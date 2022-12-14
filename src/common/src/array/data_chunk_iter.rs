@@ -16,7 +16,7 @@ use std::iter::TrustedLen;
 
 use super::column::Column;
 use crate::array::DataChunk;
-use crate::row::{Row, Row2, RowExt};
+use crate::row::Row2;
 use crate::types::DatumRef;
 
 impl DataChunk {
@@ -111,29 +111,6 @@ impl<'a> RowRef<'a> {
     pub fn new(chunk: &'a DataChunk, idx: usize) -> Self {
         debug_assert!(idx < chunk.capacity());
         Self { chunk, idx }
-    }
-
-    /// Get an owned `Row` by the given `indices` from current row ref.
-    ///
-    /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
-    ///
-    /// TODO(row trait): use `Row::project` instead.
-    pub fn row_by_indices(&self, indices: &[usize]) -> Row {
-        self.project(indices).into_owned_row()
-    }
-
-    /// Get an iterator of datum refs by the given `indices` from current row ref.
-    ///
-    /// TODO(row trait): use `Row::project` instead.
-    pub fn datum_refs_by_indices<'b, 'c>(
-        &'b self,
-        indices: &'c [usize],
-    ) -> impl Iterator<Item = DatumRef<'c>>
-    where
-        'a: 'b,
-        'b: 'c,
-    {
-        indices.iter().map(|&idx| self.datum_at(idx))
     }
 
     /// Get the index of this row in the data chunk.

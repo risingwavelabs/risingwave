@@ -21,6 +21,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
+use risingwave_common::row::{Row2, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
@@ -222,11 +223,12 @@ where
 
         for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq(keys.iter()) {
             // The pk without group by
-            let pk_row = row_ref.row_by_indices(&self.internal_key_indices[self.group_by.len()..]);
+            let pk_row = row_ref.project(&self.internal_key_indices[self.group_by.len()..]);
             let cache_key =
                 serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
 
-            let group_key = row_ref.row_by_indices(&self.group_by);
+            // TODO(row trait): optimize this
+            let group_key = row_ref.project(&self.group_by).into_owned_row();
 
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`

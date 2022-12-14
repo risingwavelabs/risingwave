@@ -244,7 +244,8 @@ where
                                         .last()
                                         .unwrap()
                                         .1
-                                        .row_by_indices(&table_pk_indices),
+                                        .project(&table_pk_indices)
+                                        .into_owned_row(),
                                 );
 
                                 yield Message::Chunk(Self::mapping_chunk(

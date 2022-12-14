@@ -17,6 +17,7 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
@@ -232,7 +233,7 @@ where
 
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
-            let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
+            let pk_row = row_ref.project(&self.internal_key_indices);
             let cache_key =
                 serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
             match op {
