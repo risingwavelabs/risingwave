@@ -328,10 +328,7 @@ impl PredicatePushdown for LogicalHopWindow {
         let window_start_idx = self.input().schema().len();
         let window_end_idx = self.input().schema().len() + 1;
         for (i, v) in self.output_indices().iter().enumerate() {
-            if *v == window_start_idx {
-                window_columns.insert(i);
-            }
-            if *v == window_end_idx {
+            if *v == window_start_idx || *v == window_end_idx {
                 window_columns.insert(i);
             }
         }
