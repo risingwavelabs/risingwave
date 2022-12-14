@@ -49,8 +49,10 @@ struct ElectionResult {
 
 impl ElectionResult {
     pub fn get_leader_addr(&self) -> HostAddr {
-        let tmp = self.meta_leader_info.node_address.as_str();
-        tmp.parse::<HostAddr>().unwrap()
+        self.meta_leader_info
+            .node_address
+            .parse::<HostAddr>()
+            .expect("invalid leader addr")
     }
 }
 
