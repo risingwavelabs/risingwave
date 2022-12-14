@@ -53,10 +53,11 @@ risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_tracing = { path = "../tracing" }
 scopeguard = "1"
-# rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = [
-#     "encryption",
-#     "static_libcpp",
-# ], optional = true }
+rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "a6441cb8499c19d376faca560b41062a261b1332", features = [
+    "encryption",
+    "static_libcpp",
+]}
+#, optional = true
 serde = { version = "1", features = ["derive"] }
 sled = "0.34.7"
 smallvec = "1"

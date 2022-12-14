@@ -34,11 +34,14 @@ use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
 use crate::StateStore;
+use crate::rocksdb_local::RocksDBStateStore;
 
 pub type HummockStorageType = impl StateStore + AsHummockTrait;
 pub type HummockStorageV1Type = impl StateStore + AsHummockTrait;
 pub type MemoryStateStoreType = impl StateStore + AsHummockTrait;
 pub type SledStateStoreType = impl StateStore + AsHummockTrait;
+#[cfg(feature = "rocksdb-local")]
+pub type RocksDBStateStoreType = impl StateStore + AsHummockTrait;
 
 /// The type erased [`StateStore`].
 #[derive(Clone, EnumAsInner)]
@@ -65,7 +68,7 @@ pub enum StateStoreImpl {
     /// The state store cannot recover from failure. It may possibly undergo scaling on a single-node,
     /// but it may not work correctly.
     /// This implementation runs a single RocksDB instance for a single compute node.
-    #[cfg(feature = "rocksdb_store")]
+    #[cfg(feature = "rocksdb-local")]
     RocksDBStateStore(Monitored<RocksDBStateStoreType>),
 }
 
@@ -146,9 +149,9 @@ impl StateStoreImpl {
         Self::in_memory(MemoryStateStore::shared(), state_store_metrics)
     }
 
-
-    pub fn rocksdb_state_store(state_store_metrics: Arc<StateStoreMetrics>) -> Self {
-        Self::in_memory(MemoryStateStore::shared(), state_store_metrics)
+    #[cfg(feature = "rocksdb-local")]
+    pub fn rocksdb_state_store(state_store: RocksDBStateStore, state_store_metrics: Arc<StateStoreMetrics>) -> Self {
+        Self::RocksDBStateStore(may_dynamic_dispatch(state_store).monitored(state_store_metrics))
     }
 
     pub fn for_test() -> Self {
@@ -200,6 +203,8 @@ impl Debug for StateStoreImpl {
             StateStoreImpl::HummockStateStoreV1(_) => write!(f, "HummockStateStoreV1"),
             StateStoreImpl::MemoryStateStore(_) => write!(f, "MemoryStateStore"),
             StateStoreImpl::SledStateStore(_) => write!(f, "SledStateStore"),
+            #[cfg(feature = "rocksdb-local")]
+            StateStoreImpl::RocksDBStateStore(_) => write!(f, "RocksDBStateStore"),
         }
     }
 }
@@ -241,6 +246,8 @@ macro_rules! dispatch_state_store {
             StateStoreImpl::HummockStateStore($store) => $body,
 
             StateStoreImpl::HummockStateStoreV1($store) => $body,
+            #[cfg(feature = "rocksdb-local")]
+            StateStoreImpl::RocksDBStateStore($store) => $body,
         }
     }};
 }

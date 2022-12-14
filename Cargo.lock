@@ -840,12 +840,12 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.59.2"
+version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bd2a9a458e8f4304c52c43ebb0cfbd520289f8379a52e329a38afda99bf8eb8"
+checksum = "fd4865004a46a0aafb2a0a5eb19d3c9fc46ee5f063a6cfc605c69ac9ecf5263d"
 dependencies = [
  "bitflags",
- "cexpr",
+ "cexpr 0.4.0",
  "clang-sys",
  "lazy_static",
  "lazycell",
@@ -854,7 +854,26 @@ dependencies = [
  "quote",
  "regex",
  "rustc-hash",
- "shlex",
+ "shlex 0.1.1",
+]
+
+[[package]]
+name = "bindgen"
+version = "0.59.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2bd2a9a458e8f4304c52c43ebb0cfbd520289f8379a52e329a38afda99bf8eb8"
+dependencies = [
+ "bitflags",
+ "cexpr 0.6.0",
+ "clang-sys",
+ "lazy_static",
+ "lazycell",
+ "peeking_take_while",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex 1.1.0",
 ]
 
 [[package]]
@@ -1042,6 +1061,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "76a284da2e6fe2092f2353e51713435363112dfd60030e22add80be333fb928f"
 dependencies = [
  "jobserver",
+]
+
+[[package]]
+name = "cexpr"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4aedb84272dbe89af497cf81375129abda4fc0a9e7c5d317498c15cc30c0d27"
+dependencies = [
+ "nom 5.1.2",
 ]
 
 [[package]]
@@ -3023,6 +3051,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "librocksdb_sys"
+version = "0.1.0"
+source = "git+https://github.com/tikv/rust-rocksdb.git?rev=a6441cb8499c19d376faca560b41062a261b1332#a6441cb8499c19d376faca560b41062a261b1332"
+dependencies = [
+ "bindgen 0.57.0",
+ "bzip2-sys",
+ "cc",
+ "cmake",
+ "libc",
+ "libtitan_sys",
+ "libz-sys",
+ "lz4-sys",
+ "openssl-sys",
+ "snappy-sys",
+ "zstd-sys",
+]
+
+[[package]]
 name = "libtest-mimic"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3031,6 +3077,21 @@ dependencies = [
  "clap 4.0.26",
  "termcolor",
  "threadpool",
+]
+
+[[package]]
+name = "libtitan_sys"
+version = "0.0.1"
+source = "git+https://github.com/tikv/rust-rocksdb.git?rev=a6441cb8499c19d376faca560b41062a261b1332#a6441cb8499c19d376faca560b41062a261b1332"
+dependencies = [
+ "bzip2-sys",
+ "cc",
+ "cmake",
+ "libc",
+ "libz-sys",
+ "lz4-sys",
+ "snappy-sys",
+ "zstd-sys",
 ]
 
 [[package]]
@@ -3520,7 +3581,7 @@ checksum = "522f2f30f72de409fc04f88df25a031f98cfc5c398a94e0b892cabb33a1464cb"
 dependencies = [
  "base64",
  "bigdecimal",
- "bindgen",
+ "bindgen 0.59.2",
  "bitflags",
  "bitvec",
  "byteorder",
@@ -3614,6 +3675,16 @@ name = "nom"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf51a729ecf40266a2368ad335a5fdde43471f545a967109cd62146ecf8b66ff"
+
+[[package]]
+name = "nom"
+version = "5.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ffb4262d26ed83a1c0a33a38fe2bb15797329c85770da05e6b828ddb782627af"
+dependencies = [
+ "memchr",
+ "version_check",
+]
 
 [[package]]
 name = "nom"
@@ -5963,6 +6034,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_test_runner",
  "risingwave_tracing",
+ "rocksdb",
  "scopeguard",
  "serde",
  "sled",
@@ -6077,6 +6149,15 @@ name = "rle-decode-fast"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3582f63211428f83597b51b2ddb88e2a91a9d52d12831f9d08f5e624e8977422"
+
+[[package]]
+name = "rocksdb"
+version = "0.3.0"
+source = "git+https://github.com/tikv/rust-rocksdb.git?rev=a6441cb8499c19d376faca560b41062a261b1332#a6441cb8499c19d376faca560b41062a261b1332"
+dependencies = [
+ "libc",
+ "librocksdb_sys",
+]
 
 [[package]]
 name = "rust_decimal"
@@ -6486,6 +6567,12 @@ dependencies = [
 
 [[package]]
 name = "shlex"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7fdf1b9db47230893d76faad238fd6097fd6d6a9245cd7a4d90dbd639536bbd2"
+
+[[package]]
+name = "shlex"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43b2853a4d09f215c24cc5489c992ce46052d359b5109343cbafbf26bc62f8a3"
@@ -6661,6 +6748,16 @@ name = "snap"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "45456094d1983e2ee2a18fdfebce3189fa451699d0502cb8e3b49dba5ba41451"
+
+[[package]]
+name = "snappy-sys"
+version = "0.1.0"
+source = "git+https://github.com/busyjay/rust-snappy.git?branch=static-link#8c12738bad811397600455d6982aff754ea2ac44"
+dependencies = [
+ "cmake",
+ "libc",
+ "pkg-config",
+]
 
 [[package]]
 name = "socket2"

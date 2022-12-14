@@ -56,6 +56,9 @@ pub mod store_impl;
 pub mod table;
 pub mod write_batch;
 
+// #[cfg(feature = "rocksdb-local")]
+mod rocksdb_local;
+
 #[cfg(test)]
 #[cfg(feature = "failpoints")]
 mod storage_failpoints;
