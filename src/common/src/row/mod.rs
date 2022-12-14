@@ -85,7 +85,7 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     #[inline]
     fn value_serialize_into(&self, mut buf: impl BufMut) {
         for datum in self.iter() {
-            value_encoding::serialize_datum(datum, &mut buf);
+            value_encoding::serialize_datum_into(datum, &mut buf);
         }
     }
 

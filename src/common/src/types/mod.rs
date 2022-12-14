@@ -625,6 +625,12 @@ impl ToDatumRef for &Datum {
         self.as_ref().map(|d| d.as_scalar_ref_impl())
     }
 }
+impl ToDatumRef for Option<&ScalarImpl> {
+    #[inline(always)]
+    fn to_datum_ref(&self) -> DatumRef<'_> {
+        self.map(|d| d.as_scalar_ref_impl())
+    }
+}
 impl ToDatumRef for DatumRef<'_> {
     #[inline(always)]
     fn to_datum_ref(&self) -> DatumRef<'_> {

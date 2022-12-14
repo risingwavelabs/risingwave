@@ -22,7 +22,7 @@ use risingwave_common::types::{
     deserialize_datum_from, serialize_datum_into, DataType, Datum, IntervalUnit,
     NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, ScalarImpl,
 };
-use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
+use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum_into};
 
 const ENV_BENCH_SER: &str = "BENCH_SER";
 const ENV_BENCH_DE: &str = "BENCH_DE";
@@ -52,7 +52,7 @@ fn key_serialization(datum: &Datum) -> Vec<u8> {
 
 fn value_serialization(datum: &Datum) -> Vec<u8> {
     let mut buf = vec![];
-    serialize_datum(datum, &mut buf);
+    serialize_datum_into(datum, &mut buf);
     buf
 }
 

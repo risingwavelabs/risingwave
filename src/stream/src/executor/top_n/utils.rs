@@ -188,13 +188,8 @@ pub fn serialize_pk_to_cache_key(
 ) -> CacheKey {
     let pk = pk.into_owned_row().into_inner();
     let (cache_key_first, cache_key_second) = pk.split_at(order_by_len);
-    let mut cache_key_first_bytes = vec![];
-    let mut cache_key_second_bytes = vec![];
-    cache_key_serde
-        .0
-        .serialize(cache_key_first, &mut cache_key_first_bytes);
-    cache_key_serde
-        .1
-        .serialize(cache_key_second, &mut cache_key_second_bytes);
-    (cache_key_first_bytes, cache_key_second_bytes)
+    (
+        cache_key_first.memcmp_serialize(&cache_key_serde.0),
+        cache_key_second.memcmp_serialize(&cache_key_serde.1),
+    )
 }

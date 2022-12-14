@@ -50,6 +50,7 @@ impl OrderedRowSerde {
         }
     }
 
+    #[deprecated]
     pub fn serialize(&self, row: impl Row2, append_to: impl BufMut) {
         self.serialize_datums(row.iter(), append_to)
     }

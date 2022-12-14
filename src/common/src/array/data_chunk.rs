@@ -30,7 +30,7 @@ use crate::types::struct_type::StructType;
 use crate::types::to_text::ToText;
 use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
-use crate::util::value_encoding::serialize_datum;
+use crate::util::value_encoding::serialize_datum_into;
 
 /// `DataChunk` is a collection of arrays with visibility mask.
 #[derive(Clone, PartialEq)]
@@ -411,7 +411,7 @@ impl DataChunk {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
                         unsafe {
                             if vis.is_set_unchecked(i) {
-                                serialize_datum(c.value_at_unchecked(i), buffer);
+                                serialize_datum_into(c.value_at_unchecked(i), buffer);
                             }
                         }
                     }
@@ -426,7 +426,7 @@ impl DataChunk {
                     for (i, buffer) in buffers.iter_mut().enumerate() {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
                         unsafe {
-                            serialize_datum(c.value_at_unchecked(i), buffer);
+                            serialize_datum_into(c.value_at_unchecked(i), buffer);
                         }
                     }
                 }

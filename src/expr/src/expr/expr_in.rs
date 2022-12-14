@@ -125,7 +125,7 @@ mod tests {
     use risingwave_common::row::Row;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
+    use risingwave_common::util::value_encoding::serialize_datum;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
     use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -153,7 +153,7 @@ mod tests {
                     ..Default::default()
                 }),
                 rex_node: Some(RexNode::Constant(ProstDatum {
-                    body: serialize_datum_to_bytes(Some("ABC".into()).as_ref()),
+                    body: serialize_datum(Some("ABC".into()).as_ref()),
                 })),
             },
             ExprNode {
@@ -163,7 +163,7 @@ mod tests {
                     ..Default::default()
                 }),
                 rex_node: Some(RexNode::Constant(ProstDatum {
-                    body: serialize_datum_to_bytes(Some("def".into()).as_ref()),
+                    body: serialize_datum(Some("def".into()).as_ref()),
                 })),
             },
         ];
