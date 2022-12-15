@@ -321,6 +321,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         Distribution::fallback(),
         TableOption::default(),
         value_indices,
+        0,
     );
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
@@ -411,6 +412,7 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
         Distribution::fallback(),
         TableOption::default(),
         value_indices,
+        0,
     );
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
