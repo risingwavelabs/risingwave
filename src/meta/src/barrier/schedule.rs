@@ -277,7 +277,6 @@ impl ScheduledBarriers {
                 notify.notify_collection_failed(anyhow!("Scheduled barrier abort.").into())
             })
         }
-        self.inner.changed_tx.send(()).ok();
     }
 
     /// Whether the barrier(checkpoint = true) should be injected.
