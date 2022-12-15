@@ -276,6 +276,8 @@ impl Binder {
             // TODO: include version/tag/commit_id
             // TODO: choose which pg version we should return.
             "version" => return Ok(ExprImpl::literal_varchar("PostgreSQL 13.9-RW".to_string())),
+            // non-deterministic
+            "now" => ExprType::Now,
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported function: {:?}", function_name),
