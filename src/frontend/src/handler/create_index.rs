@@ -86,7 +86,7 @@ pub(crate) fn gen_create_index_plan(
         .collect::<HashMap<_, _>>();
 
     let to_column_indices = |ident: &Ident| {
-        let x = ident.to_string();
+        let x = ident.real_value();
         table_desc_map
             .get(&x)
             .cloned()
