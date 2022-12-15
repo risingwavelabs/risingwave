@@ -40,9 +40,10 @@ type SortBufferKey = (ScalarImpl, OwnedRow);
 /// [`SortBufferValue`] contains a record's value and a flag indicating whether the record has been
 /// persisted to storage.
 /// NOTE: There is an exhausting trade-off for which structure to use for the in-memory buffer. For
-/// example, up to 8x memory can be used with `Row` compared to the `CompactRow`. However, if there
-/// are only a few rows that will be temporarily stored in the buffer during an epoch, `Row` will be
-/// more efficient instead due to no ser/de needed. So here we could do further optimizations.
+/// example, up to 8x memory can be used with [`OwnedRow`] compared to the `CompactRow`. However, if
+/// there are only a few rows that will be temporarily stored in the buffer during an epoch,
+/// [`OwnedRow`] will be more efficient instead due to no ser/de needed. So here we could do further
+/// optimizations.
 type SortBufferValue = (OwnedRow, bool);
 
 /// [`SortExecutor`] consumes unordered input data and outputs ordered data to downstream.

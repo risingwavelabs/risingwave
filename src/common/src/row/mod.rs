@@ -66,7 +66,7 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     /// Returns an iterator over the datums in the row, in [`DatumRef`] form.
     fn iter(&self) -> Self::Iter<'_>;
 
-    /// Converts the row into an owned [`Row`].
+    /// Converts the row into an [`OwnedRow`].
     ///
     /// Prefer `into_owned_row` if the row is already owned.
     #[inline]
@@ -74,7 +74,7 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
         OwnedRow::new(self.iter().map(|d| d.to_owned_datum()).collect())
     }
 
-    /// Consumes `self` and converts it into an owned [`Row`].
+    /// Consumes `self` and converts it into an [`OwnedRow`].
     #[inline]
     fn into_owned_row(self) -> OwnedRow {
         self.to_owned_row()

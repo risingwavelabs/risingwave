@@ -149,7 +149,7 @@ impl Executor for MockSource {
     }
 }
 
-/// `row_nonnull` builds a `Row` with concrete values.
+/// `row_nonnull` builds a `OwnedRow` with concrete values.
 /// TODO: add macro row!, which requires a new trait `ToScalarValue`.
 #[macro_export]
 macro_rules! row_nonnull {

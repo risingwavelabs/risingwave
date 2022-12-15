@@ -112,7 +112,7 @@ impl Row for OwnedRow {
     }
 }
 
-/// Deserializer of the `Row`.
+/// Deserializer of the [`OwnedRow`].
 #[derive(Clone, Debug)]
 pub struct RowDeserializer<D: AsRef<[DataType]> = Vec<DataType>> {
     data_types: D,
