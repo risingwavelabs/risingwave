@@ -157,7 +157,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let mut services_leader_rx = leader_rx.clone();
     let f_leader_svc_leader_rx = leader_rx.clone();
     let l_leader_svc_leader_rx = leader_rx.clone();
-    let mut note_status_leader_rx = leader_rx.clone();
+    let mut note_status_leader_rx = leader_rx;
 
     // print current leader/follower status of this node + fencing mechanism
     tokio::spawn(async move {
