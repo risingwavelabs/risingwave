@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::{ColumnId, Field, TableId};
 use risingwave_pb::stream_plan::SinkNode;
 
 use super::*;
@@ -32,22 +32,22 @@ impl ExecutorBuilder for SinkExecutorBuilder {
     ) -> StreamResult<BoxedExecutor> {
         let [materialize_executor]: [_; 1] = params.input.try_into().unwrap();
 
-        let _sink_id = TableId::from(node.table_id);
-        let _column_ids = node
-            .get_column_ids()
-            .iter()
-            .map(|i| ColumnId::from(*i))
-            .collect::<Vec<ColumnId>>();
-
         let properties = node.get_properties();
+        let pk_indices = node
+            .sink_pk
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect::<Vec<_>>();
+        let schema = node.fields.iter().map(Field::from).collect();
 
         Ok(Box::new(SinkExecutor::new(
             materialize_executor,
-            store,
             stream.streaming_metrics.clone(),
             properties.clone(),
             params.executor_id,
             params.env.connector_params(),
+            schema,
+            pk_indices,
         )))
     }
 }

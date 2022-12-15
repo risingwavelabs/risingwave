@@ -28,14 +28,14 @@ use super::{BoxedExecutor, Executor, Message};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::PkIndices;
 
-pub struct SinkExecutor<S: StateStore> {
+pub struct SinkExecutor {
     input: BoxedExecutor,
-    _store: S,
     metrics: Arc<StreamingMetrics>,
     properties: HashMap<String, String>,
     identity: String,
     connector_params: ConnectorParams,
-    pk_indices: PkIndices,
+    schema: Schema,
+    pk_indices: Vec<usize>,
 }
 
 async fn build_sink(
@@ -49,26 +49,26 @@ async fn build_sink(
     ))
 }
 
-impl<S: StateStore> SinkExecutor<S> {
+impl SinkExecutor {
     pub fn new(
         materialize_executor: BoxedExecutor,
-        _store: S,
         metrics: Arc<StreamingMetrics>,
         mut properties: HashMap<String, String>,
         executor_id: u64,
         connector_params: ConnectorParams,
+        schema: Schema,
+        pk_indices: Vec<usize>,
     ) -> Self {
         // This field can be used to distinguish a specific actor in parallelism to prevent
         // transaction execution errors
         properties.insert("identifier".to_string(), format!("sink-{:?}", executor_id));
-        let pk_indices = materialize_executor.pk_indices().to_vec();
         Self {
             input: materialize_executor,
-            _store,
             metrics,
             properties,
             identity: format!("SinkExecutor_{:?}", executor_id),
             pk_indices,
+            schema,
             connector_params,
         }
     }
@@ -85,7 +85,7 @@ impl<S: StateStore> SinkExecutor<S> {
         let sink_config = SinkConfig::from_hashmap(self.properties.clone())?;
         let mut sink = build_sink(
             sink_config.clone(),
-            schema,
+            self.schema,
             self.pk_indices,
             self.connector_params,
         )
