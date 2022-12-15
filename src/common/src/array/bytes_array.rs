@@ -150,7 +150,6 @@ impl BytesArray {
         }
     }
 
-    #[cfg(test)]
     pub(super) fn data(&self) -> &[u8] {
         &self.data
     }

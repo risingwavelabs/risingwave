@@ -179,6 +179,107 @@ impl FromIntoArrow for IntervalUnit {
     }
 }
 
+impl From<&ListArray> for arrow_array::ListArray {
+    fn from(array: &ListArray) -> Self {
+        use arrow_array::builder::*;
+        fn build<A, B, F>(
+            array: &ListArray,
+            a: &A,
+            builder: B,
+            mut append: F,
+        ) -> arrow_array::ListArray
+        where
+            A: Array,
+            B: arrow_array::builder::ArrayBuilder,
+            F: FnMut(&mut B, Option<A::RefItem<'_>>),
+        {
+            let mut builder = ListBuilder::with_capacity(builder, a.len());
+            for i in 0..array.len() {
+                for j in array.offsets[i]..array.offsets[i + 1] {
+                    append(builder.values(), a.value_at(j as usize));
+                }
+                builder.append(array.is_null(i));
+            }
+            builder.finish()
+        }
+        match &*array.value {
+            ArrayImpl::Int16(a) => build(array, a, Int16Builder::with_capacity(a.len()), |b, v| {
+                b.append_option(v)
+            }),
+            ArrayImpl::Int32(a) => build(array, a, Int32Builder::with_capacity(a.len()), |b, v| {
+                b.append_option(v)
+            }),
+            ArrayImpl::Int64(a) => build(array, a, Int64Builder::with_capacity(a.len()), |b, v| {
+                b.append_option(v)
+            }),
+            ArrayImpl::Float32(a) => {
+                build(array, a, Float32Builder::with_capacity(a.len()), |b, v| {
+                    b.append_option(v.map(|f| f.0))
+                })
+            }
+            ArrayImpl::Float64(a) => {
+                build(array, a, Float64Builder::with_capacity(a.len()), |b, v| {
+                    b.append_option(v.map(|f| f.0))
+                })
+            }
+            ArrayImpl::Utf8(a) => build(
+                array,
+                a,
+                StringBuilder::with_capacity(a.len(), a.data().len()),
+                |b, v| b.append_option(v),
+            ),
+            ArrayImpl::Bool(a) => {
+                build(array, a, BooleanBuilder::with_capacity(a.len()), |b, v| {
+                    b.append_option(v)
+                })
+            }
+            ArrayImpl::Decimal(a) => build(
+                array,
+                a,
+                Decimal128Builder::with_capacity(a.len()),
+                |b, v| b.append_option(v.map(|d| d.into_arrow())),
+            ),
+            ArrayImpl::Interval(a) => build(
+                array,
+                a,
+                IntervalMonthDayNanoBuilder::with_capacity(a.len()),
+                |b, v| b.append_option(v.map(|d| d.into_arrow())),
+            ),
+            ArrayImpl::NaiveDate(a) => {
+                build(array, a, Date32Builder::with_capacity(a.len()), |b, v| {
+                    b.append_option(v.map(|d| d.into_arrow()))
+                })
+            }
+            ArrayImpl::NaiveDateTime(a) => build(
+                array,
+                a,
+                TimestampNanosecondBuilder::with_capacity(a.len()),
+                |b, v| b.append_option(v.map(|d| d.into_arrow())),
+            ),
+            ArrayImpl::NaiveTime(a) => build(
+                array,
+                a,
+                Time64NanosecondBuilder::with_capacity(a.len()),
+                |b, v| b.append_option(v.map(|d| d.into_arrow())),
+            ),
+            ArrayImpl::Struct(a) => todo!("list of struct"),
+            ArrayImpl::List(a) => todo!("list of list"),
+            ArrayImpl::Bytea(a) => build(
+                array,
+                a,
+                BinaryBuilder::with_capacity(a.len(), a.data().len()),
+                |b, v| b.append_option(v),
+            ),
+        }
+    }
+}
+
+impl From<&arrow_array::ListArray> for ListArray {
+    fn from(array: &arrow_array::ListArray) -> Self {
+        todo!()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

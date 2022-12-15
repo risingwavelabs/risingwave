@@ -120,6 +120,10 @@ impl Utf8Array {
             .into_single_value()
             .map(|bytes| unsafe { std::str::from_boxed_utf8_unchecked(bytes) })
     }
+
+    pub(super) fn data(&self) -> &[u8] {
+        &self.bytes.data()
+    }
 }
 
 /// `Utf8ArrayBuilder` use `&str` to build an `Utf8Array`.

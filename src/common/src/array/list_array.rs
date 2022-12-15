@@ -154,8 +154,8 @@ impl ListArrayBuilder {
 #[derive(Debug, Clone)]
 pub struct ListArray {
     bitmap: Bitmap,
-    offsets: Vec<u32>,
-    value: Box<ArrayImpl>,
+    pub(super) offsets: Vec<u32>,
+    pub(super) value: Box<ArrayImpl>,
     value_type: DataType,
 }
 
