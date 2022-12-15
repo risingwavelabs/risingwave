@@ -240,6 +240,7 @@ mod tests {
             .collect_vec();
         let mut reader = dml_manager
             .register_reader(table_id, &column_descs)
+            .unwrap()
             .stream_reader_v2()
             .into_stream_v2();
 

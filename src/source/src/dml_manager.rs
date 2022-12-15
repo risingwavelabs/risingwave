@@ -14,11 +14,12 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use parking_lot::RwLock;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, TableId};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use tokio::sync::oneshot;
 
@@ -33,7 +34,7 @@ pub type DmlManagerRef = Arc<DmlManager>;
 /// channel instead of offering a `write_chunk` interface).
 #[derive(Default, Debug)]
 pub struct DmlManager {
-    batch_dmls: RwLock<HashMap<TableId, TableSourceRef>>,
+    batch_dmls: RwLock<HashMap<TableId, Weak<TableSource>>>,
 }
 
 impl DmlManager {
@@ -47,13 +48,21 @@ impl DmlManager {
         &self,
         table_id: TableId,
         column_descs: &[ColumnDesc],
-    ) -> TableSourceRef {
+    ) -> Result<TableSourceRef> {
         let mut batch_dmls = self.batch_dmls.write();
         match batch_dmls.entry(table_id) {
-            Entry::Occupied(o) => o.get().to_owned(),
-            Entry::Vacant(v) => v
-                .insert(Arc::new(TableSource::new(column_descs.to_vec())))
-                .to_owned(),
+            Entry::Occupied(o) => o.get().upgrade().ok_or_else(|| {
+                InternalError(format!(
+                    "fail to register reader for table with id {:?}",
+                    table_id
+                ))
+                .into()
+            }),
+            Entry::Vacant(v) => {
+                let reader = Arc::new(TableSource::new(column_descs.to_vec()));
+                v.insert(Arc::downgrade(&reader));
+                Ok(reader)
+            }
         }
     }
 
@@ -63,7 +72,16 @@ impl DmlManager {
         chunk: StreamChunk,
     ) -> Result<oneshot::Receiver<usize>> {
         let batch_dmls = self.batch_dmls.read();
-        batch_dmls.get(table_id).unwrap().write_chunk(chunk)
+        let writer = batch_dmls
+            .get(table_id)
+            .ok_or_else(|| {
+                InternalError(format!("fail to write into table with id {:?}", table_id))
+            })?
+            .upgrade()
+            .ok_or_else(|| {
+                InternalError(format!("fail to write into table with id {:?}", table_id))
+            })?;
+        writer.write_chunk(chunk)
     }
 
     pub fn clear(&self) {
