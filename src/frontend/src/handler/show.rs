@@ -182,7 +182,7 @@ pub fn handle_show_create_object(
     };
     let name = format!("{}.{}", schema_name, object_name);
 
-    return Ok(PgResponse::new_for_stream(
+    Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
         Some(1),
         vec![Row::new(vec![Some(name.into()), Some(sql.into())])].into(),
@@ -198,7 +198,7 @@ pub fn handle_show_create_object(
                 DataType::VARCHAR.type_len(),
             ),
         ],
-    ));
+    ))
 }
 
 #[cfg(test)]
