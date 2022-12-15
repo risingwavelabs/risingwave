@@ -75,7 +75,7 @@ impl DmlExecutor {
         // Construct the reader of batch data (DML from users).
         let batch_reader = self
             .dml_manager
-            .register_reader(&self.table_id, &self.column_descs);
+            .register_reader(self.table_id, &self.column_descs);
         let batch_reader = batch_reader
             .stream_reader_v2()
             .into_stream_v2()

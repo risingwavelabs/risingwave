@@ -177,7 +177,7 @@ mod tests {
             .map(|(i, field)| ColumnDesc::unnamed(ColumnId::new(i as _), field.data_type.clone()))
             .collect_vec();
         let mut reader = dml_manager
-            .register_reader(&table_id, &column_descs)
+            .register_reader(table_id, &column_descs)
             .stream_reader_v2()
             .into_stream_v2();
 

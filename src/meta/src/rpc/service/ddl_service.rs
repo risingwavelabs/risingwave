@@ -15,7 +15,6 @@
 use std::collections::HashSet;
 
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::try_match_expand;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
 use risingwave_pb::common::worker_node::State;
@@ -375,10 +374,7 @@ where
         let table_id = request.table_id;
 
         let version = self
-            .drop_table_inner(
-                source_id.map(|id| try_match_expand!(id, ProstSourceId::Id).unwrap()),
-                table_id,
-            )
+            .drop_table_inner(source_id.map(|ProstSourceId::Id(id)| id), table_id)
             .await?;
 
         Ok(Response::new(DropTableResponse {
@@ -639,8 +635,7 @@ where
             StreamingJob::Table(source, table) => {
                 creating_internal_table_ids.push(table.id);
                 if let Some(source) = source {
-                    let internal_tables = ctx.internal_tables();
-                    assert_eq!(internal_tables.len(), 1);
+                    let internal_tables: [_; 1] = ctx.internal_tables().try_into().unwrap();
                     self.catalog_manager
                         .finish_create_table_procedure_with_source(
                             source,
@@ -706,7 +701,7 @@ where
             }
             assert_eq!(
                 source_count, 1,
-                "require exactly 1 source node when creating materialized source"
+                "require exactly 1 external stream source when creating table with a connector"
             );
 
             // Fill in the correct source id for mview.

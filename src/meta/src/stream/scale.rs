@@ -469,7 +469,8 @@ where
 
             if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
                 let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
-                let source_node = TableFragments::find_source_node(stream_node).unwrap();
+                let source_node =
+                    TableFragments::find_source_node_with_stream_source(stream_node).unwrap();
                 if source_node.source_inner.is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
                 }

@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::repeat;
+
 use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
-    ArrayBuilder, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
+    ArrayBuilder, DataChunk, I64Array, Op, PrimitiveArrayBuilder, StreamChunk,
 };
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
@@ -105,11 +107,8 @@ impl InsertExecutor {
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
             if let Some(row_id_index) = self.row_id_index {
-                let mut builder = I64ArrayBuilder::new(len);
-                for _ in 0..len {
-                    builder.append_null();
-                }
-                columns.insert(row_id_index, Column::from(builder.finish()))
+                let row_id_col = I64Array::from_iter(repeat(None).take(len));
+                columns.insert(row_id_index, row_id_col.into())
             }
 
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
@@ -240,7 +239,7 @@ mod tests {
             .map(|(i, field)| ColumnDesc::unnamed(ColumnId::new(i as _), field.data_type.clone()))
             .collect_vec();
         let mut reader = dml_manager
-            .register_reader(&table_id, &column_descs)
+            .register_reader(table_id, &column_descs)
             .stream_reader_v2()
             .into_stream_v2();
 

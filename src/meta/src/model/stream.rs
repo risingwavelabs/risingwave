@@ -224,8 +224,8 @@ impl TableFragments {
         }
     }
 
-    /// Find the source node inside the stream node, if any.
-    pub fn find_source_node(stream_node: &StreamNode) -> Option<&SourceNode> {
+    /// Find the source node that contains an external stream source inside the stream node, if any.
+    pub fn find_source_node_with_stream_source(stream_node: &StreamNode) -> Option<&SourceNode> {
         if let Some(NodeBody::Source(source)) = stream_node.node_body.as_ref() {
             if source.source_inner.is_some() {
                 return Some(source);
@@ -233,7 +233,7 @@ impl TableFragments {
         }
 
         for child in &stream_node.input {
-            if let Some(source) = Self::find_source_node(child) {
+            if let Some(source) = Self::find_source_node_with_stream_source(child) {
                 return Some(source);
             }
         }
@@ -241,15 +241,17 @@ impl TableFragments {
         None
     }
 
-    /// Extract the fragments that include stream source executors, grouping by source id.
+    /// Extract the fragments that include source executors that contains an external stream source,
+    /// grouping by source id.
     pub fn stream_source_fragments(&self) -> HashMap<SourceId, BTreeSet<FragmentId>> {
         let mut source_fragments = HashMap::new();
 
         for fragment in self.fragments() {
             for actor in &fragment.actors {
-                if let Some(source_id) =
-                    TableFragments::find_source_node(actor.nodes.as_ref().unwrap())
-                        .map(|s| s.source_inner.as_ref().unwrap().source_id)
+                if let Some(source_id) = TableFragments::find_source_node_with_stream_source(
+                    actor.nodes.as_ref().unwrap(),
+                )
+                .map(|s| s.source_inner.as_ref().unwrap().source_id)
                 {
                     source_fragments
                         .entry(source_id)

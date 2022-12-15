@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::SourceNode;
@@ -85,16 +83,13 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             )
             .await;
 
-            let stream_source_core = StreamSourceCore {
+            let stream_source_core = StreamSourceCore::new(
                 source_id,
                 source_name,
                 column_ids,
-                source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
-                source_desc_builder: Some(source_desc_builder),
-                stream_source_splits: Vec::new(),
-                split_state_store: state_table_handler,
-                state_cache: HashMap::new(),
-            };
+                source_desc_builder,
+                state_table_handler,
+            );
 
             Ok(Box::new(SourceExecutorV2::new(
                 params.actor_context,

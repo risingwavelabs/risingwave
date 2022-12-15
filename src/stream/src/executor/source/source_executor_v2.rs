@@ -37,26 +37,50 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 /// [`StreamSourceCore`] stores the necessary information for the source executor to execute on the
 /// external connector.
 pub struct StreamSourceCore<S: StateStore> {
-    pub source_id: TableId,
-    pub source_name: String,
+    source_id: TableId,
+    source_name: String,
 
-    pub column_ids: Vec<ColumnId>,
+    column_ids: Vec<ColumnId>,
 
-    pub source_identify: String,
+    source_identify: String,
 
     /// `source_desc_builder` will be taken (`mem::take`) on execution. A `SourceDesc` (currently
     /// named `SourceDescV2`) will be constructed and used for execution.
-    pub source_desc_builder: Option<SourceDescBuilderV2>,
+    source_desc_builder: Option<SourceDescBuilderV2>,
 
     /// Split info for stream source. A source executor might read data from several splits of
     /// external connector.
-    pub stream_source_splits: Vec<SplitImpl>,
+    stream_source_splits: Vec<SplitImpl>,
 
     /// Stores information of the splits.
-    pub split_state_store: SourceStateTableHandler<S>,
+    split_state_store: SourceStateTableHandler<S>,
 
     /// In-memory cache for the splits.
-    pub state_cache: HashMap<SplitId, SplitImpl>,
+    state_cache: HashMap<SplitId, SplitImpl>,
+}
+
+impl<S> StreamSourceCore<S>
+where
+    S: StateStore,
+{
+    pub fn new(
+        source_id: TableId,
+        source_name: String,
+        column_ids: Vec<ColumnId>,
+        source_desc_builder: SourceDescBuilderV2,
+        split_state_store: SourceStateTableHandler<S>,
+    ) -> Self {
+        Self {
+            source_id,
+            source_name,
+            column_ids,
+            source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
+            source_desc_builder: Some(source_desc_builder),
+            stream_source_splits: Vec::new(),
+            split_state_store,
+            state_cache: HashMap::new(),
+        }
+    }
 }
 
 pub struct SourceExecutorV2<S: StateStore> {

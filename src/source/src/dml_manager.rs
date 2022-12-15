@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::error::Result;
@@ -32,27 +33,28 @@ pub type DmlManagerRef = Arc<DmlManager>;
 /// channel instead of offering a `write_chunk` interface).
 #[derive(Default, Debug)]
 pub struct DmlManager {
-    batch_dmls: Mutex<HashMap<TableId, TableSourceRef>>,
+    batch_dmls: RwLock<HashMap<TableId, TableSourceRef>>,
 }
 
 impl DmlManager {
     pub fn new() -> Self {
         Self {
-            batch_dmls: Mutex::new(HashMap::new()),
+            batch_dmls: RwLock::new(HashMap::new()),
         }
     }
 
     pub fn register_reader(
         &self,
-        table_id: &TableId,
+        table_id: TableId,
         column_descs: &[ColumnDesc],
     ) -> TableSourceRef {
-        let mut batch_dmls = self.batch_dmls.lock();
-        if !batch_dmls.contains_key(table_id) {
-            let batch_dml = Arc::new(TableSource::new(column_descs.to_vec()));
-            batch_dmls.insert(*table_id, batch_dml);
+        let mut batch_dmls = self.batch_dmls.write();
+        match batch_dmls.entry(table_id) {
+            Entry::Occupied(o) => o.get().to_owned(),
+            Entry::Vacant(v) => v
+                .insert(Arc::new(TableSource::new(column_descs.to_vec())))
+                .to_owned(),
         }
-        batch_dmls.get(table_id).unwrap().clone()
     }
 
     pub fn write_chunk(
@@ -60,11 +62,11 @@ impl DmlManager {
         table_id: &TableId,
         chunk: StreamChunk,
     ) -> Result<oneshot::Receiver<usize>> {
-        let batch_dmls = self.batch_dmls.lock();
+        let batch_dmls = self.batch_dmls.read();
         batch_dmls.get(table_id).unwrap().write_chunk(chunk)
     }
 
     pub fn clear(&self) {
-        self.batch_dmls.lock().clear()
+        self.batch_dmls.write().clear()
     }
 }
