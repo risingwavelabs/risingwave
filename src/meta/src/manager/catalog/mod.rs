@@ -511,6 +511,7 @@ where
             .await;
     }
 
+    /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
     pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -539,6 +540,7 @@ where
         }
     }
 
+    /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
     pub async fn finish_create_table_procedure(
         &self,
         internal_tables: Vec<Table>,

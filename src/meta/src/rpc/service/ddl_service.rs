@@ -646,8 +646,10 @@ where
                 } else {
                     let internal_tables = ctx.internal_tables();
                     assert!(internal_tables.is_empty());
+                    // Though `internal_tables` is empty here, we pass it as a parameter to reuse
+                    // the method.
                     self.catalog_manager
-                        .finish_create_table_procedure(ctx.internal_tables(), table)
+                        .finish_create_table_procedure(internal_tables, table)
                         .await?
                 }
             }
