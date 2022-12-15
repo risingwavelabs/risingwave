@@ -374,6 +374,7 @@ where
             .back()
             .map(|x| x.command_ctx.command.should_pause_inject_barrier())
             .unwrap_or(false);
+        tracing::info!("commands in queue: {:?}", self.command_ctx_queue.iter().map(|x| format!("{:?}", x.command_ctx.command)).collect_vec());
         debug_assert_eq!(
             self.command_ctx_queue
                 .iter()
