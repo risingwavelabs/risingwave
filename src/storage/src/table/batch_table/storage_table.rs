@@ -91,7 +91,7 @@ pub struct StorageTable<S: StateStore> {
     /// Used for catalog table_properties
     table_option: TableOption,
 
-    prefix_hint_len: usize,
+    read_prefix_len_hint: usize,
 }
 
 impl<S: StateStore> std::fmt::Debug for StorageTable<S> {
@@ -116,7 +116,7 @@ impl<S: StateStore> StorageTable<S> {
         distribution: Distribution,
         table_options: TableOption,
         value_indices: Vec<usize>,
-        prefix_hint_len: usize,
+        read_prefix_len_hint: usize,
     ) -> Self {
         Self::new_inner(
             store,
@@ -128,7 +128,7 @@ impl<S: StateStore> StorageTable<S> {
             distribution,
             table_options,
             value_indices,
-            prefix_hint_len,
+            read_prefix_len_hint,
         )
     }
 
@@ -171,7 +171,7 @@ impl<S: StateStore> StorageTable<S> {
         }: Distribution,
         table_option: TableOption,
         value_indices: Vec<usize>,
-        prefix_hint_len: usize,
+        read_prefix_len_hint: usize,
     ) -> Self {
         assert_eq!(order_types.len(), pk_indices.len());
 
@@ -204,7 +204,7 @@ impl<S: StateStore> StorageTable<S> {
             dist_key_in_pk_indices,
             vnodes,
             table_option,
-            prefix_hint_len,
+            read_prefix_len_hint,
         }
     }
 
@@ -247,7 +247,8 @@ impl<S: StateStore> StorageTable<S> {
 
         let read_options = ReadOptions {
             prefix_hint: None,
-            check_bloom_filter: self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len(),
+            check_bloom_filter: self.read_prefix_len_hint != 0
+                && self.read_prefix_len_hint == pk.len(),
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
@@ -425,7 +426,9 @@ impl<S: StateStore> StorageTable<S> {
             .map(|index| self.pk_indices[index])
             .collect_vec();
 
-        let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len <= pk_prefix.len() {
+        let prefix_hint = if self.read_prefix_len_hint != 0
+            && self.read_prefix_len_hint <= pk_prefix.len()
+        {
             let encoded_prefix = if let Bound::Included(start_key) = start_key.as_ref() {
                 start_key
             } else {
@@ -433,7 +436,7 @@ impl<S: StateStore> StorageTable<S> {
             };
             let prefix_len = self
                 .pk_serializer
-                .deserialize_prefix_len(encoded_prefix, self.prefix_hint_len)
+                .deserialize_prefix_len(encoded_prefix, self.read_prefix_len_hint)
                 .unwrap();
             Some(encoded_prefix[..prefix_len].to_vec())
         } else {
