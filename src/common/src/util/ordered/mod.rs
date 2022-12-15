@@ -20,8 +20,8 @@ use itertools::Itertools;
 use OrderedDatum::{NormalOrder, ReversedOrder};
 
 pub use self::serde::*;
-use crate::row::Row;
-use crate::types::{serialize_datum_into, Datum};
+use crate::row::OwnedRow;
+use crate::types::{memcmp_serialize_datum_into, Datum};
 use crate::util::sort_util::OrderType;
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -57,7 +57,7 @@ impl std::fmt::Debug for OrderedRow {
 }
 
 impl OrderedRow {
-    pub fn new(row: Row, order_types: &[OrderType]) -> Self {
+    pub fn new(row: OwnedRow, order_types: &[OrderType]) -> Self {
         OrderedRow(
             row.into_inner()
                 .into_iter()
@@ -80,8 +80,8 @@ impl OrderedRow {
             .collect::<Vec<_>>()
     }
 
-    pub fn into_row(self) -> Row {
-        Row::new(self.into_vec())
+    pub fn into_row(self) -> OwnedRow {
+        OwnedRow::new(self.into_vec())
     }
 
     /// Serialize the row into a memcomparable bytes.
@@ -100,7 +100,7 @@ impl OrderedRow {
                     &datum.0
                 }
             };
-            serialize_datum_into(datum, &mut serializer)?;
+            memcmp_serialize_datum_into(datum, &mut serializer)?;
         }
         Ok(serializer.into_inner())
     }
@@ -132,7 +132,7 @@ mod tests {
     use crate::types::ScalarImpl;
 
     fn make_row(values: Vec<i64>) -> OrderedRow {
-        let row = Row::new(
+        let row = OwnedRow::new(
             values
                 .into_iter()
                 .map(|v| Some(ScalarImpl::Int64(v)))

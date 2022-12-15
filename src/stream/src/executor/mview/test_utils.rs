@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{ColumnDesc, TableId};
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
@@ -54,7 +54,7 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
 
     for idx in 0..row_count {
         let idx = idx as i32;
-        state.insert(Row::new(vec![
+        state.insert(OwnedRow::new(vec![
             Some(idx.into()),
             Some(idx.into()),
             Some(idx.into()),

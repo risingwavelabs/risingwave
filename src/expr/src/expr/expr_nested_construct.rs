@@ -20,7 +20,7 @@ use risingwave_common::array::{
     ArrayBuilder, ArrayImpl, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListValue,
     StructArrayBuilder, StructValue,
 };
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -79,7 +79,7 @@ impl Expression for NestedConstructExpression {
         }
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let datums = self
             .elements
             .iter()
@@ -128,7 +128,7 @@ impl<'a> TryFrom<&'a ExprNode> for NestedConstructExpression {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{DataChunk, ListValue};
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, Scalar, ScalarImpl};
 
     use super::NestedConstructExpression;
@@ -156,7 +156,7 @@ mod tests {
             elements: vec![i32_expr(1.into()), i32_expr(2.into())],
         };
 
-        let scalar_impl = expr.eval_row(&Row::new(vec![])).unwrap().unwrap();
+        let scalar_impl = expr.eval_row(&OwnedRow::new(vec![])).unwrap().unwrap();
         let expected = ListValue::new(vec![Some(1.into()), Some(2.into())]).to_scalar_value();
         assert_eq!(expected, scalar_impl);
     }

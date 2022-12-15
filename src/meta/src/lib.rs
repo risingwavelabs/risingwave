@@ -187,6 +187,5 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         .await
         .unwrap();
         join_handle.await.unwrap();
-        tracing::info!("Meta server is stopped");
     })
 }

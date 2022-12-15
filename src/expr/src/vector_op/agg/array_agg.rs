@@ -14,7 +14,8 @@
 
 use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, DataChunk, ListValue, RowRef};
 use risingwave_common::bail;
-use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_common::row::{Row, RowExt};
+use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
@@ -116,10 +117,10 @@ impl ArrayAggOrdered {
 
     fn push_row(&mut self, row: RowRef<'_>) {
         let key = OrderedRow::new(
-            row.row_by_indices(&self.order_col_indices),
+            row.project(&self.order_col_indices).into_owned_row(),
             &self.order_types,
         );
-        let datum = row.value_at(self.agg_col_idx).map(|x| x.into_scalar_impl());
+        let datum = row.datum_at(self.agg_col_idx).to_owned_datum();
         self.unordered_values.push((key, datum));
     }
 

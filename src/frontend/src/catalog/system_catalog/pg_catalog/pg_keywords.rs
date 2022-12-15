@@ -14,7 +14,7 @@
 
 use std::sync::LazyLock;
 
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
@@ -30,4 +30,4 @@ pub const PG_KEYWORDS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
 ];
 
 // TODO: set reserved keywords here
-pub static PG_KEYWORDS_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(Vec::new);
+pub static PG_KEYWORDS_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(Vec::new);

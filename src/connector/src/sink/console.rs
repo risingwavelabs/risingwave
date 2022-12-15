@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use itertools::join;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
 
 use crate::sink::{Result, Sink};
@@ -64,7 +65,7 @@ impl ConsoleSink {
 impl Sink for ConsoleSink {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         for (op, row_ref) in chunk.rows() {
-            let row_repr = join(row_ref.values().map(parse_datum), ", ");
+            let row_repr = join(row_ref.iter().map(parse_datum), ", ");
             let op_repr = match op {
                 Op::Insert => "INSERT",
                 Op::UpdateDelete => "UPDATE_DELETE",

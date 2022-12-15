@@ -774,7 +774,7 @@ mod tests {
         }
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|int| int.to_scalar_value()),
                 rhs[i].map(|int| int.to_scalar_value()),
             ]);
@@ -822,7 +822,7 @@ mod tests {
         }
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|date| date.to_scalar_value()),
                 rhs[i].map(|date| date.to_scalar_value()),
             ]);
@@ -875,7 +875,7 @@ mod tests {
         }
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|dec| dec.to_scalar_value()),
                 rhs[i].map(|dec| dec.to_scalar_value()),
             ]);

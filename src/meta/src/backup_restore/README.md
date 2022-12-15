@@ -3,7 +3,7 @@
 ## How to take a meta snapshot
 From the running meta service cluster
 ```bash
-risedev ctl meta backup-meta
+risectl meta backup-meta
 ```
 
 ## How to restore meta service cluster

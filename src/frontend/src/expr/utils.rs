@@ -389,6 +389,29 @@ impl Extend<usize> for CollectInputRef {
     }
 }
 
+/// Count `Now`s in the expression.
+#[derive(Clone, Default)]
+pub struct CountNow {}
+
+impl ExprVisitor<usize> for CountNow {
+    fn merge(a: usize, b: usize) -> usize {
+        a + b
+    }
+
+    fn visit_function_call(&mut self, func_call: &FunctionCall) -> usize {
+        if func_call.get_expr_type() == ExprType::Now {
+            1
+        } else {
+            func_call
+                .inputs()
+                .iter()
+                .map(|expr| self.visit_expr(expr))
+                .reduce(Self::merge)
+                .unwrap_or_default()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};

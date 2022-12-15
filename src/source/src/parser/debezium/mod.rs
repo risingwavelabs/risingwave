@@ -50,7 +50,7 @@ mod test {
 
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
-    use risingwave_common::row::{Row, Row2};
+    use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::*;
@@ -95,7 +95,7 @@ mod test {
         parser: impl SourceParser,
         columns: Vec<SourceColumnDesc>,
         payload: &[u8],
-    ) -> Vec<(Op, Row)> {
+    ) -> Vec<(Op, OwnedRow)> {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
         {
             let writer = builder.row_writer();
