@@ -741,6 +741,30 @@ impl fmt::Display for ShowObject {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ShowCreateType {
+    Table,
+    MaterializedView,
+    View,
+    Index,
+    Source,
+    Sink,
+}
+
+impl fmt::Display for ShowCreateType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ShowCreateType::Table => f.write_str("TABLE"),
+            ShowCreateType::MaterializedView => f.write_str("MATERIALIZED VIEW"),
+            ShowCreateType::View => f.write_str("VIEW"),
+            ShowCreateType::Index => f.write_str("INDEX"),
+            ShowCreateType::Source => f.write_str("SOURCE"),
+            ShowCreateType::Sink => f.write_str("SINK"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CommentObject {
     Column,
     Table,
@@ -920,8 +944,15 @@ pub enum Statement {
         /// Table or Source name
         name: ObjectName,
     },
-    /// SHOW COMMAND
+    /// SHOW OBJECT COMMAND
     ShowObjects(ShowObject),
+    /// SHOW CREATE COMMAND
+    ShowCreateObject {
+        /// Show create object type
+        create_type: ShowCreateType,
+        /// Show create object name
+        name: ObjectName,
+    },
     /// DROP
     Drop(DropStatement),
     /// SET <variable>
@@ -1059,6 +1090,10 @@ impl fmt::Display for Statement {
             }
             Statement::ShowObjects(show_object) => {
                 write!(f, "SHOW {}", show_object)?;
+                Ok(())
+            }
+            Statement::ShowCreateObject{ create_type: show_type, name } => {
+                write!(f, "SHOW CREATE {} {}", show_type, name)?;
                 Ok(())
             }
             Statement::Insert {
