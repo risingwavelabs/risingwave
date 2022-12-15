@@ -27,13 +27,11 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
 use crate::store::*;
+use crate::utils::{to_full_key_range, BytesFullKeyRange, BytesFullKey};
 use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type,
     define_state_store_write_associated_type,
 };
-
-pub type BytesFullKey = FullKey<Bytes>;
-pub type BytesFullKeyRange = (Bound<BytesFullKey>, Bound<BytesFullKey>);
 
 #[allow(clippy::type_complexity)]
 pub trait RangeKv: Clone + Send + Sync + 'static {
@@ -444,54 +442,6 @@ pub type MemoryStateStore = RangeKvStateStore<BTreeMapRangeKv>;
 pub struct RangeKvStateStore<R: RangeKv> {
     /// Stores (key, epoch) -> user value.
     inner: R,
-}
-
-fn to_full_key_range<R, B>(table_id: TableId, table_key_range: R) -> BytesFullKeyRange
-where
-    R: RangeBounds<B> + Send,
-    B: AsRef<[u8]>,
-{
-    let start = match table_key_range.start_bound() {
-        Included(k) => Included(FullKey::new(
-            table_id,
-            TableKey(Bytes::from(k.as_ref().to_vec())),
-            HummockEpoch::MAX,
-        )),
-        Excluded(k) => Excluded(FullKey::new(
-            table_id,
-            TableKey(Bytes::from(k.as_ref().to_vec())),
-            0,
-        )),
-        Unbounded => Included(FullKey::new(
-            table_id,
-            TableKey(Bytes::from(b"".to_vec())),
-            HummockEpoch::MAX,
-        )),
-    };
-    let end = match table_key_range.end_bound() {
-        Included(k) => Included(FullKey::new(
-            table_id,
-            TableKey(Bytes::from(k.as_ref().to_vec())),
-            0,
-        )),
-        Excluded(k) => Excluded(FullKey::new(
-            table_id,
-            TableKey(Bytes::from(k.as_ref().to_vec())),
-            HummockEpoch::MAX,
-        )),
-        Unbounded => {
-            if let Some(next_table_id) = table_id.table_id().checked_add(1) {
-                Excluded(FullKey::new(
-                    next_table_id.into(),
-                    TableKey(Bytes::from(b"".to_vec())),
-                    HummockEpoch::MAX,
-                ))
-            } else {
-                Unbounded
-            }
-        }
-    };
-    (start, end)
 }
 
 impl MemoryStateStore {
