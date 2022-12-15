@@ -29,7 +29,7 @@ pub use lookup_join_base::*;
 pub use nested_loop_join::*;
 use risingwave_common::array::{DataChunk, RowRef, Vis};
 use risingwave_common::error::Result;
-use risingwave_common::row::Row2;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_pb::plan_common::JoinType as JoinTypeProst;
 pub use sort_merge_join::*;
@@ -184,7 +184,7 @@ mod tests {
 
     use risingwave_common::array::{ArrayBuilder, DataChunk, PrimitiveArrayBuilder, Vis};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::row::Row2;
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarRefImpl};
 
     use crate::executor::join::{concatenate, convert_datum_refs_to_chunk};

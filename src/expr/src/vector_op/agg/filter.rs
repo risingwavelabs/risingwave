@@ -14,7 +14,7 @@
 
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::row::Row2;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::aggregator::Aggregator;

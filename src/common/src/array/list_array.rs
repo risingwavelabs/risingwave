@@ -28,7 +28,7 @@ use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult, RowRef,
 };
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::row::Row2;
+use crate::row::Row;
 use crate::types::to_text::ToText;
 use crate::types::{
     hash_datum, memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum,

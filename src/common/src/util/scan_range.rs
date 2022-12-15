@@ -21,7 +21,7 @@ use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 use super::value_encoding::serialize_datum;
 use crate::catalog::get_dist_key_in_pk_indices;
 use crate::hash::VirtualNode;
-use crate::row::{Row2, RowExt};
+use crate::row::{Row, RowExt};
 use crate::types::{Datum, ScalarImpl};
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::value_encoding::serialize_datum_into;
@@ -161,7 +161,7 @@ for_all_scalar_int_variants! { impl_split_small_range }
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::row::Row;
+    use crate::row::OwnedRow;
 
     // dist_key is prefix of pk
     #[test]
@@ -176,7 +176,7 @@ mod tests {
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
-        let vnode = Row::new(vec![
+        let vnode = OwnedRow::new(vec![
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
         ])
@@ -202,7 +202,7 @@ mod tests {
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(114514)));
-        let vnode = Row::new(vec![
+        let vnode = OwnedRow::new(vec![
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
             Some(ScalarImpl::from(114514)),

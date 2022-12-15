@@ -149,14 +149,13 @@ impl Executor for MockSource {
     }
 }
 
-/// `row_nonnull` builds a `Row` with concrete values.
+/// `row_nonnull` builds a `OwnedRow` with concrete values.
 /// TODO: add macro row!, which requires a new trait `ToScalarValue`.
 #[macro_export]
 macro_rules! row_nonnull {
     [$( $value:expr ),*] => {
         {
-            use risingwave_common::row::Row;
-            Row::new(vec![$(Some($value.into()), )*])
+            risingwave_common::row::OwnedRow::new(vec![$(Some($value.into()), )*])
         }
     };
 }

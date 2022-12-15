@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk};
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -85,7 +85,7 @@ impl Expression for InExpression {
         Ok(Arc::new(output_array.finish().into()))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let data = self.left.eval_row(input)?;
         let ret = self.exists(&data);
         Ok(ret.map(|b| b.to_scalar_value()))
@@ -122,7 +122,7 @@ impl<'a> TryFrom<&'a ExprNode> for InExpression {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::DataChunk;
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::value_encoding::serialize_datum;
@@ -267,7 +267,7 @@ mod tests {
 
             for (j, row_input) in row_inputs[i].iter().enumerate() {
                 let row_input = vec![row_input.map(|s| s.into())];
-                let row = Row::new(row_input);
+                let row = OwnedRow::new(row_input);
                 let result = search_expr.eval_row(&row).unwrap();
                 assert_eq!(result, expected[i][j].map(ScalarImpl::Bool));
             }

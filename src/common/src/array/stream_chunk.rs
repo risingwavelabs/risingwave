@@ -21,7 +21,7 @@ use super::{ArrayResult, DataChunkTestExt};
 use crate::array::column::Column;
 use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
-use crate::row::{Row, Row2};
+use crate::row::{OwnedRow, Row};
 use crate::types::to_text::ToText;
 use crate::types::DataType;
 
@@ -101,7 +101,7 @@ impl StreamChunk {
 
     /// Build a `StreamChunk` from rows.
     // TODO: introducing something like `StreamChunkBuilder` maybe better.
-    pub fn from_rows(rows: &[(Op, Row)], data_types: &[DataType]) -> Self {
+    pub fn from_rows(rows: &[(Op, OwnedRow)], data_types: &[DataType]) -> Self {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(rows.len()))

@@ -23,7 +23,7 @@ use futures::{pin_mut, stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{AllVirtualNodeIter, VirtualNode};
-use risingwave_common::row::{self, CompactedRow, Row2, RowExt};
+use risingwave_common::row::{self, CompactedRow, Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::row_serde::row_serde_util::serialize_pk;
@@ -74,7 +74,7 @@ impl<S: StateStore> RangeCache<S> {
 
     /// Insert a row and corresponding scalar value key into cache (if within range) and
     /// `StateTable`.
-    pub fn insert(&mut self, k: &ScalarImpl, v: impl Row2) -> StreamExecutorResult<()> {
+    pub fn insert(&mut self, k: &ScalarImpl, v: impl Row) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
             let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
@@ -88,7 +88,7 @@ impl<S: StateStore> RangeCache<S> {
     /// Delete a row and corresponding scalar value key from cache (if within range) and
     /// `StateTable`.
     // FIXME: panic instead of returning Err
-    pub fn delete(&mut self, k: &ScalarImpl, v: impl Row2) -> StreamExecutorResult<()> {
+    pub fn delete(&mut self, k: &ScalarImpl, v: impl Row) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
             let pk = (&v).project(self.state_table.pk_indices()).memcmp_serialize(self.state_table.pk_serde());
@@ -102,7 +102,7 @@ impl<S: StateStore> RangeCache<S> {
         Ok(())
     }
 
-    fn to_row_bound(bound: Bound<ScalarImpl>) -> Bound<impl Row2> {
+    fn to_row_bound(bound: Bound<ScalarImpl>) -> Bound<impl Row> {
         bound.map(|s| row::once(Some(s)))
     }
 
@@ -188,7 +188,7 @@ impl<S: StateStore> RangeCache<S> {
     async fn fetch_vnode_range(
         &self,
         vnode: VirtualNode,
-        pk_range: &(Bound<impl Row2>, Bound<impl Row2>),
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
         initial_map: BTreeMap<Vec<u8>, CompactedRow>,
     ) -> StreamExecutorResult<(VirtualNode, BTreeMap<Vec<u8>, CompactedRow>)> {
         let row_stream = self

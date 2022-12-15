@@ -379,7 +379,7 @@ mod tests {
         }
 
         for i in 0..input.len() {
-            let row = Row::new(vec![input[i].map(|int| int.to_scalar_value())]);
+            let row = OwnedRow::new(vec![input[i].map(|int| int.to_scalar_value())]);
             let result = vec_executor.eval_row(&row).unwrap();
             let expected = target[i].map(|int| int.to_scalar_value());
             assert_eq!(result, expected);
@@ -422,7 +422,7 @@ mod tests {
         }
 
         for i in 0..input.len() {
-            let row = Row::new(vec![input[i].map(|int| int.to_scalar_value())]);
+            let row = OwnedRow::new(vec![input[i].map(|int| int.to_scalar_value())]);
             let result = vec_executor.eval_row(&row).unwrap();
             let expected = target[i].map(|int| int.to_scalar_value());
             assert_eq!(result, expected);
@@ -472,7 +472,7 @@ mod tests {
         }
 
         for i in 0..input.len() {
-            let row = Row::new(vec![input[i]
+            let row = OwnedRow::new(vec![input[i]
                 .as_ref()
                 .cloned()
                 .map(|str| str.to_scalar_value())]);
@@ -516,7 +516,7 @@ mod tests {
         }
 
         for i in 0..input.len() {
-            let row = Row::new(vec![input[i].map(|b| b.to_scalar_value())]);
+            let row = OwnedRow::new(vec![input[i].map(|b| b.to_scalar_value())]);
             let result = vec_executor.eval_row(&row).unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
@@ -555,7 +555,7 @@ mod tests {
         }
 
         for i in 0..input.len() {
-            let row = Row::new(vec![input[i].map(|d| d.to_scalar_value())]);
+            let row = OwnedRow::new(vec![input[i].map(|d| d.to_scalar_value())]);
             let result = vec_executor.eval_row(&row).unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
