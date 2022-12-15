@@ -33,7 +33,7 @@ service HeartbeatService {
 message LeaderRequest {}
 
 message LeaderResponse {
-  common.HostAddress leaderAddr = 1;
+  common.HostAddress leader_addr = 1;
 }
 
 service LeaderService {
