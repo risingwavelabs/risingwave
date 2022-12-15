@@ -21,7 +21,6 @@ pub enum Controller {
     Cpu,
     Memory,
 }
-use tracing::error;
 
 // Default constant Cgroup paths and hierarchy.
 const DEFAULT_CGROUP_ROOT_HIERARCYHY: &str = "/sys/fs/cgroup";
@@ -111,10 +110,10 @@ pub mod memory {
             Err(err) => {
                 match err.kind() {
                     std::io::ErrorKind::InvalidData => {
-                        super::error!("Invalid data error: {}", err)
+                        println!("Invalid data error: {}", err)
                     }
                     std::io::ErrorKind::NotFound => {
-                        super::error!("Cgroup interface file was not found: {}", err)
+                        println!("Cgroup interface file was not found: {}", err)
                     }
                     _ => panic!("Unexpected error: {}", err),
                 }
@@ -148,10 +147,10 @@ pub mod memory {
             Err(err) => {
                 match err.kind() {
                     std::io::ErrorKind::InvalidData => {
-                        super::error!("Invalid data error: {}", err)
+                        println!("Invalid data error: {}", err)
                     }
                     std::io::ErrorKind::NotFound => {
-                        super::error!("Cgroup interface file was not found: {}", err)
+                        println!("Cgroup interface file was not found: {}", err)
                     }
                     _ => panic!("Unexpected error: {}", err),
                 }
@@ -242,10 +241,10 @@ pub mod cpu {
             Err(err) => {
                 match err.kind() {
                     std::io::ErrorKind::InvalidData => {
-                        super::error!("Invalid data error: {}", err)
+                        println!("Invalid data error: {}", err)
                     }
                     std::io::ErrorKind::NotFound => {
-                        super::error!("Cgroup interface file was not found: {}", err)
+                        println!("Cgroup interface file was not found: {}", err)
                     }
                     _ => panic!("Unexpected error: {}", err),
                 };
