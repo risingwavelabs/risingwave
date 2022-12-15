@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt::Debug;
+use std::fmt::{format, Debug};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -905,20 +905,21 @@ impl GrpcMetaClient {
             .leader_addr
             .expect("Expect that leader service always knows who leader is");
 
-        // let leader_addr = format!("http://{}:{}", leader_addr.host, leader_addr.port);
-        // let leader_addr = format!("{}:{}", leader_addr.host, leader_addr.port);
+        // Determine if we use protocol in addr and if so, use that protocol
+        let split_up = addr.split("://").collect::<Vec<&str>>();
+        let protocol = if split_up.len() > 1 {
+            format!("{}://", addr.split("://").collect::<Vec<&str>>()[0])
+        } else {
+            "".to_owned()
+        };
+
         let leader_addr = format!(
-            "http://{}:{}",
+            "{}{}:{}",
+            protocol,
             leader_addr.get_host(),
             leader_addr.get_port()
         );
 
-        // TODO: the http here may be incorrect
-        // error in sim test
-        // FIXME
-        // export RUST_LOG=info
-        // ./risedev sslt -- --kill-rate=0.0 --kill "e2e_test/streaming/**/*.slt"
-        // Connecting against leader meta http://0.0.0.0:5690, instead of follower meta 192.168.1.1:5690
         if leader_addr.ne(addr) {
             // TODO: Write this as function. DNRY
             tracing::info!(
