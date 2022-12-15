@@ -155,7 +155,7 @@ impl Executor for MockSource {
 macro_rules! row_nonnull {
     [$( $value:expr ),*] => {
         {
-            use risingwave_common::array::Row;
+            use risingwave_common::row::Row;
             Row::new(vec![$(Some($value.into()), )*])
         }
     };

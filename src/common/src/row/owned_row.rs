@@ -16,10 +16,9 @@
 
 use std::ops;
 
-use super::{Row2, RowExt};
+use super::Row2;
 use crate::collection::estimate_size::EstimateSize;
 use crate::types::{DataType, Datum, DatumRef, ToDatumRef};
-use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
 use crate::util::value_encoding::deserialize_datum;
 
@@ -54,7 +53,7 @@ impl Ord for Row {
 }
 
 impl Row {
-    pub fn new(values: Vec<Datum>) -> Self {
+    pub const fn new(values: Vec<Datum>) -> Self {
         Self(values)
     }
 
@@ -70,19 +69,6 @@ impl Row {
         static EMPTY_ROW: Row = Row(Vec::new());
         &EMPTY_ROW
     }
-
-    /// Serialize part of the row into memcomparable bytes.
-    ///
-    /// TODO(row trait): introduce `Row::memcmp_serialize`.
-    pub fn extract_memcomparable_by_indices(
-        &self,
-        serializer: &OrderedRowSerde,
-        key_indices: &[usize],
-    ) -> Vec<u8> {
-        let mut bytes = vec![];
-        serializer.serialize((&self).project(key_indices), &mut bytes);
-        bytes
-    }
 }
 
 impl EstimateSize for Row {
@@ -93,7 +79,7 @@ impl EstimateSize for Row {
 }
 
 impl Row2 for Row {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = std::iter::Map<std::slice::Iter<'a, Datum>, fn(&'a Datum) -> DatumRef<'a>>
     where
         Self: 'a;
 
@@ -114,7 +100,7 @@ impl Row2 for Row {
 
     #[inline]
     fn iter(&self) -> Self::Iter<'_> {
-        Iterator::map(self.0.iter(), ToDatumRef::to_datum_ref)
+        self.0.iter().map(ToDatumRef::to_datum_ref)
     }
 
     #[inline]
@@ -159,6 +145,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
+    use crate::row::RowExt;
     use crate::types::{DataType as Ty, IntervalUnit, ScalarImpl};
     use crate::util::hash_util::Crc32FastBuilder;
 
