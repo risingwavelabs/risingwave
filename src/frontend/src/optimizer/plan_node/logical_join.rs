@@ -587,7 +587,7 @@ impl LogicalJoin {
 
         let new_join_on = new_eq_cond.and(new_other_cond);
 
-        if new_join_on.always_true() {
+        if new_join_on.always_false() {
             return None;
         }
 
