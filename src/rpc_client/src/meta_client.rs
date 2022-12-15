@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt::{format, Debug};
+use std::fmt::Debug;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -905,6 +905,8 @@ impl GrpcMetaClient {
             .leader_addr
             .expect("Expect that leader service always knows who leader is");
 
+        // TODO: Do we ever use protocols in the addr?
+        // TODO: Introduce some sort of parse method that does this more elegantly
         // Determine if we use protocol in addr and if so, use that protocol
         let split_up = addr.split("://").collect::<Vec<&str>>();
         let protocol = if split_up.len() > 1 {
