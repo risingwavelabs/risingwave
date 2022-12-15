@@ -20,6 +20,7 @@ use std::time::Instant;
 
 use anyhow::anyhow;
 use risingwave_pb::hummock::HummockSnapshot;
+use tokio::sync::watch::Receiver;
 use tokio::sync::{oneshot, watch, RwLock};
 
 use super::notifier::Notifier;
@@ -36,6 +37,9 @@ struct Inner {
     queue: RwLock<VecDeque<Scheduled>>,
 
     /// When `queue` is not empty anymore, all subscribers of this watcher will be notified.
+    populated_tx: watch::Sender<()>,
+
+    /// When `queue` contents are changed, all subscribers of this watcher will be notified.
     changed_tx: watch::Sender<()>,
 
     /// The numbers of barrier (checkpoint = false) since the last barrier (checkpoint = true)
@@ -70,6 +74,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
         );
         let inner = Arc::new(Inner {
             queue: RwLock::new(VecDeque::new()),
+            populated_tx: watch::channel(()).0,
             changed_tx: watch::channel(()).0,
             num_uncheckpointed_barrier: AtomicUsize::new(0),
             checkpoint_frequency,
@@ -91,9 +96,10 @@ impl<S: MetaStore> BarrierScheduler<S> {
         for scheduled in scheduleds {
             queue.push_back(scheduled);
             if queue.len() == 1 {
-                self.inner.changed_tx.send(()).ok();
+                self.inner.populated_tx.send(()).ok();
             }
         }
+        self.inner.changed_tx.send(()).ok();
     }
 
     /// Attach `new_notifiers` to the very first scheduled barrier. If there's no one scheduled, a
@@ -117,7 +123,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
                     command: Command::barrier(),
                     checkpoint: new_checkpoint,
                 });
-                self.inner.changed_tx.send(()).ok();
+                self.inner.populated_tx.send(()).ok();
             }
         }
     }
@@ -214,25 +220,40 @@ pub struct ScheduledBarriers {
 
 impl ScheduledBarriers {
     /// Pop a scheduled barrier from the queue, or a default checkpoint barrier if not exists.
-    pub(super) async fn pop_or_default(&self) -> Scheduled {
+    pub(super) async fn pop_or_default(&self, command_to_send: &mut Option<Command>) -> Scheduled {
         let mut queue = self.inner.queue.write().await;
         let checkpoint = self.try_get_checkpoint();
-        let scheduled = match queue.pop_front() {
-            Some(mut scheduled) => {
-                scheduled.checkpoint = scheduled.checkpoint || checkpoint;
-                scheduled
-            }
-            None => {
-                // If no command scheduled, create a periodic barrier by default.
-                Scheduled {
-                    command: Command::barrier(),
-                    notifiers: Default::default(),
-                    checkpoint,
+        let scheduled = if command_to_send.is_none() {
+            match queue.pop_front() {
+                Some(mut scheduled) => {
+                    scheduled.checkpoint = scheduled.checkpoint || checkpoint;
+                    self.inner.changed_tx.send(()).ok();
+                    scheduled
                 }
+                None => {
+                    // If no command scheduled, create a periodic barrier by default.
+                    Scheduled {
+                        command: Command::barrier(),
+                        notifiers: Default::default(),
+                        checkpoint,
+                    }
+                }
+            }
+        } else {
+            let command = command_to_send.take().unwrap();
+            let need_checkpoint = command.need_checkpoint() || checkpoint;
+            Scheduled {
+                command,
+                notifiers: Default::default(),
+                checkpoint: need_checkpoint,
             }
         };
         self.update_num_uncheckpointed_barrier(scheduled.checkpoint);
         scheduled
+    }
+
+    pub(super) fn get_subscriber_for_changed_tx(&self) -> Receiver<()> {
+        self.inner.changed_tx.subscribe()
     }
 
     /// Wait for at least one scheduled barrier in the queue.
@@ -241,7 +262,7 @@ impl ScheduledBarriers {
         if queue.len() > 0 {
             return;
         }
-        let mut rx = self.inner.changed_tx.subscribe();
+        let mut rx = self.inner.populated_tx.subscribe();
         drop(queue);
 
         rx.changed().await.unwrap();

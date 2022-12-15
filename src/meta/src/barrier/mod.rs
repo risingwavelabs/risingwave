@@ -357,14 +357,16 @@ where
         complete_nodes
     }
 
-    /// Pause inject barrier until True.
-    fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
-        let in_flight_not_full = self
-            .command_ctx_queue
+    fn get_inflight_barrier_num(&self) -> usize {
+        self.command_ctx_queue
             .iter()
             .filter(|x| matches!(x.state, InFlight))
             .count()
-            < in_flight_barrier_nums;
+    }
+
+    /// Pause inject barrier until True.
+    fn can_inject_barrier(&self, in_flight_barrier_nums: usize) -> bool {
+        let in_flight_not_full = self.get_inflight_barrier_num() < in_flight_barrier_nums;
 
         // Whether some command requires pausing concurrent barrier. If so, it must be the last one.
         let should_pause = self
@@ -540,6 +542,10 @@ where
         let mut barrier_timer: Option<HistogramTimer> = None;
         let (barrier_complete_tx, mut barrier_complete_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut checkpoint_control = CheckpointControl::new(self.metrics.clone());
+
+        let mut is_throttled = false;
+        let mut command_to_send: Option<Command> = None;
+        let mut changed_rx = self.scheduled_barriers.get_subscriber_for_changed_tx();
         loop {
             tokio::select! {
                 biased;
@@ -562,6 +568,17 @@ where
                     .await;
                     continue;
                 }
+                _ = changed_rx.changed() => {
+                    if !is_throttled && checkpoint_control.get_inflight_barrier_num() >= self.in_flight_barrier_nums {
+                        is_throttled = true;
+                        tracing::info!("Barrier manager is throttled, inflght_barrier_nums={}", checkpoint_control.get_inflight_barrier_num());
+                        command_to_send = Some(Command::pause());
+                    } else if is_throttled && checkpoint_control.get_inflight_barrier_num() < self.in_flight_barrier_nums {
+                        is_throttled = false;
+                        command_to_send = Some(Command::resume());
+                        tracing::info!("Barrier manager is resumed, inflght_barrier_nums={}", checkpoint_control.get_inflight_barrier_num());
+                    }
+                }
                 // there's barrier scheduled.
                 _ = self.scheduled_barriers.wait_one(), if checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {}
                 // Wait for the minimal interval,
@@ -576,7 +593,10 @@ where
                 command,
                 notifiers,
                 checkpoint,
-            } = self.scheduled_barriers.pop_or_default().await;
+            } = self
+                .scheduled_barriers
+                .pop_or_default(&mut command_to_send)
+                .await;
             let info = self
                 .resolve_actor_info(&mut checkpoint_control, &command)
                 .await;
