@@ -324,7 +324,7 @@ impl PredicatePushdown for LogicalHopWindow {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
         // Do not push down `window_start`, `window_end` for now, they are columns produced by
         // HopWindow.
-        let mut window_columns = FixedBitSet::with_capacity(self.output_indices().len());
+        let mut window_columns = FixedBitSet::with_capacity(self.schema().len());
         let window_start_idx = self.input().schema().len();
         let window_end_idx = self.input().schema().len() + 1;
         for (i, v) in self.output_indices().iter().enumerate() {
