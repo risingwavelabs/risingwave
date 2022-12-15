@@ -148,7 +148,7 @@ export interface Table {
   valueIndices: number[];
   definition: string;
   handlePkConflict: boolean;
-  pkPrefixLenHint: number;
+  readPrefixLenHint: number;
 }
 
 export const Table_TableType = {
@@ -737,7 +737,7 @@ function createBaseTable(): Table {
     valueIndices: [],
     definition: "",
     handlePkConflict: false,
-    pkPrefixLenHint: 0,
+    readPrefixLenHint: 0,
   };
 }
 
@@ -777,7 +777,7 @@ export const Table = {
         : [],
       definition: isSet(object.definition) ? String(object.definition) : "",
       handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
-      pkPrefixLenHint: isSet(object.pkPrefixLenHint) ? Number(object.pkPrefixLenHint) : 0,
+      readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
     };
   },
 
@@ -835,7 +835,7 @@ export const Table = {
     }
     message.definition !== undefined && (obj.definition = message.definition);
     message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
-    message.pkPrefixLenHint !== undefined && (obj.pkPrefixLenHint = Math.round(message.pkPrefixLenHint));
+    message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
     return obj;
   },
 
@@ -882,7 +882,7 @@ export const Table = {
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
     message.handlePkConflict = object.handlePkConflict ?? false;
-    message.pkPrefixLenHint = object.pkPrefixLenHint ?? 0;
+    message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
     return message;
   },
 };
