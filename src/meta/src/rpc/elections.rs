@@ -28,7 +28,7 @@ use tokio::task::JoinHandle;
 
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
 use crate::storage::{MetaStore, MetaStoreError, Transaction};
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 // get duration since epoch
 fn since_epoch() -> Duration {
@@ -72,7 +72,7 @@ async fn campaign<S: MetaStore>(
     addr: &String,
     lease_time_sec: u64,
     next_lease_id: u64,
-) -> Option<ElectionResult> {
+) -> MetaResult<ElectionResult> {
     tracing::info!("running for election with lease {}", next_lease_id);
 
     let campaign_leader_info = MetaLeaderInfo {
@@ -113,26 +113,29 @@ async fn campaign<S: MetaStore>(
             )
             .await
         {
-            tracing::warn!(
+            let msg = format!(
                 "new cluster put leader info failed, MetaStoreError: {:?}",
                 e
             );
-            return None;
+            tracing::warn!(msg);
+            return Err(MetaError::unavailable(msg));
         }
 
         // Check if new leader was elected in the meantime
         return match renew_lease(&campaign_leader_info, lease_time_sec, meta_store).await {
             Ok(is_leader) => {
                 if !is_leader {
-                    return None;
+                    return Err(MetaError::permission_denied(
+                        "Node could not acquire/renew leader lease".into(),
+                    ));
                 }
-                Some(ElectionResult {
+                Ok(ElectionResult {
                     meta_leader_info: campaign_leader_info,
                     _meta_lease_info: campaign_lease_info,
                     is_leader: true,
                 })
             }
-            Err(_) => None,
+            Err(e) => Err(e.into()),
         };
     }
 
@@ -140,14 +143,14 @@ async fn campaign<S: MetaStore>(
     let is_leader = match renew_lease(&campaign_leader_info, lease_time_sec, meta_store).await {
         Err(e) => {
             tracing::warn!("Encountered error when renewing lease {}", e);
-            return None;
+            return Err(e.into());
         }
         Ok(val) => val,
     };
 
     if is_leader {
         // if is leader, return HostAddress to this node
-        return Some(ElectionResult {
+        return Ok(ElectionResult {
             meta_leader_info: campaign_leader_info,
             _meta_lease_info: campaign_lease_info,
             is_leader,
@@ -157,13 +160,16 @@ async fn campaign<S: MetaStore>(
     // FIXME: This has to be done with a single transaction, not 2
     // if it is not leader, then get the current leaders HostAddress
     // Ask Pin how to implement txn.get here
-    let (leader, lease) = get_leader_lease_obj(meta_store).await?;
-
-    Some(ElectionResult {
-        meta_leader_info: leader,
-        _meta_lease_info: lease,
-        is_leader,
-    })
+    return match get_leader_lease_obj(meta_store).await {
+        None => Err(MetaError::unavailable(
+            "Meta information not stored in meta store".into(),
+        )),
+        Some(infos) => Ok(ElectionResult {
+            meta_leader_info: infos.0,
+            _meta_lease_info: infos.1,
+            is_leader,
+        }),
+    };
 }
 
 /// Try to renew/acquire the leader lease
@@ -322,7 +328,7 @@ pub async fn run_elections<S: MetaStore>(
         )
         .await;
         let (leader_addr, initial_leader, is_initial_leader) = match election_outcome {
-            Some(outcome) => {
+            Ok(outcome) => {
                 tracing::info!("initial election finished");
                 (
                     outcome.get_leader_addr(),
@@ -330,7 +336,7 @@ pub async fn run_elections<S: MetaStore>(
                     outcome.is_leader,
                 )
             }
-            None => {
+            Err(_) => {
                 tracing::info!("initial election failed. Repeating election");
                 continue 'initial_election;
             }
@@ -349,7 +355,7 @@ pub async fn run_elections<S: MetaStore>(
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         let (leader_tx, leader_rx) = tokio::sync::watch::channel((leader_addr, is_initial_leader));
         let handle = tokio::spawn(async move {
-            // runs all follow-up elections
+            // runs all followup elections
 
             let mut is_leader = is_initial_leader;
             let mut leader_info = initial_leader.clone();
@@ -366,12 +372,12 @@ pub async fn run_elections<S: MetaStore>(
                     )
                     .await
                     {
-                        None => {
+                        Err(_) => {
                             tracing::info!("election failed. Repeating election");
                             _ = ticker.tick().await;
                             continue 'election;
                         }
-                        Some(outcome) => {
+                        Ok(outcome) => {
                             tracing::info!("election finished");
                             (
                                 outcome.get_leader_addr(),
