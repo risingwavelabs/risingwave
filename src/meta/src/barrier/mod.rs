@@ -378,7 +378,23 @@ where
             "commands in queue: {:?}",
             self.command_ctx_queue
                 .iter()
-                .map(|x| format!("{:?}", x.command_ctx.command))
+                .map(|x| match &x.command_ctx.command {
+                    Command::Plain(plain) => {
+                        format!("plain: {:?}", plain)
+                    }
+                    Command::CreateStreamingJob { .. } => {
+                        "create streaming job".to_string()
+                    }
+                    Command::DropStreamingJobs(_) => {
+                        "drop streaming jobs".to_string()
+                    }
+                    Command::RescheduleFragment(_) => {
+                        "create table".to_string()
+                    }
+                    Command::SourceSplitAssignment(_) => {
+                        "source split assignment".to_string()
+                    }
+                })
                 .collect_vec()
         );
         debug_assert_eq!(
