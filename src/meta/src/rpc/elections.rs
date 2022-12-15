@@ -60,7 +60,7 @@ impl ElectionResult {
 /// Runs for election in an attempt to become leader
 ///
 /// ## Returns
-/// Returns `MetaResult<ElectionResult>`, containing infos about the node who won the election or
+/// Returns `ElectionResult`, containing infos about the node who won the election or
 /// `MetaError` if the election ran into an error
 ///
 /// ## Arguments
@@ -176,18 +176,14 @@ async fn campaign<S: MetaStore>(
 /// Try to renew/acquire the leader lease
 ///
 /// ## Returns
-/// True, if the current node could acquire/renew the lease.
-/// False, if the current node could acquire/renew the lease.
-/// `MetaStoreError`, if there was an error.
+/// True if node was leader and was able to renew/acquire the lease.
+/// False if node was follower and thus could not renew/acquire lease.
+/// `MetaError` if operation ran into an error
 ///
 /// ## Arguments
 /// `leader_info`: Info of the node that trie
 /// `lease_time_sec`: Time in seconds that the lease is valid
 /// `meta_store`: Store which holds the lease
-///
-/// Returns true if node was leader and was able to renew/acquire the lease.
-/// Returns false if node was follower and thus could not renew/acquire lease.
-/// Returns `MetaError` if operation ran into an error
 async fn renew_lease<S: MetaStore>(
     leader_info: &MetaLeaderInfo,
     lease_time_sec: u64,
@@ -277,7 +273,7 @@ fn gen_rand_lease_id(addr: &str) -> u64 {
 }
 
 /// Used to manage single leader setup. `run_elections` will continuously run elections to determine
-/// which nodes are **leaders** and which are **followers**.
+/// which nodes is the **leader** and which are **followers**.
 ///
 /// To become a leader a **follower** node **campaigns**. A follower only ever campaigns if it
 /// detects that the current leader is down. The follower becomes a leader by acquiring a lease
