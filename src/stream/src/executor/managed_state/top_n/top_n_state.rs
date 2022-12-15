@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::row::{OwnedRow, Row2, RowExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -75,11 +75,11 @@ impl<S: StateStore> ManagedTopNState<S> {
         }
     }
 
-    pub fn insert(&mut self, value: impl Row2) {
+    pub fn insert(&mut self, value: impl Row) {
         self.state_table.insert(value);
     }
 
-    pub fn delete(&mut self, value: impl Row2) {
+    pub fn delete(&mut self, value: impl Row) {
         self.state_table.delete(value);
     }
 

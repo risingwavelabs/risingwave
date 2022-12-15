@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
-use risingwave_common::row::{OwnedRow, Row2};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::BoxedExpression;

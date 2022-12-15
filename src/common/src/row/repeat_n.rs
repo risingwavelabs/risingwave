@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::Row2;
+use super::Row;
 use crate::types::{DatumRef, ToDatumRef};
 
 /// Row for the [`repeat_n`] function.
@@ -33,7 +33,7 @@ impl<D: PartialEq> PartialEq for RepeatN<D> {
 }
 impl<D: Eq> Eq for RepeatN<D> {}
 
-impl<D: ToDatumRef> Row2 for RepeatN<D> {
+impl<D: ToDatumRef> Row for RepeatN<D> {
     type Iter<'a> = std::iter::Take<std::iter::Repeat<DatumRef<'a>>>
     where
         Self: 'a;

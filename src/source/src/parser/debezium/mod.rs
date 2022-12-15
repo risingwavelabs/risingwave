@@ -50,7 +50,7 @@ mod test {
 
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
-    use risingwave_common::row::{OwnedRow, Row2};
+    use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::*;

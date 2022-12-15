@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::Row2;
+use super::Row;
 use crate::types::DatumRef;
 
 /// Row for the [`project`](super::RowExt::project) method.
@@ -22,14 +22,14 @@ pub struct Project<'i, R> {
     indices: &'i [usize],
 }
 
-impl<'i, R: Row2> PartialEq for Project<'i, R> {
+impl<'i, R: Row> PartialEq for Project<'i, R> {
     fn eq(&self, other: &Self) -> bool {
         self.iter().eq(other.iter())
     }
 }
-impl<'i, R: Row2> Eq for Project<'i, R> {}
+impl<'i, R: Row> Eq for Project<'i, R> {}
 
-impl<'i, R: Row2> Row2 for Project<'i, R> {
+impl<'i, R: Row> Row for Project<'i, R> {
     type Iter<'a> = std::iter::Map<std::slice::Iter<'i, usize>, impl FnMut(&'i usize) -> DatumRef<'a>>
     where
         R: 'a,
@@ -60,7 +60,7 @@ impl<'i, R: Row2> Row2 for Project<'i, R> {
     }
 }
 
-impl<'i, R: Row2> Project<'i, R> {
+impl<'i, R: Row> Project<'i, R> {
     pub(crate) fn new(row: R, indices: &'i [usize]) -> Self {
         if let Some(index) = indices.iter().find(|&&i| i >= row.len()) {
             panic!(

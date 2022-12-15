@@ -18,7 +18,7 @@ use bytes::BufMut;
 use itertools::Itertools;
 
 use crate::error::Result;
-use crate::row::{OwnedRow, Row2};
+use crate::row::{OwnedRow, Row};
 use crate::types::{
     memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, ToDatumRef,
 };
@@ -54,12 +54,12 @@ impl OrderedRowSerde {
         }
     }
 
-    /// Note: prefer [`Row2::memcmp_serialize`] if possible.
-    pub fn serialize(&self, row: impl Row2, append_to: impl BufMut) {
+    /// Note: prefer [`Row::memcmp_serialize`] if possible.
+    pub fn serialize(&self, row: impl Row, append_to: impl BufMut) {
         self.serialize_datums(row.iter(), append_to)
     }
 
-    /// Note: prefer [`Row2::memcmp_serialize`] if possible.
+    /// Note: prefer [`Row::memcmp_serialize`] if possible.
     pub fn serialize_datums(
         &self,
         datum_refs: impl Iterator<Item = impl ToDatumRef>,

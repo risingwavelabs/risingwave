@@ -28,7 +28,7 @@ use risingwave_common::catalog::{
     TableId, TableOption,
 };
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{self, OwnedRow, Row2, RowDeserializer, RowExt};
+use risingwave_common::row::{self, OwnedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
@@ -218,13 +218,13 @@ impl<S: StateStore> StorageTable<S> {
 /// Point get
 impl<S: StateStore> StorageTable<S> {
     /// Get vnode value with given primary key.
-    fn compute_vnode_by_pk(&self, pk: impl Row2) -> VirtualNode {
+    fn compute_vnode_by_pk(&self, pk: impl Row) -> VirtualNode {
         compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
     }
 
     /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
     /// Return `None` if the provided columns are not enough.
-    fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: impl Row2) -> Option<VirtualNode> {
+    fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: impl Row) -> Option<VirtualNode> {
         self.dist_key_in_pk_indices
             .iter()
             .all(|&d| d < pk_prefix.len())
@@ -234,7 +234,7 @@ impl<S: StateStore> StorageTable<S> {
     /// Get a single row by point get
     pub async fn get_row(
         &self,
-        pk: impl Row2,
+        pk: impl Row,
         wait_epoch: HummockReadEpoch,
     ) -> StorageResult<Option<OwnedRow>> {
         let epoch = wait_epoch.get_epoch();
@@ -356,13 +356,13 @@ impl<S: StateStore> StorageTable<S> {
     async fn iter_with_pk_bounds(
         &self,
         epoch: HummockReadEpoch,
-        pk_prefix: impl Row2,
+        pk_prefix: impl Row,
         range_bounds: impl RangeBounds<OwnedRow>,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S>> {
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerde,
-            pk_prefix: impl Row2,
+            pk_prefix: impl Row,
             range_bound: Bound<&OwnedRow>,
             is_start_bound: bool,
         ) -> Bound<Vec<u8>> {
@@ -491,7 +491,7 @@ impl<S: StateStore> StorageTable<S> {
     pub async fn batch_iter_with_pk_bounds(
         &self,
         epoch: HummockReadEpoch,
-        pk_prefix: impl Row2,
+        pk_prefix: impl Row,
         range_bounds: impl RangeBounds<OwnedRow>,
     ) -> StorageResult<StorageTableIter<S>> {
         self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, true)

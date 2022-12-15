@@ -20,7 +20,7 @@ use risingwave_common::array::{ArrayBuilderImpl, Op};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
-use risingwave_common::row::{OwnedRow, Row2, RowExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};

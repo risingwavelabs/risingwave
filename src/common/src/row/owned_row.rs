@@ -14,7 +14,7 @@
 
 use std::ops;
 
-use super::Row2;
+use super::Row;
 use crate::collection::estimate_size::EstimateSize;
 use crate::types::{DataType, Datum, DatumRef, ToDatumRef};
 use crate::util::value_encoding;
@@ -76,7 +76,7 @@ impl EstimateSize for OwnedRow {
     }
 }
 
-impl Row2 for OwnedRow {
+impl Row for OwnedRow {
     type Iter<'a> = std::iter::Map<std::slice::Iter<'a, Datum>, fn(&'a Datum) -> DatumRef<'a>>
     where
         Self: 'a;

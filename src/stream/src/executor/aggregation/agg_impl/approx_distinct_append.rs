@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::row::{OwnedRow, Row2, RowExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::{bail, row};
 use risingwave_storage::StateStore;

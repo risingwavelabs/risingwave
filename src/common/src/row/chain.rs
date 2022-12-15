@@ -14,7 +14,7 @@
 
 use bytes::BufMut;
 
-use super::Row2;
+use super::Row;
 use crate::types::DatumRef;
 
 /// Row for the [`chain`](super::RowExt::chain) method.
@@ -24,14 +24,14 @@ pub struct Chain<R1, R2> {
     r2: R2,
 }
 
-impl<R1: Row2, R2: Row2> PartialEq for Chain<R1, R2> {
+impl<R1: Row, R2: Row> PartialEq for Chain<R1, R2> {
     fn eq(&self, other: &Self) -> bool {
         self.iter().eq(other.iter())
     }
 }
-impl<R1: Row2, R2: Row2> Eq for Chain<R1, R2> {}
+impl<R1: Row, R2: Row> Eq for Chain<R1, R2> {}
 
-impl<R1: Row2, R2: Row2> Row2 for Chain<R1, R2> {
+impl<R1: Row, R2: Row> Row for Chain<R1, R2> {
     type Iter<'a> = std::iter::Chain<R1::Iter<'a>, R2::Iter<'a>>
     where
         R1: 'a,

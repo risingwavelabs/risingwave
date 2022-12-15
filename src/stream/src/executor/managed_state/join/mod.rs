@@ -29,7 +29,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::row;
-use risingwave_common::row::{CompactedRow, OwnedRow, Row2, RowExt};
+use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -44,18 +44,18 @@ use crate::task::ActorId;
 
 type DegreeType = u64;
 
-fn build_degree_row(order_key: impl Row2, degree: DegreeType) -> impl Row2 {
+fn build_degree_row(order_key: impl Row, degree: DegreeType) -> impl Row {
     order_key.chain(row::once(Some(ScalarImpl::Int64(degree as i64))))
 }
 
 /// This is a row with a match degree
 #[derive(Clone, Debug)]
-pub struct JoinRow<R: Row2> {
+pub struct JoinRow<R: Row> {
     pub row: R,
     degree: DegreeType,
 }
 
-impl<R: Row2> JoinRow<R> {
+impl<R: Row> JoinRow<R> {
     pub fn new(row: R, degree: DegreeType) -> Self {
         Self { row, degree }
     }
@@ -71,7 +71,7 @@ impl<R: Row2> JoinRow<R> {
     pub fn to_table_rows<'a>(
         &'a self,
         state_order_key_indices: &'a [usize],
-    ) -> (&'a R, impl Row2 + 'a) {
+    ) -> (&'a R, impl Row + 'a) {
         let order_key = (&self.row).project(state_order_key_indices);
         let degree = build_degree_row(order_key, self.degree);
         (&self.row, degree)
@@ -398,7 +398,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a join row
-    pub fn insert(&mut self, key: &K, value: JoinRow<impl Row2>) {
+    pub fn insert(&mut self, key: &K, value: JoinRow<impl Row>) {
         if let Some(entry) = self.inner.get_mut(key) {
             let pk = (&value.row)
                 .project(&self.state.pk_indices)
@@ -413,7 +413,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Insert a row.
     /// Used when the side does not need to update degree.
-    pub fn insert_row(&mut self, key: &K, value: impl Row2) {
+    pub fn insert_row(&mut self, key: &K, value: impl Row) {
         if let Some(entry) = self.inner.get_mut(key) {
             let join_row = JoinRow::new(&value, 0);
             let pk = (&value)
@@ -426,7 +426,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Delete a join row
-    pub fn delete(&mut self, key: &K, value: JoinRow<impl Row2>) {
+    pub fn delete(&mut self, key: &K, value: JoinRow<impl Row>) {
         if let Some(entry) = self.inner.get_mut(key) {
             let pk = (&value.row)
                 .project(&self.state.pk_indices)
@@ -442,7 +442,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Delete a row
     /// Used when the side does not need to update degree.
-    pub fn delete_row(&mut self, key: &K, value: impl Row2) {
+    pub fn delete_row(&mut self, key: &K, value: impl Row) {
         if let Some(entry) = self.inner.get_mut(key) {
             let pk = (&value)
                 .project(&self.state.pk_indices)

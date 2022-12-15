@@ -16,7 +16,7 @@ use std::ops::Deref;
 
 use bytes::Bytes;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
-use risingwave_common::row::{OwnedRow, Row2};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};

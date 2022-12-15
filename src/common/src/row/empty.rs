@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{assert_row, Row2};
+use super::{assert_row, Row};
 use crate::types::DatumRef;
 
 /// Row for the [`empty`] function.
@@ -21,7 +21,7 @@ pub struct Empty {
     _private: (),
 }
 
-impl Row2 for Empty {
+impl Row for Empty {
     type Iter<'a> = std::iter::Empty<DatumRef<'a>>
     where
         Self: 'a;

@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{CompactedRow, Row2, RowDeserializer};
+use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
@@ -180,7 +180,7 @@ pub fn generate_executor_pk_indices_info(
 /// For a given pk (Row), it can be split into `order_key` and `additional_pk` according to
 /// `order_by_len`, and the two split parts are serialized separately.
 pub fn serialize_pk_to_cache_key(
-    pk: impl Row2,
+    pk: impl Row,
     order_by_len: usize,
     cache_key_serde: &(OrderedRowSerde, OrderedRowSerde),
 ) -> CacheKey {

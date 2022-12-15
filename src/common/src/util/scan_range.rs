@@ -21,7 +21,7 @@ use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 use super::value_encoding::serialize_datum;
 use crate::catalog::get_dist_key_in_pk_indices;
 use crate::hash::VirtualNode;
-use crate::row::{Row2, RowExt};
+use crate::row::{Row, RowExt};
 use crate::types::{Datum, ScalarImpl};
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::value_encoding::serialize_datum_into;

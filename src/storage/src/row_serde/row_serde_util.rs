@@ -14,15 +14,15 @@
 
 use risingwave_common::error::Result;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{OwnedRow, Row2};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::ordered::OrderedRowSerde;
 
-pub fn serialize_pk(pk: impl Row2, serializer: &OrderedRowSerde) -> Vec<u8> {
+pub fn serialize_pk(pk: impl Row, serializer: &OrderedRowSerde) -> Vec<u8> {
     pk.memcmp_serialize(serializer)
 }
 
 pub fn serialize_pk_with_vnode(
-    pk: impl Row2,
+    pk: impl Row,
     serializer: &OrderedRowSerde,
     vnode: VirtualNode,
 ) -> Vec<u8> {

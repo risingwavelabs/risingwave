@@ -261,7 +261,7 @@ mod tests {
 
     use super::{compare_rows, OrderPair, OrderType};
     use crate::array::{DataChunk, ListValue, StructValue};
-    use crate::row::{OwnedRow, Row2};
+    use crate::row::{OwnedRow, Row};
     use crate::types::{DataType, ScalarImpl};
     use crate::util::sort_util::compare_rows_in_chunk;
 

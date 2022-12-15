@@ -40,8 +40,7 @@ use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
 
 /// The trait for abstracting over a Row-like type.
-// TODO(row trait): rename type `Row(Vec<Datum>)` to `OwnedRow` and rename trait `Row2` to `Row`.
-pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
+pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     type Iter<'a>: Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
@@ -125,25 +124,25 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
 
     /// Determines whether the datums of this row are equal to those of another.
     #[inline]
-    fn eq(this: &Self, other: impl Row2) -> bool {
+    fn eq(this: &Self, other: impl Row) -> bool {
         this.iter().eq(other.iter())
     }
 
     /// Lexicographically compares the datums of this row with those of another.
     #[inline]
-    fn cmp(this: &Self, other: impl Row2) -> Ordering {
+    fn cmp(this: &Self, other: impl Row) -> Ordering {
         this.iter().cmp(other.iter())
     }
 }
 
-const fn assert_row<R: Row2>(r: R) -> R {
+const fn assert_row<R: Row>(r: R) -> R {
     r
 }
 
-/// An extension trait for [`Row2`]s that provides a variety of convenient adapters.
-pub trait RowExt: Row2 {
+/// An extension trait for [`Row`]s that provides a variety of convenient adapters.
+pub trait RowExt: Row {
     /// Adapter for chaining two rows together.
-    fn chain<R: Row2>(self, other: R) -> Chain<Self, R>
+    fn chain<R: Row>(self, other: R) -> Chain<Self, R>
     where
         Self: Sized,
     {
@@ -162,9 +161,9 @@ pub trait RowExt: Row2 {
     }
 }
 
-impl<R: Row2> RowExt for R {}
+impl<R: Row> RowExt for R {}
 
-/// Forward the implementation of [`Row2`] to the deref target.
+/// Forward the implementation of [`Row`] to the deref target.
 macro_rules! deref_forward_row {
     () => {
         fn datum_at(&self, index: usize) -> DatumRef<'_> {
@@ -211,17 +210,17 @@ macro_rules! deref_forward_row {
             (**self).hash(hash_builder)
         }
 
-        fn eq(this: &Self, other: impl Row2) -> bool {
-            Row2::eq(&(**this), other)
+        fn eq(this: &Self, other: impl Row) -> bool {
+            Row::eq(&(**this), other)
         }
 
-        fn cmp(this: &Self, other: impl Row2) -> Ordering {
-            Row2::cmp(&(**this), other)
+        fn cmp(this: &Self, other: impl Row) -> Ordering {
+            Row::cmp(&(**this), other)
         }
     };
 }
 
-impl<R: Row2> Row2 for &R {
+impl<R: Row> Row for &R {
     type Iter<'a> = R::Iter<'a>
     where
         Self: 'a;
@@ -229,7 +228,7 @@ impl<R: Row2> Row2 for &R {
     deref_forward_row!();
 }
 
-impl<R: Row2 + Clone> Row2 for Cow<'_, R> {
+impl<R: Row + Clone> Row for Cow<'_, R> {
     type Iter<'a> = R::Iter<'a>
     where
         Self: 'a;
@@ -242,7 +241,7 @@ impl<R: Row2 + Clone> Row2 for Cow<'_, R> {
     }
 }
 
-impl<R: Row2> Row2 for Box<R> {
+impl<R: Row> Row for Box<R> {
     type Iter<'a> = R::Iter<'a>
     where
         Self: 'a;
@@ -256,7 +255,7 @@ impl<R: Row2> Row2 for Box<R> {
     }
 }
 
-/// Implements [`Row2`] for a slice of datums.
+/// Implements [`Row`] for a slice of datums.
 macro_rules! impl_slice_row {
     () => {
         #[inline]
@@ -283,7 +282,7 @@ macro_rules! impl_slice_row {
 
 type SliceIter<'a, D> = std::iter::Map<std::slice::Iter<'a, D>, fn(&'a D) -> DatumRef<'a>>;
 
-impl<D: ToDatumRef> Row2 for &[D] {
+impl<D: ToDatumRef> Row for &[D] {
     type Iter<'a> = SliceIter<'a, D>
     where
         Self: 'a;
@@ -291,7 +290,7 @@ impl<D: ToDatumRef> Row2 for &[D] {
     impl_slice_row!();
 }
 
-impl<D: ToDatumRef, const N: usize> Row2 for [D; N] {
+impl<D: ToDatumRef, const N: usize> Row for [D; N] {
     type Iter<'a> = SliceIter<'a, D>
     where
         Self: 'a;
@@ -299,9 +298,9 @@ impl<D: ToDatumRef, const N: usize> Row2 for [D; N] {
     impl_slice_row!();
 }
 
-/// Implements [`Row2`] for an optional row.
-impl<R: Row2> Row2 for Option<R> {
-    type Iter<'a> = itertools::Either<R::Iter<'a>, <Empty as Row2>::Iter<'a>>
+/// Implements [`Row`] for an optional row.
+impl<R: Row> Row for Option<R> {
+    type Iter<'a> = itertools::Either<R::Iter<'a>, <Empty as Row>::Iter<'a>>
     where
         Self: 'a;
 

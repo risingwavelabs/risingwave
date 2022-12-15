@@ -30,7 +30,7 @@ use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, get_dist_key_start_index_in_pk, ColumnDesc, TableId, TableOption,
 };
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{self, CompactedRow, OwnedRow, Row2, RowDeserializer, RowExt};
+use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -364,7 +364,7 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Get the vnode value with given (prefix of) primary key
-    fn compute_prefix_vnode(&self, pk_prefix: impl Row2) -> VirtualNode {
+    fn compute_prefix_vnode(&self, pk_prefix: impl Row) -> VirtualNode {
         let prefix_len = pk_prefix.len();
         if let Some(vnode_col_idx_in_pk) = self.vnode_col_idx_in_pk {
             let vnode = pk_prefix.datum_at(vnode_col_idx_in_pk).unwrap();
@@ -377,7 +377,7 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Get the vnode value of the given row
-    pub fn compute_vnode(&self, row: impl Row2) -> VirtualNode {
+    pub fn compute_vnode(&self, row: impl Row) -> VirtualNode {
         compute_vnode(row, &self.dist_key_indices, &self.vnodes)
     }
 
@@ -416,7 +416,7 @@ const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 // point get
 impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
-    pub async fn get_row(&self, pk: impl Row2) -> StreamExecutorResult<Option<OwnedRow>> {
+    pub async fn get_row(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
         let compacted_row: Option<CompactedRow> = self.get_compacted_row(pk).await?;
         match compacted_row {
             Some(compacted_row) => {
@@ -432,7 +432,7 @@ impl<S: StateStore> StateTable<S> {
     /// Get a compacted row from state table.
     pub async fn get_compacted_row(
         &self,
-        pk: impl Row2,
+        pk: impl Row,
     ) -> StreamExecutorResult<Option<CompactedRow>> {
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
@@ -517,7 +517,7 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    fn serialize_value(&self, value: impl Row2) -> Vec<u8> {
+    fn serialize_value(&self, value: impl Row) -> Vec<u8> {
         if let Some(value_indices) = self.value_indices.as_ref() {
             value.project(value_indices).value_serialize()
         } else {
@@ -527,7 +527,7 @@ impl<S: StateStore> StateTable<S> {
 
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
-    pub fn insert(&mut self, value: impl Row2) {
+    pub fn insert(&mut self, value: impl Row) {
         let pk = (&value).project(self.pk_indices());
 
         let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
@@ -539,7 +539,7 @@ impl<S: StateStore> StateTable<S> {
 
     /// Delete a row from state table. Must provide a full row of old value corresponding to the
     /// column desc of the table.
-    pub fn delete(&mut self, old_value: impl Row2) {
+    pub fn delete(&mut self, old_value: impl Row) {
         let pk = (&old_value).project(self.pk_indices());
 
         let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
@@ -550,11 +550,11 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Update a row. The old and new value should have the same pk.
-    pub fn update(&mut self, old_value: impl Row2, new_value: impl Row2) {
+    pub fn update(&mut self, old_value: impl Row, new_value: impl Row) {
         let old_pk = (&old_value).project(self.pk_indices());
         let new_pk = (&new_value).project(self.pk_indices());
         debug_assert!(
-            Row2::eq(&old_pk, new_pk),
+            Row::eq(&old_pk, new_pk),
             "pk should not change: {old_pk:?} vs {new_pk:?}",
         );
 
@@ -869,7 +869,7 @@ impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table with specific `pk_prefix`.
     pub async fn iter_with_pk_prefix(
         &self,
-        pk_prefix: impl Row2,
+        pk_prefix: impl Row,
     ) -> StreamExecutorResult<RowStream<'_, S>> {
         let (mem_table_iter, storage_iter_stream) = self
             .iter_with_pk_prefix_inner(pk_prefix, self.epoch())
@@ -886,7 +886,7 @@ impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table with specific `pk_prefix`.
     async fn iter_with_pk_range_inner(
         &self,
-        pk_range: &(Bound<impl Row2>, Bound<impl Row2>),
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
@@ -908,7 +908,7 @@ impl<S: StateStore> StateTable<S> {
 
     pub async fn iter_with_pk_range(
         &self,
-        pk_range: &(Bound<impl Row2>, Bound<impl Row2>),
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
@@ -926,7 +926,7 @@ impl<S: StateStore> StateTable<S> {
 
     pub async fn iter_key_and_val_with_pk_range(
         &self,
-        pk_range: &(Bound<impl Row2>, Bound<impl Row2>),
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
@@ -944,7 +944,7 @@ impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table with specific `pk_prefix`.
     pub async fn iter_prev_epoch_with_pk_prefix(
         &self,
-        pk_prefix: impl Row2,
+        pk_prefix: impl Row,
     ) -> StreamExecutorResult<RowStream<'_, S>> {
         let (mem_table_iter, storage_iter_stream) = self
             .iter_with_pk_prefix_inner(pk_prefix, self.prev_epoch())
@@ -962,7 +962,7 @@ impl<S: StateStore> StateTable<S> {
     /// key and value.
     pub async fn iter_key_and_val(
         &self,
-        pk_prefix: impl Row2,
+        pk_prefix: impl Row,
     ) -> StreamExecutorResult<RowStreamWithPk<'_, S>> {
         let (mem_table_iter, storage_iter_stream) = self
             .iter_with_pk_prefix_inner(pk_prefix, self.epoch())
@@ -977,7 +977,7 @@ impl<S: StateStore> StateTable<S> {
 
     async fn iter_with_pk_prefix_inner(
         &self,
-        pk_prefix: impl Row2,
+        pk_prefix: impl Row,
         epoch: u64,
     ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
@@ -1223,7 +1223,7 @@ impl<S: LocalStateStore> StorageIterInner<S> {
 
 pub fn prefix_range_to_memcomparable(
     pk_serde: &OrderedRowSerde,
-    range: &(Bound<impl Row2>, Bound<impl Row2>),
+    range: &(Bound<impl Row>, Bound<impl Row>),
 ) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
     (
         to_memcomparable(pk_serde, &range.0, false),
@@ -1231,7 +1231,7 @@ pub fn prefix_range_to_memcomparable(
     )
 }
 
-fn to_memcomparable<R: Row2>(
+fn to_memcomparable<R: Row>(
     pk_serde: &OrderedRowSerde,
     bound: &Bound<R>,
     is_upper: bool,
