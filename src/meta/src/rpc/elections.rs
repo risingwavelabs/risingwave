@@ -187,12 +187,12 @@ async fn campaign<S: MetaStore>(
 ///
 /// Returns true if node was leader and was able to renew/acquire the lease.
 /// Returns false if node was follower and thus could not renew/acquire lease.
-/// Returns None if operation ran into an error
+/// Returns `MetaError` if operation ran into an error
 async fn renew_lease<S: MetaStore>(
     leader_info: &MetaLeaderInfo,
     lease_time_sec: u64,
     meta_store: &Arc<S>,
-) -> Result<bool, MetaStoreError> {
+) -> MetaResult<bool> {
     let now = since_epoch();
     let mut txn = Transaction::default();
     let lease_info = MetaLeaseInfo {
@@ -215,7 +215,7 @@ async fn renew_lease<S: MetaStore>(
     let is_leader = match meta_store.txn(txn).await {
         Err(e) => match e {
             MetaStoreError::TransactionAbort() => false,
-            e => return Err(e),
+            e => return Err(e.into()),
         },
         Ok(_) => true,
     };
@@ -440,13 +440,13 @@ pub async fn run_elections<S: MetaStore>(
 /// ## Returns
 /// True if the leader defined in `leader_info` is still in power.
 /// False if the old leader failed, there is no leader, or there a new leader got elected
-/// `MetaStoreError` if there was an error.
+/// `MetaError` if there was an error.
 async fn manage_term<S: MetaStore>(
     is_leader: bool,
     leader_info: &MetaLeaderInfo,
     lease_time_sec: u64,
     meta_store: &Arc<S>,
-) -> Result<bool, MetaStoreError> {
+) -> MetaResult<bool> {
     // try to renew/acquire the lease if this node is a leader
     if is_leader {
         return Ok(renew_lease(leader_info, lease_time_sec, meta_store)
@@ -501,11 +501,11 @@ async fn manage_term<S: MetaStore>(
 
 /// True if leader changed
 /// False if leader is still the leader defined in `leader_info`
-/// `MetaStoreError` on error
+/// `MetaError` on error
 async fn leader_changed<S: MetaStore>(
     leader_info: &MetaLeaderInfo,
     meta_store: &Arc<S>,
-) -> Result<bool, MetaStoreError> {
+) -> MetaResult<bool> {
     let mut txn = Transaction::default();
     txn.check_equal(
         META_CF_NAME.to_string(),
@@ -516,7 +516,7 @@ async fn leader_changed<S: MetaStore>(
     return match meta_store.txn(txn).await {
         Err(e) => match e {
             MetaStoreError::TransactionAbort() => Ok(true),
-            e => return Err(e),
+            e => return Err(e.into()),
         },
         Ok(_) => Ok(false),
     };
