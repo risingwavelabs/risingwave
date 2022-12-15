@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{ColumnId, Field, TableId};
+use risingwave_common::catalog::Field;
 use risingwave_pb::stream_plan::SinkNode;
 
 use super::*;
@@ -27,7 +27,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
     async fn new_boxed_executor(
         params: ExecutorParams,
         node: &Self::Node,
-        store: impl StateStore,
+        _store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [materialize_executor]: [_; 1] = params.input.try_into().unwrap();

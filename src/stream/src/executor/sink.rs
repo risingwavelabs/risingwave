@@ -21,7 +21,6 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl};
 use risingwave_connector::ConnectorParams;
-use risingwave_storage::StateStore;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
@@ -81,7 +80,6 @@ impl SinkExecutor {
         let mut in_transaction = false;
         let mut epoch = 0;
 
-        let schema = self.schema().clone();
         let sink_config = SinkConfig::from_hashmap(self.properties.clone())?;
         let mut sink = build_sink(
             sink_config.clone(),
@@ -149,7 +147,7 @@ impl SinkExecutor {
     }
 }
 
-impl<S: StateStore> Executor for SinkExecutor<S> {
+impl Executor for SinkExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -190,15 +188,17 @@ mod test {
         "table".into() => "t".into(),
         "user".into() => "root".into()
         };
+        let schema = Schema::new(vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+            Field::with_name(DataType::Int32, "v3"),
+        ]);
+        let pk = vec![];
 
         // Mock `child`
         let mock = MockSource::with_messages(
-            Schema::new(vec![
-                Field::with_name(DataType::Int32, "v1"),
-                Field::with_name(DataType::Int32, "v2"),
-                Field::with_name(DataType::Int32, "v3"),
-            ]),
-            PkIndices::new(),
+            schema.clone(),
+            pk.clone(),
             vec![
                 Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                     " I I I
@@ -214,11 +214,12 @@ mod test {
 
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
-            MemoryStateStore::new(),
             Arc::new(StreamingMetrics::unused()),
             properties,
             0,
             Default::default(),
+            schema.clone(),
+            pk.clone(),
         );
 
         let mut executor = SinkExecutor::execute(Box::new(sink_executor));
