@@ -20,6 +20,7 @@ pub mod remote;
 
 use std::collections::HashMap;
 
+use ::redis::RedisError;
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
 use risingwave_common::array::StreamChunk;
@@ -123,7 +124,9 @@ impl SinkImpl {
     ) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Mysql(cfg) => SinkImpl::MySql(Box::new(MySqlSink::new(cfg, schema).await?)),
-            SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
+            SinkConfig::Redis(cfg) => {
+                SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema, pk_indices)?))
+            }
             SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg, schema).await?)),
             SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
             SinkConfig::Remote(cfg) => SinkImpl::Remote(Box::new(
@@ -209,6 +212,8 @@ pub enum SinkError {
     MySqlInner(#[from] mysql_async::Error),
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
+    #[error("Redis error: {0}")]
+    Redis(#[from] RedisError),
     #[error("Remote sink error: {0}")]
     Remote(String),
     #[error("Json parse error: {0}")]

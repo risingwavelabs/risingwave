@@ -489,6 +489,7 @@ mod test {
             })
             .expect("test failed: failed to sync epoch");
         sink.commit().await.unwrap();
+
         let commit_request = request_receiver.recv().await.unwrap();
         match commit_request.request {
             Some(Request::Sync(sync_batch)) => {
@@ -504,6 +505,7 @@ mod test {
             })
             .expect("test failed: failed to start epoch");
         sink.begin_epoch(2023).await.unwrap();
+
         // simply keep the channel empty since we've tested begin_epoch
         let _ = request_receiver.recv().await.unwrap();
         assert_eq!(sink.epoch, Some(2023));

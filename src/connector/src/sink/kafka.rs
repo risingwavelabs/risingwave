@@ -166,6 +166,22 @@ impl KafkaSink {
         )
     }
 
+    // defined source "source": {
+    //       "version": "1.9.6.Final",
+    //       "connector": "mysql",
+    //       "name": "mysql-server-1",
+    //       "ts_ms": 1465581902300,
+    //       "snapshot": false,
+    //       "db": "inventory",
+    //       "table": "",
+    //       "server_id": ,
+    //       "gtid": null,
+    //       "file": "",
+    //       "pos": 805,
+    //       "row": 0,
+    //       "thread": 7,
+    //       "query": "DELETE FROM customers WHERE id=1004"
+    //     },
     async fn debezium_update(&self, chunk: StreamChunk, schema: &Schema, ts_ms: u64) -> Result<()> {
         let mut update_cache: Option<Map<String, Value>> = None;
         for (op, row) in chunk.rows() {
@@ -177,6 +193,16 @@ impl KafkaSink {
                         "after": record_to_json(row, schema.fields.clone())?,
                         "op": "c",
                         "ts_ms": ts_ms,
+                        "snapshot": false,
+                        "db": "",
+                        "table": (),
+                        "server_id": "",
+                        "gtid": "",
+                        "file": "",
+                        "pos": "",
+                        "row": 0,
+                        "thread": 0,
+                        "query": "",
                     }
                 })),
                 Op::Delete => Some(json!({
