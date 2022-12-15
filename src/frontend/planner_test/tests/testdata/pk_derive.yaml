@@ -97,7 +97,7 @@
     where
         v3 = 'world' or v3 = 'hello';
   optimized_logical_plan: |
-    LogicalScan { table: mv, output_columns: [mv.v1], required_columns: [v1, v3], predicate: ((mv.v3 = 'world':Varchar) OR (mv.v3 = 'hello':Varchar)) }
+    LogicalScan { table: mv, output_columns: [mv.v1], required_columns: [mv.v1, mv.v3], predicate: ((mv.v3 = 'world':Varchar) OR (mv.v3 = 'hello':Varchar)) }
   stream_plan: |
     StreamMaterialize { columns: [v1, mv.v2(hidden), mv.v3(hidden)], pk_columns: [v1, mv.v2, mv.v3] }
     └─StreamFilter { predicate: ((mv.v3 = 'world':Varchar) OR (mv.v3 = 'hello':Varchar)) }
