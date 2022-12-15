@@ -60,8 +60,10 @@ pub struct MetaMetrics {
     pub current_version_id: IntGauge,
     /// The version id of checkpoint version.
     pub checkpoint_version_id: IntGauge,
-    /// The smallest version id that is being pinned.
+    /// The smallest version id that is being pinned by worker nodes.
     pub min_pinned_version_id: IntGauge,
+    /// The smallest version id that is being guarded by meta node safe points.
+    pub min_safepoint_version_id: IntGauge,
     /// Hummock version stats
     pub version_stats: IntGaugeVec,
 
@@ -198,6 +200,13 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let min_safepoint_version_id = register_int_gauge_with_registry!(
+            "storage_min_safepoint_version_id",
+            "min safepoint version id",
+            registry
+        )
+        .unwrap();
+
         let level_file_size = register_int_gauge_vec_with_registry!(
             "storage_level_total_file_size",
             "KBs total file bytes in each level",
@@ -261,6 +270,7 @@ impl MetaMetrics {
             current_version_id,
             checkpoint_version_id,
             min_pinned_version_id,
+            min_safepoint_version_id,
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),
