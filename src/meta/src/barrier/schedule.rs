@@ -124,6 +124,7 @@ impl<S: MetaStore> BarrierScheduler<S> {
                     checkpoint: new_checkpoint,
                 });
                 self.inner.populated_tx.send(()).ok();
+                self.inner.changed_tx.send(()).ok();
             }
         }
     }
