@@ -37,7 +37,7 @@ fn since_epoch() -> Duration {
         .expect("Time went backwards")
 }
 
-/// Contains the outcome of an election
+/// Contains the result of an election
 /// Use this to get information about the current leader and yourself
 struct ElectionResult {
     pub meta_leader_info: MetaLeaderInfo,
