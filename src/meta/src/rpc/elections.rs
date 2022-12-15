@@ -439,7 +439,7 @@ pub async fn run_elections<S: MetaStore>(
 /// ## Returns
 /// True if the leader defined in `leader_info` is still in power.
 /// False if the old leader failed, there is no leader, or there a new leader got elected
-/// None if there was an error.
+/// `MetaStoreError` if there was an error.
 async fn manage_term<S: MetaStore>(
     is_leader: bool,
     leader_info: &MetaLeaderInfo,
