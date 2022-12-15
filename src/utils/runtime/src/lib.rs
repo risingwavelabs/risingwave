@@ -143,6 +143,26 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_writer(std::sync::Mutex::new(file))
             .with_filter(filter::Targets::new().with_target("pgwire_query_log", Level::TRACE));
         layers.push(layer.boxed());
+
+        // also dump slow query log
+        let slow_query_log_path = ".risingwave/log/slow_query.log";
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(slow_query_log_path)
+            .expect("failed to create '.risingwave/log/slow_query.log'");
+        let layer = tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_level(false)
+            .with_file(false)
+            .with_target(false)
+            .with_writer(std::sync::Mutex::new(file))
+            .with_filter(
+                filter::Targets::new()
+                    .with_target("risingwave_frontend_slow_query_log", Level::TRACE),
+            );
+        layers.push(layer.boxed());
     };
 
     if settings.enable_tokio_console {
