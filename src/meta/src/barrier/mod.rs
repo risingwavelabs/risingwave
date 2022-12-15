@@ -605,7 +605,7 @@ where
                 // there's barrier scheduled.
                 _ = self.scheduled_barriers.wait_one(), if checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {}
                 // Wait for the minimal interval,
-                _ = min_interval.tick(), if checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {}
+                _ = min_interval.tick(), if !is_throttled && checkpoint_control.can_inject_barrier(self.in_flight_barrier_nums) => {}
             }
 
             if let Some(barrier_timer) = barrier_timer {
