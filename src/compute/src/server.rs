@@ -228,6 +228,7 @@ pub async fn compute_node_serve(
         batch_task_metrics.clone(),
         client_pool,
         dml_mgr.clone(),
+        source_metrics.clone(),
     );
 
     let connector_params = risingwave_connector::ConnectorParams {

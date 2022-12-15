@@ -18,6 +18,7 @@ use risingwave_common::config::BatchConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_source::dml_manager::DmlManagerRef;
+use risingwave_source::monitor::SourceMetrics;
 use risingwave_storage::StateStoreImpl;
 
 use crate::executor::BatchTaskMetrics;
@@ -52,6 +53,9 @@ pub struct BatchEnvironment {
 
     /// Manages dml information.
     dml_manager: DmlManagerRef,
+
+    /// Metrics for source.
+    source_metrics: Arc<SourceMetrics>,
 }
 
 impl BatchEnvironment {
@@ -65,6 +69,7 @@ impl BatchEnvironment {
         task_metrics: Arc<BatchTaskMetrics>,
         client_pool: ComputeClientPoolRef,
         dml_manager: DmlManagerRef,
+        source_metrics: Arc<SourceMetrics>,
     ) -> Self {
         BatchEnvironment {
             server_addr,
@@ -75,6 +80,7 @@ impl BatchEnvironment {
             task_metrics,
             client_pool,
             dml_manager,
+            source_metrics,
         }
     }
 
@@ -96,6 +102,7 @@ impl BatchEnvironment {
             task_metrics: Arc::new(BatchTaskMetrics::for_test()),
             client_pool: Arc::new(ComputeClientPool::default()),
             dml_manager: Arc::new(DmlManager::default()),
+            source_metrics: Arc::new(SourceMetrics::default()),
         }
     }
 
@@ -129,5 +136,9 @@ impl BatchEnvironment {
 
     pub fn dml_manager_ref(&self) -> DmlManagerRef {
         self.dml_manager.clone()
+    }
+
+    pub fn source_metrics(&self) -> Arc<SourceMetrics> {
+        self.source_metrics.clone()
     }
 }

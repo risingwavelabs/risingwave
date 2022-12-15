@@ -104,7 +104,7 @@ impl BatchTaskContext for ComputeNodeContext {
     }
 
     fn source_metrics(&self) -> Arc<SourceMetrics> {
-        unimplemented!("not supported in compute node context")
+        self.env.source_metrics()
     }
 }
 
