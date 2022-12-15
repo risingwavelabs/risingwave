@@ -15,11 +15,11 @@
 use std::ops::Deref;
 
 use bytes::Bytes;
-use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_common::row::{Row, Row2};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::{bail, row};
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::Table as ProstTable;
@@ -53,16 +53,16 @@ impl<S: StateStore> SourceStateTableHandler<S> {
 
     pub(crate) async fn get(&self, key: SplitId) -> StreamExecutorResult<Option<Row>> {
         self.state_store
-            .get_row(&Row::new(vec![Some(Self::string_to_scalar(key.deref()))]))
+            .get_row(row::once(Some(Self::string_to_scalar(key.deref()))))
             .await
             .map_err(StreamExecutorError::from)
     }
 
     async fn set(&mut self, key: SplitId, value: Bytes) -> StreamExecutorResult<()> {
-        let row = Row::new(vec![
+        let row = [
             Some(Self::string_to_scalar(key.deref())),
-            Some(ScalarImpl::Bytea(Box::from(value.as_ref()))),
-        ]);
+            Some(ScalarImpl::Bytea(Vec::from(value).into_boxed_slice())),
+        ];
         match self.get(key).await? {
             Some(prev_row) => {
                 self.state_store.update(prev_row, row);

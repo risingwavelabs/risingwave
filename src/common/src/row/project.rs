@@ -16,7 +16,7 @@ use super::Row2;
 use crate::types::DatumRef;
 
 /// Row for the [`project`](super::RowExt::project) method.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Project<'i, R> {
     row: R,
     indices: &'i [usize],
@@ -30,7 +30,7 @@ impl<'i, R: Row2> PartialEq for Project<'i, R> {
 impl<'i, R: Row2> Eq for Project<'i, R> {}
 
 impl<'i, R: Row2> Row2 for Project<'i, R> {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = std::iter::Map<std::slice::Iter<'i, usize>, impl FnMut(&'i usize) -> DatumRef<'a>>
     where
         R: 'a,
         'i: 'a;

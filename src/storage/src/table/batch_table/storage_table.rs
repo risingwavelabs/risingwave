@@ -257,7 +257,7 @@ impl<S: StateStore> StorageTable<S> {
         };
         if let Some(value) = self.store.get(&serialized_pk, epoch, read_options).await? {
             let full_row = self.row_deserializer.deserialize(value)?;
-            let result_row = self.mapping.project(full_row);
+            let result_row = self.mapping.project(full_row).into_owned_row();
             Ok(Some(result_row))
         } else {
             Ok(None)
@@ -559,7 +559,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
         {
             let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);
             let full_row = self.row_deserializer.deserialize(value)?;
-            let row = self.mapping.project(full_row);
+            let row = self.mapping.project(full_row).into_owned_row();
             yield (key.to_vec(), row)
         }
     }

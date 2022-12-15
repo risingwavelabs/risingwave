@@ -15,24 +15,8 @@
 pub use builder::*;
 pub use column_mapping::*;
 pub use infallible_expr::*;
-use risingwave_common::row::Row;
-use risingwave_storage::StateStore;
-
-use self::table::state_table::{RowStream, StateTable};
-use crate::executor::StreamExecutorResult;
 
 mod builder;
 mod column_mapping;
 mod infallible_expr;
 pub mod table;
-
-pub async fn iter_state_table<'a, S: StateStore>(
-    state_table: &'a StateTable<S>,
-    prefix: Option<&'a Row>,
-) -> StreamExecutorResult<RowStream<'a, S>> {
-    Ok(if let Some(group_key) = prefix {
-        state_table.iter_with_pk_prefix(group_key).await?
-    } else {
-        state_table.iter().await?
-    })
-}
