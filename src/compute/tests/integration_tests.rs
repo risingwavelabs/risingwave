@@ -30,7 +30,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
@@ -406,12 +406,12 @@ async fn test_row_seq_scan() -> Result<()> {
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
     epoch.inc();
-    state.insert(Row::new(vec![
+    state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
         Some(4_i32.into()),
         Some(7_i64.into()),
     ]));
-    state.insert(Row::new(vec![
+    state.insert(OwnedRow::new(vec![
         Some(2_i32.into()),
         Some(5_i32.into()),
         Some(8_i64.into()),

@@ -19,10 +19,10 @@ use std::sync::Arc;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
-use risingwave_common::array::{Op, RowDeserializer, StreamChunk, Vis};
+use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
-use risingwave_common::row::CompactedRow;
+use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -512,7 +512,7 @@ mod tests {
     use futures::stream::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -598,14 +598,14 @@ mod tests {
             Some(Message::Barrier(_)) => {
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(3_i32.into())]),
+                        &OwnedRow::new(vec![Some(3_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(3_i32.into()), Some(6_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(3_i32.into()), Some(6_i32.into())]))
                 );
             }
             _ => unreachable!(),
@@ -616,14 +616,14 @@ mod tests {
             Some(Message::Barrier(_)) => {
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(7_i32.into())]),
+                        &OwnedRow::new(vec![Some(7_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(7_i32.into()), Some(8_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(7_i32.into()), Some(8_i32.into())]))
                 );
             }
             _ => unreachable!(),
@@ -716,38 +716,38 @@ mod tests {
             Some(Message::Barrier(_)) => {
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(3_i32.into())]),
+                        &OwnedRow::new(vec![Some(3_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(3_i32.into()), Some(6_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(3_i32.into()), Some(6_i32.into())]))
                 );
 
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(1_i32.into())]),
+                        &OwnedRow::new(vec![Some(1_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(1_i32.into()), Some(3_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(1_i32.into()), Some(3_i32.into())]))
                 );
 
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(2_i32.into())]),
+                        &OwnedRow::new(vec![Some(2_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(2_i32.into()), Some(6_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(2_i32.into()), Some(6_i32.into())]))
                 );
             }
             _ => unreachable!(),
@@ -849,14 +849,14 @@ mod tests {
                 // can read (8, 3), check insert after update
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(8_i32.into())]),
+                        &OwnedRow::new(vec![Some(8_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(8_i32.into()), Some(3_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(8_i32.into()), Some(3_i32.into())]))
                 );
             }
             _ => unreachable!(),
@@ -867,20 +867,20 @@ mod tests {
             Some(Message::Barrier(_)) => {
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(7_i32.into())]),
+                        &OwnedRow::new(vec![Some(7_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(7_i32.into()), Some(8_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(7_i32.into()), Some(8_i32.into())]))
                 );
 
                 // check delete wrong value
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(3_i32.into())]),
+                        &OwnedRow::new(vec![Some(3_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
@@ -890,7 +890,7 @@ mod tests {
                 // check delete wrong pk
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(5_i32.into())]),
+                        &OwnedRow::new(vec![Some(5_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
@@ -906,40 +906,40 @@ mod tests {
             Some(Message::Barrier(_)) => {
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(1_i32.into())]),
+                        &OwnedRow::new(vec![Some(1_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(1_i32.into()), Some(5_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(1_i32.into()), Some(5_i32.into())]))
                 );
 
                 // check update wrong value
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(2_i32.into())]),
+                        &OwnedRow::new(vec![Some(2_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(2_i32.into()), Some(8_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(2_i32.into()), Some(8_i32.into())]))
                 );
 
                 // check update wrong pk, should become insert
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(9_i32.into())]),
+                        &OwnedRow::new(vec![Some(9_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(9_i32.into()), Some(1_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(9_i32.into()), Some(1_i32.into())]))
                 );
             }
             _ => unreachable!(),

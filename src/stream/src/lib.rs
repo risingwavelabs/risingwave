@@ -36,6 +36,7 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(btree_drain_filter)]
+#![feature(bound_map)]
 
 #[macro_use]
 extern crate tracing;

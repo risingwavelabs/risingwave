@@ -17,7 +17,7 @@ use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use risingwave_storage::StateStore;
 
@@ -81,7 +81,7 @@ impl<S: StateStore> AggState<S> {
         row_count: usize,
         prev_output: Option<&Datum>,
         pk_indices: &PkIndices,
-        group_key: Option<&Row>,
+        group_key: Option<&OwnedRow>,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
@@ -134,7 +134,7 @@ impl<S: StateStore> AggState<S> {
     pub async fn get_output(
         &mut self,
         storage: &AggStateStorage<S>,
-        group_key: Option<&Row>,
+        group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => {
