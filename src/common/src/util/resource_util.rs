@@ -162,7 +162,7 @@ pub mod memory {
 
     // Returns the memory limit of a container if running in a container else returns the system
     // memory available.
-    // When the limit is set to max, which is all memory in system, it will return a none,
+    // When the limit is set to max, which is all memory in system, it will return an error,
     // which will be handled in total_memory_available_bytes() to return default system memory.
     fn get_container_memory_limit(
         cgroup_version: super::CgroupVersion,
@@ -309,8 +309,7 @@ mod util {
         Path::new(super::DEFAULT_CGROUP_ROOT_HIERARCYHY).is_dir()
     }
 
-    // Returns a cgroup version if it exists, else returns None.
-    // Checks for the existence of the root hierarchy directory.
+    // Returns a cgroup version
     pub fn get_cgroup_version() -> super::CgroupVersion {
         // if cgroup.controllers exist, v2 is used.
         if Path::new(super::DEFAULT_CGROUP_V2_CONTROLLER_LIST_PATH).exists() {
@@ -371,7 +370,8 @@ mod util {
     // Helper function to parse a cpu limit file path for cgroup_v2.
     // returns the CPU limit when cgroup_V2 is utilised.
     // interface file should have the format as such -> "{cpu_quota} {cpu_period}". e.g "max
-    // 1000000".
+    // 1000000". if max is present, will return an invalid data error kind which will be handled by
+    // total_cpu_available to return the default system cpu.
     pub fn read_cgroup_v2_cpu_limit_from_file_path(file_path: &str) -> Result<f32, std::io::Error> {
         fs::read_to_string(file_path)
             .and_then(|cpu_limit_string| parse_cgroup_v2_cpu_limit_string(&cpu_limit_string))
@@ -654,28 +654,20 @@ mod util {
                     Controller::Cpu => "cpu",
                     Controller::Memory => "memory",
                 };
+                let mut file: tempfile::NamedTempFile;
+                let mut test_file_path = String::from(DEFAULT_NON_EXISTENT_PATH);
                 if curr_test_case.file_exists {
-                    let mut file = tempfile::NamedTempFile::new()
+                    file = tempfile::NamedTempFile::new()
                         .expect("Error encountered while creating file!");
                     file.as_file_mut()
                         .write_all(curr_test_case.value_in_file.as_bytes())
                         .expect("Error while writing to file");
-                    assert_eq!(
-                        parse_controller_enable_file_for_cgroup_v2(
-                            file.path().to_str().unwrap(),
-                            controller_name
-                        ),
-                        curr_test_case.expected
-                    );
-                } else {
-                    assert_eq!(
-                        parse_controller_enable_file_for_cgroup_v2(
-                            "non-existent-path",
-                            controller_name
-                        ),
-                        curr_test_case.expected
-                    );
+                    test_file_path = String::from(file.path().to_str().unwrap())
                 }
+                assert_eq!(
+                    parse_controller_enable_file_for_cgroup_v2(&test_file_path, controller_name),
+                    curr_test_case.expected
+                );
             }
         }
     }
