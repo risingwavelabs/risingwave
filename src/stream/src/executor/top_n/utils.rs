@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
+use risingwave_common::row::{CompactedRow, Row2, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
@@ -180,21 +180,15 @@ pub fn generate_executor_pk_indices_info(
 /// For a given pk (Row), it can be split into `order_key` and `additional_pk` according to
 /// `order_by_len`, and the two split parts are serialized separately.
 pub fn serialize_pk_to_cache_key(
-    pk: Row,
+    pk: impl Row2,
     order_by_len: usize,
     cache_key_serde: &(OrderedRowSerde, OrderedRowSerde),
 ) -> CacheKey {
-    let pk = pk.into_inner();
+    // TODO(row trait): may support splitting row
+    let pk = pk.into_owned_row().into_inner();
     let (cache_key_first, cache_key_second) = pk.split_at(order_by_len);
-    let mut cache_key_first_bytes = vec![];
-    let mut cache_key_second_bytes = vec![];
-    cache_key_serde.0.serialize(
-        &Row::new(cache_key_first.to_vec()),
-        &mut cache_key_first_bytes,
-    );
-    cache_key_serde.1.serialize(
-        &Row::new(cache_key_second.to_vec()),
-        &mut cache_key_second_bytes,
-    );
-    (cache_key_first_bytes, cache_key_second_bytes)
+    (
+        cache_key_first.memcmp_serialize(&cache_key_serde.0),
+        cache_key_second.memcmp_serialize(&cache_key_serde.1),
+    )
 }

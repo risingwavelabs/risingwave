@@ -667,6 +667,7 @@ impl Session<PgResponseStream> for SessionImpl {
                     match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
                         Ok(result) => break result,
                         Err(_) => tracing::warn!(
+                            target: "risingwave_frontend_slow_query_log",
                             sql,
                             "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
                         ),

@@ -87,6 +87,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
+        let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
         let table = StorageTable::new_partial(
             state_store,
             table_id,
@@ -97,6 +98,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             distribution,
             table_option,
             value_indices,
+            prefix_hint_len,
         );
 
         let schema = table.schema().clone();
