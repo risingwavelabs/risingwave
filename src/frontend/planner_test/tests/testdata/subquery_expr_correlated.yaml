@@ -479,7 +479,7 @@
               |   ├─LogicalScan { table: a, columns: [a.a3] }
               |   └─LogicalScan { table: b, columns: [b.b2] }
               └─LogicalProject { exprs: [c.c3, c.c2, 1:Int32] }
-                └─LogicalScan { table: c, columns: [c.c2, c.c3], predicate: IsNotNull(c.c3) AND IsNotNull(c.c2) }
+                └─LogicalScan { table: c, columns: [c.c2, c.c3], predicate: (c.c3 = c.c2) AND IsNotNull(c.c3) AND IsNotNull(c.c2) }
 - sql: |
     create table a(x int, y int, z int);
     create table b(x int, y int, z int);
