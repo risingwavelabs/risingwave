@@ -16,13 +16,13 @@ use super::{assert_row, Row2};
 use crate::types::DatumRef;
 
 /// Row for the [`empty`] function.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Empty {
     _private: (),
 }
 
 impl Row2 for Empty {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = std::iter::Empty<DatumRef<'a>>
     where
         Self: 'a;
 
@@ -48,6 +48,8 @@ impl Row2 for Empty {
 }
 
 /// Creates a row which contains no datums.
-pub fn empty() -> Empty {
+pub const fn empty() -> Empty {
     assert_row(Empty { _private: () })
 }
+
+pub(super) static EMPTY: Empty = empty();

@@ -112,7 +112,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         });
 
         for (idx, (row, op)) in data_chunk.rows().zip_eq(ops.iter()).enumerate() {
-            let left_val = row.value_at(self.key_l).to_owned_datum();
+            let left_val = row.datum_at(self.key_l).to_owned_datum();
 
             let res = if let Some(array) = &eval_results {
                 if let ArrayImpl::Bool(results) = &**array {
@@ -171,10 +171,10 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             if let Some(val) = left_val {
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
-                        self.range_cache.insert(&val, row.into_owned_row())?;
+                        self.range_cache.insert(&val, row)?;
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        self.range_cache.delete(&val, row.into_owned_row())?;
+                        self.range_cache.delete(&val, row)?;
                     }
                 }
             }
@@ -335,14 +335,14 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     for (row, op) in data_chunk.rows().zip_eq(ops.iter()) {
                         match *op {
                             Op::UpdateInsert | Op::Insert => {
-                                current_epoch_value = Some(row.value_at(0).to_owned_datum());
+                                current_epoch_value = Some(row.datum_at(0).to_owned_datum());
                                 current_epoch_row = Some(row.into_owned_row());
                             }
                             _ => {
                                 // To be consistent, there must be an existing `current_epoch_value`
                                 // equivalent to row indicated for
                                 // deletion.
-                                if Some(row.value_at(0))
+                                if Some(row.datum_at(0))
                                     != current_epoch_value.as_ref().map(ToDatumRef::to_datum_ref)
                                 {
                                     bail!(

@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayBuilder, NaiveDateTimeArray, Utf8ArrayBuilder};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
 use super::Expression;
@@ -57,7 +58,7 @@ impl Expression for ExprToCharConstTmpl {
         Ok(Arc::new(output.finish().into()))
     }
 
-    fn eval_row(&self, input: &risingwave_common::array::Row) -> crate::Result<Datum> {
+    fn eval_row(&self, input: &Row) -> crate::Result<Datum> {
         let data = self.child.eval_row(input)?;
         Ok(if let Some(ScalarImpl::NaiveDateTime(data)) = data {
             Some(data.0.format(&self.ctx.chrono_tmpl).to_string().into())
