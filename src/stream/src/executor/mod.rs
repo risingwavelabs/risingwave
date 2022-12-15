@@ -28,7 +28,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum_to_bytes};
+use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::data::{Datum as ProstDatum, Epoch as ProstEpoch};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
@@ -583,7 +583,7 @@ impl Watermark {
             col_idx: self.col_idx as _,
             data_type: Some(self.data_type.to_protobuf()),
             val: Some(ProstDatum {
-                body: serialize_datum_to_bytes(Some(&self.val)),
+                body: serialize_datum(Some(&self.val)),
             }),
         }
     }

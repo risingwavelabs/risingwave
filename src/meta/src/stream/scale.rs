@@ -32,7 +32,7 @@ use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    ActorMapping, DispatcherType, FragmentType, PauseMutation, ResumeMutation, StreamActor,
+    ActorMapping, DispatcherType, FragmentTypeFlag, PauseMutation, ResumeMutation, StreamActor,
     StreamNode,
 };
 use risingwave_pb::stream_service::{
@@ -468,7 +468,7 @@ where
                 }
             }
 
-            if fragment.get_fragment_type()? == FragmentType::Source {
+            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
                 let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
                 let source_node = TableFragments::find_source_node(stream_node).unwrap();
                 if is_stream_source(source_node) {
@@ -1409,7 +1409,7 @@ where
                 fragment_actors_to_create.get(&downstream_fragment_id);
 
             match dispatcher.r#type() {
-                d @ (DispatcherType::Hash | DispatcherType::Simple) => {
+                d @ (DispatcherType::Hash | DispatcherType::Simple | DispatcherType::Broadcast) => {
                     if let Some(downstream_actors_to_remove) = downstream_fragment_actors_to_remove
                     {
                         dispatcher
@@ -1437,10 +1437,7 @@ where
                         .unwrap();
                     dispatcher.downstream_actor_id = vec![*downstream_actor_id as ActorId];
                 }
-                d => bail!(
-                    "cascading resolution of {:?} dispatcher is not supported for now",
-                    d
-                ),
+                DispatcherType::Unspecified => unreachable!(),
             }
 
             if let Some(mapping) = dispatcher.hash_mapping.as_mut() {

@@ -20,11 +20,12 @@
 #![allow(clippy::disallowed_methods)]
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use risingwave_common::array::{DataChunk, I32Array};
+use risingwave_common::array::{Array, DataChunk, I32Array};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::expr_binary_nonnull::*;
 use risingwave_expr::expr::*;
 use risingwave_expr::vector_op::agg::create_agg_state_unary;
+use risingwave_expr::ExprError;
 use risingwave_pb::expr::expr_node::Type;
 
 criterion_group!(benches, bench_expr, bench_raw);
@@ -68,6 +69,29 @@ fn bench_expr(c: &mut Criterion) {
             create_agg_state_unary(DataType::Int32, 0, AggKind::Sum, DataType::Int64, false)
                 .unwrap();
         bencher.iter(|| sum.update_multi(&input, 0, 1024).unwrap())
+    });
+
+    // ~360ns
+    // This should be the optimization goal for our add expression.
+    c.bench_function("expr/add/i32/TBD", |bencher| {
+        bencher.iter(|| {
+            let a = input.column_at(0).array_ref().as_int32();
+            let b = input.column_at(1).array_ref().as_int32();
+            assert_eq!(a.len(), b.len());
+            let mut c = (a.raw_iter())
+                .zip(b.raw_iter())
+                .map(|(a, b)| a + b)
+                .collect::<I32Array>();
+            let mut overflow = false;
+            for ((a, b), c) in a.raw_iter().zip(b.raw_iter()).zip(c.raw_iter()) {
+                overflow |= (c ^ a) & (c ^ b) < 0;
+            }
+            if overflow {
+                return Err(ExprError::NumericOutOfRange);
+            }
+            c.set_bitmap(a.null_bitmap() & b.null_bitmap());
+            Ok(c)
+        })
     });
 }
 
@@ -114,29 +138,28 @@ fn bench_raw(c: &mut Criterion) {
                 .collect::<Vec<_>>()
         })
     });
+    enum Error {
+        Overflow,
+        Cast,
+    }
     // ~2100ns
     c.bench_function("raw/add/Option<i32>/zip_eq,checked", |bencher| {
         let a = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
         let b = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
-        struct Overflow;
         bencher.iter(|| {
             use itertools::Itertools;
             itertools::Itertools::zip_eq(a.iter(), b.iter())
                 .map(|(a, b)| match (a, b) {
-                    (Some(a), Some(b)) => a.checked_add(*b).ok_or(Overflow).map(Some),
+                    (Some(a), Some(b)) => a.checked_add(*b).ok_or(Error::Overflow).map(Some),
                     _ => Ok(None),
                 })
-                .try_collect::<_, Vec<_>, Overflow>()
+                .try_collect::<_, Vec<_>, Error>()
         })
     });
     // ~2400ns
     c.bench_function("raw/add/Option<i32>/zip_eq,checked,cast", |bencher| {
         let a = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
         let b = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
-        enum Error {
-            Overflow,
-            Cast,
-        }
         #[allow(clippy::useless_conversion)]
         fn checked_add(a: i32, b: i32) -> Result<i32, Error> {
             let a: i32 = a.try_into().map_err(|_| Error::Cast)?;
@@ -159,10 +182,6 @@ fn bench_raw(c: &mut Criterion) {
         |bencher| {
             let a = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
             let b = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
-            enum Error {
-                Overflow,
-                Cast,
-            }
             #[allow(clippy::useless_conversion)]
             fn checked_add(a: i32, b: i32) -> Result<i32, Error> {
                 let a: i32 = a.try_into().map_err(|_| Error::Cast)?;

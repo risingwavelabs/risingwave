@@ -18,13 +18,13 @@ use paste::paste;
 use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 
-use super::value_encoding::serialize_datum_to_bytes;
+use super::value_encoding::serialize_datum;
 use crate::catalog::get_dist_key_in_pk_indices;
 use crate::hash::VirtualNode;
 use crate::row::{Row2, RowExt};
 use crate::types::{Datum, ScalarImpl};
 use crate::util::hash_util::Crc32FastBuilder;
-use crate::util::value_encoding::serialize_datum;
+use crate::util::value_encoding::serialize_datum_into;
 
 /// See also [`ScanRangeProst`]
 #[derive(Debug, Clone)]
@@ -36,11 +36,11 @@ pub struct ScanRange {
 fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<BoundProst> {
     match bound {
         Bound::Included(literal) => Some(BoundProst {
-            value: serialize_datum_to_bytes(Some(literal)),
+            value: serialize_datum(Some(literal)),
             inclusive: true,
         }),
         Bound::Excluded(literal) => Some(BoundProst {
-            value: serialize_datum_to_bytes(Some(literal)),
+            value: serialize_datum(Some(literal)),
             inclusive: false,
         }),
         Bound::Unbounded => None,
@@ -55,7 +55,7 @@ impl ScanRange {
                 .iter()
                 .map(|datum| {
                     let mut encoded = vec![];
-                    serialize_datum(datum, &mut encoded);
+                    serialize_datum_into(datum, &mut encoded);
                     encoded
                 })
                 .collect(),

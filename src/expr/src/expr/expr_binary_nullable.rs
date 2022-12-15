@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use itertools::{multizip, Itertools};
 use risingwave_common::array::*;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_pb::expr::expr_node::Type;
 

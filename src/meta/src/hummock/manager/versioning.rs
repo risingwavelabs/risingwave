@@ -29,6 +29,7 @@ use risingwave_pb::hummock::{
 
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{read_lock, write_lock};
+use crate::hummock::metrics_utils::trigger_safepoint_stat;
 use crate::hummock::HummockManager;
 use crate::storage::MetaStore;
 
@@ -180,6 +181,7 @@ where
             event_sender: self.event_sender.clone(),
         };
         wl.version_safe_points.push(safe_point.id);
+        trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
         safe_point
     }
 
@@ -190,6 +192,7 @@ where
         if let Some(pos) = version_safe_points.iter().position(|sp| *sp == safe_point) {
             version_safe_points.remove(pos);
         }
+        trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
     }
 }
 
