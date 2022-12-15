@@ -46,7 +46,7 @@ use risingwave_storage::store::{
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
-use crate::test_utils::prepare_first_valid_version;
+use crate::test_utils::{prepare_first_valid_version, register_test_tables};
 
 pub async fn prepare_hummock_event_handler(
     opt: Arc<StorageConfig>,
@@ -64,13 +64,16 @@ pub async fn prepare_hummock_event_handler(
         worker_node.id,
     ));
 
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+    register_test_tables(&filter_key_extractor_manager, &hummock_manager_ref, &[0]).await;
+
     let compactor_context = Arc::new(Context::new_local_compact_context(
         opt.clone(),
         sstable_store_ref,
         hummock_meta_client,
         Arc::new(StateStoreMetrics::unused()),
         sstable_id_manager,
-        Arc::new(FilterKeyExtractorManager::default()),
+        filter_key_extractor_manager,
     ));
 
     let hummock_event_handler = HummockEventHandler::new(

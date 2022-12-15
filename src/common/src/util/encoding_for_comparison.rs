@@ -17,7 +17,7 @@ use itertools::Itertools;
 use crate::array::{ArrayImpl, DataChunk};
 use crate::error::Result;
 use crate::row::Row;
-use crate::types::{serialize_datum_into, DataType, ScalarRefImpl};
+use crate::types::{memcmp_serialize_datum_into, DataType, ScalarRefImpl};
 use crate::util::sort_util::{OrderPair, OrderType};
 
 /// This function is used to check whether we can perform encoding on this type.
@@ -38,7 +38,7 @@ pub fn is_type_encodable(t: DataType) -> bool {
 fn encode_value(value: Option<ScalarRefImpl<'_>>, order: &OrderType) -> Result<Vec<u8>> {
     let mut serializer = memcomparable::Serializer::new(vec![]);
     serializer.set_reverse(order == &OrderType::Descending);
-    serialize_datum_into(value, &mut serializer)?;
+    memcmp_serialize_datum_into(value, &mut serializer)?;
     Ok(serializer.into_inner())
 }
 

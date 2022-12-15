@@ -1211,25 +1211,7 @@ async fn test_multiple_epoch_sync_inner(
 
 #[tokio::test]
 async fn test_gc_watermark_and_clear_shared_buffer() {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-
-    let hummock_storage = HummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-    )
-    .await
-    .unwrap();
-
-    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage, Default::default()).await;
+    let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
 
     assert_eq!(
         hummock_storage

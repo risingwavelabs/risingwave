@@ -15,10 +15,11 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![feature(let_chains)]
 
+use task_stats_alloc::TaskLocalAlloc;
 use tikv_jemallocator::Jemalloc;
 
 #[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+static GLOBAL: TaskLocalAlloc<Jemalloc> = TaskLocalAlloc(Jemalloc);
 
 use std::collections::HashMap;
 use std::env;

@@ -16,9 +16,8 @@ use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor, TableWithJoins};
 
-use crate::{
-    BinaryOperator, Column, Expr, Join, JoinConstraint, JoinOperator, SqlGenerator, Table,
-};
+use crate::sql_gen::{Column, SqlGenerator};
+use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
 
 fn create_join_on_clause(left: String, right: String) -> Expr {
     let left = Box::new(Expr::Identifier(Ident::new(left)));

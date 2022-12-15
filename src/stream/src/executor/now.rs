@@ -18,8 +18,8 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, NaiveDateTimeWrapper, ScalarImpl};
+use risingwave_common::row;
+use risingwave_common::types::{DataType, NaiveDateTimeWrapper, ScalarImpl, ToDatumRef};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -109,11 +109,11 @@ impl<S: StateStore> NowExecutor<S> {
                 let data_chunk = DataChunk::from_rows(
                     &if last_timestamp.is_some() {
                         vec![
-                            Row::new(vec![last_timestamp.clone()]),
-                            Row::new(vec![timestamp.clone()]),
+                            row::once(last_timestamp.to_datum_ref()),
+                            row::once(timestamp.to_datum_ref()),
                         ]
                     } else {
-                        vec![Row::new(vec![timestamp.clone()])]
+                        vec![row::once(timestamp.to_datum_ref())]
                     },
                     &schema.data_types(),
                 );
@@ -133,9 +133,9 @@ impl<S: StateStore> NowExecutor<S> {
                 ));
 
                 if last_timestamp.is_some() {
-                    state_table.delete(Row::new(vec![last_timestamp]));
+                    state_table.delete(row::once(last_timestamp));
                 }
-                state_table.insert(Row::new(vec![timestamp.clone()]));
+                state_table.insert(row::once(timestamp.to_datum_ref()));
                 last_timestamp = timestamp;
 
                 state_table.commit(barrier.epoch).await?;

@@ -526,8 +526,7 @@ impl<S: StateStore> StateTable<S> {
     pub fn insert(&mut self, value: impl Row2) {
         let pk = (&value).project(self.pk_indices());
 
-        let key_bytes =
-            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
+        let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let value_bytes = self.serialize_value(value);
         self.mem_table
             .insert(key_bytes, value_bytes)
@@ -539,8 +538,7 @@ impl<S: StateStore> StateTable<S> {
     pub fn delete(&mut self, old_value: impl Row2) {
         let pk = (&old_value).project(self.pk_indices());
 
-        let key_bytes =
-            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
+        let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let value_bytes = self.serialize_value(old_value);
         self.mem_table
             .delete(key_bytes, value_bytes)
@@ -552,12 +550,12 @@ impl<S: StateStore> StateTable<S> {
         let old_pk = (&old_value).project(self.pk_indices());
         let new_pk = (&new_value).project(self.pk_indices());
         debug_assert!(
-            Row2::eq(&old_pk, &new_pk),
+            Row2::eq(&old_pk, new_pk),
             "pk should not change: {old_pk:?} vs {new_pk:?}",
         );
 
         let new_key_bytes =
-            serialize_pk_with_vnode(&new_pk, &self.pk_serde, self.compute_prefix_vnode(&new_pk));
+            serialize_pk_with_vnode(new_pk, &self.pk_serde, self.compute_prefix_vnode(new_pk));
         let old_value_bytes = self.serialize_value(old_value);
         let new_value_bytes = self.serialize_value(new_value);
 
@@ -692,7 +690,7 @@ impl<S: StateStore> StateTable<S> {
         };
         let range_end_suffix = watermark.map(|watermark| {
             serialize_pk(
-                &Row::new(vec![Some(watermark.clone())]),
+                row::once(Some(watermark.clone())),
                 prefix_serializer.as_ref().unwrap(),
             )
         });
@@ -728,7 +726,7 @@ impl<S: StateStore> StateTable<S> {
         if let Some(range_end_suffix) = range_end_suffix {
             let range_begin_suffix = if let Some(ref last_watermark) = self.last_watermark {
                 serialize_pk(
-                    &Row::new(vec![Some(last_watermark.clone())]),
+                    row::once(Some(last_watermark.clone())),
                     prefix_serializer.as_ref().unwrap(),
                 )
             } else {

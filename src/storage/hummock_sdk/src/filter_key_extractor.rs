@@ -263,14 +263,6 @@ impl FilterKeyExtractorManagerInner {
             return FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default());
         }
 
-        #[cfg(debug_assertions)]
-        {
-            // for some unit-test not config table_id_set
-            if table_id_set.iter().any(|table_id| *table_id == 0) {
-                return FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor::default());
-            }
-        }
-
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         while !table_id_set.is_empty() {
             let notified = self.notify.notified();
