@@ -177,7 +177,6 @@ mod test {
         use risingwave_common::array::StreamChunkTestExt;
         use risingwave_common::catalog::Field;
         use risingwave_common::types::DataType;
-        use risingwave_storage::memory::MemoryStateStore;
 
         use crate::executor::Barrier;
 
