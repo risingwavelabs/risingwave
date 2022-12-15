@@ -18,8 +18,10 @@ use std::ops::{Bound, RangeBounds};
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use rocksdb::{DBIterator, ReadOptions as RocksDBReadOptions, SeekKey, Writable, WriteBatch, WriteOptions as RocksDBWriteOptions, DB};
 use tokio::sync::OnceCell;
@@ -75,8 +77,12 @@ impl StateStoreRead for RocksDBStateStore {
         }
     }
 
-    fn get<'a>(&'a self, key: &'a [u8], _epoch: u64) -> Self::GetFuture<'_> {
-        async move { self.storage().await.get(key).await }
+    fn get<'a>(&'a self, key: &'a [u8], epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
+        let key = FullKey::new(read_options.table_id, TableKey(key.to_vec()), epoch).encode_reverse_epoch();
+        async move { 
+            let key = key;
+            Ok(self.storage().await.get(&key[..]).await?)
+        }
     }
 }
 
@@ -86,21 +92,21 @@ impl StateStoreWrite for RocksDBStateStore {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        epoch: u64,
+        _delete_ranges: Vec<(Bytes, Bytes)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
-        async move { self.storage().await.write_batch(kv_pairs, write_options.table_id, epoch).await }
+        async move { self.storage().await.write_batch(kv_pairs, write_options.table_id, write_options.epoch).await }
     }
 }
 
 impl StateStore for RocksDBStateStore {
     define_state_store_associated_type!();
 
-    fn try_wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move { unimplemented!() }
     }
 
-    fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
+    fn sync(&self, _epoch: u64) -> Self::SyncFuture<'_> {
         async move { unimplemented!() }
     }
 
@@ -189,12 +195,13 @@ impl RocksDBStateStoreIter {
                     is_end_unbounded,
                 }),
                 stopped: false,
+                last_key: None,
             })
         })
         .await?
     }
 
-    async fn next_inner(&mut self) -> StorageResult<Option<StateStoreIterItem>>  {
+    async fn next_inner(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Option<Bytes>)>>  {
         async move {
             let iter = self.iter.clone();
             let end_key_data = self.end_key_data.clone();
@@ -211,12 +218,16 @@ impl RocksDBStateStoreIter {
                     return Ok(None);
                 }
                 let k = iter.key().to_vec();
-                let v = Bytes::from(iter.value().to_vec());
+                let v = match iter.value().as_ref() {
+                    [EMPTY] => None,
+                    [NON_EMPTY, rest @ ..] => Some(Bytes::from(Vec::from(rest))),
+                    value => unreachable!("malformed value: {:?}", value),
+                };
 
                 if end_key_data.is_end_unbounded {
                     return Ok(Some((FullKey::decode_reverse_epoch(&k[..]), v)));
                 }
-                if iter.key() > end_key_data.end_key[..] || (k == end_key_data.end_key[..] && end_key_data.is_end_exclude) {
+                if iter.key() > &end_key_data.end_key[..] || (k == &end_key_data.end_key[..] && end_key_data.is_end_exclude) {
                     return Ok(None);
                 }
                 if let Err(e) = iter.next().map_err(|e| RwError::from(InternalError(e))) {
@@ -227,7 +238,7 @@ impl RocksDBStateStoreIter {
             .await
             .unwrap();
 
-            kv
+            Ok(kv)
         }
     }
 }
@@ -264,6 +275,9 @@ pub struct RocksDBStorage {
     db: Arc<DB>,
 }
 
+const EMPTY: u8 = 1;
+const NON_EMPTY: u8 = 0;
+
 impl RocksDBStorage {
     pub async fn new(path: &str) -> Self {
         let path = path.to_string();
@@ -291,18 +305,22 @@ impl RocksDBStorage {
         .await?
     }
 
-    async fn write_batch(&self, kv_pairs: Vec<(Bytes, StorageValue)>, table_id: u32, epoch: u64) -> Result<usize> {
+    async fn write_batch(&self, kv_pairs: Vec<(Bytes, StorageValue)>, table_id: TableId, epoch: u64) -> Result<usize> {
         let mut size = 0;
         let wb = WriteBatch::new();
         for (key, value) in kv_pairs {
             let key = FullKey::new(table_id, TableKey(key), epoch).encode_reverse_epoch();
             size += key.len() + value.size();
-            let value = value.user_value();
+            let value = value.user_value;
+            let mut buffer =
+                Vec::with_capacity(value.as_ref().map(|v| v.len()).unwrap_or_default() + 1);
             if let Some(value) = value {
-                if let Err(e) = wb.put(key.as_ref(), value.as_ref()) {
-                    return Err(InternalError(e).into());
-                }
-            } else if let Err(e) = wb.delete(key.as_ref()) {
+                buffer.push(NON_EMPTY);
+                buffer.extend_from_slice(value.as_ref());
+            } else {
+                buffer.push(EMPTY);
+            }
+            if let Err(e) = wb.put(key.as_ref(), buffer.as_ref()) {
                 return Err(InternalError(e).into());
             }
         }
