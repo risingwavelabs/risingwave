@@ -59,8 +59,8 @@ impl ElectionResult {
 /// Runs for election in an attempt to become leader
 ///
 /// ## Returns
-/// Returns `ElectionOutcome`, containing infos about the node who won the election or
-/// None if the election ran into an error
+/// Returns `MetaResult<ElectionResult>`, containing infos about the node who won the election or
+/// MetaError if the election ran into an error
 ///
 /// ## Arguments
 /// `meta_store`: The meta store which holds the lease, deciding about the election outcome
