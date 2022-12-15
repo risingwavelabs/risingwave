@@ -192,7 +192,6 @@ async fn renew_lease<S: MetaStore>(
     lease_time_sec: u64,
     meta_store: &Arc<S>,
 ) -> Result<bool, MetaStoreError> {
-    // does this function work?
     let now = since_epoch();
     let mut txn = Transaction::default();
     let lease_info = MetaLeaseInfo {
