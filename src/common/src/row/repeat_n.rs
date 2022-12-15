@@ -52,7 +52,7 @@ impl<D: ToDatumRef> Row for RepeatN<D> {
 
     #[inline]
     unsafe fn datum_at_unchecked(&self, _index: usize) -> crate::types::DatumRef<'_> {
-        // Always ignore the index and return the datum.
+        // Always ignore the index and return the datum, which is okay for undefined behavior.
         self.datum.to_datum_ref()
     }
 

@@ -128,9 +128,26 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
         this.iter().eq(other.iter())
     }
 
-    /// Lexicographically compares the datums of this row with those of another.
+    /// Lexicographically compares the datums of this row with those of another with the same
+    /// length.
+    ///
+    /// # Panics
+    /// Panics if the lengths of the two rows are not equal. For this case, use
+    /// [`Row::cmp_ignore_len`] instead.
     #[inline]
     fn cmp(this: &Self, other: impl Row) -> Ordering {
+        assert_eq!(
+            this.len(),
+            other.len(),
+            "cannot compare rows of different lengths, use `cmp_ignore_len` instead"
+        );
+        Self::cmp_ignore_len(this, other)
+    }
+
+    /// Lexicographically compares the datums of this row with those of another, without checking
+    /// the equality of the lengths.
+    #[inline]
+    fn cmp_ignore_len(this: &Self, other: impl Row) -> Ordering {
         this.iter().cmp(other.iter())
     }
 }
@@ -307,14 +324,14 @@ impl<R: Row> Row for Option<R> {
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         match self {
             Some(row) => row.datum_at(index),
-            None => EMPTY.datum_at(index), // for better error messages
+            None => EMPTY.datum_at(index),
         }
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
         match self {
             Some(row) => row.datum_at_unchecked(index),
-            None => EMPTY.datum_at_unchecked(index), // for better error messages
+            None => EMPTY.datum_at_unchecked(index),
         }
     }
 

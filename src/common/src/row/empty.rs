@@ -28,12 +28,13 @@ impl Row for Empty {
 
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        [][index] // for better error messages
+        panic!("index out of bounds: the len of `Empty` is 0 but the index is {index}")
     }
 
     #[inline]
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        *[].get_unchecked(index) // for better error messages
+    unsafe fn datum_at_unchecked(&self, _index: usize) -> DatumRef<'_> {
+        // Always ignore the index and return `NULL`, which is okay for undefined behavior.
+        None
     }
 
     #[inline]

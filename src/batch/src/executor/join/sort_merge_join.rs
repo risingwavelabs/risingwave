@@ -149,8 +149,6 @@ impl SortMergeJoinExecutor {
                         if let Some(next_build_row_idx) = build_chunk.next_visible_row_idx(build_row_idx) {
                             let build_row = build_chunk.row_at_unchecked_vis(next_build_row_idx);
                             let build_key = build_row.project(&build_key_idxs);
-                            // TODO: [`Row`] may not be PartialOrd. May use some trait like
-                            // [`ScalarPartialOrd`].
 
                             match Row::cmp(&probe_key, build_key) {
                                 std::cmp::Ordering::Equal => {

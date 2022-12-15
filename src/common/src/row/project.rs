@@ -37,7 +37,7 @@ impl<'i, R: Row> Row for Project<'i, R> {
 
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        // SAFETY: we have checked that `self.indices` are all valid in `RowExt::project`.
+        // SAFETY: we have checked that `self.indices` are all valid in `new`.
         unsafe { self.row.datum_at_unchecked(self.indices[index]) }
     }
 
@@ -55,7 +55,7 @@ impl<'i, R: Row> Row for Project<'i, R> {
     #[inline]
     fn iter(&self) -> Self::Iter<'_> {
         self.indices.iter().map(|&i|
-                // SAFETY: we have checked that `self.indices` are all valid in `RowExt::project`.
+                // SAFETY: we have checked that `self.indices` are all valid in `new`.
                 unsafe { self.row.datum_at_unchecked(i) })
     }
 }

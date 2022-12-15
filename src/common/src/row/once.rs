@@ -26,12 +26,17 @@ impl<D: ToDatumRef> Row for Once<D> {
 
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        [self.0.to_datum_ref()][index] // for better error messages
+        if index == 0 {
+            self.0.to_datum_ref()
+        } else {
+            panic!("index out of bounds: the len of `Once` is 1 but the index is {index}")
+        }
     }
 
     #[inline]
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        *[self.0.to_datum_ref()].get_unchecked(index) // for better error messages
+    unsafe fn datum_at_unchecked(&self, _index: usize) -> DatumRef<'_> {
+        // Always ignore the index and return the datum, which is okay for undefined behavior.
+        self.0.to_datum_ref()
     }
 
     #[inline]
