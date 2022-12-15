@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use futures::future::ready;
-use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
+use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::ToOwnedDatum;
 
 use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
@@ -88,24 +89,12 @@ impl JsonParser {
         payload: &[u8],
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        use simd_json::{BorrowedValue, ValueAccess};
-
-        use crate::parser::common::simd_json_parse_value;
-
-        let mut payload_mut = payload.to_vec();
-
-        let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
-        writer.insert(|desc| {
-            simd_json_parse_value(&desc.data_type, value.get(desc.name.as_str())).map_err(|e| {
-                tracing::error!(
-                    "failed to process value ({}): {}",
-                    String::from_utf8_lossy(payload),
-                    e
-                );
-                e.into()
-            })
+        let boxed_row: Box<OwnedRow> = unsafe { Box::from_raw(payload.as_ptr() as *mut OwnedRow) };
+        let mut idx = 0;
+        writer.insert(|_desc| {
+            let datum = boxed_row.datum_at(idx).to_owned_datum();
+            idx += 1;
+            Ok(datum)
         })
     }
 }

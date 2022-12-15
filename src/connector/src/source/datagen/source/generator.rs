@@ -11,19 +11,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::HashMap;
+
 use std::time::Duration;
 
 use anyhow::Result;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use risingwave_common::field_generator::FieldGeneratorImpl;
-use serde_json::Value;
+use risingwave_common::row::OwnedRow;
 
 use crate::source::{SourceMessage, SplitId};
 
 pub struct DatagenEventGenerator {
-    fields_map: HashMap<String, FieldGeneratorImpl>,
+    fields_vec: Vec<FieldGeneratorImpl>,
     offset: u64,
     split_id: SplitId,
     partition_rows_per_second: u64,
@@ -31,7 +31,7 @@ pub struct DatagenEventGenerator {
 
 impl DatagenEventGenerator {
     pub fn new(
-        fields_map: HashMap<String, FieldGeneratorImpl>,
+        fields_vec: Vec<FieldGeneratorImpl>,
         rows_per_second: u64,
         offset: u64,
         split_id: SplitId,
@@ -44,7 +44,7 @@ impl DatagenEventGenerator {
             rows_per_second / split_num
         };
         Ok(Self {
-            fields_map,
+            fields_vec,
             offset,
             split_id,
             partition_rows_per_second,
@@ -66,16 +66,23 @@ impl DatagenEventGenerator {
                     self.partition_rows_per_second - rows_generated_this_second,
                 );
                 for _ in 0..num_rows_to_generate {
-                    let value = Value::Object(
-                        self.fields_map
-                            .iter_mut()
-                            .map(|(name, field_generator)| {
-                                (name.to_string(), field_generator.generate(self.offset))
-                            })
-                            .collect(),
-                    );
+                    let data = self
+                        .fields_vec
+                        .iter_mut()
+                        .map(|field_generator| field_generator.generate_datum(self.offset))
+                        .collect();
+                    let value = unsafe {
+                        let row = OwnedRow::new(data);
+                        let row = Box::new(row);
+                        let ptr = Box::into_raw(row);
+                        let ptr = std::slice::from_raw_parts(
+                            (ptr as *const OwnedRow) as *const u8,
+                            ::std::mem::size_of::<OwnedRow>(),
+                        );
+                        ptr
+                    };
                     msgs.push(SourceMessage {
-                        payload: Some(Bytes::from(value.to_string())),
+                        payload: Some(Bytes::from_static(value)),
                         offset: self.offset.to_string(),
                         split_id: self.split_id.clone(),
                     });
@@ -101,9 +108,8 @@ mod tests {
         expected_length: usize,
     ) {
         let split_id = format!("{}-{}", split_num, split_index).into();
-        let mut fields_map = HashMap::new();
-        fields_map.insert(
-            "v1".to_string(),
+        let mut fields_vec = vec![];
+        fields_vec.push(
             FieldGeneratorImpl::with_number_sequence(
                 risingwave_common::types::DataType::Int32,
                 Some("1".to_string()),
@@ -114,8 +120,7 @@ mod tests {
             .unwrap(),
         );
 
-        fields_map.insert(
-            "v2".to_string(),
+        fields_vec.push(
             FieldGeneratorImpl::with_number_sequence(
                 risingwave_common::types::DataType::Float32,
                 Some("1".to_string()),
@@ -127,7 +132,7 @@ mod tests {
         );
 
         let generator = DatagenEventGenerator::new(
-            fields_map,
+            fields_vec,
             rows_per_second,
             0,
             split_id,

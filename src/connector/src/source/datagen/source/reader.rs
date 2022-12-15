@@ -67,7 +67,6 @@ impl SplitReader for DatagenSplitReader {
 
         let rows_per_second = properties.rows_per_second;
         let fields_option_map = properties.fields;
-        let mut fields_map = HashMap::<String, FieldGeneratorImpl>::new();
 
         // check columns
         assert!(columns.as_ref().is_some());
@@ -90,21 +89,20 @@ impl SplitReader for DatagenSplitReader {
 
         // 'fields.f_random_str.length'='10'
         // )
-
+        let mut fields_vec = vec![];
         for column in columns {
             let name = column.name.clone();
             let gen = generator_from_data_type(
-                column.data_type,
+                column.data_type.clone(),
                 &fields_option_map,
                 &name,
                 split_index,
                 split_num,
             )?;
-            fields_map.insert(name, gen);
+            fields_vec.push(gen);
         }
-
         let generator = DatagenEventGenerator::new(
-            fields_map,
+            fields_vec,
             rows_per_second,
             events_so_far,
             split_id,
