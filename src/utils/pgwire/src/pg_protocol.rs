@@ -322,7 +322,7 @@ where
         // Parse sql.
         let stmts = Parser::parse_sql(sql)
             .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
-            .map_err(|err| PsqlError::ParseError(err.into()))?;
+            .map_err(|err| PsqlError::QueryError(err.into()))?;
 
         // Execute multiple statements in simple query. KISS later.
         for stmt in stmts {
