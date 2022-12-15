@@ -22,6 +22,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::row::Row2;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::BoxedExpression;
@@ -88,7 +89,7 @@ impl<K: HashKey> LookupJoinBase<K> {
                         self.outer_side_key_idxs
                             .iter()
                             .take(self.lookup_prefix_len)
-                            .map(|&idx| row.value_at(idx).to_owned_datum())
+                            .map(|&idx| row.datum_at(idx).to_owned_datum())
                             .collect_vec()
                     })
                 })

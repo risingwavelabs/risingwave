@@ -19,7 +19,9 @@ use itertools::Itertools;
 
 use crate::error::Result;
 use crate::row::{Row, Row2};
-use crate::types::{deserialize_datum_from, serialize_datum_into, DataType, ToDatumRef};
+use crate::types::{
+    memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, ToDatumRef,
+};
 use crate::util::sort_util::OrderType;
 
 /// `OrderedRowSerde` is responsible for serializing and deserializing Ordered Row.
@@ -38,6 +40,8 @@ impl OrderedRowSerde {
         }
     }
 
+    /// FIXME: This leads to allocation in most cases. Should allow using slices for the schema and
+    /// order types.
     #[must_use]
     pub fn prefix(&self, len: usize) -> Cow<'_, Self> {
         if len == self.order_types.len() {
@@ -50,10 +54,12 @@ impl OrderedRowSerde {
         }
     }
 
+    /// Note: prefer [`Row2::memcmp_serialize`] if possible.
     pub fn serialize(&self, row: impl Row2, append_to: impl BufMut) {
         self.serialize_datums(row.iter(), append_to)
     }
 
+    /// Note: prefer [`Row2::memcmp_serialize`] if possible.
     pub fn serialize_datums(
         &self,
         datum_refs: impl Iterator<Item = impl ToDatumRef>,
@@ -62,7 +68,7 @@ impl OrderedRowSerde {
         for (datum, order_type) in datum_refs.zip_eq(self.order_types.iter()) {
             let mut serializer = memcomparable::Serializer::new(&mut append_to);
             serializer.set_reverse(*order_type == OrderType::Descending);
-            serialize_datum_into(datum, &mut serializer).unwrap();
+            memcmp_serialize_datum_into(datum, &mut serializer).unwrap();
         }
     }
 
@@ -71,7 +77,7 @@ impl OrderedRowSerde {
         let mut deserializer = memcomparable::Deserializer::new(data);
         for (data_type, order_type) in self.schema.iter().zip_eq(self.order_types.iter()) {
             deserializer.set_reverse(*order_type == OrderType::Descending);
-            let datum = deserialize_datum_from(data_type, &mut deserializer)?;
+            let datum = memcmp_deserialize_datum_from(data_type, &mut deserializer)?;
             values.push(datum);
         }
         Ok(Row::new(values))
