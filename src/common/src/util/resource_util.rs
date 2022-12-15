@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 pub enum CgroupVersion {
     V1,
     V2,
@@ -65,6 +64,7 @@ mod runtime {
 
 pub mod memory {
     use sysinfo::{System, SystemExt};
+    use tracing::log::error;
 
     // Default paths for memory limtiations and usage for cgroup_v1 and cgroup_v2.
     const V1_MEMORY_LIMIT_HIERARCHY: &str = "/memory/memory.limit_in_bytes";
@@ -92,7 +92,6 @@ pub mod memory {
     /// memory used, if interface files are not found, will return the memory used in the system
     /// as default. The cgroup mount point is assumed to be at /sys/fs/cgroup by default.
     ///
-    /// [`with_capacity`]: #method.with_capacity
     ///
     /// # Examples
     ///
@@ -101,12 +100,26 @@ pub mod memory {
     /// let mem_used = memory::total_memory_used_bytes();
     /// ```
     pub fn total_memory_used_bytes() -> usize {
-        if !super::runtime::is_linux_machine() || !super::runtime::is_running_in_container() {
+        if !super::runtime::is_linux_machine()
+            || !super::runtime::is_running_in_container()
+            || !super::util::is_controller_activated(super::Controller::Memory)
+        {
             return get_system_memory_used();
         };
         match get_memory_used_in_container(super::util::get_cgroup_version()) {
-            Some(mem_used) => std::cmp::min(mem_used, get_system_memory_used()),
-            None => get_system_memory_used(),
+            Ok(mem_used) => std::cmp::min(mem_used, get_system_memory_used()),
+            Err(err) => {
+                match err.kind() {
+                    std::io::ErrorKind::InvalidData => {
+                        error!("Invalid data error: {}", err)
+                    }
+                    std::io::ErrorKind::NotFound => {
+                        error!("Cgroup interface file was not found: {}", err)
+                    }
+                    _ => panic!("Unexpected error: {}", err),
+                }
+                get_system_memory_used()
+            }
         }
     }
 
@@ -116,7 +129,6 @@ pub mod memory {
     /// memory available/limit, if interface files are not found, will return the system memory
     /// volume by default. The cgroup mount point is assumed to be at /sys/fs/cgroup by default.
     ///
-    /// [`with_capacity`]: #method.with_capacity
     ///
     /// # Examples
     ///
@@ -125,12 +137,26 @@ pub mod memory {
     /// let mem_available = memory::total_memory_available_bytes();
     /// ```
     pub fn total_memory_available_bytes() -> usize {
-        if !super::runtime::is_linux_machine() || !super::runtime::is_running_in_container() {
+        if !super::runtime::is_linux_machine()
+            || !super::runtime::is_running_in_container()
+            || !super::util::is_controller_activated(super::Controller::Memory)
+        {
             return get_system_memory();
         };
         match get_container_memory_limit(super::util::get_cgroup_version()) {
-            Some(mem_limit) => std::cmp::min(mem_limit, get_system_memory()),
-            None => get_system_memory(),
+            Ok(mem_limit) => std::cmp::min(mem_limit, get_system_memory()),
+            Err(err) => {
+                match err.kind() {
+                    std::io::ErrorKind::InvalidData => {
+                        error!("Invalid data error: {}", err)
+                    }
+                    std::io::ErrorKind::NotFound => {
+                        error!("Cgroup interface file was not found: {}", err)
+                    }
+                    _ => panic!("Unexpected error: {}", err),
+                }
+                get_system_memory()
+            }
         }
     }
 
@@ -138,13 +164,10 @@ pub mod memory {
     // memory available.
     // When the limit is set to max, which is all memory in system, it will return a none,
     // which will be handled in total_memory_available_bytes() to return default system memory.
-    fn get_container_memory_limit(cgroup_version: Option<super::CgroupVersion>) -> Option<usize> {
-        if !super::util::is_controller_activated(super::Controller::Memory)
-            || cgroup_version.is_none()
-        {
-            return None;
-        }
-        let limit_path = match cgroup_version.unwrap() {
+    fn get_container_memory_limit(
+        cgroup_version: super::CgroupVersion,
+    ) -> Result<usize, std::io::Error> {
+        let limit_path = match cgroup_version {
             super::CgroupVersion::V1 => format!(
                 "{}{}",
                 super::DEFAULT_CGROUP_ROOT_HIERARCYHY,
@@ -161,13 +184,10 @@ pub mod memory {
 
     // Returns the memory used in a container if running in a container else returns the system
     // memory used.
-    fn get_memory_used_in_container(cgroup_version: Option<super::CgroupVersion>) -> Option<usize> {
-        if !super::util::is_controller_activated(super::Controller::Memory)
-            || cgroup_version.is_none()
-        {
-            return None;
-        }
-        let usage_path = match cgroup_version.unwrap() {
+    fn get_memory_used_in_container(
+        cgroup_version: super::CgroupVersion,
+    ) -> Result<usize, std::io::Error> {
+        let usage_path = match cgroup_version {
             super::CgroupVersion::V1 => format!(
                 "{}{}",
                 super::DEFAULT_CGROUP_ROOT_HIERARCYHY,
@@ -186,6 +206,8 @@ pub mod memory {
 pub mod cpu {
     use std::thread;
 
+    use tracing::log::error;
+
     use super::util;
 
     // Default constant Cgroup paths and hierarchy.
@@ -201,7 +223,6 @@ pub mod cpu {
     /// ```std::thread::available_parallelism``` or if the platform is not supported. The cgroup
     /// mount point is assumed to be at /sys/fs/cgroup by default.
     ///
-    /// [`with_capacity`]: #method.with_capacity
     ///
     /// # Examples
     ///
@@ -210,21 +231,36 @@ pub mod cpu {
     /// let cpu_available = cpu::total_cpu_available();
     /// ```
     pub fn total_cpu_available() -> f32 {
-        if !super::runtime::is_linux_machine() || !super::runtime::is_running_in_container() {
+        if !super::runtime::is_linux_machine()
+            || !super::runtime::is_running_in_container()
+            || !super::util::is_controller_activated(super::Controller::Cpu)
+            || !super::util::cgroup_exists()
+        {
             return get_system_cpu();
         }
 
-        get_container_cpu_limit(super::util::get_cgroup_version()).unwrap_or_else(get_system_cpu)
+        match get_container_cpu_limit(super::util::get_cgroup_version()) {
+            Ok(cpu_limit) => cpu_limit,
+            Err(err) => {
+                match err.kind() {
+                    std::io::ErrorKind::InvalidData => {
+                        error!("Invalid data error: {}", err)
+                    }
+                    std::io::ErrorKind::NotFound => {
+                        error!("Cgroup interface file was not found: {}", err)
+                    }
+                    _ => panic!("Unexpected error: {}", err),
+                };
+                get_system_cpu()
+            }
+        }
     }
 
     // Returns the CPU limit of the container.
-    fn get_container_cpu_limit(cgroup_version: Option<super::CgroupVersion>) -> Option<f32> {
-        if !super::util::is_controller_activated(super::Controller::Cpu) || cgroup_version.is_none()
-        {
-            return None;
-        }
-
-        match cgroup_version.unwrap() {
+    fn get_container_cpu_limit(
+        cgroup_version: super::CgroupVersion,
+    ) -> Result<f32, std::io::Error> {
+        match cgroup_version {
             super::CgroupVersion::V1 => get_cpu_limit_v1(),
             super::CgroupVersion::V2 => get_cpu_limit_v2(),
         }
@@ -239,29 +275,23 @@ pub mod cpu {
     }
 
     // Returns the CPU limit when cgroup_V1 is utilised.
-    fn get_cpu_limit_v1() -> Option<f32> {
-        let cpu_quota = match super::util::read_integer_from_file_path(&format!(
+    fn get_cpu_limit_v1() -> Result<f32, std::io::Error> {
+        let cpu_quota = super::util::read_integer_from_file_path(&format!(
             "{}{}",
             super::DEFAULT_CGROUP_ROOT_HIERARCYHY,
             V1_CPU_QUOTA_HIERARCHY
-        )) {
-            Some(quota_val) => quota_val,
-            None => return None,
-        };
+        ))?;
 
-        let cpu_period = match super::util::read_integer_from_file_path(&format!(
+        let cpu_period = super::util::read_integer_from_file_path(&format!(
             "{}{}",
             super::DEFAULT_CGROUP_ROOT_HIERARCYHY,
             V1_CPU_PERIOD_HIERARCHY
-        )) {
-            Some(period_val) => period_val,
-            None => return None,
-        };
-        Some((cpu_quota as f32) / (cpu_period as f32))
+        ))?;
+        Ok((cpu_quota as f32) / (cpu_period as f32))
     }
 
     // Returns the CPU limit when cgroup_V2 is utilised.
-    fn get_cpu_limit_v2() -> Option<f32> {
+    fn get_cpu_limit_v2() -> Result<f32, std::io::Error> {
         util::read_cgroup_v2_cpu_limit_from_file_path(&format!(
             "{}{}",
             super::DEFAULT_CGROUP_ROOT_HIERARCYHY,
@@ -274,32 +304,30 @@ mod util {
     use std::fs;
     use std::path::Path;
 
+    // If cgroup exists or is enabled in kernel, returnb true, else false.
+    pub fn cgroup_exists() -> bool {
+        Path::new(super::DEFAULT_CGROUP_ROOT_HIERARCYHY).is_dir()
+    }
+
     // Returns a cgroup version if it exists, else returns None.
     // Checks for the existence of the root hierarchy directory.
-    pub fn get_cgroup_version() -> Option<super::CgroupVersion> {
-        // check if cgroup exists.
-        if !Path::new(super::DEFAULT_CGROUP_ROOT_HIERARCYHY).is_dir() {
-            return None;
-        }
+    pub fn get_cgroup_version() -> super::CgroupVersion {
         // if cgroup.controllers exist, v2 is used.
         if Path::new(super::DEFAULT_CGROUP_V2_CONTROLLER_LIST_PATH).exists() {
-            Some(super::CgroupVersion::V2)
+            super::CgroupVersion::V2
         } else {
-            Some(super::CgroupVersion::V1)
+            super::CgroupVersion::V1
         }
     }
 
     // Reads an integer value from a file path.
-    // If max is read from file, a none will be returned regardless, which should be handled by
-    // wrapper functions.
-    pub fn read_integer_from_file_path(file_path: &str) -> Option<usize> {
-        match fs::read_to_string(file_path) {
-            Ok(limit_str) => match limit_str.trim().parse::<usize>() {
-                Ok(limit_val) => Some(limit_val),
-                Err(_) => None,
-            },
-            Err(_) => None,
-        }
+    pub fn read_integer_from_file_path(file_path: &str) -> Result<usize, std::io::Error> {
+        let limit_str = std::fs::read_to_string(file_path)?;
+        let limit_val = limit_str
+            .trim()
+            .parse::<usize>()
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number"))?;
+        Ok(limit_val)
     }
 
     // Parses the filepath and checks for the existence of controller_name in the file.
@@ -307,7 +335,7 @@ mod util {
         file_path: &str,
         controller_name: &str,
     ) -> bool {
-        return match fs::read_to_string(file_path) {
+        match fs::read_to_string(file_path) {
             Ok(controller_string) => {
                 for controller in controller_string.split_whitespace() {
                     if controller.eq(controller_name) {
@@ -317,7 +345,7 @@ mod util {
                 false
             }
             Err(_) => false,
-        };
+        }
     }
 
     // Given a certain controller, checks if it is enabled.
@@ -325,23 +353,18 @@ mod util {
     // hierarchy. e.g if directory "/sys/fs/cgroup"/cpu" exists then CPU controller is enabled.
     // For cgroup_v2, check the controller list path for the controller name.
     pub fn is_controller_activated(controller_type: super::Controller) -> bool {
+        let controller_name: &str = match controller_type {
+            super::Controller::Cpu => "cpu",
+            super::Controller::Memory => "memory",
+        };
         match get_cgroup_version() {
-            Some(cgroup_version) => {
-                let controller_name: &str = match controller_type {
-                    super::Controller::Cpu => "cpu",
-                    super::Controller::Memory => "memory",
-                };
-                match cgroup_version {
-                    super::CgroupVersion::V1 => Path::new(super::DEFAULT_CGROUP_ROOT_HIERARCYHY)
-                        .join(controller_name)
-                        .is_dir(),
-                    super::CgroupVersion::V2 => parse_controller_enable_file_for_cgroup_v2(
-                        super::DEFAULT_CGROUP_V2_CONTROLLER_LIST_PATH,
-                        controller_name,
-                    ),
-                }
-            }
-            None => false,
+            super::CgroupVersion::V1 => Path::new(super::DEFAULT_CGROUP_ROOT_HIERARCYHY)
+                .join(controller_name)
+                .is_dir(),
+            super::CgroupVersion::V2 => parse_controller_enable_file_for_cgroup_v2(
+                super::DEFAULT_CGROUP_V2_CONTROLLER_LIST_PATH,
+                controller_name,
+            ),
         }
     }
 
@@ -349,47 +372,48 @@ mod util {
     // returns the CPU limit when cgroup_V2 is utilised.
     // interface file should have the format as such -> "{cpu_quota} {cpu_period}". e.g "max
     // 1000000".
-    pub fn read_cgroup_v2_cpu_limit_from_file_path(file_path: &str) -> Option<f32> {
-        match fs::read_to_string(file_path) {
-            Ok(cpu_limit_string) => parse_cgroup_v2_cpu_limit_string(&cpu_limit_string),
-            Err(_) => None,
-        }
+    pub fn read_cgroup_v2_cpu_limit_from_file_path(file_path: &str) -> Result<f32, std::io::Error> {
+        fs::read_to_string(file_path)
+            .and_then(|cpu_limit_string| parse_cgroup_v2_cpu_limit_string(&cpu_limit_string))
     }
 
     // Helper function to parse the string inside the cgroup cpu limit file.
-    pub fn parse_cgroup_v2_cpu_limit_string(cpu_limit_string: &str) -> Option<f32> {
+    pub fn parse_cgroup_v2_cpu_limit_string(cpu_limit_string: &str) -> Result<f32, std::io::Error> {
         let cpu_data: Vec<&str> = cpu_limit_string.split_whitespace().collect();
         match cpu_data.get(0..2) {
             Some(cpu_data_values) => {
-                let cpu_quota = match cpu_data_values[0].parse::<usize>() {
-                    Ok(quota_val) => quota_val,
-                    Err(_) => return None,
-                };
-                let cpu_period = match cpu_data_values[1].parse::<usize>() {
-                    Ok(period_val) => period_val,
-                    Err(_) => return None,
-                };
-                Some((cpu_quota as f32) / (cpu_period as f32))
+                let cpu_quota = cpu_data_values[0].parse::<usize>().map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number")
+                })?;
+                let cpu_period = cpu_data_values[1].parse::<usize>().map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, "not a number")
+                })?;
+                Ok((cpu_quota as f32) / (cpu_period as f32))
             }
-            None => None,
+            None => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Invalid format in Cgroup CPU interface file",
+            )),
         }
     }
 
     #[cfg(test)]
     mod tests {
         use std::collections::HashMap;
-        use std::fs::File;
         use std::io::prelude::*;
+
+        use tempfile;
 
         use super::*;
         use crate::util::resource_util::Controller;
+        const DEFAULT_NON_EXISTENT_PATH: &str = "default-non-existent-path";
 
         #[test]
         fn test_read_integer_from_file_path() {
             struct TestCase {
                 file_exists: bool,
                 value_in_file: String,
-                expected: Option<usize>,
+                expected: Result<usize, std::io::Error>,
             }
 
             let test_cases = HashMap::from([
@@ -398,7 +422,7 @@ mod util {
                     TestCase {
                         file_exists: true,
                         value_in_file: String::from("10000"),
-                        expected: Some(10000),
+                        expected: Ok(10000),
                     },
                 ),
                 (
@@ -406,7 +430,7 @@ mod util {
                     TestCase {
                         file_exists: true,
                         value_in_file: String::from("10000   "),
-                        expected: Some(10000),
+                        expected: Ok(10000),
                     },
                 ),
                 (
@@ -414,7 +438,7 @@ mod util {
                     TestCase {
                         file_exists: true,
                         value_in_file: String::from("   10000"),
-                        expected: Some(10000),
+                        expected: Ok(10000),
                     },
                 ),
                 (
@@ -422,7 +446,10 @@ mod util {
                     TestCase {
                         file_exists: true,
                         value_in_file: String::from("test-string"),
-                        expected: None,
+                        expected: Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "not a number",
+                        )),
                     },
                 ),
                 (
@@ -430,7 +457,10 @@ mod util {
                     TestCase {
                         file_exists: false,
                         value_in_file: String::from(""),
-                        expected: None,
+                        expected: Err(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            "File not found",
+                        )),
                     },
                 ),
                 (
@@ -438,26 +468,32 @@ mod util {
                     TestCase {
                         file_exists: true,
                         value_in_file: String::from("max"),
-                        expected: None,
+                        expected: Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "not a number",
+                        )),
                     },
                 ),
             ]);
 
-            let test_file_path = "resource-util-test-1";
             for tc in test_cases {
                 let curr_test_case = &tc.1;
+                let mut file: tempfile::NamedTempFile;
+                let mut test_file_path = String::from(DEFAULT_NON_EXISTENT_PATH);
                 if curr_test_case.file_exists {
-                    let mut file = File::create(test_file_path)
+                    file = tempfile::NamedTempFile::new()
                         .expect("Error encountered while creating file!");
-                    file.write_all(curr_test_case.value_in_file.as_bytes())
+                    file.as_file_mut()
+                        .write_all(curr_test_case.value_in_file.as_bytes())
                         .expect("Error while writing to file");
-                };
-                assert_eq!(
-                    read_integer_from_file_path(test_file_path),
-                    curr_test_case.expected
-                );
-                if Path::new(test_file_path).exists() {
-                    fs::remove_file(test_file_path).expect("File delete failed");
+                    test_file_path = String::from(file.path().to_str().unwrap())
+                }
+                match read_integer_from_file_path(&test_file_path) {
+                    Ok(int_val) => assert_eq!(&int_val, curr_test_case.expected.as_ref().unwrap()),
+                    Err(e) => assert_eq!(
+                        e.kind(),
+                        curr_test_case.expected.as_ref().unwrap_err().kind()
+                    ),
                 }
             }
         }
@@ -467,7 +503,7 @@ mod util {
             struct TestCase {
                 file_exists: bool,
                 value_in_file: String,
-                expected: Option<f32>,
+                expected: Result<f32, std::io::Error>,
             }
 
             let test_cases = HashMap::from([
@@ -476,7 +512,7 @@ mod util {
                     TestCase {
                         file_exists: true,
                         value_in_file: String::from("10000 20000"),
-                        expected: Some(10000.0 / 20000.0),
+                        expected: Ok(10000.0 / 20000.0),
                     },
                 ),
                 (
@@ -484,7 +520,10 @@ mod util {
                     TestCase {
                         file_exists: true,
                         value_in_file: String::from("10000"),
-                        expected: None,
+                        expected: Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Invalid format in Cgroup CPU interface file",
+                        )),
                     },
                 ),
                 (
@@ -492,7 +531,10 @@ mod util {
                     TestCase {
                         file_exists: true,
                         value_in_file: String::from("10000 test-string "),
-                        expected: None,
+                        expected: Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "not a number",
+                        )),
                     },
                 ),
                 (
@@ -500,7 +542,10 @@ mod util {
                     TestCase {
                         file_exists: true,
                         value_in_file: String::from("max 20000"),
-                        expected: None,
+                        expected: Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "not a number",
+                        )),
                     },
                 ),
                 (
@@ -508,25 +553,32 @@ mod util {
                     TestCase {
                         file_exists: false,
                         value_in_file: String::from(""),
-                        expected: None,
+                        expected: Err(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            "File not found",
+                        )),
                     },
                 ),
             ]);
-
-            let test_file_path = "resource-util-test-2";
             for tc in test_cases {
                 let curr_test_case = &tc.1;
+                let mut file: tempfile::NamedTempFile;
+                let mut test_file_path = String::from(DEFAULT_NON_EXISTENT_PATH);
                 if curr_test_case.file_exists {
-                    let mut file = tempfile::NamedTempFile::new()
+                    file = tempfile::NamedTempFile::new()
                         .expect("Error encountered while creating file!");
                     file.as_file_mut()
                         .write_all(curr_test_case.value_in_file.as_bytes())
                         .expect("Error while writing to file");
-                    assert_eq!(
-                        read_cgroup_v2_cpu_limit_from_file_path(file.path()),
-                        curr_test_case.expected
-                    );
-                };
+                    test_file_path = String::from(file.path().to_str().unwrap())
+                }
+                match read_cgroup_v2_cpu_limit_from_file_path(&test_file_path) {
+                    Ok(int_val) => assert_eq!(&int_val, curr_test_case.expected.as_ref().unwrap()),
+                    Err(e) => assert_eq!(
+                        e.kind(),
+                        curr_test_case.expected.as_ref().unwrap_err().kind()
+                    ),
+                }
             }
         }
 
@@ -596,25 +648,33 @@ mod util {
                 ),
             ]);
 
-            let test_file_path = "resource-util-test-3";
             for tc in test_cases {
                 let curr_test_case = &tc.1;
-                if curr_test_case.file_exists {
-                    let mut file = File::create(test_file_path)
-                        .expect("Error encountered while creating file!");
-                    file.write_all(curr_test_case.value_in_file.as_bytes())
-                        .expect("Error while writing to file");
-                };
                 let controller_name: &str = match curr_test_case.controller_type {
                     Controller::Cpu => "cpu",
                     Controller::Memory => "memory",
                 };
-                assert_eq!(
-                    parse_controller_enable_file_for_cgroup_v2(test_file_path, controller_name),
-                    curr_test_case.expected
-                );
-                if Path::new(test_file_path).exists() {
-                    fs::remove_file(test_file_path).expect("File delete failed");
+                if curr_test_case.file_exists {
+                    let mut file = tempfile::NamedTempFile::new()
+                        .expect("Error encountered while creating file!");
+                    file.as_file_mut()
+                        .write_all(curr_test_case.value_in_file.as_bytes())
+                        .expect("Error while writing to file");
+                    assert_eq!(
+                        parse_controller_enable_file_for_cgroup_v2(
+                            file.path().to_str().unwrap(),
+                            controller_name
+                        ),
+                        curr_test_case.expected
+                    );
+                } else {
+                    assert_eq!(
+                        parse_controller_enable_file_for_cgroup_v2(
+                            "non-existent-path",
+                            controller_name
+                        ),
+                        curr_test_case.expected
+                    );
                 }
             }
         }

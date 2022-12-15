@@ -3199,9 +3199,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-macros"
-version = "0.2.12"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
+checksum = "8abbe137adbf2023c066b8acb3fdef0a4bec6494642ef2174d060fc99a9f80ea"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -5216,6 +5216,7 @@ dependencies = [
  "strum",
  "strum_macros",
  "sysinfo",
+ "tempfile",
  "thiserror",
  "tokio-stream",
  "toml",
