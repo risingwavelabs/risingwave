@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Internal utilities for sql gen.
 use std::mem;
 
 use rand::Rng;
@@ -20,12 +21,20 @@ use risingwave_sqlparser::ast::{
     DataType, FunctionArg, FunctionArgExpr, TableAlias, TableFactor, TableWithJoins,
 };
 
-use crate::{Column, Expr, Ident, ObjectName, SqlGenerator, Table};
+use crate::sql_gen::{Column, Expr, Ident, ObjectName, SqlGenerator, Table};
 
 type Context = (Vec<Column>, Vec<Table>);
 
 /// Context utils
 impl<'a, R: Rng> SqlGenerator<'a, R> {
+    pub(crate) fn add_relations_to_context(&mut self, mut tables: Vec<Table>) {
+        for rel in &tables {
+            let mut bound_columns = rel.get_qualified_columns();
+            self.bound_columns.append(&mut bound_columns);
+        }
+        self.bound_relations.append(&mut tables);
+    }
+
     pub(crate) fn new_local_context(&mut self) -> Context {
         let current_bound_relations = mem::take(&mut self.bound_relations);
         let current_bound_columns = mem::take(&mut self.bound_columns);
@@ -97,7 +106,7 @@ fn create_function_arg_from_expr(expr: Expr) -> FunctionArg {
 }
 
 /// Used to cast [`DataTypeName`] into [`DataType`] where possible.
-pub fn data_type_name_to_ast_data_type(type_name: DataTypeName) -> Option<DataType> {
+pub(crate) fn data_type_name_to_ast_data_type(type_name: DataTypeName) -> Option<DataType> {
     match type_name {
         DataTypeName::Boolean => Some(DataType::Boolean),
         DataTypeName::Int16 => Some(DataType::SmallInt(None)),
