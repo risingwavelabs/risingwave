@@ -21,7 +21,7 @@ use auto_enums::auto_enum;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, Schema, TableId, TableOption,
@@ -295,21 +295,31 @@ impl<S: StateStore> StorageTable<S> {
         R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
     {
-        // Vnodes that are set and should be accessed.
-        #[auto_enum(Iterator)]
-        let vnodes = match vnode_hint {
-            // If `vnode_hint` is set, we can only access this single vnode.
-            Some(vnode) => std::iter::once(vnode),
-            // Otherwise, we need to access all vnodes of this table.
-            None => self.vnodes.ones().map(VirtualNode::from_index),
+        let raw_key_ranges = if vnode_hint.is_none()
+            && !ordered
+            && matches!(encoded_key_range.start_bound(), Unbounded)
+            && matches!(encoded_key_range.end_bound(), Unbounded)
+        {
+            Either::Left(self.vnodes.high_ranges().map(|r| {
+                let start = VirtualNode::from_index(r.start).to_be_bytes().to_vec();
+                let end = VirtualNode::from_index(r.end).to_be_bytes().to_vec();
+                (Included(start), Excluded(end))
+            }))
+        } else {
+            // Vnodes that are set and should be accessed.
+            let vnodes = match vnode_hint {
+                // If `vnode_hint` is set, we can only access this single vnode.
+                Some(vnode) => Either::Left(std::iter::once(vnode)),
+                // Otherwise, we need to access all vnodes of this table.
+                None => Either::Right(self.vnodes.ones().map(VirtualNode::from_index)),
+            };
+            Either::Right(
+                vnodes.map(|vnode| prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes())),
+            )
         };
 
-        // For each vnode, construct an iterator.
-        // TODO: if there're some vnodes continuously in the range and we don't care about order, we
-        // can use a single iterator.
-        let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
-            let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-
+        // For each range, construct an iterator.
+        let iterators: Vec<_> = try_join_all(raw_key_ranges.map(|raw_key_range| {
             let prefix_hint = prefix_hint.clone();
             let wait_epoch = wait_epoch.clone();
             async move {
@@ -478,14 +488,19 @@ impl<S: StateStore> StorageTable<S> {
         epoch: HummockReadEpoch,
         pk_prefix: impl Row2,
         range_bounds: impl RangeBounds<Row>,
+        ordered: bool,
     ) -> StorageResult<StorageTableIter<S>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, true)
+        self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered)
             .await
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
-    pub async fn batch_iter(&self, epoch: HummockReadEpoch) -> StorageResult<StorageTableIter<S>> {
-        self.batch_iter_with_pk_bounds(epoch, row::empty(), ..)
+    pub async fn batch_iter(
+        &self,
+        epoch: HummockReadEpoch,
+        ordered: bool,
+    ) -> StorageResult<StorageTableIter<S>> {
+        self.batch_iter_with_pk_bounds(epoch, row::empty(), .., ordered)
             .await
     }
 }

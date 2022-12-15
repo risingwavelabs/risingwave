@@ -295,7 +295,12 @@ where
         // We use uncommitted read here, because we have already scheduled the `BackfillExecutor`
         // together with the upstream mv.
         let iter = table
-            .batch_iter_with_pk_bounds(HummockReadEpoch::NoWait(epoch), Row::empty(), range_bounds)
+            .batch_iter_with_pk_bounds(
+                HummockReadEpoch::NoWait(epoch),
+                Row::empty(),
+                range_bounds,
+                true,
+            )
             .await?;
 
         pin_mut!(iter);

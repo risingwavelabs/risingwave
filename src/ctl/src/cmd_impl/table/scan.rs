@@ -118,7 +118,7 @@ async fn do_scan(
     let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
     let storage_table = make_storage_table(hummock, &table);
     let stream = storage_table
-        .batch_iter(HummockReadEpoch::Committed(read_epoch))
+        .batch_iter(HummockReadEpoch::Committed(read_epoch), true)
         .await?;
     pin_mut!(stream);
     while let Some(item) = stream.next().await {

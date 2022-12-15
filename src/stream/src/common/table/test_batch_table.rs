@@ -436,13 +436,12 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
     state.commit_for_test(epoch).await.unwrap();
 
     let iter = table
-        .batch_iter(HummockReadEpoch::Committed(epoch.curr))
+        .batch_iter(HummockReadEpoch::Committed(epoch.curr), false)
         .await
         .unwrap();
     pin_mut!(iter);
 
     let res = iter.next_row().await.unwrap();
-    assert!(res.is_some());
 
     // only scan two columns
     assert_eq!(

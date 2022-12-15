@@ -394,7 +394,12 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         } else {
             let iter = self
                 .table
-                .batch_iter_with_pk_bounds(HummockReadEpoch::Committed(self.epoch), &pk_prefix, ..)
+                .batch_iter_with_pk_bounds(
+                    HummockReadEpoch::Committed(self.epoch),
+                    &pk_prefix,
+                    ..,
+                    false,
+                )
                 .await?;
 
             pin_mut!(iter);

@@ -387,6 +387,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     next_col_bounds.0.map(|x| Row::new(vec![x])),
                     next_col_bounds.1.map(|x| Row::new(vec![x])),
                 ),
+                true,
             )
             .await?;
 
