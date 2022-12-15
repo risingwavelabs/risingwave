@@ -136,7 +136,7 @@ async fn campaign<S: MetaStore>(
                     is_leader: true,
                 })
             }
-            Err(e) => Err(e.into()),
+            Err(e) => Err(e),
         };
     }
 
@@ -144,7 +144,7 @@ async fn campaign<S: MetaStore>(
     let is_leader = match renew_lease(&campaign_leader_info, lease_time_sec, meta_store).await {
         Err(e) => {
             tracing::warn!("Encountered error when renewing lease {}", e);
-            return Err(e.into());
+            return Err(e);
         }
         Ok(val) => val,
     };
