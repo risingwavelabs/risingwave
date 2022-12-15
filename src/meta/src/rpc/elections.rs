@@ -501,7 +501,7 @@ async fn manage_term<S: MetaStore>(
 
 /// True if leader changed
 /// False if leader is still the leader defined in `leader_info`
-/// None on error
+/// `MetaStoreError` on error
 async fn leader_changed<S: MetaStore>(
     leader_info: &MetaLeaderInfo,
     meta_store: &Arc<S>,
