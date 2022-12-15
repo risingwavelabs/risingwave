@@ -17,7 +17,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::RowRef;
 use risingwave_common::catalog::{ColumnDesc, Schema};
-use risingwave_common::row::{Row, Row2, RowExt};
+use risingwave_common::row::{OwnedRow, Row2, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::StateStore;
@@ -373,7 +373,10 @@ impl<S: StateStore> LookupExecutor<S> {
     }
 
     /// Lookup all rows corresponding to a join key in shared buffer.
-    async fn lookup_one_row(&mut self, stream_row: &RowRef<'_>) -> StreamExecutorResult<Vec<Row>> {
+    async fn lookup_one_row(
+        &mut self,
+        stream_row: &RowRef<'_>,
+    ) -> StreamExecutorResult<Vec<OwnedRow>> {
         // fast-path for empty look-ups.
         if self.arrangement.state_table.epoch() == 0 {
             return Ok(vec![]);

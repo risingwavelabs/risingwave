@@ -22,7 +22,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{Row, Row2, RowExt};
+use risingwave_common::row::{OwnedRow, Row2, RowExt};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 
 use crate::error::StorageResult;
@@ -69,7 +69,7 @@ impl Distribution {
 // TODO: GAT-ify this trait or remove this trait
 #[async_trait::async_trait]
 pub trait TableIter: Send {
-    async fn next_row(&mut self) -> StorageResult<Option<Row>>;
+    async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;
 
     async fn collect_data_chunk(
         &mut self,

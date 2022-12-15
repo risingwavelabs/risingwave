@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use futures::{pin_mut, StreamExt};
-use risingwave_common::row::{Row, Row2, RowExt};
+use risingwave_common::row::{OwnedRow, Row2, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -42,11 +42,11 @@ pub struct ManagedTopNState<S: StateStore> {
 pub struct TopNStateRow {
     // (order_key|input_pk)
     pub cache_key: CacheKey,
-    pub row: Row,
+    pub row: OwnedRow,
 }
 
 impl TopNStateRow {
-    pub fn new(cache_key: CacheKey, row: Row) -> Self {
+    pub fn new(cache_key: CacheKey, row: OwnedRow) -> Self {
         Self { cache_key, row }
     }
 }
@@ -83,7 +83,12 @@ impl<S: StateStore> ManagedTopNState<S> {
         self.state_table.delete(value);
     }
 
-    fn get_topn_row(&self, row: Row, group_key_len: usize, order_by_len: usize) -> TopNStateRow {
+    fn get_topn_row(
+        &self,
+        row: OwnedRow,
+        group_key_len: usize,
+        order_by_len: usize,
+    ) -> TopNStateRow {
         let pk = (&row).project(&self.state_table.pk_indices()[group_key_len..]);
         let cache_key = serialize_pk_to_cache_key(pk, order_by_len, &self.cache_key_serde);
 

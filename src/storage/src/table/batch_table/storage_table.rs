@@ -28,7 +28,7 @@ use risingwave_common::catalog::{
     TableId, TableOption,
 };
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{self, Row, Row2, RowDeserializer, RowExt};
+use risingwave_common::row::{self, OwnedRow, Row2, RowDeserializer, RowExt};
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
@@ -236,7 +236,7 @@ impl<S: StateStore> StorageTable<S> {
         &self,
         pk: impl Row2,
         wait_epoch: HummockReadEpoch,
-    ) -> StorageResult<Option<Row>> {
+    ) -> StorageResult<Option<OwnedRow>> {
         let epoch = wait_epoch.get_epoch();
         self.store.try_wait_epoch(wait_epoch).await?;
         let serialized_pk =
@@ -265,7 +265,7 @@ impl<S: StateStore> StorageTable<S> {
     }
 }
 
-pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
+pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, OwnedRow)>> + Send;
 
 /// The row iterator of the storage table.
 /// The wrapper of [`StorageTableIter`] if pk is not persisted.
@@ -273,7 +273,7 @@ pub type StorageTableIter<S: StateStore> = impl PkAndRowStream;
 
 #[async_trait::async_trait]
 impl<S: PkAndRowStream + Unpin> TableIter for S {
-    async fn next_row(&mut self) -> StorageResult<Option<Row>> {
+    async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>> {
         self.next()
             .await
             .transpose()
@@ -357,13 +357,13 @@ impl<S: StateStore> StorageTable<S> {
         &self,
         epoch: HummockReadEpoch,
         pk_prefix: impl Row2,
-        range_bounds: impl RangeBounds<Row>,
+        range_bounds: impl RangeBounds<OwnedRow>,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S>> {
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerde,
             pk_prefix: impl Row2,
-            range_bound: Bound<&Row>,
+            range_bound: Bound<&OwnedRow>,
             is_start_bound: bool,
         ) -> Bound<Vec<u8>> {
             match range_bound {
@@ -492,7 +492,7 @@ impl<S: StateStore> StorageTable<S> {
         &self,
         epoch: HummockReadEpoch,
         pk_prefix: impl Row2,
-        range_bounds: impl RangeBounds<Row>,
+        range_bounds: impl RangeBounds<OwnedRow>,
     ) -> StorageResult<StorageTableIter<S>> {
         self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, true)
             .await
@@ -545,7 +545,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
     }
 
     /// Yield a row with its primary key.
-    #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
+    #[try_stream(ok = (Vec<u8>, OwnedRow), error = StorageError)]
     async fn into_stream(self) {
         use futures::TryStreamExt;
 

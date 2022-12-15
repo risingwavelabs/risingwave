@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16ArrayBuilder};
-use risingwave_common::row::{Row, Row2, RowExt};
+use risingwave_common::row::{OwnedRow, Row2, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -76,7 +76,7 @@ impl Expression for VnodeExpression {
         Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let vnode = input
             .project(&self.dist_key_indices)
             .hash(Crc32FastBuilder)

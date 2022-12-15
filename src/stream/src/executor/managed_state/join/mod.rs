@@ -29,7 +29,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::collection::estimate_size::EstimateSize;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
 use risingwave_common::row;
-use risingwave_common::row::{CompactedRow, Row, Row2, RowExt};
+use risingwave_common::row::{CompactedRow, OwnedRow, Row2, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -92,14 +92,14 @@ pub struct EncodedJoinRow {
 }
 
 impl EncodedJoinRow {
-    fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow<Row>> {
+    fn decode(&self, data_types: &[DataType]) -> StreamExecutorResult<JoinRow<OwnedRow>> {
         Ok(JoinRow {
             row: self.decode_row(data_types)?,
             degree: self.degree,
         })
     }
 
-    fn decode_row(&self, data_types: &[DataType]) -> StreamExecutorResult<Row> {
+    fn decode_row(&self, data_types: &[DataType]) -> StreamExecutorResult<OwnedRow> {
         let row = self.compacted_row.deserialize(data_types)?;
         Ok(row)
     }
@@ -378,7 +378,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
             #[for_await]
             for row in table_iter {
-                let row: Cow<'_, Row> = row?;
+                let row: Cow<'_, OwnedRow> = row?;
                 let pk = row
                     .as_ref()
                     .project(&self.state.pk_indices)
@@ -464,7 +464,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     fn manipulate_degree(
         &mut self,
         join_row_ref: &mut StateValueType,
-        join_row: &mut JoinRow<Row>,
+        join_row: &mut JoinRow<OwnedRow>,
         action: impl Fn(&mut DegreeType),
     ) {
         // TODO: no need to `into_owned_row` here due to partial borrow.
@@ -483,13 +483,21 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Increment the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
     /// memory and in the degree table.
-    pub fn inc_degree(&mut self, join_row_ref: &mut StateValueType, join_row: &mut JoinRow<Row>) {
+    pub fn inc_degree(
+        &mut self,
+        join_row_ref: &mut StateValueType,
+        join_row: &mut JoinRow<OwnedRow>,
+    ) {
         self.manipulate_degree(join_row_ref, join_row, |d| *d += 1)
     }
 
     /// Decrement the degree of the given [`JoinRow`] and [`EncodedJoinRow`] with `action`, both in
     /// memory and in the degree table.
-    pub fn dec_degree(&mut self, join_row_ref: &mut StateValueType, join_row: &mut JoinRow<Row>) {
+    pub fn dec_degree(
+        &mut self,
+        join_row_ref: &mut StateValueType,
+        join_row: &mut JoinRow<OwnedRow>,
+    ) {
         self.manipulate_degree(join_row_ref, join_row, |d| {
             *d = d
                 .checked_sub(1)

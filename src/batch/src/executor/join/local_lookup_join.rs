@@ -22,7 +22,7 @@ use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{
     HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode, VnodeMapping,
 };
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::scan_range::ScanRange;
@@ -192,7 +192,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
                     Box::new(LiteralExpression::new(outer_type.clone(), datum.clone())),
                 )?;
 
-                cast_expr.eval_row(Row::empty())?
+                cast_expr.eval_row(OwnedRow::empty())?
             };
 
             scan_range.eq_conds.push(datum);

@@ -22,7 +22,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::row::{Row, Row2};
+use risingwave_common::row::{OwnedRow, Row2};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
@@ -59,7 +59,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 /// Range for batch scan.
 pub struct ScanRange {
     /// The prefix of the primary key.
-    pub pk_prefix: Row,
+    pub pk_prefix: OwnedRow,
 
     /// The range bounds of the next column.
     pub next_col_bounds: (Bound<Datum>, Bound<Datum>),
@@ -76,7 +76,7 @@ impl ScanRange {
         scan_range: ProstScanRange,
         mut pk_types: impl Iterator<Item = DataType>,
     ) -> Result<Self> {
-        let pk_prefix = Row::new(
+        let pk_prefix = OwnedRow::new(
             scan_range
                 .eq_conds
                 .iter()
@@ -122,7 +122,7 @@ impl ScanRange {
     /// Create a scan range for full table scan.
     pub fn full() -> Self {
         Self {
-            pk_prefix: Row::default(),
+            pk_prefix: OwnedRow::default(),
             next_col_bounds: (Bound::Unbounded, Bound::Unbounded),
         }
     }
@@ -345,7 +345,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         scan_range: ScanRange,
         epoch: u64,
         histogram: Option<Histogram>,
-    ) -> Result<Option<Row>> {
+    ) -> Result<Option<OwnedRow>> {
         let pk_prefix = scan_range.pk_prefix;
         assert!(pk_prefix.len() == table.pk_indices().len());
 
@@ -383,8 +383,8 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 HummockReadEpoch::Committed(epoch),
                 &pk_prefix,
                 (
-                    next_col_bounds.0.map(|x| Row::new(vec![x])),
-                    next_col_bounds.1.map(|x| Row::new(vec![x])),
+                    next_col_bounds.0.map(|x| OwnedRow::new(vec![x])),
+                    next_col_bounds.1.map(|x| OwnedRow::new(vec![x])),
                 ),
             )
             .await?;

@@ -88,16 +88,16 @@ impl<R1, R2> Chain<R1, R2> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::row::Row;
+    use crate::row::OwnedRow;
     use crate::types::{ScalarImpl, ScalarRefImpl};
 
     #[test]
     fn test_chain_row() {
-        let r1 = || Row::new((1..=3).map(|i| Some(ScalarImpl::Int64(i))).collect());
-        let r2 = || Row::new((4..=6).map(|i| Some(ScalarImpl::Int64(i))).collect());
-        let r3 = || Row::new((7..=9).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r1 = || OwnedRow::new((1..=3).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r2 = || OwnedRow::new((4..=6).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r3 = || OwnedRow::new((7..=9).map(|i| Some(ScalarImpl::Int64(i))).collect());
 
-        let r_expected = Row::new((1..=9).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r_expected = OwnedRow::new((1..=9).map(|i| Some(ScalarImpl::Int64(i))).collect());
 
         macro_rules! test {
             ($r:expr) => {

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::for_all_variants;
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{literal_type_match, DataType, Datum, Scalar, ScalarImpl};
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -66,7 +66,7 @@ impl Expression for LiteralExpression {
         Ok(Arc::new(array_builder.finish()))
     }
 
-    fn eval_row(&self, _input: &Row) -> Result<Datum> {
+    fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
         Ok(self.literal.as_ref().cloned())
     }
 }
@@ -252,7 +252,7 @@ mod tests {
     #[test]
     fn test_literal_eval_row_dummy_chunk() {
         let literal = LiteralExpression::new(DataType::Int32, Some(1.into()));
-        let result = literal.eval_row(&Row::new(vec![])).unwrap();
+        let result = literal.eval_row(&OwnedRow::new(vec![])).unwrap();
         assert_eq!(result, Some(1.into()))
     }
 }

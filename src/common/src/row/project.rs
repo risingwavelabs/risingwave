@@ -76,15 +76,15 @@ impl<'i, R: Row2> Project<'i, R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::row::{Row, RowExt};
+    use crate::row::{OwnedRow, RowExt};
     use crate::types::{ScalarImpl, ScalarRefImpl};
 
     #[test]
     fn test_project_row() {
-        let r0 = Row::new((0..=8).map(|i| Some(ScalarImpl::Int64(i))).collect());
+        let r0 = OwnedRow::new((0..=8).map(|i| Some(ScalarImpl::Int64(i))).collect());
         let indices = vec![1, 1, 4, 5, 1, 4];
 
-        let r_expected = Row::new(
+        let r_expected = OwnedRow::new(
             indices
                 .iter()
                 .map(|&i| Some(ScalarImpl::Int64(i as _)))

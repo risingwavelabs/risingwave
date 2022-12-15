@@ -29,7 +29,7 @@ pub use chain::Chain;
 pub use compacted_row::CompactedRow;
 pub use empty::{empty, Empty};
 pub use once::{once, Once};
-pub use owned_row::{Row, RowDeserializer};
+pub use owned_row::{OwnedRow, RowDeserializer};
 pub use project::Project;
 pub use repeat_n::{repeat_n, RepeatN};
 
@@ -71,13 +71,13 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     ///
     /// Prefer `into_owned_row` if the row is already owned.
     #[inline]
-    fn to_owned_row(&self) -> Row {
-        Row::new(self.iter().map(|d| d.to_owned_datum()).collect())
+    fn to_owned_row(&self) -> OwnedRow {
+        OwnedRow::new(self.iter().map(|d| d.to_owned_datum()).collect())
     }
 
     /// Consumes `self` and converts it into an owned [`Row`].
     #[inline]
-    fn into_owned_row(self) -> Row {
+    fn into_owned_row(self) -> OwnedRow {
         self.to_owned_row()
     }
 
@@ -187,7 +187,7 @@ macro_rules! deref_forward_row {
             (**self).iter()
         }
 
-        fn to_owned_row(&self) -> Row {
+        fn to_owned_row(&self) -> OwnedRow {
             (**self).to_owned_row()
         }
 
@@ -237,7 +237,7 @@ impl<R: Row2 + Clone> Row2 for Cow<'_, R> {
     deref_forward_row!();
 
     // Manually implemented in case `R` has a more efficient implementation.
-    fn into_owned_row(self) -> Row {
+    fn into_owned_row(self) -> OwnedRow {
         self.into_owned().into_owned_row()
     }
 }
@@ -251,7 +251,7 @@ impl<R: Row2> Row2 for Box<R> {
 
     // Manually implemented in case the `Cow` is `Owned` and `R` has a more efficient
     // implementation.
-    fn into_owned_row(self) -> Row {
+    fn into_owned_row(self) -> OwnedRow {
         (*self).into_owned_row()
     }
 }
@@ -333,17 +333,17 @@ impl<R: Row2> Row2 for Option<R> {
         }
     }
 
-    fn to_owned_row(&self) -> Row {
+    fn to_owned_row(&self) -> OwnedRow {
         match self {
             Some(row) => row.to_owned_row(),
-            None => Row::new(Vec::new()),
+            None => OwnedRow::new(Vec::new()),
         }
     }
 
-    fn into_owned_row(self) -> Row {
+    fn into_owned_row(self) -> OwnedRow {
         match self {
             Some(row) => row.into_owned_row(),
-            None => Row::new(Vec::new()),
+            None => OwnedRow::new(Vec::new()),
         }
     }
 
