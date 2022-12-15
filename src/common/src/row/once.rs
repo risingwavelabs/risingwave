@@ -16,11 +16,11 @@ use super::{assert_row, Row2};
 use crate::types::{DatumRef, ToDatumRef};
 
 /// Row for the [`once`] function.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct Once<D>(D);
 
 impl<D: ToDatumRef> Row2 for Once<D> {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+    type Iter<'a> = std::iter::Once<DatumRef<'a>>
     where
         Self: 'a;
 

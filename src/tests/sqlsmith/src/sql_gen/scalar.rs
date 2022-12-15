@@ -21,8 +21,8 @@ use rand::Rng;
 use risingwave_common::types::DataTypeName;
 use risingwave_sqlparser::ast::{DataType, Expr, Value};
 
-use crate::expr::sql_null;
-use crate::SqlGenerator;
+use crate::sql_gen::expr::sql_null;
+use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn gen_simple_scalar(&mut self, typ: DataTypeName) -> Expr {

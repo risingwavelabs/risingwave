@@ -21,10 +21,10 @@ use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{Row2, RowExt};
+use risingwave_common::row::{Row, Row2, RowExt};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
@@ -244,7 +244,8 @@ where
                                         .last()
                                         .unwrap()
                                         .1
-                                        .row_by_indices(&table_pk_indices),
+                                        .project(&table_pk_indices)
+                                        .into_owned_row(),
                                 );
 
                                 yield Message::Chunk(Self::mapping_chunk(

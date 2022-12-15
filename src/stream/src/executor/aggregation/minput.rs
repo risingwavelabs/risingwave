@@ -36,7 +36,7 @@ use super::state_cache::string_agg::StringAgg;
 use super::state_cache::{CacheKey, GenericStateCache, StateCache};
 use super::AggCall;
 use crate::common::table::state_table::StateTable;
-use crate::common::{iter_state_table, StateTableColumnMapping};
+use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Aggregation state as a materialization of input chunks.
@@ -184,7 +184,7 @@ impl<S: StateStore> MaterializedInputState<S> {
         group_key: Option<&Row>,
     ) -> StreamExecutorResult<Datum> {
         if !self.cache.is_synced() {
-            let all_data_iter = iter_state_table(state_table, group_key).await?;
+            let all_data_iter = state_table.iter_with_pk_prefix(&group_key).await?;
             pin_mut!(all_data_iter);
 
             let mut cache_filler = self.cache.begin_syncing();

@@ -75,9 +75,7 @@ impl<S: StateStore> AggGroup<S> {
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<AggGroup<S>> {
-        let prev_outputs: Option<Row> = result_table
-            .get_row(group_key.as_ref().unwrap_or_else(Row::empty))
-            .await?;
+        let prev_outputs: Option<Row> = result_table.get_row(&group_key).await?;
         if let Some(prev_outputs) = &prev_outputs {
             assert_eq!(prev_outputs.len(), agg_calls.len());
         }
@@ -290,11 +288,7 @@ impl<S: StateStore> AggGroup<S> {
             }
         };
 
-        let result_row = self
-            .group_key()
-            .unwrap_or_else(Row::empty)
-            .chain(&curr_outputs)
-            .into_owned_row();
+        let result_row = self.group_key().chain(&curr_outputs).into_owned_row();
 
         let prev_outputs = if n_appended_ops == 0 {
             self.prev_outputs.clone()

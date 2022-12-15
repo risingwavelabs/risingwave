@@ -15,7 +15,7 @@
 use std::collections::BTreeSet;
 
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::row::{Row, Row2};
+use risingwave_common::row::{Row, Row2, RowExt};
 
 use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 
@@ -38,7 +38,7 @@ impl LookupCache {
     /// Apply a batch from the arrangement side
     pub fn apply_batch(&mut self, chunk: StreamChunk, arrange_join_keys: &[usize]) {
         for (op, row) in chunk.rows() {
-            let key = row.row_by_indices(arrange_join_keys);
+            let key = row.project(arrange_join_keys).into_owned_row();
             if let Some(values) = self.data.get_mut(&key) {
                 // the item is in cache, update it
                 match op {

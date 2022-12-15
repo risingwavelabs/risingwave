@@ -1,0 +1,6 @@
+query ITI rowsort
+select * from nexmark_q102;
+----
+1000 mksxmeugsicmeb 24
+1001 k  y 4
+1012 vxhbxffngwfonbmtp 5

@@ -17,7 +17,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::RowRef;
 use risingwave_common::catalog::{ColumnDesc, Schema};
-use risingwave_common::row::Row;
+use risingwave_common::row::{Row, Row2, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::StateStore;
@@ -312,7 +312,7 @@ impl<S: StateStore> LookupExecutor<S> {
                         for matched_row in self.lookup_one_row(&row).await? {
                             tracing::trace!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 
-                            if let Some(chunk) = builder.append_row(*op, &row, &matched_row) {
+                            if let Some(chunk) = builder.append_row(*op, row, &matched_row) {
                                 yield Message::Chunk(chunk);
                             }
                         }
@@ -381,7 +381,9 @@ impl<S: StateStore> LookupExecutor<S> {
 
         // stream_row is the row from stream side, we need to transform into the correct order of
         // the arrangement side.
-        let lookup_row = stream_row.row_by_indices(&self.key_indices_mapping);
+        let lookup_row = stream_row
+            .project(&self.key_indices_mapping)
+            .into_owned_row();
         if let Some(result) = self.lookup_cache.lookup(&lookup_row) {
             return Ok(result.iter().cloned().collect_vec());
         }
