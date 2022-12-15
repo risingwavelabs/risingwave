@@ -33,14 +33,14 @@ pub use crate::sql_gen::{print_function_table, Table};
 /// Generate a random SQL string.
 pub fn sql_gen(rng: &mut impl Rng, tables: Vec<Table>) -> String {
     let mut gen = SqlGenerator::new(rng, tables);
-    format!("{}", gen.gen_stmt())
+    format!("{}", gen.gen_batch_query_stmt())
 }
 
 /// Generate a random CREATE MATERIALIZED VIEW sql string.
 /// These are derived from `tables`.
 pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (String, Table) {
     let mut gen = SqlGenerator::new_for_mview(rng, tables);
-    let (mview, table) = gen.gen_mview(name);
+    let (mview, table) = gen.gen_mview_stmt(name);
     (mview.to_string(), table)
 }
 

@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Provides Data structures for query generation,
+//! and the interface for generating
+//! stream (MATERIALIZED VIEW) and batch query statements.
 use std::vec;
 
 use rand::Rng;
@@ -176,12 +179,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    pub(crate) fn gen_stmt(&mut self) -> Statement {
+    pub(crate) fn gen_batch_query_stmt(&mut self) -> Statement {
         let (query, _) = self.gen_query();
         Statement::Query(Box::new(query))
     }
 
-    pub(crate) fn gen_mview(&mut self, name: &str) -> (Statement, Table) {
+    pub(crate) fn gen_mview_stmt(&mut self, name: &str) -> (Statement, Table) {
         let (query, schema) = self.gen_query();
         let query = Box::new(query);
         let table = Table {
