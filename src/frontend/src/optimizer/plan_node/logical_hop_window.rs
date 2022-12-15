@@ -336,16 +336,6 @@ impl PredicatePushdown for LogicalHopWindow {
         // Keep predicate on time window (time_window_pred), the rest (pushed_predicate) may be
         // pushed-down.
         let (time_window_pred, pushed_predicate) = predicate.split_disjoint(&window_columns);
-
-        // Convert the pushed_predicate to one that references the child of the hop window
-        let mut subst = Substitute {
-            mapping: self
-                .output_indices()
-                .iter()
-                .filter(|i| **i != window_start_idx && **i != window_end_idx)
-                .map(|i| InputRef::new(*i, self.input().schema().fields()[*i].data_type()).into())
-                .collect(),
-        };
         let pushed_predicate = pushed_predicate.rewrite_expr(&mut subst);
         gen_filter_and_pushdown(self, time_window_pred, pushed_predicate)
     }
