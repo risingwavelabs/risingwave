@@ -41,7 +41,7 @@ use crate::row_serde::row_serde_util::{
 };
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
-use crate::table::{compute_vnode, Distribution, TableIter};
+use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
 use crate::StateStore;
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
@@ -295,11 +295,17 @@ impl<S: StateStore> StorageTable<S> {
         R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
     {
-        let raw_key_ranges = if vnode_hint.is_none()
-            && !ordered
+        let raw_key_ranges = if !ordered
             && matches!(encoded_key_range.start_bound(), Unbounded)
             && matches!(encoded_key_range.end_bound(), Unbounded)
         {
+            // If the range is unbounded and order is not required, we can create a single iterator
+            // for each continuous vnode range.
+
+            // In this case, the `vnode_hint` must be default for singletons and `None` for
+            // distributed tables.
+            assert_eq!(vnode_hint.unwrap_or(DEFAULT_VNODE), DEFAULT_VNODE);
+
             Either::Left(self.vnodes.high_ranges().map(|r| {
                 let start = VirtualNode::from_index(r.start).to_be_bytes().to_vec();
                 let end = VirtualNode::from_index(r.end).to_be_bytes().to_vec();
@@ -318,7 +324,7 @@ impl<S: StateStore> StorageTable<S> {
             )
         };
 
-        // For each range, construct an iterator.
+        // For each key range, construct an iterator.
         let iterators: Vec<_> = try_join_all(raw_key_ranges.map(|raw_key_range| {
             let prefix_hint = prefix_hint.clone();
             let wait_epoch = wait_epoch.clone();
