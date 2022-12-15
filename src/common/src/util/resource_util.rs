@@ -21,6 +21,7 @@ pub enum Controller {
     Cpu,
     Memory,
 }
+use tracing::error;
 
 // Default constant Cgroup paths and hierarchy.
 const DEFAULT_CGROUP_ROOT_HIERARCYHY: &str = "/sys/fs/cgroup";
@@ -64,7 +65,6 @@ mod runtime {
 
 pub mod memory {
     use sysinfo::{System, SystemExt};
-    use tracing::log::error;
 
     // Default paths for memory limtiations and usage for cgroup_v1 and cgroup_v2.
     const V1_MEMORY_LIMIT_HIERARCHY: &str = "/memory/memory.limit_in_bytes";
@@ -111,10 +111,10 @@ pub mod memory {
             Err(err) => {
                 match err.kind() {
                     std::io::ErrorKind::InvalidData => {
-                        error!("Invalid data error: {}", err)
+                        super::error!("Invalid data error: {}", err)
                     }
                     std::io::ErrorKind::NotFound => {
-                        error!("Cgroup interface file was not found: {}", err)
+                        super::error!("Cgroup interface file was not found: {}", err)
                     }
                     _ => panic!("Unexpected error: {}", err),
                 }
@@ -148,10 +148,10 @@ pub mod memory {
             Err(err) => {
                 match err.kind() {
                     std::io::ErrorKind::InvalidData => {
-                        error!("Invalid data error: {}", err)
+                        super::error!("Invalid data error: {}", err)
                     }
                     std::io::ErrorKind::NotFound => {
-                        error!("Cgroup interface file was not found: {}", err)
+                        super::error!("Cgroup interface file was not found: {}", err)
                     }
                     _ => panic!("Unexpected error: {}", err),
                 }
@@ -206,8 +206,6 @@ pub mod memory {
 pub mod cpu {
     use std::thread;
 
-    use tracing::log::error;
-
     use super::util;
 
     // Default constant Cgroup paths and hierarchy.
@@ -244,10 +242,10 @@ pub mod cpu {
             Err(err) => {
                 match err.kind() {
                     std::io::ErrorKind::InvalidData => {
-                        error!("Invalid data error: {}", err)
+                        super::error!("Invalid data error: {}", err)
                     }
                     std::io::ErrorKind::NotFound => {
-                        error!("Cgroup interface file was not found: {}", err)
+                        super::error!("Cgroup interface file was not found: {}", err)
                     }
                     _ => panic!("Unexpected error: {}", err),
                 };
