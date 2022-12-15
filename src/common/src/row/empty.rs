@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{assert_row, Row2};
+use super::{assert_row, Row};
 use crate::types::DatumRef;
 
 /// Row for the [`empty`] function.
@@ -21,19 +21,20 @@ pub struct Empty {
     _private: (),
 }
 
-impl Row2 for Empty {
+impl Row for Empty {
     type Iter<'a> = std::iter::Empty<DatumRef<'a>>
     where
         Self: 'a;
 
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        [][index] // for better error messages
+        panic!("index out of bounds: the len of `Empty` is 0 but the index is {index}")
     }
 
     #[inline]
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        *[].get_unchecked(index) // for better error messages
+    unsafe fn datum_at_unchecked(&self, _index: usize) -> DatumRef<'_> {
+        // Always ignore the index and return `NULL`, which is okay for undefined behavior.
+        None
     }
 
     #[inline]

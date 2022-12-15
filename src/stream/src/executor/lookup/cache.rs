@@ -15,23 +15,23 @@
 use std::collections::BTreeSet;
 
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::row::{Row, Row2, RowExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 
 use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
-    data: ExecutorCache<Row, BTreeSet<Row>>,
+    data: ExecutorCache<OwnedRow, BTreeSet<OwnedRow>>,
 }
 
 impl LookupCache {
     /// Lookup a row in cache. If not found, return `None`.
-    pub fn lookup(&mut self, key: &Row) -> Option<&BTreeSet<Row>> {
+    pub fn lookup(&mut self, key: &OwnedRow) -> Option<&BTreeSet<OwnedRow>> {
         self.data.get(key)
     }
 
     /// Update a key after lookup cache misses.
-    pub fn batch_update(&mut self, key: Row, value: impl Iterator<Item = Row>) {
+    pub fn batch_update(&mut self, key: OwnedRow, value: impl Iterator<Item = OwnedRow>) {
         self.data.push(key, value.collect());
     }
 

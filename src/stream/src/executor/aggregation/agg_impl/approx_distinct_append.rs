@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::row::{Row, Row2, RowExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::{bail, row};
 use risingwave_storage::StateStore;
@@ -112,7 +112,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
     async fn update_from_state_table(
         &mut self,
         state_table: &StateTable<S>,
-        group_key: Option<&Row>,
+        group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<()> {
         let state_row = {
             let data_iter = state_table.iter_with_pk_prefix(&group_key).await?;
@@ -141,7 +141,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
     async fn flush_state_if_needed(
         &self,
         state_table: &mut StateTable<S>,
-        group_key: Option<&Row>,
+        group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<()> {
         let list = Some(ScalarImpl::List(ListValue::new(
             serialize_buckets(

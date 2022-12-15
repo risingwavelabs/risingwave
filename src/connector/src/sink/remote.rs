@@ -22,7 +22,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Field;
 use risingwave_common::catalog::Schema;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
-use risingwave_common::row::Row2;
+use risingwave_common::row::Row;
 #[cfg(test)]
 use risingwave_common::types::DataType;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};

@@ -19,7 +19,7 @@ use itertools::Itertools;
 
 use crate::array::column::Column;
 use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk};
-use crate::row::Row2;
+use crate::row::Row;
 use crate::types::{DataType, ToDatumRef};
 
 /// A [`SlicedDataChunk`] is a [`DataChunk`] with offset.
@@ -145,10 +145,10 @@ impl DataChunkBuilder {
         self.buffered_count += 1;
     }
 
-    /// Append one row from the given [`Row2`].
+    /// Append one row from the given [`Row`].
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
     #[must_use]
-    pub fn append_one_row(&mut self, row: impl Row2) -> Option<DataChunk> {
+    pub fn append_one_row(&mut self, row: impl Row) -> Option<DataChunk> {
         assert!(self.buffered_count < self.batch_size);
         self.ensure_builders();
 
