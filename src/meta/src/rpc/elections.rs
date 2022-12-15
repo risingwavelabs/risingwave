@@ -15,6 +15,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use prost::Message;
@@ -306,15 +307,9 @@ pub async fn run_elections<S: MetaStore>(
 )> {
     // Randomize interval to reduce mitigate likelihood of simultaneous requests
     let mut rng: StdRng = SeedableRng::from_entropy();
-    let mut ticker = tokio::time::interval(
-        Duration::from_secs(lease_time_sec / 2) + Duration::from_millis(rng.gen_range(0..500)),
-    );
-    ticker.reset();
 
     // runs the initial election, determining who the first leader is
     'initial_election: loop {
-        ticker.tick().await;
-
         // every lease gets a random ID to differentiate between leases/leaders
         let mut initial_election = true;
 
@@ -337,6 +332,7 @@ pub async fn run_elections<S: MetaStore>(
             }
             Err(_) => {
                 tracing::info!("initial election failed. Repeating election");
+                thread::sleep(std::time::Duration::from_millis(500));
                 continue 'initial_election;
             }
         };
@@ -355,6 +351,11 @@ pub async fn run_elections<S: MetaStore>(
         let (leader_tx, leader_rx) = tokio::sync::watch::channel((leader_addr, is_initial_leader));
         let handle = tokio::spawn(async move {
             // runs all followup elections
+            let mut ticker = tokio::time::interval(
+                Duration::from_secs(lease_time_sec / 2)
+                    + Duration::from_millis(rng.gen_range(0..500)),
+            );
+            ticker.reset();
 
             let mut is_leader = is_initial_leader;
             let mut leader_info = initial_leader.clone();
