@@ -319,11 +319,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
         self.stream_source_core = Some(core);
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::info!(
-            "start actor {:?} with state {:?}",
-            self.ctx.id,
-            recover_state
-        );
+        tracing::info!(actor_id = self.ctx.id, state = ?recover_state, "start with state");
 
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
