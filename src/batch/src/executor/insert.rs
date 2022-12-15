@@ -238,11 +238,12 @@ mod tests {
             .enumerate()
             .map(|(i, field)| ColumnDesc::unnamed(ColumnId::new(i as _), field.data_type.clone()))
             .collect_vec();
-        let mut reader = dml_manager
+        // We must create a variable to hold this `Arc<TableSource>` here, or it will be dropped due
+        // to the `Weak` reference in `DmlManager`.
+        let reader = dml_manager
             .register_reader(table_id, &column_descs)
-            .unwrap()
-            .stream_reader_v2()
-            .into_stream_v2();
+            .unwrap();
+        let mut reader = reader.stream_reader_v2().into_stream_v2();
 
         // Insert
         let insert_executor = Box::new(InsertExecutor::new(

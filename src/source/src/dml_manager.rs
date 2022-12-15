@@ -54,7 +54,7 @@ impl DmlManager {
             Entry::Occupied(o) => o.get().upgrade().ok_or_else(|| {
                 InternalError(format!(
                     "fail to register reader for table with id {:?}",
-                    table_id
+                    table_id.table_id
                 ))
                 .into()
             }),
@@ -75,11 +75,17 @@ impl DmlManager {
         let writer = batch_dmls
             .get(table_id)
             .ok_or_else(|| {
-                InternalError(format!("fail to write into table with id {:?}", table_id))
+                InternalError(format!(
+                    "fail to write into table with id {:?}",
+                    table_id.table_id
+                ))
             })?
             .upgrade()
             .ok_or_else(|| {
-                InternalError(format!("fail to write into table with id {:?}", table_id))
+                InternalError(format!(
+                    "fail to write into table with id {:?}",
+                    table_id.table_id
+                ))
             })?;
         writer.write_chunk(chunk)
     }
