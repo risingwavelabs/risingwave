@@ -165,8 +165,7 @@ pub async fn handle_create_mv(
         .await?;
 
     if has_order_by {
-        let notice =
-r#"
+        let notice = r#"
 The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
 It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view."#;
         Ok(PgResponse::empty_result_with_notice(
