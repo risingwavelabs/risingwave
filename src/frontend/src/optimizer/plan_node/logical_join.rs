@@ -594,7 +594,7 @@ impl LogicalJoin {
         // We discovered that we cannot use a lookup join after pulling up the predicate
         // from one side and simplifying the condition. Let's use  some other join instead.
         if !new_predicate.has_eq() {
-            return None
+            return None;
         }
 
         // Rewrite the join output indices and all output indices referred to the old scan need to
