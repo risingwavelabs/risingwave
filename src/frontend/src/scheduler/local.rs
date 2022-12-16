@@ -42,7 +42,7 @@ use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::{QueryHummockSnapshot, SchedulerResult};
+use crate::scheduler::{PinnedHummockSnapshot, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
 pub struct LocalQueryStream {
@@ -71,7 +71,7 @@ pub struct LocalQueryExecution {
     query: Query,
     front_env: FrontendEnv,
     // The snapshot will be released when LocalQueryExecution is dropped.
-    snapshot: QueryHummockSnapshot,
+    snapshot: PinnedHummockSnapshot,
     auth_context: Arc<AuthContext>,
 }
 
@@ -80,7 +80,7 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        snapshot: QueryHummockSnapshot,
+        snapshot: PinnedHummockSnapshot,
         auth_context: Arc<AuthContext>,
     ) -> Self {
         Self {
@@ -115,7 +115,7 @@ impl LocalQueryExecution {
             &task_id,
             context,
             // TODO: Add support to use current epoch when needed
-            self.snapshot.get_committed_epoch(),
+            self.snapshot.get_batch_query_epoch(),
         );
         let executor = executor.build().await?;
 
@@ -246,7 +246,7 @@ impl LocalQueryExecution {
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
                             // TODO: Add support to use current epoch when needed
-                            epoch: self.snapshot.get_committed_epoch(),
+                            epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
@@ -279,7 +279,7 @@ impl LocalQueryExecution {
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
                             // TODO: Add support to use current epoch when needed
-                            epoch: self.snapshot.get_committed_epoch(),
+                            epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         // NOTE: select a random work node here.
                         let worker_node = self.front_env.worker_node_manager().next_random()?;
@@ -312,7 +312,7 @@ impl LocalQueryExecution {
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
                         // TODO: Add support to use current epoch when needed
-                        epoch: self.snapshot.get_committed_epoch(),
+                        epoch: Some(self.snapshot.get_batch_query_epoch()),
                     };
 
                     let workers = if second_stage.parallelism == 1 {

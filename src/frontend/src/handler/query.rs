@@ -20,7 +20,6 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use postgres_types::FromSql;
-use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
@@ -36,7 +35,7 @@ use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
-    LocalQueryExecution, LocalQueryStream, QueryHummockSnapshot,
+    LocalQueryExecution, LocalQueryStream, PinnedHummockSnapshot,
 };
 use crate::session::SessionImpl;
 use crate::PlanRef;
@@ -134,16 +133,9 @@ pub async fn handle_query(
         let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
         let query_id = query.query_id().clone();
         let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
-        let mut query_snapshot = QueryHummockSnapshot::FrontendPinned(pinned_snapshot);
+        let mut query_snapshot = PinnedHummockSnapshot::FrontendPinned(pinned_snapshot);
         if let Some(query_epoch) = session.config().get_query_epoch() {
-            if query_epoch.0 > query_snapshot.get_committed_epoch() {
-                bail!(
-                    "cannot query with future epoch: {}, current committed epoch: {}",
-                    query_epoch.0,
-                    query_snapshot.get_committed_epoch()
-                );
-            }
-            query_snapshot = QueryHummockSnapshot::Other(query_epoch);
+            query_snapshot = PinnedHummockSnapshot::Other(query_epoch);
         }
         match query_mode {
             QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
@@ -235,7 +227,7 @@ fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
 pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
-    pinned_snapshot: QueryHummockSnapshot,
+    pinned_snapshot: PinnedHummockSnapshot,
 ) -> Result<DistributedQueryStream> {
     let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
     let query_manager = session.env().query_manager().clone();
@@ -249,7 +241,7 @@ pub async fn distribute_execute(
 pub async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
-    pinned_snapshot: QueryHummockSnapshot,
+    pinned_snapshot: PinnedHummockSnapshot,
 ) -> Result<LocalQueryStream> {
     let front_env = session.env();
 

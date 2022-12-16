@@ -184,7 +184,7 @@ impl StateStore for HummockStorage {
                     );
                     return Ok(());
                 }
-                HummockReadEpoch::NoWait(_) => return Ok(()),
+                HummockReadEpoch::NoWait(_) | HummockReadEpoch::Backup(_) => return Ok(()),
             };
             if wait_epoch == HummockEpoch::MAX {
                 panic!("epoch should not be u64::MAX");

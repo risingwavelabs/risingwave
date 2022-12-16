@@ -36,7 +36,7 @@ use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    ExecutionContextRef, QueryHummockSnapshot, SchedulerError, SchedulerResult,
+    ExecutionContextRef, PinnedHummockSnapshot, SchedulerError, SchedulerResult,
 };
 
 /// Message sent to a `QueryRunner` to control its execution.
@@ -114,7 +114,7 @@ impl QueryExecution {
         &self,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeManagerRef,
-        pinned_snapshot: QueryHummockSnapshot,
+        pinned_snapshot: PinnedHummockSnapshot,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
@@ -188,7 +188,7 @@ impl QueryExecution {
 
     fn gen_stage_executions(
         &self,
-        pinned_snapshot: &QueryHummockSnapshot,
+        pinned_snapshot: &PinnedHummockSnapshot,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeManagerRef,
         compute_client_pool: ComputeClientPoolRef,
@@ -208,7 +208,7 @@ impl QueryExecution {
 
             let stage_exec = Arc::new(StageExecution::new(
                 // TODO: Add support to use current epoch when needed
-                pinned_snapshot.get_committed_epoch(),
+                pinned_snapshot.get_batch_query_epoch(),
                 self.query.stage_graph.stages[&stage_id].clone(),
                 worker_node_manager.clone(),
                 self.shutdown_tx.clone(),
@@ -224,7 +224,7 @@ impl QueryExecution {
 }
 
 impl QueryRunner {
-    async fn run(mut self, pinned_snapshot: QueryHummockSnapshot) {
+    async fn run(mut self, pinned_snapshot: PinnedHummockSnapshot) {
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {

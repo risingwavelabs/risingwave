@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::HummockSnapshot;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{channel as once_channel, Sender as Callback};
@@ -32,25 +33,34 @@ use crate::scheduler::{SchedulerError, SchedulerResult};
 const UNPIN_INTERVAL_SECS: u64 = 10;
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
-pub enum QueryHummockSnapshot {
+pub enum PinnedHummockSnapshot {
     FrontendPinned(HummockSnapshotGuard),
     /// Other arbitrary epoch, e.g. user specified.
     /// Availability and consistency of underlying data should be guaranteed accordingly.
     Other(Epoch),
 }
 
-impl QueryHummockSnapshot {
-    pub fn get_committed_epoch(&self) -> u64 {
+impl PinnedHummockSnapshot {
+    pub fn get_batch_query_epoch(&self) -> BatchQueryEpoch {
         match self {
-            QueryHummockSnapshot::FrontendPinned(s) => s.snapshot.committed_epoch,
-            QueryHummockSnapshot::Other(s) => s.0,
+            PinnedHummockSnapshot::FrontendPinned(s) => {
+                // extend Epoch::Current here
+                BatchQueryEpoch {
+                    epoch: Some(batch_query_epoch::Epoch::Committed(
+                        s.snapshot.committed_epoch,
+                    )),
+                }
+            }
+            PinnedHummockSnapshot::Other(e) => BatchQueryEpoch {
+                epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),
+            },
         }
     }
 }
 
-impl From<HummockSnapshotGuard> for QueryHummockSnapshot {
+impl From<HummockSnapshotGuard> for PinnedHummockSnapshot {
     fn from(s: HummockSnapshotGuard) -> Self {
-        QueryHummockSnapshot::FrontendPinned(s)
+        PinnedHummockSnapshot::FrontendPinned(s)
     }
 }
 
