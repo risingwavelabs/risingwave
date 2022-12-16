@@ -20,7 +20,7 @@ use risingwave_common::array::{
     Array, ArrayBuilder, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListRef, ListValue,
     Utf8Array,
 };
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -147,7 +147,7 @@ impl Expression for RegexpMatchExpression {
         Ok(Arc::new(output.finish().into()))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let text = self.child.eval_row(input)?;
         Ok(if let Some(ScalarImpl::Utf8(text)) = text {
             self.match_one(Some(&text)).map(Into::into)

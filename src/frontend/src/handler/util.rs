@@ -26,7 +26,7 @@ use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::Result as RwResult;
-use risingwave_common::row::Row2;
+use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 
 pin_project! {

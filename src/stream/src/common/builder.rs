@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
-use risingwave_common::row::Row2;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
 
 type IndexMappings = Vec<(usize, usize)>;
@@ -124,8 +124,8 @@ impl StreamChunkBuilder {
     pub fn append_row(
         &mut self,
         op: Op,
-        row_update: impl Row2,
-        row_matched: impl Row2,
+        row_update: impl Row,
+        row_matched: impl Row,
     ) -> Option<StreamChunk> {
         self.ops.push(op);
         for &(update_idx, output_idx) in &self.update_to_output {
@@ -142,7 +142,7 @@ impl StreamChunkBuilder {
     ///
     /// A [`StreamChunk`] will be returned when `size == capacity`
     #[must_use]
-    pub fn append_row_update(&mut self, op: Op, row_update: impl Row2) -> Option<StreamChunk> {
+    pub fn append_row_update(&mut self, op: Op, row_update: impl Row) -> Option<StreamChunk> {
         self.ops.push(op);
         for &(update_idx, output_idx) in &self.update_to_output {
             self.column_builders[output_idx].append_datum(row_update.datum_at(update_idx));
@@ -158,7 +158,7 @@ impl StreamChunkBuilder {
     ///
     /// A [`StreamChunk`] will be returned when `size == capacity`
     #[must_use]
-    pub fn append_row_matched(&mut self, op: Op, row_matched: impl Row2) -> Option<StreamChunk> {
+    pub fn append_row_matched(&mut self, op: Op, row_matched: impl Row) -> Option<StreamChunk> {
         self.ops.push(op);
         for &(_update_idx, output_idx) in &self.update_to_output {
             self.column_builders[output_idx].append_datum(Datum::None);

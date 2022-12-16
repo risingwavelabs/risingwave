@@ -30,7 +30,7 @@ pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
 pub use crate::constants::hummock;
 use crate::error::Result;
-use crate::row::Row;
+use crate::row::OwnedRow;
 
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
@@ -49,7 +49,7 @@ pub const NON_RESERVED_PG_CATALOG_TABLE_ID: i32 = 1001;
 /// The local system catalog reader in the frontend node.
 #[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {
-    async fn read_table(&self, table_id: &TableId) -> Result<Vec<Row>>;
+    async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>>;
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
