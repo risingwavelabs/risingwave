@@ -324,6 +324,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let max_wait_barrier_time_ms = self.expected_barrier_latency_ms as u128 * 5;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
+        let mut timer: Option<Instant> = None;
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
@@ -332,6 +333,12 @@ impl<S: StateStore> SourceExecutor<S> {
                     if self_paused {
                         stream.resume_source();
                         self_paused = false;
+
+                        tracing::warn!(
+                            "actor_id = {:?} resume source, after {:?}",
+                            self.ctx.id,
+                            timer.take().unwrap().elapsed().as_millis()
+                        );
                     }
                     let epoch = barrier.epoch;
 
@@ -383,6 +390,12 @@ impl<S: StateStore> SourceExecutor<S> {
                         // chunks.
                         self_paused = true;
                         stream.pause_source();
+                        timer = Some(Instant::now());
+                        tracing::warn!(
+                            "actor_id = {:?} pause source, after {:?}",
+                            self.ctx.id,
+                            last_barrier_time.elapsed().as_millis()
+                        );
                     }
                     if let Some(mapping) = split_offset_mapping {
                         let state: HashMap<_, _> = mapping

@@ -42,6 +42,7 @@ pub struct StreamingMetrics {
     pub actor_out_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
+    pub source_barrier_interval: GenericGaugeVec<AtomicF64>,
     pub exchange_recv_size: GenericCounterVec<AtomicU64>,
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
 
@@ -94,6 +95,13 @@ impl StreamingMetrics {
             registry
         )
         .unwrap();
+
+        let source_barrier_interval = register_gauge_vec_with_registry!(
+            "stream_source_barrier_interval",
+            "The interval between two barriers from source",
+            &["source_id", "source_name", "actor_id"],
+            registry
+        ).unwrap();
 
         let actor_execution_time = register_gauge_vec_with_registry!(
             "stream_actor_actor_execution_time",
@@ -405,6 +413,7 @@ impl StreamingMetrics {
             actor_out_record_cnt,
             actor_sampled_deserialize_duration_ns,
             source_output_row_count,
+            source_barrier_interval,
             exchange_recv_size,
             exchange_frag_recv_size,
             join_lookup_miss_count,

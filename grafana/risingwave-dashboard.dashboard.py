@@ -910,6 +910,16 @@ def section_streaming(panels):
             ],
         ),
         panels.timeseries_latency(
+            "Source barrier interval",
+            "",
+            quantile(
+                lambda quantile, legend: panels.target(
+                    f"histogram_quantile({quantile}, sum(rate({metric('stream_source_barrier_interval')}[$__rate_interval])) by (le))",
+                    "source_barrier_interval_avg",
+                ), [50, 90, 99, 999, "max"]
+            ),
+        ),
+        panels.timeseries_latency(
             "Barrier Latency",
             "",
             quantile(
