@@ -102,6 +102,7 @@ pub mod memory {
         if !super::runtime::is_linux_machine()
             || !super::runtime::is_running_in_container()
             || !super::util::is_controller_activated(super::Controller::Memory)
+            || !super::util::cgroup_exists()
         {
             return get_system_memory_used();
         };
@@ -139,6 +140,7 @@ pub mod memory {
         if !super::runtime::is_linux_machine()
             || !super::runtime::is_running_in_container()
             || !super::util::is_controller_activated(super::Controller::Memory)
+            || !super::util::cgroup_exists()
         {
             return get_system_memory();
         };
