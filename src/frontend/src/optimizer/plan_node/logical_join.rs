@@ -586,11 +586,6 @@ impl LogicalJoin {
             .and(scan_predicate.rewrite_expr(&mut scan_predicate_rewriter));
 
         let new_join_on = new_eq_cond.and(new_other_cond);
-
-        if new_join_on.always_false() {
-            return None;
-        }
-
         let new_predicate = EqJoinPredicate::create(
             left_schema_len,
             new_scan.base.schema().len(),
