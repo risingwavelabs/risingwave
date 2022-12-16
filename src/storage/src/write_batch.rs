@@ -88,7 +88,7 @@ impl<'a, S: StateStoreWrite> WriteBatch<'a, S> {
     }
 
     /// Preprocesses the batch to make it sorted. It returns `false` if duplicate keys are found.
-    pub fn preprocess(&mut self) -> StorageResult<()> {
+    fn preprocess(&mut self) -> StorageResult<()> {
         let original_length = self.batch.len();
         self.batch.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
         self.batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
