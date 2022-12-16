@@ -15,7 +15,7 @@
 use std::sync::LazyLock;
 
 use itertools::Itertools;
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
@@ -67,11 +67,11 @@ pub const PG_TYPE_DATA: &[(i32, &str)] = &[
     (1700, "numeric"),
 ];
 
-pub static PG_TYPE_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(|| {
+pub static PG_TYPE_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(|| {
     PG_TYPE_DATA
         .iter()
         .map(|(oid, name)| {
-            Row::new(vec![
+            OwnedRow::new(vec![
                 Some(ScalarImpl::Int32(*oid)),
                 Some(ScalarImpl::Utf8((*name).into())),
                 Some(ScalarImpl::Int32(0)),

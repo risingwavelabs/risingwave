@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
 use risingwave_common::error::Result;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::scan_range::ScanRange;
@@ -213,7 +213,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-
+        let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(
                 state_store,
@@ -225,6 +225,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 distribution,
                 table_option,
                 value_indices,
+                prefix_hint_len,
             );
 
             let inner_side_builder = InnerSideExecutorBuilder::new(
@@ -314,7 +315,7 @@ struct InnerSideExecutorBuilder<S: StateStore> {
     inner_side_key_types: Vec<DataType>,
     lookup_prefix_len: usize,
     epoch: u64,
-    row_list: Vec<Row>,
+    row_list: Vec<OwnedRow>,
     table: StorageTable<S>,
     chunk_size: usize,
 }
@@ -325,7 +326,7 @@ impl<S: StateStore> InnerSideExecutorBuilder<S> {
         inner_side_key_types: Vec<DataType>,
         lookup_prefix_len: usize,
         epoch: u64,
-        row_list: Vec<Row>,
+        row_list: Vec<OwnedRow>,
         table: StorageTable<S>,
         chunk_size: usize,
     ) -> Self {
@@ -373,13 +374,13 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
                     Box::new(LiteralExpression::new(outer_type.clone(), datum.clone())),
                 )?;
 
-                cast_expr.eval_row(Row::empty())?
+                cast_expr.eval_row(OwnedRow::empty())?
             };
 
             scan_range.eq_conds.push(datum);
         }
 
-        let pk_prefix = Row::new(scan_range.eq_conds);
+        let pk_prefix = OwnedRow::new(scan_range.eq_conds);
 
         if self.lookup_prefix_len == self.table.pk_indices().len() {
             let row = self
