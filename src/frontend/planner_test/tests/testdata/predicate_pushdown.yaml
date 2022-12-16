@@ -62,19 +62,19 @@
 - name: filter hop transpose with non-trivial output-indices
   sql: |
     create table t(v1 int, v2 int, v3 int, v4 int, ts date);
-    with cte as (select window_end, v1, v2 from hop(t, ts, interval '1' day, interval '3' day))
-    select * from cte where window_end > date '2022-01-01' AND v1=10 AND v2 > 20
+    with cte as (select window_end, v4, v2 from hop(t, ts, interval '1' day, interval '3' day))
+    select * from cte where window_end > date '2022-01-01' AND v4=10 AND v2 > 20
   logical_plan: |
-    LogicalProject { exprs: [window_end, t.v1, t.v2] }
-    └─LogicalFilter { predicate: (window_end > '2022-01-01':Varchar::Date) AND (t.v1 = 10:Int32) AND (t.v2 > 20:Int32) }
-      └─LogicalProject { exprs: [window_end, t.v1, t.v2] }
+    LogicalProject { exprs: [window_end, t.v4, t.v2] }
+    └─LogicalFilter { predicate: (window_end > '2022-01-01':Varchar::Date) AND (t.v4 = 10:Int32) AND (t.v2 > 20:Int32) }
+      └─LogicalProject { exprs: [window_end, t.v4, t.v2] }
         └─LogicalHopWindow { time_col: t.ts, slide: 1 day, size: 3 days, output: all }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts, t._row_id] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [window_end, t.v1, t.v2] }
+    LogicalProject { exprs: [window_end, t.v4, t.v2] }
     └─LogicalFilter { predicate: (window_end > '2022-01-01':Varchar::Date) }
-      └─LogicalHopWindow { time_col: t.ts, slide: 1 day, size: 3 days, output: [t.v1, t.v2, window_end] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.ts], predicate: (t.v1 = 10:Int32) AND (t.v2 > 20:Int32) }
+      └─LogicalHopWindow { time_col: t.ts, slide: 1 day, size: 3 days, output: [t.v2, t.v4, window_end] }
+        └─LogicalScan { table: t, columns: [t.v2, t.v4, t.ts], predicate: (t.v4 = 10:Int32) AND (t.v2 > 20:Int32) }
 - name: filter union transpose
   sql: |
     create table t1 (v1 int, v2 int, v3 int);
