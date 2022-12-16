@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -307,12 +308,9 @@ impl<S: StateStore> StorageTable<S> {
             assert_eq!(vnode_hint.unwrap_or(DEFAULT_VNODE), DEFAULT_VNODE);
 
             Either::Left(self.vnodes.high_ranges().map(|r| {
-                let start = r
-                    .start_bound()
-                    .map(|&v| VirtualNode::from_index(v).to_be_bytes().to_vec());
-                let end = r
-                    .end_bound()
-                    .map(|&v| VirtualNode::from_index(v).to_be_bytes().to_vec());
+                let start = Included(VirtualNode::from_index(*r.start()).to_be_bytes().to_vec());
+                let end = end_bound_of_prefix(&VirtualNode::from_index(*r.end()).to_be_bytes());
+                assert_matches!(end, Excluded(_) | Unbounded);
                 (start, end)
             }))
         } else {
