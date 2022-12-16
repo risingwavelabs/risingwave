@@ -84,9 +84,9 @@ query I rowsort
 SELECT s FROM structs;
 ----
 (1,2)
-NULL
-(NULL,2)
 (1,NULL)
+(NULL,2)
+NULL
 
 statement ok
 DROP TABLE structs;
