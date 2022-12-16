@@ -156,7 +156,7 @@ steps:
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
-    command: "KILL_RATE=1.0 timeout 14m ci/scripts/deterministic-recovery-test.sh"
+    command: "KILL_RATE=1.0 ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -165,7 +165,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "misc check"

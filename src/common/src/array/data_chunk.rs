@@ -25,12 +25,12 @@ use crate::array::data_chunk_iter::RowRef;
 use crate::array::{ArrayBuilderImpl, StructValue};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::hash::HashCode;
-use crate::row::{Row, Row2};
+use crate::row::Row;
 use crate::types::struct_type::StructType;
 use crate::types::to_text::ToText;
 use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
-use crate::util::value_encoding::serialize_datum;
+use crate::util::value_encoding::serialize_datum_into;
 
 /// `DataChunk` is a collection of arrays with visibility mask.
 #[derive(Clone, PartialEq)]
@@ -65,7 +65,7 @@ impl DataChunk {
     }
 
     /// Build a `DataChunk` with rows.
-    pub fn from_rows(rows: &[Row], data_types: &[DataType]) -> Self {
+    pub fn from_rows(rows: &[impl Row], data_types: &[DataType]) -> Self {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(1))
@@ -341,7 +341,7 @@ impl DataChunk {
         table.load_preset("||--+-++|    ++++++\n");
         for row in self.rows() {
             let cells: Vec<_> = row
-                .values()
+                .iter()
                 .map(|v| {
                     match v {
                         None => "".to_owned(), // null
@@ -411,7 +411,7 @@ impl DataChunk {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
                         unsafe {
                             if vis.is_set_unchecked(i) {
-                                serialize_datum(c.value_at_unchecked(i), buffer);
+                                serialize_datum_into(c.value_at_unchecked(i), buffer);
                             }
                         }
                     }
@@ -426,7 +426,7 @@ impl DataChunk {
                     for (i, buffer) in buffers.iter_mut().enumerate() {
                         // SAFETY(value_at_unchecked): the idx is always in bound.
                         unsafe {
-                            serialize_datum(c.value_at_unchecked(i), buffer);
+                            serialize_datum_into(c.value_at_unchecked(i), buffer);
                         }
                     }
                 }
@@ -640,6 +640,7 @@ impl DataChunkTestExt for DataChunk {
 mod tests {
 
     use crate::array::*;
+    use crate::row::Row;
     use crate::{column, column_nonnull};
 
     #[test]
@@ -716,7 +717,7 @@ mod tests {
         let chunk: DataChunk = DataChunk::new(columns, length);
         for row in chunk.rows() {
             for i in 0..num_of_columns {
-                let val = row.value_at(i).unwrap();
+                let val = row.datum_at(i).unwrap();
                 assert_eq!(val.into_int32(), i as i32);
             }
         }

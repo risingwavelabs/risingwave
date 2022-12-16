@@ -16,6 +16,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::AggKind;
 use risingwave_storage::StateStore;
@@ -30,13 +31,13 @@ pub trait TableStateImpl<S: StateStore>: Send + Sync + 'static {
     async fn update_from_state_table(
         &mut self,
         state_table: &StateTable<S>,
-        group_key: Option<&Row>,
+        group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<()>;
 
     async fn flush_state_if_needed(
         &self,
         state_table: &mut StateTable<S>,
-        group_key: Option<&Row>,
+        group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<()>;
 
     fn apply_batch(
@@ -69,7 +70,7 @@ impl<S: StateStore> TableState<S> {
     pub async fn new(
         agg_call: &AggCall,
         state_table: &StateTable<S>,
-        group_key: Option<&Row>,
+        group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<Self> {
         let mut this = Self {
             arg_indices: agg_call.args.val_indices().to_vec(),
@@ -108,7 +109,7 @@ impl<S: StateStore> TableState<S> {
     pub async fn flush_state_if_needed(
         &self,
         state_table: &mut StateTable<S>,
-        group_key: Option<&Row>,
+        group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<()> {
         self.inner
             .flush_state_if_needed(state_table, group_key)
