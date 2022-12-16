@@ -52,7 +52,7 @@ mod tests {
     use std::str::FromStr;
 
     use risingwave_common::array::Op;
-    use risingwave_common::row::Row2;
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
     use risingwave_expr::vector_op::cast::str_to_timestamp;
 

@@ -52,7 +52,7 @@ pub use pg_user::*;
 pub use pg_views::*;
 use risingwave_common::array::ListValue;
 use risingwave_common::error::Result;
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::ScalarImpl;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_pb::user::UserInfo;
@@ -130,15 +130,15 @@ fn get_acl_items(
 }
 
 impl SysCatalogReaderImpl {
-    pub(super) fn read_types(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_types(&self) -> Result<Vec<OwnedRow>> {
         Ok(PG_TYPE_DATA_ROWS.clone())
     }
 
-    pub(super) fn read_cast(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_cast(&self) -> Result<Vec<OwnedRow>> {
         Ok(PG_CAST_DATA_ROWS.clone())
     }
 
-    pub(super) fn read_namespace(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_namespace(&self) -> Result<Vec<OwnedRow>> {
         let schemas = self
             .catalog_reader
             .read_guard()
@@ -149,7 +149,7 @@ impl SysCatalogReaderImpl {
         Ok(schemas
             .iter()
             .map(|schema| {
-                Row::new(vec![
+                OwnedRow::new(vec![
                     Some(ScalarImpl::Int32(schema.id as i32)),
                     Some(ScalarImpl::Utf8(schema.name.clone().into())),
                     Some(ScalarImpl::Int32(schema.owner as i32)),
@@ -161,13 +161,13 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    pub(super) fn read_user_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_user_info(&self) -> Result<Vec<OwnedRow>> {
         let reader = self.user_info_reader.read_guard();
         let users = reader.get_all_users();
         Ok(users
             .iter()
             .map(|user| {
-                Row::new(vec![
+                OwnedRow::new(vec![
                     Some(ScalarImpl::Int32(user.id as i32)),
                     Some(ScalarImpl::Utf8(user.name.clone().into())),
                     Some(ScalarImpl::Bool(user.can_create_db)),
@@ -180,26 +180,26 @@ impl SysCatalogReaderImpl {
     }
 
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
-    pub(super) fn read_opclass_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_opclass_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
     }
 
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
-    pub(super) fn read_operator_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_operator_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
     }
 
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
-    pub(super) fn read_am_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_am_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
     }
 
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
-    pub(super) fn read_collation_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_collation_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
     }
 
-    pub(super) fn read_class_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_class_info(&self) -> Result<Vec<OwnedRow>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
         let schema_infos = reader.get_all_schema_info(&self.auth_context.database)?;
@@ -213,7 +213,7 @@ impl SysCatalogReaderImpl {
                 let rows = schema
                     .iter_table()
                     .map(|table| {
-                        Row::new(vec![
+                        OwnedRow::new(vec![
                             Some(ScalarImpl::Int32(table.id.table_id() as i32)),
                             Some(ScalarImpl::Utf8(table.name.clone().into())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
@@ -226,7 +226,7 @@ impl SysCatalogReaderImpl {
                 let mvs = schema
                     .iter_mv()
                     .map(|mv| {
-                        Row::new(vec![
+                        OwnedRow::new(vec![
                             Some(ScalarImpl::Int32(mv.id.table_id() as i32)),
                             Some(ScalarImpl::Utf8(mv.name.clone().into())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
@@ -239,7 +239,7 @@ impl SysCatalogReaderImpl {
                 let indexes = schema
                     .iter_index()
                     .map(|index| {
-                        Row::new(vec![
+                        OwnedRow::new(vec![
                             Some(ScalarImpl::Int32(index.index_table.id.table_id as i32)),
                             Some(ScalarImpl::Utf8(index.name.clone().into())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
@@ -252,7 +252,7 @@ impl SysCatalogReaderImpl {
                 let sources = schema
                     .iter_source()
                     .map(|source| {
-                        Row::new(vec![
+                        OwnedRow::new(vec![
                             Some(ScalarImpl::Int32(source.id as i32)),
                             Some(ScalarImpl::Utf8(source.name.clone().into())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
@@ -265,7 +265,7 @@ impl SysCatalogReaderImpl {
                 let sys_tables = schema
                     .iter_system_tables()
                     .map(|table| {
-                        Row::new(vec![
+                        OwnedRow::new(vec![
                             Some(ScalarImpl::Int32(table.id.table_id() as i32)),
                             Some(ScalarImpl::Utf8(table.name.clone().into())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
@@ -278,7 +278,7 @@ impl SysCatalogReaderImpl {
                 let views = schema
                     .iter_view()
                     .map(|view| {
-                        Row::new(vec![
+                        OwnedRow::new(vec![
                             Some(ScalarImpl::Int32(view.id as i32)),
                             Some(ScalarImpl::Utf8(view.name().into())),
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
@@ -299,14 +299,14 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    pub(super) fn read_index_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_index_info(&self) -> Result<Vec<OwnedRow>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
 
         Ok(schemas
             .flat_map(|schema| {
                 schema.iter_index().map(|index| {
-                    Row::new(vec![
+                    OwnedRow::new(vec![
                         Some(ScalarImpl::Int32(index.id.index_id() as i32)),
                         Some(ScalarImpl::Int32(index.primary_table.id.table_id() as i32)),
                         Some(ScalarImpl::Int16(index.original_columns.len() as i16)),
@@ -323,7 +323,7 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    pub(super) async fn read_mviews_info(&self) -> Result<Vec<Row>> {
+    pub(super) async fn read_mviews_info(&self) -> Result<Vec<OwnedRow>> {
         let mut table_ids = Vec::new();
         {
             let reader = self.catalog_reader.read_guard();
@@ -348,7 +348,7 @@ impl SysCatalogReaderImpl {
                 .iter_mv()
                 .for_each(|t| {
                     if let Some(fragments) = table_fragments.get(&t.id.table_id) {
-                        rows.push(Row::new(vec![
+                        rows.push(OwnedRow::new(vec![
                             Some(ScalarImpl::Utf8(schema.clone().into())),
                             Some(ScalarImpl::Utf8(t.name.clone().into())),
                             Some(ScalarImpl::Int32(t.owner as i32)),
@@ -363,7 +363,7 @@ impl SysCatalogReaderImpl {
         Ok(rows)
     }
 
-    pub(super) fn read_views_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_views_info(&self) -> Result<Vec<OwnedRow>> {
         // TODO(zehua): solve the deadlock problem.
         // Get two read locks. The order must be the same as
         // `FrontendObserverNode::handle_initialization_notification`.
@@ -374,7 +374,7 @@ impl SysCatalogReaderImpl {
         Ok(schemas
             .flat_map(|schema| {
                 schema.iter_view().map(|view| {
-                    Row::new(vec![
+                    OwnedRow::new(vec![
                         Some(ScalarImpl::Utf8(schema.name().into())),
                         Some(ScalarImpl::Utf8(view.name().into())),
                         Some(ScalarImpl::Utf8(
@@ -391,7 +391,7 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    pub(super) fn read_pg_attribute(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_pg_attribute(&self) -> Result<Vec<OwnedRow>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
 
@@ -399,7 +399,7 @@ impl SysCatalogReaderImpl {
             .flat_map(|schema| {
                 let view_rows = schema.iter_view().flat_map(|view| {
                     view.columns.iter().enumerate().map(|(index, column)| {
-                        Row::new(vec![
+                        OwnedRow::new(vec![
                             Some(ScalarImpl::Int32(view.id as i32)),
                             Some(ScalarImpl::Utf8(column.name.clone().into())),
                             Some(ScalarImpl::Int32(column.data_type().to_oid())),
@@ -419,7 +419,7 @@ impl SysCatalogReaderImpl {
                             .enumerate()
                             .filter(|(_, column)| !column.is_hidden())
                             .map(|(index, column)| {
-                                Row::new(vec![
+                                OwnedRow::new(vec![
                                     Some(ScalarImpl::Int32(table.id.table_id() as i32)),
                                     Some(ScalarImpl::Utf8(column.name().into())),
                                     Some(ScalarImpl::Int32(column.data_type().to_oid())),
@@ -434,7 +434,7 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    pub(super) fn read_database_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_database_info(&self) -> Result<Vec<OwnedRow>> {
         let reader = self.catalog_reader.read_guard();
         let databases = reader.get_all_database_names();
 
@@ -444,7 +444,7 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    pub(super) fn read_description_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_description_info(&self) -> Result<Vec<OwnedRow>> {
         let reader = self.catalog_reader.read_guard();
         let schemas = reader.iter_schemas(&self.auth_context.database)?;
 
@@ -491,11 +491,11 @@ impl SysCatalogReaderImpl {
             .collect_vec())
     }
 
-    pub(super) fn read_settings_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_settings_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(PG_SETTINGS_DATA_ROWS.clone())
     }
 
-    pub(super) fn read_keywords_info(&self) -> Result<Vec<Row>> {
+    pub(super) fn read_keywords_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(PG_KEYWORDS_DATA_ROWS.clone())
     }
 }

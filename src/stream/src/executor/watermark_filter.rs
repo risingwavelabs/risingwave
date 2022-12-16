@@ -19,7 +19,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{Row, Row2};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{bail, row};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
@@ -246,7 +246,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
     ) -> StreamExecutorResult<ScalarImpl> {
         let watermark_iter_futures = (0..VirtualNode::COUNT).map(|vnode| async move {
             let pk = row::once(Some(ScalarImpl::Int16(vnode as _)));
-            let watermark_row: Option<Row> = table.get_row(pk).await?;
+            let watermark_row: Option<OwnedRow> = table.get_row(pk).await?;
             match watermark_row {
                 Some(row) => {
                     if row.len() == 1 {

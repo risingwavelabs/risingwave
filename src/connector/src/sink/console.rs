@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use itertools::join;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row2;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
 
 use crate::sink::{Result, Sink};
