@@ -22,6 +22,7 @@ use risingwave_pb::meta::MetaLeaderInfo;
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::meta::MetaLeaseInfo;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
+use tokio::sync::watch::Receiver;
 
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
@@ -55,7 +56,7 @@ where
     /// idle status manager.
     idle_manager: IdleManagerRef,
 
-    info: MetaLeaderInfo,
+    leader_rx: Receiver<(MetaLeaderInfo, bool)>,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -133,7 +134,11 @@ impl<S> MetaSrvEnv<S>
 where
     S: MetaStore,
 {
-    pub async fn new(opts: MetaOpts, meta_store: Arc<S>, info: MetaLeaderInfo) -> Self {
+    pub async fn new(
+        opts: MetaOpts,
+        meta_store: Arc<S>,
+        leader_rx: Receiver<(MetaLeaderInfo, bool)>,
+    ) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
@@ -146,7 +151,7 @@ where
             notification_manager,
             stream_client_pool,
             idle_manager,
-            info,
+            leader_rx,
             opts: opts.into(),
         }
     }
@@ -192,7 +197,7 @@ where
     }
 
     pub fn get_leader_info(&self) -> MetaLeaderInfo {
-        self.info.clone()
+        self.leader_rx.borrow().0.clone()
     }
 }
 
@@ -209,6 +214,8 @@ impl MetaSrvEnv<MemStore> {
             lease_id: 0,
             node_address: "".to_string(),
         };
+        let (_, leader_rx) = tokio::sync::watch::channel((leader_info.clone(), true));
+
         let lease_info = MetaLeaseInfo {
             leader: Some(leader_info.clone()),
             lease_register_time: 0,
@@ -242,7 +249,7 @@ impl MetaSrvEnv<MemStore> {
             notification_manager,
             stream_client_pool,
             idle_manager,
-            info: leader_info,
+            leader_rx,
             opts,
         }
     }

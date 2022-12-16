@@ -21,7 +21,6 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use prost::Message;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch::Receiver;
@@ -48,14 +47,12 @@ struct ElectionResult {
     pub is_leader: bool,
 }
 
-impl ElectionResult {
-    pub fn get_leader_addr(&self) -> HostAddr {
-        self.meta_leader_info
-            .node_address
-            .parse::<HostAddr>()
-            .expect("invalid leader addr")
-    }
-}
+// TODO: remove
+// impl ElectionResult {
+//     pub fn get_leader_addr(&self) -> HostAddr {
+//         HostAddr::from(self.meta_leader_info.clone())
+//     }
+// }
 
 /// Runs for election in an attempt to become leader
 ///
@@ -299,7 +296,7 @@ pub async fn run_elections<S: MetaStore>(
     MetaLeaderInfo,
     JoinHandle<()>,
     Sender<()>,
-    Receiver<(HostAddr, bool)>,
+    Receiver<(MetaLeaderInfo, bool)>,
 )> {
     // Randomize interval to reduce mitigate likelihood of simultaneous requests
     let mut rng: StdRng = SeedableRng::from_entropy();
@@ -317,14 +314,10 @@ pub async fn run_elections<S: MetaStore>(
             gen_rand_lease_id(addr.as_str()),
         )
         .await;
-        let (leader_addr, initial_leader, is_initial_leader) = match election_result {
+        let (initial_leader, is_initial_leader) = match election_result {
             Ok(elect_result) => {
                 tracing::info!("initial election finished");
-                (
-                    elect_result.get_leader_addr(),
-                    elect_result.meta_leader_info,
-                    elect_result.is_leader,
-                )
+                (elect_result.meta_leader_info, elect_result.is_leader)
             }
             Err(_) => {
                 tracing::info!("initial election failed. Repeating election");
@@ -344,7 +337,8 @@ pub async fn run_elections<S: MetaStore>(
 
         // define all follow up elections and terms in handle
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let (leader_tx, leader_rx) = tokio::sync::watch::channel((leader_addr, is_initial_leader));
+        let (leader_tx, leader_rx) =
+            tokio::sync::watch::channel((initial_leader.clone(), is_initial_leader));
         let handle = tokio::spawn(async move {
             // runs all followup elections
             let mut ticker = tokio::time::interval(
@@ -355,12 +349,10 @@ pub async fn run_elections<S: MetaStore>(
 
             let mut is_leader = is_initial_leader;
             let mut leader_info = initial_leader.clone();
-            let n_addr = initial_leader.node_address.as_str();
-            let mut leader_addr = n_addr.parse::<HostAddr>().unwrap();
             'election: loop {
                 // Do not elect new leader directly after running the initial election
                 if !initial_election {
-                    let (leader_addr_, leader_info_, is_leader_) = match campaign(
+                    let (leader_info_, is_leader_) = match campaign(
                         &meta_store,
                         &addr,
                         lease_time_sec,
@@ -375,11 +367,7 @@ pub async fn run_elections<S: MetaStore>(
                         }
                         Ok(elect_result) => {
                             tracing::info!("election finished");
-                            (
-                                elect_result.get_leader_addr(),
-                                elect_result.meta_leader_info,
-                                elect_result.is_leader,
-                            )
+                            (elect_result.meta_leader_info, elect_result.is_leader)
                         }
                     };
 
@@ -392,12 +380,11 @@ pub async fn run_elections<S: MetaStore>(
                     }
                     leader_info = leader_info_;
                     is_leader = is_leader_;
-                    leader_addr = leader_addr_;
                 }
                 initial_election = false;
 
                 // signal to observers if there is a change in leadership
-                leader_tx.send((leader_addr.clone(), is_leader)).unwrap();
+                leader_tx.send((leader_info.clone(), is_leader)).unwrap();
 
                 // election done. Enter the term of the current leader
                 // Leader stays in power until leader crashes
