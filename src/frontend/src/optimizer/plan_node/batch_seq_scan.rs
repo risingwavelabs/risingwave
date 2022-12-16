@@ -26,7 +26,7 @@ use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
-use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone)]
@@ -39,12 +39,12 @@ pub struct BatchSeqScan {
 impl BatchSeqScan {
     fn new_inner(logical: LogicalScan, dist: Distribution, scan_ranges: Vec<ScanRange>) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            dist,
-            logical.get_out_column_index_order(),
-        );
+        let order = if scan_ranges.len() > 1 {
+            Order::any()
+        } else {
+            logical.get_out_column_index_order()
+        };
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, order);
 
         {
             // validate scan_range
