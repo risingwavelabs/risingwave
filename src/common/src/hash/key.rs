@@ -43,7 +43,7 @@ use crate::types::{
     OrderedF32, OrderedF64, ScalarRef,
 };
 use crate::util::hash_util::Crc32FastBuilder;
-use crate::util::value_encoding::{deserialize_datum, serialize_datum};
+use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
 
 /// A wrapper for u64 hash result.
 #[derive(Default, Clone, Copy, Debug, PartialEq)]
@@ -594,10 +594,10 @@ impl HashKeySerializer for SerializedKeySerializer {
         self.null_bitmap.grow(len_bitmap + 1);
         match data {
             Some(v) => {
-                serialize_datum(&Some(v.to_owned_scalar().into()), &mut self.buffer);
+                serialize_datum_into(&Some(v.to_owned_scalar().into()), &mut self.buffer);
             }
             None => {
-                serialize_datum(&None, &mut self.buffer);
+                serialize_datum_into(&None, &mut self.buffer);
                 self.null_bitmap.insert(len_bitmap);
             }
         }

@@ -20,8 +20,8 @@ use risingwave_sqlparser::ast::{
     DataType, FunctionArg, ObjectName, TableAlias, TableFactor, TableWithJoins,
 };
 
-use crate::utils::{create_args, create_table_alias};
-use crate::{Column, Expr, SqlGenerator, Table};
+use crate::sql_gen::utils::{create_args, create_table_alias};
+use crate::sql_gen::{Column, Expr, SqlGenerator, Table};
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates time window functions.

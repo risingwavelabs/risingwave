@@ -135,7 +135,7 @@ impl DataChunkBuilder {
     }
 
     fn append_one_row_internal(&mut self, data_chunk: &DataChunk, row_idx: usize) {
-        self.do_append_one_row_from_datums(data_chunk.row_at(row_idx).0.values());
+        self.do_append_one_row_from_datums(data_chunk.row_at(row_idx).0.iter());
     }
 
     fn do_append_one_row_from_datums(&mut self, datums: impl Iterator<Item = impl ToDatumRef>) {
