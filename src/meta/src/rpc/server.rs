@@ -266,6 +266,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         tracing::info!("Starting leader services");
 
         // TODO: put leader service definition in separate function or maybe even separate file
+        // Do that in this PR see https://github.com/risingwavelabs/risingwave/pull/6937#issuecomment-1354518161
+
         let prometheus_endpoint = opts.prometheus_endpoint.clone();
         let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
         let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
