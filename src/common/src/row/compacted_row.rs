@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{Row, Row2, RowDeserializer};
+use super::{OwnedRow, Row, RowDeserializer};
 use crate::types::DataType;
 use crate::util::value_encoding;
 
@@ -24,13 +24,13 @@ pub struct CompactedRow {
 }
 
 impl CompactedRow {
-    /// Deserialize [`CompactedRow`] into [`Row`] with given types.
-    pub fn deserialize(&self, data_types: &[DataType]) -> value_encoding::Result<Row> {
+    /// Deserialize [`CompactedRow`] into [`OwnedRow`] with given types.
+    pub fn deserialize(&self, data_types: &[DataType]) -> value_encoding::Result<OwnedRow> {
         RowDeserializer::new(data_types).deserialize(self.row.as_slice())
     }
 }
 
-impl<R: Row2> From<R> for CompactedRow {
+impl<R: Row> From<R> for CompactedRow {
     fn from(row: R) -> Self {
         Self {
             row: row.value_serialize(),

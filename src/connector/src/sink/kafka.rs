@@ -25,7 +25,7 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::{ArrayError, ArrayResult, Op, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::row::Row2;
+use risingwave_common::row::Row;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
 use serde::Deserialize;

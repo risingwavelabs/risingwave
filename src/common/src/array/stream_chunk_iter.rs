@@ -108,7 +108,7 @@ mod tests {
     use test::Bencher;
 
     use super::RecordRef;
-    use crate::row::Row2;
+    use crate::row::Row;
     use crate::test_utils::test_stream_chunk::{
         BigStreamChunk, TestStreamChunk, WhatEverStreamChunk,
     };

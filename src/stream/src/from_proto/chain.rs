@@ -119,6 +119,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .iter()
                     .map(|&k| k as usize)
                     .collect_vec();
+                let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
                 // TODO: refactor it with from_table_catalog in the future.
                 let table = StorageTable::new_partial(
                     state_store,
@@ -130,6 +131,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     distribution,
                     table_option,
                     value_indices,
+                    prefix_hint_len,
                 );
 
                 BackfillExecutor::new(
