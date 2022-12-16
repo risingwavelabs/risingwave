@@ -20,9 +20,14 @@
 #![allow(clippy::disallowed_methods)]
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use risingwave_common::array::{Array, DataChunk, I32Array};
-use risingwave_common::types::DataType;
+use risingwave_common::array::*;
+use risingwave_common::types::{
+    DataType, Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32,
+    OrderedF64,
+};
 use risingwave_expr::expr::expr_binary_nonnull::*;
+use risingwave_expr::expr::expr_binary_nullable::*;
+use risingwave_expr::expr::expr_unary::new_unary_expr;
 use risingwave_expr::expr::*;
 use risingwave_expr::vector_op::agg::create_agg_state_unary;
 use risingwave_expr::ExprError;
@@ -36,34 +41,94 @@ const CHUNK_SIZE: usize = 1024;
 fn bench_expr(c: &mut Criterion) {
     let input = DataChunk::new(
         vec![
-            I32Array::from_iter(0..CHUNK_SIZE as i32).into(),
-            I32Array::from_iter(0..CHUNK_SIZE as i32).into(),
+            BoolArray::from_iter((1..=CHUNK_SIZE).map(|i| i % 2 == 0)).into(),
+            I16Array::from_iter((1..=CHUNK_SIZE).map(|i| (i as i16 % 128).max(1))).into(),
+            I32Array::from_iter(1..=CHUNK_SIZE as i32).into(),
+            I64Array::from_iter(1..=CHUNK_SIZE as i64).into(),
+            F32Array::from_iter((1..=CHUNK_SIZE).map(|i| OrderedF32::from(i as f32))).into(),
+            F64Array::from_iter((1..=CHUNK_SIZE).map(|i| OrderedF64::from(i as f64))).into(),
+            DecimalArray::from_iter((1..=CHUNK_SIZE).map(|i| Decimal::from(i))).into(),
+            NaiveDateArray::from_iter((1..=CHUNK_SIZE).map(|_| NaiveDateWrapper::default())).into(),
+            NaiveTimeArray::from_iter((1..=CHUNK_SIZE).map(|_| NaiveTimeWrapper::default())).into(),
+            NaiveDateTimeArray::from_iter(
+                (1..=CHUNK_SIZE).map(|_| NaiveDateTimeWrapper::default()),
+            )
+            .into(),
+            Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some)).into(),
+            Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some))
+                .into_bytes_array()
+                .into(),
         ],
-        1024,
+        CHUNK_SIZE,
     );
+    let inputrefs = [
+        ("bool", InputRefExpression::new(DataType::Boolean, 0)),
+        ("i16", InputRefExpression::new(DataType::Int16, 1)),
+        ("i32", InputRefExpression::new(DataType::Int32, 2)),
+        ("i64", InputRefExpression::new(DataType::Int64, 3)),
+        ("f32", InputRefExpression::new(DataType::Float32, 4)),
+        ("f64", InputRefExpression::new(DataType::Float64, 5)),
+        ("decimal", InputRefExpression::new(DataType::Decimal, 6)),
+        ("date", InputRefExpression::new(DataType::Date, 7)),
+        ("time", InputRefExpression::new(DataType::Time, 8)),
+        ("timestamp", InputRefExpression::new(DataType::Timestamp, 9)),
+        ("string", InputRefExpression::new(DataType::Varchar, 10)),
+        ("bytea", InputRefExpression::new(DataType::Bytea, 11)),
+    ];
 
-    let i0 = || InputRefExpression::new(DataType::Int32, 0).boxed();
-    let i1 = || InputRefExpression::new(DataType::Int32, 1).boxed();
     c.bench_function("expr/inputref", |bencher| {
-        let inputref = i0();
+        let inputref = inputrefs[0].1.clone().boxed();
         bencher.iter(|| inputref.eval(&input).unwrap())
     });
     c.bench_function("expr/constant", |bencher| {
         let constant = LiteralExpression::new(DataType::Int32, Some(1_i32.into()));
         bencher.iter(|| constant.eval(&input).unwrap())
     });
-    c.bench_function("expr/add/i32", |bencher| {
-        let add = new_binary_expr(Type::Add, DataType::Int32, i0(), i1()).unwrap();
+
+    let ops = [
+        ("add", Type::Add),
+        ("sub", Type::Subtract),
+        ("mul", Type::Multiply),
+        ("div", Type::Divide),
+        ("mod", Type::Modulus),
+    ];
+    for (op, op_type) in &ops {
+        // only for numberic types
+        for (ty, expr) in &inputrefs[1..=6] {
+            c.bench_function(&format!("expr/{op}/{ty}"), |bencher| {
+                let l = expr.clone().boxed();
+                let r = expr.clone().boxed();
+                let add = new_binary_expr(*op_type, expr.return_type(), l, r).unwrap();
+                bencher.iter(|| add.eval(&input).unwrap())
+            });
+        }
+    }
+
+    let ops = [("eq", Type::Equal), ("gt", Type::GreaterThan)];
+    for (op, op_type) in &ops {
+        for (ty, expr) in &inputrefs {
+            c.bench_function(&format!("expr/{op}/{ty}"), |bencher| {
+                let l = expr.clone().boxed();
+                let r = expr.clone().boxed();
+                let add = new_binary_expr(*op_type, expr.return_type(), l, r).unwrap();
+                bencher.iter(|| add.eval(&input).unwrap())
+            });
+        }
+    }
+
+    c.bench_function("expr/and/bool", |bencher| {
+        let l = inputrefs[0].1.clone().boxed();
+        let r = inputrefs[0].1.clone().boxed();
+        let add = new_nullable_binary_expr(Type::And, DataType::Boolean, l, r).unwrap();
         bencher.iter(|| add.eval(&input).unwrap())
     });
-    c.bench_function("expr/mul/i32", |bencher| {
-        let mul = new_binary_expr(Type::Multiply, DataType::Int32, i0(), i1()).unwrap();
-        bencher.iter(|| mul.eval(&input).unwrap())
+
+    c.bench_function("expr/not/bool", |bencher| {
+        let l = inputrefs[0].1.clone().boxed();
+        let add = new_unary_expr(Type::Not, DataType::Boolean, l).unwrap();
+        bencher.iter(|| add.eval(&input).unwrap())
     });
-    c.bench_function("expr/eq/i32", |bencher| {
-        let mul = new_binary_expr(Type::Equal, DataType::Int32, i0(), i1()).unwrap();
-        bencher.iter(|| mul.eval(&input).unwrap())
-    });
+
     c.bench_function("expr/sum/i32", |bencher| {
         let mut sum =
             create_agg_state_unary(DataType::Int32, 0, AggKind::Sum, DataType::Int64, false)
