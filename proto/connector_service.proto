@@ -90,8 +90,9 @@ message CdcMessage {
 }
 
 enum SourceType {
-  MYSQL = 0;
-  POSTGRES = 1;
+  UNSPECIFIED = 0;
+  MYSQL = 1;
+  POSTGRES = 2;
 }
 
 message GetEventStreamRequest {
