@@ -107,6 +107,8 @@ message ExprNode {
     SARG = 999;
     // Internal functions
     VNODE = 1101;
+    // Non-deterministic functions
+    NOW = 2022;
   }
   Type expr_type = 1;
   data.DataType return_type = 3;
@@ -123,6 +125,7 @@ message TableFunction {
     GENERATE = 1;
     UNNEST = 2;
     REGEXP_MATCHES = 3;
+    RANGE = 4;
   }
   Type function_type = 1;
   repeated expr.ExprNode args = 2;

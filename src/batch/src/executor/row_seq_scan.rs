@@ -22,7 +22,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::row::Row;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
@@ -59,7 +59,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 /// Range for batch scan.
 pub struct ScanRange {
     /// The prefix of the primary key.
-    pub pk_prefix: Row,
+    pub pk_prefix: OwnedRow,
 
     /// The range bounds of the next column.
     pub next_col_bounds: (Bound<Datum>, Bound<Datum>),
@@ -76,14 +76,16 @@ impl ScanRange {
         scan_range: ProstScanRange,
         mut pk_types: impl Iterator<Item = DataType>,
     ) -> Result<Self> {
-        let pk_prefix = Row(scan_range
-            .eq_conds
-            .iter()
-            .map(|v| {
-                let ty = pk_types.next().unwrap();
-                deserialize_datum(v.as_slice(), &ty)
-            })
-            .try_collect()?);
+        let pk_prefix = OwnedRow::new(
+            scan_range
+                .eq_conds
+                .iter()
+                .map(|v| {
+                    let ty = pk_types.next().unwrap();
+                    deserialize_datum(v.as_slice(), &ty)
+                })
+                .try_collect()?,
+        );
         if scan_range.lower_bound.is_none() && scan_range.upper_bound.is_none() {
             return Ok(Self {
                 pk_prefix,
@@ -120,7 +122,7 @@ impl ScanRange {
     /// Create a scan range for full table scan.
     pub fn full() -> Self {
         Self {
-            pk_prefix: Row::default(),
+            pk_prefix: OwnedRow::default(),
             next_col_bounds: (Bound::Unbounded, Bound::Unbounded),
         }
     }
@@ -221,7 +223,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-
+        let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
         let scan_ranges = seq_scan_node.scan_ranges.clone();
         let scan_ranges = {
             if scan_ranges.is_empty() {
@@ -249,6 +251,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 distribution,
                 table_option,
                 value_indices,
+                prefix_hint_len,
             );
 
             Ok(Box::new(RowSeqScanExecutor::new(
@@ -307,7 +310,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
 
         let (point_gets, range_scans): (Vec<ScanRange>, Vec<ScanRange>) = scan_ranges
             .into_iter()
-            .partition(|x| x.pk_prefix.size() == table.pk_indices().len());
+            .partition(|x| x.pk_prefix.len() == table.pk_indices().len());
 
         let mut data_chunk_builder = DataChunkBuilder::new(table.schema().data_types(), chunk_size);
         // Point Get
@@ -315,7 +318,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             let table = table.clone();
             let histogram = histogram.clone();
             if let Some(row) = Self::execute_point_get(table, point_get, epoch, histogram).await? {
-                if let Some(chunk) = data_chunk_builder.append_one_row_from_datums(row.values()) {
+                if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                     yield chunk;
                 }
             }
@@ -343,9 +346,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         scan_range: ScanRange,
         epoch: u64,
         histogram: Option<Histogram>,
-    ) -> Result<Option<Row>> {
+    ) -> Result<Option<OwnedRow>> {
         let pk_prefix = scan_range.pk_prefix;
-        assert!(pk_prefix.size() == table.pk_indices().len());
+        assert!(pk_prefix.len() == table.pk_indices().len());
 
         let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
@@ -375,14 +378,14 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         } = scan_range;
 
         // Range Scan.
-        assert!(pk_prefix.size() < table.pk_indices().len());
+        assert!(pk_prefix.len() < table.pk_indices().len());
         let iter = table
             .batch_iter_with_pk_bounds(
                 HummockReadEpoch::Committed(epoch),
                 &pk_prefix,
                 (
-                    next_col_bounds.0.map(|x| Row::new(vec![x])),
-                    next_col_bounds.1.map(|x| Row::new(vec![x])),
+                    next_col_bounds.0.map(|x| OwnedRow::new(vec![x])),
+                    next_col_bounds.1.map(|x| OwnedRow::new(vec![x])),
                 ),
             )
             .await?;

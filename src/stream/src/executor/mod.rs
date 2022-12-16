@@ -28,7 +28,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum_to_bytes};
+use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::data::{Datum as ProstDatum, Epoch as ProstEpoch};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
@@ -69,6 +69,7 @@ mod lookup_union;
 mod managed_state;
 mod merge;
 mod mview;
+mod now;
 mod project;
 mod project_set;
 mod rearranged_chain;
@@ -109,6 +110,7 @@ pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
 pub use merge::MergeExecutor;
 pub use mview::*;
+pub use now::NowExecutor;
 pub use project::ProjectExecutor;
 pub use project_set::*;
 pub use rearranged_chain::RearrangedChainExecutor;
@@ -235,6 +237,15 @@ impl Barrier {
         }
     }
 
+    pub fn with_prev_epoch_for_test(epoch: u64, prev_epoch: u64) -> Self {
+        Self {
+            epoch: EpochPair::new(epoch, prev_epoch),
+            checkpoint: true,
+            mutation: Default::default(),
+            passed_actors: Default::default(),
+        }
+    }
+
     #[must_use]
     pub fn with_mutation(self, mutation: Mutation) -> Self {
         Self {
@@ -279,9 +290,20 @@ impl Barrier {
         )
     }
 
+    /// Whether this barrier is for pause.
+    pub fn is_pause(&self) -> bool {
+        matches!(self.mutation.as_deref(), Some(Mutation::Pause))
+    }
+
     /// Whether this barrier is for configuration change. Used for source executor initialization.
     pub fn is_update(&self) -> bool {
         matches!(self.mutation.as_deref(), Some(Mutation::Update { .. }))
+    }
+
+    /// Whether this barrier is for resume. Used for now executor to determine whether to yield a
+    /// chunk and a watermark before this barrier.
+    pub fn is_resume(&self) -> bool {
+        matches!(self.mutation.as_deref(), Some(Mutation::Resume))
     }
 
     /// Returns the [`MergeUpdate`] if this barrier is to update the merge executors for the actor
@@ -561,7 +583,7 @@ impl Watermark {
             col_idx: self.col_idx as _,
             data_type: Some(self.data_type.to_protobuf()),
             val: Some(ProstDatum {
-                body: serialize_datum_to_bytes(Some(&self.val)),
+                body: serialize_datum(Some(&self.val)),
             }),
         }
     }
@@ -648,7 +670,6 @@ pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
 /// Expect the first message of the given `stream` as a barrier.
-#[track_caller]
 pub async fn expect_first_barrier(
     stream: &mut (impl MessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {
@@ -664,7 +685,6 @@ pub async fn expect_first_barrier(
 }
 
 /// Expect the first message of the given `stream` as a barrier.
-#[track_caller]
 pub async fn expect_first_barrier_from_aligned_stream(
     stream: &mut (impl AlignedMessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {

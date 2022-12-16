@@ -51,9 +51,9 @@ impl MemStoreInner {
 #[async_trait]
 impl Snapshot for MemSnapshot {
     #[inline(always)]
-    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<Value>> {
+    async fn list_cf(&self, cf: &str) -> MetaStoreResult<Vec<(Key, Value)>> {
         Ok(match self.0.cf_ref(cf) {
-            Some(cf) => cf.values().cloned().collect(),
+            Some(cf) => cf.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
             None => vec![],
         })
     }

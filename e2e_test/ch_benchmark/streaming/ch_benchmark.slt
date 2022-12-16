@@ -1,0 +1,14 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+include ../create_sources.slt.part
+
+# Then, create materialized views based on the historical data (snapshot)
+include ./create_views.slt.part
+
+# Test the result of each mv
+include ./test_mv_result.slt.part
+
+include ./drop_views.slt.part
+
+include ../drop_sources.slt.part

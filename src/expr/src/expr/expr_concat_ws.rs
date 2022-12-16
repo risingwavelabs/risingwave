@@ -18,8 +18,8 @@ use std::sync::Arc;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Utf8ArrayBuilder,
 };
-use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -91,7 +91,7 @@ impl Expression for ConcatWsExpression {
         Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let sep = self.sep_expr.eval_row(input)?;
         let sep = match sep {
             Some(sep) => sep,
@@ -115,7 +115,7 @@ impl Expression for ConcatWsExpression {
             final_string.push_str(string.as_utf8());
         }
 
-        Ok(Some(final_string.to_scalar_value()))
+        Ok(Some(final_string.into()))
     }
 }
 
@@ -159,8 +159,8 @@ impl<'a> TryFrom<&'a ExprNode> for ConcatWsExpression {
 mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
-    use risingwave_common::row::Row;
-    use risingwave_common::types::{Datum, Scalar};
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::Datum;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::RexNode;
@@ -238,14 +238,11 @@ mod tests {
         let expected = vec![Some("a,b,c"), None, Some("b,c"), Some(""), None];
 
         for (i, row_input) in row_inputs.iter().enumerate() {
-            let datum_vec: Vec<Datum> = row_input
-                .iter()
-                .map(|e| e.map(|s| s.to_string().to_scalar_value()))
-                .collect();
-            let row = Row::new(datum_vec);
+            let datum_vec: Vec<Datum> = row_input.iter().map(|e| e.map(|s| s.into())).collect();
+            let row = OwnedRow::new(datum_vec);
 
             let result = concat_ws_expr.eval_row(&row).unwrap();
-            let expected = expected[i].map(|s| s.to_string().to_scalar_value());
+            let expected = expected[i].map(|s| s.into());
 
             assert_eq!(result, expected);
         }

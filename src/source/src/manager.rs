@@ -24,6 +24,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_connector::source::ConnectorProperties;
+use risingwave_connector::ConnectorParams;
 use risingwave_pb::catalog::source_info::SourceInfo as ProstSourceInfo;
 use risingwave_pb::catalog::ColumnIndex as ProstColumnIndex;
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
@@ -166,11 +167,11 @@ impl TableSourceManager {
         self.sources.lock().clear()
     }
 
-    fn metrics(&self) -> Arc<SourceMetrics> {
+    pub fn metrics(&self) -> Arc<SourceMetrics> {
         self.metrics.clone()
     }
 
-    fn msg_buf_size(&self) -> usize {
+    pub fn msg_buf_size(&self) -> usize {
         self.connector_message_buffer_size
     }
 }
@@ -204,7 +205,7 @@ pub struct SourceDescBuilder {
     properties: HashMap<String, String>,
     info: ProstSourceInfo,
     source_manager: TableSourceManagerRef,
-    connector_node_addr: String,
+    connector_params: ConnectorParams,
 }
 
 impl SourceDescBuilder {
@@ -217,7 +218,7 @@ impl SourceDescBuilder {
         properties: HashMap<String, String>,
         info: ProstSourceInfo,
         source_manager: TableSourceManagerRef,
-        connector_node_addr: String,
+        connector_params: ConnectorParams,
     ) -> Self {
         Self {
             source_id,
@@ -227,7 +228,7 @@ impl SourceDescBuilder {
             properties,
             info,
             source_manager,
-            connector_node_addr,
+            connector_params,
         }
     }
 
@@ -292,15 +293,12 @@ impl SourceDescBuilder {
             "source should have at least one pk column"
         );
 
-        // store the connector node address to properties for later use
-        let mut source_props: HashMap<String, String> =
-            HashMap::from_iter(self.properties.clone().into_iter());
-        source_props.insert(
-            "connector_node_addr".to_string(),
-            self.connector_node_addr.clone(),
-        );
-        let config = ConnectorProperties::extract(source_props)
-            .map_err(|e| RwError::from(ConnectorError(e.into())))?;
+        let mut config = ConnectorProperties::extract(self.properties.clone())
+            .map_err(|e| ConnectorError(e.into()))?;
+        if let Some(addr) = self.connector_params.connector_rpc_endpoint.as_ref() {
+            config.set_connector_node_addr(addr.to_owned());
+            config.set_source_id_for_cdc(self.source_id.table_id());
+        }
 
         let source = SourceImpl::Connector(ConnectorSource {
             config,
@@ -322,6 +320,7 @@ impl SourceDescBuilder {
 
 pub mod test_utils {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+    use risingwave_connector::ConnectorParams;
     use risingwave_pb::catalog::source_info::SourceInfo as ProstSourceInfo;
     use risingwave_pb::catalog::{ColumnIndex, TableSourceInfo};
     use risingwave_pb::plan_common::ColumnCatalog;
@@ -363,7 +362,9 @@ pub mod test_utils {
             properties: Default::default(),
             info,
             source_manager,
-            connector_node_addr: "127.0.0.1:60061".to_string(),
+            connector_params: ConnectorParams {
+                connector_rpc_endpoint: None,
+            },
         }
     }
 }

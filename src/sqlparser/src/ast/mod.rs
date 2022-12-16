@@ -1561,6 +1561,8 @@ pub enum GrantObjects {
     Sequences(Vec<ObjectName>),
     /// Grant privileges on specific tables
     Tables(Vec<ObjectName>),
+    /// Grant privileges on specific sinks
+    Sinks(Vec<ObjectName>),
 }
 
 impl fmt::Display for GrantObjects {
@@ -1611,6 +1613,9 @@ impl fmt::Display for GrantObjects {
             }
             GrantObjects::Mviews(mviews) => {
                 write!(f, "MATERIALIZED VIEW {}", display_comma_separated(mviews))
+            }
+            GrantObjects::Sinks(sinks) => {
+                write!(f, "SINK {}", display_comma_separated(sinks))
             }
         }
     }

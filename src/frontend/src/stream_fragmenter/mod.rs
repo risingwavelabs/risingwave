@@ -24,7 +24,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FragmentType,
+    DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
@@ -200,17 +200,22 @@ fn build_fragment(
 ) -> Result<StreamNode> {
     // Update current fragment based on the node we're visiting.
     match stream_node.get_node_body()? {
-        NodeBody::Source(_) => current_fragment.fragment_type = FragmentType::Source,
+        NodeBody::Source(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
+        }
 
-        NodeBody::Materialize(_) => current_fragment.fragment_type = FragmentType::Mview,
+        NodeBody::Materialize(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Mview as u32;
+        }
 
-        NodeBody::Sink(_) => current_fragment.fragment_type = FragmentType::Sink,
+        NodeBody::Sink(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Sink as u32,
 
         // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
         NodeBody::TopN(_) => current_fragment.is_singleton = true,
 
         // FIXME: workaround for single-fragment mview on singleton upstream mview.
         NodeBody::Chain(node) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::ChainNode as u32;
             // memorize table id for later use
             state
                 .dependent_table_ids
@@ -219,10 +224,13 @@ fn build_fragment(
             current_fragment.is_singleton = node.is_singleton;
         }
 
+        NodeBody::Now(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Now as u32,
+
         _ => {}
     };
 
     // handle join logic
+    // TODO: frontend won't generate delta index join now, so this branch will never hit.
     if let NodeBody::DeltaIndexJoin(delta_index_join) = stream_node.node_body.as_mut().unwrap() {
         if delta_index_join.get_join_type()? == JoinType::Inner
             && delta_index_join.condition.is_none()

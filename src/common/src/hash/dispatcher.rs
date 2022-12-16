@@ -100,6 +100,7 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
         DataType::Interval => HashKeySize::Fixed(size_of::<IntervalUnit>()),
 
         DataType::Varchar => HashKeySize::Variable,
+        DataType::Bytea => HashKeySize::Variable,
         DataType::Struct { .. } => HashKeySize::Variable,
         DataType::List { .. } => HashKeySize::Variable,
     }

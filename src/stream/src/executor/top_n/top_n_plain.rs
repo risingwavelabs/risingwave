@@ -17,6 +17,7 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
@@ -27,7 +28,7 @@ use super::{TopNCache, TopNCacheTrait};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::ManagedTopNState;
+use crate::executor::managed_state::top_n::{ManagedTopNState, NO_GROUP_KEY};
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
@@ -232,23 +233,23 @@ where
 
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
-            let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
+            let pk_row = row_ref.project(&self.internal_key_indices);
             let cache_key =
                 serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
-                    self.managed_state.insert(row_ref.clone());
+                    self.managed_state.insert(row_ref);
                     self.cache
                         .insert(cache_key, row_ref, &mut res_ops, &mut res_rows)
                 }
 
                 Op::Delete | Op::UpdateDelete => {
                     // First remove the row from state store
-                    self.managed_state.delete(row_ref.clone());
+                    self.managed_state.delete(row_ref);
                     self.cache
                         .delete(
-                            None,
+                            NO_GROUP_KEY,
                             &mut self.managed_state,
                             cache_key,
                             row_ref,
@@ -281,7 +282,7 @@ where
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
-            .init_topn_cache(None, &mut self.cache, self.order_by_len)
+            .init_topn_cache(NO_GROUP_KEY, &mut self.cache, self.order_by_len)
             .await
     }
 }

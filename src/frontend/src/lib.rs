@@ -40,7 +40,7 @@ pub mod handler;
 pub use handler::PgResponseStream;
 mod observer;
 mod optimizer;
-pub use optimizer::PlanRef;
+pub use optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 pub use planner::Planner;
 #[expect(dead_code)]
@@ -63,7 +63,6 @@ use std::sync::Arc;
 
 use clap::Parser;
 use pgwire::pg_server::pg_serve;
-use serde::{Deserialize, Serialize};
 use session::SessionManagerImpl;
 
 #[derive(Parser, Clone, Debug)]
@@ -83,10 +82,6 @@ pub struct FrontendOpts {
     #[clap(long, default_value = "http://127.0.0.1:5690")]
     pub meta_addr: String,
 
-    /// No given `config_path` means to use default config.
-    #[clap(long, default_value = "")]
-    pub config_path: String,
-
     #[clap(long, default_value = "127.0.0.1:2222")]
     pub prometheus_listener_addr: String,
 
@@ -98,6 +93,15 @@ pub struct FrontendOpts {
     /// >0 = open metrics
     #[clap(long, default_value = "0")]
     pub metrics_level: u32,
+
+    /// The path of `risingwave.toml` configuration file.
+    ///
+    /// If empty, default configuration values will be used.
+    ///
+    /// Note that internal system parameters should be defined in the configuration file at
+    /// [`risingwave_common::config`] instead of command line arguments.
+    #[clap(long, default_value = "")]
+    pub config_path: String,
 }
 
 impl Default for FrontendOpts {
@@ -110,7 +114,6 @@ use std::future::Future;
 use std::pin::Pin;
 
 use pgwire::pg_protocol::TlsConfig;
-use risingwave_common::config::ServerConfig;
 
 /// Start frontend
 pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
@@ -122,11 +125,4 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             .await
             .unwrap();
     })
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct FrontendConfig {
-    // For connection
-    #[serde(default)]
-    pub server: ServerConfig,
 }

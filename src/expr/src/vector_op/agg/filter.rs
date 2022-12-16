@@ -14,6 +14,7 @@
 
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::aggregator::Aggregator;
@@ -46,7 +47,7 @@ impl Aggregator for Filter {
         assert!(vis); // cuz the input chunk is supposed to be compacted
         if self
             .condition
-            .eval_row(&row_ref.to_owned_row())?
+            .eval_row(&row_ref.into_owned_row())?
             .map(ScalarImpl::into_bool)
             .unwrap_or(false)
         {
@@ -72,7 +73,7 @@ impl Aggregator for Filter {
                     assert!(vis); // cuz the input chunk is supposed to be compacted
                     Ok(self
                         .condition
-                        .eval_row(&row_ref.to_owned_row())?
+                        .eval_row(&row_ref.into_owned_row())?
                         .map(ScalarImpl::into_bool)
                         .unwrap_or(false))
                 })

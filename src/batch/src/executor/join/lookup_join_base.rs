@@ -22,6 +22,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::BoxedExpression;
@@ -44,6 +45,7 @@ pub struct LookupJoinBase<K> {
     pub inner_side_key_types: Vec<DataType>, // Data types only of key columns of inner side table
     pub inner_side_key_idxs: Vec<usize>,
     pub null_safe: Vec<bool>,
+    pub lookup_prefix_len: usize,
     pub chunk_builder: DataChunkBuilder,
     pub schema: Schema,
     pub output_indices: Vec<usize>,
@@ -86,7 +88,8 @@ impl<K: HashKey> LookupJoinBase<K> {
                     chunk.rows().map(|row| {
                         self.outer_side_key_idxs
                             .iter()
-                            .map(|&idx| row.value_at(idx).to_owned_datum())
+                            .take(self.lookup_prefix_len)
+                            .map(|&idx| row.datum_at(idx).to_owned_datum())
                             .collect_vec()
                     })
                 })

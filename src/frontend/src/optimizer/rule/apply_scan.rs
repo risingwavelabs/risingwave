@@ -23,6 +23,36 @@ use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalProject};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
+/// Remove `LogicalApply` at leaf.
+///
+/// Before:
+///
+/// ```text
+///    LogicalApply
+///    /           \
+///  Domain      LogicalScan
+/// ```
+///
+/// If it can remove DAG.
+/// After:
+///
+/// ```text
+///  LogicalProject
+///        |
+///  LogicalFilter (Null reject for equal)
+///        |
+///  LogicalScan
+/// ```
+///
+///
+/// If it can't remove DAG.
+/// After:
+///
+/// ```text
+///     LogicalJoin
+///    /           \
+///  Domain   LogicalScan
+/// ```
 pub struct ApplyScanRule {}
 impl Rule for ApplyScanRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {

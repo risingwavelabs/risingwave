@@ -75,6 +75,32 @@ fn may_dynamic_dispatch(
     }
 }
 
+fn may_verify(state_store: impl StateStore + AsHummockTrait) -> impl StateStore + AsHummockTrait {
+    #[cfg(not(debug_assertions))]
+    {
+        state_store
+    }
+    #[cfg(debug_assertions)]
+    {
+        use risingwave_common::util::env_var::env_var_is_true;
+        use tracing::info;
+
+        use crate::store_impl::verify::VerifyStateStore;
+
+        let expected = if env_var_is_true("ENABLE_STATE_STORE_VERIFY") {
+            info!("enable verify state store");
+            Some(SledStateStore::new_temp())
+        } else {
+            info!("verify state store is not enabled");
+            None
+        };
+        VerifyStateStore {
+            actual: state_store,
+            expected,
+        }
+    }
+}
+
 impl StateStoreImpl {
     fn in_memory(
         state_store: MemoryStateStore,
@@ -89,7 +115,9 @@ impl StateStoreImpl {
         state_store_metrics: Arc<StateStoreMetrics>,
     ) -> Self {
         // The specific type of HummockStateStoreType in deducted here.
-        Self::HummockStateStore(may_dynamic_dispatch(state_store).monitored(state_store_metrics))
+        Self::HummockStateStore(
+            may_dynamic_dispatch(may_verify(state_store)).monitored(state_store_metrics),
+        )
     }
 
     pub fn hummock_v1(
@@ -97,7 +125,9 @@ impl StateStoreImpl {
         state_store_metrics: Arc<StateStoreMetrics>,
     ) -> Self {
         // The specific type of HummockStateStoreV1Type in deducted here.
-        Self::HummockStateStoreV1(may_dynamic_dispatch(state_store).monitored(state_store_metrics))
+        Self::HummockStateStoreV1(
+            may_dynamic_dispatch(may_verify(state_store)).monitored(state_store_metrics),
+        )
     }
 
     pub fn sled(state_store: SledStateStore, state_store_metrics: Arc<StateStoreMetrics>) -> Self {
@@ -202,8 +232,235 @@ macro_rules! dispatch_state_store {
     }};
 }
 
+#[cfg(debug_assertions)]
+pub mod verify {
+    use std::fmt::Debug;
+    use std::future::Future;
+    use std::ops::{Bound, Deref};
+
+    use bytes::Bytes;
+    use futures::{pin_mut, TryStreamExt};
+    use futures_async_stream::try_stream;
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::HummockReadEpoch;
+    use tracing::log::warn;
+
+    use crate::error::StorageError;
+    use crate::storage_value::StorageValue;
+    use crate::store::*;
+    use crate::store_impl::{AsHummockTrait, HummockTrait};
+    use crate::{StateStore, StateStoreIter};
+
+    fn assert_result_eq<Item: PartialEq + Debug, E>(
+        first: &std::result::Result<Item, E>,
+        second: &std::result::Result<Item, E>,
+    ) {
+        match (first, second) {
+            (Ok(first), Ok(second)) => {
+                if first != second {
+                    warn!("result different: {:?} {:?}", first, second);
+                }
+                assert_eq!(first, second);
+            }
+            (Err(_), Err(_)) => {}
+            _ => {
+                warn!("one success and one failed");
+                panic!("result not equal");
+            }
+        }
+    }
+
+    pub struct VerifyStateStore<A, E> {
+        pub actual: A,
+        pub expected: Option<E>,
+    }
+
+    impl<A: AsHummockTrait, E> AsHummockTrait for VerifyStateStore<A, E> {
+        fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
+            self.actual.as_hummock_trait()
+        }
+    }
+
+    impl<A: StateStoreIter<Item: PartialEq + Debug>, E: StateStoreIter<Item = A::Item>>
+        StateStoreIter for VerifyStateStore<A, E>
+    {
+        type Item = A::Item;
+
+        type NextFuture<'a> = impl NextFutureTrait<'a, A::Item>;
+
+        fn next(&mut self) -> Self::NextFuture<'_> {
+            async {
+                let actual = self.actual.next().await;
+                if let Some(expected) = &mut self.expected {
+                    let expected = expected.next().await;
+                    assert_result_eq(&actual, &expected);
+                }
+                actual
+            }
+        }
+    }
+
+    impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
+        type IterStream = impl StateStoreReadIterStream;
+
+        define_state_store_read_associated_type!();
+
+        fn get<'a>(
+            &'a self,
+            key: &'a [u8],
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> Self::GetFuture<'_> {
+            async move {
+                let actual = self.actual.get(key, epoch, read_options.clone()).await;
+                if let Some(expected) = &self.expected {
+                    let expected = expected.get(key, epoch, read_options).await;
+                    assert_result_eq(&actual, &expected);
+                }
+                actual
+            }
+        }
+
+        fn iter(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> Self::IterFuture<'_> {
+            async move {
+                let actual = self
+                    .actual
+                    .iter(key_range.clone(), epoch, read_options.clone())
+                    .await?;
+                let expected = if let Some(expected) = &self.expected {
+                    Some(expected.iter(key_range, epoch, read_options).await?)
+                } else {
+                    None
+                };
+
+                Ok(verify_stream(actual, expected))
+            }
+        }
+    }
+
+    #[try_stream(ok = StateStoreIterItem, error = StorageError)]
+    async fn verify_stream(
+        actual: impl StateStoreReadIterStream,
+        expected: Option<impl StateStoreReadIterStream>,
+    ) {
+        pin_mut!(actual);
+        pin_mut!(expected);
+        let mut expected = expected.as_pin_mut();
+
+        loop {
+            let actual = actual.try_next().await?;
+            if let Some(expected) = expected.as_mut() {
+                let expected = expected.try_next().await?;
+                assert_eq!(actual, expected);
+            }
+            if let Some(actual) = actual {
+                yield actual;
+            } else {
+                break;
+            }
+        }
+    }
+
+    impl<A: StateStoreWrite, E: StateStoreWrite> StateStoreWrite for VerifyStateStore<A, E> {
+        define_state_store_write_associated_type!();
+
+        fn ingest_batch(
+            &self,
+            kv_pairs: Vec<(Bytes, StorageValue)>,
+            delete_ranges: Vec<(Bytes, Bytes)>,
+            write_options: WriteOptions,
+        ) -> Self::IngestBatchFuture<'_> {
+            async move {
+                let actual = self
+                    .actual
+                    .ingest_batch(
+                        kv_pairs.clone(),
+                        delete_ranges.clone(),
+                        write_options.clone(),
+                    )
+                    .await;
+                if let Some(expected) = &self.expected {
+                    let expected = expected
+                        .ingest_batch(kv_pairs, delete_ranges, write_options)
+                        .await;
+                    assert_eq!(actual.is_err(), expected.is_err());
+                }
+                actual
+            }
+        }
+    }
+
+    impl<A: Clone, E: Clone> Clone for VerifyStateStore<A, E> {
+        fn clone(&self) -> Self {
+            Self {
+                actual: self.actual.clone(),
+                expected: self.expected.clone(),
+            }
+        }
+    }
+
+    impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {}
+
+    impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
+        type Local = VerifyStateStore<A::Local, E::Local>;
+
+        type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
+
+        define_state_store_associated_type!();
+
+        fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
+            self.actual.try_wait_epoch(epoch)
+        }
+
+        fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
+            async move {
+                if let Some(expected) = &self.expected {
+                    let _ = expected.sync(epoch).await;
+                }
+                self.actual.sync(epoch).await
+            }
+        }
+
+        fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
+            self.actual.seal_epoch(epoch, is_checkpoint)
+        }
+
+        fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+            async move { self.actual.clear_shared_buffer().await }
+        }
+
+        fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
+            async move {
+                let expected = if let Some(expected) = &self.expected {
+                    Some(expected.new_local(table_id).await)
+                } else {
+                    None
+                };
+                VerifyStateStore {
+                    actual: self.actual.new_local(table_id).await,
+                    expected,
+                }
+            }
+        }
+    }
+
+    impl<A, E> Deref for VerifyStateStore<A, E> {
+        type Target = A;
+
+        fn deref(&self) -> &Self::Target {
+            &self.actual
+        }
+    }
+}
+
 impl StateStoreImpl {
     #[cfg_attr(not(target_os = "linux"), expect(unused_variables))]
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         s: &str,
         file_cache_dir: &str,
@@ -212,6 +469,7 @@ impl StateStoreImpl {
         state_store_stats: Arc<StateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
         tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
+        tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> StorageResult<Self> {
         #[cfg(not(target_os = "linux"))]
         let tiered_cache = TieredCache::none();
@@ -279,6 +537,7 @@ impl StateStoreImpl {
                         hummock_meta_client.clone(),
                         notification_client,
                         state_store_stats.clone(),
+                        tracing,
                     )
                     .await?;
 
@@ -290,6 +549,7 @@ impl StateStoreImpl {
                         hummock_meta_client.clone(),
                         notification_client,
                         state_store_stats.clone(),
+                        tracing,
                     )
                     .await?;
 
@@ -398,49 +658,22 @@ impl AsHummockTrait for SledStateStore {
 #[cfg(debug_assertions)]
 pub mod boxed_state_store {
     use std::future::Future;
-    use std::ops::{Bound, Deref, DerefMut};
+    use std::ops::{Bound, Deref};
 
     use bytes::Bytes;
+    use futures::stream::BoxStream;
     use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::key::FullKey;
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
     use crate::storage_value::StorageValue;
-    use crate::store::{
-        EmptyFutureTrait, GetFutureTrait, IngestBatchFutureTrait, IterFutureTrait, LocalStateStore,
-        NextFutureTrait, ReadOptions, StateStoreRead, StateStoreWrite, StaticSendSync,
-        SyncFutureTrait, SyncResult, WriteOptions,
-    };
+    use crate::store::*;
     use crate::store_impl::{AsHummockTrait, HummockTrait};
-    use crate::{StateStore, StateStoreIter};
-
-    // For StateStoreIter
-
-    #[async_trait::async_trait]
-    pub trait DynamicDispatchedStateStoreIter: StaticSendSync {
-        async fn next(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Bytes)>>;
-    }
-
-    #[async_trait::async_trait]
-    impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> DynamicDispatchedStateStoreIter for I {
-        async fn next(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Bytes)>> {
-            self.next().await
-        }
-    }
-
-    impl StateStoreIter for Box<dyn DynamicDispatchedStateStoreIter> {
-        type Item = (FullKey<Vec<u8>>, Bytes);
-
-        type NextFuture<'a> = impl NextFutureTrait<'a, Self::Item>;
-
-        fn next(&mut self) -> Self::NextFuture<'_> {
-            async { self.deref_mut().next().await }
-        }
-    }
+    use crate::StateStore;
 
     // For StateStoreRead
 
+    pub type BoxStateStoreReadIterStream = BoxStream<'static, StorageResult<StateStoreIterItem>>;
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
         async fn get<'a>(
@@ -455,7 +688,7 @@ pub mod boxed_state_store {
             key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<Box<dyn DynamicDispatchedStateStoreIter>>;
+        ) -> StorageResult<BoxStateStoreReadIterStream>;
     }
 
     #[async_trait::async_trait]
@@ -474,15 +707,16 @@ pub mod boxed_state_store {
             key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<Box<dyn DynamicDispatchedStateStoreIter>> {
-            Ok(Box::new(self.iter(key_range, epoch, read_options).await?))
+        ) -> StorageResult<BoxStateStoreReadIterStream> {
+            use futures::StreamExt;
+            Ok(self.iter(key_range, epoch, read_options).await?.boxed())
         }
     }
 
     macro_rules! impl_state_store_read_for_box {
         ($box_type_name:ident) => {
             impl StateStoreRead for $box_type_name {
-                type Iter = Box<dyn DynamicDispatchedStateStoreIter>;
+                type IterStream = BoxStateStoreReadIterStream;
 
                 define_state_store_read_associated_type!();
 

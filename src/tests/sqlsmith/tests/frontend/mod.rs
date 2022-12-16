@@ -19,12 +19,14 @@ use itertools::Itertools;
 use libtest_mimic::{Arguments, Failed, Trial};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
-use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::LocalFrontend;
-use risingwave_frontend::{handler, Binder, FrontendOpts, Planner, WithOptions};
-use risingwave_sqlparser::ast::Statement;
+use risingwave_frontend::{
+    handler, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef, Planner, WithOptions,
+};
+use risingwave_sqlparser::ast::{ExplainOptions, Statement};
 use risingwave_sqlsmith::{
-    create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table,
+    create_table_statement_to_table, is_permissible_error, mview_sql_gen, parse_sql, sql_gen, Table,
 };
 use tokio::runtime::Runtime;
 
@@ -38,12 +40,16 @@ pub struct SqlsmithEnv {
 }
 
 /// Executes sql queries, prints recoverable errors.
-/// Panic recovery happens separately.
-async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<()> {
-    handler::handle(session.clone(), stmt, sql, false)
+/// Panic recovery happens separately, see [`reproduce_failing_queries`].
+/// Returns `Ok(true)` if query result was ignored.
+/// Skip status is required, so that we know if a SQL statement writing to the database was skipped.
+/// Then, we can infer the correct state of the database.
+async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<bool> {
+    let result = handler::handle(session.clone(), stmt, sql, false)
         .await
         .map(|_| ())
-        .map_err(|e| format!("Error Reason:\n{}", e).into())
+        .map_err(|e| format!("Error Reason:\n{}", e).into());
+    validate_result(result)
 }
 
 fn get_seed_table_sql() -> String {
@@ -54,7 +60,7 @@ fn get_seed_table_sql() -> String {
         .collect::<String>()
 }
 
-/// Prints failing queries and their setup code.
+/// Prints failing queries and their setup code, if execution fails.
 /// NOTE: This depends on convention of test suites
 /// not writing to stderr, unless the test fails.
 /// (This applies to nextest).
@@ -101,8 +107,10 @@ async fn create_tables(
         setup_sql.push_str(&format!("{};", &sql));
         let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
-        handle(session.clone(), stmt, &sql).await?;
-        tables.push(table);
+        let skipped = handle(session.clone(), stmt, &sql).await?;
+        if !skipped {
+            tables.push(table);
+        }
     }
     Ok((tables, setup_sql))
 }
@@ -125,12 +133,32 @@ async fn test_stream_query(
     // The generated SQL must be parsable.
     let statements = parse_sql(&sql);
     let stmt = statements[0].clone();
-    handle(session.clone(), stmt, &sql).await?;
+    let skipped = handle(session.clone(), stmt, &sql).await?;
+    if !skipped {
+        let drop_sql = format!("DROP MATERIALIZED VIEW {}", table.name);
+        let drop_stmts = parse_sql(&drop_sql);
+        let drop_stmt = drop_stmts[0].clone();
+        handle(session.clone(), drop_stmt, &drop_sql).await?;
+    }
+    Ok(())
+}
 
-    let drop_sql = format!("DROP MATERIALIZED VIEW {}", table.name);
-    let drop_stmts = parse_sql(&drop_sql);
-    let drop_stmt = drop_stmts[0].clone();
-    handle(session.clone(), drop_stmt, &drop_sql).await?;
+fn run_batch_query(
+    session: Arc<SessionImpl>,
+    context: OptimizerContextRef,
+    stmt: Statement,
+) -> Result<()> {
+    let mut binder = Binder::new(&session);
+    let bound = binder
+        .bind(stmt)
+        .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e)))?;
+    let mut planner = Planner::new(context);
+    let mut logical_plan = planner
+        .plan(bound)
+        .map_err(|e| Failed::from(format!("Failed to generate logical plan:\nReason:\n{}", e)))?;
+    logical_plan
+        .gen_batch_distributed_plan()
+        .map_err(|e| Failed::from(format!("Failed to generate batch plan:\nReason:\n{}", e)))?;
     Ok(())
 }
 
@@ -157,22 +185,14 @@ fn test_batch_query(
         session.clone(),
         Arc::from(sql),
         WithOptions::try_from(&stmt)?,
+        ExplainOptions::default(),
     )
     .into();
 
     match stmt {
         Statement::Query(_) => {
-            let mut binder = Binder::new(&session);
-            let bound = binder
-                .bind(stmt)
-                .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e)))?;
-            let mut planner = Planner::new(context);
-            let mut logical_plan = planner.plan(bound).map_err(|e| {
-                Failed::from(format!("Failed to generate logical plan:\nReason:\n{}", e))
-            })?;
-            logical_plan.gen_batch_distributed_plan().map_err(|e| {
-                Failed::from(format!("Failed to generate batch plan:\nReason:\n{}", e))
-            })?;
+            let result = run_batch_query(session, context, stmt);
+            validate_result(result)?;
             Ok(())
         }
         _ => Err(format!("Invalid Query: {}", stmt).into()),
@@ -209,6 +229,20 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
         tables,
         setup_sql,
     })
+}
+
+/// Returns error if it is not permissible.
+/// If error was permissible, query still failed, return skip status: true.
+/// Otherwise no error: skip status: false.
+fn validate_result<T>(result: Result<T>) -> Result<bool> {
+    if let Err(e) = result {
+        if let Some(s) = e.message() && is_permissible_error(s) {
+            return Ok(true);
+        } else {
+            return Err(e);
+        }
+    }
+    Ok(false)
 }
 
 pub fn run() {

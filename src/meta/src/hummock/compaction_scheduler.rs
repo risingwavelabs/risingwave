@@ -122,13 +122,9 @@ where
         );
 
         tracing::info!("Start compaction scheduler.");
-        let periodic_compaction_interval_sec = if self.env.opts.compaction_deterministic_test {
-            u64::MAX
-        } else {
-            self.env.opts.periodic_compaction_interval_sec
-        };
-        let mut min_trigger_interval =
-            tokio::time::interval(Duration::from_secs(periodic_compaction_interval_sec));
+        let mut min_trigger_interval = tokio::time::interval(Duration::from_secs(
+            self.env.opts.periodic_compaction_interval_sec,
+        ));
         min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             let compaction_group: CompactionGroupId = tokio::select! {
@@ -143,6 +139,10 @@ where
                     }
                 },
                 _ = min_trigger_interval.tick() => {
+                    // Disable periodic trigger for compaction_deterministic_test.
+                    if self.env.opts.compaction_deterministic_test {
+                        continue;
+                    }
                     // Periodically trigger compaction for all compaction groups.
                     for cg_id in self.hummock_manager.compaction_group_ids().await {
                         if let Err(e) = sched_channel.try_sched_compaction(cg_id) {

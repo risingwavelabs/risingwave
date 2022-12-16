@@ -21,6 +21,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
+use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
@@ -222,18 +223,18 @@ where
 
         for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq(keys.iter()) {
             // The pk without group by
-            let pk_row = row_ref.row_by_indices(&self.internal_key_indices[self.group_by.len()..]);
+            let pk_row = row_ref.project(&self.internal_key_indices[self.group_by.len()..]);
             let cache_key =
                 serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
 
-            let group_key = row_ref.row_by_indices(&self.group_by);
+            let group_key = row_ref.project(&self.group_by);
 
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
                 let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
                 self.managed_state
-                    .init_topn_cache(Some(&group_key), &mut topn_cache, self.order_by_len)
+                    .init_topn_cache(Some(group_key), &mut topn_cache, self.order_by_len)
                     .await?;
                 self.caches.insert(group_cache_key.clone(), topn_cache);
             }
@@ -242,15 +243,15 @@ where
             // apply the chunk to state table
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    self.managed_state.insert(row_ref.clone());
+                    self.managed_state.insert(row_ref);
                     cache.insert(cache_key, row_ref, &mut res_ops, &mut res_rows);
                 }
 
                 Op::Delete | Op::UpdateDelete => {
-                    self.managed_state.delete(row_ref.clone());
+                    self.managed_state.delete(row_ref);
                     cache
                         .delete(
-                            Some(&group_key),
+                            Some(group_key),
                             &mut self.managed_state,
                             cache_key,
                             row_ref,

@@ -22,6 +22,7 @@ use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
 
+use super::iterator::ArrayRawIter;
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
 };
@@ -29,8 +30,8 @@ use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, hash_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
-    Datum, DatumRef, Scalar, ScalarRefImpl,
+    hash_datum, memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum,
+    DatumRef, Scalar, ScalarRefImpl, ToDatumRef,
 };
 
 #[derive(Debug)]
@@ -76,24 +77,24 @@ impl ArrayBuilder for StructArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<StructRef<'_>>) {
+    fn append_n(&mut self, n: usize, value: Option<StructRef<'_>>) {
         match value {
             None => {
-                self.bitmap.append(false);
+                self.bitmap.append_n(n, false);
                 for child in &mut self.children_array {
-                    child.append_datum_ref(None);
+                    child.append_datum_n(n, Datum::None);
                 }
             }
             Some(v) => {
-                self.bitmap.append(true);
+                self.bitmap.append_n(n, true);
                 let fields = v.fields_ref();
                 assert_eq!(fields.len(), self.children_array.len());
-                for (field_idx, f) in fields.into_iter().enumerate() {
-                    self.children_array[field_idx].append_datum_ref(f);
+                for (child, f) in self.children_array.iter_mut().zip_eq(fields) {
+                    child.append_datum_n(n, f);
                 }
             }
         }
-        self.len += 1;
+        self.len += n;
     }
 
     fn append_array(&mut self, other: &StructArray) {
@@ -156,7 +157,12 @@ impl Array for StructArray {
     type Builder = StructArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = StructValue;
+    type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = StructRef<'a>;
+
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> StructRef<'_> {
+        StructRef::Indexed { arr: self, idx }
+    }
 
     fn value_at(&self, idx: usize) -> Option<StructRef<'_>> {
         if !self.is_null(idx) {
@@ -180,6 +186,10 @@ impl Array for StructArray {
 
     fn iter(&self) -> Self::Iter<'_> {
         ArrayIterator::new(self)
+    }
+
+    fn raw_iter(&self) -> Self::RawIter<'_> {
+        ArrayRawIter::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -317,13 +327,13 @@ impl StructValue {
         &self.fields
     }
 
-    pub fn deserialize(
+    pub fn memcmp_deserialize(
         fields: &[DataType],
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
         fields
             .iter()
-            .map(|field| deserialize_datum_from(field, deserializer))
+            .map(|field| memcmp_deserialize_datum_from(field, deserializer))
             .try_collect()
             .map(Self::new)
     }
@@ -344,7 +354,7 @@ macro_rules! iter_fields_ref {
                 $($body)*
             }
             StructRef::ValueRef { val } => {
-                let $it = val.fields.iter().map(to_datum_ref);
+                let $it = val.fields.iter().map(ToDatumRef::to_datum_ref);
                 $($body)*
             }
         }
@@ -356,13 +366,13 @@ impl<'a> StructRef<'a> {
         iter_fields_ref!(self, it, { it.collect() })
     }
 
-    pub fn serialize(
+    pub fn memcmp_serialize(
         &self,
         serializer: &mut memcomparable::Serializer<impl BufMut>,
     ) -> memcomparable::Result<()> {
         iter_fields_ref!(self, it, {
             for datum_ref in it {
-                serialize_datum_ref_into(&datum_ref, serializer)?
+                memcmp_serialize_datum_into(datum_ref, serializer)?
             }
             Ok(())
         })
@@ -371,7 +381,7 @@ impl<'a> StructRef<'a> {
     pub fn hash_scalar_inner<H: std::hash::Hasher>(&self, state: &mut H) {
         iter_fields_ref!(self, it, {
             for datum_ref in it {
-                hash_datum_ref(datum_ref, state);
+                hash_datum(datum_ref, state);
             }
         })
     }
@@ -440,6 +450,13 @@ impl ToText for StructRef<'_> {
                 it.map(|x| x.to_text()).collect::<Vec<String>>().join(",")
             )
         })
+    }
+
+    fn to_text_with_type(&self, ty: &DataType) -> String {
+        match ty {
+            DataType::Struct(_) => self.to_text(),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -559,18 +576,18 @@ mod tests {
     fn test_serialize_deserialize() {
         let value = StructValue::new(vec![
             Some(OrderedF32::from(3.2).to_scalar_value()),
-            Some("abcde".to_string().to_scalar_value()),
+            Some("abcde".into()),
             Some(
                 StructValue::new(vec![
                     Some(OrderedF64::from(1.3).to_scalar_value()),
-                    Some("a".to_string().to_scalar_value()),
+                    Some("a".into()),
                     None,
                     Some(StructValue::new(vec![]).to_scalar_value()),
                 ])
                 .to_scalar_value(),
             ),
             None,
-            Some("".to_string().to_scalar_value()),
+            Some("".into()),
             None,
             Some(StructValue::new(vec![]).to_scalar_value()),
             Some(12345.to_scalar_value()),
@@ -595,11 +612,11 @@ mod tests {
         ];
         let struct_ref = StructRef::ValueRef { val: &value };
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        struct_ref.serialize(&mut serializer).unwrap();
+        struct_ref.memcmp_serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         assert_eq!(
-            StructValue::deserialize(&fields, &mut deserializer).unwrap(),
+            StructValue::memcmp_deserialize(&fields, &mut deserializer).unwrap(),
             value
         );
 
@@ -613,11 +630,11 @@ mod tests {
         let array = builder.finish();
         let struct_ref = array.value_at(0).unwrap();
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        struct_ref.serialize(&mut serializer).unwrap();
+        struct_ref.memcmp_serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         assert_eq!(
-            StructValue::deserialize(&fields, &mut deserializer).unwrap(),
+            StructValue::memcmp_deserialize(&fields, &mut deserializer).unwrap(),
             value
         );
     }
@@ -650,19 +667,16 @@ mod tests {
                 Ordering::Greater,
             ),
             (
-                StructValue::new(vec![Some("".to_string().to_scalar_value())]),
+                StructValue::new(vec![Some("".into())]),
                 StructValue::new(vec![None]),
                 vec![DataType::Varchar],
                 Ordering::Less,
             ),
             (
-                StructValue::new(vec![Some("abcd".to_string().to_scalar_value()), None]),
+                StructValue::new(vec![Some("abcd".into()), None]),
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 vec![
                     DataType::Varchar,
@@ -672,18 +686,12 @@ mod tests {
             ),
             (
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 vec![
                     DataType::Varchar,
@@ -697,14 +705,14 @@ mod tests {
             let lhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 StructRef::ValueRef { val: &lhs }
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
             let rhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 StructRef::ValueRef { val: &rhs }
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -724,7 +732,7 @@ mod tests {
                 array
                     .value_at(0)
                     .unwrap()
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -733,7 +741,7 @@ mod tests {
                 array
                     .value_at(1)
                     .unwrap()
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };

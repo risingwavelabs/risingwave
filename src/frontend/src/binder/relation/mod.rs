@@ -17,13 +17,16 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    Field, TableId, DEFAULT_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
+    Field, TableId, DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
 };
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{FunctionArg, Ident, ObjectName, TableAlias, TableFactor};
 
 use super::bind_context::ColumnBinding;
 use crate::binder::{Binder, BoundSetExpr};
+use crate::catalog::system_catalog::pg_catalog::{
+    PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
+};
 use crate::expr::{Expr, ExprImpl, TableFunction, TableFunctionType};
 
 mod join;
@@ -70,13 +73,13 @@ impl Relation {
         }
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn is_correlated(&self, depth: Depth) -> bool {
         match self {
-            Relation::Subquery(subquery) => subquery.query.is_correlated(),
+            Relation::Subquery(subquery) => subquery.query.is_correlated(depth),
             Relation::Join(join) => {
-                join.cond.has_correlated_input_ref_by_depth()
-                    || join.left.is_correlated()
-                    || join.right.is_correlated()
+                join.cond.has_correlated_input_ref_by_depth(depth)
+                    || join.left.is_correlated(depth)
+                    || join.right.is_correlated(depth)
             }
             _ => false,
         }
@@ -167,11 +170,6 @@ impl Binder {
     /// return the `index_name`
     pub fn resolve_index_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "index name")
-    }
-
-    /// return the `sink_name`
-    pub fn resolve_sink_name(name: ObjectName) -> Result<String> {
-        Self::resolve_single_name(name.0, "sink name")
     }
 
     /// return the `user_name`
@@ -321,6 +319,18 @@ impl Binder {
                 let func_name = &name.0[0].real_value();
                 if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
                     return self.bind_internal_table(args, alias);
+                }
+                if func_name.eq_ignore_ascii_case(PG_GET_KEYWORDS_FUNC_NAME)
+                    || name.real_value().eq_ignore_ascii_case(
+                        format!("{}.{}", PG_CATALOG_SCHEMA_NAME, PG_GET_KEYWORDS_FUNC_NAME)
+                            .as_str(),
+                    )
+                {
+                    return self.bind_relation_by_name_inner(
+                        Some(PG_CATALOG_SCHEMA_NAME),
+                        PG_KEYWORDS_TABLE_NAME,
+                        alias,
+                    );
                 }
                 if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
                     let args: Vec<ExprImpl> = args

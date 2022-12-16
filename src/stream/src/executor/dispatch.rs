@@ -157,18 +157,20 @@ impl DispatchExecutorInner {
         let dispatcher = self.find_dispatcher(update.dispatcher_id);
         dispatcher.remove_outputs(&ids);
 
-        match dispatcher {
-            // The hash mapping is only used by the hash dispatcher.
-            DispatcherImpl::Hash(dispatcher) => {
-                dispatcher.hash_mapping = {
-                    let compressed_mapping = update.get_hash_mapping()?;
-                    decompress_data(
-                        &compressed_mapping.original_indices,
-                        &compressed_mapping.data,
-                    )
-                }
+        // The hash mapping is only used by the hash dispatcher.
+        //
+        // We specify a single upstream hash mapping for scaling the downstream fragment. However,
+        // it's possible that there're multiple upstreams with different exchange types, for
+        // example, the `Broadcast` inner side of the dynamic filter. There're too many combinations
+        // to handle here, so we just ignore the `hash_mapping` field for any other exchange types.
+        if let DispatcherImpl::Hash(dispatcher) = dispatcher {
+            dispatcher.hash_mapping = {
+                let compressed_mapping = update.get_hash_mapping()?;
+                decompress_data(
+                    &compressed_mapping.original_indices,
+                    &compressed_mapping.data,
+                )
             }
-            _ => assert!(update.hash_mapping.is_none()),
         }
 
         Ok(())
@@ -584,7 +586,7 @@ impl Dispatcher for HashDataDispatcher {
             let num_outputs = self.outputs.len();
 
             // get hash value of every line by its key
-            let hash_builder = Crc32FastBuilder {};
+            let hash_builder = Crc32FastBuilder;
             let vnodes = chunk
                 .data_chunk()
                 .get_hash_values(&self.keys, hash_builder)
@@ -1178,7 +1180,7 @@ mod tests {
         let mut output_cols = vec![vec![vec![]; dimension]; num_outputs];
         let mut output_ops = vec![vec![]; num_outputs];
         for op in &ops {
-            let hash_builder = Crc32FastBuilder {};
+            let hash_builder = Crc32FastBuilder;
             let mut hasher = hash_builder.build_hasher();
             let one_row = (0..dimension).map(|_| start.next().unwrap()).collect_vec();
             for key_idx in key_indices.iter() {

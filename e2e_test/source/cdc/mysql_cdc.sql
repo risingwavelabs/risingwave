@@ -37,15 +37,14 @@ VALUES (default, '2020-07-30 10:08:22', 'Jark', 50.50, 102, false),
        (default, '2020-07-30 10:11:09', 'Sally', 15.00, 105, false),
        (default, '2020-07-30 12:00:30', 'Edward', 25.25, 106, false);
 
-CREATE TABLE shipments (
-    shipment_id INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    order_id INTEGER NOT NULL,
-    origin VARCHAR(255) NOT NULL,
-    destination VARCHAR(255) NOT NULL,
-    is_arrived BOOLEAN NOT NULL
-) AUTO_INCREMENT = 1001;
+CREATE TABLE mytable (
+    v1 INTEGER NOT NULL PRIMARY KEY,
+    v2 INTEGER NOT NULL,
+    v3 VARCHAR(255) NOT NULL
+);
 
-INSERT INTO shipments
-VALUES (default,10001,'Beijing','Shanghai',false),
-       (default,10002,'Hangzhou','Shanghai',false),
-       (default,10003,'Shanghai','Hangzhou',false);
+INSERT INTO mytable
+VALUES (1,1,'no'),
+       (2,2,'no'),
+       (3,3,'no'),
+       (4,4,'no');

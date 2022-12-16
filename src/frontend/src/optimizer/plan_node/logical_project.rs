@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -24,57 +23,10 @@ use super::{
     gen_filter_and_pushdown, BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
-use crate::expr::{assert_input_ref, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
-
-/// Construct a `LogicalProject` and dedup expressions.
-/// expressions
-#[derive(Default)]
-pub struct LogicalProjectBuilder {
-    exprs: Vec<ExprImpl>,
-    exprs_index: HashMap<ExprImpl, usize>,
-}
-
-impl LogicalProjectBuilder {
-    /// add an expression to the `LogicalProject` and return the column index of the project's
-    /// output
-    pub fn add_expr(&mut self, expr: &ExprImpl) -> std::result::Result<usize, &'static str> {
-        if expr.has_subquery() {
-            return Err("subquery");
-        }
-        if expr.has_agg_call() {
-            return Err("aggregate function");
-        }
-        if expr.has_table_function() {
-            return Err("table function");
-        }
-        if expr.has_window_function() {
-            return Err("window function");
-        }
-        if let Some(idx) = self.exprs_index.get(expr) {
-            Ok(*idx)
-        } else {
-            let index = self.exprs.len();
-            self.exprs.push(expr.clone());
-            self.exprs_index.insert(expr.clone(), index);
-            Ok(index)
-        }
-    }
-
-    pub fn expr_index(&self, expr: &ExprImpl) -> Option<usize> {
-        if expr.has_subquery() {
-            return None;
-        }
-        self.exprs_index.get(expr).copied()
-    }
-
-    /// build the `LogicalProject` from `LogicalProjectBuilder`
-    pub fn build(self, input: PlanRef) -> LogicalProject {
-        LogicalProject::new(input, self.exprs)
-    }
-}
 
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
@@ -84,25 +36,21 @@ pub struct LogicalProject {
 }
 
 impl LogicalProject {
+    pub fn create(input: PlanRef, exprs: Vec<ExprImpl>) -> PlanRef {
+        Self::new(input, exprs).into()
+    }
+
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
-        let ctx = input.ctx();
-        for expr in &exprs {
-            assert_input_ref!(expr, input.schema().fields().len());
-            assert!(!expr.has_subquery());
-            assert!(!expr.has_agg_call());
-            assert!(
-                !expr.has_table_function(),
-                "Project should not have table function."
-            );
-            assert!(
-                !expr.has_window_function(),
-                "Project should not have window function."
-            );
-        }
         let core = generic::Project::new(exprs, input.clone());
+        Self::with_core(core)
+    }
+
+    pub fn with_core(core: generic::Project<PlanRef>) -> Self {
+        let ctx = core.input.ctx();
+
         let schema = core.schema();
         let pk_indices = core.logical_pk();
-        let functional_dependency = Self::derive_fd(&core, input.functional_dependency());
+        let functional_dependency = Self::derive_fd(&core, core.input.functional_dependency());
 
         let base = PlanBase::new_logical(
             ctx,
@@ -121,16 +69,6 @@ impl LogicalProject {
         self.core.i2o_col_mapping()
     }
 
-    pub fn create(input: PlanRef, exprs: Vec<ExprImpl>) -> PlanRef {
-        Self::new(input, exprs).into()
-    }
-
-    /// Map the order of the input to use the updated indices
-    pub fn get_out_column_index_order(&self) -> Order {
-        self.i2o_col_mapping()
-            .rewrite_provided_order(self.input().order())
-    }
-
     /// Creates a `LogicalProject` which select some columns from the input.
     ///
     /// `mapping` should maps from `(0..input_fields.len())` to a consecutive range starting from 0.
@@ -138,38 +76,17 @@ impl LogicalProject {
     /// This is useful in column pruning when we want to add a project to ensure the output schema
     /// is correct.
     pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> Self {
-        if mapping.target_size() == 0 {
-            // The mapping is empty, so the parent actually doesn't need the output of the input.
-            // This can happen when the parent node only selects constant expressions.
-            return LogicalProject::new(input, vec![]);
-        };
-        let mut input_refs = vec![None; mapping.target_size()];
-        for (src, tar) in mapping.mapping_pairs() {
-            assert_eq!(input_refs[tar], None);
-            input_refs[tar] = Some(src);
-        }
-        let input_schema = input.schema();
-        let exprs: Vec<ExprImpl> = input_refs
-            .into_iter()
-            .map(|i| i.unwrap())
-            .map(|i| InputRef::new(i, input_schema.fields()[i].data_type()).into())
-            .collect();
-
-        LogicalProject::new(input, exprs)
+        Self::with_core(generic::Project::with_mapping(input, mapping))
     }
 
     /// Creates a `LogicalProject` which select some columns from the input.
     pub fn with_out_fields(input: PlanRef, out_fields: &FixedBitSet) -> Self {
-        LogicalProject::with_out_col_idx(input, out_fields.ones())
+        Self::with_core(generic::Project::with_out_fields(input, out_fields))
     }
 
     /// Creates a `LogicalProject` which select some columns from the input.
     pub fn with_out_col_idx(input: PlanRef, out_fields: impl Iterator<Item = usize>) -> Self {
-        let input_schema = input.schema();
-        let exprs = out_fields
-            .map(|index| InputRef::new(index, input_schema[index].data_type()).into())
-            .collect();
-        LogicalProject::new(input, exprs)
+        Self::with_core(generic::Project::with_out_col_idx(input, out_fields))
     }
 
     fn derive_fd(
@@ -195,30 +112,19 @@ impl LogicalProject {
     }
 
     pub fn is_identity(&self) -> bool {
-        self.schema().len() == self.input().schema().len()
-            && self
-                .exprs()
-                .iter()
-                .zip_eq(self.input().schema().fields())
-                .enumerate()
-                .all(|(i, (expr, field))| {
-                    matches!(expr, ExprImpl::InputRef(input_ref) if **input_ref == InputRef::new(i, field.data_type()))
-                })
+        self.core.is_identity()
     }
 
     pub fn try_as_projection(&self) -> Option<Vec<usize>> {
-        self.exprs()
-            .iter()
-            .enumerate()
-            .map(|(_i, expr)| match expr {
-                ExprImpl::InputRef(input_ref) => Some(input_ref.index),
-                _ => None,
-            })
-            .collect::<Option<Vec<_>>>()
+        self.core.try_as_projection()
     }
 
     pub fn decompose(self) -> (Vec<ExprImpl>, PlanRef) {
         self.core.decompose()
+    }
+
+    pub fn is_all_inputref(&self) -> bool {
+        self.core.is_all_inputref()
     }
 }
 
@@ -417,8 +323,8 @@ mod tests {
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     /// Pruning

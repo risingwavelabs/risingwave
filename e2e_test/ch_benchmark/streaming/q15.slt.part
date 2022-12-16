@@ -1,0 +1,5 @@
+query ITTTR
+select * from ch_benchmark_q15
+order by su_suppkey;
+----
+96 'Supplier#000000096 'UTv1FnnAXhSsDyW?PT36MNpCpBfDiWtSC62GpH' 16-578-413-5053 113342

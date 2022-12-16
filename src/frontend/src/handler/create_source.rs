@@ -28,12 +28,12 @@ use risingwave_sqlparser::ast::{
     AvroSchema, CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema,
 };
 
-use super::create_table::{
-    bind_sql_columns, bind_sql_table_constraints, gen_materialized_source_plan,
-};
+use super::create_table::{bind_sql_columns, bind_sql_table_constraints, gen_materialize_plan};
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::session::{OptimizerContext, SessionImpl};
+use crate::handler::HandlerArgs;
+use crate::optimizer::OptimizerContext;
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn make_prost_source(
@@ -108,8 +108,9 @@ async fn extract_protobuf_table_schema(
         .collect_vec())
 }
 
+// TODO(Yuanxin): Only create a source w/o materializing.
 pub async fn handle_create_source(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<RwPgResponse> {
@@ -122,7 +123,7 @@ pub async fn handle_create_source(
         )
         .into());
     }
-    let with_properties = context.with_options.inner().clone();
+    let with_properties = handler_args.with_options.inner().clone();
     const UPSTREAM_SOURCE_KEY: &str = "connector";
     // confluent schema registry must be used with kafka
     let is_kafka = with_properties
@@ -149,9 +150,11 @@ pub async fn handle_create_source(
     }
     let (columns, source_info) = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            assert_eq!(columns.len(), 1);
-            assert_eq!(pk_column_ids, vec![0.into()]);
-            assert_eq!(row_id_index, Some(0));
+            if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
+                return Err(RwError::from(ProtocolError(
+                    "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/latest/sql-create-source/#protobuf for more information.".to_string(),
+                )));
+            }
 
             columns.extend(
                 extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
@@ -168,9 +171,11 @@ pub async fn handle_create_source(
             )
         }
         SourceSchema::Avro(avro_schema) => {
-            assert_eq!(columns.len(), 1);
-            assert_eq!(pk_column_ids, vec![0.into()]);
-            assert_eq!(row_id_index, Some(0));
+            if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
+                return Err(RwError::from(ProtocolError(
+                    "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/latest/sql-create-source/#avro for more information.".to_string(),
+                )));
+            }
             columns.extend(extract_avro_table_schema(avro_schema, with_properties.clone()).await?);
             (
                 columns,
@@ -242,7 +247,7 @@ pub async fn handle_create_source(
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
 
-    let session = context.session_ctx.clone();
+    let session = handler_args.session.clone();
 
     session.check_relation_name_duplicated(stmt.source_name.clone())?;
 
@@ -256,18 +261,19 @@ pub async fn handle_create_source(
         Info::StreamSource(source_info),
     )?;
     let catalog_writer = session.env().catalog_writer();
+
+    // TODO(Yuanxin): This should be removed after unifying table and materialized source.
     if is_materialized {
         let (graph, table) = {
+            let context = OptimizerContext::new_with_handler_args(handler_args);
             let (plan, table) =
-                gen_materialized_source_plan(context.into(), source.clone(), session.user_id())?;
+                gen_materialize_plan(context.into(), source.clone(), session.user_id())?;
             let graph = build_graph(plan);
 
             (graph, table)
         };
 
-        catalog_writer
-            .create_materialized_source(source, table, graph)
-            .await?;
+        catalog_writer.create_table(source, table, graph).await?;
     } else {
         catalog_writer.create_source(source).await?;
     }

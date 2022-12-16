@@ -37,6 +37,7 @@ pub struct TableFunction {
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum TableFunctionType {
     Generate,
+    Range,
     Unnest,
     RegexpMatches,
 }
@@ -45,6 +46,7 @@ impl TableFunctionType {
     fn to_protobuf(self) -> Type {
         match self {
             TableFunctionType::Generate => Type::Generate,
+            TableFunctionType::Range => Type::Range,
             TableFunctionType::Unnest => Type::Unnest,
             TableFunctionType::RegexpMatches => Type::RegexpMatches,
         }
@@ -55,6 +57,7 @@ impl TableFunctionType {
     pub fn name(&self) -> &str {
         match self {
             TableFunctionType::Generate => "generate_series",
+            TableFunctionType::Range => "range",
             TableFunctionType::Unnest => "unnest",
             TableFunctionType::RegexpMatches => "regexp_matches",
         }
@@ -67,6 +70,8 @@ impl FromStr for TableFunctionType {
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         if s.eq_ignore_ascii_case("generate_series") {
             Ok(TableFunctionType::Generate)
+        } else if s.eq_ignore_ascii_case("range") {
+            Ok(TableFunctionType::Range)
         } else if s.eq_ignore_ascii_case("unnest") {
             Ok(TableFunctionType::Unnest)
         } else if s.eq_ignore_ascii_case("regexp_matches") {
@@ -85,7 +90,7 @@ impl TableFunction {
         // Current implementation is copied from legacy code.
 
         match func_type {
-            TableFunctionType::Generate => {
+            function_type @ (TableFunctionType::Generate | TableFunctionType::Range) => {
                 // generate_series ( start timestamp, stop timestamp, step interval ) or
                 // generate_series ( start i32, stop i32, step i32 )
 
@@ -116,7 +121,7 @@ impl TableFunction {
                 Ok(TableFunction {
                     args,
                     return_type: data_type,
-                    function_type: TableFunctionType::Generate,
+                    function_type,
                 })
             }
             TableFunctionType::Unnest => {
@@ -154,7 +159,7 @@ impl TableFunction {
                 if let Some(flag) = args.get(2) {
                     if let ExprImpl::Literal(lit) = flag &&
                       let Some(ScalarImpl::Utf8(flag)) = lit.get_data() {
-                        if flag != "g" {
+                        if flag.as_ref() != "g" {
                             return Err(ErrorCode::NotImplemented(
                                 "flag in regexp_matches".to_string(),
                                 4545.into()

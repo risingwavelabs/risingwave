@@ -51,7 +51,7 @@ impl ProtobufParser {
 
         let schema_bytes = if use_schema_registry {
             let kafka_topic = get_kafka_topic(&props)?;
-            let client = Client::new(url)?;
+            let client = Client::new(url, &props)?;
             compile_file_descriptor_from_schema_registry(
                 format!("{}-value", kafka_topic).as_str(),
                 &client,
@@ -157,7 +157,7 @@ impl ProtobufParser {
     fn parse_inner(
         &self,
         mut payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         if self.confluent_wire_type {
             let raw_payload = resolve_pb_header(payload)?;
@@ -197,7 +197,7 @@ fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Da
         Value::U64(i) => ScalarImpl::Decimal(Decimal::from(*i)),
         Value::F32(f) => ScalarImpl::Float32(OrderedF32::from(*f)),
         Value::F64(f) => ScalarImpl::Float64(OrderedF64::from(*f)),
-        Value::String(s) => ScalarImpl::Utf8(s.to_owned()),
+        Value::String(s) => ScalarImpl::Utf8(s.as_str().into()),
         Value::EnumNumber(idx) => {
             let kind = field_desc.kind();
             let enum_desc = kind.as_enum().ok_or_else(|| {
@@ -211,7 +211,7 @@ fn from_protobuf_value(field_desc: &FieldDescriptor, value: &Value) -> Result<Da
                 );
                 RwError::from(ProtocolError(err_msg))
             })?;
-            ScalarImpl::Utf8(enum_symbol.name().to_owned())
+            ScalarImpl::Utf8(enum_symbol.name().into())
         }
         Value::Message(dyn_msg) => {
             let mut rw_values = Vec::with_capacity(dyn_msg.descriptor().fields().len());
@@ -333,7 +333,7 @@ mod test {
         let dir = PathBuf::from("src/test_data");
         format!(
             "file://{}",
-            std::fs::canonicalize(&dir).unwrap().to_str().unwrap()
+            std::fs::canonicalize(dir).unwrap().to_str().unwrap()
         )
     }
 

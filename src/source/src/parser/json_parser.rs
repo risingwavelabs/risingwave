@@ -32,7 +32,7 @@ impl JsonParser {
     fn parse_inner(
         &self,
         payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         use serde_json::Value;
 
@@ -86,7 +86,7 @@ impl JsonParser {
     fn parse_inner(
         &self,
         payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         use simd_json::{BorrowedValue, ValueAccess};
 
@@ -139,6 +139,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::catalog::ColumnDesc;
+    use risingwave_common::row::Row;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
     use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
@@ -178,43 +179,43 @@ mod tests {
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
-            assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
             assert_eq!(
-                row.value_at(1).to_owned_datum(),
+                row.datum_at(1).to_owned_datum(),
                 (Some(ScalarImpl::Bool(true)))
             );
             assert_eq!(
-                row.value_at(2).to_owned_datum(),
+                row.datum_at(2).to_owned_datum(),
                 (Some(ScalarImpl::Int16(1)))
             );
             assert_eq!(
-                row.value_at(3).to_owned_datum(),
+                row.datum_at(3).to_owned_datum(),
                 (Some(ScalarImpl::Int64(12345678)))
             );
             assert_eq!(
-                row.value_at(4).to_owned_datum(),
+                row.datum_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Float32(1.23.into())))
             );
             assert_eq!(
-                row.value_at(5).to_owned_datum(),
+                row.datum_at(5).to_owned_datum(),
                 (Some(ScalarImpl::Float64(1.2345.into())))
             );
             assert_eq!(
-                row.value_at(6).to_owned_datum(),
-                (Some(ScalarImpl::Utf8("varchar".to_string())))
+                row.datum_at(6).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("varchar".into())))
             );
             assert_eq!(
-                row.value_at(7).to_owned_datum(),
+                row.datum_at(7).to_owned_datum(),
                 (Some(ScalarImpl::NaiveDate(str_to_date("2021-01-01").unwrap())))
             );
             assert_eq!(
-                row.value_at(8).to_owned_datum(),
+                row.datum_at(8).to_owned_datum(),
                 (Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("2021-01-01 16:06:12.269").unwrap()
                 )))
             );
             assert_eq!(
-                row.value_at(9).to_owned_datum(),
+                row.datum_at(9).to_owned_datum(),
                 (Some(ScalarImpl::Decimal(
                     Decimal::from_str("12345.67890").unwrap()
                 )))
@@ -225,20 +226,20 @@ mod tests {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
             assert_eq!(
-                row.value_at(0).to_owned_datum(),
+                row.datum_at(0).to_owned_datum(),
                 (Some(ScalarImpl::Int32(1)))
             );
-            assert_eq!(row.value_at(1).to_owned_datum(), None);
+            assert_eq!(row.datum_at(1).to_owned_datum(), None);
             assert_eq!(
-                row.value_at(4).to_owned_datum(),
+                row.datum_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Float32(12345e+10.into())))
             );
             assert_eq!(
-                row.value_at(5).to_owned_datum(),
+                row.datum_at(5).to_owned_datum(),
                 (Some(ScalarImpl::Float64(12345.into())))
             );
             assert_eq!(
-                row.value_at(9).to_owned_datum(),
+                row.datum_at(9).to_owned_datum(),
                 (Some(ScalarImpl::Decimal(12345.into())))
             );
         }
@@ -337,24 +338,24 @@ mod tests {
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
-        let row = row.to_owned_row().0;
+        let row = row.into_owned_row().into_inner();
 
         let expected = vec![
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("2022-07-13 20:48:37.07").unwrap()
                 )),
-                Some(ScalarImpl::Utf8("1732524418112319151".to_string())),
-                Some(ScalarImpl::Utf8("Here man favor ourselves mysteriously most her sigh in straightaway for afterwards.".to_string())),
-                Some(ScalarImpl::Utf8("English".to_string())),
+                Some(ScalarImpl::Utf8("1732524418112319151".into())),
+                Some(ScalarImpl::Utf8("Here man favor ourselves mysteriously most her sigh in straightaway for afterwards.".into())),
+                Some(ScalarImpl::Utf8("English".into())),
             ]))),
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("2018-01-29 12:19:11.07").unwrap()
                 )),
-                Some(ScalarImpl::Utf8("7772634297".to_string())),
-                Some(ScalarImpl::Utf8("Lily Frami yet".to_string())),
-                Some(ScalarImpl::Utf8("Dooley5659".to_string())),
+                Some(ScalarImpl::Utf8("7772634297".into())),
+                Some(ScalarImpl::Utf8("Lily Frami yet".into())),
+                Some(ScalarImpl::Utf8("Dooley5659".into())),
             ]) ))
         ];
         assert_eq!(row, expected);

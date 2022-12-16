@@ -64,11 +64,11 @@ use crate::expr::{
     to_conjunctions, to_disjunctions, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor,
     FunctionCall, InputRef,
 };
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary, PredicatePushdown,
 };
 use crate::optimizer::PlanRef;
-use crate::session::OptimizerContextRef;
 use crate::utils::Condition;
 
 const INDEX_MAX_LEN: usize = 5;
@@ -699,6 +699,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Timestampz => size_of::<i64>(),
             DataType::Interval => size_of::<IntervalUnit>(),
             DataType::Varchar => 20,
+            DataType::Bytea => 20,
             DataType::Struct { .. } => 20,
             DataType::List { .. } => 20,
         }

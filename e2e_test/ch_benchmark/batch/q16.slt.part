@@ -1,0 +1,73 @@
+query TTII
+select	 i_name,
+         substr(i_data, 1, 3) as brand,
+         i_price,
+         count(distinct ((s_w_id * s_i_id) % 10000)) as supplier_cnt
+from	 stock, item
+where	 i_id = s_i_id
+         and i_data not like '%a%'
+         and ((s_w_id * s_i_id) % 10000 not in
+                (select su_suppkey
+                from supplier
+                where su_comment like '%bad%'))
+group by i_name, substr(i_data, 1, 3), i_price
+order by supplier_cnt desc, i_name;
+----
+ '0Cl2joZSDeo4QFPQgBE8pjH'   'TN      43.6            1
+ '0SI28EvNNcPiwvJG@?zAP6N'   'Gm     28.57            1
+ '3ZqOTCAy?Fnpr9S6qnjOs'     '79      1.08            1
+ '3eklXGHhWXL4S6H'           'g9     55.17            1
+ '3mvQQui@xeERBPLM5jxV'      'X1      71.9            1
+ '41OfAnIT8lQsEb?c'          'R6     26.26            1
+ '7k8K1F59fMzcJk?48ok'       'cA     74.76            1
+ '8CQpKSKGiacX2XXTqvG'       'vB     81.56            1
+ '@E?0iafYnGEtp2AyfX'        '9M      17.6            1
+ 'AVq5f@cQKRCDueh'           'XM     83.09            1
+ 'BZGdmLm4fACdt?y?xpgPVh'    'Jr     89.63            1
+ 'C3uxfZn@ZihBLPWc@f7u'      'hV     72.27            1
+ 'ChDJI6bnR6@wzqKNnYfRlT6'   'Vb      1.63            1
+ 'DSttD7DlLubPkrQ3yHa'       '5K     30.35            1
+ 'DkHUmuexN?Nv0AEuIgLE9Q2'   'E1     31.41            1
+ 'IdKPbrqBUb3wPVxQdKCEchp'   '88     28.61            1
+ 'JLFm2MZMgSaMtGiP'          'OR     25.29            1
+ 'JaayfVqwg3WCywB9c5?1'      'pU     28.48            1
+ 'Jppsxu5UAl0LrCJM8h'        '9M     49.79            1
+ 'MVHkOaWSHFPaZkpM8a@'       'eJ     78.84            1
+ 'OIOD3KrApBZBQ9EDZmq3Q5'    'Te     31.16            1
+ 'OjdkQizVTDhrJrYj'          'OX     17.12            1
+ 'Rp0F5KkhjeLJLkqW'          '8W     55.72            1
+ 'UG5TqJUD8qVrsDs06a2WU'     'Pf     26.29            1
+ 'UGTRUWjeDmaBuh'            'ZB     25.77            1
+ 'UGbAFLBG@kyKFui0Gu'        'td      29.6            1
+ 'Um15TLr4nSwclpAL7FnSkeN'   '6Q     46.21            1
+ 'WNkgBQtqJuMURNup1p4WMbq@'  'S?     45.57            1
+ 'XDqQMzRMKufAwN5v7ON'       'ne      62.5            1
+ 'XS3BV21JgJ8R2G7qivhfM2C4'  'yi     36.77            1
+ 'XXSyP1QSz2WWeoewP'         '9h     59.54            1
+ 'Y?4Ah?C@4?mIw@7F'          'xZ     69.52            1
+ 'Z7sML2Ix2kSGaa1acZNJsV'    'jE     30.74            1
+ 'ZAKV8d6YI@G5AdL'           'OR     74.68            1
+ 'ZxGU1KBbYt6OyN'            'YN     76.22            1
+ 'bhNxapsEwqQzVbvi8Vp'       'oS     53.18            1
+ 'c?ncNJmIhcDjpN'            'Jo     71.79            1
+ 'eCC0wbPXXjBKK@L3@Yi'       'mA     85.72            1
+ 'eNEvRRS1MUD1D911Zq2sXEP'   '57     30.85            1
+ 'fRi?8IJ33iGoAhC'           'z5     70.56            1
+ 'gPn6AxPJ5@8e7g'            'Uk     49.85            1
+ 'gZkPAoBGqIk21ljmSCvL'      'ce     41.84            1
+ 'hmgpSaQHKHgVw1kH'          's4     70.59            1
+ 'iFuTodal7GjDWgc6SDL91Ms'   'Vl     65.07            1
+ 'jDcm7tWHoaRHCpgzJ?d8IIy'   'Wk     57.81            1
+ 'jWKopfHHDZ0VYHm0xQqBVpZs'  'o9     57.99            1
+ 'jXv5g2zWrcOTB7'            '7V     97.48            1
+ 'n0DbpPFoT8yZy7zCbx5a1SJ@'  'sY     60.56            1
+ 'nqnH?dcWNguH6T'            'B?     29.27            1
+ 'ofwxvMu2BZS4tJnTr97eN'     'vN     59.81            1
+ 'rJ4LbKY8UzIa7aFVc56bV'     'JF     44.91            1
+ 'sH20xQa8ovRUAXxq09'        'rE     51.81            1
+ 'tJBTe11nf9eUmKxPR'         'U1     11.61            1
+ 'uOQ7ONGA6oJe7F'            'y7     90.49            1
+ 'w7pLIJ0OJAjmu60EpMSrY26'   'lT      57.1            1
+ 'we1xg3Y@eqX5Xu'            'co     89.68            1
+ 'yHnYHM0iAaQ3ONdBY'         '7v     47.77            1
+ 'ygYMgF?bE72P5Tg'           'xU     47.23            1

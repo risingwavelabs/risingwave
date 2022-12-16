@@ -1,0 +1,35 @@
+statement ok
+DROP SOURCE customer;
+
+statement ok
+DROP SOURCE district;
+
+statement ok
+DROP SOURCE history;
+
+statement ok
+DROP SOURCE item;
+
+statement ok
+DROP SOURCE neworder;
+
+statement ok
+DROP SOURCE orderline;
+
+statement ok
+DROP SOURCE orders;
+
+statement ok
+DROP SOURCE stock;
+
+statement ok
+DROP SOURCE warehouse;
+
+statement ok
+DROP SOURCE supplier;
+
+statement ok
+DROP SOURCE region;
+
+statement ok
+DROP SOURCE nation;

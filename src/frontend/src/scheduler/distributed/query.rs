@@ -380,7 +380,7 @@ pub(crate) mod tests {
     use std::sync::{Arc, RwLock};
 
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
-    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+    use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
@@ -394,12 +394,12 @@ pub(crate) mod tests {
         LogicalScan, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
-    use crate::optimizer::PlanRef;
+    use crate::optimizer::{OptimizerContext, PlanRef};
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
     use crate::scheduler::{ExecutionContext, HummockSnapshotManager, QueryExecutionInfo};
-    use crate::session::{OptimizerContext, SessionImpl};
+    use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
 
@@ -474,9 +474,10 @@ pub(crate) mod tests {
                     },
                 ],
                 distribution_key: vec![2],
-                appendonly: false,
+                append_only: false,
                 retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
                 value_indices: vec![0, 1, 2],
+                read_prefix_len_hint: 0,
             }),
             vec![],
             ctx,

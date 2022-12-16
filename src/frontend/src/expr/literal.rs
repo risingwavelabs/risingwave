@@ -15,7 +15,7 @@
 use risingwave_common::array::list_array::display_for_explain;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{literal_type_match, DataType, Datum, ScalarImpl};
-use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
+use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::Expr;
@@ -85,7 +85,7 @@ fn literal_to_value_encoding(d: &Datum) -> Option<RexNode> {
     }
     use risingwave_pb::data::Datum as ProstDatum;
 
-    let body = serialize_datum_to_bytes(d.as_ref());
+    let body = serialize_datum(d.as_ref());
     Some(RexNode::Constant(ProstDatum { body }))
 }
 
@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn test_struct_to_value_encoding() {
         let value = StructValue::new(vec![
-            Some(ScalarImpl::Utf8("".to_string())),
+            Some(ScalarImpl::Utf8("".into())),
             Some(2.into()),
             Some(3.into()),
         ]);
@@ -124,9 +124,9 @@ mod tests {
     #[test]
     fn test_list_to_value_encoding() {
         let value = ListValue::new(vec![
-            Some(ScalarImpl::Utf8("1".to_owned())),
-            Some(ScalarImpl::Utf8("2".to_owned())),
-            Some(ScalarImpl::Utf8("".to_owned())),
+            Some(ScalarImpl::Utf8("1".into())),
+            Some(ScalarImpl::Utf8("2".into())),
+            Some(ScalarImpl::Utf8("".into())),
         ]);
         let data = Some(ScalarImpl::List(value.clone()));
         let node = literal_to_value_encoding(&data);

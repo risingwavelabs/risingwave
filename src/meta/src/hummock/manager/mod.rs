@@ -52,7 +52,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{Notify, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
-use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
+use crate::hummock::compaction::{CompactStatus, LocalSelectorStatistic, ManualCompactionOption};
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
@@ -75,8 +75,11 @@ mod gc;
 #[cfg(test)]
 mod tests;
 mod versioning;
+pub use versioning::HummockVersionSafePoint;
 use versioning::*;
 mod compaction;
+mod worker;
+
 use compaction::*;
 
 type Snapshot = ArcSwap<HummockSnapshot>;
@@ -109,6 +112,7 @@ pub struct HummockManager<S: MetaStore> {
     compaction_tasks_to_cancel: parking_lot::Mutex<Vec<HummockCompactionTaskId>>,
 
     compactor_manager: CompactorManagerRef,
+    event_sender: HummockManagerEventSender,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -191,6 +195,7 @@ pub(crate) use start_measure_real_process_timer;
 
 use self::compaction_group_manager::CompactionGroupManagerInner;
 use super::Compactor;
+use crate::hummock::manager::worker::HummockManagerEventSender;
 
 static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     [
@@ -221,7 +226,7 @@ where
         cluster_manager: ClusterManagerRef<S>,
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
-    ) -> Result<HummockManager<S>> {
+    ) -> Result<HummockManagerRef<S>> {
         let compaction_group_manager = Self::build_compaction_group_manager(&env).await?;
         Self::with_compaction_group_manager(
             env,
@@ -240,7 +245,7 @@ where
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         config: CompactionConfig,
-    ) -> Result<HummockManager<S>> {
+    ) -> Result<HummockManagerRef<S>> {
         let compaction_group_manager =
             Self::build_compaction_group_manager_with_config(&env, config).await?;
         Self::with_compaction_group_manager(
@@ -259,7 +264,8 @@ where
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: tokio::sync::RwLock<CompactionGroupManagerInner<S>>,
-    ) -> Result<HummockManager<S>> {
+    ) -> Result<HummockManagerRef<S>> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -281,8 +287,10 @@ where
                 committed_epoch: INVALID_EPOCH,
                 current_epoch: INVALID_EPOCH,
             }),
+            event_sender: tx,
         };
-
+        let instance = Arc::new(instance);
+        instance.start_worker(rx).await;
         instance.load_meta_store_state().await?;
         instance.release_invalid_contexts().await?;
         instance.cancel_unassigned_compaction_task().await?;
@@ -780,13 +788,16 @@ where
             return Ok(None);
         }
         let can_trivial_move = manual_compaction_option.is_none();
+        let mut stats = LocalSelectorStatistic::default();
         let compact_task = compact_status.get_compact_task(
             current_version.get_compaction_group_levels(compaction_group_id),
             task_id as HummockCompactionTaskId,
             compaction_group_id,
             manual_compaction_option,
             group_config.compaction_config(),
+            &mut stats,
         );
+        stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         let mut compact_task = match compact_task {
             None => {
                 return Ok(None);

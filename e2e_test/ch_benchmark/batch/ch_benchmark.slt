@@ -1,0 +1,16 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET QUERY_MODE TO distributed;
+
+# Create materialized sources from tpcc tables
+include ../create_sources.slt.part
+
+# Ensure that the upstream data is fully consumed
+statement ok
+flush;
+
+include ./test_result.slt.part
+
+include ../drop_sources.slt.part

@@ -1,0 +1,11 @@
+query II
+select * from ch_benchmark_q13
+order by custdist desc, c_count desc;
+----
+       1        8
+       2        7
+       0        6
+       4        3
+       3        3
+       6        2
+       5        1

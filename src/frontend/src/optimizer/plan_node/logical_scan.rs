@@ -28,12 +28,15 @@ use super::{
     StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{
+    CollectInputRef, CorrelatedInputRef, CountNow, Expr, ExprImpl, ExprRewriter, ExprVisitor,
+    InputRef,
+};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
-use crate::session::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
@@ -309,7 +312,7 @@ impl LogicalScan {
     }
 
     /// Undo predicate push down when predicate in scan is not supported.
-    fn predicate_pull_up(&self) -> (LogicalScan, Condition, Option<Vec<ExprImpl>>) {
+    pub fn predicate_pull_up(&self) -> (LogicalScan, Condition, Option<Vec<ExprImpl>>) {
         let mut predicate = self.predicate().clone();
         if predicate.always_true() {
             return (self.clone(), Condition::true_cond(), None);
@@ -375,42 +378,56 @@ impl_plan_tree_node_for_leaf! {LogicalScan}
 impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
+        let output_col_names = if verbose {
+            self.column_names_with_table_prefix()
+        } else {
+            self.column_names()
+        }
+        .join(", ");
+
         if self.predicate().always_true() {
             write!(
                 f,
                 "LogicalScan {{ table: {}, columns: [{}] }}",
                 self.table_name(),
-                if verbose {
-                    self.column_names_with_table_prefix()
-                } else {
-                    self.column_names()
-                }
-                .join(", "),
+                output_col_names,
             )
         } else {
-            let required_col_names = self
-                .required_col_idx()
-                .iter()
-                .map(|i| self.table_desc().columns[*i].name.to_string())
-                .collect_vec();
+            write!(f, "LogicalScan {{ table: {}", self.table_name())?;
+            if self.output_col_idx() == self.required_col_idx() {
+                write!(f, ", columns: [{}]", output_col_names)?;
+            } else {
+                write!(
+                    f,
+                    ", output_columns: [{}], required_columns: [{}]",
+                    output_col_names,
+                    self.required_col_idx().iter().format_with(", ", |i, f| {
+                        if verbose {
+                            f(&format_args!(
+                                "{}.{}",
+                                self.table_name(),
+                                self.table_desc().columns[*i].name
+                            ))
+                        } else {
+                            f(&format_args!("{}", self.table_desc().columns[*i].name))
+                        }
+                    })
+                )?;
+            }
 
+            let fields = self
+                .table_desc()
+                .columns
+                .iter()
+                .map(|col| Field::from_with_table_name_prefix(col, self.table_name()))
+                .collect_vec();
+            let input_schema = Schema { fields };
             write!(
                 f,
-                "LogicalScan {{ table: {}, output_columns: [{}], required_columns: [{}], predicate: {} }}",
-                self.table_name(),
-                if verbose {
-                    self.column_names_with_table_prefix()
-                } else {
-                    self.column_names()
-                }.join(", "),
-                required_col_names.join(", "),
-                {
-                    let fields = self.table_desc().columns.iter().map(|col| Field::from_with_table_name_prefix(col, self.table_name())).collect_vec();
-                    let input_schema = Schema{fields};
-                    format!("{}", ConditionDisplay {
-                        condition: self.predicate(),
-                        input_schema: &input_schema,
-                    })
+                ", predicate: {} }}",
+                ConditionDisplay {
+                    condition: self.predicate(),
+                    input_schema: &input_schema,
                 }
             )
         }
@@ -433,6 +450,28 @@ impl ColPrunable for LogicalScan {
 
 impl PredicatePushdown for LogicalScan {
     fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+        // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
+        // This case could come from the predicate push down before the subquery unnesting.
+        struct HasCorrelated {}
+        impl ExprVisitor<bool> for HasCorrelated {
+            fn merge(a: bool, b: bool) -> bool {
+                a | b
+            }
+
+            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) -> bool {
+                true
+            }
+        }
+        let mut has_correlated_visitor = HasCorrelated {};
+        if predicate.visit_expr(&mut has_correlated_visitor)
+            || predicate.visit_expr(&mut CountNow::default()) > 0
+        {
+            return LogicalFilter::create(
+                self.clone_with_predicate(self.predicate().clone()).into(),
+                predicate,
+            );
+        }
+
         let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
         ));
@@ -451,8 +490,7 @@ impl LogicalScan {
                 self.core.table_desc.clone(),
                 self.base
                     .ctx
-                    .inner()
-                    .session_ctx
+                    .session_ctx()
                     .config()
                     .get_max_split_range_gap(),
             )?;

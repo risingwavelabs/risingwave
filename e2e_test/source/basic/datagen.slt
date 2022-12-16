@@ -22,6 +22,7 @@ query II rowsort
 select v1, v2 from s1 where v1 is not null limit 15;
 ----
 1 11
+10 20
 2 12
 3 13
 4 14
@@ -30,7 +31,6 @@ select v1, v2 from s1 where v1 is not null limit 15;
 7 17
 8 18
 9 19
-10 20
 
 statement ok
 drop source s1;
@@ -110,6 +110,7 @@ create materialized source s1 (v1 struct<v2 int>, t1 timestamp, c1 varchar) with
     fields.v1.v2.seed = '1',
     fields.t1.kind = 'random',
     fields.t1.max_past = '2h 37min',
+    fields.t1.max_past_mode = 'relative',
     fields.t1.seed = '3',
     fields.c1.kind = 'random',
     fields.c1.length = '100',

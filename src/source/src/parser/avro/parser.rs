@@ -58,7 +58,7 @@ impl AvroParser {
         })?;
         let (schema, schema_resolver) = if use_schema_registry {
             let kafka_topic = get_kafka_topic(&props)?;
-            let client = Client::new(url)?;
+            let client = Client::new(url, &props)?;
             let (schema, resolver) =
                 ConfluentSchemaResolver::new(format!("{}-value", kafka_topic).as_str(), client)
                     .await?;
@@ -181,7 +181,7 @@ impl AvroParser {
     async fn parse_inner(
         &self,
         payload: &[u8],
-        writer: SourceStreamChunkRowWriter<'_>,
+        mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
@@ -237,7 +237,7 @@ impl AvroParser {
 fn from_avro_value(value: Value) -> Result<Datum> {
     let v = match value {
         Value::Boolean(b) => ScalarImpl::Bool(b),
-        Value::String(s) => ScalarImpl::Utf8(s),
+        Value::String(s) => ScalarImpl::Utf8(s.into_boxed_str()),
         Value::Int(i) => ScalarImpl::Int32(i),
         Value::Long(i) => ScalarImpl::Int64(i),
         Value::Float(f) => ScalarImpl::Float32(OrderedF32::from(f)),
@@ -280,7 +280,7 @@ fn from_avro_value(value: Value) -> Result<Datum> {
             let millis = u32::from(duration.millis()) as i64;
             ScalarImpl::Interval(IntervalUnit::new(months, days, millis))
         }
-        Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol),
+        Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol.into_boxed_str()),
         Value::Record(descs) => {
             let rw_values = descs
                 .into_iter()
@@ -331,6 +331,7 @@ mod test {
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
+    use risingwave_common::row::Row;
     use risingwave_common::types::{
         DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl,
     };
@@ -419,12 +420,12 @@ mod test {
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
-        let row = row.to_owned_row();
+        let row = row.into_owned_row();
         for (i, field) in record.fields.iter().enumerate() {
             let value = field.clone().1;
             match value {
                 Value::String(str) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Utf8(str)));
+                    assert_eq!(row[i], Some(ScalarImpl::Utf8(str.into_boxed_str())));
                 }
                 Value::Boolean(bool_val) => {
                     assert_eq!(row[i], Some(ScalarImpl::Bool(bool_val)));

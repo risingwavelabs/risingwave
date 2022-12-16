@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::max;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -22,16 +23,16 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::generic::GenericPlanNode;
 use super::{
-    generic, BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanNodeType,
-    PlanRef, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch,
-    ToStream,
+    generic, BatchProject, ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::max_one_row_visitor::MaxOneRowVisitor;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
-    LogicalFilter, StreamDynamicFilter, StreamFilter,
+    LogicalFilter, LogicalScan, StreamDynamicFilter, StreamFilter,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
@@ -53,20 +54,17 @@ impl fmt::Display for LogicalJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("LogicalJoin");
-        builder.field("type", &format_args!("{:?}", self.join_type()));
+        builder.field("type", &self.join_type());
 
         let mut concat_schema = self.left().schema().fields.clone();
         concat_schema.extend(self.right().schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);
         builder.field(
             "on",
-            &format_args!(
-                "{}",
-                ConditionDisplay {
-                    condition: self.on(),
-                    input_schema: &concat_schema
-                }
-            ),
+            &ConditionDisplay {
+                condition: self.on(),
+                input_schema: &concat_schema,
+            },
         );
 
         if verbose {
@@ -279,7 +277,7 @@ impl LogicalJoin {
     /// Returns the pushed predicates. The pushed part will be removed from the original predicate.
     ///
     /// `InputRef`s in the right `Condition` are shifted by `-left_col_num`.
-    fn push_down(
+    pub fn push_down(
         predicate: &mut Condition,
         left_col_num: usize,
         right_col_num: usize,
@@ -287,11 +285,13 @@ impl LogicalJoin {
         push_right: bool,
         push_on: bool,
     ) -> (Condition, Condition, Condition) {
-        let conjunctions = std::mem::take(&mut predicate.conjunctions);
+        let mut conjunctions = std::mem::take(&mut predicate.conjunctions);
+
+        let mut cannot_push = conjunctions
+            .drain_filter(|expr| expr.count_nows() > 0)
+            .collect_vec();
         let (mut left, right, mut others) =
             Condition { conjunctions }.split(left_col_num, right_col_num);
-
-        let mut cannot_push = vec![];
 
         if !push_left {
             cannot_push.extend(left);
@@ -322,35 +322,35 @@ impl LogicalJoin {
         (left, right, on)
     }
 
-    fn can_push_left_from_filter(ty: JoinType) -> bool {
+    pub fn can_push_left_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
         )
     }
 
-    fn can_push_right_from_filter(ty: JoinType) -> bool {
+    pub fn can_push_right_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti
         )
     }
 
-    fn can_push_on_from_filter(ty: JoinType) -> bool {
+    pub fn can_push_on_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftSemi | JoinType::RightSemi
         )
     }
 
-    fn can_push_left_from_on(ty: JoinType) -> bool {
+    pub fn can_push_left_from_on(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi
         )
     }
 
-    fn can_push_right_from_on(ty: JoinType) -> bool {
+    pub fn can_push_right_from_on(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
@@ -402,82 +402,235 @@ impl LogicalJoin {
         }
     }
 
-    fn to_batch_lookup_join(
+    /// Index Join:
+    /// Try to convert logical join into batch lookup join and meanwhile it will do
+    /// the index selection for the lookup table so that we can benefit from indexes.
+    fn to_batch_lookup_join_with_index_selection(
         &self,
-        mut predicate: EqJoinPredicate,
+        predicate: EqJoinPredicate,
         logical_join: LogicalJoin,
-    ) -> Option<PlanRef> {
-        let right = self.right();
-        if right.as_ref().node_type() != PlanNodeType::LogicalScan {
-            tracing::warn!(
-                "Lookup Join only supports basic tables on the join's right side. A \
-            different join will be used instead."
-            );
-            return None;
-        }
-
+    ) -> Option<BatchLookupJoin> {
         match logical_join.join_type() {
-            JoinType::RightOuter
-            | JoinType::RightSemi
-            | JoinType::RightAnti
-            | JoinType::FullOuter => return None,
-            _ => {}
+            JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {}
+            _ => return None,
         };
 
-        let logical_scan = right.as_logical_scan().unwrap();
-        let table_desc = logical_scan.table_desc().clone();
-        let output_column_ids = logical_scan.output_column_ids();
+        // Index selection for index join.
+        let right = self.right();
+        // Lookup Join only supports basic tables on the join's right side.
+        let logical_scan: &LogicalScan = right.as_logical_scan()?;
 
-        // Verify that the right join key columns are the same as the primary key
-        // TODO: Refactor Lookup Join so that prefixes of the primary key are allowed
-        let eq_col_warn_message = "In Lookup Join, the right columns of the equality join \
-        predicates must be the same as the primary key. A different join will be used instead.";
-
-        let order_col_ids = table_desc.order_column_ids();
-        if order_col_ids.len() != predicate.right_eq_indexes().len() {
-            tracing::warn!("{}", eq_col_warn_message);
-            return None;
+        let mut result_plan = None;
+        // Lookup primary table.
+        if let Some(lookup_join) =
+            self.to_batch_lookup_join(predicate.clone(), logical_join.clone())
+        {
+            result_plan = Some(lookup_join);
         }
 
-        for (order_col_id, eq_idx) in order_col_ids
-            .into_iter()
-            .zip_eq(predicate.right_eq_indexes())
-        {
-            if order_col_id != output_column_ids[eq_idx] {
-                tracing::warn!("{}", eq_col_warn_message);
-                return None;
+        let required_col_idx = logical_scan.required_col_idx();
+        let indexes = logical_scan.indexes();
+        for index in indexes {
+            let p2s_mapping = index.primary_to_secondary_mapping();
+            if required_col_idx.iter().all(|x| p2s_mapping.contains_key(x)) {
+                // Covering index selection
+                let index_scan: PlanRef = logical_scan
+                    .to_index_scan(
+                        &index.name,
+                        index.index_table.table_desc().into(),
+                        p2s_mapping,
+                    )
+                    .into();
+
+                let that = self.clone_with_left_right(self.left(), index_scan.clone());
+                let new_logical_join = logical_join.clone_with_left_right(
+                    logical_join.left(),
+                    index_scan.to_batch().expect("index scan failed to batch"),
+                );
+
+                // Lookup covered index.
+                if let Some(lookup_join) =
+                    that.to_batch_lookup_join(predicate.clone(), new_logical_join)
+                {
+                    match &result_plan {
+                        None => result_plan = Some(lookup_join),
+                        Some(prev_lookup_join) => {
+                            // Prefer to choose lookup join with longer lookup prefix len.
+                            if prev_lookup_join.lookup_prefix_len()
+                                < lookup_join.lookup_prefix_len()
+                            {
+                                result_plan = Some(lookup_join)
+                            }
+                        }
+                    }
+                }
             }
         }
 
+        result_plan
+    }
+
+    /// Try to convert logical join into batch lookup join.
+    fn to_batch_lookup_join(
+        &self,
+        predicate: EqJoinPredicate,
+        logical_join: LogicalJoin,
+    ) -> Option<BatchLookupJoin> {
+        match logical_join.join_type() {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {}
+            _ => return None,
+        };
+
+        let right = self.right();
+        // Lookup Join only supports basic tables on the join's right side.
+        let logical_scan: &LogicalScan = right.as_logical_scan()?;
+        let table_desc = logical_scan.table_desc().clone();
+        let output_column_ids = logical_scan.output_column_ids();
+
+        // Verify that the right join key columns are the the prefix of the primary key and
+        // also contain the distribution key.
+        let order_col_ids = table_desc.order_column_ids();
+        let order_key = table_desc.order_column_indices();
+        let dist_key = table_desc.distribution_key.clone();
+        // The at least prefix of order key that contains distribution key.
+        let at_least_prefix_len = {
+            let mut max_pos = 0;
+            for d in dist_key {
+                max_pos = max(
+                    max_pos,
+                    order_key
+                        .iter()
+                        .position(|x| *x == d)
+                        .expect("dist_key must in order_key"),
+                );
+            }
+            max_pos + 1
+        };
+
+        // Reorder the join equal predicate to match the order key.
+        let mut reorder_idx = vec![];
+        for order_col_id in order_col_ids {
+            for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
+                if order_col_id == output_column_ids[eq_idx] {
+                    reorder_idx.push(i);
+                    break;
+                }
+            }
+        }
+        if reorder_idx.len() < at_least_prefix_len {
+            return None;
+        }
+        let lookup_prefix_len = reorder_idx.len();
+        let predicate = predicate.reorder(&reorder_idx);
+
+        // Extract the predicate from logical scan. Only pure scan is supported.
+        let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
+        // Construct output column to require column mapping
+        let o2r = if let Some(project_expr) = project_expr {
+            project_expr
+                .into_iter()
+                .map(|x| x.as_input_ref().unwrap().index)
+                .collect_vec()
+        } else {
+            (0..logical_scan.output_col_idx().len())
+                .into_iter()
+                .collect_vec()
+        };
         let left_schema_len = logical_join.left().schema().len();
-        struct Rewriter {
+
+        // Rewrite the join predicate and all columns referred to the scan side need to rewrite.
+        struct JoinPredicateRewriter {
+            offset: usize,
+            mapping: Vec<usize>,
+        }
+        impl ExprRewriter for JoinPredicateRewriter {
+            fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+                if input_ref.index() < self.offset {
+                    input_ref.into()
+                } else {
+                    InputRef::new(
+                        self.mapping[input_ref.index() - self.offset] + self.offset,
+                        input_ref.return_type(),
+                    )
+                    .into()
+                }
+            }
+        }
+        let mut join_predicate_rewriter = JoinPredicateRewriter {
+            offset: left_schema_len,
+            mapping: o2r.clone(),
+        };
+
+        let new_eq_cond = predicate
+            .eq_cond()
+            .rewrite_expr(&mut join_predicate_rewriter);
+
+        // Rewrite the scan predicate so we can add it to the join predicate.
+        struct ScanPredicateRewriter {
             offset: usize,
         }
-        impl ExprRewriter for Rewriter {
+        impl ExprRewriter for ScanPredicateRewriter {
             fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
                 InputRef::new(input_ref.index() + self.offset, input_ref.return_type()).into()
             }
         }
-        let mut rewriter = Rewriter {
+        let mut scan_predicate_rewriter = ScanPredicateRewriter {
             offset: left_schema_len,
         };
 
-        let new_other = predicate
+        let new_other_cond = predicate
             .other_cond()
             .clone()
-            .and(logical_scan.predicate().clone().rewrite_expr(&mut rewriter));
-        *predicate.other_cond_mut() = new_other;
+            .rewrite_expr(&mut join_predicate_rewriter)
+            .and(scan_predicate.rewrite_expr(&mut scan_predicate_rewriter));
 
-        Some(
-            BatchLookupJoin::new(
-                logical_join,
-                predicate,
-                table_desc,
-                output_column_ids,
-                false,
-            )
-            .into(),
-        )
+        let new_join_on = new_eq_cond.and(new_other_cond);
+        let new_predicate = EqJoinPredicate::create(
+            left_schema_len,
+            new_scan.base.schema().len(),
+            new_join_on.clone(),
+        );
+
+        // We discovered that we cannot use a lookup join after pulling up the predicate
+        // from one side and simplifying the condition. Let's use  some other join instead.
+        if !new_predicate.has_eq() {
+            return None;
+        }
+
+        // Rewrite the join output indices and all output indices referred to the old scan need to
+        // rewrite.
+        let new_join_output_indices = logical_join
+            .output_indices()
+            .clone()
+            .into_iter()
+            .map(|x| {
+                if x < left_schema_len {
+                    x
+                } else {
+                    o2r[x - left_schema_len] + left_schema_len
+                }
+            })
+            .collect_vec();
+
+        let new_scan_output_column_ids = new_scan.output_column_ids();
+
+        // Construct a new logical join, because we have change its RHS.
+        let new_logical_join = LogicalJoin::with_output_indices(
+            logical_join.left(),
+            new_scan.into(),
+            logical_join.join_type(),
+            new_join_on,
+            new_join_output_indices,
+        );
+
+        Some(BatchLookupJoin::new(
+            new_logical_join,
+            new_predicate,
+            table_desc,
+            new_scan_output_column_ids,
+            lookup_prefix_len,
+            false,
+        ))
     }
 
     pub fn decompose(self) -> (PlanRef, PlanRef, Condition, JoinType, Vec<usize>) {
@@ -919,7 +1072,8 @@ impl LogicalJoin {
 
         Ok(self
             .to_batch_lookup_join(predicate, logical_join)
-            .expect("Fail to convert to lookup join"))
+            .expect("Fail to convert to lookup join")
+            .into())
     }
 
     fn to_batch_nested_loop_join(
@@ -944,14 +1098,15 @@ impl ToBatch for LogicalJoin {
         let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
 
-        let config = self.base.ctx.inner().session_ctx.config();
+        let config = self.base.ctx.session_ctx().config();
 
         if predicate.has_eq() {
             if config.get_batch_enable_lookup_join() {
-                if let Some(lookup_join) =
-                    self.to_batch_lookup_join(predicate.clone(), logical_join.clone())
-                {
-                    return Ok(lookup_join);
+                if let Some(lookup_join) = self.to_batch_lookup_join_with_index_selection(
+                    predicate.clone(),
+                    logical_join.clone(),
+                ) {
+                    return Ok(lookup_join.into());
                 }
             }
 
@@ -1065,9 +1220,9 @@ mod tests {
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
     use crate::optimizer::property::FunctionalDependency;
-    use crate::session::OptimizerContext;
 
     /// Pruning
     /// ```text

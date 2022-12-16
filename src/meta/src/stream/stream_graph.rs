@@ -785,7 +785,12 @@ impl ActorGraphBuilder {
         })
     }
 
-    pub fn fill_mview_id(&mut self, table: &mut Table) {
+    pub fn fill_mview_or_sink_id(
+        &mut self,
+        database_id: DatabaseId,
+        schema_id: SchemaId,
+        table_id: TableId,
+    ) -> FragmentId {
         // Fill in the correct mview id for stream node.
         struct FillIdContext {
             database_id: DatabaseId,
@@ -793,10 +798,10 @@ impl ActorGraphBuilder {
             table_id: TableId,
             fragment_id: FragmentId,
         }
-        fn fill_mview_id_inner(stream_node: &mut StreamNode, ctx: &FillIdContext) -> usize {
+        fn fill_mview_or_sink_id_inner(stream_node: &mut StreamNode, ctx: &FillIdContext) -> usize {
             let mut mview_count = 0;
-            if let NodeBody::Materialize(materialize_node) = stream_node.node_body.as_mut().unwrap()
-            {
+            let node_body = stream_node.node_body.as_mut().unwrap();
+            if let NodeBody::Materialize(materialize_node) = node_body {
                 materialize_node.table_id = ctx.table_id.table_id;
                 materialize_node.table.as_mut().unwrap().id = ctx.table_id.table_id;
                 materialize_node.table.as_mut().unwrap().database_id = ctx.database_id;
@@ -804,26 +809,31 @@ impl ActorGraphBuilder {
                 materialize_node.table.as_mut().unwrap().fragment_id = ctx.fragment_id;
                 mview_count += 1;
             }
+            if let NodeBody::Sink(sink_node) = node_body {
+                sink_node.table_id = ctx.table_id.table_id;
+                mview_count += 1;
+            }
             for input in &mut stream_node.input {
-                mview_count += fill_mview_id_inner(input, ctx);
+                mview_count += fill_mview_or_sink_id_inner(input, ctx);
             }
             mview_count
         }
 
         let mut mview_count = 0;
+        let mut fragment_id = 0;
         for fragment in self.fragment_graph.fragments_mut().values_mut() {
-            let delta = fill_mview_id_inner(
+            let delta = fill_mview_or_sink_id_inner(
                 fragment.node.as_mut().unwrap(),
                 &FillIdContext {
-                    database_id: table.database_id,
-                    schema_id: table.schema_id,
-                    table_id: table.id.into(),
+                    database_id,
+                    schema_id,
+                    table_id,
                     fragment_id: fragment.fragment_id,
                 },
             );
             mview_count += delta;
             if delta != 0 {
-                table.fragment_id = fragment.fragment_id
+                fragment_id = fragment.fragment_id
             }
         }
 
@@ -831,6 +841,8 @@ impl ActorGraphBuilder {
             mview_count, 1,
             "require exactly 1 materialize node when creating materialized view"
         );
+
+        fragment_id
     }
 
     pub async fn generate_graph<S>(
@@ -900,7 +912,7 @@ impl ActorGraphBuilder {
                     fragment_id,
                     Fragment {
                         fragment_id,
-                        fragment_type: fragment.fragment_type,
+                        fragment_type_mask: fragment.get_fragment_type_mask(),
                         distribution_type: if fragment.is_singleton {
                             FragmentDistributionType::Single
                         } else {

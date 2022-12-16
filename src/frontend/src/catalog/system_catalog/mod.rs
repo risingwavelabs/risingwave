@@ -25,7 +25,7 @@ use risingwave_common::catalog::{
     INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
 use crate::catalog::catalog_service::CatalogReader;
@@ -160,7 +160,7 @@ macro_rules! prepare_sys_catalog {
 
         #[async_trait]
         impl SysCatalogReader for SysCatalogReaderImpl {
-            async fn read_table(&self, table_id: &TableId) -> Result<Vec<Row>> {
+            async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>> {
                 match table_id.table_id - 1 {
                     $(
                         ${index()} => {
@@ -181,7 +181,7 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_TYPE, vec![0], read_types },
     { PG_CATALOG, PG_NAMESPACE, vec![0], read_namespace },
     { PG_CATALOG, PG_CAST, vec![0], read_cast },
-    { PG_CATALOG, PG_MATVIEWS_INFO, vec![0], read_mviews_info await },
+    { PG_CATALOG, PG_MATVIEWS, vec![0], read_mviews_info await },
     { PG_CATALOG, PG_USER, vec![0], read_user_info },
     { PG_CATALOG, PG_CLASS, vec![0], read_class_info },
     { PG_CATALOG, PG_INDEX, vec![0], read_index_info },
@@ -190,6 +190,11 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_AM, vec![0], read_am_info },
     { PG_CATALOG, PG_OPERATOR, vec![0], read_operator_info },
     { PG_CATALOG, PG_VIEWS, vec![], read_views_info },
+    { PG_CATALOG, PG_ATTRIBUTE, vec![0, 4], read_pg_attribute },
+    { PG_CATALOG, PG_DATABASE, vec![0], read_database_info },
+    { PG_CATALOG, PG_DESCRIPTION, vec![0], read_description_info },
+    { PG_CATALOG, PG_SETTINGS, vec![0], read_settings_info },
+    { PG_CATALOG, PG_KEYWORDS, vec![0], read_keywords_info },
     { INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
     { INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
 }

@@ -15,12 +15,13 @@
 use std::ops::Deref;
 
 use bytes::Bytes;
-use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
-use risingwave_common::row::Row;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::{bail, row};
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
+use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -47,23 +48,21 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     }
 
     fn string_to_scalar(rhs: impl Into<String>) -> ScalarImpl {
-        ScalarImpl::Utf8(rhs.into())
+        ScalarImpl::Utf8(rhs.into().into_boxed_str())
     }
 
-    pub(crate) async fn get(&self, key: SplitId) -> StreamExecutorResult<Option<Row>> {
+    pub(crate) async fn get(&self, key: SplitId) -> StreamExecutorResult<Option<OwnedRow>> {
         self.state_store
-            .get_row(&Row::new(vec![Some(Self::string_to_scalar(key.deref()))]))
+            .get_row(row::once(Some(Self::string_to_scalar(key.deref()))))
             .await
             .map_err(StreamExecutorError::from)
     }
 
     async fn set(&mut self, key: SplitId, value: Bytes) -> StreamExecutorResult<()> {
-        let row = Row::new(vec![
+        let row = [
             Some(Self::string_to_scalar(key.deref())),
-            Some(Self::string_to_scalar(
-                String::from_utf8_lossy(&value).to_string(),
-            )),
-        ]);
+            Some(ScalarImpl::Bytea(Vec::from(value).into_boxed_slice())),
+        ];
         match self.get(key).await? {
             Some(prev_row) => {
                 self.state_store.update(prev_row, row);
@@ -102,8 +101,8 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     ) -> StreamExecutorResult<Option<SplitImpl>> {
         Ok(match self.get(stream_source_split.id()).await? {
             None => None,
-            Some(row) => match row.0.get(1).unwrap() {
-                Some(ScalarImpl::Utf8(s)) => Some(SplitImpl::restore_from_bytes(s.as_bytes())?),
+            Some(row) => match row.datum_at(1) {
+                Some(ScalarRefImpl::Bytea(bytes)) => Some(SplitImpl::restore_from_bytes(bytes)?),
                 _ => unreachable!(),
             },
         })
@@ -129,7 +128,7 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
 
     let columns = vec![
         make_column(TypeName::Varchar, 0),
-        make_column(TypeName::Varchar, 1),
+        make_column(TypeName::Bytea, 1),
     ];
     ProstTable {
         id,
@@ -137,7 +136,7 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
         database_id: DatabaseId::placeholder() as u32,
         name: String::new(),
         columns,
-        is_index: false,
+        table_type: TableType::Internal as i32,
         value_indices: vec![0, 1],
         pk: vec![ColumnOrder {
             index: 0,
@@ -151,7 +150,7 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
 pub(crate) mod tests {
     use std::sync::Arc;
 
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{Datum, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_connector::source::kafka::KafkaSplit;
@@ -175,12 +174,12 @@ pub(crate) mod tests {
         let next_epoch = EpochPair::new_test_epoch(init_epoch_num + 1);
 
         state_table.init_epoch(init_epoch);
-        state_table.insert(Row::new(vec![a.clone(), b.clone()]));
+        state_table.insert(OwnedRow::new(vec![a.clone(), b.clone()]));
         state_table.commit(next_epoch).await.unwrap();
 
         let a: Arc<str> = String::from("a").into();
         let a: Datum = Some(ScalarImpl::Utf8(a.as_ref().into()));
-        let _resp = state_table.get_row(&Row::new(vec![a])).await.unwrap();
+        let _resp = state_table.get_row(&OwnedRow::new(vec![a])).await.unwrap();
     }
 
     #[tokio::test]

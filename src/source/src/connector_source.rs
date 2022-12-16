@@ -28,6 +28,7 @@ use risingwave_connector::source::{
     Column, ConnectorProperties, ConnectorState, SourceMessage, SplitId, SplitMetaData,
     SplitReaderImpl,
 };
+use risingwave_connector::ConnectorParams;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, StreamSourceInfo as ProstStreamSourceInfo,
 };
@@ -193,18 +194,16 @@ impl ConnectorSource {
         proto_message_name: String,
         properties: HashMap<String, String>,
         columns: Vec<SourceColumnDesc>,
-        connector_node_addr: String,
+        connector_node_addr: Option<String>,
         connector_message_buffer_size: usize,
     ) -> Result<Self> {
-        // Store the connector node address to properties for later use.
-        let mut source_props: HashMap<String, String> =
-            HashMap::from_iter(properties.clone().into_iter());
-        source_props.insert(
-            "connector_node_addr".to_string(),
-            connector_node_addr.clone(),
-        );
-        let config =
-            ConnectorProperties::extract(source_props).map_err(|e| ConnectorError(e.into()))?;
+        let mut config = ConnectorProperties::extract(properties.clone())
+            .map_err(|e| ConnectorError(e.into()))?;
+        if let Some(addr) = connector_node_addr {
+            config.set_connector_node_addr(addr);
+            // fixme: require source_id
+            // config.set_source_id_for_cdc(source_id);
+        }
         let parser = SourceParserImpl::create(
             &format,
             &properties,
@@ -298,7 +297,7 @@ pub struct SourceDescBuilderV2 {
     pk_column_ids: Vec<i32>,
     properties: HashMap<String, String>,
     source_info: ProstStreamSourceInfo,
-    connector_node_addr: String,
+    connector_params: ConnectorParams,
     connector_message_buffer_size: usize,
 }
 
@@ -311,7 +310,7 @@ impl SourceDescBuilderV2 {
         pk_column_ids: Vec<i32>,
         properties: HashMap<String, String>,
         source_info: ProstStreamSourceInfo,
-        connector_node_addr: String,
+        connector_params: ConnectorParams,
         connector_message_buffer_size: usize,
     ) -> Self {
         Self {
@@ -321,7 +320,7 @@ impl SourceDescBuilderV2 {
             pk_column_ids,
             properties,
             source_info,
-            connector_node_addr,
+            connector_params,
             connector_message_buffer_size,
         }
     }
@@ -361,7 +360,7 @@ impl SourceDescBuilderV2 {
             self.source_info.proto_message_name,
             self.properties,
             columns.clone(),
-            self.connector_node_addr,
+            self.connector_params.connector_rpc_endpoint,
             self.connector_message_buffer_size,
         )
         .await?;
@@ -418,7 +417,7 @@ pub mod test_utils {
             pk_column_ids,
             properties,
             source_info,
-            connector_node_addr: "127.0.0.1:60061".to_string(),
+            connector_params: Default::default(),
             connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
         }
     }

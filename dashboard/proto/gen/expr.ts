@@ -113,6 +113,8 @@ export const ExprNode_Type = {
   SARG: "SARG",
   /** VNODE - Internal functions */
   VNODE: "VNODE",
+  /** NOW - Non-deterministic functions */
+  NOW: "NOW",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -360,6 +362,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 1101:
     case "VNODE":
       return ExprNode_Type.VNODE;
+    case 2022:
+    case "NOW":
+      return ExprNode_Type.NOW;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -529,6 +534,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "SARG";
     case ExprNode_Type.VNODE:
       return "VNODE";
+    case ExprNode_Type.NOW:
+      return "NOW";
     case ExprNode_Type.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -546,6 +553,7 @@ export const TableFunction_Type = {
   GENERATE: "GENERATE",
   UNNEST: "UNNEST",
   REGEXP_MATCHES: "REGEXP_MATCHES",
+  RANGE: "RANGE",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -565,6 +573,9 @@ export function tableFunction_TypeFromJSON(object: any): TableFunction_Type {
     case 3:
     case "REGEXP_MATCHES":
       return TableFunction_Type.REGEXP_MATCHES;
+    case 4:
+    case "RANGE":
+      return TableFunction_Type.RANGE;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -582,6 +593,8 @@ export function tableFunction_TypeToJSON(object: TableFunction_Type): string {
       return "UNNEST";
     case TableFunction_Type.REGEXP_MATCHES:
       return "REGEXP_MATCHES";
+    case TableFunction_Type.RANGE:
+      return "RANGE";
     case TableFunction_Type.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";

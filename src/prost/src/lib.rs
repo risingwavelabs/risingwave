@@ -48,6 +48,9 @@ pub mod batch_plan;
 #[cfg_attr(madsim, path = "sim/task_service.rs")]
 pub mod task_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path="sim/connector_service.rs")]
+pub mod connector_service;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/stream_plan.rs")]
 pub mod stream_plan;
 #[rustfmt::skip]
@@ -69,15 +72,14 @@ pub mod source;
 #[cfg_attr(madsim, path = "sim/monitor_service.rs")]
 pub mod monitor_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/backup_service.rs")]
+pub mod backup_service;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/health.rs")]
 pub mod health;
 #[rustfmt::skip]
-#[cfg_attr(madsim, path = "sim/cdc_service.rs")]
-pub mod cdc_service;
-#[rustfmt::skip]
-#[path = "cdc_service.serde.rs"]
-pub mod cdc_service_serde;
-
+#[path = "connector_service.serde.rs"]
+pub mod connector_service_serde;
 #[rustfmt::skip]
 #[path = "catalog.serde.rs"]
 pub mod catalog_serde;
@@ -129,6 +131,9 @@ pub mod source_serde;
 #[rustfmt::skip]
 #[path = "monitor_service.serde.rs"]
 pub mod monitor_service_serde;
+#[rustfmt::skip]
+#[path = "backup_service.serde.rs"]
+pub mod backup_service_serde;
 
 
 #[derive(Clone, PartialEq, Eq, Debug)]
