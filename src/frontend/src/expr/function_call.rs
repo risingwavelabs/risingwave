@@ -109,6 +109,9 @@ impl FunctionCall {
     /// Create a cast expr over `child` to `target` type in `allows` context.
     pub fn new_cast(child: ExprImpl, target: DataType, allows: CastContext) -> Result<ExprImpl> {
         if is_row_function(&child) {
+            // Row function will have empty fields in Datatype::Struct at this point. Therefore,
+            // we will need to take some special care to generate the cast types. For normal struct
+            // types, they will be handled in `cast_ok`.
             return Self::cast_nested(child, target, allows);
         }
         let source = child.return_type();
@@ -335,7 +338,7 @@ fn explain_verbose_binary_op(
     Ok(())
 }
 
-fn is_row_function(expr: &ExprImpl) -> bool {
+pub fn is_row_function(expr: &ExprImpl) -> bool {
     if let ExprImpl::FunctionCall(func) = expr {
         if func.get_expr_type() == ExprType::Row {
             return true;
