@@ -321,7 +321,6 @@ impl<S: StateStore> SourceExecutor<S> {
 
         // We allow data to flow for 5 * `expected_barrier_latency_ms` milliseconds, considering
         // some other latencies like network and cost in Meta.
-        tracing::info!("expected_barrier_latency_ms: {}", self.expected_barrier_latency_ms);
         let max_wait_barrier_time_ms = self.expected_barrier_latency_ms as u128 * 5;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
