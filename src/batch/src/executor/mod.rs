@@ -229,7 +229,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_hummock_sdk::to_commited_batch_query_epoch;
+    use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::PlanNode;
 
     use crate::executor::ExecutorBuilder;
@@ -249,7 +249,7 @@ mod tests {
             &plan_node,
             task_id,
             ComputeNodeContext::for_test(),
-            to_commited_batch_query_epoch(u64::MAX),
+            to_committed_batch_query_epoch(u64::MAX),
         );
         let child_plan = &PlanNode {
             ..Default::default()

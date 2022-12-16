@@ -183,7 +183,7 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
     }
 }
 
-pub fn to_commited_batch_query_epoch(epoch: u64) -> BatchQueryEpoch {
+pub fn to_committed_batch_query_epoch(epoch: u64) -> BatchQueryEpoch {
     BatchQueryEpoch {
         epoch: Some(batch_query_epoch::Epoch::Committed(epoch)),
     }

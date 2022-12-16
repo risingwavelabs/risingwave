@@ -215,7 +215,7 @@ mod tests {
     use risingwave_common::config::BatchConfig;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::make_i32_literal;
-    use risingwave_hummock_sdk::to_commited_batch_query_epoch;
+    use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::batch_plan::{
@@ -284,13 +284,13 @@ mod tests {
             .fire_task(
                 &task_id,
                 plan.clone(),
-                to_commited_batch_query_epoch(0),
+                to_committed_batch_query_epoch(0),
                 context.clone(),
             )
             .await
             .unwrap();
         let err = manager
-            .fire_task(&task_id, plan, to_commited_batch_query_epoch(0), context)
+            .fire_task(&task_id, plan, to_committed_batch_query_epoch(0), context)
             .await
             .unwrap_err();
         assert!(err
@@ -334,7 +334,7 @@ mod tests {
             .fire_task(
                 &task_id,
                 plan.clone(),
-                to_commited_batch_query_epoch(0),
+                to_committed_batch_query_epoch(0),
                 context.clone(),
             )
             .await

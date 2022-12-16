@@ -125,6 +125,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -141,6 +142,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -159,6 +161,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -190,6 +193,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -222,6 +226,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -239,6 +244,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -256,6 +262,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -274,6 +281,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -292,6 +300,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -309,6 +318,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -327,6 +337,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -353,6 +364,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -369,6 +381,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -571,6 +584,7 @@ async fn test_reload_storage() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -589,6 +603,7 @@ async fn test_reload_storage() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -620,6 +635,7 @@ async fn test_reload_storage() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -638,6 +654,7 @@ async fn test_reload_storage() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -656,6 +673,7 @@ async fn test_reload_storage() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -674,6 +692,7 @@ async fn test_reload_storage() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -691,6 +710,7 @@ async fn test_reload_storage() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -735,6 +755,7 @@ async fn test_write_anytime_inner(
                             prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
+                            read_version_from_backup: false,
                         }
                     )
                     .await
@@ -753,6 +774,7 @@ async fn test_write_anytime_inner(
                             prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
+                            read_version_from_backup: false,
                         }
                     )
                     .await
@@ -771,6 +793,7 @@ async fn test_write_anytime_inner(
                             prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
+                            read_version_from_backup: false,
                         }
                     )
                     .await
@@ -791,6 +814,7 @@ async fn test_write_anytime_inner(
                         prefix_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -856,6 +880,7 @@ async fn test_write_anytime_inner(
                             prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
+                            read_version_from_backup: false,
                         }
                     )
                     .await
@@ -872,6 +897,7 @@ async fn test_write_anytime_inner(
                         prefix_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
+                        read_version_from_backup: false,
                     }
                 )
                 .await
@@ -889,6 +915,7 @@ async fn test_write_anytime_inner(
                             prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
+                            read_version_from_backup: false,
                         }
                     )
                     .await
@@ -908,6 +935,7 @@ async fn test_write_anytime_inner(
                         prefix_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -1062,6 +1090,7 @@ async fn test_delete_get_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             }
         )
         .await
@@ -1147,6 +1176,7 @@ async fn test_multiple_epoch_sync_inner(
                             prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
+                            read_version_from_backup: false,
                         }
                     )
                     .await
@@ -1164,6 +1194,7 @@ async fn test_multiple_epoch_sync_inner(
                         prefix_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
+                        read_version_from_backup: false,
                     }
                 )
                 .await
@@ -1180,6 +1211,7 @@ async fn test_multiple_epoch_sync_inner(
                             prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
+                            read_version_from_backup: false,
                         }
                     )
                     .await
