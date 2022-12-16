@@ -144,31 +144,27 @@ impl Compactor {
     pub fn try_update_state(&self, new_state: CompactorState) {
         match new_state {
             CompactorState::Idle(_) => {
-                if let CompactorState::Burst(last_burst) = self.state() {
-                    if last_burst.elapsed().as_secs() > 60 {
+                if let CompactorState::Burst(last_state_time) = self.state() {
+                    if last_state_time.elapsed().as_secs() > 60 {
                         self.set_state(new_state)
                     }
                 }
             }
 
-            CompactorState::Burst(last_burst) => {
-                if let CompactorState::Idle(_) = self.state() {
-                    // up
-                    if last_burst.elapsed().as_secs() > 60 {
-                        self.set_state(new_state)
-                    }
-                } else if let CompactorState::Busy(last_busy) = self.state() {
-                    // down
-                    if last_busy.elapsed().as_secs() > 60 {
+            CompactorState::Burst(_) => match self.state() {
+                CompactorState::Idle(last_state_time) | CompactorState::Busy(last_state_time) => {
+                    if last_state_time.elapsed().as_secs() > 60 {
                         self.set_state(new_state)
                     }
                 }
-            }
+
+                _ => {}
+            },
 
             CompactorState::Busy(_) => {
                 // up
-                if let CompactorState::Burst(last_burst) = self.state() {
-                    if last_burst.elapsed().as_secs() > 60 {
+                if let CompactorState::Burst(last_state_time) = self.state() {
+                    if last_state_time.elapsed().as_secs() > 60 {
                         self.set_state(new_state)
                     }
                 }
@@ -476,9 +472,15 @@ impl CompactorManager {
             } else {
                 compactor.try_down_state();
             }
-        }
 
-        self.policy.write().refresh_state();
+            self.policy.write().refresh_state();
+
+            tracing::info!(
+                "update_compactor_state cpu {} state {:?}",
+                workload.cpu,
+                compactor.state(),
+            );
+        }
     }
 }
 
