@@ -374,6 +374,7 @@ impl<S: StateStore> StorageTable<S> {
         range_bounds: impl RangeBounds<Row>,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S>> {
+        // TODO: directly use `prefixed_range`.
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerde,
             pk_prefix: impl Row2,
