@@ -202,8 +202,8 @@ impl FromIntoArrow for NaiveTimeWrapper {
     fn from_arrow(value: Self::ArrowType) -> Self {
         NaiveTimeWrapper(
             NaiveTime::from_num_seconds_from_midnight_opt(
-                (value / 1000_000_000) as _,
-                (value % 1000_000_000) as _,
+                (value / 1_000_000_000) as _,
+                (value % 1_000_000_000) as _,
             )
             .unwrap(),
         )
@@ -223,8 +223,8 @@ impl FromIntoArrow for NaiveDateTimeWrapper {
     fn from_arrow(value: Self::ArrowType) -> Self {
         NaiveDateTimeWrapper(
             NaiveDateTime::from_timestamp_opt(
-                (value / 1000_000_000) as _,
-                (value % 1000_000_000) as _,
+                (value / 1_000_000_000) as _,
+                (value % 1_000_000_000) as _,
             )
             .unwrap(),
         )
@@ -243,14 +243,14 @@ impl FromIntoArrow for IntervalUnit {
 
     fn from_arrow(value: Self::ArrowType) -> Self {
         let (months, days, ns) = arrow_array::types::IntervalMonthDayNanoType::to_parts(value);
-        IntervalUnit::new(months, days, ns / 1000_000)
+        IntervalUnit::new(months, days, ns / 1_000_000)
     }
 
     fn into_arrow(self) -> Self::ArrowType {
         arrow_array::types::IntervalMonthDayNanoType::make_value(
             self.get_months(),
             self.get_days(),
-            self.get_ms() * 1000_000,
+            self.get_ms() * 1_000_000,
         )
     }
 }

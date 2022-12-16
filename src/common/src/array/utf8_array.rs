@@ -122,7 +122,7 @@ impl Utf8Array {
     }
 
     pub(super) fn data(&self) -> &[u8] {
-        &self.bytes.data()
+        self.bytes.data()
     }
 }
 
