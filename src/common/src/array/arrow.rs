@@ -20,12 +20,12 @@ use super::*;
 
 /// Implement bi-directional `From` between `ArrayImpl` and `arrow_array::ArrayRef`.
 macro_rules! converts_generic {
-    ($({ $ArrowType:ty, $ArrowPatten:pat, $ArrayImplPatten:path }),*) => {
+    ($({ $ArrowType:ty, $ArrowPattern:pat, $ArrayImplPattern:path }),*) => {
         // RisingWave array -> Arrow array
         impl From<&ArrayImpl> for arrow_array::ArrayRef {
             fn from(array: &ArrayImpl) -> Self {
                 match array {
-                    $($ArrayImplPatten(a) => Arc::new(<$ArrowType>::from(a)),)*
+                    $($ArrayImplPattern(a) => Arc::new(<$ArrowType>::from(a)),)*
                     _ => todo!("unsupported array"),
                 }
             }
@@ -37,7 +37,7 @@ macro_rules! converts_generic {
                 use arrow_schema::IntervalUnit::*;
                 use arrow_schema::TimeUnit::*;
                 match array.data_type() {
-                    $($ArrowPatten => $ArrayImplPatten(
+                    $($ArrowPattern => $ArrayImplPattern(
                         array
                             .as_any()
                             .downcast_ref::<$ArrowType>()
