@@ -60,6 +60,9 @@ impl BatchLookupJoin {
         lookup_prefix_len: usize,
         distributed_lookup: bool,
     ) -> Self {
+        // We cannot create a `BatchLookupJoin` without any eq keys. We require eq keys to do the
+        // lookup.
+        assert!(eq_join_predicate.has_eq());
         let ctx = logical.base.ctx.clone();
         let dist = Self::derive_dist(logical.left().distribution(), &logical);
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());

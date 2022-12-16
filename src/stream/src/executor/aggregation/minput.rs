@@ -22,7 +22,7 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayImpl, Op};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{Row, RowExt};
+use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::{Datum, DatumRef, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
@@ -36,7 +36,7 @@ use super::state_cache::string_agg::StringAgg;
 use super::state_cache::{CacheKey, GenericStateCache, StateCache};
 use super::AggCall;
 use crate::common::table::state_table::StateTable;
-use crate::common::{iter_state_table, StateTableColumnMapping};
+use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Aggregation state as a materialization of input chunks.
@@ -181,16 +181,16 @@ impl<S: StateStore> MaterializedInputState<S> {
     pub async fn get_output(
         &mut self,
         state_table: &StateTable<S>,
-        group_key: Option<&Row>,
+        group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<Datum> {
         if !self.cache.is_synced() {
-            let all_data_iter = iter_state_table(state_table, group_key).await?;
+            let all_data_iter = state_table.iter_with_pk_prefix(&group_key).await?;
             pin_mut!(all_data_iter);
 
             let mut cache_filler = self.cache.begin_syncing();
             #[for_await]
             for state_row in all_data_iter.take(cache_filler.capacity()) {
-                let state_row: Cow<'_, Row> = state_row?;
+                let state_row: Cow<'_, OwnedRow> = state_row?;
                 let cache_key = {
                     let mut cache_key = Vec::new();
                     self.cache_key_serializer.serialize(
@@ -288,7 +288,7 @@ mod tests {
     use rand::Rng;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
@@ -713,7 +713,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
         let agg_call = create_extreme_agg_call(AggKind::Max, DataType::Int32, 1); // max(b)
-        let group_key = Some(Row::new(vec![Some(8.into())]));
+        let group_key = Some(OwnedRow::new(vec![Some(8.into())]));
 
         let (mut table, mapping) = create_mem_state_table(
             &input_schema,

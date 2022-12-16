@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::RowDeserializer;
+use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
@@ -29,7 +29,7 @@ use super::TopNCache;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::ManagedTopNState;
+use crate::executor::managed_state::top_n::{ManagedTopNState, NO_GROUP_KEY};
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
@@ -202,7 +202,7 @@ where
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
             debug_assert_eq!(op, Op::Insert);
-            let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
+            let pk_row = row_ref.project(&self.internal_key_indices);
             let cache_key =
                 serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
             self.cache.insert(
@@ -237,7 +237,7 @@ where
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
-            .init_topn_cache(None, &mut self.cache, self.order_by_len)
+            .init_topn_cache(NO_GROUP_KEY, &mut self.cache, self.order_by_len)
             .await
     }
 }

@@ -14,7 +14,7 @@
 
 use std::sync::LazyLock;
 
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
@@ -25,4 +25,4 @@ pub const PG_SETTINGS_TABLE_NAME: &str = "pg_settings";
 pub const PG_SETTINGS_COLUMNS: &[SystemCatalogColumnsDef<'_>] =
     &[(DataType::Varchar, "name"), (DataType::Varchar, "setting")];
 
-pub static PG_SETTINGS_DATA_ROWS: LazyLock<Vec<Row>> = LazyLock::new(Vec::new);
+pub static PG_SETTINGS_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(Vec::new);

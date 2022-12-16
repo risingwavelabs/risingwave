@@ -52,6 +52,7 @@ mod tests {
     use std::str::FromStr;
 
     use risingwave_common::array::Op;
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
     use risingwave_expr::vector_op::cast::str_to_timestamp;
 
@@ -83,27 +84,27 @@ mod tests {
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::UpdateDelete);
-            assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int64(1)));
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int64(1)));
             assert_eq!(
-                row.value_at(1).to_owned_datum(),
+                row.datum_at(1).to_owned_datum(),
                 (Some(ScalarImpl::Utf8("mike".into())))
             );
             assert_eq!(
-                row.value_at(2).to_owned_datum(),
+                row.datum_at(2).to_owned_datum(),
                 (Some(ScalarImpl::Bool(false)))
             );
             assert_eq!(
-                row.value_at(3).to_owned_datum(),
+                row.datum_at(3).to_owned_datum(),
                 (Some(Decimal::from_str("1000.62").unwrap().into()))
             );
             assert_eq!(
-                row.value_at(4).to_owned_datum(),
+                row.datum_at(4).to_owned_datum(),
                 (Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("2018-01-01 00:00:01").unwrap()
                 )))
             );
             assert_eq!(
-                row.value_at(5).to_owned_datum(),
+                row.datum_at(5).to_owned_datum(),
                 (Some(ScalarImpl::Float64(0.65.into())))
             );
         }
@@ -111,27 +112,27 @@ mod tests {
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::UpdateInsert);
-            assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int64(1)));
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int64(1)));
             assert_eq!(
-                row.value_at(1).to_owned_datum(),
+                row.datum_at(1).to_owned_datum(),
                 (Some(ScalarImpl::Utf8("mike".into())))
             );
             assert_eq!(
-                row.value_at(2).to_owned_datum(),
+                row.datum_at(2).to_owned_datum(),
                 (Some(ScalarImpl::Bool(false)))
             );
             assert_eq!(
-                row.value_at(3).to_owned_datum(),
+                row.datum_at(3).to_owned_datum(),
                 (Some(Decimal::from_str("1500.62").unwrap().into()))
             );
             assert_eq!(
-                row.value_at(4).to_owned_datum(),
+                row.datum_at(4).to_owned_datum(),
                 (Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("2018-01-01 00:00:01").unwrap()
                 )))
             );
             assert_eq!(
-                row.value_at(5).to_owned_datum(),
+                row.datum_at(5).to_owned_datum(),
                 (Some(ScalarImpl::Float64(0.65.into())))
             );
         }
@@ -159,15 +160,15 @@ mod tests {
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
-            assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
-            assert_eq!(row.value_at(1).to_owned_datum(), Some(ScalarImpl::Int32(2)));
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
+            assert_eq!(row.datum_at(1).to_owned_datum(), Some(ScalarImpl::Int32(2)));
         }
 
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
-            assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int32(3)));
-            assert_eq!(row.value_at(1).to_owned_datum(), Some(ScalarImpl::Int32(4)));
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(3)));
+            assert_eq!(row.datum_at(1).to_owned_datum(), Some(ScalarImpl::Int32(4)));
         }
     }
 }

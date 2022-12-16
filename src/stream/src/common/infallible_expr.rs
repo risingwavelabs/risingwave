@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
-use risingwave_common::row::{Row, Row2};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::Expression;
 use risingwave_expr::ExprError;
@@ -42,7 +42,7 @@ pub trait InfallibleExpression: Expression {
         })
     }
 
-    fn eval_row_infallible(&self, input: &Row, on_err: impl Fn(ExprError)) -> Datum {
+    fn eval_row_infallible(&self, input: &OwnedRow, on_err: impl Fn(ExprError)) -> Datum {
         const_assert!(!crate::STRICT_MODE);
 
         #[expect(clippy::disallowed_methods)]
