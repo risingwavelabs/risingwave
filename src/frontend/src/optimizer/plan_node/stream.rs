@@ -688,8 +688,7 @@ pub fn to_stream_prost_body(
                 .sink_desc
                 .columns()
                 .iter()
-                .map(|c| Field::from(c.column_desc.clone()))
-                .map(|f| f.to_prost())
+                .map(|c| Field::from(c.column_desc.clone()).to_prost())
                 .collect(),
             sink_pk: me.sink_desc.pk().iter().map(|c| c.index as u32).collect(),
         }),

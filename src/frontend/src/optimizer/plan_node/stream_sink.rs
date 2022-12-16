@@ -81,8 +81,7 @@ impl StreamNode for StreamSink {
                 .sink_catalog
                 .columns()
                 .iter()
-                .map(|c| Field::from(c.column_desc.clone()))
-                .map(|f| f.to_prost())
+                .map(|c| Field::from(c.column_desc.clone()).to_prost())
                 .collect(),
             sink_pk: self
                 .sink_catalog
