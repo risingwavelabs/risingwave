@@ -34,7 +34,7 @@
 //! This file is adapted from [arrow-rs](https://github.com/apache/arrow-rs)
 
 use std::iter;
-use std::ops::{BitAnd, BitOr, Not, Range};
+use std::ops::{BitAnd, BitOr, Not, RangeInclusive};
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -312,7 +312,7 @@ impl Bitmap {
     }
 
     /// Returns an iterator which yields the position ranges of continuous high bits.
-    pub fn high_ranges(&self) -> impl Iterator<Item = Range<usize>> + '_ {
+    pub fn high_ranges(&self) -> impl Iterator<Item = RangeInclusive<usize>> + '_ {
         let mut start = None;
 
         self.iter()
@@ -327,7 +327,7 @@ impl Bitmap {
                 // The current high range ends.
                 (false, Some(s)) => {
                     start = None;
-                    Some(s..i)
+                    Some(s..=(i - 1))
                 }
                 _ => None,
             })
@@ -682,7 +682,7 @@ mod tests {
 
     #[test]
     fn test_bitmap_high_ranges_iter() {
-        fn test(bits: impl IntoIterator<Item = bool>, expected: Vec<Range<usize>>) {
+        fn test(bits: impl IntoIterator<Item = bool>, expected: Vec<RangeInclusive<usize>>) {
             let bitmap = Bitmap::from_iter(bits);
             let high_ranges = bitmap.high_ranges().collect::<Vec<_>>();
             assert_eq!(high_ranges, expected);
@@ -692,9 +692,9 @@ mod tests {
             vec![
                 true, true, true, false, false, true, true, true, false, true,
             ],
-            vec![0..3, 5..8, 9..10],
+            vec![0..=2, 5..=7, 9..=9],
         );
-        test(vec![true, true, true], vec![0..3]);
+        test(vec![true, true, true], vec![0..=2]);
         test(vec![false, false, false], vec![]);
     }
 

@@ -307,9 +307,13 @@ impl<S: StateStore> StorageTable<S> {
             assert_eq!(vnode_hint.unwrap_or(DEFAULT_VNODE), DEFAULT_VNODE);
 
             Either::Left(self.vnodes.high_ranges().map(|r| {
-                let start = VirtualNode::from_index(r.start).to_be_bytes().to_vec();
-                let end = VirtualNode::from_index(r.end).to_be_bytes().to_vec();
-                (Included(start), Excluded(end))
+                let start = r
+                    .start_bound()
+                    .map(|&v| VirtualNode::from_index(v).to_be_bytes().to_vec());
+                let end = r
+                    .end_bound()
+                    .map(|&v| VirtualNode::from_index(v).to_be_bytes().to_vec());
+                (start, end)
             }))
         } else {
             // Vnodes that are set and should be accessed.
