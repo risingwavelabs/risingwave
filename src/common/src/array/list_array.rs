@@ -151,7 +151,7 @@ impl ListArrayBuilder {
 
 /// This is a naive implementation of list array.
 /// We will eventually move to a more efficient flatten implementation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ListArray {
     bitmap: Bitmap,
     pub(super) offsets: Vec<u32>,

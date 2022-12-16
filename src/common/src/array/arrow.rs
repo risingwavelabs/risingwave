@@ -4,7 +4,83 @@ use chrono::{NaiveDateTime, NaiveTime};
 
 use super::*;
 
-/// Implement bi-directional `From` between 2 array types.
+/// Implement bi-directional `From` between `ArrayImpl` and `arrow_array::ArrayRef`.
+macro_rules! converts_generic {
+    ($({ $ArrowType:ty, $ArrowPatten:pat, $ArrayImplPatten:path }),*) => {
+        // RisingWave array -> Arrow array
+        impl From<&ArrayImpl> for arrow_array::ArrayRef {
+            fn from(array: &ArrayImpl) -> Self {
+                match array {
+                    $($ArrayImplPatten(a) => Arc::new(<$ArrowType>::from(a)),)*
+                    _ => todo!("unsupported array"),
+                }
+            }
+        }
+        // Arrow array -> RisingWave array
+        impl From<&arrow_array::ArrayRef> for ArrayImpl {
+            fn from(array: &arrow_array::ArrayRef) -> Self {
+                use arrow_schema::DataType::*;
+                use arrow_schema::IntervalUnit::*;
+                use arrow_schema::TimeUnit::*;
+                match array.data_type() {
+                    $($ArrowPatten => $ArrayImplPatten(
+                        array
+                            .as_any()
+                            .downcast_ref::<$ArrowType>()
+                            .unwrap()
+                            .into(),
+                    ),)*
+                    t => todo!("Unsupported arrow data type: {t:?}"),
+                }
+            }
+        }
+    };
+}
+converts_generic! {
+    { arrow_array::Int16Array, Int16, ArrayImpl::Int16 },
+    { arrow_array::Int32Array, Int32, ArrayImpl::Int32 },
+    { arrow_array::Int64Array, Int64, ArrayImpl::Int64 },
+    { arrow_array::Float32Array, Float32, ArrayImpl::Float32 },
+    { arrow_array::Float64Array, Float64, ArrayImpl::Float64 },
+    { arrow_array::StringArray, Utf8, ArrayImpl::Utf8 },
+    { arrow_array::BooleanArray, Boolean, ArrayImpl::Bool },
+    { arrow_array::Decimal128Array, Decimal128(_, _), ArrayImpl::Decimal },
+    { arrow_array::IntervalMonthDayNanoArray, Interval(MonthDayNano), ArrayImpl::Interval },
+    { arrow_array::Date32Array, Date32, ArrayImpl::NaiveDate },
+    { arrow_array::TimestampNanosecondArray, Timestamp(Nanosecond, _), ArrayImpl::NaiveDateTime },
+    { arrow_array::Time64NanosecondArray, Time64(Nanosecond), ArrayImpl::NaiveTime },
+    // { arrow_array::StructArray, Struct(_), ArrayImpl::Struct }, // TODO: convert struct
+    { arrow_array::ListArray, List(_), ArrayImpl::List },
+    { arrow_array::BinaryArray, Binary, ArrayImpl::Bytea }
+}
+
+// Arrow Datatype -> Risingwave Datatype
+impl From<&arrow_schema::DataType> for DataType {
+    fn from(value: &arrow_schema::DataType) -> Self {
+        use arrow_schema::DataType::*;
+        match value {
+            Boolean => Self::Boolean,
+            Int16 => Self::Int16,
+            Int32 => Self::Int32,
+            Int64 => Self::Int64,
+            Float32 => Self::Float32,
+            Float64 => Self::Float64,
+            Timestamp(_, _) => Self::Timestamp, // TODO: check time unit
+            Date32 => Self::Date,
+            Time64(_) => Self::Time,
+            Interval(_) => Self::Interval, // TODO: check time unit
+            Binary => Self::Bytea,
+            Utf8 => Self::Varchar,
+            List(field) => Self::List {
+                datatype: Box::new(field.data_type().into()),
+            },
+            Decimal128(_, _) => Self::Decimal,
+            _ => todo!("Unsupported arrow data type: {value:?}"),
+        }
+    }
+}
+
+/// Implement bi-directional `From` between concrete array types.
 macro_rules! converts {
     ($ArrayType:ty, $ArrowType:ty) => {
         impl From<&$ArrayType> for $ArrowType {
@@ -198,7 +274,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                 for j in array.offsets[i]..array.offsets[i + 1] {
                     append(builder.values(), a.value_at(j as usize));
                 }
-                builder.append(array.is_null(i));
+                builder.append(!array.is_null(i));
             }
             builder.finish()
         }
@@ -262,8 +338,8 @@ impl From<&ListArray> for arrow_array::ListArray {
                 Time64NanosecondBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
-            ArrayImpl::Struct(a) => todo!("list of struct"),
-            ArrayImpl::List(a) => todo!("list of list"),
+            ArrayImpl::Struct(_) => todo!("list of struct"),
+            ArrayImpl::List(_) => todo!("list of list"),
             ArrayImpl::Bytea(a) => build(
                 array,
                 a,
@@ -276,13 +352,15 @@ impl From<&ListArray> for arrow_array::ListArray {
 
 impl From<&arrow_array::ListArray> for ListArray {
     fn from(array: &arrow_array::ListArray) -> Self {
-        todo!()
+        let iter = array.iter().map(|o| o.map(|a| ArrayImpl::from(&a)));
+        ListArray::from_iter(iter, (&array.value_type()).into())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{array, empty_array};
 
     #[test]
     fn decimal() {
@@ -295,5 +373,20 @@ mod tests {
         ]);
         let arrow = arrow_array::Decimal128Array::from(&array);
         assert_eq!(DecimalArray::from(&arrow), array);
+    }
+
+    #[test]
+    fn list() {
+        let array = ListArray::from_iter(
+            [
+                Some(array! { I32Array, [None, Some(-7), Some(25)] }.into()),
+                None,
+                Some(array! { I32Array, [Some(0), Some(-127), Some(127), Some(50)] }.into()),
+                Some(empty_array! { I32Array }.into()),
+            ],
+            DataType::Int32,
+        );
+        let arrow = arrow_array::ListArray::from(&array);
+        assert_eq!(ListArray::from(&arrow), array);
     }
 }

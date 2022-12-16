@@ -5349,6 +5349,7 @@ version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "arrow-array",
+ "arrow-schema",
  "async-stream",
  "async-trait",
  "auto_enums",
