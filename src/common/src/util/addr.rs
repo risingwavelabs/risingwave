@@ -16,6 +16,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 
 use risingwave_pb::common::HostAddress as ProstHostAddress;
+use risingwave_pb::meta::MetaLeaderInfo;
 
 use crate::error::{internal_error, Result};
 
@@ -38,6 +39,14 @@ impl From<SocketAddr> for HostAddr {
             host: addr.ip().to_string(),
             port: addr.port(),
         }
+    }
+}
+
+impl From<MetaLeaderInfo> for HostAddr {
+    fn from(mli: MetaLeaderInfo) -> Self {
+        mli.node_address
+            .parse::<HostAddr>()
+            .expect("invalid leader addr")
     }
 }
 

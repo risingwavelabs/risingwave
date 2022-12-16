@@ -23,6 +23,7 @@ use arc_swap::ArcSwap;
 use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
+use prost::Message;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
@@ -65,6 +66,7 @@ use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, MetadataModel, ValTransaction, VarTransaction,
 };
 use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
 use crate::storage::{MetaStore, Transaction};
 
 mod compaction_group_manager;
@@ -489,9 +491,9 @@ where
     async fn commit_trx(
         &self,
         meta_store: &S,
-        trx: Transaction,
+        mut trx: Transaction,
         context_id: Option<HummockContextId>,
-        _info: MetaLeaderInfo,
+        info: MetaLeaderInfo,
     ) -> Result<()> {
         if let Some(context_id) = context_id {
             if context_id == META_NODE_ID {
@@ -501,13 +503,13 @@ where
                 return Err(Error::InvalidContext(context_id));
             }
         }
-        // FIXME: https://github.com/risingwavelabs/risingwave/issues/6534
+
         // check prevents meta node failover
-        // trx.check_equal(
-        //     META_CF_NAME.to_owned(),
-        //     META_LEADER_KEY.as_bytes().to_vec(),
-        //     info.encode_to_vec(),
-        // );
+        trx.check_equal(
+            META_CF_NAME.to_owned(),
+            META_LEADER_KEY.as_bytes().to_vec(),
+            info.encode_to_vec(),
+        );
         meta_store.txn(trx).await.map_err(Into::into)
     }
 

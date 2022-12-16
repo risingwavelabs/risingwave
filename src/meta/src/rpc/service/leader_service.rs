@@ -15,17 +15,17 @@
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::leader_service_server::LeaderService;
-use risingwave_pb::meta::{LeaderRequest, LeaderResponse};
+use risingwave_pb::meta::{LeaderRequest, LeaderResponse, MetaLeaderInfo};
 use tokio::sync::watch::Receiver;
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct LeaderServiceImpl {
-    leader_rx: Receiver<(HostAddr, bool)>,
+    leader_rx: Receiver<(MetaLeaderInfo, bool)>,
 }
 
 impl LeaderServiceImpl {
-    pub fn new(leader_rx: Receiver<(HostAddr, bool)>) -> Self {
+    pub fn new(leader_rx: Receiver<(MetaLeaderInfo, bool)>) -> Self {
         LeaderServiceImpl { leader_rx }
     }
 }
@@ -44,7 +44,8 @@ impl LeaderService for LeaderServiceImpl {
 
         // TODO: change request. Need only a simple ping
         // let req = request.into_inner();
-        let leader_addr = self.leader_rx.borrow().0.clone();
+        let leader_info = self.leader_rx.borrow().0.clone();
+        let leader_addr = HostAddr::from(leader_info);
         let leader_address = HostAddress {
             host: leader_addr.host,
             port: leader_addr.port.into(),

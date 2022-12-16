@@ -19,6 +19,7 @@ use std::time::Duration;
 use etcd_client::ConnectOptions;
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
@@ -147,7 +148,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     //   address_info.listen_addr;
 
     // Initialize managers.
-    let (info, lease_handle, lease_shutdown, leader_rx) = run_elections(
+    let (_, lease_handle, lease_shutdown, leader_rx) = run_elections(
         address_info.listen_addr.clone().to_string(),
         meta_store.clone(),
         lease_interval_secs,
@@ -155,9 +156,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     .await?;
 
     let mut services_leader_rx = leader_rx.clone();
-    let f_leader_svc_leader_rx = leader_rx.clone();
-    let l_leader_svc_leader_rx = leader_rx.clone();
-    let mut note_status_leader_rx = leader_rx;
+    let mut note_status_leader_rx = leader_rx.clone();
 
     // print current leader/follower status of this node + fencing mechanism
     tokio::spawn(async move {
@@ -168,8 +167,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             if note_status_leader_rx.changed().await.is_err() {
                 panic!("Leader sender dropped");
             }
-
-            let (leader_addr, is_leader) = note_status_leader_rx.borrow().clone();
+            let (leader_info, is_leader) = note_status_leader_rx.borrow().clone();
+            let leader_addr = HostAddr::from(leader_info);
 
             // Implementation of naive fencing mechanism:
             // leader nodes should panic if they loose their leader position
@@ -217,6 +216,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
         let is_leader = services_leader_rx.borrow().clone().1;
         let was_follower = !is_leader;
+        let f_leader_svc_leader_rx = services_leader_rx.clone();
+        let l_leader_svc_leader_rx = services_leader_rx.clone();
 
         // TODO: remove interceptor. Not needed if we have LeaderService
         let leader_srv = LeaderServiceImpl::new(f_leader_svc_leader_rx);
@@ -289,7 +290,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
         // TODO: put leader service definition in separate function or maybe even separate file
         let prometheus_endpoint = opts.prometheus_endpoint.clone();
-        let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), info).await;
+        let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), leader_rx.clone()).await;
         let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
         let meta_metrics = Arc::new(MetaMetrics::new());
         let registry = meta_metrics.registry();
