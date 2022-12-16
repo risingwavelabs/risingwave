@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Provides E2E Test runner functionality.
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use tokio_postgres::error::Error as PgError;
 
-use crate::{
-    create_table_statement_to_table, is_permissible_error, mview_sql_gen, parse_sql, sql_gen, Table,
-};
+use crate::validation::is_permissible_error;
+use crate::{create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table};
 
 /// e2e test runner for sqlsmith
 pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) {
@@ -143,9 +143,12 @@ async fn create_tables(
         let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
         setup_sql.push_str(&format!("{};", &create_sql));
         tracing::info!("Executing MView Setup: {}", &create_sql);
-        client.execute(&create_sql, &[]).await.unwrap();
-        tables.push(table.clone());
-        mviews.push(table);
+        let response = client.execute(&create_sql, &[]).await;
+        let skip_count = validate_response(&setup_sql, &create_sql, response);
+        if skip_count == 0 {
+            tables.push(table.clone());
+            mviews.push(table);
+        }
     }
     (tables, mviews, setup_sql)
 }
@@ -153,7 +156,10 @@ async fn create_tables(
 /// Drops mview tables.
 async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
     client
-        .execute(&format!("DROP MATERIALIZED VIEW {}", mview.name), &[])
+        .execute(
+            &format!("DROP MATERIALIZED VIEW IF EXISTS {}", mview.name),
+            &[],
+        )
         .await
         .unwrap();
 }

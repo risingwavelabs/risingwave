@@ -552,12 +552,13 @@ message StreamActor {
   string mview_definition = 9;
 }
 
-enum FragmentType {
+enum FragmentTypeFlag {
   FRAGMENT_UNSPECIFIED = 0;
-  OTHERS = 1;
-  SOURCE = 2;
-  MVIEW = 3;
+  SOURCE = 1;
+  MVIEW = 2;
   SINK = 4;
+  NOW = 8;
+  CHAIN_NODE = 16;
 }
 
 message StreamFragmentGraph {
@@ -566,7 +567,8 @@ message StreamFragmentGraph {
     uint32 fragment_id = 1;
     // root stream node in this fragment.
     StreamNode node = 2;
-    FragmentType fragment_type = 3;
+    // Bitwise-OR of FragmentTypeFlags
+    uint32 fragment_type_mask = 3;
     // mark whether this fragment should only have one actor.
     bool is_singleton = 4;
     // Number of table ids (stateful states) for this fragment.

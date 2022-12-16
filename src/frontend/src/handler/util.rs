@@ -26,6 +26,7 @@ use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::Result as RwResult;
+use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 
 pin_project! {
@@ -98,7 +99,7 @@ fn to_pg_rows(column_types: &[DataType], chunk: DataChunk, format: bool) -> RwRe
         .rows()
         .map(|r| {
             let row = r
-                .values()
+                .iter()
                 .zip_eq(column_types)
                 .map(|(data, t)| match data {
                     Some(data) => Some(pg_value_format(t, data, format)).transpose(),

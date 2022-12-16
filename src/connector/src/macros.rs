@@ -139,15 +139,19 @@ macro_rules! impl_connector_properties {
             pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
                 const UPSTREAM_SOURCE_KEY: &str = "connector";
                 let connector = props.remove(UPSTREAM_SOURCE_KEY).ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
-                let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
-                match connector.to_lowercase().as_str() {
-                    $(
-                        $connector_name => {
-                            serde_json::from_value(json_value).map_err(|e| anyhow!(e.to_string())).map(Self::$variant_name)
-                        },
-                    )*
-                    _ => {
-                        Err(anyhow!("connector '{}' is not supported", connector,))
+                if connector.ends_with("cdc") {
+                    ConnectorProperties::new_cdc_properties(&connector, props)
+                } else {
+                    let json_value = serde_json::to_value(props).map_err(|e| anyhow!(e))?;
+                    match connector.to_lowercase().as_str() {
+                        $(
+                            $connector_name => {
+                                serde_json::from_value(json_value).map_err(|e| anyhow!(e.to_string())).map(Self::$variant_name)
+                            },
+                        )*
+                        _ => {
+                            Err(anyhow!("connector '{}' is not supported", connector,))
+                        }
                     }
                 }
             }

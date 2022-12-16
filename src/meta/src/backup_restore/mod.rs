@@ -16,6 +16,7 @@ mod backup_manager;
 pub use backup_manager::*;
 mod error;
 mod meta_snapshot_builder;
+mod metrics;
 mod restore;
 mod utils;
 

@@ -278,7 +278,19 @@ impl Cluster {
             })
             .await??;
 
-        Ok(result)
+        match result {
+            sqllogictest::DBOutput::Rows { rows, .. } => Ok(rows
+                .into_iter()
+                .map(|row| {
+                    row.into_iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .collect::<Vec<_>>()
+                .join("\n")),
+            _ => Ok("".to_string()),
+        }
     }
 
     /// Run a future on the client node.

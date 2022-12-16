@@ -6,7 +6,7 @@ set -euo pipefail
 source ci/scripts/common.env.sh
 
 # Should set a stable version of connector node
-STABLE_VERSION=7d454801e478e86c50a1e94cc139842554a0470d
+STABLE_VERSION=9d2e1331680335661fd3e55ee234532358683201
 
 echo "--- Build Java connector node"
 git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git

@@ -20,7 +20,9 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
 use risingwave_hummock_sdk::HummockSstableId;
-use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::test_utils::{
+    setup_compute_env, update_filter_key_extractor_for_table_ids,
+};
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_meta::storage::MemStore;
@@ -65,6 +67,9 @@ pub async fn prepare_local_version_manager(
         opt.sstable_id_remote_fetch_number,
     ));
 
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+    update_filter_key_extractor_for_table_ids(&filter_key_extractor_manager, &[0]);
+
     let buffer_tracker = BufferTracker::from_storage_config(&opt);
     let compactor_context = Arc::new(Context::new_local_compact_context(
         opt.clone(),
@@ -72,7 +77,7 @@ pub async fn prepare_local_version_manager(
         hummock_meta_client,
         Arc::new(StateStoreMetrics::unused()),
         sstable_id_manager,
-        Arc::new(FilterKeyExtractorManager::default()),
+        filter_key_extractor_manager,
     ));
 
     LocalVersionManager::new(pinned_version, compactor_context, buffer_tracker)

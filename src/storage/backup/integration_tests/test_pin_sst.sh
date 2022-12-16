@@ -36,7 +36,6 @@ sst_count_before_gc=$(get_total_sst_count)
 # SSTs are no longer pinned
 full_gc_sst
 sst_count_after_gc=$(get_total_sst_count)
-echo "sst count: ${sst_count_after_gc}"
 [ 0 -eq "${sst_count_after_gc}" ]
 
 echo "test succeeded"

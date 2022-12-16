@@ -189,11 +189,15 @@ impl ColIndexMapping {
     }
 
     #[must_use]
+    /// Compose column index mappings.
+    /// For example if this maps 0->5,
+    /// and `following` maps 5->1,
+    /// Then the composite has 0->5->1 => 0->1.
     pub fn composite(&self, following: &Self) -> Self {
         // debug!("composing {:?} and {:?}", self, following);
         let mut map = self.map.clone();
-        for tar in &mut map {
-            *tar = tar.and_then(|index| following.try_map(index));
+        for target in &mut map {
+            *target = target.and_then(|index| following.try_map(index));
         }
         Self::with_target_size(map, following.target_size())
     }

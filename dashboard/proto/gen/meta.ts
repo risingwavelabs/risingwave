@@ -13,14 +13,7 @@ import {
 } from "./common";
 import { HummockSnapshot, HummockVersion, HummockVersionDeltas } from "./hummock";
 import { ConnectorSplits } from "./source";
-import {
-  Dispatcher,
-  FragmentType,
-  fragmentTypeFromJSON,
-  fragmentTypeToJSON,
-  StreamActor,
-  StreamNode,
-} from "./stream_plan";
+import { Dispatcher, StreamActor, StreamNode } from "./stream_plan";
 import { UserInfo } from "./user";
 
 export const protobufPackage = "meta";
@@ -203,7 +196,8 @@ export function tableFragments_ActorStatus_ActorStateToJSON(object: TableFragmen
 
 export interface TableFragments_Fragment {
   fragmentId: number;
-  fragmentType: FragmentType;
+  /** Bitwise-OR of FragmentTypeFlags */
+  fragmentTypeMask: number;
   distributionType: TableFragments_Fragment_FragmentDistributionType;
   actors: StreamActor[];
   /**
@@ -746,7 +740,7 @@ export const TableFragments_ActorStatus = {
 function createBaseTableFragments_Fragment(): TableFragments_Fragment {
   return {
     fragmentId: 0,
-    fragmentType: FragmentType.FRAGMENT_UNSPECIFIED,
+    fragmentTypeMask: 0,
     distributionType: TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED,
     actors: [],
     vnodeMapping: undefined,
@@ -759,15 +753,11 @@ export const TableFragments_Fragment = {
   fromJSON(object: any): TableFragments_Fragment {
     return {
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
-      fragmentType: isSet(object.fragmentType)
-        ? fragmentTypeFromJSON(object.fragmentType)
-        : FragmentType.FRAGMENT_UNSPECIFIED,
+      fragmentTypeMask: isSet(object.fragmentTypeMask) ? Number(object.fragmentTypeMask) : 0,
       distributionType: isSet(object.distributionType)
         ? tableFragments_Fragment_FragmentDistributionTypeFromJSON(object.distributionType)
         : TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED,
-      actors: Array.isArray(object?.actors)
-        ? object.actors.map((e: any) => StreamActor.fromJSON(e))
-        : [],
+      actors: Array.isArray(object?.actors) ? object.actors.map((e: any) => StreamActor.fromJSON(e)) : [],
       vnodeMapping: isSet(object.vnodeMapping) ? ParallelUnitMapping.fromJSON(object.vnodeMapping) : undefined,
       stateTableIds: Array.isArray(object?.stateTableIds) ? object.stateTableIds.map((e: any) => Number(e)) : [],
       upstreamFragmentIds: Array.isArray(object?.upstreamFragmentIds)
@@ -779,7 +769,7 @@ export const TableFragments_Fragment = {
   toJSON(message: TableFragments_Fragment): unknown {
     const obj: any = {};
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
-    message.fragmentType !== undefined && (obj.fragmentType = fragmentTypeToJSON(message.fragmentType));
+    message.fragmentTypeMask !== undefined && (obj.fragmentTypeMask = Math.round(message.fragmentTypeMask));
     message.distributionType !== undefined &&
       (obj.distributionType = tableFragments_Fragment_FragmentDistributionTypeToJSON(message.distributionType));
     if (message.actors) {
@@ -805,7 +795,7 @@ export const TableFragments_Fragment = {
   fromPartial<I extends Exact<DeepPartial<TableFragments_Fragment>, I>>(object: I): TableFragments_Fragment {
     const message = createBaseTableFragments_Fragment();
     message.fragmentId = object.fragmentId ?? 0;
-    message.fragmentType = object.fragmentType ?? FragmentType.FRAGMENT_UNSPECIFIED;
+    message.fragmentTypeMask = object.fragmentTypeMask ?? 0;
     message.distributionType = object.distributionType ?? TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED;
     message.actors = object.actors?.map((e) => StreamActor.fromPartial(e)) || [];
     message.vnodeMapping = (object.vnodeMapping !== undefined && object.vnodeMapping !== null)

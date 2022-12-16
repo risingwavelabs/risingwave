@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::{ArrayImpl, ArrayRef, BoolArray, DataChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar};
 
 use crate::expr::{BoxedExpression, Expression};
@@ -67,7 +67,7 @@ impl Expression for IsNullExpression {
         Ok(Arc::new(ArrayImpl::Bool(arr)))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let result = self.child.eval_row(input)?;
         let is_null = result.is_none();
         Ok(Some(is_null.to_scalar_value()))
@@ -90,7 +90,7 @@ impl Expression for IsNotNullExpression {
         Ok(Arc::new(ArrayImpl::Bool(arr)))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let result = self.child.eval_row(input)?;
         let is_not_null = result.is_some();
         Ok(Some(is_not_null.to_scalar_value()))
@@ -102,7 +102,7 @@ mod tests {
     use std::str::FromStr;
 
     use risingwave_common::array::{ArrayBuilder, DataChunk, DecimalArrayBuilder};
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, Decimal};
 
     use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
@@ -133,8 +133,8 @@ mod tests {
         }
 
         let rows = vec![
-            Row::new(vec![Some(1.into()), Some(2.into())]),
-            Row::new(vec![None, Some(2.into())]),
+            OwnedRow::new(vec![Some(1.into()), Some(2.into())]),
+            OwnedRow::new(vec![None, Some(2.into())]),
         ];
 
         for (i, row) in rows.iter().enumerate() {

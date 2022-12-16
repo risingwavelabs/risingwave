@@ -281,8 +281,8 @@ macro_rules! gen_binary_expr_bitwise {
             { int32, int16, int32, $general_f },
             { int32, int32, int32, $general_f },
             { int32, int64, int64, $general_f },
-            { int64, int16,int64, $general_f },
-            { int64, int32,int64, $general_f },
+            { int64, int16, int64, $general_f },
+            { int64, int32, int64, $general_f },
             { int64, int64, int64, $general_f },
             $(
                 { $i1, $i2, $rt, $func },
@@ -774,7 +774,7 @@ mod tests {
         }
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|int| int.to_scalar_value()),
                 rhs[i].map(|int| int.to_scalar_value()),
             ]);
@@ -822,7 +822,7 @@ mod tests {
         }
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|date| date.to_scalar_value()),
                 rhs[i].map(|date| date.to_scalar_value()),
             ]);
@@ -875,7 +875,7 @@ mod tests {
         }
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|dec| dec.to_scalar_value()),
                 rhs[i].map(|dec| dec.to_scalar_value()),
             ]);
