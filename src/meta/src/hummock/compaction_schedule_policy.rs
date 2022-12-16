@@ -88,6 +88,8 @@ pub trait CompactionSchedulePolicy: Send + Sync {
     fn suggest_scale_policy(&self) -> ScalePolicy;
 
     fn max_concurrent_task_num(&self) -> usize;
+
+    fn refresh_state(&mut self);
 }
 
 // This strategy is retained just for reference, it is not used.
@@ -204,6 +206,8 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
             .map(|c| c.max_concurrent_task_number() as usize)
             .sum()
     }
+
+    fn refresh_state(&mut self) {}
 }
 
 /// The score must be linear to the input for easy update.
@@ -331,51 +335,6 @@ impl ScoredPolicy {
         }
         None
     }
-
-    fn refresh_state(&mut self) {
-        let idle_count = self
-            .score_to_compactor
-            .values()
-            .filter(|compactor| matches!(compactor.state(), CompactorState::Idle(_)))
-            .count();
-
-        if idle_count * 10 < self.score_to_compactor.len() * 2 {
-            match self.state {
-                CompactorState::Idle(_) => {
-                    self.state = CompactorState::Burst(Instant::now());
-                }
-                CompactorState::Burst(last_burst) => {
-                    if last_burst.elapsed().as_secs() > MAX_BURST_TIME {
-                        self.state = CompactorState::Busy(Instant::now());
-                    }
-                }
-                CompactorState::Busy(_) => {}
-            }
-        } else {
-            match self.state {
-                CompactorState::Idle(_) => {}
-
-                CompactorState::Burst(last_burst) => {
-                    if last_burst.elapsed().as_secs() > 60 {
-                        self.state = CompactorState::Idle(Instant::now());
-                    }
-                }
-
-                CompactorState::Busy(last_busy) => {
-                    if last_busy.elapsed().as_secs() > 60 {
-                        self.state = CompactorState::Burst(Instant::now());
-                    }
-                }
-            }
-        }
-
-        tracing::info!(
-            "refresh_state idle_count {} total {} state {:?}",
-            idle_count,
-            self.score_to_compactor.len(),
-            self.state
-        );
-    }
 }
 
 impl CompactionSchedulePolicy for ScoredPolicy {
@@ -383,8 +342,6 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         &mut self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
-        self.refresh_state();
-
         if let CompactorState::Busy(_) = self.state {
             return None;
         }
@@ -519,6 +476,51 @@ impl CompactionSchedulePolicy for ScoredPolicy {
             .values()
             .map(|c| c.max_concurrent_task_number() as usize)
             .sum()
+    }
+
+    fn refresh_state(&mut self) {
+        let idle_count = self
+            .score_to_compactor
+            .values()
+            .filter(|compactor| matches!(compactor.state(), CompactorState::Idle(_)))
+            .count();
+
+        if idle_count * 10 < self.score_to_compactor.len() * 2 {
+            match self.state {
+                CompactorState::Idle(_) => {
+                    self.state = CompactorState::Burst(Instant::now());
+                }
+                CompactorState::Burst(last_burst) => {
+                    if last_burst.elapsed().as_secs() > MAX_BURST_TIME {
+                        self.state = CompactorState::Busy(Instant::now());
+                    }
+                }
+                CompactorState::Busy(_) => {}
+            }
+        } else {
+            match self.state {
+                CompactorState::Idle(_) => {}
+
+                CompactorState::Burst(last_burst) => {
+                    if last_burst.elapsed().as_secs() > 60 {
+                        self.state = CompactorState::Idle(Instant::now());
+                    }
+                }
+
+                CompactorState::Busy(last_busy) => {
+                    if last_busy.elapsed().as_secs() > 60 {
+                        self.state = CompactorState::Burst(Instant::now());
+                    }
+                }
+            }
+        }
+
+        tracing::info!(
+            "refresh_state idle_count {} total {} state {:?}",
+            idle_count,
+            self.score_to_compactor.len(),
+            self.state
+        );
     }
 }
 

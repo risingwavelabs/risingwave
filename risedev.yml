@@ -277,6 +277,7 @@ profile:
 
   # special config for deployment, see related PR for more information
   compose-3node-deploy:
+    config-path: src/config/example.toml
     steps:
       # - use: minio
       #   id: minio-0

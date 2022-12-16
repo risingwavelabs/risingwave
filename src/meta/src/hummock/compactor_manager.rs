@@ -472,41 +472,13 @@ impl CompactorManager {
 
         if let Some(compactor) = self.policy.read().get_compactor(context_id) {
             if workload.cpu > CPU_THRESHOLD {
-                // match compactor.state() {
-                //     CompactorState::Idle(_) => {
-                //         compactor.set_state(CompactorState::Burst(Instant::now()))
-                //     }
-
-                //     CompactorState::Burst(last_burst) => {
-                //         if last_burst.elapsed().as_secs() > 120 {
-                //             compactor.set_state(CompactorState::Busy(Instant::now()))
-                //         }
-                //     }
-
-                //     CompactorState::Busy(_) => {}
-                // }
-
                 compactor.try_up_state();
             } else {
-                // match compactor.state() {
-                //     CompactorState::Idle(_) => {}
-
-                //     CompactorState::Burst(last_burst) => {
-                //         if last_burst.elapsed().as_secs() > 60 {
-                //             compactor.set_state(CompactorState::Idle(Instant::now()))
-                //         }
-                //     }
-
-                //     CompactorState::Busy(last_busy) => {
-                //         if last_busy.elapsed().as_secs() > 60 {
-                //             compactor.set_state(CompactorState::Burst(Instant::now()))
-                //         }
-                //     }
-                // }
-
                 compactor.try_down_state();
             }
         }
+
+        self.policy.write().refresh_state();
     }
 }
 

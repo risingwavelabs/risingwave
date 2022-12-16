@@ -165,9 +165,12 @@ where
                 if let Some(compactor) = self.hummock_manager.get_idle_compactor().await {
                     break compactor;
                 } else {
+                    let mut min_check_state_interval =
+                        tokio::time::interval(Duration::from_secs(1));
                     tracing::debug!("No available compactor, pausing compaction.");
                     self.hummock_manager.report_scale_compactor_info().await;
                     tokio::select! {
+                        _ = min_check_state_interval.tick() => {},
                         _ = self.compaction_resume_notifier.notified() => {},
                         _ = &mut shutdown_rx => {
                             return;
