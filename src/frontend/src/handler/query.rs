@@ -128,15 +128,17 @@ pub async fn handle_query(
         .collect_vec();
 
     let mut row_stream = {
-        // Acquire hummock snapshot for execution.
-        // TODO: if there's no table scan, we don't need to acquire snapshot.
-        let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
-        let query_id = query.query_id().clone();
-        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
-        let mut query_snapshot = PinnedHummockSnapshot::FrontendPinned(pinned_snapshot);
-        if let Some(query_epoch) = session.config().get_query_epoch() {
-            query_snapshot = PinnedHummockSnapshot::Other(query_epoch);
-        }
+        let query_epoch = session.config().get_query_epoch();
+        let query_snapshot = if let Some(query_epoch) = query_epoch {
+            PinnedHummockSnapshot::Other(query_epoch)
+        } else {
+            // Acquire hummock snapshot for execution.
+            // TODO: if there's no table scan, we don't need to acquire snapshot.
+            let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
+            let query_id = query.query_id().clone();
+            let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
+            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot)
+        };
         match query_mode {
             QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
                 local_execute(session.clone(), query, query_snapshot).await?,

@@ -37,6 +37,7 @@ pub enum PinnedHummockSnapshot {
     FrontendPinned(HummockSnapshotGuard),
     /// Other arbitrary epoch, e.g. user specified.
     /// Availability and consistency of underlying data should be guaranteed accordingly.
+    /// Currently it's only used for querying meta snapshot backup.
     Other(Epoch),
 }
 

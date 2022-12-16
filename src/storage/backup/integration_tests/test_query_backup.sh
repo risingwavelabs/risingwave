@@ -43,7 +43,6 @@ select * from t1;
 
 result=$(
 execute_sql "
-SET QUERY_EPOCH TO 0;
 select * from t1;
 " | grep "1 row"
 )
@@ -69,25 +68,16 @@ do
 done
 echo "safe epoch after compaction: ${safe_epoch}"
 
-echo "query with safe_epoch"
+echo "QUERY_EPOCH=safe_epoch. It should fail because it's not covered by any backup"
 result=$(
 execute_sql "
 SET QUERY_EPOCH TO ${safe_epoch};
 select * from t1;
-" | grep "1 row\|3 row"
+" | grep "Read backup error backup include epoch ${safe_epoch} not found"
 )
 [ -n "${result}" ]
 
-echo "query with safe_epoch - 1"
-result=$(
-execute_sql "
-SET QUERY_EPOCH TO $(( safe_epoch - 1 ));
-select * from t1;
-" | grep "Expired Epoch"
-)
-[ -n "${result}" ]
-
-echo "query with QUERY_EPOCH=0 aka use latest epoch"
+echo "QUERY_EPOCH=0 aka disabling query backup"
 result=$(
 execute_sql "
 SET QUERY_EPOCH TO 0;
@@ -96,7 +86,7 @@ select * from t1;
 )
 [ -n "${result}" ]
 
-echo "query with backup_safe_epoch + 1 < safe_epoch but covered by backup"
+echo "QUERY_EPOCH=backup_safe_epoch + 1, it's < safe_epoch but covered by backup"
 [ $((backup_safe_epoch + 1)) -eq 1 ]
 result=$(
 execute_sql "
@@ -106,7 +96,7 @@ select * from t1;
 )
 [ -n "${result}" ]
 
-echo "query with backup_mce < safe_epoch but covered by backup"
+echo "QUERY_EPOCH=backup_mce < safe_epoch, it's < safe_epoch but covered by backup"
 result=$(
 execute_sql "
 SET QUERY_EPOCH TO $((backup_mce));
@@ -115,11 +105,12 @@ select * from t1;
 )
 [ -n "${result}" ]
 
-echo "query with future epoch"
+echo "QUERY_EPOCH=future epoch. It should fail because it's not covered by any backup"
+future_epoch=18446744073709551615
 result=$(
 execute_sql "
-SET QUERY_EPOCH TO 18446744073709551615;
+SET QUERY_EPOCH TO ${future_epoch};
 select * from t1;
-" | grep "cannot query with future epoch"
+" | grep "Read backup error backup include epoch ${future_epoch} not found"
 )
 [ -n "${result}" ]

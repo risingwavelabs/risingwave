@@ -138,7 +138,7 @@ impl BackupReader {
     pub async fn try_get_hummock_version(
         self: &BackupReaderRef,
         epoch: u64,
-    ) -> Option<PinnedVersion> {
+    ) -> StorageResult<Option<PinnedVersion>> {
         // 1. check manifest to locate snapshot, if any.
         let snapshot_id = self
             .store
@@ -149,7 +149,7 @@ impl BackupReader {
             .map(|s| s.id);
         let snapshot_id = match snapshot_id {
             None => {
-                return None;
+                return Ok(None);
             }
             Some(s) => s,
         };
@@ -157,18 +157,16 @@ impl BackupReader {
         let future = {
             let mut req_guard = self.inflight_request.lock();
             if let Some((v, _)) = self.versions.read().get(&snapshot_id) {
-                return Some(v.clone());
+                return Ok(Some(v.clone()));
             }
             if let Some(f) = req_guard.get(&snapshot_id) {
                 f.clone()
             } else {
                 let this = self.clone();
                 let f = async move {
-                    let snapshot = this
-                        .store
-                        .get(snapshot_id)
-                        .await
-                        .map_err(|e| e.to_string())?;
+                    let snapshot = this.store.get(snapshot_id).await.map_err(|e| {
+                        format!("failed to get meta snapshot {}. {}", snapshot_id, e)
+                    })?;
                     let version_holder = build_version_holder(snapshot);
                     let version_clone = version_holder.0.clone();
                     this.versions.write().insert(snapshot_id, version_holder);
@@ -180,19 +178,12 @@ impl BackupReader {
                 f
             }
         };
-        let result = future.await;
+        let result = future
+            .await
+            .map(Some)
+            .map_err(|e| HummockError::read_backup_error(e).into());
         self.inflight_request.lock().remove(&snapshot_id);
-        match result {
-            Ok(v) => Some(v),
-            Err(e) => {
-                tracing::warn!(
-                    "hummock version from backup {} is not available yet. {}",
-                    snapshot_id,
-                    e
-                );
-                None
-            }
-        }
+        result
     }
 }
 

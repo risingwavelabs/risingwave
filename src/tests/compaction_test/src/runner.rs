@@ -596,6 +596,7 @@ async fn open_hummock_iters(
                     retention_seconds: None,
                     check_bloom_filter: false,
                     ignore_range_tombstone: false,
+                    read_version_from_backup: false,
                 },
             )
             .await?;

@@ -61,9 +61,11 @@ impl HummockStorage {
             Bound::Included(TableKey(key.to_vec())),
         );
 
-        let read_version_tuple = self
-            .build_read_version_tuple(epoch, read_options.table_id, &key_range)
-            .await?;
+        let read_version_tuple = if read_options.read_version_from_backup {
+            self.build_read_version_tuple_from_backup(epoch).await?
+        } else {
+            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?
+        };
 
         self.hummock_version_reader
             .get(TableKey(key), epoch, read_options, read_version_tuple)
@@ -76,39 +78,49 @@ impl HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
-        let read_version_tuple = self
-            .build_read_version_tuple(epoch, read_options.table_id, &key_range)
-            .await?;
+        let read_version_tuple = if read_options.read_version_from_backup {
+            self.build_read_version_tuple_from_backup(epoch).await?
+        } else {
+            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?
+        };
 
         self.hummock_version_reader
             .iter(key_range, epoch, read_options, read_version_tuple)
             .await
     }
 
-    async fn build_read_version_tuple(
+    async fn build_read_version_tuple_from_backup(
+        &self,
+        epoch: u64,
+    ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+        match self.backup_reader.try_get_hummock_version(epoch).await {
+            Ok(Some(backup_version)) => {
+                validate_epoch(backup_version.safe_epoch(), epoch)?;
+                Ok((Vec::default(), Vec::default(), backup_version))
+            }
+            Ok(None) => Err(HummockError::read_backup_error(format!(
+                "backup include epoch {} not found",
+                epoch
+            ))
+            .into()),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn build_read_version_tuple(
         &self,
         epoch: u64,
         table_id: TableId,
         key_range: &TableKeyRange,
     ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
         let pinned_version = self.pinned_version.load();
-        let mut committed_version = (**pinned_version).clone();
-        if epoch < pinned_version.safe_epoch() {
-            // try to query hummock version from backup
-            if let Some(backup_version) = self.backup_reader.try_get_hummock_version(epoch).await {
-                assert!(
-                    epoch <= backup_version.max_committed_epoch()
-                        && epoch >= backup_version.safe_epoch()
-                );
-                committed_version = backup_version;
-            }
-        }
-        validate_epoch(committed_version.safe_epoch(), epoch)?;
+        validate_epoch(pinned_version.safe_epoch(), epoch)?;
+
         // check epoch if lower mce
         let read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion) =
-            if epoch <= committed_version.max_committed_epoch() {
+            if epoch <= pinned_version.max_committed_epoch() {
                 // read committed_version directly without build snapshot
-                (Vec::default(), Vec::default(), committed_version)
+                (Vec::default(), Vec::default(), (**pinned_version).clone())
             } else {
                 let read_version_vec = {
                     let read_guard = self.read_version_mapping.read();
@@ -123,7 +135,7 @@ impl HummockStorage {
                 // When the system has just started and no state has been created, the memory state
                 // may be empty
                 if read_version_vec.is_empty() {
-                    (Vec::default(), Vec::default(), committed_version)
+                    (Vec::default(), Vec::default(), (**pinned_version).clone())
                 } else {
                     read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
                 }

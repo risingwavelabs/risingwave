@@ -56,6 +56,8 @@ enum HummockErrorInner {
     CompactionGroupError(String),
     #[error("SstableUpload error {0}.")]
     SstableUploadError(String),
+    #[error("Read backup error {0}.")]
+    ReadBackupError(String),
     #[error("Other error {0}.")]
     Other(String),
 }
@@ -139,6 +141,10 @@ impl HummockError {
 
     pub fn sstable_upload_error(error: impl ToString) -> HummockError {
         HummockErrorInner::SstableUploadError(error.to_string()).into()
+    }
+
+    pub fn read_backup_error(error: impl ToString) -> HummockError {
+        HummockErrorInner::ReadBackupError(error.to_string()).into()
     }
 
     pub fn other(error: impl ToString) -> HummockError {
