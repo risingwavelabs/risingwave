@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
@@ -33,8 +33,8 @@ pub const PG_DATABASE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "datctype"),
 ];
 
-pub fn new_pg_database_row(id: u32, name: &str) -> Row {
-    Row::new(vec![
+pub fn new_pg_database_row(id: u32, name: &str) -> OwnedRow {
+    OwnedRow::new(vec![
         Some(ScalarImpl::Int32(id as i32)),
         Some(ScalarImpl::Utf8(name.into())),
         None,

@@ -16,7 +16,7 @@ use std::iter::TrustedLen;
 
 use super::column::Column;
 use crate::array::DataChunk;
-use crate::row::Row2;
+use crate::row::Row;
 use crate::types::DatumRef;
 
 impl DataChunk {
@@ -138,7 +138,7 @@ impl Ord for RowRef<'_> {
     }
 }
 
-impl Row2 for RowRef<'_> {
+impl Row for RowRef<'_> {
     type Iter<'a> = RowRefIter<'a>
     where
         Self: 'a;

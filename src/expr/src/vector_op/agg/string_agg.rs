@@ -17,7 +17,7 @@ use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef,
 };
 use risingwave_common::bail;
-use risingwave_common::row::{Row2, RowExt};
+use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};

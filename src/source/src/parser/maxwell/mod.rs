@@ -46,7 +46,7 @@ pub use simd_json_parser::*;
 #[cfg(test)]
 mod test {
     use risingwave_common::array::Op;
-    use risingwave_common::row::Row2;
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
     use risingwave_expr::vector_op::cast::str_to_timestamp;
 

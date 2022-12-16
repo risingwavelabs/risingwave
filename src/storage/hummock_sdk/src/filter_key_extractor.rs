@@ -342,7 +342,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
     use risingwave_common::types::ScalarImpl::{self};
     use risingwave_common::util::ordered::OrderedRowSerde;
@@ -472,7 +472,7 @@ mod tests {
         let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
         let schema = vec![DataType::Int64, DataType::Varchar];
         let serializer = OrderedRowSerde::new(schema, order_types);
-        let row = Row::new(vec![
+        let row = OwnedRow::new(vec![
             Some(ScalarImpl::Int64(100)),
             Some(ScalarImpl::Utf8("abc".into())),
         ]);
@@ -507,7 +507,7 @@ mod tests {
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
             let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(100)),
                 Some(ScalarImpl::Utf8("abc".into())),
             ]);
@@ -545,7 +545,7 @@ mod tests {
             let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
             let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 Some(ScalarImpl::Int64(100)),
                 Some(ScalarImpl::Utf8("abc".into())),
             ]);

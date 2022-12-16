@@ -20,7 +20,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::row::Row2;
+use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;

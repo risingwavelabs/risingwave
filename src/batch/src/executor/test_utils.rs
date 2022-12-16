@@ -23,7 +23,7 @@ use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::field_generator::FieldGeneratorImpl;
-use risingwave_common::row::Row2;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
