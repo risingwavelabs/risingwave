@@ -62,8 +62,12 @@ impl ConnectorClient {
                 })),
             })
             .await
-            .inspect_err(|_| {
-                tracing::error!("failed to create event stream for CDC source {}", source_id)
+            .inspect_err(|err| {
+                tracing::error!(
+                    "failed to start stream for CDC source {}: {}",
+                    source_id,
+                    err.message()
+                )
             })?
             .into_inner())
     }
@@ -86,7 +90,13 @@ impl ConnectorClient {
                 })),
             })
             .await
-            .inspect_err(|_| tracing::error!("failed to validate source properties {}", source_id))?
+            .inspect_err(|err| {
+                tracing::error!(
+                    "failed to validate source {} properties: {}",
+                    source_id,
+                    err.message()
+                )
+            })?
             .into_inner())
     }
 }
