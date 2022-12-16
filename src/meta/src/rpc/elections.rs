@@ -64,7 +64,7 @@ impl ElectionResult {
 /// `MetaError` if the election ran into an error
 ///
 /// ## Arguments
-/// `meta_store`: The meta store which holds the lease, deciding about the election outcome
+/// `meta_store`: The meta store which holds the lease, deciding about the election result
 /// `addr`: Address of the node that runs for election
 /// `lease_time_sec`: Amount of seconds that this lease will be valid
 /// `next_lease_id`: If the node wins, the lease used until the next election will have this id
@@ -310,20 +310,20 @@ pub async fn run_elections<S: MetaStore>(
         let mut initial_election = true;
 
         // run the initial election
-        let election_outcome = campaign(
+        let election_result = campaign(
             &meta_store,
             &addr,
             lease_time_sec,
             gen_rand_lease_id(addr.as_str()),
         )
         .await;
-        let (leader_addr, initial_leader, is_initial_leader) = match election_outcome {
-            Ok(outcome) => {
+        let (leader_addr, initial_leader, is_initial_leader) = match election_result {
+            Ok(elect_result) => {
                 tracing::info!("initial election finished");
                 (
-                    outcome.get_leader_addr(),
-                    outcome.meta_leader_info,
-                    outcome.is_leader,
+                    elect_result.get_leader_addr(),
+                    elect_result.meta_leader_info,
+                    elect_result.is_leader,
                 )
             }
             Err(_) => {
@@ -373,12 +373,12 @@ pub async fn run_elections<S: MetaStore>(
                             _ = ticker.tick().await;
                             continue 'election;
                         }
-                        Ok(outcome) => {
+                        Ok(elect_result) => {
                             tracing::info!("election finished");
                             (
-                                outcome.get_leader_addr(),
-                                outcome.meta_leader_info,
-                                outcome.is_leader,
+                                elect_result.get_leader_addr(),
+                                elect_result.meta_leader_info,
+                                elect_result.is_leader,
                             )
                         }
                     };
