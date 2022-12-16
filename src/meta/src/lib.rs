@@ -101,6 +101,11 @@ pub struct MetaNodeOpts {
     #[clap(long)]
     prometheus_endpoint: Option<String>,
 
+    /// Endpoint of the connector node, there will be a sidecar connector node
+    /// colocated with Meta node in the cloud environment
+    #[clap(long, env = "META_CONNECTOR_RPC_ENDPOINT")]
+    pub connector_rpc_endpoint: Option<String>,
+
     /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
@@ -180,6 +185,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
                 prometheus_endpoint: opts.prometheus_endpoint,
+                connector_rpc_endpoint: opts.connector_rpc_endpoint,
                 backup_storage_url: config.backup.storage_url,
                 backup_storage_directory: config.backup.storage_directory,
             },

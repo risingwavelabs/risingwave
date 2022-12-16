@@ -52,10 +52,13 @@ impl MetaNodeService {
                 config.listen_address, config.dashboard_port
             ));
 
-        cmd.arg("--prometheus-host").arg(format!(
-            "{}:{}",
-            config.listen_address, config.exporter_port
-        ));
+        cmd.arg("--prometheus-host")
+            .arg(format!(
+                "{}:{}",
+                config.listen_address, config.exporter_port
+            ))
+            .arg("--connector-rpc-endpoint")
+            .arg(&config.connector_rpc_endpoint);
 
         match config.provide_prometheus.as_ref().unwrap().as_slice() {
             [] => {}

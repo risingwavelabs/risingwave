@@ -366,6 +366,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let source_manager = Arc::new(
         SourceManager::new(
+            env.opts.connector_rpc_endpoint.clone(),
             barrier_scheduler.clone(),
             catalog_manager.clone(),
             fragment_manager.clone(),

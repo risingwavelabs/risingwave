@@ -61,6 +61,7 @@ pub struct MetaNodeConfig {
 
     pub user_managed: bool,
 
+    pub connector_rpc_endpoint: String,
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 }

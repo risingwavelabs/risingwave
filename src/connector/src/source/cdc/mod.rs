@@ -18,7 +18,9 @@ pub mod split;
 
 use std::collections::HashMap;
 
+use anyhow::anyhow;
 pub use enumerator::*;
+use risingwave_pb::connector_service::SourceType;
 use serde::Deserialize;
 pub use source::*;
 pub use split::*;
@@ -36,4 +38,14 @@ pub struct CdcProperties {
     pub source_type: String,
     /// Properties specified in the WITH clause by user
     pub props: HashMap<String, String>,
+}
+
+impl CdcProperties {
+    pub fn source_type_enum(&self) -> anyhow::Result<SourceType> {
+        match self.source_type.as_str() {
+            "mysql" => Ok(SourceType::Mysql),
+            "postgres" => Ok(SourceType::Postgres),
+            _ => Err(anyhow!("unknown source type")),
+        }
+    }
 }
