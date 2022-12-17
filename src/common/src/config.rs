@@ -521,7 +521,9 @@ mod default {
         }
 
         pub fn in_flight_barrier_nums() -> usize {
-            10
+            // quick fix
+            // TODO: remove this limitation from code
+            10000
         }
 
         pub fn checkpoint_frequency() -> usize {
