@@ -13,8 +13,16 @@ public class Record implements AutoCloseable {
         return Binding.recordGetKey(pointer);
     }
 
-    byte[] getValue() {
-        return Binding.recordGetValue(pointer);
+    boolean isNull(int index) {
+        return Binding.recordIsNull(pointer, index);
+    }
+
+    long getLong(int index) {
+        return Binding.recordGetInt64Value(pointer, index);
+    }
+
+    String getString(int index) {
+        return Binding.recordGetStringValue(pointer, index);
     }
 
     @Override

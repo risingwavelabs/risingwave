@@ -41,11 +41,27 @@ JNIEXPORT jbyteArray JNICALL Java_com_risingwave_binding_Binding_recordGetKey
 
 /*
  * Class:     com_risingwave_binding_Binding
- * Method:    recordGetValue
- * Signature: (J)[B
+ * Method:    recordIsNull
+ * Signature: (JI)Z
  */
-JNIEXPORT jbyteArray JNICALL Java_com_risingwave_binding_Binding_recordGetValue
-  (JNIEnv *, jclass, jlong);
+JNIEXPORT jboolean JNICALL Java_com_risingwave_binding_Binding_recordIsNull
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_binding_Binding
+ * Method:    recordGetInt64Value
+ * Signature: (JI)J
+ */
+JNIEXPORT jlong JNICALL Java_com_risingwave_binding_Binding_recordGetInt64Value
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_binding_Binding
+ * Method:    recordGetStringValue
+ * Signature: (JI)Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_com_risingwave_binding_Binding_recordGetStringValue
+  (JNIEnv *, jclass, jlong, jint);
 
 /*
  * Class:     com_risingwave_binding_Binding

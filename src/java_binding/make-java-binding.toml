@@ -1,3 +1,12 @@
+[tasks.gen-java-binding-header]
+description = "Generate the java binding C header file"
+script = '''
+#!/bin/bash
+set -e
+cd src/java_binding/java
+javac -h . -cp src/main/java/ src/main/java/com/risingwave/binding/Binding.java
+'''
+
 [tasks.build-java-binding-rust]
 description = "Build the java binding rust code"
 script = '''

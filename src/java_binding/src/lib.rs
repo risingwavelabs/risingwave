@@ -1,13 +1,18 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 
+mod iterator;
+
 use std::backtrace::Backtrace;
 use std::marker::PhantomData;
-use std::panic::{catch_unwind, UnwindSafe};
+use std::ops::Deref;
+use std::panic::catch_unwind;
 
-use jni::objects::{JClass, JObject};
-use jni::sys::{jbyteArray, jlong};
+use iterator::{Iterator, Record};
+use jni::objects::{JClass, JObject, JString};
+use jni::sys::{jboolean, jbyteArray, jint, jlong};
 use jni::JNIEnv;
+use risingwave_storage::error::StorageError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -16,6 +21,13 @@ enum BindingError {
     JniError {
         #[from]
         error: jni::errors::Error,
+        backtrace: Backtrace,
+    },
+
+    #[error("StorageError {error}")]
+    StorageError {
+        #[from]
+        error: StorageError,
         backtrace: Backtrace,
     },
 }
@@ -82,12 +94,35 @@ impl<'a, T> Pointer<'a, T> {
     }
 }
 
-fn execute_and_catch<F, Ret>(env: JNIEnv<'_>, inner: F) -> Ret
+/// In most Jni interfaces, the first parameter is `JNIEnv`, and the second parameter is `JClass`.
+/// This struct simply encapsulates the two common parameters into a single struct for simplicity.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct EnvParam<'a> {
+    env: JNIEnv<'a>,
+    class: JClass<'a>,
+}
+
+impl<'a> Deref for EnvParam<'a> {
+    type Target = JNIEnv<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.env
+    }
+}
+
+impl<'a> EnvParam<'a> {
+    pub fn get_class(&self) -> JClass<'a> {
+        self.class
+    }
+}
+
+fn execute_and_catch<F, Ret>(env: EnvParam<'_>, inner: F) -> Ret
 where
-    F: FnOnce() -> Result<Ret> + UnwindSafe,
+    F: FnOnce() -> Result<Ret>,
     Ret: Default,
 {
-    match catch_unwind(move || inner()) {
+    match catch_unwind(std::panic::AssertUnwindSafe(move || inner())) {
         Ok(Ok(ret)) => ret.into(),
         Ok(Err(e)) => {
             match e {
@@ -115,19 +150,17 @@ where
 
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_binding_Binding_iteratorNew(
-    _env: JNIEnv<'_>,
-    _class: JClass<'_>,
+    env: EnvParam<'_>,
 ) -> Pointer<'static, Iterator> {
-    Iterator { cur_idx: 0 }.into()
+    execute_and_catch(env, move || Ok(Iterator::new()?.into()))
 }
 
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_binding_Binding_iteratorNext<'a>(
-    env: JNIEnv<'a>,
-    _class: JClass<'a>,
+    env: EnvParam<'a>,
     mut pointer: Pointer<'a, Iterator>,
 ) -> Pointer<'static, Record> {
-    execute_and_catch(env, move || match pointer.as_mut().next() {
+    execute_and_catch(env, move || match pointer.as_mut().next()? {
         None => Ok(Pointer::null()),
         Some(record) => Ok(record.into()),
     })
@@ -135,8 +168,7 @@ pub extern "system" fn Java_com_risingwave_binding_Binding_iteratorNext<'a>(
 
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_binding_Binding_iteratorClose(
-    _env: JNIEnv<'_>,
-    _class: JClass<'_>,
+    _env: EnvParam<'_>,
     pointer: Pointer<'_, Iterator>,
 ) {
     pointer.drop();
@@ -144,64 +176,52 @@ pub extern "system" fn Java_com_risingwave_binding_Binding_iteratorClose(
 
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_binding_Binding_recordGetKey<'a>(
-    env: JNIEnv<'a>,
-    _class: JClass<'a>,
+    env: EnvParam<'a>,
     pointer: Pointer<'a, Record>,
 ) -> ByteArray<'a> {
-    execute_and_catch(env.clone(), move || {
+    execute_and_catch(env, move || {
         Ok(ByteArray::from(
-            env.byte_array_from_slice(pointer.as_ref().key)?,
+            env.byte_array_from_slice(pointer.as_ref().key())?,
         ))
     })
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_binding_Binding_recordGetValue<'a>(
-    env: JNIEnv<'a>,
-    _class: JClass<'a>,
+pub extern "system" fn Java_com_risingwave_binding_Binding_recordIsNull<'a>(
+    env: EnvParam<'a>,
     pointer: Pointer<'a, Record>,
-) -> ByteArray<'a> {
-    execute_and_catch(env.clone(), move || {
-        Ok(ByteArray::from(
-            env.byte_array_from_slice(pointer.as_ref().value)?,
-        ))
+    idx: jint,
+) -> jboolean {
+    execute_and_catch(
+        env,
+        move || Ok(pointer.as_ref().is_null(idx as usize) as u8),
+    )
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_binding_Binding_recordGetInt64Value<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, Record>,
+    idx: jint,
+) -> jlong {
+    execute_and_catch(env, move || Ok(pointer.as_ref().get_int64(idx as usize)))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_binding_Binding_recordGetStringValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, Record>,
+    idx: jint,
+) -> JString<'a> {
+    execute_and_catch(env, move || {
+        Ok(env.new_string(pointer.as_ref().get_utf8(idx as usize))?)
     })
 }
 
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_binding_Binding_recordClose<'a>(
-    _env: JNIEnv<'a>,
-    _class: JClass<'a>,
+    _env: EnvParam<'a>,
     pointer: Pointer<'a, Record>,
 ) {
     pointer.drop()
-}
-
-pub struct Iterator {
-    cur_idx: usize,
-}
-
-pub struct Record {
-    key: &'static [u8],
-    value: &'static [u8],
-}
-
-impl Iterator {
-    fn next(&mut self) -> Option<Record> {
-        if self.cur_idx == 0 {
-            self.cur_idx += 1;
-            Some(Record {
-                key: &b"first"[..],
-                value: &b"value1"[..],
-            })
-        } else if self.cur_idx == 1 {
-            self.cur_idx += 1;
-            Some(Record {
-                key: &b"second"[..],
-                value: &b"value2"[..],
-            })
-        } else {
-            None
-        }
-    }
 }

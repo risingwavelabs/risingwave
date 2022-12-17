@@ -13,7 +13,7 @@ public class Main {
                     if (record == null) {
                         break;
                     }
-                    System.out.printf("key %s, value %s%n", Arrays.toString(record.getKey()), Arrays.toString(record.getValue()));
+                    System.out.printf("key %s, id: %d, name: %s, is null: %s%n", Arrays.toString(record.getKey()), record.getLong(0), record.getString(1), record.isNull(2));
                 }
             }
         }

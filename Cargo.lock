@@ -5583,7 +5583,15 @@ dependencies = [
 name = "risingwave_java_binding"
 version = "0.1.0"
 dependencies = [
+ "bytes",
+ "futures",
+ "itertools",
  "jni",
+ "madsim-tokio",
+ "risingwave_common",
+ "risingwave_object_store",
+ "risingwave_pb",
+ "risingwave_storage",
  "thiserror",
  "tracing",
 ]

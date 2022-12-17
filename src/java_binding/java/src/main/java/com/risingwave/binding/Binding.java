@@ -17,7 +17,11 @@ public class Binding {
     // record method
     static native byte[] recordGetKey(long pointer);
 
-    static native byte[] recordGetValue(long pointer);
+    static native boolean recordIsNull(long pointer, int index);
+
+    static native long recordGetInt64Value(long pointer, int index);
+
+    static native String recordGetStringValue(long pointer, int index);
 
     static native void recordClose(long pointer);
 }
