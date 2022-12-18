@@ -23,7 +23,7 @@ use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, StringWriter, Utf8Array, Utf8ArrayBuilder,
     WrittenGuard,
 };
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar};
 
 use crate::expr::{BoxedExpression, Expression};
@@ -62,7 +62,7 @@ macro_rules! gen_eval {
 
         /// `eval_row()` first calls `eval_row()` on the inner expressions to get the resulting datums,
         /// then directly calls `$macro_row` to evaluate the current expression.
-        fn eval_row(&self, row: &Row) -> $crate::Result<Datum> {
+        fn eval_row(&self, row: &OwnedRow) -> $crate::Result<Datum> {
             paste! {
                 $(
                     let [<datum_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_row(row)?;

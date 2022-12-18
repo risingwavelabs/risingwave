@@ -60,8 +60,11 @@ impl BatchLookupJoin {
         lookup_prefix_len: usize,
         distributed_lookup: bool,
     ) -> Self {
+        // We cannot create a `BatchLookupJoin` without any eq keys. We require eq keys to do the
+        // lookup.
+        assert!(eq_join_predicate.has_eq());
         let ctx = logical.base.ctx.clone();
-        let dist = Self::derive_dist(logical.left().distribution());
+        let dist = Self::derive_dist(logical.left().distribution(), &logical);
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         Self {
             base,
@@ -74,8 +77,17 @@ impl BatchLookupJoin {
         }
     }
 
-    fn derive_dist(left: &Distribution) -> Distribution {
-        left.clone()
+    fn derive_dist(left: &Distribution, logical: &LogicalJoin) -> Distribution {
+        match left {
+            Distribution::Single => Distribution::Single,
+            Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) => {
+                let l2o = logical
+                    .l2i_col_mapping()
+                    .composite(&logical.i2o_col_mapping());
+                l2o.rewrite_provided_distribution(left)
+            }
+            _ => unreachable!(),
+        }
     }
 
     fn eq_join_predicate(&self) -> &EqJoinPredicate {

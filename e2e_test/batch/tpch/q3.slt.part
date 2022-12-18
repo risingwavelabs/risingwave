@@ -1,5 +1,4 @@
 # tpch q3
-
 query IRTI
 select
 	l_orderkey,

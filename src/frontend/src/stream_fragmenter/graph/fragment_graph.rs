@@ -18,7 +18,7 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
     StreamFragment as StreamFragmentProto, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, FragmentType, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    DispatchStrategy, FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
 type LocalFragmentId = u32;
@@ -32,8 +32,8 @@ pub struct StreamFragment {
     /// root stream node in this fragment.
     pub node: Option<Box<StreamNode>>,
 
-    /// type of this fragment.
-    pub fragment_type: FragmentType,
+    /// Bitwise-OR of type Flags of this fragment.
+    pub fragment_type_mask: u32,
 
     /// mark whether this fragment should only have one actor.
     pub is_singleton: bool,
@@ -64,7 +64,7 @@ impl StreamFragment {
     pub fn new(fragment_id: LocalFragmentId) -> Self {
         Self {
             fragment_id,
-            fragment_type: FragmentType::Others,
+            fragment_type_mask: FragmentTypeFlag::FragmentUnspecified as u32,
             // FIXME: is it okay to use `false` as default value?
             is_singleton: false,
             node: None,
@@ -77,7 +77,7 @@ impl StreamFragment {
         StreamFragmentProto {
             fragment_id: self.fragment_id,
             node: self.node.clone().map(|n| *n),
-            fragment_type: self.fragment_type as i32,
+            fragment_type_mask: self.fragment_type_mask,
             is_singleton: self.is_singleton,
             table_ids_cnt: self.table_ids_cnt,
             upstream_table_ids: self.upstream_table_ids.clone(),

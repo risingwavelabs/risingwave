@@ -163,7 +163,7 @@ impl HummockStorage {
             HummockObserverNode::new(filter_key_extractor_manager.clone(), event_tx.clone()),
         )
         .await;
-        let _ = observer_manager.start().await;
+        observer_manager.start().await;
 
         let hummock_version = match event_rx.recv().await {
             Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,
@@ -329,11 +329,10 @@ pub async fn get_from_sstable_info(
     } else {
         get_delete_range_epoch_from_sstable(sstable.value().as_ref(), &full_key)
     };
-    // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
-    // contain `TablePrefix` and `VnodePrefix`.
-    let dist_key = &ukey.table_key[VirtualNode::SIZE..];
+    // Bloom filter key is the prefix of pk.
+    let pk_prefix = &ukey.table_key[VirtualNode::SIZE..];
     if read_options.check_bloom_filter
-        && !hit_sstable_bloom_filter(sstable.value(), dist_key, local_stats)
+        && !hit_sstable_bloom_filter(sstable.value(), pk_prefix, local_stats)
     {
         if delete_epoch.is_some() {
             return Ok(Some(HummockValue::Delete));
@@ -379,11 +378,11 @@ pub async fn get_from_sstable_info(
 
 pub fn hit_sstable_bloom_filter(
     sstable_info_ref: &Sstable,
-    dist_key: &[u8],
+    pk_prefix: &[u8],
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
-    let surely_not_have = sstable_info_ref.surely_not_have_dist_key(dist_key);
+    let surely_not_have = sstable_info_ref.surely_not_have_dist_key(pk_prefix);
 
     if surely_not_have {
         local_stats.bloom_filter_true_negative_count += 1;
@@ -499,7 +498,7 @@ impl HummockStorageV1 {
             HummockObserverNode::new(filter_key_extractor_manager.clone(), event_tx.clone()),
         )
         .await;
-        let _ = observer_manager.start().await;
+        observer_manager.start().await;
 
         let hummock_version = match event_rx.recv().await {
             Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,

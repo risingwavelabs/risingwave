@@ -7,7 +7,6 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 # create tables
-
 statement ok
 CREATE TABLE test (a INTEGER, b INTEGER);
 

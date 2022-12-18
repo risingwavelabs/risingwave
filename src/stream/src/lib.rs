@@ -27,7 +27,6 @@
 #![feature(generators)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
-#![feature(unzip_option)]
 #![feature(allocator_api)]
 #![feature(map_try_insert)]
 #![feature(result_option_inspect)]
@@ -37,6 +36,7 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(btree_drain_filter)]
+#![feature(bound_map)]
 
 #[macro_use]
 extern crate tracing;

@@ -37,6 +37,7 @@ select * from v2;
 statement ok
 insert into t2 values(1, 2);
 
+
 query II
 select * from v;
 ----
@@ -71,6 +72,7 @@ select * from v;
 query II
 select * from v2;
 ----
+
 
 statement ok
 drop materialized view v;
