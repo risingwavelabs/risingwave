@@ -88,7 +88,8 @@ impl Condition {
 
     pub fn always_false(&self) -> bool {
         static FALSE: LazyLock<ExprImpl> = LazyLock::new(|| ExprImpl::literal_bool(false));
-        !self.conjunctions.is_empty() && self.conjunctions.iter().all(|e| *e == *FALSE)
+        // There is at least one conjunction that is false.
+        !self.conjunctions.is_empty() && self.conjunctions.iter().any(|e| *e == *FALSE)
     }
 
     /// Convert condition to an expression. If always true, return `None`.

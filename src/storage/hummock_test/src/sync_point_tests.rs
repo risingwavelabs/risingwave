@@ -242,6 +242,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let storage = get_hummock_storage(
         hummock_meta_client.clone(),
         get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+        &hummock_manager_ref,
         TableId::from(existing_table_id),
     )
     .await;
@@ -330,7 +331,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let read_options = ReadOptions {
         ignore_range_tombstone: false,
         check_bloom_filter: false,
-        dist_key_hint: None,
+        prefix_hint: None,
         table_id: TableId::from(existing_table_id),
         retention_seconds: None,
     };

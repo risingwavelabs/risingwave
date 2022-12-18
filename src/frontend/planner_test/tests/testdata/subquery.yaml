@@ -110,7 +110,7 @@
     ├─LogicalScan { table: ab, columns: [ab.a, ab.b] }
     └─LogicalJoin { type: Inner, on: true, output: all }
       ├─LogicalScan { table: bc, columns: [bc.b] }
-      └─LogicalScan { table: t, output_columns: [], required_columns: [v1], predicate: IsNotNull(t.v1) }
+      └─LogicalScan { table: t, output_columns: [], required_columns: [t.v1], predicate: IsNotNull(t.v1) }
 - name: We cannot reference columns in left table if not lateral
   sql: |
     create table ab (a int, b int);
@@ -264,7 +264,7 @@
   optimized_logical_plan: |
     LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftSemi, on: true, output: all }
-      ├─LogicalScan { table: t, output_columns: [], required_columns: [v], predicate: (t.v > 1:Int32) }
+      ├─LogicalScan { table: t, output_columns: [], required_columns: [t.v], predicate: (t.v > 1:Int32) }
       └─LogicalAgg { aggs: [] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
@@ -336,7 +336,7 @@
                 ├─LogicalAgg { group_key: [a.a1], aggs: [] }
                 | └─LogicalScan { table: a, columns: [a.a1] }
                 └─LogicalProject { exprs: [b.b1, b.b1] }
-                  └─LogicalScan { table: b, output_columns: [b.b1], required_columns: [b1], predicate: IsNotNull(b.b1) }
+                  └─LogicalScan { table: b, columns: [b.b1], predicate: IsNotNull(b.b1) }
 - name: test subquery in join on condition
   sql: |
     create table a (v1 int, v2 int);

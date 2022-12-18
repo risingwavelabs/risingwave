@@ -151,7 +151,11 @@ impl<'a, T: PrimitiveArrayItemType> FromIterator<&'a Option<T>> for PrimitiveArr
 
 impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
-        iter.into_iter().map(Some).collect()
+        let data: Vec<T> = iter.into_iter().collect();
+        PrimitiveArray {
+            bitmap: Bitmap::all_high_bits(data.len()),
+            data,
+        }
     }
 }
 
@@ -159,13 +163,19 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     type Builder = PrimitiveArrayBuilder<T>;
     type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = T;
+    type RawIter<'a> = std::iter::Cloned<std::slice::Iter<'a, T>>;
     type RefItem<'a> = T;
+
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
+        *self.data.get_unchecked(idx)
+    }
 
     fn value_at(&self, idx: usize) -> Option<T> {
         if self.is_null(idx) {
             None
         } else {
-            Some(self.data[idx])
+            // Safety: the above `is_null` check ensures that the index is valid.
+            Some(unsafe { *self.data.get_unchecked(idx) })
         }
     }
 
@@ -187,6 +197,10 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
 
     fn iter(&self) -> Self::Iter<'_> {
         ArrayIterator::new(self)
+    }
+
+    fn raw_iter(&self) -> Self::RawIter<'_> {
+        self.data.iter().cloned()
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -244,15 +258,15 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         }
     }
 
-    fn append(&mut self, value: Option<T>) {
+    fn append_n(&mut self, n: usize, value: Option<T>) {
         match value {
             Some(x) => {
-                self.bitmap.append(true);
-                self.data.push(x);
+                self.bitmap.append_n(n, true);
+                self.data.extend(std::iter::repeat(x).take(n));
             }
             None => {
-                self.bitmap.append(false);
-                self.data.push(T::default());
+                self.bitmap.append_n(n, false);
+                self.data.extend(std::iter::repeat(T::default()).take(n));
             }
         }
     }

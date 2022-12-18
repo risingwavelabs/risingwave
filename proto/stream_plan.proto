@@ -130,8 +130,9 @@ message SourceNode {
 
 message SinkNode {
   uint32 table_id = 1;
-  repeated int32 column_ids = 2;
   map<string, string> properties = 3;
+  repeated plan_common.Field fields = 4;
+  repeated uint32 sink_pk = 5;
 }
 
 message ProjectNode {
@@ -557,6 +558,8 @@ enum FragmentTypeFlag {
   SOURCE = 1;
   MVIEW = 2;
   SINK = 4;
+  NOW = 8;
+  CHAIN_NODE = 16;
 }
 
 message StreamFragmentGraph {

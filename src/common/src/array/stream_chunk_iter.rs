@@ -108,7 +108,7 @@ mod tests {
     use test::Bencher;
 
     use super::RecordRef;
-    use crate::row::Row2;
+    use crate::row::Row;
     use crate::test_utils::test_stream_chunk::{
         BigStreamChunk, TestStreamChunk, WhatEverStreamChunk,
     };
@@ -143,7 +143,7 @@ mod tests {
         let chunk = BigStreamChunk::new(10000).stream_chunk();
         b.iter(|| {
             for (_op, row) in chunk.records().flat_map(RecordRef::into_row_refs) {
-                test::black_box(row.values().count());
+                test::black_box(row.iter().count());
             }
         })
     }
@@ -153,7 +153,7 @@ mod tests {
         let chunk = BigStreamChunk::new(10000).stream_chunk();
         b.iter(|| {
             for (_op, row) in chunk.rows() {
-                test::black_box(row.values().count());
+                test::black_box(row.iter().count());
             }
         })
     }
@@ -164,7 +164,7 @@ mod tests {
         b.iter(|| {
             for (_op, row) in chunk.rows() {
                 // Mimic the old `RowRef(Vec<DatumRef>)`
-                let row = row.values().collect_vec();
+                let row = row.iter().collect_vec();
                 test::black_box(row);
             }
         })
@@ -176,11 +176,11 @@ mod tests {
         b.iter(|| {
             for record in chunk.records() {
                 match record {
-                    RecordRef::Insert(row) => test::black_box(row.values().count()),
-                    RecordRef::Delete(row) => test::black_box(row.values().count()),
+                    RecordRef::Insert(row) => test::black_box(row.iter().count()),
+                    RecordRef::Delete(row) => test::black_box(row.iter().count()),
                     RecordRef::Update { delete, insert } => {
-                        test::black_box(delete.values().count());
-                        test::black_box(insert.values().count())
+                        test::black_box(delete.iter().count());
+                        test::black_box(insert.iter().count())
                     }
                 };
             }

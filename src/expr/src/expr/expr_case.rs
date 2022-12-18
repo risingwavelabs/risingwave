@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk, Vis};
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -98,7 +98,7 @@ impl Expression for CaseExpression {
         Ok(Arc::new(builder.finish()))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         for WhenClause { when, then } in &self.when_clauses {
             if when.eval_row(input)?.map_or(false, |w| w.into_bool()) {
                 return then.eval_row(input);
@@ -201,7 +201,7 @@ mod tests {
 
     fn test_eval_row(expr: CaseExpression, row_inputs: Vec<i32>, expected: Vec<Option<f32>>) {
         for (i, row_input) in row_inputs.iter().enumerate() {
-            let row = Row::new(vec![Some(row_input.to_scalar_value())]);
+            let row = OwnedRow::new(vec![Some(row_input.to_scalar_value())]);
             let datum = expr.eval_row(&row).unwrap();
             let expected = expected[i].map(|f| f.into());
             assert_eq!(datum, expected)

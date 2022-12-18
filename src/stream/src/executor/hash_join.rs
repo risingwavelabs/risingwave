@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
-use risingwave_common::row::{Row, Row2};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::BoxedExpression;
@@ -280,7 +280,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     fn with_match_on_insert(
         &mut self,
         row: &RowRef<'_>,
-        matched_row: &JoinRow<Row>,
+        matched_row: &JoinRow<OwnedRow>,
     ) -> Option<StreamChunk> {
         // Left/Right Anti sides
         if is_anti(T) {
@@ -322,7 +322,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     fn with_match_on_delete(
         &mut self,
         row: &RowRef<'_>,
-        matched_row: &JoinRow<Row>,
+        matched_row: &JoinRow<OwnedRow>,
     ) -> Option<StreamChunk> {
         // Left/Right Anti sides
         if is_anti(T) {
@@ -735,18 +735,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     fn row_concat(
         row_update: &RowRef<'_>,
         update_start_pos: usize,
-        row_matched: &Row,
+        row_matched: &OwnedRow,
         matched_start_pos: usize,
-    ) -> Row {
-        let mut new_row = vec![None; row_update.size() + row_matched.len()];
+    ) -> OwnedRow {
+        let mut new_row = vec![None; row_update.len() + row_matched.len()];
 
-        for (i, datum_ref) in row_update.values().enumerate() {
+        for (i, datum_ref) in row_update.iter().enumerate() {
             new_row[i + update_start_pos] = datum_ref.to_owned_datum();
         }
         for i in 0..row_matched.len() {
             new_row[i + matched_start_pos] = row_matched[i].clone();
         }
-        Row::new(new_row)
+        OwnedRow::new(new_row)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -779,7 +779,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             ),
         };
 
-        let mut check_join_condition = |row_update: &RowRef<'_>, row_matched: &Row| -> bool {
+        let mut check_join_condition = |row_update: &RowRef<'_>, row_matched: &OwnedRow| -> bool {
             // TODO(yuhao-su): We should find a better way to eval the expression without concat
             // two rows.
             // if there are non-equi expressions

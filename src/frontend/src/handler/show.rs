@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Ident, ObjectName, ShowObject};
+use risingwave_sqlparser::ast::{Ident, ObjectName, ShowCreateType, ShowObject};
+use risingwave_sqlparser::parser::Parser;
 
 use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
@@ -128,6 +130,74 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
             DataType::VARCHAR.to_oid(),
             DataType::VARCHAR.type_len(),
         )],
+    ))
+}
+
+pub fn handle_show_create_object(
+    handle_args: HandlerArgs,
+    show_create_type: ShowCreateType,
+    name: ObjectName,
+) -> Result<RwPgResponse> {
+    let session = handle_args.session;
+    let catalog_reader = session.env().catalog_reader().read_guard();
+    let (schema_name, object_name) =
+        Binder::resolve_schema_qualified_name(session.database(), name.clone())?;
+    let schema_name = schema_name.unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
+    let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+    let sql = match show_create_type {
+        ShowCreateType::MaterializedView => {
+            let table = schema.get_table_by_name(&object_name).ok_or_else(|| {
+                RwError::from(CatalogError::NotFound(
+                    "materialized view",
+                    name.to_string(),
+                ))
+            })?;
+            if !table.is_mview() {
+                return Err(CatalogError::NotFound("materialized view", name.to_string()).into());
+            }
+            // We only stored the definition of materialized view, format and return directly.
+            format!(
+                "CREATE MATERIALIZED VIEW {} AS {}",
+                table.name, table.definition
+            )
+        }
+        ShowCreateType::View => {
+            let view = schema
+                .get_view_by_name(&object_name)
+                .ok_or_else(|| RwError::from(CatalogError::NotFound("view", name.to_string())))?;
+
+            // We only stored original sql in catalog, uses parser to parse and format.
+            let stmt = Parser::parse_sql(&view.sql)
+                .map_err(|err| anyhow!("Failed to parse view create sql: {}, {}", view.sql, err))?;
+            assert!(stmt.len() == 1);
+            stmt[0].to_string()
+        }
+        _ => {
+            return Err(ErrorCode::NotImplemented(
+                format!("show create on: {}", show_create_type),
+                None.into(),
+            )
+            .into());
+        }
+    };
+    let name = format!("{}.{}", schema_name, object_name);
+
+    Ok(PgResponse::new_for_stream(
+        StatementType::SHOW_COMMAND,
+        Some(1),
+        vec![Row::new(vec![Some(name.into()), Some(sql.into())])].into(),
+        vec![
+            PgFieldDescriptor::new(
+                "Name".to_owned(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Create Sql".to_owned(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
+        ],
     ))
 }
 

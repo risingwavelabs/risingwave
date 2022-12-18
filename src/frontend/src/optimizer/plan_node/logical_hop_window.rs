@@ -185,6 +185,11 @@ impl LogicalHopWindow {
         self.i2o_col_mapping()
             .rewrite_provided_order(self.input().order())
     }
+
+    /// Get output indices
+    fn output_indices(&self) -> &Vec<usize> {
+        &self.core.output_indices
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalHopWindow {
@@ -317,13 +322,26 @@ impl ColPrunable for LogicalHopWindow {
 }
 
 impl PredicatePushdown for LogicalHopWindow {
+    /// Keep predicate on time window parameters (`window_start`, `window_end`),
+    /// the rest may be pushed-down.
     fn predicate_pushdown(
         &self,
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        // TODO: hop's predicate pushdown https://github.com/risingwavelabs/risingwave/issues/6606
-        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
+        let mut window_columns = FixedBitSet::with_capacity(self.schema().len());
+
+        let window_start_idx = self.window_start_col_idx();
+        let window_end_idx = self.window_end_col_idx();
+        for (i, v) in self.output_indices().iter().enumerate() {
+            if *v == window_start_idx || *v == window_end_idx {
+                window_columns.insert(i);
+            }
+        }
+        let (time_window_pred, pushed_predicate) = predicate.split_disjoint(&window_columns);
+        let mut mapping = self.o2i_col_mapping();
+        let pushed_predicate = pushed_predicate.rewrite_expr(&mut mapping);
+        gen_filter_and_pushdown(self, time_window_pred, pushed_predicate, ctx)
     }
 }
 

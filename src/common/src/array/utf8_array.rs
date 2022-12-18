@@ -15,6 +15,7 @@
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
 use super::bytes_array::{BytesWriter, PartialBytesWriter, WrittenGuard};
+use super::iterator::ArrayRawIter;
 use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, BytesArray, BytesArrayBuilder};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::Bitmap;
@@ -29,9 +30,14 @@ impl Array for Utf8Array {
     type Builder = Utf8ArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = Box<str>;
+    type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = &'a str;
 
-    #[inline]
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
+        let bytes = self.bytes.raw_value_at_unchecked(idx);
+        std::str::from_utf8_unchecked(bytes)
+    }
+
     fn value_at(&self, idx: usize) -> Option<&str> {
         self.bytes
             .value_at(idx)
@@ -52,6 +58,10 @@ impl Array for Utf8Array {
 
     fn iter(&self) -> ArrayIterator<'_, Self> {
         ArrayIterator::new(self)
+    }
+
+    fn raw_iter(&self) -> Self::RawIter<'_> {
+        ArrayRawIter::new(self)
     }
 
     #[inline]
@@ -128,8 +138,8 @@ impl ArrayBuilder for Utf8ArrayBuilder {
     }
 
     #[inline]
-    fn append<'a>(&'a mut self, value: Option<&'a str>) {
-        self.bytes.append(value.map(|v| v.as_bytes()));
+    fn append_n<'a>(&'a mut self, n: usize, value: Option<&'a str>) {
+        self.bytes.append_n(n, value.map(|v| v.as_bytes()));
     }
 
     #[inline]
