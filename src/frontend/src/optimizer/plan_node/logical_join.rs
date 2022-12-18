@@ -33,7 +33,7 @@ use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext,
     EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
-    StreamDynamicFilter, StreamFilter,
+    StreamDynamicFilter, StreamFilter, ToStreamContext,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
@@ -864,14 +864,16 @@ impl PredicatePushdown for LogicalJoin {
 }
 
 impl LogicalJoin {
-    fn to_stream_hash_join(&self, predicate: EqJoinPredicate) -> Result<PlanRef> {
+    fn to_stream_hash_join(
+        &self,
+        predicate: EqJoinPredicate,
+        ctx: &mut ToStreamContext,
+    ) -> Result<PlanRef> {
         assert!(predicate.has_eq());
-        let mut right = self
-            .right()
-            .to_stream_with_dist_required(&RequiredDist::shard_by_key(
-                self.right().schema().len(),
-                &predicate.right_eq_indexes(),
-            ))?;
+        let mut right = self.right().to_stream_with_dist_required(
+            &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
+            ctx,
+        )?;
         let mut left = self.left();
 
         let r2l = predicate.r2l_eq_columns_mapping(left.schema().len(), right.schema().len());
@@ -882,13 +884,16 @@ impl LogicalJoin {
             Distribution::HashShard(_) => {
                 let left_dist = r2l
                     .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
-                left = left.to_stream_with_dist_required(&left_dist)?;
+                left = left.to_stream_with_dist_required(&left_dist, ctx)?;
             }
             Distribution::UpstreamHashShard(_, _) => {
-                left = left.to_stream_with_dist_required(&RequiredDist::shard_by_key(
-                    self.left().schema().len(),
-                    &predicate.left_eq_indexes(),
-                ))?;
+                left = left.to_stream_with_dist_required(
+                    &RequiredDist::shard_by_key(
+                        self.left().schema().len(),
+                        &predicate.left_eq_indexes(),
+                    ),
+                    ctx,
+                )?;
                 let left_dist = left.distribution();
                 match left_dist {
                     Distribution::HashShard(_) => {
@@ -945,7 +950,11 @@ impl LogicalJoin {
         }
     }
 
-    fn to_stream_dynamic_filter(&self, predicate: EqJoinPredicate) -> Result<Option<PlanRef>> {
+    fn to_stream_dynamic_filter(
+        &self,
+        predicate: EqJoinPredicate,
+        ctx: &mut ToStreamContext,
+    ) -> Result<Option<PlanRef>> {
         assert!(!predicate.has_eq());
         // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
         // join is a `Inner` join, we can convert the scalar subquery into a
@@ -990,11 +999,12 @@ impl LogicalJoin {
             return Ok(None);
         }
 
-        let left = self.left().to_stream()?;
+        let left = self.left().to_stream(ctx)?;
 
-        let right = self
-            .right()
-            .to_stream_with_dist_required(&RequiredDist::PhysicalDist(Distribution::Broadcast))?;
+        let right = self.right().to_stream_with_dist_required(
+            &RequiredDist::PhysicalDist(Distribution::Broadcast),
+            ctx,
+        )?;
 
         assert!(right.as_stream_exchange().is_some());
         assert_eq!(
@@ -1124,7 +1134,7 @@ impl ToBatch for LogicalJoin {
 }
 
 impl ToStream for LogicalJoin {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let predicate = EqJoinPredicate::create(
             self.left().schema().len(),
             self.right().schema().len(),
@@ -1132,8 +1142,8 @@ impl ToStream for LogicalJoin {
         );
 
         if predicate.has_eq() {
-            self.to_stream_hash_join(predicate)
-        } else if let Some(dynamic_filter) = self.to_stream_dynamic_filter(predicate)? {
+            self.to_stream_hash_join(predicate, ctx)
+        } else if let Some(dynamic_filter) = self.to_stream_dynamic_filter(predicate, ctx)? {
             Ok(dynamic_filter)
         } else {
             Err(RwError::from(ErrorCode::NotImplemented(

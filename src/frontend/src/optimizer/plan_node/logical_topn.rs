@@ -26,7 +26,7 @@ use super::{
 use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext,
-    RewriteStreamContext, StreamTopN,
+    RewriteStreamContext, StreamTopN, ToStreamContext,
 };
 use crate::optimizer::property::{Distribution, FieldOrder, Order, OrderDisplay, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
@@ -377,7 +377,7 @@ impl ToBatch for LogicalTopN {
 }
 
 impl ToStream for LogicalTopN {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         if self.offset() != 0 && self.limit() == LIMIT_ALL_COUNT {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                 "OFFSET without LIMIT in streaming mode".to_string(),
@@ -389,13 +389,13 @@ impl ToStream for LogicalTopN {
             )));
         }
         Ok(if !self.group_key().is_empty() {
-            let input = self.input().to_stream()?;
+            let input = self.input().to_stream(ctx)?;
             let input = RequiredDist::hash_shard(self.group_key())
                 .enforce_if_not_satisfies(input, &Order::any())?;
             let logical = self.clone_with_input(input);
             StreamGroupTopN::new(logical, None).into()
         } else {
-            self.gen_dist_stream_top_n_plan(self.input().to_stream()?)?
+            self.gen_dist_stream_top_n_plan(self.input().to_stream(ctx)?)?
         })
     }
 

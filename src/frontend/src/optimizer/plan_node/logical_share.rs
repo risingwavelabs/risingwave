@@ -24,6 +24,7 @@ use super::{
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamShare,
+    ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -144,10 +145,17 @@ impl ToBatch for LogicalShare {
 }
 
 impl ToStream for LogicalShare {
-    fn to_stream(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_stream()?;
-        let new_logical = self.clone_with_input(new_input);
-        Ok(StreamShare::new(new_logical).into())
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        match ctx.get_to_stream_result(self.base.id) {
+            None => {
+                let new_input = self.input().to_stream(ctx)?;
+                let new_logical = self.clone_with_input(new_input);
+                let stream_share_ref: PlanRef = StreamShare::new(new_logical).into();
+                ctx.add_to_stream_result(self.base.id, stream_share_ref.clone());
+                Ok(stream_share_ref)
+            }
+            Some(cache) => Ok(cache.clone()),
+        }
     }
 
     fn logical_rewrite_for_stream(

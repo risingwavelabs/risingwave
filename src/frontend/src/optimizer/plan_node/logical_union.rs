@@ -24,7 +24,7 @@ use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
     generic, BatchHashAgg, BatchUnion, ColumnPruningContext, LogicalAgg, LogicalProject,
-    PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
+    PlanTreeNode, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{FunctionalDependencySet, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
@@ -147,13 +147,13 @@ impl ToBatch for LogicalUnion {
 }
 
 impl ToStream for LogicalUnion {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         // TODO: use round robin distribution instead of using hash distribution of all inputs.
         let dist = RequiredDist::hash_shard(self.base.logical_pk());
         let new_inputs: Result<Vec<_>> = self
             .inputs()
             .iter()
-            .map(|input| input.to_stream_with_dist_required(&dist))
+            .map(|input| input.to_stream_with_dist_required(&dist, ctx))
             .collect();
         let new_logical = Self::new_with_source_col(true, new_inputs?, self.core.source_col);
         assert!(

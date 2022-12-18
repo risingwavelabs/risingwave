@@ -35,7 +35,7 @@ use crate::expr::{
 };
 use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalProject,
-    PredicatePushdownContext, RewriteStreamContext,
+    PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::Direction::{Asc, Desc};
 use crate::optimizer::property::{
@@ -899,7 +899,7 @@ impl ToBatch for LogicalAgg {
 }
 
 impl ToStream for LogicalAgg {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         // To rewrite StreamAgg, there are two things to do:
         // 1. insert a RowCount(Count with zero argument) at the beginning of agg_calls of
         // LogicalAgg.
@@ -920,7 +920,7 @@ impl ToStream for LogicalAgg {
             .collect_vec();
 
         let logical_agg = LogicalAgg::new(agg_calls, self.group_key().to_vec(), self.input());
-        let stream_agg = logical_agg.gen_dist_stream_agg_plan(self.input().to_stream()?)?;
+        let stream_agg = logical_agg.gen_dist_stream_agg_plan(self.input().to_stream(ctx)?)?;
 
         let stream_project = StreamProject::new(LogicalProject::with_out_col_idx(
             stream_agg,

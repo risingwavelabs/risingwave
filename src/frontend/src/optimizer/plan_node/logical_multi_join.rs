@@ -26,6 +26,7 @@ use super::{
 use crate::expr::{ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
 };
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, ConnectedComponentLabeller};
@@ -496,7 +497,7 @@ impl ToStream for LogicalMultiJoin {
         )
     }
 
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."

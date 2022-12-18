@@ -25,7 +25,7 @@ use super::{
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
@@ -114,7 +114,7 @@ impl ToBatch for LogicalSource {
 }
 
 impl ToStream for LogicalSource {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         Ok(StreamSource::new(self.clone()).into())
     }
 

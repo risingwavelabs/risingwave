@@ -22,6 +22,7 @@ use crate::expr::{Expr, TableFunction};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     BatchTableFunction, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
 };
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
@@ -84,7 +85,7 @@ impl ToBatch for LogicalTableFunction {
 }
 
 impl ToStream for LogicalTableFunction {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         Err(
             ErrorCode::NotImplemented("LogicalTableFunction::to_stream".to_string(), None.into())
                 .into(),

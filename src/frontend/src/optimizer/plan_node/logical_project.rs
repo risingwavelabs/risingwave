@@ -26,6 +26,7 @@ use super::{
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::{
     CollectInputRef, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
 };
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
@@ -251,7 +252,11 @@ impl ToBatch for LogicalProject {
 }
 
 impl ToStream for LogicalProject {
-    fn to_stream_with_dist_required(&self, required_dist: &RequiredDist) -> Result<PlanRef> {
+    fn to_stream_with_dist_required(
+        &self,
+        required_dist: &RequiredDist,
+        ctx: &mut ToStreamContext,
+    ) -> Result<PlanRef> {
         let input_required = if required_dist.satisfies(&RequiredDist::AnyShard) {
             RequiredDist::Any
         } else {
@@ -266,7 +271,9 @@ impl ToStream for LogicalProject {
                 _ => input_required,
             }
         };
-        let new_input = self.input().to_stream_with_dist_required(&input_required)?;
+        let new_input = self
+            .input()
+            .to_stream_with_dist_required(&input_required, ctx)?;
         let new_logical = self.clone_with_input(new_input.clone());
         let stream_plan = if let Some(input_proj) = new_input.as_stream_project() {
             let outer_project = new_logical;
@@ -287,8 +294,8 @@ impl ToStream for LogicalProject {
         required_dist.enforce_if_not_satisfies(stream_plan.into(), &Order::any())
     }
 
-    fn to_stream(&self) -> Result<PlanRef> {
-        self.to_stream_with_dist_required(&RequiredDist::Any)
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        self.to_stream_with_dist_required(&RequiredDist::Any, ctx)
     }
 
     fn logical_rewrite_for_stream(

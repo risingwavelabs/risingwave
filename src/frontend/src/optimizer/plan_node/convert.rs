@@ -45,11 +45,15 @@ pub trait ToStream {
     ) -> Result<(PlanRef, ColIndexMapping)>;
 
     /// `to_stream` is equivalent to `to_stream_with_dist_required(RequiredDist::Any)`
-    fn to_stream(&self) -> Result<PlanRef>;
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef>;
 
     /// convert the plan to streaming physical plan and satisfy the required distribution
-    fn to_stream_with_dist_required(&self, required_dist: &RequiredDist) -> Result<PlanRef> {
-        let ret = self.to_stream()?;
+    fn to_stream_with_dist_required(
+        &self,
+        required_dist: &RequiredDist,
+        ctx: &mut ToStreamContext,
+    ) -> Result<PlanRef> {
+        let ret = self.to_stream(ctx)?;
         required_dist.enforce_if_not_satisfies(ret, &Order::any())
     }
 }
@@ -77,6 +81,22 @@ impl RewriteStreamContext {
         plan_node_id: PlanNodeId,
     ) -> Option<&(PlanRef, ColIndexMapping)> {
         self.share_rewrite_map.get(&plan_node_id.0)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ToStreamContext {
+    share_to_stream_map: HashMap<i32, PlanRef>,
+}
+
+impl ToStreamContext {
+    pub fn add_to_stream_result(&mut self, plan_node_id: PlanNodeId, plan_ref: PlanRef) {
+        let prev = self.share_to_stream_map.insert(plan_node_id.0, plan_ref);
+        assert!(prev.is_none());
+    }
+
+    pub fn get_to_stream_result(&self, plan_node_id: PlanNodeId) -> Option<&PlanRef> {
+        self.share_to_stream_map.get(&plan_node_id.0)
     }
 }
 
@@ -160,7 +180,7 @@ macro_rules! ban_to_stream {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ToStream for [<$convention $name>] {
-                fn to_stream(&self) -> Result<PlanRef>{
+                fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef>{
                     panic!("converting to stream is only allowed on logical plan")
                 }
                 fn logical_rewrite_for_stream(&self, _ctx: &mut RewriteStreamContext) -> Result<(PlanRef, ColIndexMapping)>{

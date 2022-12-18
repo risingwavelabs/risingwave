@@ -23,7 +23,7 @@ use super::{
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction};
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMapping, Condition};
@@ -313,8 +313,8 @@ impl ToStream for LogicalProjectSet {
 
     // TODO: implement to_stream_with_dist_required like LogicalProject
 
-    fn to_stream(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_stream()?;
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        let new_input = self.input().to_stream(ctx)?;
         let new_logical = self.clone_with_input(new_input);
         Ok(StreamProjectSet::new(new_logical).into())
     }

@@ -481,7 +481,7 @@ impl PlanRoot {
                     .unwrap();
                 self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
                 self.schema = plan.schema().clone();
-                plan.to_stream_with_dist_required(&self.required_dist)
+                plan.to_stream_with_dist_required(&self.required_dist, &mut Default::default())
             }
             _ => unreachable!(),
         }?;

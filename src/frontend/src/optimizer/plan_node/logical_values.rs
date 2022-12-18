@@ -25,7 +25,7 @@ use super::{
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
@@ -108,7 +108,7 @@ impl ToBatch for LogicalValues {
 }
 
 impl ToStream for LogicalValues {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         Err(RwError::from(ErrorCode::NotImplemented(
             "Stream values executor is unimplemented!".to_string(),
             None.into(),

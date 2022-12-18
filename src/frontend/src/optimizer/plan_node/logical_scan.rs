@@ -35,7 +35,7 @@ use crate::expr::{
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
-    PredicatePushdownContext, RewriteStreamContext,
+    PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
@@ -593,7 +593,7 @@ impl ToBatch for LogicalScan {
 }
 
 impl ToStream for LogicalScan {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         if self.is_sys_table() {
             return Err(RwError::from(ErrorCode::NotImplemented(
                 "streaming on system table is not allowed".to_string(),
@@ -608,7 +608,7 @@ impl ToStream for LogicalScan {
             if let Some(exprs) = project_expr {
                 plan = LogicalProject::create(plan, exprs)
             }
-            plan.to_stream()
+            plan.to_stream(ctx)
         }
     }
 

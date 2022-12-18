@@ -24,7 +24,7 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
@@ -190,8 +190,8 @@ impl ToStream for LogicalExpand {
         Ok((expand.into(), out_col_change))
     }
 
-    fn to_stream(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_stream()?;
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        let new_input = self.input().to_stream(ctx)?;
         let new_logical = self.clone_with_input(new_input);
         Ok(StreamExpand::new(new_logical).into())
     }

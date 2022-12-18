@@ -21,7 +21,7 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -119,7 +119,7 @@ impl ToBatch for LogicalLimit {
 }
 
 impl ToStream for LogicalLimit {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         Err(RwError::from(ErrorCode::NotImplemented(
             "there is no limit stream operator".to_string(),
             None.into(),

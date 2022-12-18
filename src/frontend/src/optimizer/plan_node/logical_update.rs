@@ -25,7 +25,7 @@ use super::{
 use crate::catalog::TableId;
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
@@ -160,7 +160,7 @@ impl ToBatch for LogicalUpdate {
 }
 
 impl ToStream for LogicalUpdate {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         unreachable!("update should always be converted to batch plan");
     }
 

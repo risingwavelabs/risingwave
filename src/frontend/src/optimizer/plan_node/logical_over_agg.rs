@@ -27,7 +27,7 @@ use super::{
 };
 use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType};
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -284,7 +284,7 @@ impl ToBatch for LogicalOverAgg {
 }
 
 impl ToStream for LogicalOverAgg {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 4847.into()).into())
     }
 

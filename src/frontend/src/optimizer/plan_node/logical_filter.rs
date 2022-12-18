@@ -31,7 +31,7 @@ use crate::expr::{assert_input_ref, ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::plan_node::stream_now::StreamNow;
 use crate::optimizer::plan_node::{
     BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
-    StreamDynamicFilter, StreamFilter, StreamProject,
+    StreamDynamicFilter, StreamFilter, StreamProject, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -211,8 +211,8 @@ fn convert_comparator_to_priority(comparator: Type) -> i32 {
 }
 
 impl ToStream for LogicalFilter {
-    fn to_stream(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_stream()?;
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        let new_input = self.input().to_stream(ctx)?;
 
         let predicate = self.predicate();
         let has_now = predicate
