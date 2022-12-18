@@ -24,7 +24,9 @@ use super::{
     PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprRewriter};
-use crate::optimizer::plan_node::{ColumnPruningContext, PlanTreeNode, PredicatePushdownContext};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, ConnectedComponentLabeller};
 
@@ -484,7 +486,10 @@ impl LogicalMultiJoin {
 }
 
 impl ToStream for LogicalMultiJoin {
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         panic!(
             "Method not available for `LogicalMultiJoin` which is a placeholder node with \
              a temporary lifetime. It only facilitates join reordering during logical planning."

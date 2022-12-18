@@ -23,7 +23,9 @@ use super::{
     gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
-use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -179,8 +181,11 @@ impl ToBatch for LogicalExpand {
 }
 
 impl ToStream for LogicalExpand {
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (expand, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((expand.into(), out_col_change))
     }

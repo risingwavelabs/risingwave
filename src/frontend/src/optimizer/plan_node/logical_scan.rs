@@ -35,7 +35,7 @@ use crate::expr::{
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
-    PredicatePushdownContext,
+    PredicatePushdownContext, RewriteStreamContext,
 };
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
@@ -612,7 +612,10 @@ impl ToStream for LogicalScan {
         }
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         if self.is_sys_table() {
             return Err(RwError::from(ErrorCode::NotImplemented(
                 "streaming on system table is not allowed".to_string(),

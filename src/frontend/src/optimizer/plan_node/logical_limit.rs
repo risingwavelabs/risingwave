@@ -20,7 +20,9 @@ use super::{
     gen_filter_and_pushdown, BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
 };
-use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
@@ -124,8 +126,11 @@ impl ToStream for LogicalLimit {
         )))
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream(ctx)?;
         let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((filter.into(), out_col_change))
     }

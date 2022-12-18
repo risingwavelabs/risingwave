@@ -22,7 +22,9 @@ use super::{
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction};
 use crate::optimizer::plan_node::generic::GenericPlanNode;
-use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+};
 use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -275,8 +277,11 @@ impl ToBatch for LogicalProjectSet {
 }
 
 impl ToStream for LogicalProjectSet {
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (project_set, out_col_change) =
             self.rewrite_with_input(input.clone(), input_col_change);
 

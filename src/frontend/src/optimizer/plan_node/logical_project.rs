@@ -25,7 +25,7 @@ use super::{
 };
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::{
-    CollectInputRef, ColumnPruningContext, PredicatePushdownContext,
+    CollectInputRef, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
 };
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
@@ -291,8 +291,11 @@ impl ToStream for LogicalProject {
         self.to_stream_with_dist_required(&RequiredDist::Any)
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.

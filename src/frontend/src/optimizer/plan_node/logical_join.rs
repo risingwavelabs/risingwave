@@ -32,8 +32,8 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext,
-    EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownContext, StreamDynamicFilter,
-    StreamFilter,
+    EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
+    StreamDynamicFilter, StreamFilter,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
@@ -1143,10 +1143,13 @@ impl ToStream for LogicalJoin {
         }
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (left, left_col_change) = self.left().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (left, left_col_change) = self.left().logical_rewrite_for_stream(ctx)?;
         let left_len = left.schema().len();
-        let (right, right_col_change) = self.right().logical_rewrite_for_stream()?;
+        let (right, right_col_change) = self.right().logical_rewrite_for_stream(ctx)?;
         let (join, out_col_change) = self.rewrite_with_left_right(
             left.clone(),
             left_col_change,

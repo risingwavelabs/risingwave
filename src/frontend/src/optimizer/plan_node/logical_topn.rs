@@ -25,7 +25,8 @@ use super::{
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
-    BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext, StreamTopN,
+    BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext,
+    RewriteStreamContext, StreamTopN,
 };
 use crate::optimizer::property::{Distribution, FieldOrder, Order, OrderDisplay, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
@@ -398,8 +399,11 @@ impl ToStream for LogicalTopN {
         })
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (top_n, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((top_n.into(), out_col_change))
     }

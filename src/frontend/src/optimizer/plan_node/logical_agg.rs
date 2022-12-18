@@ -35,7 +35,7 @@ use crate::expr::{
 };
 use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalProject,
-    PredicatePushdownContext,
+    PredicatePushdownContext, RewriteStreamContext,
 };
 use crate::optimizer::property::Direction::{Asc, Desc};
 use crate::optimizer::property::{
@@ -929,8 +929,11 @@ impl ToStream for LogicalAgg {
         Ok(stream_project.into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
         let (map, _) = out_col_change.into_parts();
         let out_col_change = ColIndexMapping::with_target_size(map, agg.schema().len());

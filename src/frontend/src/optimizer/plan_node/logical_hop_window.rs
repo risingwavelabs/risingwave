@@ -26,7 +26,9 @@ use super::{
     PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
 use crate::expr::InputRef;
-use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+};
 use crate::optimizer::property::Order;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -360,8 +362,11 @@ impl ToStream for LogicalHopWindow {
         Ok(StreamHopWindow::new(new_logical).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (hop, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
         let (input, time_col, window_slide, window_size, mut output_indices) = hop.into_parts();
         if !output_indices.contains(&input.schema().len())

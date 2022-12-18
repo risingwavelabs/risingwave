@@ -24,7 +24,7 @@ use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
     generic, BatchHashAgg, BatchUnion, ColumnPruningContext, LogicalAgg, LogicalProject,
-    PlanTreeNode, PredicatePushdownContext,
+    PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
 };
 use crate::optimizer::property::{FunctionalDependencySet, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
@@ -163,12 +163,15 @@ impl ToStream for LogicalUnion {
         Ok(StreamUnion::new(new_logical).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         let original_schema = self.base.schema.clone();
         let original_schema_len = original_schema.len();
         let mut rewrites = vec![];
         for input in &self.core.inputs {
-            rewrites.push(input.logical_rewrite_for_stream()?);
+            rewrites.push(input.logical_rewrite_for_stream(ctx)?);
         }
 
         let original_schema_contain_all_input_pks =

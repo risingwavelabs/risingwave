@@ -23,9 +23,11 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
-use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalInsert` iterates on input relation and insert the data into specified table.
 ///
@@ -158,7 +160,10 @@ impl ToStream for LogicalInsert {
         unreachable!("insert should always be converted to batch plan");
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         unreachable!("insert should always be converted to batch plan");
     }
 }

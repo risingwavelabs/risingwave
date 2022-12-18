@@ -30,8 +30,8 @@ use super::{
 use crate::expr::{assert_input_ref, ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::plan_node::stream_now::StreamNow;
 use crate::optimizer::plan_node::{
-    BatchFilter, ColumnPruningContext, PredicatePushdownContext, StreamDynamicFilter, StreamFilter,
-    StreamProject,
+    BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    StreamDynamicFilter, StreamFilter, StreamProject,
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -329,8 +329,11 @@ impl ToStream for LogicalFilter {
         }
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((filter.into(), out_col_change))
     }

@@ -24,9 +24,11 @@ use super::{
 };
 use crate::catalog::TableId;
 use crate::expr::ExprImpl;
-use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// [`LogicalUpdate`] iterates on input relation, set some columns, and inject update records into
 /// specified table.
@@ -162,7 +164,10 @@ impl ToStream for LogicalUpdate {
         unreachable!("update should always be converted to batch plan");
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         unreachable!("update should always be converted to batch plan");
     }
 }

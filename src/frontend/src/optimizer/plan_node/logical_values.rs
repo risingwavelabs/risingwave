@@ -24,9 +24,11 @@ use super::{
 };
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalValues` builds rows according to a list of expressions
 #[derive(Debug, Clone)]
@@ -113,7 +115,10 @@ impl ToStream for LogicalValues {
         )))
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         Err(RwError::from(ErrorCode::NotImplemented(
             "Stream values executor is unimplemented!".to_string(),
             None.into(),

@@ -24,7 +24,9 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::{ColumnPruningContext, LogicalFilter, PredicatePushdownContext};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, LogicalFilter, PredicatePushdownContext, RewriteStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -359,7 +361,10 @@ impl ToStream for LogicalApply {
         )))
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         Err(RwError::from(ErrorCode::InternalError(
             "LogicalApply should be unnested".to_string(),
         )))
