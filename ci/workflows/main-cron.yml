@@ -128,6 +128,7 @@ steps:
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
+          mount-buildkite-agent: true
           environment:
             - RUN_SQLSMITH: 1
             - SQLSMITH_COUNT: 1000
