@@ -16,7 +16,7 @@ use clap::Parser;
 use itertools::Itertools;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::MetaSnapshot;
-use risingwave_backup::storage::BackupStorageRef;
+use risingwave_backup::storage::MetaSnapshotStorageRef;
 
 use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBackendImpl};
 use crate::hummock::compaction_group::CompactionGroup;
@@ -123,7 +123,7 @@ async fn restore_metadata<S: MetaStore>(meta_store: S, snapshot: MetaSnapshot) -
 async fn restore_impl(
     opts: RestoreOpts,
     meta_store: Option<MetaStoreBackendImpl>,
-    backup_store: Option<BackupStorageRef>,
+    backup_store: Option<MetaSnapshotStorageRef>,
 ) -> BackupResult<()> {
     if cfg!(not(test)) {
         assert!(meta_store.is_none());
@@ -138,7 +138,7 @@ async fn restore_impl(
         Some(b) => b,
     };
     let target_id = opts.meta_snapshot_id;
-    let snapshot_list = backup_store.list().await?;
+    let snapshot_list = backup_store.manifest().snapshot_metadata.clone();
     if !snapshot_list.iter().any(|m| m.id == target_id) {
         return Err(BackupError::Other(anyhow::anyhow!(
             "snapshot id {} not found",
@@ -184,7 +184,7 @@ pub async fn restore(opts: RestoreOpts) -> BackupResult<()> {
             tracing::info!("restore succeeded");
         }
         Err(e) => {
-            tracing::error!("restore failed: {}", e);
+            tracing::warn!("restore failed: {}", e);
         }
     }
     result

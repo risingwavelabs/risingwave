@@ -1,6 +1,6 @@
 /* eslint-disable */
 import { SourceInfo } from "./catalog";
-import { Buffer, HostAddress, WorkerNode } from "./common";
+import { BatchQueryEpoch, Buffer, HostAddress, WorkerNode } from "./common";
 import { IntervalUnit } from "./data";
 import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem, TableFunction } from "./expr";
 import {
@@ -221,7 +221,7 @@ export interface TaskOutputId {
 
 export interface LocalExecutePlan {
   plan: PlanFragment | undefined;
-  epoch: number;
+  epoch: BatchQueryEpoch | undefined;
 }
 
 /** ExchangeSource describes where to read results from children operators */
@@ -1431,21 +1431,21 @@ export const TaskOutputId = {
 };
 
 function createBaseLocalExecutePlan(): LocalExecutePlan {
-  return { plan: undefined, epoch: 0 };
+  return { plan: undefined, epoch: undefined };
 }
 
 export const LocalExecutePlan = {
   fromJSON(object: any): LocalExecutePlan {
     return {
       plan: isSet(object.plan) ? PlanFragment.fromJSON(object.plan) : undefined,
-      epoch: isSet(object.epoch) ? Number(object.epoch) : 0,
+      epoch: isSet(object.epoch) ? BatchQueryEpoch.fromJSON(object.epoch) : undefined,
     };
   },
 
   toJSON(message: LocalExecutePlan): unknown {
     const obj: any = {};
     message.plan !== undefined && (obj.plan = message.plan ? PlanFragment.toJSON(message.plan) : undefined);
-    message.epoch !== undefined && (obj.epoch = Math.round(message.epoch));
+    message.epoch !== undefined && (obj.epoch = message.epoch ? BatchQueryEpoch.toJSON(message.epoch) : undefined);
     return obj;
   },
 
@@ -1454,7 +1454,9 @@ export const LocalExecutePlan = {
     message.plan = (object.plan !== undefined && object.plan !== null)
       ? PlanFragment.fromPartial(object.plan)
       : undefined;
-    message.epoch = object.epoch ?? 0;
+    message.epoch = (object.epoch !== undefined && object.epoch !== null)
+      ? BatchQueryEpoch.fromPartial(object.epoch)
+      : undefined;
     return message;
   },
 };

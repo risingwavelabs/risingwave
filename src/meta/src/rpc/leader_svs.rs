@@ -66,23 +66,25 @@ pub async fn get_leader_srv<S: MetaStore>(
 ) -> Result<LeaderServices<S>, BackupError> {
     tracing::info!("Defining leader services");
 
-    let prometheus_endpoint = opts.prometheus_endpoint.clone();
-    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), leader_rx.clone()).await;
+    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), current_leader_info).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let registry = meta_metrics.registry();
     monitor_process(registry).unwrap();
-    let compactor_manager = Arc::new(
-        hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
-            .await
-            .unwrap(),
-    );
 
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval)
             .await
             .unwrap(),
     );
+    let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
+
+    let compactor_manager = Arc::new(
+        hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
+            .await
+            .unwrap(),
+    );
+
     let hummock_manager = hummock::HummockManager::new(
         env.clone(),
         cluster_manager.clone(),
@@ -193,7 +195,6 @@ pub async fn get_leader_srv<S: MetaStore>(
         compactor_manager.clone(),
     ));
 
-    let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
         catalog_manager.clone(),
@@ -233,6 +234,7 @@ pub async fn get_leader_srv<S: MetaStore>(
         cluster_manager.clone(),
         hummock_manager.clone(),
         fragment_manager.clone(),
+        backup_manager.clone(),
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
@@ -244,13 +246,13 @@ pub async fn get_leader_srv<S: MetaStore>(
         )
     }
 
-    // Initialize sub-tasks.
-    // sub_tasks executed concurrently. Can be shutdown via shutdown_all
     let compaction_scheduler = Arc::new(CompactionScheduler::new(
         env.clone(),
         hummock_manager.clone(),
         compactor_manager.clone(),
     ));
+
+    // sub_tasks executed concurrently. Can be shutdown via shutdown_all
     let mut sub_tasks =
         hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &env.opts);
     sub_tasks.push(
@@ -262,20 +264,18 @@ pub async fn get_leader_srv<S: MetaStore>(
         .await,
     );
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
-    sub_tasks.push((lease_handle, lease_shutdown));
+    sub_tasks.push((election_handle, election_shutdown));
     if cfg!(not(test)) {
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
         );
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
-
     let (idle_send, idle_recv) = tokio::sync::oneshot::channel();
     sub_tasks.push(
         IdleManager::start_idle_checker(env.idle_manager_ref(), Duration::from_secs(30), idle_send)
             .await,
     );
-
     Ok(LeaderServices {
         meta_metrics,
         heartbeat_srv,

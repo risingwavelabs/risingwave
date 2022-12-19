@@ -12,12 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod backup_manager;
-pub use backup_manager::*;
-mod error;
-mod meta_snapshot_builder;
-mod metrics;
-mod restore;
-mod utils;
-
-pub use restore::*;
+mod rw_meta_snapshot;
+pub use rw_meta_snapshot::*;

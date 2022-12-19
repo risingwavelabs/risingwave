@@ -668,6 +668,12 @@ impl MetaClient {
         let _resp = self.inner.delete_meta_snapshot(req).await?;
         Ok(())
     }
+
+    pub async fn get_meta_snapshot_manifest(&self) -> Result<MetaSnapshotManifest> {
+        let req = GetMetaSnapshotManifestRequest {};
+        let resp = self.inner.get_meta_snapshot_manifest(req).await?;
+        Ok(resp.manifest.expect("should exist"))
+    }
 }
 
 #[async_trait]
@@ -986,6 +992,7 @@ macro_rules! for_all_meta_rpc {
             ,{ backup_client, backup_meta, BackupMetaRequest, BackupMetaResponse }
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
+            ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
         }
     };
 }
