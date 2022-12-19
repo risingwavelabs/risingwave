@@ -15,11 +15,11 @@
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex}; 
+use futures::{pin_mut, StreamExt};
 
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
@@ -27,7 +27,7 @@ use rocksdb::{DBIterator, ReadOptions as RocksDBReadOptions, SeekKey, Writable, 
 use tokio::sync::OnceCell;
 use tokio::task;
 
-use crate::error::StorageResult;
+use crate::error::{StorageResult, StorageError};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::utils::{to_full_key_range, BytesFullKeyRange, BytesFullKey};
@@ -78,10 +78,14 @@ impl StateStoreRead for RocksDBStateStore {
     }
 
     fn get<'a>(&'a self, key: &'a [u8], epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
-        let key = FullKey::new(read_options.table_id, TableKey(key.to_vec()), epoch).encode_reverse_epoch();
-        async move { 
-            let key = key;
-            Ok(self.storage().await.get(&key[..]).await?)
+        async move {
+            let stream = self.iter((Included(key.to_vec()), Included(key.to_vec())), epoch, read_options).await?;
+            pin_mut!(stream);
+            let item = stream.next().await;
+            match item {
+                None => Ok(None),
+                Some(res) => Ok(Some(res?.1))
+            }
         }
     }
 }
@@ -99,18 +103,34 @@ impl StateStoreWrite for RocksDBStateStore {
     }
 }
 
+
+impl LocalStateStore for RocksDBStateStore {}
+
 impl StateStore for RocksDBStateStore {
+    type Local = Self;
+
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
+
     define_state_store_associated_type!();
 
     fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move { unimplemented!() }
     }
 
+    // TODO: make this a `RocksDB` flush?
     fn sync(&self, _epoch: u64) -> Self::SyncFuture<'_> {
         async move { unimplemented!() }
     }
 
-    // TODO: `clear_shared_buffer`...
+    fn seal_epoch(&self, _epoch: u64, _is_checkpoint: bool) {}
+
+    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
+        async move { Ok(()) }
+    }
+
+    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
+        async { self.clone() }
+    }
 }
 
 pub fn next_prefix(prefix: &[u8]) -> Vec<u8> {
@@ -144,7 +164,7 @@ impl RocksDBStateStoreIter {
         store: RocksDBStateStore,
         range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         epoch: u64,
-    ) -> Result<Self> {
+    ) -> StorageResult<Self> {
         let mut start_key = vec![];
         let mut is_start_unbounded = false;
         match range.start_bound() {
@@ -155,7 +175,7 @@ impl RocksDBStateStoreIter {
                 is_start_unbounded = true;
             }
             _ => {
-                return Err(InternalError("invalid range start".to_string()).into());
+                return Err(StorageError::InternalError("invalid range start".to_string()));
             }
         };
 
@@ -184,7 +204,7 @@ impl RocksDBStateStoreIter {
                 SeekKey::from(start_key.as_slice())
             };
             iter.seek(seek_key)
-                .map_err(|e| RwError::from(InternalError(e)))?;
+                .map_err(|e| StorageError::InternalError(e))?;
             Ok(Self {
                 iter: Arc::new(Mutex::new(iter)),
                 key_range: range,
@@ -198,48 +218,47 @@ impl RocksDBStateStoreIter {
                 last_key: None,
             })
         })
-        .await?
+        .await
+        .map_err(|e| StorageError::InternalError(e.to_string()))?
     }
 
     async fn next_inner(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Option<Bytes>)>>  {
-        async move {
-            let iter = self.iter.clone();
-            let end_key_data = self.end_key_data.clone();
+        let iter = self.iter.clone();
+        let end_key_data = self.end_key_data.clone();
 
-            // If our objective is to benchmark the performance, spawning a blocking task per
-            // iteration seems to be extremely high overhead.
-            let kv = tokio::task::spawn_blocking(move || {
-                let mut iter = iter.lock().unwrap();
-                let result = iter.valid().map_err(|e| RwError::from(InternalError(e)));
-                if let Err(e) = result {
-                    return Err(e);
-                }
-                if !result.unwrap() {
-                    return Ok(None);
-                }
-                let k = iter.key().to_vec();
-                let v = match iter.value().as_ref() {
-                    [EMPTY] => None,
-                    [NON_EMPTY, rest @ ..] => Some(Bytes::from(Vec::from(rest))),
-                    value => unreachable!("malformed value: {:?}", value),
-                };
+        // If our objective is to benchmark the performance, spawning a blocking task per
+        // iteration seems to be extremely high overhead.
+        let kv = tokio::task::spawn_blocking(move || {
+            let mut iter = iter.lock().unwrap();
+            let result = iter.valid().map_err(|e| StorageError::InternalError(e));
+            if let Err(e) = result {
+                return Err(e);
+            }
+            if !result.unwrap() {
+                return Ok(None);
+            }
+            let k = iter.key().to_vec();
+            let v = match iter.value().as_ref() {
+                [EMPTY] => None,
+                [NON_EMPTY, rest @ ..] => Some(Bytes::from(Vec::from(rest))),
+                value => unreachable!("malformed value: {:?}", value),
+            };
 
-                if end_key_data.is_end_unbounded {
-                    return Ok(Some((FullKey::decode_reverse_epoch(&k[..]), v)));
-                }
-                if iter.key() > &end_key_data.end_key[..] || (k == &end_key_data.end_key[..] && end_key_data.is_end_exclude) {
-                    return Ok(None);
-                }
-                if let Err(e) = iter.next().map_err(|e| RwError::from(InternalError(e))) {
-                    return Err(e);
-                }
-                Ok(Some((FullKey::decode_reverse_epoch(&k[..]), v)))
-            })
-            .await
-            .unwrap();
+            if end_key_data.is_end_unbounded {
+                return Ok(Some((FullKey::decode_reverse_epoch(&k[..]).to_vec(), v)));
+            }
+            if iter.key() > &end_key_data.end_key[..] || (k == &end_key_data.end_key[..] && end_key_data.is_end_exclude) {
+                return Ok(None);
+            }
+            if let Err(e) = iter.next().map_err(|e| StorageError::InternalError(e)) {
+                return Err(e);
+            }
+            Ok(Some((FullKey::decode_reverse_epoch(&k[..]).to_vec(), v)))
+        })
+        .await
+        .unwrap();
 
-            Ok(kv)
-        }
+        kv
     }
 }
 
@@ -289,7 +308,7 @@ impl RocksDBStorage {
         storage
     }
 
-    async fn clear_all(&self) -> Result<()> {
+    async fn clear_all(&self) -> StorageResult<()> {
         let db = self.db.clone();
         task::spawn_blocking(move || {
             let mut it = db.iter();
@@ -300,12 +319,13 @@ impl RocksDBStorage {
             it.seek(SeekKey::End).unwrap();
             let end_key = next_prefix(it.key());
             db.delete_range(start_key.as_slice(), end_key.as_slice())
-                .map_err(|e| RwError::from(InternalError(e)))
+                .map_err(|e| StorageError::InternalError(e))
         })
-        .await?
+        .await
+        .map_err(|e| StorageError::InternalError(e.to_string()))?
     }
 
-    async fn write_batch(&self, kv_pairs: Vec<(Bytes, StorageValue)>, table_id: TableId, epoch: u64) -> Result<usize> {
+    async fn write_batch(&self, kv_pairs: Vec<(Bytes, StorageValue)>, table_id: TableId, epoch: u64) -> StorageResult<usize> {
         let mut size = 0;
         let wb = WriteBatch::new();
         for (key, value) in kv_pairs {
@@ -321,7 +341,7 @@ impl RocksDBStorage {
                 buffer.push(EMPTY);
             }
             if let Err(e) = wb.put(key.as_ref(), buffer.as_ref()) {
-                return Err(InternalError(e).into());
+                return Err(StorageError::InternalError(e));
             }
         }
 
@@ -330,22 +350,11 @@ impl RocksDBStorage {
             let mut opts = RocksDBWriteOptions::default();
             opts.set_sync(true);
             db.write_opt(&wb, &opts)
-                .map_or_else(|e| Err(InternalError(e).into()), |_| Ok(()))
+                .map_or_else(|e| Err(StorageError::InternalError(e)), |_| Ok(()))
         })
-        .await?;
+        .await
+        .map_err(|e| StorageError::InternalError(e.to_string()))??;
         Ok(size)
-    }
-
-    async fn get(&self, key: &[u8]) -> Result<Option<Bytes>> {
-        let db = self.db.clone();
-        let seek_key = key.to_vec();
-        task::spawn_blocking(move || {
-            db.get(&seek_key).map_or_else(
-                |e| Err(InternalError(e).into()),
-                |option_v| Ok(option_v.map(|v| Bytes::from(v.to_vec()))),
-            )
-        })
-        .await?
     }
 
     async fn iter(&self) -> DBIterator<Arc<DB>> {
@@ -356,52 +365,149 @@ impl RocksDBStorage {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use bytes::Bytes;
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
 
-//     use super::*;
+    use super::*;
 
-//     #[tokio::test]
-//     async fn test_rocksdb() {
-//         let rocksdb_state_store = RocksDBStateStore::new("/tmp/default");
-//         let result = rocksdb_state_store.get("key1".as_bytes(), 0).await;
-//         assert_eq!(result.unwrap(), None);
-//         let result = rocksdb_state_store.get("key2".as_bytes(), 0).await;
-//         assert_eq!(result.unwrap(), None);
-//         let result = rocksdb_state_store.get("key3".as_bytes(), 0).await;
-//         assert_eq!(result.unwrap(), None);
+    #[tokio::test]
+    async fn test_snapshot_isolation_rocksdb() {
+        let state_store = RocksDBStateStore::new("/tmp/default");
+        test_snapshot_isolation_inner(state_store).await;
+    }
 
-//         let kv_pairs: Vec<(Bytes, StorageValue)> = vec![
-//             ("key1".into(), StorageValue::new_default_put("val1")),
-//             ("key2".into(), StorageValue::new_default_put("val2")),
-//             ("key3".into(), StorageValue::new_default_put("val3")),
-//         ];
-//         rocksdb_state_store.ingest_batch(kv_pairs, 0).await.unwrap();
-//         let result = rocksdb_state_store
-//             .get("key1".as_bytes(), 0)
-//             .await
-//             .unwrap()
-//             .unwrap();
-//         assert!(result.eq(&Bytes::from("val1")));
-//         let result = rocksdb_state_store
-//             .get("key2".as_bytes(), 0)
-//             .await
-//             .unwrap()
-//             .unwrap();
-//         assert!(result.eq(&Bytes::from("val2")));
-//         let result = rocksdb_state_store
-//             .get("key3".as_bytes(), 0)
-//             .await
-//             .unwrap()
-//             .unwrap();
-//         assert!(result.eq(&Bytes::from("val3")));
-//         let result = rocksdb_state_store.get("key4".as_bytes(), 0).await;
-//         assert_eq!(result.unwrap(), None);
 
-//         let range = "key1".as_bytes().."key3".as_bytes();
-//         let result = rocksdb_state_store.scan(range, Some(2), 0).await.unwrap();
-//         assert!(result.get(0).unwrap().0.eq(&Bytes::from("key1")));
-//         assert!(result.get(1).unwrap().0.eq(&Bytes::from("key2")));
-//     }
-// }
+    async fn test_snapshot_isolation_inner(state_store: RocksDBStateStore) {
+        state_store
+            .ingest_batch(
+                vec![
+                    (b"a".to_vec().into(), StorageValue::new_put(b"v1".to_vec())),
+                    (b"b".to_vec().into(), StorageValue::new_put(b"v1".to_vec())),
+                ],
+                vec![],
+                WriteOptions {
+                    epoch: 0,
+                    table_id: Default::default(),
+                },
+            )
+            .await
+            .unwrap();
+        state_store
+            .ingest_batch(
+                vec![
+                    (b"a".to_vec().into(), StorageValue::new_put(b"v2".to_vec())),
+                    (b"b".to_vec().into(), StorageValue::new_delete()),
+                ],
+                vec![],
+                WriteOptions {
+                    epoch: 1,
+                    table_id: Default::default(),
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            state_store
+                .scan(
+                    (
+                        Bound::Included(b"a".to_vec()),
+                        Bound::Included(b"b".to_vec()),
+                    ),
+                    0,
+                    None,
+                    ReadOptions::default()
+                )
+                .await
+                .unwrap(),
+            vec![
+                (
+                    FullKey::for_test(Default::default(), b"a".to_vec(), 0),
+                    b"v1".to_vec().into()
+                ),
+                (
+                    FullKey::for_test(Default::default(), b"b".to_vec(), 0),
+                    b"v1".to_vec().into()
+                )
+            ]
+        );
+        assert_eq!(
+            state_store
+                .scan(
+                    (
+                        Bound::Included(b"a".to_vec()),
+                        Bound::Included(b"b".to_vec()),
+                    ),
+                    0,
+                    Some(1),
+                    ReadOptions::default(),
+                )
+                .await
+                .unwrap(),
+            vec![(
+                FullKey::for_test(Default::default(), b"a".to_vec(), 0),
+                b"v1".to_vec().into()
+            )]
+        );
+        assert_eq!(
+            state_store
+                .scan(
+                    (
+                        Bound::Included(b"a".to_vec()),
+                        Bound::Included(b"b".to_vec()),
+                    ),
+                    1,
+                    None,
+                    ReadOptions::default(),
+                )
+                .await
+                .unwrap(),
+            vec![(
+                FullKey::for_test(Default::default(), b"a".to_vec(), 1),
+                b"v2".to_vec().into()
+            )]
+        );
+        assert_eq!(
+            state_store
+                .get(b"a", 0, ReadOptions::default(),)
+                .await
+                .unwrap(),
+            Some(b"v1".to_vec().into())
+        );
+        assert_eq!(
+            state_store
+                .get(b"b", 0, ReadOptions::default(),)
+                .await
+                .unwrap(),
+            Some(b"v1".to_vec().into())
+        );
+        assert_eq!(
+            state_store
+                .get(b"c", 0, ReadOptions::default(),)
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            state_store
+                .get(b"a", 1, ReadOptions::default(),)
+                .await
+                .unwrap(),
+            Some(b"v2".to_vec().into())
+        );
+        assert_eq!(
+            state_store
+                .get(b"b", 1, ReadOptions::default(),)
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            state_store
+                .get(b"c", 1, ReadOptions::default())
+                .await
+                .unwrap(),
+            None
+        );
+    }
+}

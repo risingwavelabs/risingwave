@@ -38,6 +38,11 @@ pub enum StorageError {
         #[from]
         sled::Error,
     ),
+
+    #[error("Internal error: {0}")]
+    InternalError(
+        String,
+    )
 }
 
 pub type StorageResult<T> = std::result::Result<T, StorageError>;
