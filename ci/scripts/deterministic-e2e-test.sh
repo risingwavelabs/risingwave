@@ -9,7 +9,7 @@ echo "--- Download artifacts"
 buildkite-agent artifact download risingwave_simulation .
 chmod +x ./risingwave_simulation
 
-export RUST_LOG=trace
+export RUST_LOG=info
 export LOGDIR=.risingwave/log
 
 mkdir -p $LOGDIR
