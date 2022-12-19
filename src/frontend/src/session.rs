@@ -701,11 +701,11 @@ impl Session<PgResponseStream> for SessionImpl {
     async fn run_one_query(
         self: Arc<Self>,
         stmt: Statement,
+        sql_str: &str,
         format: bool,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
-        let sql = stmt.to_string();
         let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, &sql, format));
+            let mut handle_fut = Box::pin(handle(self, stmt, sql_str, format));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
@@ -713,7 +713,7 @@ impl Session<PgResponseStream> for SessionImpl {
                     match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
                         Ok(result) => break result,
                         Err(_) => tracing::warn!(
-                            sql,
+                            sql_str,
                             "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
                         ),
                     }
@@ -722,7 +722,7 @@ impl Session<PgResponseStream> for SessionImpl {
                 handle_fut.await
             }
         }
-        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
+        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql_str, e))?;
         Ok(rsp)
     }
 

@@ -61,9 +61,12 @@ where
         format: bool,
     ) -> Result<PgResponse<VS>, BoxedError>;
 
+    /// The str sql can not use the unparse from AST: There is some problem when dealing with create
+    /// view, see  https://github.com/risingwavelabs/risingwave/issues/6801.
     async fn run_one_query(
         self: Arc<Self>,
         sql: Statement,
+        sql_str: &str,
         format: bool,
     ) -> Result<PgResponse<VS>, BoxedError>;
 
@@ -244,6 +247,7 @@ mod tests {
         async fn run_one_query(
             self: Arc<Self>,
             _sql: Statement,
+            _sql_str: &str,
             _format: bool,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
             let res: Vec<Option<Bytes>> = vec![Some(Bytes::new())];
