@@ -213,8 +213,6 @@ steps:
       - docker-compose#v3.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
-          environment:
-            - CODECOV_TOKEN
     timeout_in_minutes: 10
     retry: *auto-retry
 
