@@ -40,7 +40,6 @@ pub async fn handle_create_view(
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let properties = handler_args.with_options.clone();
-    let sql = handler_args.sql.clone();
 
     session.check_relation_name_duplicated(name.clone())?;
 
@@ -89,10 +88,7 @@ pub async fn handle_create_view(
         properties: properties.inner().clone(),
         owner: session.user_id(),
         dependent_relations,
-        // Here we save the original sql instead of the unparsed one from AST, in case there're
-        // uncovered cases in the unparsing implementation.
-        // TODO: this includes the `CREATE VIEW` prefix, which can be removed if we have span info.
-        sql: sql.to_string(),
+        sql: format!("{}", query),
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
     };
 

@@ -77,6 +77,7 @@ pub(crate) struct SqlGeneratorContext {
     inside_explicit_cast: bool,
 }
 
+#[allow(dead_code)]
 impl SqlGeneratorContext {
     pub fn new() -> Self {
         SqlGeneratorContext {
