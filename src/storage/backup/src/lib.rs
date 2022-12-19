@@ -37,8 +37,13 @@ pub mod storage;
 
 use std::hash::Hasher;
 
+use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{HummockSstableId, HummockVersionId};
+use risingwave_pb::backup_service::{
+    MetaSnapshotManifest as ProstMetaSnapshotManifest,
+    MetaSnapshotMetadata as ProstMetaSnapshotMetadata,
+};
 use risingwave_pb::hummock::HummockVersion;
 use serde::{Deserialize, Serialize};
 
@@ -92,4 +97,24 @@ pub fn xxhash64_verify(data: &[u8], checksum: u64) -> BackupResult<()> {
         });
     }
     Ok(())
+}
+
+impl From<&MetaSnapshotMetadata> for ProstMetaSnapshotMetadata {
+    fn from(m: &MetaSnapshotMetadata) -> Self {
+        Self {
+            id: m.id,
+            hummock_version_id: m.hummock_version_id,
+            max_committed_epoch: m.max_committed_epoch,
+            safe_epoch: m.safe_epoch,
+        }
+    }
+}
+
+impl From<&MetaSnapshotManifest> for ProstMetaSnapshotManifest {
+    fn from(m: &MetaSnapshotManifest) -> Self {
+        Self {
+            manifest_id: m.manifest_id,
+            snapshot_metadata: m.snapshot_metadata.iter().map_into().collect_vec(),
+        }
+    }
 }
