@@ -27,8 +27,8 @@ use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::expr_unary::new_unary_expr;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, LiteralExpression};
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -314,7 +314,7 @@ struct InnerSideExecutorBuilder<S: StateStore> {
     outer_side_key_types: Vec<DataType>,
     inner_side_key_types: Vec<DataType>,
     lookup_prefix_len: usize,
-    epoch: u64,
+    epoch: BatchQueryEpoch,
     row_list: Vec<OwnedRow>,
     table: StorageTable<S>,
     chunk_size: usize,
@@ -325,7 +325,7 @@ impl<S: StateStore> InnerSideExecutorBuilder<S> {
         outer_side_key_types: Vec<DataType>,
         inner_side_key_types: Vec<DataType>,
         lookup_prefix_len: usize,
-        epoch: u64,
+        epoch: BatchQueryEpoch,
         row_list: Vec<OwnedRow>,
         table: StorageTable<S>,
         chunk_size: usize,
@@ -385,7 +385,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         if self.lookup_prefix_len == self.table.pk_indices().len() {
             let row = self
                 .table
-                .get_row(&pk_prefix, HummockReadEpoch::Committed(self.epoch))
+                .get_row(&pk_prefix, self.epoch.clone().into())
                 .await?;
 
             if let Some(row) = row {
@@ -394,7 +394,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         } else {
             let iter = self
                 .table
-                .batch_iter_with_pk_bounds(HummockReadEpoch::Committed(self.epoch), &pk_prefix, ..)
+                .batch_iter_with_pk_bounds(self.epoch.clone().into(), &pk_prefix, .., false)
                 .await?;
 
             pin_mut!(iter);

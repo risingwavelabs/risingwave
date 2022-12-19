@@ -36,6 +36,7 @@ use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType as ProstRowFormatType;
 use risingwave_source::connector_test_utils::create_source_desc_builder;
@@ -244,7 +245,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let scan = Box::new(RowSeqScanExecutor::new(
         table.clone(),
         vec![ScanRange::full()],
-        u64::MAX,
+        to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqExecutor2".to_string(),
         None,
@@ -306,7 +307,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let scan = Box::new(RowSeqScanExecutor::new(
         table.clone(),
         vec![ScanRange::full()],
-        u64::MAX,
+        to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqScanExecutor2".to_string(),
         None,
@@ -378,7 +379,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let scan = Box::new(RowSeqScanExecutor::new(
         table,
         vec![ScanRange::full()],
-        u64::MAX,
+        to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqScanExecutor2".to_string(),
         None,
@@ -445,7 +446,7 @@ async fn test_row_seq_scan() -> Result<()> {
     let executor = Box::new(RowSeqScanExecutor::new(
         table,
         vec![ScanRange::full()],
-        u64::MAX,
+        to_committed_batch_query_epoch(u64::MAX),
         1,
         "RowSeqScanExecutor2".to_string(),
         None,

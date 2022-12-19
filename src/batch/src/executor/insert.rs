@@ -315,6 +315,7 @@ mod tests {
                     ignore_range_tombstone: false,
                     table_id: Default::default(),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await?;

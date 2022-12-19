@@ -249,7 +249,7 @@ pub fn run() {
     let args = Arguments::from_args();
     let env = Arc::new(setup_sqlsmith_with_seed(0).unwrap());
 
-    let num_tests = 256;
+    let num_tests = 512;
     let tests = (0..num_tests)
         .map(|i| {
             let env = env.clone();

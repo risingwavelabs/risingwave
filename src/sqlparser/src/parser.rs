@@ -69,7 +69,7 @@ pub enum WildcardExpr {
     Expr(Expr),
     /// Expr and Qualified wildcard, expr is a table or a column struct, object_name is field.
     /// e.g. `(table.v1).*` or `(table).v1.*`
-    ExprQualifiedWildcard(Expr, ObjectName),
+    ExprQualifiedWildcard(Expr, Option<ObjectName>),
     QualifiedWildcard(ObjectName),
     Wildcard,
 }
@@ -277,6 +277,8 @@ impl Parser {
             let mut id_parts = vec![ident];
             id_parts.append(&mut idents.0);
             Ok(WildcardExpr::QualifiedWildcard(ObjectName(id_parts)))
+        } else if let WildcardExpr::Wildcard = expr {
+            Ok(WildcardExpr::QualifiedWildcard(ObjectName(vec![ident])))
         } else {
             Ok(expr)
         }
@@ -295,14 +297,16 @@ impl Parser {
                 idents.append(&mut id_parts);
                 Ok(WildcardExpr::ExprQualifiedWildcard(
                     *expr,
-                    ObjectName(idents),
+                    Some(ObjectName(idents)),
                 ))
             } else {
                 Ok(WildcardExpr::ExprQualifiedWildcard(
                     expr,
-                    ObjectName(id_parts),
+                    Some(ObjectName(id_parts)),
                 ))
             }
+        } else if let WildcardExpr::Wildcard = wildcard_expr {
+            Ok(WildcardExpr::ExprQualifiedWildcard(expr, None))
         } else {
             Ok(wildcard_expr)
         }
@@ -318,7 +322,11 @@ impl Parser {
             match self.next_token() {
                 Token::Word(w) => id_parts.push(w.to_ident()),
                 Token::Mul => {
-                    return Ok(WildcardExpr::QualifiedWildcard(ObjectName(id_parts)));
+                    return if id_parts.is_empty() {
+                        Ok(WildcardExpr::Wildcard)
+                    } else {
+                        Ok(WildcardExpr::QualifiedWildcard(ObjectName(id_parts)))
+                    }
                 }
                 unexpected => {
                     return self.expected("an identifier or a '*' after '.'", unexpected);
