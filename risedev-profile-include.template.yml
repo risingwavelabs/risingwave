@@ -5,7 +5,7 @@
 # - add new profiles just like the ones defined under the `profile` section in `risedev.yml`
 # - develop the cluster with the new profiles by `./risedev dev <new-profile-name>`
 
-my-default:
+my-default-template:
   config-path: src/config/default.toml
   steps:
     - use: meta-node
