@@ -367,7 +367,9 @@ impl LogicalAggBuilder {
     pub fn syntax_check(&self) -> Result<()> {
         let mut has_distinct = false;
         let mut has_order_by = false;
+        // TODO(stonepage): refactor it and unify the 2-phase agg rewriting logic
         let mut has_non_distinct_string_agg = false;
+        let mut has_non_distinct_array_agg = false;
         self.agg_calls.iter().for_each(|agg_call| {
             if agg_call.distinct {
                 has_distinct = true;
@@ -377,6 +379,9 @@ impl LogicalAggBuilder {
             }
             if !agg_call.distinct && agg_call.agg_kind == AggKind::StringAgg {
                 has_non_distinct_string_agg = true;
+            }
+            if !agg_call.distinct && agg_call.agg_kind == AggKind::ArrayAgg {
+                has_non_distinct_array_agg = true;
             }
         });
 
@@ -395,6 +400,13 @@ impl LogicalAggBuilder {
         if has_distinct && has_non_distinct_string_agg {
             return Err(ErrorCode::NotImplemented(
                 "Non-distinct string_agg can't appear with distinct aggregates".into(),
+                TrackingIssue::none(),
+            )
+            .into());
+        }
+        if has_distinct && has_non_distinct_array_agg {
+            return Err(ErrorCode::NotImplemented(
+                "Non-distinct array_agg can't appear with distinct aggregates".into(),
                 TrackingIssue::none(),
             )
             .into());
