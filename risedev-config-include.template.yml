@@ -1,0 +1,6 @@
+my-default:
+  config-path: src/config/default.toml
+  steps:
+    - use: meta-node
+    - use: compute-node
+    - use: frontend

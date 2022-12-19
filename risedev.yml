@@ -4,7 +4,8 @@
 #
 # ```
 #     "yaml.schemas": {
-#         "src/risedevtool/risedev-schema.json": "risedev.yml"
+#         "src/risedevtool/schemas/risedev.json": "risedev.yml",
+#         "src/risedevtool/schemas/risedev-config-include.json": "risedev-config-include.*.yml"
 #     }
 # ```
 
