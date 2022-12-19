@@ -156,6 +156,8 @@ pub fn generate_output(
     }
 }
 
+/// Separate the information of `order_pairs` into different `Vec`s. The `Vec`s have the same
+/// length as `order_pairs`.
 pub fn generate_executor_pk_indices_info(
     order_pairs: &[OrderPair],
     schema: &Schema,
