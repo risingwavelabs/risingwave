@@ -143,9 +143,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, tokio::sync::watch::Sender<()>)> {
-    // Contains address info with port
-    //   address_info.listen_addr;
-
     // Initialize managers.
     let (_, lease_handle, lease_shutdown, leader_rx) = run_elections(
         address_info.listen_addr.clone().to_string(),
