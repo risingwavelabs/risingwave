@@ -132,15 +132,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         use CastContext as T;
         match cast_sig.context {
-            // For implicit casts, there are 2 edge cases:
-            // 1. If the resulting expression's signature is ambiguous,
-            //    ignore evaluation result.
-            // 2. If Expression is part of explicit cast expression,
-            //    implicit cast won't be applied,
-            //    so do not generate implicit cast.
-            T::Implicit if context.can_implicit_cast() => {
-                self.gen_expr(cast_sig.from_type, context).into()
-            }
             T::Explicit => {
                 let expr = self
                     .gen_expr(cast_sig.from_type, context.set_inside_explicit_cast())
@@ -148,6 +139,27 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 let data_type = data_type_name_to_ast_data_type(cast_sig.to_type)?;
                 Some(Expr::Cast { expr, data_type })
             }
+
+            // TODO: Re-enable implicit casts
+            // Currently these implicit cast expressions may surface in:
+            // select items, functions and so on.
+            // Type-inference could result in different type from what SQLGenerator expects.
+            // For example:
+            // Suppose we had implicit cast expr from smallint->int.
+            // We then generated 1::smallint with implicit type int.
+            // If it was part of this expression:
+            // SELECT 1::smallint as col0;
+            // Then, when generating other expressions, SqlGenerator sees `col0` with type `int`,
+            // but its type will be inferred as `smallint` actually in the frontend.
+            //
+            // Functions also encounter problems, and could infer to the wrong type.
+            // May refer to type inference rules:
+            // https://github.com/risingwavelabs/risingwave/blob/650810a5a9b86028036cb3b51eec5b18d8f814d5/src/frontend/src/expr/type_inference/func.rs#L445-L464
+            // Therefore it is disabled for now.
+            // T::Implicit if context.can_implicit_cast() => {
+            //     self.gen_expr(cast_sig.from_type, context).into()
+            // }
+
             // TODO: Generate this when e2e inserts are generated.
             // T::Assign
             _ => None,
