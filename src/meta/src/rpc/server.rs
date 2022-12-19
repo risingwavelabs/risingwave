@@ -292,7 +292,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                         shutdown_all.await;
                     },
                     _ = svc.idle_recv => {
-                        tracing::info!("idle_recv");
                         shutdown_all.await;
                     },
                 }

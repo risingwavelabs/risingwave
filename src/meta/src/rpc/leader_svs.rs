@@ -48,6 +48,7 @@ use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManager, SourceManager};
 
+/// Simple struct containing everything required to start services on a meta leader node
 pub struct LeaderServices<S: MetaStore> {
     pub backup_srv: BackupServiceImpl<S>,
     pub cluster_srv: ClusterServiceImpl<S>,
@@ -55,17 +56,27 @@ pub struct LeaderServices<S: MetaStore> {
     pub health_srv: HealthServiceImpl,
     pub heartbeat_srv: HeartbeatServiceImpl<S>,
     pub hummock_srv: HummockServiceImpl<S>,
+
+    /// OneShot receiver that signals if sub tasks is idle
     pub idle_recv: OneReceiver<()>,
+
     pub meta_metrics: Arc<MetaMetrics>,
     pub notification_srv: NotificationServiceImpl<S>,
     pub scale_srv: ScaleServiceImpl<S>,
     pub stream_srv: StreamServiceImpl<S>,
+
+    /// sub_tasks executed concurrently. Can be shutdown via shutdown_all
     pub sub_tasks: Vec<(JoinHandle<()>, OneSender<()>)>,
+
     pub user_srv: UserServiceImpl<S>,
 }
 
-// TODO: Write docstring
-// TODO: Only call this function once
+/// Initializing all services needed for the meta leader node
+/// Only call this function once, since initializing the services multiple times will result in an
+/// inconsistent state
+///
+/// ## Returns
+/// Returns an instance of `LeaderServices` or an Error if initializing leader services failed
 pub async fn get_leader_srv<S: MetaStore>(
     meta_store: Arc<S>,
     address_info: AddressInfo,
