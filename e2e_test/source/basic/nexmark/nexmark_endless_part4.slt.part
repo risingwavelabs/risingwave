@@ -4,7 +4,7 @@ include ../../../streaming/nexmark/views/q103.slt.part
 include ../../../streaming/nexmark/views/q104.slt.part
 include ../../../streaming/nexmark/views/q105.slt.part
 
-sleep 5s
+sleep 10s
 
 query I
 select count(*) > 0 from (select * from nexmark_q103 limit 1);
