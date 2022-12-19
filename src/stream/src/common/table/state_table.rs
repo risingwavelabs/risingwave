@@ -21,6 +21,7 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
+use bytes::Bytes;
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
@@ -37,15 +38,13 @@ use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
 use risingwave_pb::catalog::Table;
+use risingwave_storage::mem_table::{KeyOp, MemTable, MemTableError, MemTableIter};
 use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     LocalStateStore, ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions,
-};
-use risingwave_storage::table::streaming_table::mem_table::{
-    MemTable, MemTableError, MemTableIter, RowOp,
 };
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
 use risingwave_storage::StateStore;
@@ -435,11 +434,11 @@ impl<S: StateStore> StateTable<S> {
 
         match mem_table_res {
             Some(row_op) => match row_op {
-                RowOp::Insert(row_bytes) => Ok(Some(CompactedRow {
+                KeyOp::Insert(row_bytes) => Ok(Some(CompactedRow {
                     row: row_bytes.to_vec(),
                 })),
-                RowOp::Delete(_) => Ok(None),
-                RowOp::Update((_, row_bytes)) => Ok(Some(CompactedRow {
+                KeyOp::Delete(_) => Ok(None),
+                KeyOp::Update((_, row_bytes)) => Ok(Some(CompactedRow {
                     row: row_bytes.to_vec(),
                 })),
             },
@@ -665,7 +664,7 @@ impl<S: StateStore> StateTable<S> {
     /// Write to state store.
     async fn batch_write_rows(
         &mut self,
-        buffer: BTreeMap<Vec<u8>, RowOp>,
+        buffer: BTreeMap<Bytes, KeyOp>,
         epoch: u64,
     ) -> StreamExecutorResult<()> {
         let watermark = self.cur_watermark.as_ref().and_then(|cur_watermark_ref| {
@@ -702,19 +701,19 @@ impl<S: StateStore> StateTable<S> {
                 // Currently, some executors do not strictly comply with these semantics. As a
                 // workaround you may call disable the check by calling `.disable_sanity_check()` on
                 // state table.
-                RowOp::Insert(row) => {
+                KeyOp::Insert(row) => {
                     if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
                         self.do_insert_sanity_check(&pk, &row, epoch).await?;
                     }
                     write_batch.put(pk, StorageValue::new_put(row));
                 }
-                RowOp::Delete(row) => {
+                KeyOp::Delete(row) => {
                     if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
                         self.do_delete_sanity_check(&pk, &row, epoch).await?;
                     }
                     write_batch.delete(pk);
                 }
-                RowOp::Update((old_row, new_row)) => {
+                KeyOp::Update((old_row, new_row)) => {
                     if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
                         self.do_update_sanity_check(&pk, &old_row, &new_row, epoch)
                             .await?;
@@ -1020,8 +1019,10 @@ impl<S: StateStore> StateTable<S> {
         prefix_hint: Option<Vec<u8>>,
         epoch: u64,
     ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
+        let (l, r) = key_range.clone();
+        let bytes_key_range = (l.map(Bytes::from), r.map(Bytes::from));
         // Mem table iterator.
-        let mem_table_iter = self.mem_table.iter(key_range.clone());
+        let mem_table_iter = self.mem_table.iter(bytes_key_range);
 
         let check_bloom_filter = prefix_hint.is_some();
 
@@ -1053,7 +1054,7 @@ impl<S: StateStore> StateTable<S> {
 
 pub type RowStream<'a, S: StateStore> = impl Stream<Item = StreamExecutorResult<Cow<'a, OwnedRow>>>;
 pub type RowStreamWithPk<'a, S: StateStore> =
-    impl Stream<Item = StreamExecutorResult<(Cow<'a, Vec<u8>>, Cow<'a, OwnedRow>)>>;
+    impl Stream<Item = StreamExecutorResult<(Cow<'a, Bytes>, Cow<'a, OwnedRow>)>>;
 
 /// `StateTableRowIter` is able to read the just written data (uncommitted data).
 /// It will merge the result of `mem_table_iter` and `state_store_iter`.
@@ -1066,8 +1067,8 @@ struct StateTableRowIter<'a, M, C> {
 
 impl<'a, M, C> StateTableRowIter<'a, M, C>
 where
-    M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
-    C: Stream<Item = StreamExecutorResult<(Vec<u8>, OwnedRow)>>,
+    M: Iterator<Item = (&'a Bytes, &'a KeyOp)>,
+    C: Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>>,
 {
     fn new(mem_table_iter: M, storage_iter: C, deserializer: RowDeserializer) -> Self {
         Self {
@@ -1081,7 +1082,7 @@ where
     /// This function scans kv pairs from the `shared_storage` and
     /// memory(`mem_table`) with optional pk_bounds. If a record exist in both `shared_storage` and
     /// `mem_table`, result `mem_table` is returned according to the operation(RowOp) on it.
-    #[try_stream(ok = (Cow<'a, Vec<u8>>, Cow<'a, OwnedRow>), error = StreamExecutorError)]
+    #[try_stream(ok = (Cow<'a, Bytes>, Cow<'a, OwnedRow>), error = StreamExecutorError)]
     async fn into_stream(self) {
         let storage_iter = self.storage_iter.peekable();
         pin_mut!(storage_iter);
@@ -1100,7 +1101,7 @@ where
                 (None, Some(_)) => {
                     let (pk, row_op) = mem_table_iter.next().unwrap();
                     match row_op {
-                        RowOp::Insert(row_bytes) | RowOp::Update((_, row_bytes)) => {
+                        KeyOp::Insert(row_bytes) | KeyOp::Update((_, row_bytes)) => {
                             let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
                             yield (Cow::Borrowed(pk), Cow::Owned(row))
@@ -1122,13 +1123,13 @@ where
                             let (pk, row_op) = mem_table_iter.next().unwrap();
                             let (_, old_row_in_storage) = storage_iter.next().await.unwrap()?;
                             match row_op {
-                                RowOp::Insert(row_bytes) => {
+                                KeyOp::Insert(row_bytes) => {
                                     let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
                                     yield (Cow::Borrowed(pk), Cow::Owned(row));
                                 }
-                                RowOp::Delete(_) => {}
-                                RowOp::Update((old_row_bytes, new_row_bytes)) => {
+                                KeyOp::Delete(_) => {}
+                                KeyOp::Update((old_row_bytes, new_row_bytes)) => {
                                     let old_row =
                                         self.deserializer.deserialize(old_row_bytes.as_ref())?;
                                     let new_row =
@@ -1145,13 +1146,13 @@ where
                             let (pk, row_op) = mem_table_iter.next().unwrap();
 
                             match row_op {
-                                RowOp::Insert(row_bytes) => {
+                                KeyOp::Insert(row_bytes) => {
                                     let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
                                     yield (Cow::Borrowed(pk), Cow::Owned(row));
                                 }
-                                RowOp::Delete(_) => {}
-                                RowOp::Update(_) => unreachable!(
+                                KeyOp::Delete(_) => {}
+                                KeyOp::Update(_) => unreachable!(
                                     "memtable update should always be paired with a storage key"
                                 ),
                             }
@@ -1188,7 +1189,7 @@ impl<S: LocalStateStore> StorageIterInner<S> {
     }
 
     /// Yield a row with its primary key.
-    #[try_stream(ok = (Vec<u8>, OwnedRow), error = StreamExecutorError)]
+    #[try_stream(ok = (Bytes, OwnedRow), error = StreamExecutorError)]
     async fn into_stream(self) {
         use futures::TryStreamExt;
 

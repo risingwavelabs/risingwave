@@ -16,6 +16,8 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
+use bytes::Bytes;
+
 use super::{HummockResult, HummockValue};
 
 mod forward_concat;
@@ -392,7 +394,7 @@ impl DirectedUserIterator {
     }
 
     #[inline(always)]
-    pub fn key(&self) -> &FullKey<Vec<u8>> {
+    pub fn key(&self) -> &FullKey<Bytes> {
         match self {
             Self::Forward(iter) => iter.key(),
             Self::Backward(iter) => iter.key(),
@@ -400,7 +402,7 @@ impl DirectedUserIterator {
     }
 
     #[inline(always)]
-    pub fn value(&self) -> &[u8] {
+    pub fn value(&self) -> &Bytes {
         match self {
             Self::Forward(iter) => iter.value(),
             Self::Backward(iter) => iter.value(),

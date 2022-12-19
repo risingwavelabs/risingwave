@@ -28,7 +28,6 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
-use risingwave_storage::table::streaming_table::mem_table::RowOp;
 use risingwave_storage::StateStore;
 
 use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
@@ -260,6 +259,12 @@ fn generate_output(
     } else {
         Ok(None)
     }
+}
+
+pub enum RowOp {
+    Insert(Vec<u8>),
+    Delete(Vec<u8>),
+    Update((Vec<u8>, Vec<u8>)),
 }
 
 /// `MaterializeBuffer` is a buffer to handle chunk into `RowOp`.
