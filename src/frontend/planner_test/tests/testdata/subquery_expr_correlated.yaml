@@ -189,7 +189,7 @@
     LogicalJoin { type: LeftSemi, on: (t1.y = t2.y) AND ((t1.x + t2.x) = 100:Int32), output: [t1.x] }
     ├─LogicalScan { table: t1, columns: [t1.x, t1.y], predicate: (t1.y = 1000:Int32) }
     └─LogicalProject { exprs: [t2.y, t2.x] }
-      └─LogicalScan { table: t2, columns: [t2.x, t2.y] }
+      └─LogicalScan { table: t2, columns: [t2.x, t2.y], predicate: (t2.y = 1000:Int32) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
