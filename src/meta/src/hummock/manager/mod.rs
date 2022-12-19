@@ -504,8 +504,6 @@ where
             }
         }
 
-        // FIXME: This should not panic
-        // check prevents meta node failover
         trx.check_equal(
             META_CF_NAME.to_owned(),
             META_LEADER_KEY.as_bytes().to_vec(),
