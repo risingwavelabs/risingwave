@@ -18,10 +18,10 @@ use futures::future::join_all;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{Row, Row2};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::{bail, row};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use risingwave_expr::Result as ExprResult;
@@ -212,7 +212,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         let vnodes = table.get_vnodes();
                         for vnode in vnodes.ones() {
                             let pk = Some(ScalarImpl::Int16(vnode as _));
-                            let row = Row::new(vec![pk, Some(current_watermark.clone())]);
+                            let row = [pk, Some(current_watermark.clone())];
                             // FIXME(yuhao): use upsert.
                             table.insert(row);
                         }
@@ -245,8 +245,8 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         watermark_type: DataType,
     ) -> StreamExecutorResult<ScalarImpl> {
         let watermark_iter_futures = (0..VirtualNode::COUNT).map(|vnode| async move {
-            let pk = Row::new(vec![Some(ScalarImpl::Int16(vnode as _))]);
-            let watermark_row: Option<Row> = table.get_row(&pk).await?;
+            let pk = row::once(Some(ScalarImpl::Int16(vnode as _)));
+            let watermark_row: Option<OwnedRow> = table.get_row(pk).await?;
             match watermark_row {
                 Some(row) => {
                     if row.len() == 1 {

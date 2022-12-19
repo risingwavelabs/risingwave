@@ -20,6 +20,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -115,7 +116,7 @@ impl UpdateExecutor {
                 .zip_eq(updated_data_chunk.rows())
                 .flat_map(|(a, b)| [a, b])
             {
-                for (datum_ref, builder) in row.values().zip_eq(builders.iter_mut()) {
+                for (datum_ref, builder) in row.iter().zip_eq(builders.iter_mut()) {
                     builder.append_datum(datum_ref);
                 }
             }

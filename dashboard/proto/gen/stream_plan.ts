@@ -352,8 +352,9 @@ export interface SourceNode {
 
 export interface SinkNode {
   tableId: number;
-  columnIds: number[];
   properties: { [key: string]: string };
+  fields: Field[];
+  sinkPk: number[];
 }
 
 export interface SinkNode_PropertiesEntry {
@@ -1779,36 +1780,46 @@ export const SourceNode = {
 };
 
 function createBaseSinkNode(): SinkNode {
-  return { tableId: 0, columnIds: [], properties: {} };
+  return { tableId: 0, properties: {}, fields: [], sinkPk: [] };
 }
 
 export const SinkNode = {
   fromJSON(object: any): SinkNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
-      columnIds: Array.isArray(object?.columnIds) ? object.columnIds.map((e: any) => Number(e)) : [],
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
           return acc;
         }, {})
         : {},
+      fields: Array.isArray(object?.fields)
+        ? object.fields.map((e: any) => Field.fromJSON(e))
+        : [],
+      sinkPk: Array.isArray(object?.sinkPk)
+        ? object.sinkPk.map((e: any) => Number(e))
+        : [],
     };
   },
 
   toJSON(message: SinkNode): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
-    if (message.columnIds) {
-      obj.columnIds = message.columnIds.map((e) => Math.round(e));
-    } else {
-      obj.columnIds = [];
-    }
     obj.properties = {};
     if (message.properties) {
       Object.entries(message.properties).forEach(([k, v]) => {
         obj.properties[k] = v;
       });
+    }
+    if (message.fields) {
+      obj.fields = message.fields.map((e) => e ? Field.toJSON(e) : undefined);
+    } else {
+      obj.fields = [];
+    }
+    if (message.sinkPk) {
+      obj.sinkPk = message.sinkPk.map((e) => Math.round(e));
+    } else {
+      obj.sinkPk = [];
     }
     return obj;
   },
@@ -1816,7 +1827,6 @@ export const SinkNode = {
   fromPartial<I extends Exact<DeepPartial<SinkNode>, I>>(object: I): SinkNode {
     const message = createBaseSinkNode();
     message.tableId = object.tableId ?? 0;
-    message.columnIds = object.columnIds?.map((e) => e) || [];
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
         if (value !== undefined) {
@@ -1826,6 +1836,8 @@ export const SinkNode = {
       },
       {},
     );
+    message.fields = object.fields?.map((e) => Field.fromPartial(e)) || [];
+    message.sinkPk = object.sinkPk?.map((e) => e) || [];
     return message;
   },
 };

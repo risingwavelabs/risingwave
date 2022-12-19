@@ -88,7 +88,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                dist_key_hint: None,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -133,7 +133,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                dist_key_hint: None,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -147,7 +147,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: false,
-                dist_key_hint: None,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -162,7 +162,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                dist_key_hint: None,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -196,7 +196,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                dist_key_hint: None,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },
@@ -212,7 +212,7 @@ async fn test_failpoints_state_store_read_upload() {
             ReadOptions {
                 ignore_range_tombstone: false,
                 check_bloom_filter: true,
-                dist_key_hint: None,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
             },

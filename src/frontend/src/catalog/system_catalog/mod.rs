@@ -25,7 +25,7 @@ use risingwave_common::catalog::{
     INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
 use crate::catalog::catalog_service::CatalogReader;
@@ -160,7 +160,7 @@ macro_rules! prepare_sys_catalog {
 
         #[async_trait]
         impl SysCatalogReader for SysCatalogReaderImpl {
-            async fn read_table(&self, table_id: &TableId) -> Result<Vec<Row>> {
+            async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>> {
                 match table_id.table_id - 1 {
                     $(
                         ${index()} => {
