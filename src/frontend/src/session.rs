@@ -701,11 +701,11 @@ impl Session<PgResponseStream> for SessionImpl {
     async fn run_one_query(
         self: Arc<Self>,
         stmt: Statement,
-        sql_str: &str,
         format: bool,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
+        let sql_str = stmt.to_string();
         let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, sql_str, format));
+            let mut handle_fut = Box::pin(handle(self, stmt, &sql_str, format));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);

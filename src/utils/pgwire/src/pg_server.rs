@@ -66,7 +66,6 @@ where
     async fn run_one_query(
         self: Arc<Self>,
         sql: Statement,
-        sql_str: &str,
         format: bool,
     ) -> Result<PgResponse<VS>, BoxedError>;
 
@@ -247,11 +246,9 @@ mod tests {
         async fn run_one_query(
             self: Arc<Self>,
             _sql: Statement,
-            _sql_str: &str,
             _format: bool,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
             let res: Vec<Option<Bytes>> = vec![Some(Bytes::new())];
-            // let param_len = 2;
             Ok(PgResponse::new_for_stream(
                 StatementType::SELECT,
                 Some(1),
