@@ -243,8 +243,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             };
         }
 
-        tracing::info!("Starting leader services");
-
         let svc = get_leader_srv(
             meta_store,
             address_info.clone(),
