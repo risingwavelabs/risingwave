@@ -19,7 +19,10 @@ export RUN_META_BACKUP=0;
 export RUN_DELETE_RANGE=0;
 
 if [[ -n "$CHANGED" ]]; then
-    echo "Changes to Sqlsmith source files detected.";
+    echo "origin/main SHA: $(git rev-parse origin/main)";
+    echo "Changes to Sqlsmith source files detected:";
+    echo "$CHANGED";
+
     export RUN_SQLSMITH=1;
     export SQLSMITH_COUNT=100;
     echo "Enabled Sqlsmith tests.";

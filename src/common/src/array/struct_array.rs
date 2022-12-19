@@ -30,8 +30,8 @@ use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, hash_datum, serialize_datum_into, DataType, Datum, DatumRef, Scalar,
-    ScalarRefImpl, ToDatumRef,
+    hash_datum, memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum,
+    DatumRef, Scalar, ScalarRefImpl, ToDatumRef,
 };
 
 #[derive(Debug)]
@@ -327,13 +327,13 @@ impl StructValue {
         &self.fields
     }
 
-    pub fn deserialize(
+    pub fn memcmp_deserialize(
         fields: &[DataType],
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
         fields
             .iter()
-            .map(|field| deserialize_datum_from(field, deserializer))
+            .map(|field| memcmp_deserialize_datum_from(field, deserializer))
             .try_collect()
             .map(Self::new)
     }
@@ -366,13 +366,13 @@ impl<'a> StructRef<'a> {
         iter_fields_ref!(self, it, { it.collect() })
     }
 
-    pub fn serialize(
+    pub fn memcmp_serialize(
         &self,
         serializer: &mut memcomparable::Serializer<impl BufMut>,
     ) -> memcomparable::Result<()> {
         iter_fields_ref!(self, it, {
             for datum_ref in it {
-                serialize_datum_into(datum_ref, serializer)?
+                memcmp_serialize_datum_into(datum_ref, serializer)?
             }
             Ok(())
         })
@@ -427,9 +427,15 @@ fn cmp_struct_field(l: &Option<ScalarRefImpl<'_>>, r: &Option<ScalarRefImpl<'_>>
 
 impl Debug for StructRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut is_first = true;
         iter_fields_ref!(self, it, {
             for v in it {
-                v.fmt(f)?;
+                if is_first {
+                    write!(f, "{:?}", v)?;
+                    is_first = false;
+                } else {
+                    write!(f, ", {:?}", v)?;
+                }
             }
             Ok(())
         })
@@ -606,11 +612,11 @@ mod tests {
         ];
         let struct_ref = StructRef::ValueRef { val: &value };
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        struct_ref.serialize(&mut serializer).unwrap();
+        struct_ref.memcmp_serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         assert_eq!(
-            StructValue::deserialize(&fields, &mut deserializer).unwrap(),
+            StructValue::memcmp_deserialize(&fields, &mut deserializer).unwrap(),
             value
         );
 
@@ -624,11 +630,11 @@ mod tests {
         let array = builder.finish();
         let struct_ref = array.value_at(0).unwrap();
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        struct_ref.serialize(&mut serializer).unwrap();
+        struct_ref.memcmp_serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         assert_eq!(
-            StructValue::deserialize(&fields, &mut deserializer).unwrap(),
+            StructValue::memcmp_deserialize(&fields, &mut deserializer).unwrap(),
             value
         );
     }
@@ -699,14 +705,14 @@ mod tests {
             let lhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 StructRef::ValueRef { val: &lhs }
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
             let rhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 StructRef::ValueRef { val: &rhs }
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -726,7 +732,7 @@ mod tests {
                 array
                     .value_at(0)
                     .unwrap()
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -735,7 +741,7 @@ mod tests {
                 array
                     .value_at(1)
                     .unwrap()
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };

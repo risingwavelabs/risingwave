@@ -95,7 +95,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                     (Unbounded, Unbounded),
                     epoch,
                     ReadOptions {
-                        dist_key_hint: None,
+                        prefix_hint: None,
                         ignore_range_tombstone: true,
                         check_bloom_filter: false,
                         retention_seconds: None,

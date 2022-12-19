@@ -285,11 +285,13 @@ impl LogicalJoin {
         push_right: bool,
         push_on: bool,
     ) -> (Condition, Condition, Condition) {
-        let conjunctions = std::mem::take(&mut predicate.conjunctions);
+        let mut conjunctions = std::mem::take(&mut predicate.conjunctions);
+
+        let mut cannot_push = conjunctions
+            .drain_filter(|expr| expr.count_nows() > 0)
+            .collect_vec();
         let (mut left, right, mut others) =
             Condition { conjunctions }.split(left_col_num, right_col_num);
-
-        let mut cannot_push = vec![];
 
         if !push_left {
             cannot_push.extend(left);
@@ -588,6 +590,12 @@ impl LogicalJoin {
             new_scan.base.schema().len(),
             new_join_on.clone(),
         );
+
+        // We discovered that we cannot use a lookup join after pulling up the predicate
+        // from one side and simplifying the condition. Let's use  some other join instead.
+        if !new_predicate.has_eq() {
+            return None;
+        }
 
         // Rewrite the join output indices and all output indices referred to the old scan need to
         // rewrite.

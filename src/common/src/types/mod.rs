@@ -548,7 +548,7 @@ pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 // TODO: specify `NULL FIRST` or `NULL LAST`.
-pub fn serialize_datum_into(
+pub fn memcmp_serialize_datum_into(
     datum: impl ToDatumRef,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
@@ -563,7 +563,8 @@ pub fn serialize_datum_into(
 }
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
-pub fn serialize_datum_not_null_into(
+#[cfg_attr(not(test), expect(dead_code))]
+fn memcmp_serialize_datum_not_null_into(
     datum: impl ToDatumRef,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
@@ -575,7 +576,7 @@ pub fn serialize_datum_not_null_into(
 }
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
-pub fn deserialize_datum_from(
+pub fn memcmp_deserialize_datum_from(
     ty: &DataType,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,
 ) -> memcomparable::Result<Datum> {
@@ -588,7 +589,8 @@ pub fn deserialize_datum_from(
 }
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
-pub fn deserialize_datum_not_null_from(
+#[cfg_attr(not(test), expect(dead_code))]
+fn memcmp_deserialize_datum_not_null_from(
     ty: &DataType,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,
 ) -> memcomparable::Result<Datum> {
@@ -623,6 +625,12 @@ impl ToDatumRef for &Datum {
     #[inline(always)]
     fn to_datum_ref(&self) -> DatumRef<'_> {
         self.as_ref().map(|d| d.as_scalar_ref_impl())
+    }
+}
+impl ToDatumRef for Option<&ScalarImpl> {
+    #[inline(always)]
+    fn to_datum_ref(&self) -> DatumRef<'_> {
+        self.map(|d| d.as_scalar_ref_impl())
     }
 }
 impl ToDatumRef for DatumRef<'_> {
@@ -856,8 +864,8 @@ impl ScalarRefImpl<'_> {
                 v.0.num_seconds_from_midnight().serialize(&mut *ser)?;
                 v.0.nanosecond().serialize(ser)?;
             }
-            Self::Struct(v) => v.serialize(ser)?,
-            Self::List(v) => v.serialize(ser)?,
+            Self::Struct(v) => v.memcmp_serialize(ser)?,
+            Self::List(v) => v.memcmp_serialize(ser)?,
         };
         Ok(())
     }
@@ -885,6 +893,7 @@ impl ScalarImpl {
             Ty::Float32 => Self::Float32(f32::deserialize(de)?.into()),
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
             Ty::Varchar => Self::Utf8(Box::<str>::deserialize(de)?),
+            Ty::Bytea => Self::Bytea(Box::<[u8]>::deserialize(de)?),
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
             Ty::Decimal => Self::Decimal(de.deserialize_decimal()?.into()),
             Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
@@ -903,10 +912,8 @@ impl ScalarImpl {
                 let days = i32::deserialize(de)?;
                 NaiveDateWrapper::with_days(days)?
             }),
-            Ty::Struct(t) => StructValue::deserialize(&t.fields, de)?.to_scalar_value(),
-            Ty::List { datatype } => ListValue::deserialize(datatype, de)?.to_scalar_value(),
-            // TODO: Consider directly use get bytes
-            Ty::Bytea => Self::Bytea(Bytes::deserialize(de)?.to_vec().into()),
+            Ty::Struct(t) => StructValue::memcmp_deserialize(&t.fields, de)?.to_scalar_value(),
+            Ty::List { datatype } => ListValue::memcmp_deserialize(datatype, de)?.to_scalar_value(),
         })
     }
 
@@ -1008,7 +1015,8 @@ mod tests {
 
     fn serialize_datum_not_null_into_vec(data: i64) -> Vec<u8> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        serialize_datum_not_null_into(&Some(ScalarImpl::Int64(data)), &mut serializer).unwrap();
+        memcmp_serialize_datum_not_null_into(&Some(ScalarImpl::Int64(data)), &mut serializer)
+            .unwrap();
         serializer.into_inner()
     }
 
@@ -1034,14 +1042,15 @@ mod tests {
 
         fn serialize(f: OrderedF32) -> Vec<u8> {
             let mut serializer = memcomparable::Serializer::new(vec![]);
-            serialize_datum_not_null_into(&Some(f.into()), &mut serializer).unwrap();
+            memcmp_serialize_datum_not_null_into(&Some(f.into()), &mut serializer).unwrap();
             serializer.into_inner()
         }
 
         fn deserialize(data: Vec<u8>) -> OrderedF32 {
             let mut deserializer = memcomparable::Deserializer::new(data.as_slice());
             let datum =
-                deserialize_datum_not_null_from(&DataType::Float32, &mut deserializer).unwrap();
+                memcmp_deserialize_datum_not_null_from(&DataType::Float32, &mut deserializer)
+                    .unwrap();
             datum.unwrap().try_into().unwrap()
         }
 
