@@ -29,7 +29,7 @@ CREATE SOURCE nexmark (
 ) WITH (
     connector = 'nexmark',
     nexmark.split.num = '4',
-    nexmark.min.event.gap.in.ns = '20000'
+    nexmark.min.event.gap.in.ns = '40000'
 ) ROW FORMAT JSON;
 
 statement ok
@@ -47,7 +47,7 @@ CREATE MATERIALIZED SOURCE person (
     connector = 'nexmark',
     nexmark.table.type = 'Person',
     nexmark.split.num = '4',
-    nexmark.min.event.gap.in.ns = '20000'
+    nexmark.min.event.gap.in.ns = '40000'
 ) ROW FORMAT JSON;
 
 statement ok
@@ -67,7 +67,7 @@ CREATE MATERIALIZED SOURCE auction (
     connector = 'nexmark',
     nexmark.table.type = 'Auction',
     nexmark.split.num = '4',
-    nexmark.min.event.gap.in.ns = '20000'
+    nexmark.min.event.gap.in.ns = '40000'
 ) ROW FORMAT JSON;
 
 statement ok

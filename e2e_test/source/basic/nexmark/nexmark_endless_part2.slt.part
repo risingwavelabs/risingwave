@@ -4,21 +4,20 @@ include ../../../streaming/nexmark/views/q7.slt.part
 include ../../../streaming/nexmark/views/q8.slt.part
 include ../../../streaming/nexmark/views/q9.slt.part
 
-
-sleep 10s
+sleep 5s
 
 query I
-select count(*) > 0 as has_results from nexmark_q7;
+select count(*) > 0 from (select * from nexmark_q7 limit 1);
 ----
 t
 
 query I
-select count(*) > 0 as has_results from nexmark_q8;
+select count(*) > 0 from (select * from nexmark_q8 limit 1);
 ----
 t
 
 query I
-select count(*) > 0 as has_results from nexmark_q9;
+select count(*) > 0 from (select * from nexmark_q9 limit 1);
 ----
 t
 
