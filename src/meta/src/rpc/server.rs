@@ -265,7 +265,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             };
         }
 
-        // leader services defined below
         tracing::info!("Starting leader services");
 
         let svc = get_leader_srv(
@@ -280,23 +279,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .await
         .expect("Unable to create leader services");
 
-        // TODO: Do not define all these vars, just use ls.<var_name>
-        let meta_metrics = svc.meta_metrics;
-        let heartbeat_srv = svc.heartbeat_srv;
-        let cluster_srv = svc.cluster_srv;
-        let hummock_srv = svc.hummock_srv;
-        let stream_srv = svc.stream_srv;
-        let ddl_srv = svc.ddl_srv;
-        let notification_srv = svc.notification_srv;
-        let user_srv = svc.user_srv;
-        let health_srv = svc.health_srv;
-        let scale_srv = svc.scale_srv;
-        let backup_srv = svc.backup_srv;
-        let sub_tasks = svc.sub_tasks;
-        let idle_recv = svc.idle_recv;
-
         let shutdown_all = async move {
-            for (join_handle, shutdown_sender) in sub_tasks {
+            for (join_handle, shutdown_sender) in svc.sub_tasks {
                 if let Err(_err) = shutdown_sender.send(()) {
                     // Maybe it is already shut down
                     continue;
@@ -310,19 +294,18 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         // FIXME: Add service discovery for leader
         // https://github.com/risingwavelabs/risingwave/issues/6755
 
-        // leader services defined above
         tonic::transport::Server::builder()
-            .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
-            .add_service(HeartbeatServiceServer::new(heartbeat_srv))
-            .add_service(ClusterServiceServer::new(cluster_srv))
-            .add_service(StreamManagerServiceServer::new(stream_srv))
-            .add_service(HummockManagerServiceServer::new(hummock_srv))
-            .add_service(NotificationServiceServer::new(notification_srv))
-            .add_service(DdlServiceServer::new(ddl_srv))
-            .add_service(UserServiceServer::new(user_srv))
-            .add_service(ScaleServiceServer::new(scale_srv))
-            .add_service(HealthServer::new(health_srv))
-            .add_service(BackupServiceServer::new(backup_srv))
+            .layer(MetricsMiddlewareLayer::new(svc.meta_metrics.clone()))
+            .add_service(HeartbeatServiceServer::new(svc.heartbeat_srv))
+            .add_service(ClusterServiceServer::new(svc.cluster_srv))
+            .add_service(StreamManagerServiceServer::new(svc.stream_srv))
+            .add_service(HummockManagerServiceServer::new(svc.hummock_srv))
+            .add_service(NotificationServiceServer::new(svc.notification_srv))
+            .add_service(DdlServiceServer::new(svc.ddl_srv))
+            .add_service(UserServiceServer::new(svc.user_srv))
+            .add_service(ScaleServiceServer::new(svc.scale_srv))
+            .add_service(HealthServer::new(svc.health_srv))
+            .add_service(BackupServiceServer::new(svc.backup_srv))
             .serve_with_shutdown(address_info.listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
@@ -333,7 +316,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                         }
                         shutdown_all.await;
                     },
-                    _ = idle_recv => {
+                    _ = svc.idle_recv => {
                         tracing::info!("idle_recv");
                         shutdown_all.await;
                     },
