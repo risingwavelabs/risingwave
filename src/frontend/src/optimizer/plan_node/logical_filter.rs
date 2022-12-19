@@ -236,9 +236,11 @@ impl ToStream for LogicalFilter {
                             if try_match_expand!(&now_expr.inputs()[0], ExprImpl::FunctionCall)?
                                 .get_expr_type()
                                 != Type::Now
-                                || !matches!(&now_expr.inputs()[1], ExprImpl::Literal(_) | ExprImpl::FunctionCall(_))
+                                || !matches!(
+                                    &now_expr.inputs()[1],
+                                    ExprImpl::Literal(_) | ExprImpl::FunctionCall(_)
+                                )
                                 || now_expr.inputs()[1].has_input_ref()
-                                
                             {
                                 return Err(ExprError::InvalidParam {
                                     name: "now",
