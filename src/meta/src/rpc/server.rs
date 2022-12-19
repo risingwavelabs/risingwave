@@ -253,7 +253,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             election_shutdown,
         )
         .await
-        .expect("Unable to create leader services");
+        .expect("Unable to start leader services");
 
         let shutdown_all = async move {
             for (join_handle, shutdown_sender) in svc.sub_tasks {
