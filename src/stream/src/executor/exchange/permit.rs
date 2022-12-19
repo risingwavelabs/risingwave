@@ -22,10 +22,10 @@ use crate::executor::Message;
 
 /// The initial permits that a channel holds, i.e., the maximum row count can be buffered in the
 /// channel.
-const INITIAL_PERMITS: usize = 8192;
+const INITIAL_PERMITS: usize = 32768;
 /// The permits that are batched to add back, for reducing the backward `AddPermits` messages in
 /// remote exchange.
-pub const BATCHED_PERMITS: usize = 1024;
+pub const BATCHED_PERMITS: usize = 4096;
 /// The maximum permits required by a chunk. If there're too many rows in a chunk, we only acquire
 /// these permits. [`BATCHED_PERMITS`] is subtracted to avoid deadlock with batching.
 const MAX_CHUNK_PERMITS: usize = INITIAL_PERMITS - BATCHED_PERMITS;
