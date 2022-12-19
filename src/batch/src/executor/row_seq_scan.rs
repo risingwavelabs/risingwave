@@ -28,9 +28,9 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_datum;
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange as ProstScanRange};
+use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
@@ -54,7 +54,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     table: StorageTable<S>,
     scan_ranges: Vec<ScanRange>,
     ordered: bool,
-    epoch: u64,
+    epoch: BatchQueryEpoch,
 }
 
 /// Range for batch scan.
@@ -134,7 +134,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         table: StorageTable<S>,
         scan_ranges: Vec<ScanRange>,
         ordered: bool,
-        epoch: u64,
+        epoch: BatchQueryEpoch,
         chunk_size: usize,
         identity: String,
         metrics: Option<BatchTaskMetricsWithTaskLabels>,
@@ -240,7 +240,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         };
         let ordered = seq_scan_node.ordered;
 
-        let epoch = source.epoch;
+        let epoch = source.epoch.clone();
         let chunk_size = source.context.get_config().developer.batch_chunk_size;
         let metrics = source.context().task_metrics();
 
@@ -297,7 +297,6 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             ordered,
             epoch,
         } = *self;
-
         let table = Arc::new(table);
 
         // Create collector.
@@ -330,7 +329,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         for point_get in point_gets {
             let table = table.clone();
             let histogram = histogram.clone();
-            if let Some(row) = Self::execute_point_get(table, point_get, epoch, histogram).await? {
+            if let Some(row) =
+                Self::execute_point_get(table, point_get, epoch.clone(), histogram).await?
+            {
                 if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                     yield chunk;
                 }
@@ -345,7 +346,12 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             let table = table.clone();
             let histogram = histogram.clone();
             Box::pin(Self::execute_range(
-                table, range_scan, ordered, epoch, chunk_size, histogram,
+                table,
+                range_scan,
+                ordered,
+                epoch.clone(),
+                chunk_size,
+                histogram,
             ))
         }));
         #[for_await]
@@ -357,7 +363,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
     async fn execute_point_get(
         table: Arc<StorageTable<S>>,
         scan_range: ScanRange,
-        epoch: u64,
+        epoch: BatchQueryEpoch,
         histogram: Option<Histogram>,
     ) -> Result<Option<OwnedRow>> {
         let pk_prefix = scan_range.pk_prefix;
@@ -366,9 +372,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         let timer = histogram.as_ref().map(|histogram| histogram.start_timer());
 
         // Point Get.
-        let row = table
-            .get_row(&pk_prefix, HummockReadEpoch::Committed(epoch))
-            .await?;
+        let row = table.get_row(&pk_prefix, epoch.into()).await?;
 
         if let Some(timer) = timer {
             timer.observe_duration()
@@ -382,7 +386,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         table: Arc<StorageTable<S>>,
         scan_range: ScanRange,
         ordered: bool,
-        epoch: u64,
+        epoch: BatchQueryEpoch,
         chunk_size: usize,
         histogram: Option<Histogram>,
     ) {
@@ -395,7 +399,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         assert!(pk_prefix.len() < table.pk_indices().len());
         let iter = table
             .batch_iter_with_pk_bounds(
-                HummockReadEpoch::Committed(epoch),
+                epoch.into(),
                 &pk_prefix,
                 (
                     next_col_bounds.0.map(|x| OwnedRow::new(vec![x])),

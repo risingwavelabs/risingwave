@@ -302,6 +302,7 @@ pub(crate) mod tests {
                     prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
@@ -320,6 +321,7 @@ pub(crate) mod tests {
                     prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await;
@@ -431,6 +433,7 @@ pub(crate) mod tests {
                     prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
@@ -783,6 +786,7 @@ pub(crate) mod tests {
                     prefix_hint: None,
                     table_id: TableId::from(existing_table_ids),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
@@ -955,6 +959,7 @@ pub(crate) mod tests {
                     prefix_hint: None,
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
@@ -1128,6 +1133,7 @@ pub(crate) mod tests {
                     prefix_hint: Some(bloom_filter_key),
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await

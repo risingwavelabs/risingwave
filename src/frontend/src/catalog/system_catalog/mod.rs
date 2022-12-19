@@ -14,6 +14,7 @@
 
 pub mod information_schema;
 pub mod pg_catalog;
+pub mod rw_catalog;
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
@@ -22,7 +23,7 @@ use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{
     ColumnDesc, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
-    INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
+    INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
@@ -32,6 +33,7 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::system_catalog::information_schema::*;
 use crate::catalog::system_catalog::pg_catalog::*;
+use crate::catalog::system_catalog::rw_catalog::*;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::session::AuthContext;
@@ -197,4 +199,5 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_KEYWORDS, vec![0], read_keywords_info },
     { INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
     { INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
+    { RW_CATALOG, RW_META_SNAPSHOT, vec![], read_meta_snapshot await },
 }
