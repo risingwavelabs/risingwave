@@ -288,6 +288,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
         tonic::transport::Server::builder()
             .layer(MetricsMiddlewareLayer::new(svc.meta_metrics))
+            .add_service(LeaderServiceServer::new(leader_srv))
             .add_service(HeartbeatServiceServer::new(svc.heartbeat_srv))
             .add_service(ClusterServiceServer::new(svc.cluster_srv))
             .add_service(StreamManagerServiceServer::new(svc.stream_srv))
