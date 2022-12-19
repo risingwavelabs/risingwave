@@ -47,13 +47,6 @@ struct ElectionResult {
     pub is_leader: bool,
 }
 
-// TODO: remove
-// impl ElectionResult {
-//     pub fn get_leader_addr(&self) -> HostAddr {
-//         HostAddr::from(self.meta_leader_info.clone())
-//     }
-// }
-
 /// Runs for election in an attempt to become leader
 ///
 /// ## Returns
