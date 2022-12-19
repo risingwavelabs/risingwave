@@ -1,0 +1,37 @@
+include ../../../nexmark/create_sources.slt.part
+
+include ../../../streaming/nexmark/views/q3.slt.part
+include ../../../streaming/nexmark/views/q4.slt.part
+include ../../../streaming/nexmark/views/q5.slt.part
+
+sleep 10s
+
+statement ok
+flush;
+
+query I
+select count(*) > 0 as has_results from nexmark_q3;
+----
+t
+
+query I
+select count(*) > 0 as has_results from nexmark_q4;
+----
+t
+
+query I
+select count(*) > 0 as has_results from nexmark_q5;
+----
+t
+
+
+statement ok
+drop materialized view nexmark_q3;
+
+statement ok
+drop materialized view nexmark_q4;
+
+statement ok
+drop materialized view nexmark_q5;
+
+include ../../../nexmark/drop_sources.slt.part
