@@ -14,6 +14,7 @@
 
 mod elections;
 mod intercept;
+mod leader_svs;
 pub mod metrics;
 pub mod server;
 mod service;

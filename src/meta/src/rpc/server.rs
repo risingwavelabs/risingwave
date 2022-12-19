@@ -37,6 +37,7 @@ use tokio::task::JoinHandle;
 
 use super::elections::run_elections;
 use super::intercept::MetricsMiddlewareLayer;
+use super::leader_svs::get_leader_srv;
 use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
@@ -267,225 +268,32 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         // leader services defined below
         tracing::info!("Starting leader services");
 
-        // TODO: put leader service definition in separate function or maybe even separate file
-        // Do that in this PR see https://github.com/risingwavelabs/risingwave/pull/6937#issuecomment-1354518161
-
-        let prometheus_endpoint = opts.prometheus_endpoint.clone();
-        let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), leader_rx.clone()).await;
-        let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
-        let meta_metrics = Arc::new(MetaMetrics::new());
-        let registry = meta_metrics.registry();
-        monitor_process(registry).unwrap();
-        let compactor_manager = Arc::new(
-            hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
-                .await
-                .unwrap(),
-        );
-
-        let cluster_manager = Arc::new(
-            ClusterManager::new(env.clone(), max_heartbeat_interval)
-                .await
-                .unwrap(),
-        );
-        let hummock_manager = hummock::HummockManager::new(
-            env.clone(),
-            cluster_manager.clone(),
-            meta_metrics.clone(),
-            compactor_manager.clone(),
+        let svc = get_leader_srv(
+            meta_store,
+            address_info.clone(),
+            max_heartbeat_interval,
+            opts,
+            leader_rx,
+            lease_handle,
+            lease_shutdown,
         )
         .await
-        .unwrap();
+        .expect("Unable to create leader services");
 
-        #[cfg(not(madsim))]
-        if let Some(ref dashboard_addr) = address_info.dashboard_addr {
-            let dashboard_service = crate::dashboard::DashboardService {
-                dashboard_addr: *dashboard_addr,
-                cluster_manager: cluster_manager.clone(),
-                fragment_manager: fragment_manager.clone(),
-                meta_store: env.meta_store_ref(),
-                prometheus_endpoint: prometheus_endpoint.clone(),
-                prometheus_client: prometheus_endpoint.as_ref().map(|x| {
-                    use std::str::FromStr;
-                    prometheus_http_query::Client::from_str(x).unwrap()
-                }),
-            };
-            // TODO: join dashboard service back to local thread.
-            tokio::spawn(dashboard_service.serve(address_info.ui_path));
-        }
-
-        let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
-
-        let (barrier_scheduler, scheduled_barriers) =
-            BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
-
-        let source_manager = Arc::new(
-            SourceManager::new(
-                barrier_scheduler.clone(),
-                catalog_manager.clone(),
-                fragment_manager.clone(),
-            )
-            .await
-            .unwrap(),
-        );
-
-        let barrier_manager = Arc::new(GlobalBarrierManager::new(
-            scheduled_barriers,
-            env.clone(),
-            cluster_manager.clone(),
-            catalog_manager.clone(),
-            fragment_manager.clone(),
-            hummock_manager.clone(),
-            source_manager.clone(),
-            meta_metrics.clone(),
-        ));
-
-        {
-            let source_manager = source_manager.clone();
-            tokio::spawn(async move {
-                source_manager.run().await.unwrap();
-            });
-        }
-
-        let stream_manager = Arc::new(
-            GlobalStreamManager::new(
-                env.clone(),
-                fragment_manager.clone(),
-                barrier_scheduler.clone(),
-                cluster_manager.clone(),
-                source_manager.clone(),
-                hummock_manager.clone(),
-            )
-            .unwrap(),
-        );
-
-        hummock_manager
-            .purge_stale(
-                &fragment_manager
-                    .list_table_fragments()
-                    .await
-                    .expect("list_table_fragments"),
-            )
-            .await
-            .unwrap();
-
-        // Initialize services.
-        let backup_object_store = Arc::new(
-            parse_remote_object_store(
-                &env.opts.backup_storage_url,
-                Arc::new(ObjectStoreMetrics::unused()),
-                true,
-            )
-            .await,
-        );
-        let backup_storage = Arc::new(
-            ObjectStoreMetaSnapshotStorage::new(
-                &env.opts.backup_storage_directory,
-                backup_object_store,
-            )
-            .await
-            .unwrap(),
-            // FIXME: Do not use unwrap here
-        );
-        let backup_manager = Arc::new(BackupManager::new(
-            env.clone(),
-            hummock_manager.clone(),
-            backup_storage,
-            meta_metrics.registry().clone(),
-        ));
-        let vacuum_manager = Arc::new(hummock::VacuumManager::new(
-            env.clone(),
-            hummock_manager.clone(),
-            backup_manager.clone(),
-            compactor_manager.clone(),
-        ));
-
-        let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
-        let ddl_srv = DdlServiceImpl::<S>::new(
-            env.clone(),
-            catalog_manager.clone(),
-            stream_manager.clone(),
-            source_manager.clone(),
-            cluster_manager.clone(),
-            fragment_manager.clone(),
-            barrier_manager.clone(),
-        );
-
-        let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
-
-        let scale_srv = ScaleServiceImpl::<S>::new(
-            barrier_scheduler.clone(),
-            fragment_manager.clone(),
-            cluster_manager.clone(),
-            source_manager,
-            catalog_manager.clone(),
-            stream_manager.clone(),
-        );
-
-        let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
-        let stream_srv = StreamServiceImpl::<S>::new(
-            env.clone(),
-            barrier_scheduler.clone(),
-            fragment_manager.clone(),
-        );
-        let hummock_srv = HummockServiceImpl::new(
-            hummock_manager.clone(),
-            compactor_manager.clone(),
-            vacuum_manager.clone(),
-            fragment_manager.clone(),
-        );
-        let notification_srv = NotificationServiceImpl::new(
-            env.clone(),
-            catalog_manager,
-            cluster_manager.clone(),
-            hummock_manager.clone(),
-            fragment_manager.clone(),
-        );
-        let health_srv = HealthServiceImpl::new();
-        let backup_srv = BackupServiceImpl::new(backup_manager);
-
-        if let Some(prometheus_addr) = address_info.prometheus_addr {
-            MetricsManager::boot_metrics_service(
-                prometheus_addr.to_string(),
-                meta_metrics.registry().clone(),
-            )
-        }
-
-        // Initialize sub-tasks.
-        // sub_tasks executed concurrently. Can be shutdown via shutdown_all
-        let compaction_scheduler = Arc::new(CompactionScheduler::new(
-            env.clone(),
-            hummock_manager.clone(),
-            compactor_manager.clone(),
-        ));
-        let mut sub_tasks =
-            hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &env.opts);
-        sub_tasks.push(
-            ClusterManager::start_worker_num_monitor(
-                cluster_manager.clone(),
-                Duration::from_secs(env.opts.node_num_monitor_interval_sec),
-                meta_metrics.clone(),
-            )
-            .await,
-        );
-        sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
-        sub_tasks.push((lease_handle, lease_shutdown));
-        if cfg!(not(test)) {
-            sub_tasks.push(
-                ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1))
-                    .await,
-            );
-            sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
-        }
-
-        let (idle_send, idle_recv) = tokio::sync::oneshot::channel();
-        sub_tasks.push(
-            IdleManager::start_idle_checker(
-                env.idle_manager_ref(),
-                Duration::from_secs(30),
-                idle_send,
-            )
-            .await,
-        );
+        // TODO: Do not define all these vars, just use ls.<var_name>
+        let meta_metrics = svc.meta_metrics;
+        let heartbeat_srv = svc.heartbeat_srv;
+        let cluster_srv = svc.cluster_srv;
+        let hummock_srv = svc.hummock_srv;
+        let stream_srv = svc.stream_srv;
+        let ddl_srv = svc.ddl_srv;
+        let notification_srv = svc.notification_srv;
+        let user_srv = svc.user_srv;
+        let health_srv = svc.health_srv;
+        let scale_srv = svc.scale_srv;
+        let backup_srv = svc.backup_srv;
+        let sub_tasks = svc.sub_tasks;
+        let idle_recv = svc.idle_recv;
 
         let shutdown_all = async move {
             for (join_handle, shutdown_sender) in sub_tasks {
