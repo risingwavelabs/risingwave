@@ -102,8 +102,8 @@ steps:
     timeout_in_minutes: 8
     retry: *auto-retry
 
-  - label: "unit and fuzz test"
-    command: "ci/scripts/unit-fuzz-test.sh"
+  - label: "unit test"
+    command: "ci/scripts/unit-test.sh"
     plugins:
       - ./ci/plugins/swapfile
       - gencer/cache#v2.4.10: *cargo-cache
@@ -115,8 +115,24 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "fuzz test"
+    command: "ci/scripts/fuzz-test.sh"
+    plugins:
+      - ./ci/plugins/swapfile
+      - gencer/cache#v2.4.10: *cargo-cache
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            CODECOV_TOKEN: my-codecov-token
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          environment:
+            - RUN_SQLSMITH: 1
             - RW_RANDOM_SEED_SQLSMITH: true
-    timeout_in_minutes: 18
+    timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
