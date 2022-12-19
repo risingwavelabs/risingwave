@@ -160,7 +160,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         }
     });
 
-    // TODO: maybe do not use a channel here
+    // FIXME: maybe do not use a channel here
     // What I need is basically a oneshot channel with one producer and multiple consumers
     let (svc_shutdown_tx, mut svc_shutdown_rx) = WatchChannel(());
 
@@ -176,10 +176,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let is_leader = services_leader_rx.borrow().clone().1;
         let was_follower = !is_leader;
 
+        // run follower services until node becomes leader
         // FIXME: Add service discovery for follower
         // https://github.com/risingwavelabs/risingwave/issues/6755
-
-        // run follower services until node becomes leader
         let mut svc_shutdown_rx_clone = svc_shutdown_rx.clone();
         let (follower_shutdown_tx, follower_shutdown_rx) = OneChannel::<()>();
         let (follower_finished_tx, follower_finished_rx) = OneChannel::<()>();
