@@ -64,7 +64,7 @@ impl TaskService for BatchServiceImpl {
             .fire_task(
                 task_id.as_ref().expect("no task id found"),
                 plan.expect("no plan found").clone(),
-                epoch,
+                epoch.expect("no epoch found"),
                 ComputeNodeContext::new(
                     self.env.clone(),
                     TaskId::from(task_id.as_ref().expect("no task id found")),
@@ -111,6 +111,7 @@ impl TaskService for BatchServiceImpl {
         } = req.into_inner();
         let task_id = task_id.expect("no task id found");
         let plan = plan.expect("no plan found").clone();
+        let epoch = epoch.expect("no epoch found");
         let context = ComputeNodeContext::new_for_local(self.env.clone());
         trace!(
             "local execute request: plan:{:?} with task id:{:?}",

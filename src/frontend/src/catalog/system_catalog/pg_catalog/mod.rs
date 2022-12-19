@@ -53,7 +53,8 @@ pub use pg_views::*;
 use risingwave_common::array::ListValue;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{NaiveDateTimeWrapper, ScalarImpl};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_pb::user::UserInfo;
 use serde_json::json;
@@ -177,6 +178,38 @@ impl SysCatalogReaderImpl {
                 ])
             })
             .collect_vec())
+    }
+
+    pub(super) async fn read_meta_snapshot(&self) -> Result<Vec<OwnedRow>> {
+        let try_get_date_time = |epoch: u64| {
+            if epoch == 0 {
+                return None;
+            }
+            let time_millis = Epoch::from(epoch).as_unix_millis();
+            NaiveDateTimeWrapper::with_secs_nsecs(
+                (time_millis / 1000) as i64,
+                (time_millis % 1000 * 1_000_000) as u32,
+            )
+            .map(ScalarImpl::NaiveDateTime)
+            .ok()
+        };
+        let meta_snapshots = self
+            .meta_client
+            .list_meta_snapshots()
+            .await?
+            .into_iter()
+            .map(|s| {
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(s.id as i64)),
+                    Some(ScalarImpl::Int64(s.hummock_version_id as i64)),
+                    Some(ScalarImpl::Int64(s.safe_epoch as i64)),
+                    try_get_date_time(s.safe_epoch),
+                    Some(ScalarImpl::Int64(s.max_committed_epoch as i64)),
+                    try_get_date_time(s.max_committed_epoch),
+                ])
+            })
+            .collect_vec();
+        Ok(meta_snapshots)
     }
 
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
