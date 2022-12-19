@@ -141,9 +141,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let span = tracing::span!(tracing::Level::INFO, "node_status");
         let _enter = span.enter();
         loop {
-            if note_status_leader_rx.changed().await.is_err() {
-                panic!("Leader sender dropped");
-            }
+            note_status_leader_rx
+                .changed()
+                .await
+                .expect("Leader sender dropped");
+
             let (leader_info, is_leader) = note_status_leader_rx.borrow().clone();
             let leader_addr = HostAddr::from(leader_info);
 
@@ -169,9 +171,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let _enter = span.enter();
 
         // failover logic
-        if services_leader_rx.changed().await.is_err() {
-            panic!("Leader sender dropped");
-        }
+        services_leader_rx
+            .changed()
+            .await
+            .expect("Leader sender dropped");
 
         let is_leader = services_leader_rx.borrow().clone().1;
         let was_follower = !is_leader;
@@ -186,7 +189,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             tracing::info!("Starting follower services");
             tokio::spawn(async move {
                 let health_srv = HealthServiceImpl::new();
-                // TODO: Use prometheus endpoint in follower?
                 tonic::transport::Server::builder()
                     .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
                     .add_service(HealthServer::new(health_srv))
@@ -220,9 +222,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
         // wait until this node becomes a leader
         while !services_leader_rx.borrow().clone().1 {
-            if services_leader_rx.changed().await.is_err() {
-                panic!("Leader sender dropped");
-            }
+            services_leader_rx
+                .changed()
+                .await
+                .expect("Leader sender dropped");
         }
 
         // shut down follower svc if node used to be follower
@@ -270,7 +273,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         // https://github.com/risingwavelabs/risingwave/issues/6755
 
         tonic::transport::Server::builder()
-            .layer(MetricsMiddlewareLayer::new(svc.meta_metrics.clone()))
+            .layer(MetricsMiddlewareLayer::new(svc.meta_metrics))
             .add_service(HeartbeatServiceServer::new(svc.heartbeat_srv))
             .add_service(ClusterServiceServer::new(svc.cluster_srv))
             .add_service(StreamManagerServiceServer::new(svc.stream_srv))
