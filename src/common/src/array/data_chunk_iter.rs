@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::TrustedLen;
+
 use super::column::Column;
 use crate::array::DataChunk;
-use crate::row::{Row, Row2, RowExt};
+use crate::row::Row;
 use crate::types::DatumRef;
 
 impl DataChunk {
     /// Get an iterator for visible rows.
-    pub fn rows(&self) -> impl Iterator<Item = RowRef<'_>> {
+    pub fn rows(&self) -> DataChunkRefIter<'_> {
         DataChunkRefIter {
             chunk: self,
             idx: Some(0),
@@ -27,7 +29,7 @@ impl DataChunk {
     }
 
     /// Get an iterator for all rows in the chunk, and a `None` represents an invisible row.
-    pub fn rows_with_holes(&self) -> impl Iterator<Item = Option<RowRef<'_>>> {
+    pub fn rows_with_holes(&self) -> DataChunkRefIterWithHoles<'_> {
         DataChunkRefIterWithHoles {
             chunk: self,
             idx: 0,
@@ -35,7 +37,7 @@ impl DataChunk {
     }
 }
 
-struct DataChunkRefIter<'a> {
+pub struct DataChunkRefIter<'a> {
     chunk: &'a DataChunk,
     /// `None` means finished
     idx: Option<usize>,
@@ -64,7 +66,7 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
     }
 }
 
-struct DataChunkRefIterWithHoles<'a> {
+pub struct DataChunkRefIterWithHoles<'a> {
     chunk: &'a DataChunk,
     idx: usize,
 }
@@ -101,7 +103,7 @@ pub struct RowRef<'a> {
 
 impl<'a> std::fmt::Debug for RowRef<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list().entries(self.values()).finish()
+        f.debug_list().entries(self.iter()).finish()
     }
 }
 
@@ -109,70 +111,6 @@ impl<'a> RowRef<'a> {
     pub fn new(chunk: &'a DataChunk, idx: usize) -> Self {
         debug_assert!(idx < chunk.capacity());
         Self { chunk, idx }
-    }
-
-    /// TODO(row trait): use `Row::datum_at` instead.
-    pub fn value_at(&self, pos: usize) -> DatumRef<'_> {
-        debug_assert!(self.idx < self.chunk.capacity());
-        // for `RowRef`, the index is always in bound.
-        unsafe {
-            self.chunk.columns()[pos]
-                .array_ref()
-                .value_at_unchecked(self.idx)
-        }
-    }
-
-    /// Returns the datum ref at the `pos`, without doing bounds checking.
-    ///
-    /// # Safety
-    /// Calling this method with an out-of-bounds index is undefined behavior.
-    pub(super) unsafe fn value_at_unchecked(&self, pos: usize) -> DatumRef<'_> {
-        debug_assert!(self.idx < self.chunk.capacity());
-        // for `RowRef`, the index is always in bound.
-        self.chunk
-            .columns()
-            .get_unchecked(pos)
-            .array_ref()
-            .value_at_unchecked(self.idx)
-    }
-
-    pub fn size(&self) -> usize {
-        self.chunk.columns().len()
-    }
-
-    /// TODO(row trait): make `pub(super)` and use `Row::iter` instead.
-    pub fn values<'b>(&'b self) -> impl Iterator<Item = DatumRef<'a>>
-    where
-        'a: 'b,
-    {
-        debug_assert!(self.idx < self.chunk.capacity());
-        RowRefIter::<'a> {
-            columns: self.chunk.columns().iter(),
-            row_idx: self.idx,
-        }
-    }
-
-    /// Get an owned `Row` by the given `indices` from current row ref.
-    ///
-    /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
-    ///
-    /// TODO(row trait): use `Row::project` instead.
-    pub fn row_by_indices(&self, indices: &[usize]) -> Row {
-        self.project(indices).into_owned_row()
-    }
-
-    /// Get an iterator of datum refs by the given `indices` from current row ref.
-    ///
-    /// TODO(row trait): use `Row::project` instead.
-    pub fn datum_refs_by_indices<'b, 'c>(
-        &'b self,
-        indices: &'c [usize],
-    ) -> impl Iterator<Item = DatumRef<'c>>
-    where
-        'a: 'b,
-        'b: 'c,
-    {
-        indices.iter().map(|&idx| self.value_at(idx))
     }
 
     /// Get the index of this row in the data chunk.
@@ -184,46 +122,62 @@ impl<'a> RowRef<'a> {
 
 impl PartialEq for RowRef<'_> {
     fn eq(&self, other: &Self) -> bool {
-        self.values().eq(other.values())
+        self.iter().eq(other.iter())
     }
 }
 impl Eq for RowRef<'_> {}
 
 impl PartialOrd for RowRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.values().partial_cmp(other.values())
+        self.iter().partial_cmp(other.iter())
     }
 }
 impl Ord for RowRef<'_> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.values().cmp(other.values())
+        self.iter().cmp(other.iter())
     }
 }
 
-impl Row2 for RowRef<'_> {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+impl Row for RowRef<'_> {
+    type Iter<'a> = RowRefIter<'a>
     where
         Self: 'a;
 
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        RowRef::value_at(self, index)
+        debug_assert!(self.idx < self.chunk.capacity());
+        // for `RowRef`, the index is always in bound.
+        unsafe {
+            self.chunk.columns()[index]
+                .array_ref()
+                .value_at_unchecked(self.idx)
+        }
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        RowRef::value_at_unchecked(self, index)
+        debug_assert!(self.idx < self.chunk.capacity());
+        // for `RowRef`, the index is always in bound.
+        self.chunk
+            .columns()
+            .get_unchecked(index)
+            .array_ref()
+            .value_at_unchecked(self.idx)
     }
 
     fn len(&self) -> usize {
-        RowRef::size(self)
+        self.chunk.columns().len()
     }
 
     fn iter(&self) -> Self::Iter<'_> {
-        RowRef::values(self)
+        debug_assert!(self.idx < self.chunk.capacity());
+        RowRefIter {
+            columns: self.chunk.columns().iter(),
+            row_idx: self.idx,
+        }
     }
 }
 
 #[derive(Clone)]
-struct RowRefIter<'a> {
+pub struct RowRefIter<'a> {
     columns: std::slice::Iter<'a, Column>,
     row_idx: usize,
 }
@@ -239,4 +193,10 @@ impl<'a> Iterator for RowRefIter<'a> {
                 .map(|col| col.array_ref().value_at_unchecked(self.row_idx))
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.columns.size_hint()
+    }
 }
+
+unsafe impl TrustedLen for RowRefIter<'_> {}

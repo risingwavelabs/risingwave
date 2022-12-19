@@ -14,7 +14,6 @@
 
 pub mod console;
 pub mod kafka;
-pub mod mysql;
 pub mod redis;
 pub mod remote;
 
@@ -33,7 +32,6 @@ pub use tracing;
 
 use crate::sink::console::{ConsoleConfig, ConsoleSink, CONSOLE_SINK};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
-pub use crate::sink::mysql::{MySqlConfig, MySqlSink, MYSQL_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink, REDIS_SINK};
 use crate::sink::remote::{RemoteConfig, RemoteSink};
 use crate::ConnectorParams;
@@ -56,7 +54,6 @@ pub trait Sink {
 
 #[derive(Clone, Debug, EnumAsInner)]
 pub enum SinkConfig {
-    Mysql(MySqlConfig),
     Redis(RedisConfig),
     Kafka(KafkaConfig),
     Remote(RemoteConfig),
@@ -67,7 +64,6 @@ pub enum SinkConfig {
 #[derive(Clone, Debug, EnumAsInner, Serialize, Deserialize)]
 pub enum SinkState {
     Kafka,
-    Mysql,
     Redis,
     Console,
     Remote,
@@ -85,7 +81,6 @@ impl SinkConfig {
         match sink_type.to_lowercase().as_str() {
             KAFKA_SINK => Ok(SinkConfig::Kafka(KafkaConfig::from_hashmap(properties)?)),
             REDIS_SINK => Ok(SinkConfig::Redis(RedisConfig::from_hashmap(properties)?)),
-            MYSQL_SINK => Ok(SinkConfig::Mysql(MySqlConfig::from_hashmap(properties)?)),
             CONSOLE_SINK => Ok(SinkConfig::Console(ConsoleConfig::from_hashmap(
                 properties,
             )?)),
@@ -96,7 +91,6 @@ impl SinkConfig {
 
     pub fn get_connector(&self) -> &'static str {
         match self {
-            SinkConfig::Mysql(_) => "mysql",
             SinkConfig::Kafka(_) => "kafka",
             SinkConfig::Redis(_) => "redis",
             SinkConfig::Remote(_) => "remote",
@@ -108,7 +102,6 @@ impl SinkConfig {
 
 #[derive(Debug)]
 pub enum SinkImpl {
-    MySql(Box<MySqlSink>),
     Redis(Box<RedisSink>),
     Kafka(Box<KafkaSink>),
     Remote(Box<RemoteSink>),
@@ -124,11 +117,10 @@ impl SinkImpl {
         connector_params: ConnectorParams,
     ) -> Result<Self> {
         Ok(match cfg {
-            SinkConfig::Mysql(cfg) => SinkImpl::MySql(Box::new(MySqlSink::new(cfg, schema).await?)),
+            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg, schema).await?)),
             SinkConfig::Redis(cfg) => {
                 SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema, pk_indices)?))
             }
-            SinkConfig::Kafka(cfg) => SinkImpl::Kafka(Box::new(KafkaSink::new(cfg, schema).await?)),
             SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
             SinkConfig::Remote(cfg) => SinkImpl::Remote(Box::new(
                 RemoteSink::new(cfg, schema, pk_indices, connector_params).await?,
@@ -136,31 +128,12 @@ impl SinkImpl {
             SinkConfig::BlackHole => SinkImpl::Blackhole,
         })
     }
-
-    pub fn needs_preparation(&self) -> bool {
-        match self {
-            SinkImpl::MySql(_) => true,
-            SinkImpl::Redis(_) => false,
-            SinkImpl::Kafka(_) => false,
-            SinkImpl::Remote(_) => false,
-            SinkImpl::Console(_) => false,
-            SinkImpl::Blackhole => false,
-        }
-    }
-
-    pub async fn prepare(&mut self) -> Result<()> {
-        match self {
-            SinkImpl::MySql(sink) => sink.prepare().await,
-            _ => unreachable!(),
-        }
-    }
 }
 
 #[async_trait]
 impl Sink for SinkImpl {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         match self {
-            SinkImpl::MySql(sink) => sink.write_batch(chunk).await,
             SinkImpl::Redis(sink) => sink.write_batch(chunk).await,
             SinkImpl::Kafka(sink) => sink.write_batch(chunk).await,
             SinkImpl::Remote(sink) => sink.write_batch(chunk).await,
@@ -171,7 +144,6 @@ impl Sink for SinkImpl {
 
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         match self {
-            SinkImpl::MySql(sink) => sink.begin_epoch(epoch).await,
             SinkImpl::Redis(sink) => sink.begin_epoch(epoch).await,
             SinkImpl::Kafka(sink) => sink.begin_epoch(epoch).await,
             SinkImpl::Remote(sink) => sink.begin_epoch(epoch).await,
@@ -182,7 +154,6 @@ impl Sink for SinkImpl {
 
     async fn commit(&mut self) -> Result<()> {
         match self {
-            SinkImpl::MySql(sink) => sink.commit().await,
             SinkImpl::Redis(sink) => sink.commit().await,
             SinkImpl::Kafka(sink) => sink.commit().await,
             SinkImpl::Remote(sink) => sink.commit().await,
@@ -193,7 +164,6 @@ impl Sink for SinkImpl {
 
     async fn abort(&mut self) -> Result<()> {
         match self {
-            SinkImpl::MySql(sink) => sink.abort().await,
             SinkImpl::Redis(sink) => sink.abort().await,
             SinkImpl::Kafka(sink) => sink.abort().await,
             SinkImpl::Remote(sink) => sink.abort().await,
@@ -207,10 +177,6 @@ pub type Result<T> = std::result::Result<T, SinkError>;
 
 #[derive(Error, Debug)]
 pub enum SinkError {
-    #[error("MySql error: {0}")]
-    MySql(String),
-    #[error("MySql inner error: {0}")]
-    MySqlInner(#[from] mysql_async::Error),
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
     #[error("Redis error: {0}")]

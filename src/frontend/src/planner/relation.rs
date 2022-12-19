@@ -81,7 +81,15 @@ impl Planner {
         let right = self.plan_relation(join.right)?;
         let join_type = join.join_type;
         let on_clause = join.cond;
-        Ok(LogicalJoin::create(left, right, join_type, on_clause))
+        if on_clause.has_subquery() {
+            Err(ErrorCode::NotImplemented(
+                "Subquery in join on condition is unsupported".into(),
+                None.into(),
+            )
+            .into())
+        } else {
+            Ok(LogicalJoin::create(left, right, join_type, on_clause))
+        }
     }
 
     pub(super) fn plan_window_table_function(

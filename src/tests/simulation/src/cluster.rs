@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 use clap::Parser;
-use futures::future::{join_all, BoxFuture};
+use futures::future::join_all;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::Rng;
 use sqllogictest::AsyncDB;
@@ -102,11 +102,7 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    pub fn start(conf: Configuration) -> BoxFuture<'static, Result<Self>> {
-        Box::pin(Self::start_inner(conf))
-    }
-
-    async fn start_inner(conf: Configuration) -> Result<Self> {
+    pub async fn start(conf: Configuration) -> Result<Self> {
         let handle = madsim::runtime::Handle::current();
         println!("seed = {}", handle.seed());
         println!("{:#?}", conf);
@@ -266,12 +262,9 @@ impl Cluster {
     }
 
     /// Run a SQL query from the client.
-    pub fn run(&mut self, sql: &str) -> BoxFuture<'_, Result<String>> {
-        Box::pin(self.run_inner(sql.to_string()))
-    }
-
-    async fn run_inner(&mut self, sql: String) -> Result<String> {
+    pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
         let frontend = self.rand_frontend_ip();
+        let sql = sql.into();
 
         let result = self
             .client
@@ -285,7 +278,19 @@ impl Cluster {
             })
             .await??;
 
-        Ok(result)
+        match result {
+            sqllogictest::DBOutput::Rows { rows, .. } => Ok(rows
+                .into_iter()
+                .map(|row| {
+                    row.into_iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .collect::<Vec<_>>()
+                .join("\n")),
+            _ => Ok("".to_string()),
+        }
     }
 
     /// Run a future on the client node.
@@ -298,20 +303,10 @@ impl Cluster {
     }
 
     /// Run a SQL query from the client and wait until the condition is met.
-    pub fn wait_until(
+    pub async fn wait_until(
         &mut self,
-        sql: &str,
-        p: impl FnMut(&str) -> bool + Send + 'static,
-        interval: Duration,
-        timeout: Duration,
-    ) -> BoxFuture<'_, Result<String>> {
-        Box::pin(self.wait_until_inner(sql.to_string(), p, interval, timeout))
-    }
-
-    async fn wait_until_inner(
-        &mut self,
-        sql: String,
-        mut p: impl FnMut(&str) -> bool + Send + 'static,
+        sql: impl Into<String> + Clone,
+        mut p: impl FnMut(&str) -> bool,
         interval: Duration,
         timeout: Duration,
     ) -> Result<String> {
@@ -319,7 +314,7 @@ impl Cluster {
             let mut interval = madsim::time::interval(interval);
             loop {
                 interval.tick().await;
-                let result = self.run(&sql).await?;
+                let result = self.run(sql.clone()).await?;
                 if p(&result) {
                     return Ok::<_, anyhow::Error>(result);
                 }
@@ -332,24 +327,15 @@ impl Cluster {
         }
     }
 
-    async fn wait_until_non_empty_inner(
-        &mut self,
-        sql: String,
-        interval: Duration,
-        timeout: Duration,
-    ) -> Result<String> {
-        self.wait_until_inner(sql, |r| !r.trim().is_empty(), interval, timeout)
-            .await
-    }
-
     /// Run a SQL query from the client and wait until the return result is not empty.
-    pub fn wait_until_non_empty(
+    pub async fn wait_until_non_empty(
         &mut self,
         sql: &str,
         interval: Duration,
         timeout: Duration,
-    ) -> BoxFuture<'_, Result<String>> {
-        Box::pin(self.wait_until_non_empty_inner(sql.to_string(), interval, timeout))
+    ) -> Result<String> {
+        self.wait_until(sql, |r| !r.trim().is_empty(), interval, timeout)
+            .await
     }
 
     /// Kill some nodes and restart them in 2s.
@@ -357,7 +343,7 @@ impl Cluster {
         let mut nodes = vec![];
         if opts.kill_meta {
             if rand::thread_rng().gen_bool(0.5) {
-                nodes.push(format!("meta"));
+                nodes.push("meta".to_string());
             }
         }
         if opts.kill_frontend {
@@ -400,12 +386,12 @@ impl Cluster {
             let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
             tokio::time::sleep(t).await;
             tracing::info!("kill {name}");
-            madsim::runtime::Handle::current().kill(&name);
+            madsim::runtime::Handle::current().kill(name);
 
             let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
             tokio::time::sleep(t).await;
             tracing::info!("restart {name}");
-            madsim::runtime::Handle::current().restart(&name);
+            madsim::runtime::Handle::current().restart(name);
         }))
         .await;
     }

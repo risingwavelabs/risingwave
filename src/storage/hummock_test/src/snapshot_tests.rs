@@ -49,9 +49,10 @@ macro_rules! assert_count_range_scan {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: false,
-                    dist_key_hint: None,
+                    prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
@@ -85,6 +86,7 @@ macro_rules! assert_count_backward_range_scan {
                     epoch: $epoch,
                     table_id: Default::default(),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await

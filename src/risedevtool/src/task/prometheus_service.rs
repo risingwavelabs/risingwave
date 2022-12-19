@@ -65,7 +65,7 @@ impl Task for PrometheusService {
 
         std::fs::write(
             Path::new(&prefix_config).join("prometheus.yml"),
-            &PrometheusGen.gen_prometheus_yml(&self.config),
+            PrometheusGen.gen_prometheus_yml(&self.config),
         )?;
 
         let mut cmd = self.prometheus()?;

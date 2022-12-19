@@ -25,6 +25,12 @@ use tracing_subscriber::filter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 
+/// Dump logs of all SQLs, i.e., tracing target `pgwire_query_log` to `.risingwave/log/query.log`.
+///
+/// Changing the level of `pgwire` to `TRACE` in `configure_risingwave_targets_fmt` can also turn on
+/// the logs, but without a dedicated file.
+const ENABLE_QUERY_LOG_FILE: bool = false;
+
 /// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
 /// logs are needed, add them here.
 fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets {
@@ -67,7 +73,7 @@ impl LoggerSettings {
     pub fn new(enable_tokio_console: bool) -> Self {
         Self {
             enable_tokio_console,
-            colorful: console::colors_enabled_stderr(),
+            colorful: console::colors_enabled_stderr() && console::colors_enabled(),
         }
     }
 }
@@ -119,8 +125,47 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
         fmt_layer.with_filter(filter)
     };
+    let mut layers = vec![fmt_layer.boxed()];
 
-    let tokio_console_layer = if settings.enable_tokio_console {
+    if ENABLE_QUERY_LOG_FILE {
+        let query_log_path = ".risingwave/log/query.log";
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(query_log_path)
+            .expect("failed to create '.risingwave/log/query.log'");
+        let layer = tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_level(false)
+            .with_file(false)
+            .with_target(false)
+            .with_writer(std::sync::Mutex::new(file))
+            .with_filter(filter::Targets::new().with_target("pgwire_query_log", Level::TRACE));
+        layers.push(layer.boxed());
+
+        // also dump slow query log
+        let slow_query_log_path = ".risingwave/log/slow_query.log";
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(slow_query_log_path)
+            .expect("failed to create '.risingwave/log/slow_query.log'");
+        let layer = tracing_subscriber::fmt::layer()
+            .with_ansi(false)
+            .with_level(false)
+            .with_file(false)
+            .with_target(false)
+            .with_writer(std::sync::Mutex::new(file))
+            .with_filter(
+                filter::Targets::new()
+                    .with_target("risingwave_frontend_slow_query_log", Level::TRACE),
+            );
+        layers.push(layer.boxed());
+    };
+
+    if settings.enable_tokio_console {
         let (console_layer, server) = console_subscriber::ConsoleLayer::builder()
             .with_default_env()
             .build();
@@ -129,32 +174,20 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
                 .with_target("tokio", Level::TRACE)
                 .with_target("runtime", Level::TRACE),
         );
-        Some((console_layer, server))
-    } else {
-        None
+        layers.push(console_layer.boxed());
+        std::thread::spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .block_on(async move {
+                    tracing::info!("serving console subscriber");
+                    server.serve().await.unwrap();
+                });
+        });
     };
 
-    match tokio_console_layer {
-        Some((tokio_console_layer, server)) => {
-            tracing_subscriber::registry()
-                .with(fmt_layer)
-                .with(tokio_console_layer)
-                .init();
-            std::thread::spawn(|| {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .unwrap()
-                    .block_on(async move {
-                        tracing::info!("serving console subscriber");
-                        server.serve().await.unwrap();
-                    });
-            });
-        }
-        None => {
-            tracing_subscriber::registry().with(fmt_layer).init();
-        }
-    }
+    tracing_subscriber::registry().with(layers).init();
 
     // TODO: add file-appender tracing subscriber in the future
 }

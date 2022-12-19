@@ -19,7 +19,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
-use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::HummockSnapshot;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{channel as once_channel, Sender as Callback};
@@ -32,7 +33,37 @@ use crate::scheduler::{SchedulerError, SchedulerResult};
 const UNPIN_INTERVAL_SECS: u64 = 10;
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
-pub type PinnedHummockSnapshot = HummockSnapshotGuard;
+pub enum PinnedHummockSnapshot {
+    FrontendPinned(HummockSnapshotGuard),
+    /// Other arbitrary epoch, e.g. user specified.
+    /// Availability and consistency of underlying data should be guaranteed accordingly.
+    /// Currently it's only used for querying meta snapshot backup.
+    Other(Epoch),
+}
+
+impl PinnedHummockSnapshot {
+    pub fn get_batch_query_epoch(&self) -> BatchQueryEpoch {
+        match self {
+            PinnedHummockSnapshot::FrontendPinned(s) => {
+                // extend Epoch::Current here
+                BatchQueryEpoch {
+                    epoch: Some(batch_query_epoch::Epoch::Committed(
+                        s.snapshot.committed_epoch,
+                    )),
+                }
+            }
+            PinnedHummockSnapshot::Other(e) => BatchQueryEpoch {
+                epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),
+            },
+        }
+    }
+}
+
+impl From<HummockSnapshotGuard> for PinnedHummockSnapshot {
+    fn from(s: HummockSnapshotGuard) -> Self {
+        PinnedHummockSnapshot::FrontendPinned(s)
+    }
+}
 
 type SnapshotRef = Arc<ArcSwap<HummockSnapshot>>;
 
@@ -165,7 +196,7 @@ impl HummockSnapshotManager {
         }
     }
 
-    pub async fn acquire(&self, query_id: &QueryId) -> SchedulerResult<PinnedHummockSnapshot> {
+    pub async fn acquire(&self, query_id: &QueryId) -> SchedulerResult<HummockSnapshotGuard> {
         let (sender, rc) = once_channel();
         let msg = EpochOperation::RequestEpoch {
             query_id: query_id.clone(),

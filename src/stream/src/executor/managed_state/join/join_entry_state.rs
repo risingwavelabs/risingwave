@@ -85,8 +85,12 @@ impl JoinEntryState {
     pub fn values_mut<'a>(
         &'a mut self,
         data_types: &'a [DataType],
-    ) -> impl Iterator<Item = (&'a mut StateValueType, StreamExecutorResult<JoinRow<Row>>)> + 'a
-    {
+    ) -> impl Iterator<
+        Item = (
+            &'a mut StateValueType,
+            StreamExecutorResult<JoinRow<OwnedRow>>,
+        ),
+    > + 'a {
         self.cached.values_mut().map(|encoded| {
             let decoded = encoded.decode(data_types);
             (encoded, decoded)
@@ -129,11 +133,11 @@ mod tests {
         );
 
         for row_ref in data_chunk.rows() {
-            let row: Row = row_ref.into_owned_row();
+            let row: OwnedRow = row_ref.into_owned_row();
             let value_indices = (0..row.len() - 1).collect_vec();
             let pk = pk_indices.iter().map(|idx| row[*idx].clone()).collect_vec();
             // Pk is only a `i64` here, so encoding method does not matter.
-            let pk = Row::new(pk).project(&value_indices).value_serialize();
+            let pk = OwnedRow::new(pk).project(&value_indices).value_serialize();
             let join_row = JoinRow { row, degree: 0 };
             managed_state.insert(pk, join_row.encode());
         }

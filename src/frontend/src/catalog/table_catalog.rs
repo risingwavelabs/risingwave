@@ -110,6 +110,8 @@ pub struct TableCatalog {
     pub definition: String,
 
     pub handle_pk_conflict: bool,
+
+    pub read_prefix_len_hint: usize,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -215,6 +217,7 @@ impl TableCatalog {
                 .retention_seconds
                 .unwrap_or(TABLE_OPTION_DUMMY_RETENTION_SECOND),
             value_indices: self.value_indices.clone(),
+            read_prefix_len_hint: self.read_prefix_len_hint,
         }
     }
 
@@ -267,6 +270,7 @@ impl TableCatalog {
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
             definition: self.definition.clone(),
             handle_pk_conflict: self.handle_pk_conflict,
+            read_prefix_len_hint: self.read_prefix_len_hint as u32,
         }
     }
 }
@@ -316,6 +320,7 @@ impl From<ProstTable> for TableCatalog {
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition.clone(),
             handle_pk_conflict: tb.handle_pk_conflict,
+            read_prefix_len_hint: tb.read_prefix_len_hint as usize,
         }
     }
 }
@@ -400,6 +405,7 @@ mod tests {
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict: false,
+            read_prefix_len_hint: 0,
             vnode_col_index: None,
             row_id_index: None,
         }
@@ -461,6 +467,7 @@ mod tests {
                 value_indices: vec![0],
                 definition: "".into(),
                 handle_pk_conflict: false,
+                read_prefix_len_hint: 0,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

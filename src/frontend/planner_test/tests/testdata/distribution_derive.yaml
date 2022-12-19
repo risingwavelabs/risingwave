@@ -12,11 +12,9 @@
   sql: select A.v, B.v as Bv from A join B using(k1);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: a.k1 = b.k1, output: [a.v, b.v] }
-      ├─BatchExchange { order: [], dist: HashShard(a.k1) }
-      | └─BatchScan { table: a, columns: [a.k1, a.v], distribution: SomeShard }
-      └─BatchExchange { order: [], dist: HashShard(b.k1) }
-        └─BatchScan { table: b, columns: [b.k1, b.v], distribution: SomeShard }
+    └─BatchLookupJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v] }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
+        └─BatchScan { table: a, columns: [a.k1, a.v], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v, bv, a._row_id(hidden), a.k1(hidden), b._row_id(hidden), b.k1(hidden)], pk_columns: [a._row_id, b._row_id, a.k1, b.k1] }
     └─StreamHashJoin { type: Inner, predicate: a.k1 = b.k1, output: [a.v, b.v, a._row_id, a.k1, b._row_id, b.k1] }
@@ -30,11 +28,9 @@
   sql: select A.v, B.v as Bv from Ak1 as A join B using(k1)
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: ak1.k1 = b.k1, output: [ak1.v, b.v] }
-      ├─BatchExchange { order: [], dist: HashShard(ak1.k1) }
-      | └─BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
-      └─BatchExchange { order: [], dist: HashShard(b.k1) }
-        └─BatchScan { table: b, columns: [b.k1, b.v], distribution: SomeShard }
+    └─BatchLookupJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v] }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(ak1.k1) }
+        └─BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
   stream_plan: |
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), b._row_id(hidden), b.k1(hidden)], pk_columns: [ak1.a._row_id, b._row_id, ak1.k1, b.k1] }
     └─StreamHashJoin { type: Inner, predicate: ak1.k1 = b.k1, output: [ak1.v, b.v, ak1.a._row_id, ak1.k1, b._row_id, b.k1] }
@@ -72,11 +68,9 @@
   sql: select A.v, B.v as Bv from A join Bk1 as B using(k1)
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v] }
-      ├─BatchExchange { order: [], dist: HashShard(a.k1) }
-      | └─BatchScan { table: a, columns: [a.k1, a.v], distribution: SomeShard }
-      └─BatchExchange { order: [], dist: HashShard(bk1.k1) }
-        └─BatchScan { table: bk1, columns: [bk1.k1, bk1.v], distribution: UpstreamHashShard(bk1.k1) }
+    └─BatchLookupJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v] }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
+        └─BatchScan { table: a, columns: [a.k1, a.v], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v, bv, a._row_id(hidden), a.k1(hidden), bk1.b._row_id(hidden), bk1.k1(hidden)], pk_columns: [a._row_id, bk1.b._row_id, a.k1, bk1.k1] }
     └─StreamHashJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v, a._row_id, a.k1, bk1.b._row_id, bk1.k1] }
@@ -114,11 +108,9 @@
   sql: select A.v, B.v as Bv from Ak1 as A join Bk1 as B using(k1)
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v] }
-      ├─BatchExchange { order: [], dist: HashShard(ak1.k1) }
-      | └─BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
-      └─BatchExchange { order: [], dist: HashShard(bk1.k1) }
-        └─BatchScan { table: bk1, columns: [bk1.k1, bk1.v], distribution: UpstreamHashShard(bk1.k1) }
+    └─BatchLookupJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v] }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(ak1.k1) }
+        └─BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
   stream_plan: |
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden), bk1.k1(hidden)], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1, bk1.k1] }
     └─StreamHashJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id, bk1.k1] }
@@ -651,13 +643,12 @@
     select A.v, B.num as Bv from B join Ak1 as A using(k1)
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count] }
-      ├─BatchProject { exprs: [count, a.k1] }
-      | └─BatchHashAgg { group_key: [a.k1], aggs: [count] }
-      |   └─BatchExchange { order: [], dist: HashShard(a.k1) }
-      |     └─BatchScan { table: a, columns: [a.k1], distribution: SomeShard }
-      └─BatchExchange { order: [], dist: HashShard(ak1.k1) }
-        └─BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
+    └─BatchLookupJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count] }
+      └─BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
+        └─BatchProject { exprs: [count, a.k1] }
+          └─BatchHashAgg { group_key: [a.k1], aggs: [count] }
+            └─BatchExchange { order: [], dist: HashShard(a.k1) }
+              └─BatchScan { table: a, columns: [a.k1], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v, bv, a.k1(hidden), ak1.a._row_id(hidden), ak1.k1(hidden)], pk_columns: [a.k1, ak1.a._row_id, ak1.k1] }
     └─StreamHashJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count, a.k1, ak1.a._row_id, ak1.k1] }

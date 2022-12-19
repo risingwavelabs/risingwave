@@ -22,6 +22,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Field;
 use risingwave_common::catalog::Schema;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
+use risingwave_common::row::Row;
 #[cfg(test)]
 use risingwave_common::types::DataType;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
@@ -242,7 +243,7 @@ impl Sink for RemoteSink {
         for (op, row_ref) in chunk.rows() {
             let mut map = serde_json::Map::new();
             row_ref
-                .values()
+                .iter()
                 .zip_eq(self.schema.fields.iter())
                 .for_each(|(v, f)| {
                     map.insert(f.name.clone(), parse_datum(v));
