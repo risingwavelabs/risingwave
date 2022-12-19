@@ -34,10 +34,13 @@ use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
+use tokio::sync::oneshot::channel as OneChannel;
+use tokio::sync::watch::{channel as WatchChannel, Sender as WatchSender};
 use tokio::task::JoinHandle;
 
 use super::elections::run_elections;
 use super::intercept::MetricsMiddlewareLayer;
+use super::leader_svs::get_leader_srv;
 use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
@@ -90,16 +93,13 @@ impl Default for AddressInfo {
     }
 }
 
-// TODO: in imports do something like tokio::sync::watch::Sender<()> as watchSender
-// and oneshot::sender as oneshotSender
-
 pub async fn rpc_serve(
     address_info: AddressInfo,
     meta_store_backend: MetaStoreBackend,
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
-) -> MetaResult<(JoinHandle<()>, tokio::sync::watch::Sender<()>)> {
+) -> MetaResult<(JoinHandle<()>, WatchSender<()>)> {
     match meta_store_backend {
         MetaStoreBackend::Etcd {
             endpoints,
@@ -143,11 +143,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
-) -> MetaResult<(JoinHandle<()>, tokio::sync::watch::Sender<()>)> {
-    // Contains address info with port
-    //   address_info.listen_addr;
-
+) -> MetaResult<(JoinHandle<()>, WatchSender<()>)> {
     // Initialize managers.
+    //    let (_, election_handle, election_shutdown, leader_rx) = run_elections(
     let (_, lease_handle, lease_shutdown, leader_rx) = run_elections(
         address_info.listen_addr.clone().to_string(),
         meta_store.clone(),
@@ -160,13 +158,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     // print current leader/follower status of this node + fencing mechanism
     tokio::spawn(async move {
-        let span = tracing::span!(tracing::Level::INFO, "node_status");
-        let _enter = span.enter();
+        let _ = tracing::span!(tracing::Level::INFO, "node_status").enter();
         let mut was_leader = false;
         loop {
-            if note_status_leader_rx.changed().await.is_err() {
-                panic!("Leader sender dropped");
-            }
+            note_status_leader_rx
+                .changed()
+                .await
+                .expect("Leader sender dropped");
             let (leader_info, is_leader) = note_status_leader_rx.borrow().clone();
             let leader_addr = HostAddr::from(leader_info);
 
@@ -195,9 +193,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     });
 
     // TODO:
-    // Remove the interceptor pattern again
-
-    // TODO:
     // we only can define leader services when they are needed. Otherwise they already do things
     // FIXME: Start leader services if follower becomes leader
 
@@ -210,304 +205,96 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let _enter = span.enter();
 
         // failover logic
-        if services_leader_rx.changed().await.is_err() {
-            panic!("Leader sender dropped");
-        }
+        services_leader_rx
+            .changed()
+            .await
+            .expect("Leader sender dropped");
 
         let is_leader = services_leader_rx.borrow().clone().1;
         let was_follower = !is_leader;
         let f_leader_svc_leader_rx = services_leader_rx.clone();
         let l_leader_svc_leader_rx = services_leader_rx.clone();
 
-        // TODO: remove interceptor. Not needed if we have LeaderService
         let leader_srv = LeaderServiceImpl::new(f_leader_svc_leader_rx);
 
         // run follower services until node becomes leader
         let mut svc_shutdown_rx_clone = svc_shutdown_rx.clone();
-        let (follower_shutdown_tx, follower_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-        let (follower_finished_tx, follower_finished_rx) = tokio::sync::oneshot::channel::<()>();
+        let (follower_shutdown_tx, follower_shutdown_rx) = OneChanel::<()>();
+        let (follower_finished_tx, follower_finished_rx) = OneChanel::<()>();
         if !is_leader {
-            tracing::info!("Starting follower services");
             tokio::spawn(async move {
+                let _ = tracing::span!(tracing::Level::INFO, "follower services").enter();
+                tracing::info!("Starting follower services");
                 let health_srv = HealthServiceImpl::new();
-                // TODO: Use prometheus endpoint in follower?
                 tonic::transport::Server::builder()
                     .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
                     .add_service(HealthServer::new(health_srv))
                     .add_service(LeaderServiceServer::new(leader_srv))
                     .serve_with_shutdown(address_info.listen_addr, async move {
                         tokio::select! {
-                        _ = tokio::signal::ctrl_c() => {},
-                        // shutdown service if all services should be shut down
-                        res = svc_shutdown_rx_clone.changed() =>  {
-                            if res.is_err() {
-                                tracing::error!("service shutdown sender dropped");
-                            }
-                        },
-                        // shutdown service if follower becomes leader
-                        res = follower_shutdown_rx =>  {
-                              if res.is_err() {
-                                  tracing::error!("follower service shutdown sender dropped");
-                              }
+                            _ = tokio::signal::ctrl_c() => {},
+                            // shutdown service if all services should be shut down
+                            res = svc_shutdown_rx_clone.changed() =>  {
+                                match res {
+                                    Ok(_) => tracing::info!("Shutting down services"),
+                                    Err(_) => tracing::error!("Service shutdown sender dropped")
+                                }
                             },
-                          }
+                            // shutdown service if follower becomes leader
+                            res = follower_shutdown_rx =>  {
+                                match res {
+                                    Ok(_) => tracing::info!("Shutting down follower services"),
+                                    Err(_) => tracing::error!("Follower service shutdown sender dropped")
+                                }
+                            },
+                        }
                     })
                     .await
                     .unwrap();
                 match follower_finished_tx.send(()) {
-                    Ok(_) => tracing::info!("Signaling that follower service is down"),
-                    Err(_) => tracing::error!(
-                        "Error when signaling that follower service is down. Receiver dropped"
-                    ),
+                    Ok(_) => tracing::info!("Shutting down follower services done"),
+                    Err(_) => {
+                        tracing::error!("Follower service shutdown done sender receiver dropped")
+                    }
                 }
             });
         }
 
         // wait until this node becomes a leader
         while !services_leader_rx.borrow().clone().1 {
-            if services_leader_rx.changed().await.is_err() {
-                panic!("Leader sender dropped");
-            }
+            services_leader_rx
+                .changed()
+                .await
+                .expect("Leader sender dropped");
         }
 
         // shut down follower svc if node used to be follower
         if was_follower {
             match follower_shutdown_tx.send(()) {
-                // TODO: Do I always use this error format?
-                // Receiver, sender dropped?
                 Ok(_) => tracing::info!("Shutting down follower services"),
                 Err(_) => tracing::error!("Follower service receiver dropped"),
             }
-            // Wait until follower service is
+            // Wait until follower service is down
             match follower_finished_rx.await {
                 Ok(_) => tracing::info!("Follower services shut down"),
                 Err(_) => tracing::error!("Follower service shutdown finished sender dropped"),
             };
         }
 
-        // leader services defined below
-        tracing::info!("Starting leader services");
-
-        // TODO: put leader service definition in separate function or maybe even separate file
-        let prometheus_endpoint = opts.prometheus_endpoint.clone();
-        let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), leader_rx.clone()).await;
-        let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
-        let meta_metrics = Arc::new(MetaMetrics::new());
-        let registry = meta_metrics.registry();
-        monitor_process(registry).unwrap();
-        let compactor_manager = Arc::new(
-            hummock::CompactorManager::with_meta(env.clone(), max_heartbeat_interval.as_secs())
-                .await
-                .unwrap(),
-        );
-
-        let cluster_manager = Arc::new(
-            ClusterManager::new(env.clone(), max_heartbeat_interval)
-                .await
-                .unwrap(),
-        );
-        let hummock_manager = hummock::HummockManager::new(
-            env.clone(),
-            cluster_manager.clone(),
-            meta_metrics.clone(),
-            compactor_manager.clone(),
+        let svc = get_leader_srv(
+            meta_store,
+            address_info.clone(),
+            max_heartbeat_interval,
+            opts,
+            leader_rx,
+            election_handle,
+            election_shutdown,
         )
         .await
-        .unwrap();
-
-        #[cfg(not(madsim))]
-        if let Some(ref dashboard_addr) = address_info.dashboard_addr {
-            let dashboard_service = crate::dashboard::DashboardService {
-                dashboard_addr: *dashboard_addr,
-                cluster_manager: cluster_manager.clone(),
-                fragment_manager: fragment_manager.clone(),
-                meta_store: env.meta_store_ref(),
-                prometheus_endpoint: prometheus_endpoint.clone(),
-                prometheus_client: prometheus_endpoint.as_ref().map(|x| {
-                    use std::str::FromStr;
-                    prometheus_http_query::Client::from_str(x).unwrap()
-                }),
-            };
-            // TODO: join dashboard service back to local thread.
-            tokio::spawn(dashboard_service.serve(address_info.ui_path));
-        }
-
-        let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
-
-        let (barrier_scheduler, scheduled_barriers) =
-            BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
-
-        let source_manager = Arc::new(
-            SourceManager::new(
-                barrier_scheduler.clone(),
-                catalog_manager.clone(),
-                fragment_manager.clone(),
-            )
-            .await
-            .unwrap(),
-        );
-
-        let barrier_manager = Arc::new(GlobalBarrierManager::new(
-            scheduled_barriers,
-            env.clone(),
-            cluster_manager.clone(),
-            catalog_manager.clone(),
-            fragment_manager.clone(),
-            hummock_manager.clone(),
-            source_manager.clone(),
-            meta_metrics.clone(),
-        ));
-
-        {
-            let source_manager = source_manager.clone();
-            tokio::spawn(async move {
-                source_manager.run().await.unwrap();
-            });
-        }
-
-        let stream_manager = Arc::new(
-            GlobalStreamManager::new(
-                env.clone(),
-                fragment_manager.clone(),
-                barrier_scheduler.clone(),
-                cluster_manager.clone(),
-                source_manager.clone(),
-                hummock_manager.clone(),
-            )
-            .unwrap(),
-        );
-
-        hummock_manager
-            .purge_stale(
-                &fragment_manager
-                    .list_table_fragments()
-                    .await
-                    .expect("list_table_fragments"),
-            )
-            .await
-            .unwrap();
-
-        // Initialize services.
-        let backup_object_store = Arc::new(
-            parse_remote_object_store(
-                &env.opts.backup_storage_url,
-                Arc::new(ObjectStoreMetrics::unused()),
-                true,
-            )
-            .await,
-        );
-        let backup_storage = Arc::new(
-            ObjectStoreMetaSnapshotStorage::new(
-                &env.opts.backup_storage_directory,
-                backup_object_store,
-            )
-            .await
-            .unwrap(),
-            // FIXME: Do not use unwrap here
-        );
-        let backup_manager = Arc::new(BackupManager::new(
-            env.clone(),
-            hummock_manager.clone(),
-            backup_storage,
-            meta_metrics.registry().clone(),
-        ));
-        let vacuum_manager = Arc::new(hummock::VacuumManager::new(
-            env.clone(),
-            hummock_manager.clone(),
-            backup_manager.clone(),
-            compactor_manager.clone(),
-        ));
-
-        let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
-        let ddl_srv = DdlServiceImpl::<S>::new(
-            env.clone(),
-            catalog_manager.clone(),
-            stream_manager.clone(),
-            source_manager.clone(),
-            cluster_manager.clone(),
-            fragment_manager.clone(),
-            barrier_manager.clone(),
-        );
-
-        let user_srv = UserServiceImpl::<S>::new(env.clone(), catalog_manager.clone());
-
-        let scale_srv = ScaleServiceImpl::<S>::new(
-            barrier_scheduler.clone(),
-            fragment_manager.clone(),
-            cluster_manager.clone(),
-            source_manager,
-            catalog_manager.clone(),
-            stream_manager.clone(),
-        );
-
-        let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
-        let stream_srv = StreamServiceImpl::<S>::new(
-            env.clone(),
-            barrier_scheduler.clone(),
-            fragment_manager.clone(),
-        );
-        let hummock_srv = HummockServiceImpl::new(
-            hummock_manager.clone(),
-            compactor_manager.clone(),
-            vacuum_manager.clone(),
-            fragment_manager.clone(),
-        );
-        let notification_srv = NotificationServiceImpl::new(
-            env.clone(),
-            catalog_manager,
-            cluster_manager.clone(),
-            hummock_manager.clone(),
-            fragment_manager.clone(),
-        );
-        let health_srv = HealthServiceImpl::new();
-        let backup_srv = BackupServiceImpl::new(backup_manager);
-
-        if let Some(prometheus_addr) = address_info.prometheus_addr {
-            MetricsManager::boot_metrics_service(
-                prometheus_addr.to_string(),
-                meta_metrics.registry().clone(),
-            )
-        }
-
-        // Initialize sub-tasks.
-        // sub_tasks executed concurrently. Can be shutdown via shutdown_all
-        let compaction_scheduler = Arc::new(CompactionScheduler::new(
-            env.clone(),
-            hummock_manager.clone(),
-            compactor_manager.clone(),
-        ));
-        let mut sub_tasks =
-            hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &env.opts);
-        sub_tasks.push(
-            ClusterManager::start_worker_num_monitor(
-                cluster_manager.clone(),
-                Duration::from_secs(env.opts.node_num_monitor_interval_sec),
-                meta_metrics.clone(),
-            )
-            .await,
-        );
-        sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
-        sub_tasks.push((lease_handle, lease_shutdown));
-        if cfg!(not(test)) {
-            sub_tasks.push(
-                ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1))
-                    .await,
-            );
-            sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
-        }
-
-        let (idle_send, idle_recv) = tokio::sync::oneshot::channel();
-        sub_tasks.push(
-            IdleManager::start_idle_checker(
-                env.idle_manager_ref(),
-                Duration::from_secs(30),
-                idle_send,
-            )
-            .await,
-        );
+        .expect("Unable to start leader services");
 
         let shutdown_all = async move {
-            for (join_handle, shutdown_sender) in sub_tasks {
+            for (join_handle, shutdown_sender) in svc.sub_tasks {
                 if let Err(_err) = shutdown_sender.send(()) {
                     // Maybe it is already shut down
                     continue;
@@ -520,32 +307,29 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
         let leader_srv = LeaderServiceImpl::new(l_leader_svc_leader_rx);
 
-        // leader services defined above
         tonic::transport::Server::builder()
-            .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))
-            .add_service(LeaderServiceServer::new(leader_srv))
-            .add_service(HeartbeatServiceServer::new(heartbeat_srv))
-            .add_service(ClusterServiceServer::new(cluster_srv))
-            .add_service(StreamManagerServiceServer::new(stream_srv))
-            .add_service(HummockManagerServiceServer::new(hummock_srv))
-            .add_service(NotificationServiceServer::new(notification_srv))
-            .add_service(DdlServiceServer::new(ddl_srv))
-            .add_service(UserServiceServer::new(user_srv))
-            .add_service(ScaleServiceServer::new(scale_srv))
-            .add_service(HealthServer::new(health_srv))
-            .add_service(BackupServiceServer::new(backup_srv))
+            .layer(MetricsMiddlewareLayer::new(svc.meta_metrics))
+            .add_service(HeartbeatServiceServer::new(svc.heartbeat_srv))
+            .add_service(ClusterServiceServer::new(svc.cluster_srv))
+            .add_service(StreamManagerServiceServer::new(svc.stream_srv))
+            .add_service(HummockManagerServiceServer::new(svc.hummock_srv))
+            .add_service(NotificationServiceServer::new(svc.notification_srv))
+            .add_service(DdlServiceServer::new(svc.ddl_srv))
+            .add_service(UserServiceServer::new(svc.user_srv))
+            .add_service(ScaleServiceServer::new(svc.scale_srv))
+            .add_service(HealthServer::new(svc.health_srv))
+            .add_service(BackupServiceServer::new(svc.backup_srv))
             .serve_with_shutdown(address_info.listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
                     res = svc_shutdown_rx.changed() => {
-                        tracing::info!("svc_shutdown_rx.changed()");
-                        if res.is_err() {
-                            tracing::error!("service shutdown sender dropped");
+                        match res {
+                            Ok(_) => tracing::info!("Shutting down services"),
+                            Err(_) => tracing::error!("Service shutdown receiver dropped")
                         }
                         shutdown_all.await;
                     },
-                    _ = idle_recv => {
-                        tracing::info!("idle_recv");
+                    _ = svc.idle_recv => {
                         shutdown_all.await;
                     },
                 }
