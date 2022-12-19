@@ -17,12 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use etcd_client::ConnectOptions;
-use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
-use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::metrics_manager::MetricsManager;
-use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -33,31 +28,18 @@ use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
+use tokio::sync::oneshot::channel as OneChannel;
+use tokio::sync::watch::{channel as WatchChannel, Sender as WatchSender};
 use tokio::task::JoinHandle;
 
 use super::elections::run_elections;
 use super::intercept::MetricsMiddlewareLayer;
 use super::leader_svs::get_leader_srv;
 use super::service::health_service::HealthServiceImpl;
-use super::service::notification_service::NotificationServiceImpl;
-use super::service::scale_service::ScaleServiceImpl;
-use super::DdlServiceImpl;
-use crate::backup_restore::BackupManager;
-use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
-use crate::hummock::{CompactionScheduler, HummockManager};
-use crate::manager::{
-    CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
-};
+use crate::manager::MetaOpts;
 use crate::rpc::metrics::MetaMetrics;
-use crate::rpc::service::backup_service::BackupServiceImpl;
-use crate::rpc::service::cluster_service::ClusterServiceImpl;
-use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
-use crate::rpc::service::hummock_service::HummockServiceImpl;
-use crate::rpc::service::stream_service::StreamServiceImpl;
-use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
-use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::{hummock, MetaResult};
+use crate::MetaResult;
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -89,16 +71,13 @@ impl Default for AddressInfo {
     }
 }
 
-// TODO: in imports do something like tokio::sync::watch::Sender<()> as watchSender
-// and oneshot::sender as oneshotSender
-
 pub async fn rpc_serve(
     address_info: AddressInfo,
     meta_store_backend: MetaStoreBackend,
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
-) -> MetaResult<(JoinHandle<()>, tokio::sync::watch::Sender<()>)> {
+) -> MetaResult<(JoinHandle<()>, WatchSender<()>)> {
     match meta_store_backend {
         MetaStoreBackend::Etcd {
             endpoints,
@@ -142,9 +121,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
-) -> MetaResult<(JoinHandle<()>, tokio::sync::watch::Sender<()>)> {
+) -> MetaResult<(JoinHandle<()>, WatchSender<()>)> {
     // Initialize managers.
-    let (_, lease_handle, lease_shutdown, leader_rx) = run_elections(
+    let (_, election_handle, election_shutdown, leader_rx) = run_elections(
         address_info.listen_addr.clone().to_string(),
         meta_store.clone(),
         lease_interval_secs,
@@ -183,7 +162,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     // TODO: maybe do not use a channel here
     // What I need is basically a oneshot channel with one producer and multiple consumers
-    let (svc_shutdown_tx, mut svc_shutdown_rx) = tokio::sync::watch::channel(());
+    let (svc_shutdown_tx, mut svc_shutdown_rx) = WatchChannel(());
 
     let join_handle = tokio::spawn(async move {
         let span = tracing::span!(tracing::Level::INFO, "services");
@@ -202,8 +181,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
         // run follower services until node becomes leader
         let mut svc_shutdown_rx_clone = svc_shutdown_rx.clone();
-        let (follower_shutdown_tx, follower_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-        let (follower_finished_tx, follower_finished_rx) = tokio::sync::oneshot::channel::<()>();
+        let (follower_shutdown_tx, follower_shutdown_rx) = OneChannel::<()>();
+        let (follower_finished_tx, follower_finished_rx) = OneChannel::<()>();
         if !is_leader {
             tracing::info!("Starting follower services");
             tokio::spawn(async move {
@@ -270,8 +249,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             max_heartbeat_interval,
             opts,
             leader_rx,
-            lease_handle,
-            lease_shutdown,
+            election_handle,
+            election_shutdown,
         )
         .await
         .expect("Unable to create leader services");

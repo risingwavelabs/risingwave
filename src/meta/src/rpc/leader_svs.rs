@@ -12,15 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use etcd_client::ConnectOptions;
 use risingwave_backup::error::BackupError;
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::monitor::process_linux::monitor_process;
-use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
@@ -35,6 +32,7 @@ use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
+use crate::hummock;
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
@@ -47,24 +45,23 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
-use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
+use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::{hummock, MetaResult};
 
 pub struct LeaderServices<S: MetaStore> {
-    pub meta_metrics: Arc<MetaMetrics>,
-    pub heartbeat_srv: HeartbeatServiceImpl<S>,
-    pub cluster_srv: ClusterServiceImpl<S>,
-    pub stream_srv: StreamServiceImpl<S>,
-    pub hummock_srv: HummockServiceImpl<S>,
-    pub notification_srv: NotificationServiceImpl<S>,
-    pub ddl_srv: DdlServiceImpl<S>,
-    pub user_srv: UserServiceImpl<S>,
-    pub scale_srv: ScaleServiceImpl<S>,
-    pub health_srv: HealthServiceImpl,
     pub backup_srv: BackupServiceImpl<S>,
-    pub sub_tasks: Vec<(JoinHandle<()>, OneSender<()>)>,
+    pub cluster_srv: ClusterServiceImpl<S>,
+    pub ddl_srv: DdlServiceImpl<S>,
+    pub health_srv: HealthServiceImpl,
+    pub heartbeat_srv: HeartbeatServiceImpl<S>,
+    pub hummock_srv: HummockServiceImpl<S>,
     pub idle_recv: OneReceiver<()>,
+    pub meta_metrics: Arc<MetaMetrics>,
+    pub notification_srv: NotificationServiceImpl<S>,
+    pub scale_srv: ScaleServiceImpl<S>,
+    pub stream_srv: StreamServiceImpl<S>,
+    pub sub_tasks: Vec<(JoinHandle<()>, OneSender<()>)>,
+    pub user_srv: UserServiceImpl<S>,
 }
 
 // TODO: Write docstring
@@ -75,12 +72,12 @@ pub async fn get_leader_srv<S: MetaStore>(
     max_heartbeat_interval: Duration,
     opts: MetaOpts,
     leader_rx: WatchReceiver<(MetaLeaderInfo, bool)>,
-    lease_handle: JoinHandle<()>,
-    lease_shutdown: OneSender<()>,
+    election_handle: JoinHandle<()>,
+    election_shutdown: OneSender<()>,
 ) -> Result<LeaderServices<S>, BackupError> {
     tracing::info!("Defining leader services");
-
-    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), current_leader_info).await;
+    let prometheus_endpoint = opts.prometheus_endpoint.clone();
+    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), leader_rx).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let registry = meta_metrics.registry();
@@ -291,18 +288,18 @@ pub async fn get_leader_srv<S: MetaStore>(
             .await,
     );
     Ok(LeaderServices {
-        meta_metrics,
-        heartbeat_srv,
-        cluster_srv,
-        hummock_srv,
-        stream_srv,
-        ddl_srv,
-        notification_srv,
-        user_srv,
-        health_srv,
-        scale_srv,
         backup_srv,
-        sub_tasks,
+        cluster_srv,
+        ddl_srv,
+        health_srv,
+        heartbeat_srv,
+        hummock_srv,
         idle_recv,
+        meta_metrics,
+        notification_srv,
+        scale_srv,
+        stream_srv,
+        sub_tasks,
+        user_srv,
     })
 }
