@@ -52,8 +52,8 @@ log/
 risedev-components.user.env
 riselab-components.user.env
 risedev-compose.yml
-risedev-config-include.*.yml
-!risedev-config-include.template.yml
+risedev-profile-include.*.yml
+!risedev-profile-include.template.yml
 ft.txt
 # generated output from regress tests
 src/tests/regress/output/*

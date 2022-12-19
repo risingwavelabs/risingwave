@@ -1,14 +1,14 @@
 {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "RiseDev",
-    "description": "RiseDev config file",
+    "description": "RiseDev configuration file",
     "type": "object",
     "properties": {
-        "risedev": {
-            "$ref": "./config.json"
+        "profile": {
+            "$ref": "./profile.json"
         },
         "template": {
-            "description": "Component configuration templates referred by the `use` field in the above `risedev` section.",
+            "description": "Component configuration templates referred by the `use` field in the above `profile` section.",
             "type": "object",
             "patternProperties": {
                 "^[_a-zA-Z][a-zA-Z0-9_-]*$": {
@@ -38,7 +38,7 @@
         }
     },
     "required": [
-        "risedev",
+        "profile",
         "template"
     ]
 }

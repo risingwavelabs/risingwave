@@ -31,6 +31,11 @@ use id_expander::IdExpander;
 use provide_expander::ProvideExpander;
 use use_expander::UseExpander;
 
+/// The main configuration file name.
+pub const RISEDEV_CONFIG_FILE: &str = "risedev.yml";
+/// The glob pattern for profile include files.
+pub const RISEDEV_PROFILE_INCLUDE_GLOB: &str = "risedev-profile-include.*.yml";
+
 pub struct ConfigExpander;
 
 impl ConfigExpander {
@@ -44,13 +49,14 @@ impl ConfigExpander {
         Ok(config)
     }
 
-    /// Transforms `risedev.yml` and `risedev-config-include.*.yml` to a fully expanded yaml file.
+    /// Transforms [`risedev.yml`] and `risedev-profile-include.*.yml` to a fully expanded yaml
+    /// file.
     ///
     /// # Arguments
     ///
     /// * `root` is the root directory of these YAML files.
     /// * `profile` is the selected config profile called by `risedev dev <profile>`. It is one of
-    ///   the keys in the `risedev` section.
+    ///   the keys in the `profile` section.
     ///
     /// # Returns
     ///
@@ -69,24 +75,24 @@ impl ConfigExpander {
         profile: &str,
         extra_info: HashMap<String, String>,
     ) -> Result<(Option<String>, Yaml)> {
-        let global_path = root.as_ref().join("risedev.yml");
+        let global_path = root.as_ref().join(RISEDEV_CONFIG_FILE);
         let global_yaml = Self::load_yaml(global_path)?;
         let global_config = global_yaml
             .as_hash()
             .ok_or_else(|| anyhow!("expect config to be a hashmap"))?;
 
-        let risedev_section = {
+        let all_profile_section = {
             let mut all = global_config
-                .get(&Yaml::String("risedev".to_string()))
-                .ok_or_else(|| anyhow!("expect `risedev` section"))?
+                .get(&Yaml::String("profile".to_string()))
+                .ok_or_else(|| anyhow!("expect `profile` section"))?
                 .as_hash()
-                .ok_or_else(|| anyhow!("expect `risedev` section to be a hashmap"))?
+                .ok_or_else(|| anyhow!("expect `profile` section to be a hashmap"))?
                 .to_owned();
 
             for include_path in glob(
                 &root
                     .as_ref()
-                    .join("risedev-config-include.*.yml")
+                    .join(RISEDEV_PROFILE_INCLUDE_GLOB)
                     .to_string_lossy(),
             )? {
                 let path = include_path?;
@@ -111,13 +117,13 @@ impl ConfigExpander {
 
         let template_section = global_config
             .get(&Yaml::String("template".to_string()))
-            .ok_or_else(|| anyhow!("expect `risedev` section"))?;
+            .ok_or_else(|| anyhow!("expect `profile` section"))?;
 
-        let profile_section = risedev_section
+        let profile_section = all_profile_section
             .get(&Yaml::String(profile.to_string()))
             .ok_or_else(|| anyhow!("profile '{}' not found", profile))?
             .as_hash()
-            .ok_or_else(|| anyhow!("expect `risedev` section to be a hashmap"))?;
+            .ok_or_else(|| anyhow!("expect `profile` section to be a hashmap"))?;
 
         let config_path = profile_section
             .get(&Yaml::String("config-path".to_string()))

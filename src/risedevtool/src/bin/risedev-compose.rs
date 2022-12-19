@@ -24,6 +24,7 @@ use itertools::Itertools;
 use risedev::{
     compose_deploy, compute_risectl_env, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile,
     ComposeService, ComposeVolume, ConfigExpander, DockerImageConfig, ServiceConfig,
+    RISEDEV_CONFIG_FILE,
 };
 use serde::Deserialize;
 
@@ -91,7 +92,7 @@ fn main() -> Result<()> {
 
     let compose_config = ComposeConfig {
         image: load_docker_image_config(
-            &std::fs::read_to_string("risedev.yml")?,
+            &std::fs::read_to_string(RISEDEV_CONFIG_FILE)?,
             compose_deploy_config
                 .as_ref()
                 .and_then(|x| x.risingwave_image_override.as_ref()),
