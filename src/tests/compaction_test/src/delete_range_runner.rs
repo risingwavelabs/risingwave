@@ -128,7 +128,7 @@ async fn compaction_test(
         value_indices: vec![],
         definition: "".to_string(),
         handle_pk_conflict: false,
-        pk_prefix_len_hint: 0,
+        read_prefix_len_hint: 0,
         optional_associated_source_id: None,
         table_type: 0,
         append_only: false,
@@ -418,7 +418,7 @@ impl NormalState {
                 key,
                 self.epoch,
                 ReadOptions {
-                    dist_key_hint: None,
+                    prefix_hint: None,
                     ignore_range_tombstone,
                     check_bloom_filter: false,
                     retention_seconds: None,
@@ -454,7 +454,7 @@ impl CheckState for NormalState {
                     ),
                     self.epoch,
                     ReadOptions {
-                        dist_key_hint: None,
+                        prefix_hint: None,
                         ignore_range_tombstone: true,
                         check_bloom_filter: false,
                         retention_seconds: None,
@@ -490,7 +490,7 @@ impl CheckState for NormalState {
                     ),
                     self.epoch,
                     ReadOptions {
-                        dist_key_hint: None,
+                        prefix_hint: None,
                         ignore_range_tombstone: true,
                         check_bloom_filter: false,
                         retention_seconds: None,
