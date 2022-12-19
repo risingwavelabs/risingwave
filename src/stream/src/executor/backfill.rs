@@ -299,6 +299,7 @@ where
                 HummockReadEpoch::NoWait(epoch),
                 OwnedRow::empty(),
                 range_bounds,
+                true,
             )
             .await?;
 
