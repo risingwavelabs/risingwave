@@ -19,7 +19,6 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
@@ -35,7 +34,7 @@ use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerGroupTopNExecutorNew<K, S, WITH_TIES>>;
@@ -48,7 +47,6 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
         storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
-        pk_indices: PkIndices,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
@@ -56,17 +54,14 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
         cache_size: usize,
     ) -> StreamResult<Self> {
         let info = input.info();
-        let schema = input.schema().clone();
         Ok(TopNExecutorWrapper {
             input,
             ctx,
             inner: InnerGroupTopNExecutorNew::new(
                 info,
-                schema,
                 storage_key,
                 offset_and_limit,
                 order_by_len,
-                pk_indices,
                 executor_id,
                 group_by,
                 state_table,
@@ -80,17 +75,11 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
 pub struct InnerGroupTopNExecutorNew<K: HashKey, S: StateStore, const WITH_TIES: bool> {
     info: ExecutorInfo,
 
-    /// Schema of the executor.
-    schema: Schema,
-
     /// `LIMIT XXX`. None means no limit.
     limit: usize,
 
     /// `OFFSET XXX`. `0` means no offset.
     offset: usize,
-
-    /// The primary key indices of the `GroupTopNExecutor`
-    pk_indices: PkIndices,
 
     /// The internal key indices of the `GroupTopNExecutor`
     internal_key_indices: PkIndices,
@@ -115,17 +104,18 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
-        schema: Schema,
         storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
-        pk_indices: PkIndices,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         lru_manager: Option<LruManagerRef>,
         cache_size: usize,
     ) -> StreamResult<Self> {
+        let ExecutorInfo {
+            pk_indices, schema, ..
+        } = input_info;
         // storage_key is superset of pk
         assert!(storage_key
             .iter()
@@ -157,15 +147,13 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
         let cache_key_serde = (first_key_serde, second_key_serde);
         Ok(Self {
             info: ExecutorInfo {
-                schema: input_info.schema,
-                pk_indices: input_info.pk_indices,
+                schema,
+                pk_indices,
                 identity: format!("TopNExecutorNew {:X}", executor_id),
             },
-            schema,
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_state,
-            pk_indices,
             internal_key_indices,
             group_by,
             caches: GroupTopNCache::new(lru_manager, cache_size),
@@ -263,23 +251,15 @@ where
             }
         }
 
-        generate_output(res_rows, res_ops, &self.schema)
+        generate_output(res_rows, res_ops, self.schema())
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.flush(epoch).await
     }
 
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
     }
 
     fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
@@ -308,7 +288,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::catalog::Field;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
@@ -403,22 +383,20 @@ mod tests {
             &[1, 2, 0],
         )
         .await;
-        let top_n_executor = Box::new(
-            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
-                source as Box<dyn Executor>,
-                ActorContext::create(0),
-                order_types,
-                (0, 2),
-                1,
-                vec![1, 2, 0],
-                1,
-                vec![1],
-                state_table,
-                None,
-                0,
-            )
-            .unwrap(),
-        );
+        let a = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
+            source as Box<dyn Executor>,
+            ActorContext::create(0),
+            order_types,
+            (0, 2),
+            1,
+            1,
+            vec![1],
+            state_table,
+            None,
+            0,
+        )
+        .unwrap();
+        let top_n_executor = Box::new(a);
         let mut top_n_executor = top_n_executor.execute();
 
         // consume the init barrier
@@ -510,7 +488,6 @@ mod tests {
                 order_types,
                 (1, 2),
                 1,
-                vec![1, 2, 0],
                 1,
                 vec![1],
                 state_table,
@@ -602,7 +579,6 @@ mod tests {
                 order_types,
                 (0, 2),
                 1,
-                vec![1, 2, 0],
                 1,
                 vec![1, 2],
                 state_table,

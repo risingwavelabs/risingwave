@@ -31,8 +31,8 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use super::top_n_cache::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
-    PkIndices, PkIndicesRef,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    ExecutorInfo, Message, PkIndices, PkIndicesRef,
 };
 
 #[async_trait]
@@ -43,14 +43,22 @@ pub trait TopNExecutorBase: Send + 'static {
     /// Flush the buffered chunk to the storage backend.
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 
+    fn info(&self) -> &ExecutorInfo;
+
     /// See [`Executor::schema`].
-    fn schema(&self) -> &Schema;
+    fn schema(&self) -> &Schema {
+        &self.info().schema
+    }
 
     /// See [`Executor::pk_indices`].
-    fn pk_indices(&self) -> PkIndicesRef<'_>;
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
+        self.info().pk_indices.as_ref()
+    }
 
     /// See [`Executor::identity`].
-    fn identity(&self) -> &str;
+    fn identity(&self) -> &str {
+        &self.info().identity
+    }
 
     /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
     /// by Group Top-N since it's distributed.
@@ -87,6 +95,10 @@ where
 
     fn identity(&self) -> &str {
         self.inner.identity()
+    }
+
+    fn info(&self) -> ExecutorInfo {
+        self.inner.info().clone()
     }
 }
 

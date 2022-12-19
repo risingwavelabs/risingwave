@@ -22,7 +22,7 @@ use risingwave_pb::stream_plan::GroupTopNNode;
 use super::*;
 use crate::cache::LruManagerRef;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{ActorContextRef, GroupTopNExecutor, PkIndices};
+use crate::executor::{ActorContextRef, GroupTopNExecutor};
 
 pub struct GroupTopNExecutorBuilder;
 
@@ -47,14 +47,13 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
         let storage_key = table.get_pk().iter().map(OrderPair::from_prost).collect();
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let group_key_types = input.schema().data_types()[..group_by.len()].to_vec();
-
+        assert_eq!(&params.pk_indices, input.pk_indices());
         let args = GroupTopNExecutorDispatcherArgs {
             input,
             ctx: params.actor_context,
             storage_key,
             offset_and_limit: (node.offset as usize, node.limit as usize),
             order_by_len: node.order_by_len as usize,
-            pk_indices: params.pk_indices,
             executor_id: params.executor_id,
             group_by,
             state_table,
@@ -73,7 +72,6 @@ struct GroupTopNExecutorDispatcherArgs<S: StateStore> {
     storage_key: Vec<OrderPair>,
     offset_and_limit: (usize, usize),
     order_by_len: usize,
-    pk_indices: PkIndices,
     executor_id: u64,
     group_by: Vec<usize>,
     state_table: StateTable<S>,
@@ -94,7 +92,6 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
                 self.storage_key,
                 self.offset_and_limit,
                 self.order_by_len,
-                self.pk_indices,
                 self.executor_id,
                 self.group_by,
                 self.state_table,
@@ -108,7 +105,6 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
                 self.storage_key,
                 self.offset_and_limit,
                 self.order_by_len,
-                self.pk_indices,
                 self.executor_id,
                 self.group_by,
                 self.state_table,

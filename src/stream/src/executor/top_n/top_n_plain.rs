@@ -16,7 +16,6 @@ use std::collections::HashSet;
 
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -29,7 +28,7 @@ use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::{ManagedTopNState, NO_GROUP_KEY};
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -44,23 +43,19 @@ impl<S: StateStore> TopNExecutor<S, false> {
         storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
-        pk_indices: PkIndices,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
         let info = input.info();
-        let schema = input.schema().clone();
 
         Ok(TopNExecutorWrapper {
             input,
             ctx,
             inner: InnerTopNExecutorNew::new(
                 info,
-                schema,
                 storage_key,
                 offset_and_limit,
                 order_by_len,
-                pk_indices,
                 executor_id,
                 state_table,
             )?,
@@ -76,23 +71,19 @@ impl<S: StateStore> TopNExecutor<S, true> {
         storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
-        pk_indices: PkIndices,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
         let info = input.info();
-        let schema = input.schema().clone();
 
         Ok(TopNExecutorWrapper {
             input,
             ctx,
             inner: InnerTopNExecutorNew::new(
                 info,
-                schema,
                 storage_key,
                 offset_and_limit,
                 order_by_len,
-                pk_indices,
                 executor_id,
                 state_table,
             )?,
@@ -109,20 +100,16 @@ impl<S: StateStore> TopNExecutor<S, true> {
         storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
-        pk_indices: PkIndices,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
         let info = input.info();
-        let schema = input.schema().clone();
 
         let mut inner = InnerTopNExecutorNew::new(
             info,
-            schema,
             storage_key,
             offset_and_limit,
             order_by_len,
-            pk_indices,
             executor_id,
             state_table,
         )?;
@@ -135,12 +122,6 @@ impl<S: StateStore> TopNExecutor<S, true> {
 
 pub struct InnerTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
     info: ExecutorInfo,
-
-    /// Schema of the executor.
-    schema: Schema,
-
-    /// The primary key indices of the `TopNExecutor`. It's the same as input's pk.
-    pk_indices: PkIndices,
 
     /// The internal key indices of the `TopNExecutor`
     internal_key_indices: PkIndices,
@@ -168,14 +149,15 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
-        schema: Schema,
         storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
-        pk_indices: PkIndices,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
+        let ExecutorInfo {
+            pk_indices, schema, ..
+        } = input_info;
         // storage_key is superset of pk
         assert!(storage_key
             .iter()
@@ -207,13 +189,11 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
         let cache_key_serde = (first_key_serde, second_key_serde);
         Ok(Self {
             info: ExecutorInfo {
-                schema: input_info.schema,
-                pk_indices: input_info.pk_indices,
+                schema,
+                pk_indices,
                 identity: format!("TopNExecutorNew {:X}", executor_id),
             },
-            schema,
             managed_state,
-            pk_indices,
             internal_key_indices,
             cache: TopNCache::new(num_offset, num_limit, order_by_len),
             order_by_len,
@@ -260,23 +240,15 @@ where
                 }
             }
         }
-        generate_output(res_rows, res_ops, &self.schema)
+        generate_output(res_rows, res_ops, self.schema())
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.flush(epoch).await
     }
 
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -292,7 +264,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::catalog::Field;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
 
@@ -392,7 +364,6 @@ mod tests {
                     order_types,
                     (3, 1000),
                     2,
-                    vec![0, 1],
                     1,
                     state_table,
                 )
@@ -490,7 +461,6 @@ mod tests {
                     order_types,
                     (0, 4),
                     2,
-                    vec![0, 1],
                     1,
                     state_table,
                 )
@@ -600,7 +570,6 @@ mod tests {
                     order_types,
                     (0, 4),
                     2,
-                    vec![0, 1],
                     1,
                     state_table,
                 )
@@ -709,7 +678,6 @@ mod tests {
                     order_types,
                     (3, 4),
                     2,
-                    vec![0, 1],
                     1,
                     state_table,
                 )
@@ -923,7 +891,6 @@ mod tests {
                     order_types,
                     (1, 3),
                     2,
-                    vec![0, 3],
                     1,
                     state_table,
                 )
@@ -1004,7 +971,6 @@ mod tests {
                     order_types.clone(),
                     (1, 3),
                     2,
-                    vec![0, 3],
                     1,
                     state_table.clone(),
                 )
@@ -1046,7 +1012,6 @@ mod tests {
                     order_types.clone(),
                     (1, 3),
                     2,
-                    vec![3],
                     1,
                     state_table,
                 )
@@ -1162,7 +1127,6 @@ mod tests {
                     order_types,
                     (0, 3),
                     1,
-                    vec![0, 1],
                     1,
                     state_table,
                 )
@@ -1312,7 +1276,6 @@ mod tests {
                     order_types.clone(),
                     (0, 3),
                     1,
-                    vec![0, 1],
                     1,
                     state_table.clone(),
                 )
@@ -1360,7 +1323,6 @@ mod tests {
                     order_types.clone(),
                     (0, 3),
                     1,
-                    vec![0, 1],
                     1,
                     state_table,
                 )
