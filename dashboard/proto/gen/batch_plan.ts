@@ -91,6 +91,11 @@ export interface InsertNode {
   /** Id of the table to perform inserting. */
   tableId: number;
   columnIndices: number[];
+  /**
+   * An optional field and will be `None` for tables without user-defined pk.
+   * The `BatchInsertExecutor` should add a column with NULL value which will
+   * be filled in streaming.
+   */
   rowIdIndex: ColumnIndex | undefined;
 }
 

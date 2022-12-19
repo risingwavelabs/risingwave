@@ -122,6 +122,10 @@ export interface DropViewResponse {
 }
 
 export interface CreateTableRequest {
+  /**
+   * An optional field and will be `Some` for tables with an external connector. If so, the table
+   * will subscribe to the changes of the external connector and materialize the data.
+   */
   source: Source | undefined;
   materializedView: Table | undefined;
   fragmentGraph: StreamFragmentGraph | undefined;
