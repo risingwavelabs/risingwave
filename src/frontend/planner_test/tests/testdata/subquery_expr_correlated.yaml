@@ -23,7 +23,7 @@
           ├─LogicalAgg { group_key: [t1.y], aggs: [] }
           | └─LogicalScan { table: t1, columns: [t1.y] }
           └─LogicalProject { exprs: [t2.y, t2.x] }
-            └─LogicalScan { table: t2, columns: [t2.x, t2.y], predicate: (t2.y = 1000:Int32) AND IsNotNull(t2.y) }
+            └─LogicalScan { table: t2, columns: [t2.x, t2.y], predicate: IsNotNull(t2.y) AND (t2.y = 1000:Int32) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
