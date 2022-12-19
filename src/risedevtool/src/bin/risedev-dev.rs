@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::env;
 use std::fmt::Write;
 use std::fs::{File, OpenOptions};
@@ -66,8 +65,7 @@ impl ProgressManager {
 
 fn task_main(
     manager: &mut ProgressManager,
-    steps: &[String],
-    services: &HashMap<String, ServiceConfig>,
+    services: &Vec<ServiceConfig>,
 ) -> Result<(Vec<(String, Duration)>, String)> {
     let log_path = env::var("PREFIX_LOG")?;
 
@@ -99,8 +97,7 @@ fn task_main(
     // Firstly, ensure that all ports needed is not occupied by previous runs.
     let mut ports = vec![];
 
-    for step in steps {
-        let service = services.get(step).unwrap();
+    for service in services {
         let listen_info = match service {
             ServiceConfig::Minio(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Etcd(c) => Some((c.port, c.id.clone())),
@@ -135,8 +132,7 @@ fn task_main(
 
     let mut stat = vec![];
 
-    for step in steps {
-        let service = services.get(step).unwrap();
+    for service in services {
         let start_time = Instant::now();
 
         match service {
@@ -347,6 +343,8 @@ fn task_main(
 }
 
 fn main() -> Result<()> {
+    preflight_check()?;
+
     let risedev_config = {
         let mut content = String::new();
         File::open("risedev.yml")?.read_to_string(&mut content)?;
@@ -357,7 +355,13 @@ fn main() -> Result<()> {
         .nth(1)
         .unwrap_or_else(|| "default".to_string());
 
-    let risedev_config = ConfigExpander::expand(&risedev_config, &task_name)?;
+    let (config_path, risedev_config) = ConfigExpander::expand(&risedev_config, &task_name)?;
+
+    if let Some(config_path) = &config_path {
+        let target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");
+        std::fs::copy(config_path, target)?;
+    }
+
     {
         let mut out_str = String::new();
         let mut emitter = YamlEmitter::new(&mut out_str);
@@ -367,10 +371,7 @@ fn main() -> Result<()> {
             &out_str,
         )?;
     }
-
-    preflight_check()?;
-
-    let (steps, services) = ConfigExpander::select(&risedev_config, &task_name)?;
+    let services = ConfigExpander::deserialize(&risedev_config)?;
 
     let mut manager = ProgressManager::new();
     // Always create a progress before calling `task_main`. Otherwise the progress bar won't be
@@ -379,10 +380,10 @@ fn main() -> Result<()> {
     p.set_prefix("dev cluster");
     p.set_message(format!(
         "starting {} services for {}...",
-        steps.len(),
+        services.len(),
         task_name
     ));
-    let task_result = task_main(&mut manager, &steps, &services);
+    let task_result = task_main(&mut manager, &services);
 
     match task_result {
         Ok(_) => {
@@ -418,7 +419,7 @@ fn main() -> Result<()> {
 
             std::fs::write(
                 Path::new(&env::var("PREFIX_CONFIG")?).join("risectl-env"),
-                &risectl_env,
+                risectl_env,
             )?;
 
             println!("All services started successfully.");

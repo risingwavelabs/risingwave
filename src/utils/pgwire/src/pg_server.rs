@@ -143,6 +143,7 @@ where
     async {
         loop {
             let msg = pg_proto.read_message().await?;
+            tracing::trace!("Received message: {:?}", msg);
             let ret = pg_proto.process(msg).await;
             if ret {
                 return Ok(());

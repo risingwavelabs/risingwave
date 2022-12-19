@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
@@ -96,10 +96,6 @@ where
         user_key_range.start_bound().map(UserKey::encode),
         user_key_range.end_bound().map(UserKey::encode),
     );
-    #[cfg(any(test, feature = "test"))]
-    if table_id.table_id() == 0 {
-        return range_overlap(&encoded_user_key_range, table_start, table_end);
-    }
     range_overlap(&encoded_user_key_range, table_start, table_end)
         && info
             .get_table_ids()
@@ -123,7 +119,7 @@ where
 }
 
 /// Search the SST containing the specified key within a level, using binary search.
-pub(crate) fn search_sst_idx<B>(ssts: &[&SstableInfo], key: &B) -> usize
+pub(crate) fn search_sst_idx<B>(ssts: &[SstableInfo], key: &B) -> usize
 where
     B: AsRef<[u8]> + Send + ?Sized,
 {
@@ -141,14 +137,14 @@ struct MemoryLimiterInner {
 }
 
 impl MemoryLimiterInner {
-    pub fn release_quota(&self, quota: u64) {
+    fn release_quota(&self, quota: u64) {
         self.total_size.fetch_sub(quota, AtomicOrdering::Release);
         self.notify.notify_waiters();
     }
 
-    pub fn try_require_memory(&self, quota: u64) -> bool {
+    fn try_require_memory(&self, quota: u64) -> bool {
         let mut current_quota = self.total_size.load(AtomicOrdering::Acquire);
-        while current_quota + quota <= self.quota {
+        while self.permit_quota(current_quota, quota) {
             match self.total_size.compare_exchange(
                 current_quota,
                 current_quota + quota,
@@ -166,9 +162,9 @@ impl MemoryLimiterInner {
         false
     }
 
-    pub async fn require_memory(&self, quota: u64) {
+    async fn require_memory(&self, quota: u64) {
         let current_quota = self.total_size.load(AtomicOrdering::Acquire);
-        if current_quota + quota <= self.quota
+        if self.permit_quota(current_quota, quota)
             && self
                 .total_size
                 .compare_exchange(
@@ -185,7 +181,7 @@ impl MemoryLimiterInner {
         loop {
             let notified = self.notify.notified();
             let current_quota = self.total_size.load(AtomicOrdering::Acquire);
-            if current_quota + quota <= self.quota {
+            if self.permit_quota(current_quota, quota) {
                 match self.total_size.compare_exchange(
                     current_quota,
                     current_quota + quota,
@@ -196,7 +192,7 @@ impl MemoryLimiterInner {
                     Err(old_quota) => {
                         // The quota is enough but just changed by other threads. So just try to
                         // update again without waiting notify.
-                        if old_quota + quota <= self.quota {
+                        if self.permit_quota(old_quota, quota) {
                             continue;
                         }
                     }
@@ -204,6 +200,10 @@ impl MemoryLimiterInner {
             }
             notified.await;
         }
+    }
+
+    fn permit_quota(&self, current_quota: u64, _request_quota: u64) -> bool {
+        current_quota <= self.quota
     }
 }
 
@@ -221,8 +221,6 @@ impl Debug for MemoryTracker {
         f.debug_struct("quota").field("quota", &self.quota).finish()
     }
 }
-
-use std::sync::atomic::Ordering as AtomicOrdering;
 
 impl MemoryLimiter {
     pub fn unlimit() -> Arc<Self> {
@@ -245,26 +243,31 @@ impl MemoryLimiter {
         }
     }
 
-    pub fn can_require_memory(&self, quota: u64) -> bool {
-        if quota > self.inner.quota {
-            return false;
+    pub fn try_require_memory(&self, quota: u64) -> Option<MemoryTracker> {
+        if self.inner.try_require_memory(quota) {
+            Some(MemoryTracker {
+                limiter: self.inner.clone(),
+                quota,
+            })
+        } else {
+            None
         }
-        self.inner.total_size.load(AtomicOrdering::Acquire) + quota < self.inner.quota
-    }
-
-    pub async fn require_memory(&self, quota: u64) -> Option<MemoryTracker> {
-        if quota > self.inner.quota {
-            return None;
-        }
-        self.inner.require_memory(quota).await;
-        Some(MemoryTracker {
-            limiter: self.inner.clone(),
-            quota,
-        })
     }
 
     pub fn get_memory_usage(&self) -> u64 {
         self.inner.total_size.load(AtomicOrdering::Acquire)
+    }
+}
+
+impl MemoryLimiter {
+    pub async fn require_memory(&self, quota: u64) -> MemoryTracker {
+        // Since the over provision limiter gets blocked only when the current usage exceeds the
+        // memory quota, it is allowed to apply for more than the memory quota.
+        self.inner.require_memory(quota).await;
+        MemoryTracker {
+            limiter: self.inner.clone(),
+            quota,
+        }
     }
 }
 
@@ -307,4 +310,43 @@ pub fn check_subset_preserve_order<T: Eq>(
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use std::future::{poll_fn, Future};
+    use std::task::Poll;
+
+    use futures::FutureExt;
+
+    use crate::hummock::utils::MemoryLimiter;
+
+    async fn assert_pending(future: &mut (impl Future + Unpin)) {
+        for _ in 0..10 {
+            assert!(poll_fn(|cx| Poll::Ready(future.poll_unpin(cx)))
+                .await
+                .is_pending());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_loose_memory_limiter() {
+        let quota = 5;
+        let memory_limiter = MemoryLimiter::new(quota);
+        drop(memory_limiter.require_memory(6).await);
+        let tracker1 = memory_limiter.require_memory(3).await;
+        assert_eq!(3, memory_limiter.get_memory_usage());
+        let tracker2 = memory_limiter.require_memory(4).await;
+        assert_eq!(7, memory_limiter.get_memory_usage());
+        let mut future = memory_limiter.require_memory(5).boxed();
+        assert_pending(&mut future).await;
+        assert_eq!(7, memory_limiter.get_memory_usage());
+        drop(tracker1);
+        let tracker3 = future.await;
+        assert_eq!(9, memory_limiter.get_memory_usage());
+        drop(tracker2);
+        assert_eq!(5, memory_limiter.get_memory_usage());
+        drop(tracker3);
+        assert_eq!(0, memory_limiter.get_memory_usage());
+    }
 }

@@ -13,13 +13,13 @@ create materialized view mv as select unnest(x) as unnest, x from t;
 query I rowsort
 select unnest, x from mv;
 ----
-NULL {1,NULL}
-1    {1,NULL}
-1    {1,2}
-2    {1,2}
-3    {3,4,5}
-4    {3,4,5}
-5    {3,4,5}
+1	{1,2}
+1	{1,NULL}
+2	{1,2}
+3	{3,4,5}
+4	{3,4,5}
+5	{3,4,5}
+NULL	{1,NULL}
 
 statement ok
 drop materialized view mv;

@@ -14,12 +14,13 @@
 
 use std::future::Future;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
 use clap::Parser;
-use futures::future::{join_all, BoxFuture};
+use futures::future::join_all;
 use madsim::runtime::{Handle, NodeHandle};
 use rand::Rng;
 use sqllogictest::AsyncDB;
@@ -58,6 +59,9 @@ pub struct Configuration {
 
     /// The probability of etcd request timeout.
     pub etcd_timeout_rate: f32,
+
+    /// Path to etcd data file.
+    pub etcd_data_path: Option<PathBuf>,
 }
 
 impl Configuration {
@@ -70,6 +74,7 @@ impl Configuration {
             compactor_nodes: 2,
             compute_node_cores: 2,
             etcd_timeout_rate: 0.0,
+            etcd_data_path: None,
         }
     }
 }
@@ -97,27 +102,28 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    pub fn start(conf: Configuration) -> BoxFuture<'static, Result<Self>> {
-        Box::pin(Self::start_inner(conf))
-    }
-
-    async fn start_inner(conf: Configuration) -> Result<Self> {
+    pub async fn start(conf: Configuration) -> Result<Self> {
         let handle = madsim::runtime::Handle::current();
         println!("seed = {}", handle.seed());
         println!("{:#?}", conf);
 
         // etcd node
+        let etcd_data = conf
+            .etcd_data_path
+            .as_ref()
+            .map(|path| std::fs::read_to_string(path).unwrap());
         handle
             .create_node()
             .name("etcd")
             .ip("192.168.10.1".parse().unwrap())
-            .init(move || async move {
+            .init(move || {
                 let addr = "0.0.0.0:2388".parse().unwrap();
-                etcd_client::SimServer::builder()
-                    .timeout_rate(conf.etcd_timeout_rate)
-                    .serve(addr)
-                    .await
-                    .unwrap();
+                let mut builder =
+                    etcd_client::SimServer::builder().timeout_rate(conf.etcd_timeout_rate);
+                if let Some(data) = &etcd_data {
+                    builder = builder.load(data.clone());
+                }
+                builder.serve(addr)
             })
             .build();
 
@@ -195,6 +201,8 @@ impl Cluster {
                 "192.168.1.1:5690",
                 "--state-store",
                 "hummock+memory-shared",
+                "--parallelism",
+                &conf.compute_node_cores.to_string(),
             ]);
             handle
                 .create_node()
@@ -254,12 +262,9 @@ impl Cluster {
     }
 
     /// Run a SQL query from the client.
-    pub fn run(&mut self, sql: &str) -> BoxFuture<'_, Result<String>> {
-        Box::pin(self.run_inner(sql.to_string()))
-    }
-
-    async fn run_inner(&mut self, sql: String) -> Result<String> {
+    pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
         let frontend = self.rand_frontend_ip();
+        let sql = sql.into();
 
         let result = self
             .client
@@ -273,7 +278,19 @@ impl Cluster {
             })
             .await??;
 
-        Ok(result)
+        match result {
+            sqllogictest::DBOutput::Rows { rows, .. } => Ok(rows
+                .into_iter()
+                .map(|row| {
+                    row.into_iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .collect::<Vec<_>>()
+                .join("\n")),
+            _ => Ok("".to_string()),
+        }
     }
 
     /// Run a future on the client node.
@@ -286,20 +303,10 @@ impl Cluster {
     }
 
     /// Run a SQL query from the client and wait until the condition is met.
-    pub fn wait_until(
+    pub async fn wait_until(
         &mut self,
-        sql: &str,
-        p: impl FnMut(&str) -> bool + Send + 'static,
-        interval: Duration,
-        timeout: Duration,
-    ) -> BoxFuture<'_, Result<String>> {
-        Box::pin(self.wait_until_inner(sql.to_string(), p, interval, timeout))
-    }
-
-    async fn wait_until_inner(
-        &mut self,
-        sql: String,
-        mut p: impl FnMut(&str) -> bool + Send + 'static,
+        sql: impl Into<String> + Clone,
+        mut p: impl FnMut(&str) -> bool,
         interval: Duration,
         timeout: Duration,
     ) -> Result<String> {
@@ -307,7 +314,7 @@ impl Cluster {
             let mut interval = madsim::time::interval(interval);
             loop {
                 interval.tick().await;
-                let result = self.run(&sql).await?;
+                let result = self.run(sql.clone()).await?;
                 if p(&result) {
                     return Ok::<_, anyhow::Error>(result);
                 }
@@ -320,59 +327,71 @@ impl Cluster {
         }
     }
 
-    async fn wait_until_non_empty_inner(
-        &mut self,
-        sql: String,
-        interval: Duration,
-        timeout: Duration,
-    ) -> Result<String> {
-        self.wait_until_inner(sql, |r| !r.trim().is_empty(), interval, timeout)
-            .await
-    }
-
     /// Run a SQL query from the client and wait until the return result is not empty.
-    pub fn wait_until_non_empty(
+    pub async fn wait_until_non_empty(
         &mut self,
         sql: &str,
         interval: Duration,
         timeout: Duration,
-    ) -> BoxFuture<'_, Result<String>> {
-        Box::pin(self.wait_until_non_empty_inner(sql.to_string(), interval, timeout))
+    ) -> Result<String> {
+        self.wait_until(sql, |r| !r.trim().is_empty(), interval, timeout)
+            .await
     }
 
     /// Kill some nodes and restart them in 2s.
     pub async fn kill_node(&self, opts: &KillOpts) {
         let mut nodes = vec![];
         if opts.kill_meta {
-            nodes.push(format!("meta"));
+            if rand::thread_rng().gen_bool(0.5) {
+                nodes.push("meta".to_string());
+            }
         }
         if opts.kill_frontend {
-            let i = rand::thread_rng().gen_range(1..=self.config.frontend_nodes);
-            nodes.push(format!("frontend-{}", i));
+            let rand = rand::thread_rng().gen_range(0..3);
+            for i in 1..=self.config.frontend_nodes {
+                match rand {
+                    0 => break,                                         // no killed
+                    1 => {}                                             // all killed
+                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    _ => {}
+                }
+                nodes.push(format!("frontend-{}", i));
+            }
         }
         if opts.kill_compute {
-            let i = rand::thread_rng().gen_range(1..=self.config.compute_nodes);
-            nodes.push(format!("compute-{}", i));
+            let rand = rand::thread_rng().gen_range(0..3);
+            for i in 1..=self.config.compute_nodes {
+                match rand {
+                    0 => break,                                         // no killed
+                    1 => {}                                             // all killed
+                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    _ => {}
+                }
+                nodes.push(format!("compute-{}", i));
+            }
         }
         if opts.kill_compactor {
-            let i = rand::thread_rng().gen_range(1..=self.config.compactor_nodes);
-            nodes.push(format!("compactor-{}", i));
-        }
-        if nodes.is_empty() {
-            return;
+            let rand = rand::thread_rng().gen_range(0..3);
+            for i in 1..=self.config.compactor_nodes {
+                match rand {
+                    0 => break,                                         // no killed
+                    1 => {}                                             // all killed
+                    _ if !rand::thread_rng().gen_bool(0.5) => continue, // random killed
+                    _ => {}
+                }
+                nodes.push(format!("compactor-{}", i));
+            }
         }
         join_all(nodes.iter().map(|name| async move {
-            // FIXME: sleep random time lead to panic
-            // let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
-            // tokio::time::sleep(t).await;
+            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            tokio::time::sleep(t).await;
             tracing::info!("kill {name}");
-            madsim::runtime::Handle::current().kill(&name);
+            madsim::runtime::Handle::current().kill(name);
 
-            // let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
-            // tokio::time::sleep(t).await;
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
+            tokio::time::sleep(t).await;
             tracing::info!("restart {name}");
-            madsim::runtime::Handle::current().restart(&name);
+            madsim::runtime::Handle::current().restart(name);
         }))
         .await;
     }

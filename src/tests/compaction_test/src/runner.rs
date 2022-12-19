@@ -14,7 +14,8 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
-use std::ops::Bound;
+use std::ops::{Bound, Deref};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -22,27 +23,26 @@ use std::time::Duration;
 use anyhow::anyhow;
 use bytes::{BufMut, BytesMut};
 use clap::Parser;
+use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, StorageConfig};
+use risingwave_common::config::{load_config, RwConfig, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
-    HummockMetrics, MonitoredStateStore, MonitoredStateStoreIter, ObjectStoreMetrics,
-    StateStoreMetrics,
+    HummockMetrics, MonitoredStateStore, ObjectStoreMetrics, StateStoreMetrics,
 };
 use risingwave_storage::store::{ReadOptions, StateStoreRead};
-use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
+use risingwave_storage::{StateStore, StateStoreImpl};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
 
-use crate::{CompactionTestOpts, TestToolConfig};
+use crate::CompactionTestOpts;
 
 struct CompactionTestMetrics {
     num_expect_check: u64,
@@ -128,10 +128,14 @@ async fn start_meta_node(listen_addr: String, config_path: String) {
         &listen_addr,
         "--backend",
         "mem",
-        "--enable-compaction-deterministic",
         "--config-path",
         &config_path,
     ]);
+    let config = load_config(&opts.config_path);
+    assert!(
+        config.meta.enable_compaction_deterministic,
+        "enable_compaction_deterministic should be set"
+    );
     risingwave_meta::start(opts).await
 }
 
@@ -293,7 +297,7 @@ async fn start_replay(
     );
 
     let mut metric = CompactionTestMetrics::new();
-    let config: TestToolConfig = load_config(&opts.config_path).unwrap();
+    let config = load_config(&opts.config_path);
     tracing::info!(
         "Starting replay with config {:?} and opts {:?}",
         config,
@@ -560,11 +564,14 @@ async fn poll_compaction_tasks_status(
     (compaction_ok, cur_version)
 }
 
+type StateStoreIterType =
+    Pin<Box<<MonitoredStateStore<HummockStorage> as StateStoreRead>::IterStream>>;
+
 async fn open_hummock_iters(
     hummock: &MonitoredStateStore<HummockStorage>,
     snapshots: &[HummockEpoch],
     table_id: u32,
-) -> anyhow::Result<BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStorageIterator>>> {
+) -> anyhow::Result<BTreeMap<HummockEpoch, StateStoreIterType>> {
     let mut results = BTreeMap::new();
 
     // Set the `table_id` to the prefix of key, since the table_id in
@@ -589,18 +596,19 @@ async fn open_hummock_iters(
                     retention_seconds: None,
                     check_bloom_filter: false,
                     ignore_range_tombstone: false,
+                    read_version_from_backup: false,
                 },
             )
             .await?;
-        results.insert(epoch, iter);
+        results.insert(epoch, Box::pin(iter));
     }
     Ok(results)
 }
 
 pub async fn check_compaction_results(
     version_id: u64,
-    mut expect_results: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStorageIterator>>,
-    mut actual_resutls: BTreeMap<HummockEpoch, MonitoredStateStoreIter<HummockStorageIterator>>,
+    mut expect_results: BTreeMap<HummockEpoch, StateStoreIterType>,
+    mut actual_resutls: BTreeMap<HummockEpoch, StateStoreIterType>,
 ) -> anyhow::Result<()> {
     let combined = expect_results.iter_mut().zip_eq(actual_resutls.iter_mut());
     for ((e1, expect_iter), (e2, actual_iter)) in combined {
@@ -612,9 +620,12 @@ pub async fn check_compaction_results(
         );
         let mut expect_cnt = 0;
         let mut actual_cnt = 0;
-        while let Some(kv_expect) = expect_iter.next().await? {
+
+        futures::pin_mut!(expect_iter);
+        futures::pin_mut!(actual_iter);
+        while let Some(kv_expect) = expect_iter.try_next().await? {
             expect_cnt += 1;
-            let ret = actual_iter.next().await?;
+            let ret = actual_iter.try_next().await?;
             match ret {
                 None => {
                     break;
@@ -647,11 +658,15 @@ pub async fn create_hummock_store_with_metrics(
         state_store_metrics: Arc::new(StateStoreMetrics::unused()),
         object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
     };
+    let rw_config = RwConfig {
+        storage: storage_config.deref().clone(),
+        ..Default::default()
+    };
 
     let state_store_impl = StateStoreImpl::new(
         &opts.state_store,
         "",
-        storage_config,
+        &rw_config,
         Arc::new(MonitoredHummockMetaClient::new(
             meta_client.clone(),
             metrics.hummock_metrics.clone(),

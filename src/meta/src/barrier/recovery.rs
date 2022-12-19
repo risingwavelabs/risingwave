@@ -117,7 +117,7 @@ where
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
 
-        debug!("recovery start!");
+        tracing::info!("recovery start!");
         self.clean_dirty_fragments()
             .await
             .expect("clean dirty fragments");
@@ -126,23 +126,25 @@ where
             let mut info = self.resolve_actor_info_for_recovery().await;
             let mut new_epoch = prev_epoch.next();
 
-            // Migrate expired actors to newly joined node by changing actor_map
-            let migrated = self.migrate_actors(&info).await?;
+            // Migrate actors in expired CN to newly joined one.
+            let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
+                error!(err = ?err, "migrate actors failed");
+            })?;
             if migrated {
                 info = self.resolve_actor_info_for_recovery().await;
             }
 
             // Reset all compute nodes, stop and drop existing actors.
-            self.reset_compute_nodes(&info).await.inspect_err(|e| {
-                error!("reset compute nodes failed: {}", e);
+            self.reset_compute_nodes(&info).await.inspect_err(|err| {
+                error!(err = ?err, "reset compute nodes failed");
             })?;
 
             // update and build all actors.
-            self.update_actors(&info).await.inspect_err(|e| {
-                error!("update actors failed: {}", e);
+            self.update_actors(&info).await.inspect_err(|err| {
+                error!(err = ?err, "update actors failed");
             })?;
-            self.build_actors(&info).await.inspect_err(|e| {
-                error!("build_actors failed: {}", e);
+            self.build_actors(&info).await.inspect_err(|err| {
+                error!(err = ?err, "build_actors failed");
             })?;
 
             // get split assignments for all actors
@@ -174,20 +176,20 @@ where
             match barrier_complete_rx.recv().await.unwrap() {
                 (_, Ok(response)) => {
                     if let Err(err) = command_ctx.post_collect().await {
-                        error!("post_collect failed: {}", err);
+                        error!(err = ?err, "post_collect failed");
                         return Err(err);
                     }
                     Ok((new_epoch, response))
                 }
                 (_, Err(err)) => {
-                    error!("inject_barrier failed: {}", err);
+                    error!(err = ?err, "inject_barrier failed");
                     Err(err)
                 }
             }
         })
         .await
         .expect("Retry until recovery success.");
-        debug!("recovery success");
+        tracing::info!("recovery success");
 
         new_epoch
     }
@@ -213,7 +215,7 @@ where
             let new_nodes = current_nodes
                 .into_iter()
                 .filter(|node| {
-                    !info.node_map.contains_key(&node.id) && !node_map.contains_key(&node.id)
+                    !info.actor_map.contains_key(&node.id) && !node_map.contains_key(&node.id)
                 })
                 .collect_vec();
             for new_node in new_nodes {
@@ -331,9 +333,9 @@ where
 
     /// Reset all compute nodes by calling `force_stop_actors`.
     async fn reset_compute_nodes(&self, info: &BarrierActorInfo) -> MetaResult<()> {
-        let futures = info.node_map.iter().map(|(_, worker_node)| async move {
+        let futures = info.node_map.values().map(|worker_node| async move {
             let client = self.env.stream_client_pool().get(worker_node).await?;
-            debug!("force stop actors: {}", worker_node.id);
+            debug!(worker = ?worker_node.id, "force stop actors");
             client
                 .force_stop_actors(ForceStopActorsRequest {
                     request_id: Uuid::new_v4().to_string(),

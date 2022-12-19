@@ -27,6 +27,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14"
 itertools = "0.10"
+memcomparable = { version = "0.1" }
 mime_guess = "2"
 num-integer = "0.1"
 num-traits = "0.2"
@@ -37,10 +38,12 @@ prometheus-http-query = "0.6"
 prost = "0.11"
 rand = "0.8"
 reqwest = "0.11"
+risingwave_backup = { path = "../storage/backup" }
 risingwave_common = { path = "../common" }
 risingwave_common_service = { path = "../common/common_service" }
 risingwave_connector = { path = "../connector" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
+risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 serde = { version = "1", features = ["derive"] }
@@ -66,9 +69,10 @@ tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
+xxhash-rust = { version = "0.8.5", features = ["xxh64"] }
 
 [target.'cfg(not(madsim))'.dependencies]
-axum = "0.5"
+axum = "0.6"
 tower-http = { version = "0.3", features = ["add-extension", "cors", "fs"] }
 workspace-hack = { path = "../workspace-hack" }
 

@@ -21,7 +21,7 @@ use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::{count_iter, default_config_for_test};
+use risingwave_storage::hummock::test_utils::{count_stream, default_config_for_test};
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
@@ -91,6 +91,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -136,6 +137,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await;
@@ -150,6 +152,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await;
@@ -165,6 +168,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -199,13 +203,14 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
         .unwrap()
         .unwrap();
     assert_eq!(value, Bytes::from("111"));
-    let mut iters = hummock_storage
+    let iters = hummock_storage
         .iter(
             (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
             5,
@@ -215,10 +220,11 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
         .unwrap();
-    let len = count_iter(&mut iters).await;
+    let len = count_stream(iters).await;
     assert_eq!(len, 2);
 }

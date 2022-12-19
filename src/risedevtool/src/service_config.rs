@@ -39,6 +39,9 @@ pub struct ComputeNodeConfig {
     pub user_managed: bool,
     pub enable_in_memory_kv_state_backend: bool,
     pub connector_rpc_endpoint: String,
+
+    pub total_memory_bytes: usize,
+    pub parallelism: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -60,12 +63,6 @@ pub struct MetaNodeConfig {
 
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
-
-    pub max_heartbeat_interval_secs: u64,
-    pub unsafe_disable_recovery: bool,
-    pub max_idle_secs_to_exit: Option<u64>,
-    pub enable_committed_sst_sanity_check: bool,
-    pub enable_compaction_deterministic: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

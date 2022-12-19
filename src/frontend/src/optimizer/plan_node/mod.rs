@@ -320,6 +320,7 @@ mod stream_hop_window;
 mod stream_index_scan;
 mod stream_local_simple_agg;
 mod stream_materialize;
+mod stream_now;
 mod stream_project;
 mod stream_project_set;
 mod stream_row_id_gen;
@@ -389,6 +390,7 @@ pub use stream_hop_window::StreamHopWindow;
 pub use stream_index_scan::StreamIndexScan;
 pub use stream_local_simple_agg::StreamLocalSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
+pub use stream_now::StreamNow;
 pub use stream_project::StreamProject;
 pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
@@ -398,7 +400,7 @@ pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 
-use crate::session::OptimizerContextRef;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
@@ -484,6 +486,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Union }
             , { Stream, RowIdGen }
             , { Stream, Dml }
+            , { Stream, Now }
         }
     };
 }
@@ -579,6 +582,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Union }
             , { Stream, RowIdGen }
             , { Stream, Dml }
+            , { Stream, Now }
         }
     };
 }

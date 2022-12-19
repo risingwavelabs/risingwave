@@ -36,8 +36,7 @@ use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    ExecutionContextRef, HummockSnapshotGuard, PinnedHummockSnapshot, SchedulerError,
-    SchedulerResult,
+    ExecutionContextRef, PinnedHummockSnapshot, SchedulerError, SchedulerResult,
 };
 
 /// Message sent to a `QueryRunner` to control its execution.
@@ -115,7 +114,7 @@ impl QueryExecution {
         &self,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeManagerRef,
-        pinned_snapshot: HummockSnapshotGuard,
+        pinned_snapshot: PinnedHummockSnapshot,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
@@ -209,7 +208,7 @@ impl QueryExecution {
 
             let stage_exec = Arc::new(StageExecution::new(
                 // TODO: Add support to use current epoch when needed
-                pinned_snapshot.get_committed_epoch(),
+                pinned_snapshot.get_batch_query_epoch(),
                 self.query.stage_graph.stages[&stage_id].clone(),
                 worker_node_manager.clone(),
                 self.shutdown_tx.clone(),
@@ -380,7 +379,7 @@ pub(crate) mod tests {
     use std::sync::{Arc, RwLock};
 
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
-    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+    use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
@@ -394,12 +393,12 @@ pub(crate) mod tests {
         LogicalScan, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
-    use crate::optimizer::PlanRef;
+    use crate::optimizer::{OptimizerContext, PlanRef};
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
     use crate::scheduler::{ExecutionContext, HummockSnapshotManager, QueryExecutionInfo};
-    use crate::session::{OptimizerContext, SessionImpl};
+    use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
 
@@ -424,7 +423,7 @@ pub(crate) mod tests {
             .start(
                 ExecutionContext::new(SessionImpl::mock().into()).into(),
                 worker_node_manager,
-                pinned_snapshot,
+                pinned_snapshot.into(),
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,
@@ -474,9 +473,10 @@ pub(crate) mod tests {
                     },
                 ],
                 distribution_key: vec![2],
-                appendonly: false,
+                append_only: false,
                 retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
                 value_indices: vec![0, 1, 2],
+                read_prefix_len_hint: 0,
             }),
             vec![],
             ctx,

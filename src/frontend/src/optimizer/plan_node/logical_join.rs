@@ -277,7 +277,7 @@ impl LogicalJoin {
     /// Returns the pushed predicates. The pushed part will be removed from the original predicate.
     ///
     /// `InputRef`s in the right `Condition` are shifted by `-left_col_num`.
-    fn push_down(
+    pub fn push_down(
         predicate: &mut Condition,
         left_col_num: usize,
         right_col_num: usize,
@@ -285,11 +285,13 @@ impl LogicalJoin {
         push_right: bool,
         push_on: bool,
     ) -> (Condition, Condition, Condition) {
-        let conjunctions = std::mem::take(&mut predicate.conjunctions);
+        let mut conjunctions = std::mem::take(&mut predicate.conjunctions);
+
+        let mut cannot_push = conjunctions
+            .drain_filter(|expr| expr.count_nows() > 0)
+            .collect_vec();
         let (mut left, right, mut others) =
             Condition { conjunctions }.split(left_col_num, right_col_num);
-
-        let mut cannot_push = vec![];
 
         if !push_left {
             cannot_push.extend(left);
@@ -320,35 +322,35 @@ impl LogicalJoin {
         (left, right, on)
     }
 
-    fn can_push_left_from_filter(ty: JoinType) -> bool {
+    pub fn can_push_left_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
         )
     }
 
-    fn can_push_right_from_filter(ty: JoinType) -> bool {
+    pub fn can_push_right_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti
         )
     }
 
-    fn can_push_on_from_filter(ty: JoinType) -> bool {
+    pub fn can_push_on_from_filter(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftSemi | JoinType::RightSemi
         )
     }
 
-    fn can_push_left_from_on(ty: JoinType) -> bool {
+    pub fn can_push_left_from_on(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi
         )
     }
 
-    fn can_push_right_from_on(ty: JoinType) -> bool {
+    pub fn can_push_right_from_on(ty: JoinType) -> bool {
         matches!(
             ty,
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
@@ -505,32 +507,21 @@ impl LogicalJoin {
             max_pos + 1
         };
 
-        if predicate.right_eq_indexes().len() < at_least_prefix_len {
-            // In Lookup Join, the right columns of the equality join predicates must contains the
-            // prefix of order key.
-            return None;
-        }
-
-        // Lookup prefix len is the prefix length of the order key.
-        let mut lookup_prefix_len = 0;
-        #[expect(clippy::disallowed_methods)]
-        for (i, (order_col_id, eq_idx)) in order_col_ids
-            .into_iter()
-            .zip(predicate.right_eq_indexes())
-            .enumerate()
-        {
-            if order_col_id != output_column_ids[eq_idx] {
-                if i < at_least_prefix_len {
-                    // In Lookup Join, the right columns of the equality join predicates must
-                    // contains the prefix of order key.
-                    return None;
-                } else {
+        // Reorder the join equal predicate to match the order key.
+        let mut reorder_idx = vec![];
+        for order_col_id in order_col_ids {
+            for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
+                if order_col_id == output_column_ids[eq_idx] {
+                    reorder_idx.push(i);
                     break;
                 }
-            } else {
-                lookup_prefix_len = i + 1;
             }
         }
+        if reorder_idx.len() < at_least_prefix_len {
+            return None;
+        }
+        let lookup_prefix_len = reorder_idx.len();
+        let predicate = predicate.reorder(&reorder_idx);
 
         // Extract the predicate from logical scan. Only pure scan is supported.
         let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
@@ -599,6 +590,12 @@ impl LogicalJoin {
             new_scan.base.schema().len(),
             new_join_on.clone(),
         );
+
+        // We discovered that we cannot use a lookup join after pulling up the predicate
+        // from one side and simplifying the condition. Let's use  some other join instead.
+        if !new_predicate.has_eq() {
+            return None;
+        }
 
         // Rewrite the join output indices and all output indices referred to the old scan need to
         // rewrite.
@@ -1101,7 +1098,7 @@ impl ToBatch for LogicalJoin {
         let right = self.right().to_batch()?;
         let logical_join = self.clone_with_left_right(left, right);
 
-        let config = self.base.ctx.inner().session_ctx.config();
+        let config = self.base.ctx.session_ctx().config();
 
         if predicate.has_eq() {
             if config.get_batch_enable_lookup_join() {
@@ -1223,9 +1220,9 @@ mod tests {
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
     use crate::optimizer::property::FunctionalDependency;
-    use crate::session::OptimizerContext;
 
     /// Pruning
     /// ```text

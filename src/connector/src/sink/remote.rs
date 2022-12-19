@@ -22,6 +22,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Field;
 use risingwave_common::catalog::Schema;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
+use risingwave_common::row::Row;
 #[cfg(test)]
 use risingwave_common::types::DataType;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
@@ -118,22 +119,33 @@ impl RemoteSink {
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
     ) -> Result<Self> {
-        let channel = Endpoint::from_shared(format!(
+        let address = format!(
             "http://{}",
             connector_params
                 .connector_rpc_endpoint
                 .ok_or_else(|| SinkError::Remote(
                     "connector sink endpoint not specified".parse().unwrap()
                 ))?
-        ))
-        .map_err(|e| SinkError::Remote(format!("failed to connect channel: {:?}", e)))?
-        .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
-        .initial_stream_window_size(STREAM_WINDOW_SIZE)
-        .tcp_nodelay(true)
-        .connect_timeout(Duration::from_secs(5))
-        .connect()
-        .await
-        .map_err(|e| SinkError::Remote(format!("failed to connect channel: {:?}", e)))?; // create client and start sink
+        );
+        let channel = Endpoint::from_shared(address.clone())
+            .map_err(|e| {
+                SinkError::Remote(format!(
+                    "invalid connector endpoint `{}`: {:?}",
+                    &address, e
+                ))
+            })?
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
+            .initial_stream_window_size(STREAM_WINDOW_SIZE)
+            .tcp_nodelay(true)
+            .connect_timeout(Duration::from_secs(5))
+            .connect()
+            .await
+            .map_err(|e| {
+                SinkError::Remote(format!(
+                    "failed to connect to connector endpoint `{}`: {:?}",
+                    &address, e
+                ))
+            })?; // create client and start sink
         let mut client = ConnectorServiceClient::new(channel);
 
         let (request_sender, request_receiver) = mpsc::unbounded_channel::<SinkStreamRequest>();
@@ -231,7 +243,7 @@ impl Sink for RemoteSink {
         for (op, row_ref) in chunk.rows() {
             let mut map = serde_json::Map::new();
             row_ref
-                .values()
+                .iter()
                 .zip_eq(self.schema.fields.iter())
                 .for_each(|(v, f)| {
                     map.insert(f.name.clone(), parse_datum(v));

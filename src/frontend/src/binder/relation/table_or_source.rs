@@ -16,9 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{
-    ColumnDesc, Field, INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
-};
+use risingwave_common::catalog::{ColumnDesc, Field, SYSTEM_SCHEMAS};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
@@ -29,7 +27,7 @@ use crate::binder::{Binder, Relation};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
-use crate::catalog::table_catalog::{TableCatalog, TableKind};
+use crate::catalog::table_catalog::{TableCatalog, TableType};
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{CatalogError, IndexCatalog, TableId};
 use crate::user::UserId;
@@ -78,7 +76,7 @@ impl Binder {
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
         fn is_system_schema(schema_name: &str) -> bool {
-            schema_name == PG_CATALOG_SCHEMA_NAME || schema_name == INFORMATION_SCHEMA_SCHEMA_NAME
+            SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
         }
 
         // define some helper functions converting catalog to bound relation
@@ -232,10 +230,11 @@ impl Binder {
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let ast = Parser::parse_sql(&view_catalog.sql)
             .expect("a view's sql should be parsed successfully");
-        assert!(ast.len() == 1, "a view should contain only one statement");
-        let query = match ast.into_iter().next().unwrap() {
-            Statement::Query(q) => q,
-            _ => unreachable!("a view should contain a query statement"),
+        let Statement::Query(query) = ast
+            .into_iter()
+            .exactly_one()
+            .expect("a view should contain only one statement") else {
+            unreachable!("a view should contain a query statement");
         };
         let query = self.bind_query(*query).map_err(|e| {
             ErrorCode::BindError(format!(
@@ -310,17 +309,23 @@ impl Binder {
         let (associate_table, schema_name) =
             self.catalog
                 .get_table_by_name(db_name, schema_path, source_name)?;
-        match associate_table.kind() {
-            TableKind::TableOrSource => {}
-            TableKind::Index => {
+        match associate_table.table_type() {
+            TableType::Table => {}
+            TableType::Index => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot change index \"{source_name}\""
                 ))
                 .into())
             }
-            TableKind::MView => {
+            TableType::MaterializedView => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot change materialized view \"{source_name}\""
+                ))
+                .into())
+            }
+            TableType::Internal => {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "cannot change internal table \"{source_name}\""
                 ))
                 .into())
             }
@@ -355,5 +360,12 @@ impl Binder {
             append_only,
             owner,
         })
+    }
+
+    pub(crate) fn resolve_regclass(&self, class_name: &str) -> Result<u32> {
+        let schema_path = SchemaPath::Path(&self.search_path, &self.auth_context.user_name);
+        Ok(self
+            .catalog
+            .get_id_by_class_name(&self.db_name, schema_path, class_name)?)
     }
 }

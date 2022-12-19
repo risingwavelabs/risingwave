@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::Row2;
+use super::Row;
 use crate::types::{DatumRef, ToDatumRef};
 
 /// Row for the [`repeat_n`] function.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct RepeatN<D> {
     datum: D,
     n: usize,
@@ -33,8 +33,8 @@ impl<D: PartialEq> PartialEq for RepeatN<D> {
 }
 impl<D: Eq> Eq for RepeatN<D> {}
 
-impl<D: ToDatumRef> Row2 for RepeatN<D> {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+impl<D: ToDatumRef> Row for RepeatN<D> {
+    type Iter<'a> = std::iter::Take<std::iter::Repeat<DatumRef<'a>>>
     where
         Self: 'a;
 
@@ -52,7 +52,7 @@ impl<D: ToDatumRef> Row2 for RepeatN<D> {
 
     #[inline]
     unsafe fn datum_at_unchecked(&self, _index: usize) -> crate::types::DatumRef<'_> {
-        // Always ignore the index and return the datum.
+        // Always ignore the index and return the datum, which is okay for undefined behavior.
         self.datum.to_datum_ref()
     }
 
@@ -63,7 +63,7 @@ impl<D: ToDatumRef> Row2 for RepeatN<D> {
 
     #[inline]
     fn iter(&self) -> Self::Iter<'_> {
-        itertools::repeat_n(self.datum.to_datum_ref(), self.n)
+        std::iter::repeat(self.datum.to_datum_ref()).take(self.n)
     }
 }
 

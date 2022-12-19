@@ -16,6 +16,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::TryStreamExt;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -25,7 +26,7 @@ use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::*;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, StateStoreIter, StateStoreWrite, WriteOptions};
+use risingwave_storage::store::{ReadOptions, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
 
 use crate::test_utils::{
@@ -41,7 +42,7 @@ macro_rules! assert_count_range_scan {
             range.start_bound().map(|x: &Bytes| x.to_vec()),
             range.end_bound().map(|x: &Bytes| x.to_vec()),
         );
-        let mut it = $storage
+        let it = $storage
             .iter(
                 bounds,
                 $epoch,
@@ -51,13 +52,15 @@ macro_rules! assert_count_range_scan {
                     prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
             .unwrap();
+        futures::pin_mut!(it);
         let mut count = 0;
         loop {
-            match it.next().await.unwrap() {
+            match it.try_next().await.unwrap() {
                 Some(_) => count += 1,
                 None => break,
             }
@@ -75,7 +78,7 @@ macro_rules! assert_count_backward_range_scan {
             range.start_bound().map(|x: &Bytes| x.to_vec()),
             range.end_bound().map(|x: &Bytes| x.to_vec()),
         );
-        let mut it = $storage
+        let it = $storage
             .backward_iter(
                 bounds,
                 ReadOptions {
@@ -83,13 +86,15 @@ macro_rules! assert_count_backward_range_scan {
                     epoch: $epoch,
                     table_id: Default::default(),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
             .unwrap();
+        futures::pin_mut!(it);
         let mut count = 0;
         loop {
-            match it.next().await.unwrap() {
+            match it.try_next().await.unwrap() {
                 Some(_) => count += 1,
                 None => break,
             }

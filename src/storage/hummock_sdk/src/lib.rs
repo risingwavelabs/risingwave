@@ -25,9 +25,9 @@ mod key_cmp;
 extern crate num_derive;
 
 use std::cmp::Ordering;
-use std::ops::Deref;
 
 pub use key_cmp::*;
+use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::compaction_group::StaticCompactionGroupId;
@@ -169,6 +169,24 @@ pub enum HummockReadEpoch {
     Current(HummockEpoch),
     /// We don't need to wait epoch, we usually do stream reading with it.
     NoWait(HummockEpoch),
+    /// We don't need to wait epoch.
+    Backup(HummockEpoch),
+}
+
+impl From<BatchQueryEpoch> for HummockReadEpoch {
+    fn from(e: BatchQueryEpoch) -> Self {
+        match e.epoch.unwrap() {
+            batch_query_epoch::Epoch::Committed(epoch) => HummockReadEpoch::Committed(epoch),
+            batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::Current(epoch),
+            batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
+        }
+    }
+}
+
+pub fn to_committed_batch_query_epoch(epoch: u64) -> BatchQueryEpoch {
+    BatchQueryEpoch {
+        epoch: Some(batch_query_epoch::Epoch::Committed(epoch)),
+    }
 }
 
 impl HummockReadEpoch {
@@ -177,6 +195,7 @@ impl HummockReadEpoch {
             HummockReadEpoch::Committed(epoch) => epoch,
             HummockReadEpoch::Current(epoch) => epoch,
             HummockReadEpoch::NoWait(epoch) => epoch,
+            HummockReadEpoch::Backup(epoch) => epoch,
         }
     }
 }
@@ -207,7 +226,7 @@ impl SstIdRange {
     }
 }
 
-pub fn can_concat(ssts: &[impl Deref<Target = SstableInfo>]) -> bool {
+pub fn can_concat(ssts: &[SstableInfo]) -> bool {
     let len = ssts.len();
     for i in 0..len - 1 {
         if ssts[i]

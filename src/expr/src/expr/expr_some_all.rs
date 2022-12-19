@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use itertools::{multizip, Itertools};
 use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk};
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
 use risingwave_pb::expr::expr_node::Type;
 
@@ -87,7 +87,7 @@ impl SomeAllExpression {
                         .iter()
                         .map(|d| {
                             self.func
-                                .eval_row(&Row::new(vec![datum_left.clone(), d.clone()]))
+                                .eval_row(&OwnedRow::new(vec![datum_left.clone(), d.clone()]))
                         })
                         .collect::<Result<Vec<_>>>()?;
                     Ok(self.resolve_scalar_vec(scalar_vec))
@@ -146,7 +146,7 @@ impl Expression for SomeAllExpression {
         }
     }
 
-    fn eval_row(&self, row: &Row) -> Result<Datum> {
+    fn eval_row(&self, row: &OwnedRow) -> Result<Datum> {
         let datum_left = self.left_expr.eval_row(row)?;
         let datum_right = self.right_expr.eval_row(row)?;
         self.compare_left_right(datum_left, datum_right)

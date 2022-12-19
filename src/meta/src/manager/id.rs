@@ -58,7 +58,7 @@ where
             .get_cf(DEFAULT_COLUMN_FAMILY, category_gen_key.as_bytes())
             .await;
         let current_id = match res {
-            Ok(value) => u64::from_be_bytes(value.as_slice().try_into().unwrap()),
+            Ok(value) => memcomparable::from_slice(&value).unwrap(),
             Err(MetaStoreError::ItemNotFound(_)) => start.unwrap_or(0),
             Err(e) => panic!("{:?}", e),
         };
@@ -68,7 +68,7 @@ where
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
                 category_gen_key.clone().into_bytes(),
-                next_allocate_id.to_be_bytes().to_vec(),
+                memcomparable::to_vec(&next_allocate_id).unwrap(),
             )
             .await
         {
@@ -105,7 +105,7 @@ where
                     .put_cf(
                         DEFAULT_COLUMN_FAMILY,
                         self.category_gen_key.clone().into_bytes(),
-                        next_allocate_id.to_be_bytes().to_vec(),
+                        memcomparable::to_vec(&next_allocate_id).unwrap(),
                     )
                     .await?;
                 *next = next_allocate_id;
@@ -131,7 +131,7 @@ pub mod IdCategory {
     pub const Worker: IdCategoryType = 4;
     pub const Fragment: IdCategoryType = 5;
     pub const Actor: IdCategoryType = 6;
-    pub const HummockSnapshot: IdCategoryType = 7;
+    pub const Backup: IdCategoryType = 7;
     pub const HummockSstableId: IdCategoryType = 8;
     pub const ParallelUnit: IdCategoryType = 9;
     pub const Source: IdCategoryType = 10;
@@ -156,7 +156,7 @@ pub struct IdGeneratorManager<S> {
     fragment: Arc<StoredIdGenerator<S>>,
     actor: Arc<StoredIdGenerator<S>>,
     user: Arc<StoredIdGenerator<S>>,
-    hummock_snapshot: Arc<StoredIdGenerator<S>>,
+    backup: Arc<StoredIdGenerator<S>>,
     hummock_ss_table_id: Arc<StoredIdGenerator<S>>,
     hummock_compaction_task: Arc<StoredIdGenerator<S>>,
     parallel_unit: Arc<StoredIdGenerator<S>>,
@@ -197,9 +197,7 @@ where
                 )
                 .await,
             ),
-            hummock_snapshot: Arc::new(
-                StoredIdGenerator::new(meta_store.clone(), "hummock_snapshot", Some(1)).await,
-            ),
+            backup: Arc::new(StoredIdGenerator::new(meta_store.clone(), "backup", Some(1)).await),
             hummock_ss_table_id: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "hummock_ss_table_id", Some(1)).await,
             ),
@@ -231,7 +229,7 @@ where
             IdCategory::Fragment => &self.fragment,
             IdCategory::Actor => &self.actor,
             IdCategory::User => &self.user,
-            IdCategory::HummockSnapshot => &self.hummock_snapshot,
+            IdCategory::Backup => &self.backup,
             IdCategory::Worker => &self.worker,
             IdCategory::HummockSstableId => &self.hummock_ss_table_id,
             IdCategory::ParallelUnit => &self.parallel_unit,

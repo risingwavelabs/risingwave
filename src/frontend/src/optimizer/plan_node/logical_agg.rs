@@ -367,7 +367,9 @@ impl LogicalAggBuilder {
     pub fn syntax_check(&self) -> Result<()> {
         let mut has_distinct = false;
         let mut has_order_by = false;
+        // TODO(stonepage): refactor it and unify the 2-phase agg rewriting logic
         let mut has_non_distinct_string_agg = false;
+        let mut has_non_distinct_array_agg = false;
         self.agg_calls.iter().for_each(|agg_call| {
             if agg_call.distinct {
                 has_distinct = true;
@@ -377,6 +379,9 @@ impl LogicalAggBuilder {
             }
             if !agg_call.distinct && agg_call.agg_kind == AggKind::StringAgg {
                 has_non_distinct_string_agg = true;
+            }
+            if !agg_call.distinct && agg_call.agg_kind == AggKind::ArrayAgg {
+                has_non_distinct_array_agg = true;
             }
         });
 
@@ -395,6 +400,13 @@ impl LogicalAggBuilder {
         if has_distinct && has_non_distinct_string_agg {
             return Err(ErrorCode::NotImplemented(
                 "Non-distinct string_agg can't appear with distinct aggregates".into(),
+                TrackingIssue::none(),
+            )
+            .into());
+        }
+        if has_distinct && has_non_distinct_array_agg {
+            return Err(ErrorCode::NotImplemented(
+                "Non-distinct array_agg can't appear with distinct aggregates".into(),
                 TrackingIssue::none(),
             )
             .into());
@@ -942,8 +954,8 @@ mod tests {
     use crate::expr::{
         assert_eq_input_ref, input_ref_to_column_indices, AggCall, ExprType, FunctionCall, OrderBy,
     };
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_create() {
@@ -1232,12 +1244,12 @@ mod tests {
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 1);
         assert_eq_input_ref!(&project.exprs()[0], 1);
-        assert_eq!(project.id().0, 4);
+        assert_eq!(project.id().0, 5);
 
         let agg_new = project.input();
         let agg_new = agg_new.as_logical_agg().unwrap();
         assert_eq!(agg_new.group_key(), &vec![0]);
-        assert_eq!(agg_new.id().0, 3);
+        assert_eq!(agg_new.id().0, 4);
 
         assert_eq!(agg_new.agg_calls().len(), 1);
         let agg_call_new = agg_new.agg_calls()[0].clone();

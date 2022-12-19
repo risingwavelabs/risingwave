@@ -1,5 +1,5 @@
 # Copied from https://github.com/duckdb/duckdb (MIT licensed).
-# Copyright 2018-2022 Stichting DuckDB Foundation 
+# Copyright 2018-2022 Stichting DuckDB Foundation
 
 # description: Test ORDER BY exceptions
 
@@ -61,4 +61,3 @@ SELECT a FROM test ORDER BY 'hello', a;
 
 statement ok
 drop table test;
-

@@ -16,12 +16,12 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
-use risingwave_common::array::{Op, RowDeserializer, RowRef};
-use risingwave_common::row::{CompactedRow, Row, Row2};
+use risingwave_common::array::{Op, RowRef};
+use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::ManagedTopNState;
+use crate::executor::managed_state::top_n::{GroupKey, ManagedTopNState};
 
 const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 
@@ -73,7 +73,7 @@ pub trait TopNCacheTrait {
     fn insert(
         &mut self,
         cache_key: CacheKey,
-        row: impl Row2,
+        row: impl Row,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     );
@@ -89,10 +89,10 @@ pub trait TopNCacheTrait {
     #[allow(clippy::too_many_arguments)]
     async fn delete<S: StateStore>(
         &mut self,
-        group_key: Option<&Row>,
+        group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row2 + Send,
+        row: impl Row + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) -> StreamExecutorResult<()>;
@@ -170,7 +170,7 @@ impl TopNCacheTrait for TopNCache<false> {
     fn insert(
         &mut self,
         cache_key: CacheKey,
-        row: impl Row2,
+        row: impl Row,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) {
@@ -233,10 +233,10 @@ impl TopNCacheTrait for TopNCache<false> {
     #[allow(clippy::too_many_arguments)]
     async fn delete<S: StateStore>(
         &mut self,
-        group_key: Option<&Row>,
+        group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row2 + Send,
+        row: impl Row + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) -> StreamExecutorResult<()> {
@@ -314,7 +314,7 @@ impl TopNCacheTrait for TopNCache<true> {
     fn insert(
         &mut self,
         cache_key: CacheKey,
-        row: impl Row2,
+        row: impl Row,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) {
@@ -409,10 +409,10 @@ impl TopNCacheTrait for TopNCache<true> {
     #[allow(clippy::too_many_arguments)]
     async fn delete<S: StateStore>(
         &mut self,
-        group_key: Option<&Row>,
+        group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row2 + Send,
+        row: impl Row + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) -> StreamExecutorResult<()> {

@@ -257,14 +257,13 @@ class Panels:
             legendCalcs=legendCols,
         )
 
-    def timeseries_ns(self, title, description, targets, legendCols=["max"]):
+    def timeseries_ms(self, title, description, targets, legendCols=["max"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
             description=description,
             targets=targets,
             gridPos=gridPos,
-            unit="ns",
             fillOpacity=10,
             legendDisplayMode="table",
             legendPlacement="right",
@@ -533,6 +532,16 @@ def section_compaction(outer_panels):
                         panels.target(
                             f"sum({metric('storage_level_compact_frequency')}) by (compactor, group, result)",
                             "{{result}} - group-{{group}} @ {{compactor}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Compaction Skip Count",
+                    "num of compaction task which does not trigger",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('storage_skip_compact_frequency')}[$__rate_interval])) by (level, type)",
+                            "{{level}}-{{type}}",
                         ),
                     ],
                 ),
@@ -993,6 +1002,16 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_bytes(
+                    "Actor Memory Usage",
+                    "",
+                    [
+                        panels.target(
+                            "rate(actor_memory_usage[$__rate_interval])",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_percentage(
                     "Actor Input Blocking Time Ratio",
                     "",
@@ -1367,7 +1386,7 @@ def section_batch_exchange(outer_panels):
     ]
 
 
-def frontend(outer_panels):
+def section_frontend(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -1631,9 +1650,9 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_merge_sstable_counts_bucket')}[$__rate_interval])) by (le, job, instance))",
+                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_merge_sstable_counts_bucket')}[$__rate_interval])) by (le, job, type))",
                         f"# merged ssts p{legend}" +
-                        " - {{job}} @ {{instance}}",
+                        " - {{job}} @ {{type}}",
                     ),
                     [90, 99, "max"],
                 ),
@@ -1849,7 +1868,6 @@ def section_hummock_tiered_cache(outer_panels):
         )
     ]
 
-
 def section_hummock_manager(outer_panels):
     panels = outer_panels.sub_panel()
     total_key_size_filter = "metric='total_key_size'"
@@ -1905,6 +1923,8 @@ def section_hummock_manager(outer_panels):
                                       "checkpoint version id"),
                         panels.target(f"{metric('storage_min_pinned_version_id')}",
                                       "min pinned version id"),
+                        panels.target(f"{metric('storage_min_safepoint_version_id')}",
+                                      "min safepoint version id"),
                     ],
                 ),
                 panels.timeseries_id(
@@ -1920,7 +1940,7 @@ def section_hummock_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_kilobytes(
-                    "table KV size",
+                    "Table KV Size",
                     "",
                     [
                         panels.target(f"{metric('storage_version_stats', total_key_size_filter)}/1024",
@@ -1930,7 +1950,7 @@ def section_hummock_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "table KV count",
+                    "Table KV Count",
                     "",
                     [
                         panels.target(f"{metric('storage_version_stats', total_key_count_filter)}",
@@ -1941,6 +1961,39 @@ def section_hummock_manager(outer_panels):
         )
     ]
 
+def section_backup_manager(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Backup Manager",
+            [
+                panels.timeseries_count(
+                    "Job Count",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('backup_job_count')}",
+                            "job count",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Job Process Time",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('backup_job_latency_bucket')}[$__rate_interval])) by (le, state))",
+                                f"Job Process Time p{legend}" +
+                                " - {{state}}",
+                                ),
+                            [50, 99, 999, "max"],
+                        ),
+                    ],
+                ),
+            ],
+        )
+    ]
 
 def grpc_metrics_target(panels, name, filter):
     return panels.timeseries_latency_small(
@@ -2183,6 +2236,59 @@ def section_grpc_hummock_meta_client(outer_panels):
         ),
     ]
 
+def section_memory_manager(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Memory manager",
+            [
+                panels.timeseries_count(
+                    "LRU manager loop count per sec",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('lru_runtime_loop_count')}[$__rate_interval])",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "LRU manager watermark steps",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('lru_watermark_step')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ms(
+                    "LRU manager watermark_time and physical_now",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('lru_current_watermark_time_ms')}",
+                            "",
+                        ),
+                        panels.target(
+                            f"{metric('lru_physical_now_ms')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The memory allocated by jemalloc",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jemalloc_allocated_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+            ],
+        ),
+    ]
 
 templating = Templating()
 if namespace_filter_enabled:
@@ -2232,11 +2338,13 @@ dashboard = Dashboard(
         *section_object_storage(panels),
         *section_hummock_tiered_cache(panels),
         *section_hummock_manager(panels),
+        *section_backup_manager(panels),
         *section_grpc_meta_catalog_service(panels),
         *section_grpc_meta_cluster_service(panels),
         *section_grpc_meta_stream_manager(panels),
         *section_grpc_meta_hummock_manager(panels),
         *section_grpc_hummock_meta_client(panels),
-        *frontend(panels),
+        *section_frontend(panels),
+        *section_memory_manager(panels),
     ],
 ).auto_panel_ids()

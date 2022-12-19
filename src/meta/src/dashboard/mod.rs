@@ -53,7 +53,7 @@ pub type Service<S> = Arc<DashboardService<S>>;
 pub(super) mod handlers {
     use axum::Json;
     use itertools::Itertools;
-    use risingwave_pb::catalog::{Source, Table};
+    use risingwave_pb::catalog::{Sink, Source, Table};
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::meta::{ActorLocation, TableFragments as ProstTableFragments};
     use risingwave_pb::stream_plan::StreamActor;
@@ -116,6 +116,15 @@ pub(super) mod handlers {
 
         let sources = Source::list(&*srv.meta_store).await.map_err(err)?;
         Ok(Json(sources))
+    }
+
+    pub async fn list_sinks<S: MetaStore>(
+        Extension(srv): Extension<Service<S>>,
+    ) -> Result<Json<Vec<Sink>>> {
+        use crate::model::MetadataModel;
+
+        let sinks = Sink::list(&*srv.meta_store).await.map_err(err)?;
+        Ok(Json(sinks))
     }
 
     pub async fn list_actors<S: MetaStore>(
@@ -188,6 +197,7 @@ where
             .route("/fragments2", get(list_fragments::<S>))
             .route("/materialized_views", get(list_materialized_views::<S>))
             .route("/sources", get(list_sources::<S>))
+            .route("/sinks", get(list_sinks::<S>))
             .route(
                 "/metrics/cluster",
                 get(prometheus::list_prometheus_cluster::<S>),
@@ -200,7 +210,7 @@ where
             .layer(cors_layer);
 
         let app = if let Some(ui_path) = ui_path {
-            let static_file_router = Router::new().nest(
+            let static_file_router = Router::new().nest_service(
                 "/",
                 get_service(ServeDir::new(ui_path)).handle_error(
                     |error: std::io::Error| async move {
@@ -212,7 +222,7 @@ where
                 ),
             );
             Router::new()
-                .fallback(static_file_router)
+                .fallback_service(static_file_router)
                 .nest("/api", api_router)
         } else {
             let cache = Arc::new(Mutex::new(HashMap::new()));
@@ -228,7 +238,9 @@ where
                     })
                 }
             });
-            Router::new().fallback(service).nest("/api", api_router)
+            Router::new()
+                .fallback_service(service)
+                .nest("/api", api_router)
         };
 
         axum::Server::bind(&srv.dashboard_addr)

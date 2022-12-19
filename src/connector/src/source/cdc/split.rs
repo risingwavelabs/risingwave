@@ -19,8 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::source::{SplitId, SplitMetaData};
 
 /// The states of a CDC split, which will be persisted to checkpoint.
-/// The offset will be updated when received a new chunk, see `StreamChunkWithState`.
-/// CDC source only has single split
+/// CDC source only has single split, so we use the `source_id` to identify the split.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct CdcSplit {
     pub source_id: u32,

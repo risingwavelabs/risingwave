@@ -70,9 +70,26 @@ sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/extended_query/**/*
 echo "--- Kill cluster"
 cargo make ci-kill
 
+if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
+    echo "--- e2e, ci-meta-backup-test"
+    buildkite-agent artifact download backup-restore-"$profile" target/debug/
+    mv target/debug/backup-restore-"$profile" target/debug/backup-restore
+    chmod +x ./target/debug/backup-restore
+
+    test_root="src/storage/backup/integration_tests"
+    BACKUP_TEST_BACKUP_RESTORE="target/debug/backup-restore" \
+    BACKUP_TEST_MCLI=".risingwave/bin/mcli" \
+    BACKUP_TEST_MCLI_CONFIG=".risingwave/config/mcli" \
+    BACKUP_TEST_RW_ALL_IN_ONE="target/debug/risingwave" \
+    RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001" \
+    RW_META_ADDR="http://127.0.0.1:5690" \
+    bash "${test_root}/run_all.sh"
+    echo "--- Kill cluster"
+    cargo make kill
+fi
+
 if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     echo "--- e2e, ci-compaction-test, nexmark_q7"
-    cargo make clean-data
     cargo make ci-start ci-compaction-test
     # Please make sure the regression is expected before increasing the timeout.
     sqllogictest -p 4566 -d dev './e2e_test/compaction/ingest_rows.slt'
@@ -100,7 +117,9 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     buildkite-agent artifact download compaction-test-"$profile" target/debug/
     mv target/debug/compaction-test-"$profile" target/debug/compaction-test
     chmod +x ./target/debug/compaction-test
-    ./target/debug/compaction-test --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001
+    # Use the config of ci-compaction-test for replay.
+    config_path=".risingwave/config/risingwave.toml"
+    ./target/debug/compaction-test --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
 
     echo "--- Kill cluster"
     cargo make ci-kill

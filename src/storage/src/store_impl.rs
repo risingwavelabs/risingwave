@@ -16,7 +16,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
-use risingwave_common::config::StorageConfig;
+use risingwave_common::config::RwConfig;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_object_store::object::{
@@ -24,6 +24,7 @@ use risingwave_object_store::object::{
 };
 
 use crate::error::StorageResult;
+use crate::hummock::backup_reader::{parse_meta_snapshot_storage, BackupReader};
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
@@ -239,16 +240,15 @@ pub mod verify {
     use std::ops::{Bound, Deref};
 
     use bytes::Bytes;
+    use futures::{pin_mut, TryStreamExt};
+    use futures_async_stream::try_stream;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
+    use crate::error::StorageError;
     use crate::storage_value::StorageValue;
-    use crate::store::{
-        EmptyFutureTrait, GetFutureTrait, IngestBatchFutureTrait, IterFutureTrait, LocalStateStore,
-        NextFutureTrait, ReadOptions, StateStoreRead, StateStoreWrite, SyncFutureTrait,
-        WriteOptions,
-    };
+    use crate::store::*;
     use crate::store_impl::{AsHummockTrait, HummockTrait};
     use crate::{StateStore, StateStoreIter};
 
@@ -302,7 +302,7 @@ pub mod verify {
     }
 
     impl<A: StateStoreRead, E: StateStoreRead> StateStoreRead for VerifyStateStore<A, E> {
-        type Iter = VerifyStateStore<A::Iter, E::Iter>;
+        type IterStream = impl StateStoreReadIterStream;
 
         define_state_store_read_associated_type!();
 
@@ -338,7 +338,31 @@ pub mod verify {
                 } else {
                     None
                 };
-                Ok(VerifyStateStore { actual, expected })
+
+                Ok(verify_stream(actual, expected))
+            }
+        }
+    }
+
+    #[try_stream(ok = StateStoreIterItem, error = StorageError)]
+    async fn verify_stream(
+        actual: impl StateStoreReadIterStream,
+        expected: Option<impl StateStoreReadIterStream>,
+    ) {
+        pin_mut!(actual);
+        pin_mut!(expected);
+        let mut expected = expected.as_pin_mut();
+
+        loop {
+            let actual = actual.try_next().await?;
+            if let Some(expected) = expected.as_mut() {
+                let expected = expected.try_next().await?;
+                assert_eq!(actual, expected);
+            }
+            if let Some(actual) = actual {
+                yield actual;
+            } else {
+                break;
             }
         }
     }
@@ -386,7 +410,7 @@ pub mod verify {
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
         type Local = VerifyStateStore<A::Local, E::Local>;
 
-        type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send;
+        type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
         define_state_store_associated_type!();
 
@@ -441,13 +465,14 @@ impl StateStoreImpl {
     pub async fn new(
         s: &str,
         file_cache_dir: &str,
-        config: Arc<StorageConfig>,
+        rw_config: &RwConfig,
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
         state_store_stats: Arc<StateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
         tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
         tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> StorageResult<Self> {
+        let config = Arc::new(rw_config.storage.clone());
         #[cfg(not(target_os = "linux"))]
         let tiered_cache = TieredCache::none();
 
@@ -508,9 +533,12 @@ impl StateStoreImpl {
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
 
                 if !config.enable_state_store_v1 {
+                    let backup_store = parse_meta_snapshot_storage(rw_config).await?;
+                    let backup_reader = BackupReader::new(backup_store);
                     let inner = HummockStorage::new(
                         config.clone(),
                         sstable_store,
+                        backup_reader,
                         hummock_meta_client.clone(),
                         notification_client,
                         state_store_stats.clone(),
@@ -635,49 +663,22 @@ impl AsHummockTrait for SledStateStore {
 #[cfg(debug_assertions)]
 pub mod boxed_state_store {
     use std::future::Future;
-    use std::ops::{Bound, Deref, DerefMut};
+    use std::ops::{Bound, Deref};
 
     use bytes::Bytes;
+    use futures::stream::BoxStream;
     use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::key::FullKey;
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
     use crate::storage_value::StorageValue;
-    use crate::store::{
-        EmptyFutureTrait, GetFutureTrait, IngestBatchFutureTrait, IterFutureTrait, LocalStateStore,
-        NextFutureTrait, ReadOptions, StateStoreRead, StateStoreWrite, StaticSendSync,
-        SyncFutureTrait, SyncResult, WriteOptions,
-    };
+    use crate::store::*;
     use crate::store_impl::{AsHummockTrait, HummockTrait};
-    use crate::{StateStore, StateStoreIter};
-
-    // For StateStoreIter
-
-    #[async_trait::async_trait]
-    pub trait DynamicDispatchedStateStoreIter: StaticSendSync {
-        async fn next(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Bytes)>>;
-    }
-
-    #[async_trait::async_trait]
-    impl<I: StateStoreIter<Item = (FullKey<Vec<u8>>, Bytes)>> DynamicDispatchedStateStoreIter for I {
-        async fn next(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Bytes)>> {
-            self.next().await
-        }
-    }
-
-    impl StateStoreIter for Box<dyn DynamicDispatchedStateStoreIter> {
-        type Item = (FullKey<Vec<u8>>, Bytes);
-
-        type NextFuture<'a> = impl NextFutureTrait<'a, Self::Item>;
-
-        fn next(&mut self) -> Self::NextFuture<'_> {
-            async { self.deref_mut().next().await }
-        }
-    }
+    use crate::StateStore;
 
     // For StateStoreRead
 
+    pub type BoxStateStoreReadIterStream = BoxStream<'static, StorageResult<StateStoreIterItem>>;
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
         async fn get<'a>(
@@ -692,7 +693,7 @@ pub mod boxed_state_store {
             key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<Box<dyn DynamicDispatchedStateStoreIter>>;
+        ) -> StorageResult<BoxStateStoreReadIterStream>;
     }
 
     #[async_trait::async_trait]
@@ -711,15 +712,16 @@ pub mod boxed_state_store {
             key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
             epoch: u64,
             read_options: ReadOptions,
-        ) -> StorageResult<Box<dyn DynamicDispatchedStateStoreIter>> {
-            Ok(Box::new(self.iter(key_range, epoch, read_options).await?))
+        ) -> StorageResult<BoxStateStoreReadIterStream> {
+            use futures::StreamExt;
+            Ok(self.iter(key_range, epoch, read_options).await?.boxed())
         }
     }
 
     macro_rules! impl_state_store_read_for_box {
         ($box_type_name:ident) => {
             impl StateStoreRead for $box_type_name {
-                type Iter = Box<dyn DynamicDispatchedStateStoreIter>;
+                type IterStream = BoxStateStoreReadIterStream;
 
                 define_state_store_read_associated_type!();
 

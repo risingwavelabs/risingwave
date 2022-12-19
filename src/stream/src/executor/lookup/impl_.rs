@@ -17,7 +17,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::RowRef;
 use risingwave_common::catalog::{ColumnDesc, Schema};
-use risingwave_common::row::Row;
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::StateStore;
@@ -306,20 +306,20 @@ impl<S: StateStore> LookupExecutor<S> {
                         &self.chunk_data_types,
                         stream_to_output.clone(),
                         arrange_to_output.clone(),
-                    )?;
+                    );
 
                     for (op, row) in ops.iter().zip_eq(chunk.rows()) {
                         for matched_row in self.lookup_one_row(&row).await? {
                             tracing::trace!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 
-                            if let Some(chunk) = builder.append_row(*op, &row, &matched_row)? {
+                            if let Some(chunk) = builder.append_row(*op, row, &matched_row) {
                                 yield Message::Chunk(chunk);
                             }
                         }
                         // TODO: support outer join (return null if no rows are matched)
                     }
 
-                    if let Some(chunk) = builder.take()? {
+                    if let Some(chunk) = builder.take() {
                         yield Message::Chunk(chunk);
                     }
                 }
@@ -373,7 +373,10 @@ impl<S: StateStore> LookupExecutor<S> {
     }
 
     /// Lookup all rows corresponding to a join key in shared buffer.
-    async fn lookup_one_row(&mut self, stream_row: &RowRef<'_>) -> StreamExecutorResult<Vec<Row>> {
+    async fn lookup_one_row(
+        &mut self,
+        stream_row: &RowRef<'_>,
+    ) -> StreamExecutorResult<Vec<OwnedRow>> {
         // fast-path for empty look-ups.
         if self.arrangement.state_table.epoch() == 0 {
             return Ok(vec![]);
@@ -381,7 +384,9 @@ impl<S: StateStore> LookupExecutor<S> {
 
         // stream_row is the row from stream side, we need to transform into the correct order of
         // the arrangement side.
-        let lookup_row = stream_row.row_by_indices(&self.key_indices_mapping);
+        let lookup_row = stream_row
+            .project(&self.key_indices_mapping)
+            .into_owned_row();
         if let Some(result) = self.lookup_cache.lookup(&lookup_row) {
             return Ok(result.iter().cloned().collect_vec());
         }

@@ -156,7 +156,7 @@ impl LocalStreamManager {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         async_stack_trace_config: Option<TraceConfig>,
-        enable_managed_cache: bool,
+        total_memory_available_bytes: usize,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
@@ -164,7 +164,7 @@ impl LocalStreamManager {
             streaming_metrics,
             config,
             async_stack_trace_config,
-            enable_managed_cache,
+            total_memory_available_bytes,
         ))
     }
 
@@ -235,7 +235,7 @@ impl LocalStreamManager {
     pub async fn collect_barrier(&self, epoch: u64) -> StreamResult<(CollectResult, bool)> {
         let complete_receiver = {
             let mut barrier_manager = self.context.lock_barrier_manager();
-            barrier_manager.remove_collect_rx(epoch)
+            barrier_manager.remove_collect_rx(epoch)?
         };
         // Wait for all actors finishing this barrier.
         let result = complete_receiver
@@ -292,7 +292,7 @@ impl LocalStreamManager {
             .barrier_inflight_latency
             .start_timer();
         barrier_manager.send_barrier(barrier, empty(), empty(), Some(timer))?;
-        barrier_manager.remove_collect_rx(barrier.epoch.prev);
+        barrier_manager.remove_collect_rx(barrier.epoch.prev)?;
         Ok(())
     }
 
@@ -377,9 +377,15 @@ impl LocalStreamManagerCore {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         async_stack_trace_config: Option<TraceConfig>,
-        enable_managed_cache: bool,
+        total_memory_available_bytes: usize,
     ) -> Self {
-        let context = SharedContext::new(addr, state_store.clone(), &config, enable_managed_cache);
+        let context = SharedContext::new(
+            addr,
+            state_store.clone(),
+            streaming_metrics.clone(),
+            &config,
+            total_memory_available_bytes,
+        );
         Self::new_inner(
             state_store,
             context,
@@ -629,6 +635,9 @@ impl LocalStreamManagerCore {
 
             let monitor = tokio_metrics::TaskMonitor::new();
 
+            let metrics = self.streaming_metrics.clone();
+            let actor_id_str = actor_id.to_string();
+
             let handle = {
                 let context = self.context.clone();
                 let actor = async move {
@@ -646,7 +655,17 @@ impl LocalStreamManagerCore {
                     None => actor.right_future(),
                 };
                 let instrumented = monitor.instrument(traced);
-                self.runtime.spawn(instrumented)
+                let allocation_stated = task_stats_alloc::allocation_stat(
+                    instrumented,
+                    Duration::from_millis(1000),
+                    move |bytes| {
+                        metrics
+                            .actor_memory_usage
+                            .with_label_values(&[&actor_id_str])
+                            .set(bytes as i64)
+                    },
+                );
+                self.runtime.spawn(allocation_stated)
             };
             self.handles.insert(actor_id, handle);
 

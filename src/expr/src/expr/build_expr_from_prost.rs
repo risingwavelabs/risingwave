@@ -314,7 +314,7 @@ mod tests {
 
     use risingwave_common::array::{ArrayImpl, DataChunk, Utf8Array};
     use risingwave_common::types::Scalar;
-    use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
+    use risingwave_common::util::value_encoding::serialize_datum;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
     use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -333,7 +333,7 @@ mod tests {
                         ..Default::default()
                     }),
                     rex_node: Some(RexNode::Constant(ProstDatum {
-                        body: serialize_datum_to_bytes(Some("foo".into()).as_ref()),
+                        body: serialize_datum(Some("foo".into()).as_ref()),
                     })),
                 },
                 ExprNode {
@@ -343,7 +343,7 @@ mod tests {
                         ..Default::default()
                     }),
                     rex_node: Some(RexNode::Constant(ProstDatum {
-                        body: serialize_datum_to_bytes(Some("bar".into()).as_ref()),
+                        body: serialize_datum(Some("bar".into()).as_ref()),
                     })),
                 },
             ],
@@ -369,7 +369,7 @@ mod tests {
                         ..Default::default()
                     }),
                     rex_node: Some(RexNode::Constant(ProstDatum {
-                        body: serialize_datum_to_bytes(Some(1_i32.to_scalar_value()).as_ref()),
+                        body: serialize_datum(Some(1_i32.to_scalar_value()).as_ref()),
                     })),
                 },
             ],
@@ -386,7 +386,7 @@ mod tests {
         assert!(expr.is_ok());
 
         let res = expr.unwrap().eval(&DataChunk::new_dummy(1)).unwrap();
-        assert_eq!(*res, ArrayImpl::Utf8(Utf8Array::from_slice(&[Some("foo")])));
+        assert_eq!(*res, ArrayImpl::Utf8(Utf8Array::from_iter(["foo"])));
     }
 
     #[test]
@@ -399,7 +399,7 @@ mod tests {
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ProstDatum {
-                body: serialize_datum_to_bytes(Some("DAY".into()).as_ref()),
+                body: serialize_datum(Some("DAY".into()).as_ref()),
             })),
         };
         let right_date = ExprNode {

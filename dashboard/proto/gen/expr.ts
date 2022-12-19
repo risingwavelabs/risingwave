@@ -115,6 +115,8 @@ export const ExprNode_Type = {
   SARG: "SARG",
   /** VNODE - Internal functions */
   VNODE: "VNODE",
+  /** NOW - Non-deterministic functions */
+  NOW: "NOW",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -368,6 +370,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 1101:
     case "VNODE":
       return ExprNode_Type.VNODE;
+    case 2022:
+    case "NOW":
+      return ExprNode_Type.NOW;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -541,6 +546,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "SARG";
     case ExprNode_Type.VNODE:
       return "VNODE";
+    case ExprNode_Type.NOW:
+      return "NOW";
     case ExprNode_Type.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
