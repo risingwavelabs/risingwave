@@ -34,13 +34,13 @@ pub type DmlManagerRef = Arc<DmlManager>;
 /// channel instead of offering a `write_chunk` interface).
 #[derive(Default, Debug)]
 pub struct DmlManager {
-    batch_dmls: RwLock<HashMap<TableId, Weak<TableSource>>>,
+    table_readers: RwLock<HashMap<TableId, Weak<TableSource>>>,
 }
 
 impl DmlManager {
     pub fn new() -> Self {
         Self {
-            batch_dmls: RwLock::new(HashMap::new()),
+            table_readers: RwLock::new(HashMap::new()),
         }
     }
 
@@ -49,8 +49,12 @@ impl DmlManager {
         table_id: TableId,
         column_descs: &[ColumnDesc],
     ) -> Result<TableSourceRef> {
-        let mut batch_dmls = self.batch_dmls.write();
-        match batch_dmls.entry(table_id) {
+        let mut table_readers = self.table_readers.write();
+
+        // Clear invalid table readers.
+        table_readers.drain_filter(|_, weak_ref| weak_ref.strong_count() == 0);
+
+        match table_readers.entry(table_id) {
             Entry::Occupied(o) => o.get().upgrade().ok_or_else(|| {
                 InternalError(format!(
                     "fail to register reader for table with id {:?}",
@@ -71,19 +75,19 @@ impl DmlManager {
         table_id: &TableId,
         chunk: StreamChunk,
     ) -> Result<oneshot::Receiver<usize>> {
-        let batch_dmls = self.batch_dmls.read();
-        let writer = batch_dmls
+        let table_readers = self.table_readers.read();
+        let writer = table_readers
             .get(table_id)
             .ok_or_else(|| {
                 InternalError(format!(
-                    "fail to write into table with id {:?}",
+                    "no reader for dml in table with id {:?}",
                     table_id.table_id
                 ))
             })?
             .upgrade()
             .ok_or_else(|| {
                 InternalError(format!(
-                    "fail to write into table with id {:?}",
+                    "no reader for dml in table with id {:?}",
                     table_id.table_id
                 ))
             })?;
@@ -91,6 +95,6 @@ impl DmlManager {
     }
 
     pub fn clear(&self) {
-        self.batch_dmls.write().clear()
+        self.table_readers.write().clear()
     }
 }
