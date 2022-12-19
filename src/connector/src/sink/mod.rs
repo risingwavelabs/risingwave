@@ -34,7 +34,7 @@ pub use tracing;
 use crate::sink::console::{ConsoleConfig, ConsoleSink, CONSOLE_SINK};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 pub use crate::sink::mysql::{MySqlConfig, MySqlSink, MYSQL_SINK};
-use crate::sink::redis::{RedisConfig, RedisSink};
+use crate::sink::redis::{RedisConfig, RedisSink, REDIS_SINK};
 use crate::sink::remote::{RemoteConfig, RemoteSink};
 use crate::ConnectorParams;
 
@@ -84,6 +84,7 @@ impl SinkConfig {
             .ok_or_else(|| SinkError::Config(format!("missing config: {}", SINK_TYPE_KEY)))?;
         match sink_type.to_lowercase().as_str() {
             KAFKA_SINK => Ok(SinkConfig::Kafka(KafkaConfig::from_hashmap(properties)?)),
+            REDIS_SINK => Ok(SinkConfig::Redis(RedisConfig::from_hashmap(properties)?)),
             MYSQL_SINK => Ok(SinkConfig::Mysql(MySqlConfig::from_hashmap(properties)?)),
             CONSOLE_SINK => Ok(SinkConfig::Console(ConsoleConfig::from_hashmap(
                 properties,
@@ -213,7 +214,9 @@ pub enum SinkError {
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
     #[error("Redis error: {0}")]
-    Redis(#[from] RedisError),
+    Redis(String),
+    #[error("Redis inner error: {0}")]
+    RedisInner(#[from] RedisError),
     #[error("Remote sink error: {0}")]
     Remote(String),
     #[error("Json parse error: {0}")]

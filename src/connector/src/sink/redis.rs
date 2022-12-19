@@ -22,13 +22,23 @@ use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::to_text::ToText;
 
-use crate::sink::{Result, Sink};
+use crate::sink::{Result, Sink, SinkError};
 
 pub const REDIS_SINK: &str = "redis";
 
 #[derive(Clone, Debug)]
 pub struct RedisConfig {
     pub endpoint: String,
+}
+
+impl RedisConfig {
+    pub fn from_hashmap(map: HashMap<String, String>) -> Result<Self> {
+        let endpoint = map
+            .get("endpoint")
+            .ok_or_else(|| SinkError::Config("endpoint".to_string()))?
+            .to_string();
+        Ok(RedisConfig { endpoint })
+    }
 }
 
 pub struct RedisSink {
@@ -41,7 +51,7 @@ pub struct RedisSink {
     pipe: redis::Pipeline,
     batch_id: u64,
     epoch: u64,
-    update_cache: HashMap<String, String>,
+    update_cache: Vec<String>,
     pk_indices: Vec<usize>,
 }
 
@@ -77,7 +87,7 @@ impl RedisSink {
             pipe,
             batch_id: 0,
             epoch: 0,
-            update_cache: HashMap::new(),
+            update_cache: Vec::new(),
             pk_indices,
         })
     }
@@ -95,7 +105,7 @@ impl RedisSink {
             pipe,
             batch_id: 0,
             epoch: 0,
-            update_cache: HashMap::new(),
+            update_cache: Vec::new(),
             pk_indices,
         })
     }
@@ -154,11 +164,13 @@ impl Sink for RedisSink {
                     self.pipe.del(key);
                 }
                 Op::UpdateDelete => {
-                    self.pipe.del(key);
+                    self.update_cache.push(key);
                 }
                 Op::UpdateInsert => {
                     self.pipe.set(
-                        key,
+                        self.update_cache
+                            .pop()
+                            .ok_or_else(|| SinkError::Redis("no update insert".to_string()))?,
                         format!("[{}]", row.values().map(|v| v.to_text()).join(",")),
                     );
                 }
