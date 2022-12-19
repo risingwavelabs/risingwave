@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
+use glob::glob;
 use itertools::Itertools;
 use yaml_rust::{Yaml, YamlEmitter, YamlLoader};
 
@@ -32,19 +34,29 @@ use use_expander::UseExpander;
 pub struct ConfigExpander;
 
 impl ConfigExpander {
-    /// Transforms `risedev.yml` to a fully expanded yaml file.
+    /// Load a single document YAML file.
+    fn load_yaml(path: impl AsRef<Path>) -> Result<Yaml> {
+        let path = path.as_ref();
+        let content = std::fs::read_to_string(&path)?;
+        let [config]: [_; 1] = YamlLoader::load_from_str(&content)?
+            .try_into()
+            .map_err(|_| anyhow!("expect `{}` to have only one section", path.display()))?;
+        Ok(config)
+    }
+
+    /// Transforms `risedev.yml` and `risedev-config-include.*.yml` to a fully expanded yaml file.
     ///
     /// # Arguments
     ///
-    /// * `config` is the full content of `risedev.yml`.
+    /// * `root` is the root directory of these YAML files.
     /// * `profile` is the selected config profile called by `risedev dev <profile>`. It is one of
     ///   the keys in the `risedev` section.
     ///
     /// # Returns
     ///
     /// A pair of `config_path` and expanded steps (items in `{profile}.steps` section in YAML)
-    pub fn expand(config: &str, profile: &str) -> Result<(Option<String>, Yaml)> {
-        Self::expand_with_extra_info(config, profile, HashMap::new())
+    pub fn expand(root: impl AsRef<Path>, profile: &str) -> Result<(Option<String>, Yaml)> {
+        Self::expand_with_extra_info(root, profile, HashMap::new())
     }
 
     /// See [`ConfigExpander::expand`] for other information.
@@ -53,40 +65,66 @@ impl ConfigExpander {
     ///
     /// - `extra_info` is additional variables for variable expansion by [`DollarExpander`].
     pub fn expand_with_extra_info(
-        config: &str,
+        root: impl AsRef<Path>,
         profile: &str,
         extra_info: HashMap<String, String>,
     ) -> Result<(Option<String>, Yaml)> {
-        let [config]: [_; 1] = YamlLoader::load_from_str(config)?
-            .try_into()
-            .map_err(|_| anyhow!("expect yaml config to have only one section"))?;
-
-        let global_config = config
+        let global_path = root.as_ref().join("risedev.yml");
+        let global_yaml = Self::load_yaml(global_path)?;
+        let global_config = global_yaml
             .as_hash()
             .ok_or_else(|| anyhow!("expect config to be a hashmap"))?;
-        let risedev_section = global_config
-            .get(&Yaml::String("risedev".to_string()))
-            .ok_or_else(|| anyhow!("expect `risedev` section"))?;
-        let risedev_section = risedev_section
-            .as_hash()
-            .ok_or_else(|| anyhow!("expect `risedev` section to be a hashmap"))?;
+
+        let risedev_section = {
+            let mut all = global_config
+                .get(&Yaml::String("risedev".to_string()))
+                .ok_or_else(|| anyhow!("expect `risedev` section"))?
+                .as_hash()
+                .ok_or_else(|| anyhow!("expect `risedev` section to be a hashmap"))?
+                .to_owned();
+
+            for include_path in glob(
+                &root
+                    .as_ref()
+                    .join("risedev-config-include.*.yml")
+                    .to_string_lossy(),
+            )? {
+                let path = include_path?;
+                let yaml = Self::load_yaml(&path)?;
+                let map = yaml
+                    .as_hash()
+                    .ok_or_else(|| anyhow!("expect `{}` to be a hashmap", path.display()))?;
+                for (k, v) in map {
+                    match all.entry(k.clone()) {
+                        linked_hash_map::Entry::Occupied(_) => {
+                            bail!("config key `{k:?}` in `{}` already exists", path.display());
+                        }
+                        linked_hash_map::Entry::Vacant(e) => {
+                            e.insert(v.clone());
+                        }
+                    }
+                }
+            }
+
+            all
+        };
+
         let template_section = global_config
             .get(&Yaml::String("template".to_string()))
             .ok_or_else(|| anyhow!("expect `risedev` section"))?;
 
         let profile_section = risedev_section
             .get(&Yaml::String(profile.to_string()))
-            .ok_or_else(|| anyhow!("profile '{}' not found", profile))?;
-        let profile_map = profile_section
+            .ok_or_else(|| anyhow!("profile '{}' not found", profile))?
             .as_hash()
             .ok_or_else(|| anyhow!("expect `risedev` section to be a hashmap"))?;
 
-        let config_path = profile_map
+        let config_path = profile_section
             .get(&Yaml::String("config-path".to_string()))
             .and_then(|s| s.as_str())
             .map(|s| s.to_string());
 
-        let steps = profile_map
+        let steps = profile_section
             .get(&Yaml::String("steps".to_string()))
             .ok_or_else(|| anyhow!("expect `steps` section"))?
             .clone();
