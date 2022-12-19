@@ -22,7 +22,7 @@ use risingwave_pb::meta::MetaLeaderInfo;
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::meta::MetaLeaseInfo;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
-use tokio::sync::watch::Receiver;
+use tokio::sync::watch::{channel as WatchChannel, Receiver as WatchReceiver};
 
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
@@ -56,7 +56,7 @@ where
     /// idle status manager.
     idle_manager: IdleManagerRef,
 
-    leader_rx: Receiver<(MetaLeaderInfo, bool)>,
+    leader_rx: WatchReceiver<(MetaLeaderInfo, bool)>,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -137,7 +137,7 @@ where
     pub async fn new(
         opts: MetaOpts,
         meta_store: Arc<S>,
-        leader_rx: Receiver<(MetaLeaderInfo, bool)>,
+        leader_rx: WatchReceiver<(MetaLeaderInfo, bool)>,
     ) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
@@ -214,7 +214,7 @@ impl MetaSrvEnv<MemStore> {
             lease_id: 0,
             node_address: "".to_string(),
         };
-        let (_, leader_rx) = tokio::sync::watch::channel((leader_info.clone(), true));
+        let (_, leader_rx) = WatchChannel((leader_info.clone(), true));
 
         let lease_info = MetaLeaseInfo {
             leader: Some(leader_info.clone()),
