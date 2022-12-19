@@ -346,6 +346,14 @@ impl PlanRoot {
             .into());
         }
 
+        // Convert the dag back to the tree, because we don't support physical dag plan for now.
+        plan = self.optimize_by_rules(
+            plan,
+            "DAG To Tree".to_string(),
+            vec![DagToTreeRule::create()],
+            ApplyOrder::TopDown,
+        );
+
         Ok(plan)
     }
 
@@ -353,14 +361,6 @@ impl PlanRoot {
     fn gen_batch_plan(&mut self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan()?;
-
-        // Convert the dag back to the tree, because we don't support physical dag plan for batch.
-        plan = self.optimize_by_rules(
-            plan,
-            "DAG To Tree".to_string(),
-            vec![DagToTreeRule::create()],
-            ApplyOrder::TopDown,
-        );
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
