@@ -89,11 +89,6 @@ impl SinkExecutor {
         )
         .await?;
 
-        // prepare the external sink before writing if needed.
-        if sink.needs_preparation() {
-            sink.prepare().await?;
-        }
-
         let input = self.input.execute();
 
         #[for_await]
