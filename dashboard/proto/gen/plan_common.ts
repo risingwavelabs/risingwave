@@ -230,6 +230,7 @@ export interface StorageTableDesc {
   readPrefixLenHint: number;
 }
 
+/** Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`). */
 export interface ColumnOrder {
   /** maybe other name */
   orderType: OrderType;
