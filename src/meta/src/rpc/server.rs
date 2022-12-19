@@ -138,8 +138,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     // print current leader/follower status of this node
     tokio::spawn(async move {
-        let span = tracing::span!(tracing::Level::INFO, "node_status");
-        let _enter = span.enter();
+        let _ = tracing::span!(tracing::Level::INFO, "node_status").enter();
         loop {
             note_status_leader_rx
                 .changed()
@@ -186,36 +185,39 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let (follower_shutdown_tx, follower_shutdown_rx) = OneChannel::<()>();
         let (follower_finished_tx, follower_finished_rx) = OneChannel::<()>();
         if !is_leader {
-            tracing::info!("Starting follower services");
             tokio::spawn(async move {
+                let _ = tracing::span!(tracing::Level::INFO, "follower services").enter();
+                tracing::info!("Starting follower services");
                 let health_srv = HealthServiceImpl::new();
                 tonic::transport::Server::builder()
                     .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
                     .add_service(HealthServer::new(health_srv))
                     .serve_with_shutdown(address_info.listen_addr, async move {
                         tokio::select! {
-                        _ = tokio::signal::ctrl_c() => {},
-                        // shutdown service if all services should be shut down
-                        res = svc_shutdown_rx_clone.changed() =>  {
-                            if res.is_err() {
-                                tracing::error!("service shutdown sender dropped");
-                            }
-                        },
-                        // shutdown service if follower becomes leader
-                        res = follower_shutdown_rx =>  {
-                              if res.is_err() {
-                                  tracing::error!("follower service shutdown sender dropped");
-                              }
+                            _ = tokio::signal::ctrl_c() => {},
+                            // shutdown service if all services should be shut down
+                            res = svc_shutdown_rx_clone.changed() =>  {
+                                match res {
+                                    Ok(_) => tracing::info!("Shutting down services"),
+                                    Err(_) => tracing::error!("Service shutdown sender dropped")
+                                }
                             },
-                          }
+                            // shutdown service if follower becomes leader
+                            res = follower_shutdown_rx =>  {
+                                match res {
+                                    Ok(_) => tracing::info!("Shutting down follower services"),
+                                    Err(_) => tracing::error!("Follower service shutdown sender dropped")
+                                }
+                            },
+                        }
                     })
                     .await
                     .unwrap();
                 match follower_finished_tx.send(()) {
-                    Ok(_) => tracing::info!("Signaling that follower service is down"),
-                    Err(_) => tracing::error!(
-                        "Error when signaling that follower service is down. Receiver dropped"
-                    ),
+                    Ok(_) => tracing::info!("Shutting down follower services done"),
+                    Err(_) => {
+                        tracing::error!("Follower service shutdown done sender receiver dropped")
+                    }
                 }
             });
         }
@@ -231,8 +233,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         // shut down follower svc if node used to be follower
         if was_follower {
             match follower_shutdown_tx.send(()) {
-                // TODO: Do I always use this error format?
-                // Receiver, sender dropped?
                 Ok(_) => tracing::info!("Shutting down follower services"),
                 Err(_) => tracing::error!("Follower service receiver dropped"),
             }
@@ -288,9 +288,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
                     res = svc_shutdown_rx.changed() => {
-                        tracing::info!("svc_shutdown_rx.changed()");
-                        if res.is_err() {
-                            tracing::error!("service shutdown sender dropped");
+                        match res {
+                            Ok(_) => tracing::info!("Shutting down services"),
+                            Err(_) => tracing::error!("Service shutdown receiver dropped")
                         }
                         shutdown_all.await;
                     },
