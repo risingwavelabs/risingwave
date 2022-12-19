@@ -45,7 +45,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
     pub fn new(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        order_pairs: Vec<OrderPair>,
+        storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
         pk_indices: PkIndices,
@@ -63,7 +63,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
             inner: InnerGroupTopNExecutorNew::new(
                 info,
                 schema,
-                order_pairs,
+                storage_key,
                 offset_and_limit,
                 order_by_len,
                 pk_indices,
@@ -116,7 +116,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
     pub fn new(
         input_info: ExecutorInfo,
         schema: Schema,
-        order_pairs: Vec<OrderPair>,
+        storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
         pk_indices: PkIndices,
@@ -126,14 +126,14 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
         lru_manager: Option<LruManagerRef>,
         cache_size: usize,
     ) -> StreamResult<Self> {
-        // order_pairs is superset of pk
-        assert!(order_pairs
+        // storage_key is superset of pk
+        assert!(storage_key
             .iter()
             .map(|x| x.column_idx)
             .collect::<HashSet<_>>()
             .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&order_pairs, &schema);
+            generate_executor_pk_indices_info(&storage_key, &schema);
 
         let managed_state = ManagedTopNState::<S>::new(
             state_table,
@@ -329,7 +329,7 @@ mod tests {
         }
     }
 
-    fn create_order_pairs() -> Vec<OrderPair> {
+    fn create_storage_key() -> Vec<OrderPair> {
         vec![
             OrderPair::new(1, OrderType::Ascending),
             OrderPair::new(2, OrderType::Ascending),
@@ -391,7 +391,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_without_offset_and_with_limits() {
-        let order_types = create_order_pairs();
+        let order_types = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
@@ -491,7 +491,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_offset_and_with_limits() {
-        let order_types = create_order_pairs();
+        let order_types = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
@@ -583,7 +583,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_multi_group_key() {
-        let order_types = create_order_pairs();
+        let order_types = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],

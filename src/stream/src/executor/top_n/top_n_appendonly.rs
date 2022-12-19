@@ -45,7 +45,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S, false> {
     pub fn new_without_ties(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        order_pairs: Vec<OrderPair>,
+        storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
         pk_indices: PkIndices,
@@ -61,7 +61,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S, false> {
             inner: InnerAppendOnlyTopNExecutor::new(
                 info,
                 schema,
-                order_pairs,
+                storage_key,
                 offset_and_limit,
                 order_by_len,
                 pk_indices,
@@ -77,7 +77,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S, true> {
     pub fn new_with_ties(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        order_pairs: Vec<OrderPair>,
+        storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
         pk_indices: PkIndices,
@@ -93,7 +93,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S, true> {
             inner: InnerAppendOnlyTopNExecutor::new(
                 info,
                 schema,
-                order_pairs,
+                storage_key,
                 offset_and_limit,
                 order_by_len,
                 pk_indices,
@@ -134,21 +134,21 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
     pub fn new(
         input_info: ExecutorInfo,
         schema: Schema,
-        order_pairs: Vec<OrderPair>,
+        storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
         pk_indices: PkIndices,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
-        // order_pairs is superset of pk
-        assert!(order_pairs
+        // storage_key is superset of pk
+        assert!(storage_key
             .iter()
             .map(|x| x.column_idx)
             .collect::<HashSet<_>>()
             .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&order_pairs, &schema);
+            generate_executor_pk_indices_info(&storage_key, &schema);
 
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
@@ -294,7 +294,7 @@ mod tests {
         }
     }
 
-    fn create_order_pairs() -> Vec<OrderPair> {
+    fn create_storage_key() -> Vec<OrderPair> {
         vec![
             OrderPair::new(0, OrderType::Ascending),
             OrderPair::new(1, OrderType::Ascending),
@@ -320,7 +320,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_only_top_n_executor_with_limit() {
-        let order_pairs = create_order_pairs();
+        let storage_key = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64],
@@ -333,7 +333,7 @@ mod tests {
             AppendOnlyTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
-                order_pairs,
+                storage_key,
                 (0, 5),
                 2,
                 vec![0, 1],
@@ -404,7 +404,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_only_top_n_executor_with_offset_and_limit() {
-        let order_pairs = create_order_pairs();
+        let storage_key = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64],
@@ -417,7 +417,7 @@ mod tests {
             AppendOnlyTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
-                order_pairs,
+                storage_key,
                 (3, 4),
                 2,
                 vec![0, 1],

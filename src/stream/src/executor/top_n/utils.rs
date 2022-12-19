@@ -156,15 +156,15 @@ pub fn generate_output(
     }
 }
 
-/// Separate the information of `order_pairs` into different `Vec`s. The `Vec`s have the same
-/// length as `order_pairs`.
+/// Separate the information of `storage_key` into different `Vec`s. The `Vec`s have the same
+/// length as `storage_key`.
 pub fn generate_executor_pk_indices_info(
-    order_pairs: &[OrderPair],
+    storage_key: &[OrderPair],
     schema: &Schema,
 ) -> (PkIndices, Vec<DataType>, Vec<OrderType>) {
     let mut internal_key_indices = vec![];
     let mut internal_order_types = vec![];
-    for order_pair in order_pairs {
+    for order_pair in storage_key {
         internal_key_indices.push(order_pair.column_idx);
         internal_order_types.push(order_pair.order_type);
     }
