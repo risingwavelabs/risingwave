@@ -55,6 +55,10 @@ export function backupJobStatusToJSON(object: BackupJobStatus): string {
   }
 }
 
+export interface MetaBackupManifestId {
+  id: number;
+}
+
 export interface BackupMetaRequest {
 }
 
@@ -77,6 +81,47 @@ export interface DeleteMetaSnapshotRequest {
 
 export interface DeleteMetaSnapshotResponse {
 }
+
+export interface GetMetaSnapshotManifestRequest {
+}
+
+export interface GetMetaSnapshotManifestResponse {
+  manifest: MetaSnapshotManifest | undefined;
+}
+
+export interface MetaSnapshotManifest {
+  manifestId: number;
+  snapshotMetadata: MetaSnapshotMetadata[];
+}
+
+export interface MetaSnapshotMetadata {
+  id: number;
+  hummockVersionId: number;
+  maxCommittedEpoch: number;
+  safeEpoch: number;
+}
+
+function createBaseMetaBackupManifestId(): MetaBackupManifestId {
+  return { id: 0 };
+}
+
+export const MetaBackupManifestId = {
+  fromJSON(object: any): MetaBackupManifestId {
+    return { id: isSet(object.id) ? Number(object.id) : 0 };
+  },
+
+  toJSON(message: MetaBackupManifestId): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MetaBackupManifestId>, I>>(object: I): MetaBackupManifestId {
+    const message = createBaseMetaBackupManifestId();
+    message.id = object.id ?? 0;
+    return message;
+  },
+};
 
 function createBaseBackupMetaRequest(): BackupMetaRequest {
   return {};
@@ -211,6 +256,119 @@ export const DeleteMetaSnapshotResponse = {
 
   fromPartial<I extends Exact<DeepPartial<DeleteMetaSnapshotResponse>, I>>(_: I): DeleteMetaSnapshotResponse {
     const message = createBaseDeleteMetaSnapshotResponse();
+    return message;
+  },
+};
+
+function createBaseGetMetaSnapshotManifestRequest(): GetMetaSnapshotManifestRequest {
+  return {};
+}
+
+export const GetMetaSnapshotManifestRequest = {
+  fromJSON(_: any): GetMetaSnapshotManifestRequest {
+    return {};
+  },
+
+  toJSON(_: GetMetaSnapshotManifestRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetMetaSnapshotManifestRequest>, I>>(_: I): GetMetaSnapshotManifestRequest {
+    const message = createBaseGetMetaSnapshotManifestRequest();
+    return message;
+  },
+};
+
+function createBaseGetMetaSnapshotManifestResponse(): GetMetaSnapshotManifestResponse {
+  return { manifest: undefined };
+}
+
+export const GetMetaSnapshotManifestResponse = {
+  fromJSON(object: any): GetMetaSnapshotManifestResponse {
+    return { manifest: isSet(object.manifest) ? MetaSnapshotManifest.fromJSON(object.manifest) : undefined };
+  },
+
+  toJSON(message: GetMetaSnapshotManifestResponse): unknown {
+    const obj: any = {};
+    message.manifest !== undefined &&
+      (obj.manifest = message.manifest ? MetaSnapshotManifest.toJSON(message.manifest) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetMetaSnapshotManifestResponse>, I>>(
+    object: I,
+  ): GetMetaSnapshotManifestResponse {
+    const message = createBaseGetMetaSnapshotManifestResponse();
+    message.manifest = (object.manifest !== undefined && object.manifest !== null)
+      ? MetaSnapshotManifest.fromPartial(object.manifest)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseMetaSnapshotManifest(): MetaSnapshotManifest {
+  return { manifestId: 0, snapshotMetadata: [] };
+}
+
+export const MetaSnapshotManifest = {
+  fromJSON(object: any): MetaSnapshotManifest {
+    return {
+      manifestId: isSet(object.manifestId) ? Number(object.manifestId) : 0,
+      snapshotMetadata: Array.isArray(object?.snapshotMetadata)
+        ? object.snapshotMetadata.map((e: any) => MetaSnapshotMetadata.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: MetaSnapshotManifest): unknown {
+    const obj: any = {};
+    message.manifestId !== undefined && (obj.manifestId = Math.round(message.manifestId));
+    if (message.snapshotMetadata) {
+      obj.snapshotMetadata = message.snapshotMetadata.map((e) => e ? MetaSnapshotMetadata.toJSON(e) : undefined);
+    } else {
+      obj.snapshotMetadata = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MetaSnapshotManifest>, I>>(object: I): MetaSnapshotManifest {
+    const message = createBaseMetaSnapshotManifest();
+    message.manifestId = object.manifestId ?? 0;
+    message.snapshotMetadata = object.snapshotMetadata?.map((e) => MetaSnapshotMetadata.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseMetaSnapshotMetadata(): MetaSnapshotMetadata {
+  return { id: 0, hummockVersionId: 0, maxCommittedEpoch: 0, safeEpoch: 0 };
+}
+
+export const MetaSnapshotMetadata = {
+  fromJSON(object: any): MetaSnapshotMetadata {
+    return {
+      id: isSet(object.id) ? Number(object.id) : 0,
+      hummockVersionId: isSet(object.hummockVersionId) ? Number(object.hummockVersionId) : 0,
+      maxCommittedEpoch: isSet(object.maxCommittedEpoch) ? Number(object.maxCommittedEpoch) : 0,
+      safeEpoch: isSet(object.safeEpoch) ? Number(object.safeEpoch) : 0,
+    };
+  },
+
+  toJSON(message: MetaSnapshotMetadata): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.hummockVersionId !== undefined && (obj.hummockVersionId = Math.round(message.hummockVersionId));
+    message.maxCommittedEpoch !== undefined && (obj.maxCommittedEpoch = Math.round(message.maxCommittedEpoch));
+    message.safeEpoch !== undefined && (obj.safeEpoch = Math.round(message.safeEpoch));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MetaSnapshotMetadata>, I>>(object: I): MetaSnapshotMetadata {
+    const message = createBaseMetaSnapshotMetadata();
+    message.id = object.id ?? 0;
+    message.hummockVersionId = object.hummockVersionId ?? 0;
+    message.maxCommittedEpoch = object.maxCommittedEpoch ?? 0;
+    message.safeEpoch = object.safeEpoch ?? 0;
     return message;
   },
 };

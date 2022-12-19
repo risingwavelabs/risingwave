@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -21,7 +20,6 @@ use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, ShowCreateType, ShowObject};
-use risingwave_sqlparser::parser::Parser;
 
 use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
@@ -155,7 +153,6 @@ pub fn handle_show_create_object(
             if !table.is_mview() {
                 return Err(CatalogError::NotFound("materialized view", name.to_string()).into());
             }
-            // We only stored the definition of materialized view, format and return directly.
             format!(
                 "CREATE MATERIALIZED VIEW {} AS {}",
                 table.name, table.definition
@@ -165,12 +162,7 @@ pub fn handle_show_create_object(
             let view = schema
                 .get_view_by_name(&object_name)
                 .ok_or_else(|| RwError::from(CatalogError::NotFound("view", name.to_string())))?;
-
-            // We only stored original sql in catalog, uses parser to parse and format.
-            let stmt = Parser::parse_sql(&view.sql)
-                .map_err(|err| anyhow!("Failed to parse view create sql: {}, {}", view.sql, err))?;
-            assert!(stmt.len() == 1);
-            stmt[0].to_string()
+            format!("CREATE VIEW {} AS {}", view.name, view.sql)
         }
         _ => {
             return Err(ErrorCode::NotImplemented(
