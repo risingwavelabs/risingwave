@@ -232,17 +232,11 @@ impl Binder {
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let ast = Parser::parse_sql(&view_catalog.sql)
             .expect("a view's sql should be parsed successfully");
-        let ast = ast
+        let Statement::Query(query) = ast
             .into_iter()
             .exactly_one()
-            .expect("a view should contain only one statement");
-        let query = match ast {
-            Statement::CreateView {
-                materialized: false,
-                query,
-                ..
-            } => query,
-            _ => unreachable!("a view should contain a query statement, but got {ast:?}"),
+            .expect("a view should contain only one statement") else {
+            unreachable!("a view should contain a query statement");
         };
         let query = self.bind_query(*query).map_err(|e| {
             ErrorCode::BindError(format!(
