@@ -112,6 +112,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             table_desc: Some(self.table_desc.clone()),
             column_ids: self.inner_side_column_ids.clone(),
             scan_ranges,
+            ordered: false,
             vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
         });
 
