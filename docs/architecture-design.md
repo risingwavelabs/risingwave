@@ -43,9 +43,9 @@ SELECT SUM(t.quantity) FROM t group by t.company;
 
 ![Batch-Query](./images/architecture-design/batch-query.svg)
 
-The query will be sliced into multiple *plan fragments*, each being an independent scheduling unit and probably with different parallelism. For simplicity, parallelism is usually set to the number of compute-nodes in the cluster.
+The query will be sliced into multiple *plan fragments*, each being an independent scheduling unit and probably with different parallelism. For simplicity, parallelism is usually set to the number of CPU cores in the cluster. For example, if there are 3 compute-nodes in the cluster, each with 4 CPU cores, then the parallelism will be set to 12 by default.
 
-Each parallel unit is called a *task*. Specifically, PlanFragment 2 will be distributed as 3 tasks to 3 compute-nodes.
+Each parallel unit is called a *task*. Specifically, PlanFragment 2 will be distributed as 4 tasks to 4 CPU cores.
 
 ![Plan-Fragments](./images/architecture-design/plan-fragments.svg)
 

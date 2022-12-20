@@ -34,7 +34,7 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    ExecutionContextRef, HummockSnapshotGuard, HummockSnapshotManagerRef, SchedulerResult,
+    ExecutionContextRef, HummockSnapshotManagerRef, PinnedHummockSnapshot, SchedulerResult,
 };
 
 pub struct DistributedQueryStream {
@@ -160,7 +160,7 @@ impl QueryManager {
         &self,
         context: ExecutionContextRef,
         query: Query,
-        pinned_snapshot: HummockSnapshotGuard,
+        pinned_snapshot: PinnedHummockSnapshot,
     ) -> SchedulerResult<DistributedQueryStream> {
         let query_id = query.query_id.clone();
         let query_execution = Arc::new(QueryExecution::new(query, context.session().id()));
