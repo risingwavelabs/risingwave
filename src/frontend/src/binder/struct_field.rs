@@ -99,7 +99,7 @@ impl Binder {
 
     /// Bind single field column, e.g. `(table.v1).v2`.
     /// Will return `Field(expr, int)` expression and the corresponding alias.
-    /// `int` in the signagure of `Field` represents the field index.
+    /// `int` in the signature of `Field` represents the field index.
     pub fn bind_single_field_column(&mut self, expr: Expr, ids: &[Ident]) -> Result<ExprImpl> {
         let (expr, idents) = self.bind_field_access(expr, ids.to_vec())?;
         let exprs = Self::bind_field("".to_string(), expr, &idents, false)?;

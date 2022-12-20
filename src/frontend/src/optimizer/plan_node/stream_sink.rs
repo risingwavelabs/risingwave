@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::catalog::Field;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{PlanBase, PlanRef, StreamNode};
@@ -76,7 +77,18 @@ impl StreamNode for StreamSink {
 
         ProstStreamNode::Sink(SinkNode {
             table_id: self.sink_catalog.id().into(),
-            column_ids: vec![], // TODO(nanderstabel): fix empty Vector
+            fields: self
+                .sink_catalog
+                .columns()
+                .iter()
+                .map(|c| Field::from(c.column_desc.clone()).to_prost())
+                .collect(),
+            sink_pk: self
+                .sink_catalog
+                .pk()
+                .iter()
+                .map(|c| c.index as u32)
+                .collect(),
             properties: self.sink_catalog.properties.inner().clone(),
         })
     }

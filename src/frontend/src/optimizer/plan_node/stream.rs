@@ -271,8 +271,8 @@ impl HashJoin {
         degree_table_catalog_builder
             .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
 
-        internal_table_catalog_builder.set_pk_prefix_len_hint(join_key_len);
-        degree_table_catalog_builder.set_pk_prefix_len_hint(join_key_len);
+        internal_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
+        degree_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
 
         (
             internal_table_catalog_builder.build(internal_table_dist_keys),
@@ -335,7 +335,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Project, core
 #[derive(Debug, Clone)]
 pub struct Sink {
     pub input: PlanRef,
-    pub table: TableCatalog,
+    pub sink_desc: TableCatalog,
 }
 impl_plan_tree_node_v2_for_stream_unary_node!(Sink, input);
 /// [`Source`] represents a table/connector source at the very beginning of the graph.
@@ -681,13 +681,17 @@ pub fn to_stream_prost_body(
                 select_list: me.exprs.iter().map(Expr::to_expr_proto).collect(),
             })
         }
-        Node::Sink(me) => {
-            ProstNode::Sink(SinkNode {
-                table_id: me.table.id().into(),
-                column_ids: vec![], // TODO(nanderstabel): fix empty Vector
-                properties: me.table.properties.inner().clone(),
-            })
-        }
+        Node::Sink(me) => ProstNode::Sink(SinkNode {
+            table_id: me.sink_desc.id().into(),
+            properties: me.sink_desc.properties.inner().clone(),
+            fields: me
+                .sink_desc
+                .columns()
+                .iter()
+                .map(|c| Field::from(c.column_desc.clone()).to_prost())
+                .collect(),
+            sink_pk: me.sink_desc.pk().iter().map(|c| c.index as u32).collect(),
+        }),
         Node::Source(me) => {
             let me = &me.core.catalog;
             ProstNode::Source(SourceNode {

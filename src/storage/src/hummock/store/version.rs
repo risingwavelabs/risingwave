@@ -539,7 +539,7 @@ impl HummockVersionReader {
         }
         let mut staging_sst_iter_count = 0;
         // encode once
-        let bloom_filter_key = read_options.dist_key_hint.as_deref();
+        let bloom_filter_key = read_options.prefix_hint.as_ref();
 
         for sstable_info in &uncommitted_ssts {
             let table_holder = self
@@ -555,13 +555,13 @@ impl HummockVersionReader {
                 ) {
                     continue;
                 }
+            }
 
-                if !table_holder.value().meta.range_tombstone_list.is_empty()
-                    && !read_options.ignore_range_tombstone
-                {
-                    delete_range_iter
-                        .add_sst_iter(SstableDeleteRangeIterator::new(table_holder.clone()));
-                }
+            if !table_holder.value().meta.range_tombstone_list.is_empty()
+                && !read_options.ignore_range_tombstone
+            {
+                delete_range_iter
+                    .add_sst_iter(SstableDeleteRangeIterator::new(table_holder.clone()));
             }
             staging_sst_iter_count += 1;
             staging_iters.push(HummockIteratorUnion::Second(SstableIterator::new(
@@ -621,7 +621,7 @@ impl HummockVersionReader {
                         .sstable(sstable_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if let Some(bloom_filter_key) = read_options.dist_key_hint.as_deref() {
+                    if let Some(bloom_filter_key) = read_options.prefix_hint.as_deref() {
                         if !hit_sstable_bloom_filter(
                             sstable.value(),
                             bloom_filter_key,

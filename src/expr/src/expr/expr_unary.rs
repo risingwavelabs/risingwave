@@ -126,6 +126,13 @@ pub fn new_unary_expr(
             return_type,
             move |input| str_to_list(input, &target_elem_type),
         )),
+        (ProstType::Cast, DataType::Struct(rty), DataType::Struct(lty)) => {
+            Box::new(UnaryExpression::<StructArray, StructArray, _>::new(
+                child_expr,
+                return_type,
+                move |input| struct_cast(input, &lty, &rty),
+            ))
+        }
         (
             ProstType::Cast,
             DataType::List {
@@ -379,7 +386,7 @@ mod tests {
         }
 
         for i in 0..input.len() {
-            let row = Row::new(vec![input[i].map(|int| int.to_scalar_value())]);
+            let row = OwnedRow::new(vec![input[i].map(|int| int.to_scalar_value())]);
             let result = vec_executor.eval_row(&row).unwrap();
             let expected = target[i].map(|int| int.to_scalar_value());
             assert_eq!(result, expected);
@@ -422,7 +429,7 @@ mod tests {
         }
 
         for i in 0..input.len() {
-            let row = Row::new(vec![input[i].map(|int| int.to_scalar_value())]);
+            let row = OwnedRow::new(vec![input[i].map(|int| int.to_scalar_value())]);
             let result = vec_executor.eval_row(&row).unwrap();
             let expected = target[i].map(|int| int.to_scalar_value());
             assert_eq!(result, expected);
@@ -472,7 +479,7 @@ mod tests {
         }
 
         for i in 0..input.len() {
-            let row = Row::new(vec![input[i]
+            let row = OwnedRow::new(vec![input[i]
                 .as_ref()
                 .cloned()
                 .map(|str| str.to_scalar_value())]);
@@ -516,7 +523,7 @@ mod tests {
         }
 
         for i in 0..input.len() {
-            let row = Row::new(vec![input[i].map(|b| b.to_scalar_value())]);
+            let row = OwnedRow::new(vec![input[i].map(|b| b.to_scalar_value())]);
             let result = vec_executor.eval_row(&row).unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
@@ -555,7 +562,7 @@ mod tests {
         }
 
         for i in 0..input.len() {
-            let row = Row::new(vec![input[i].map(|d| d.to_scalar_value())]);
+            let row = OwnedRow::new(vec![input[i].map(|d| d.to_scalar_value())]);
             let result = vec_executor.eval_row(&row).unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);

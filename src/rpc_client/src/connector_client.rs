@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -42,14 +43,18 @@ impl ConnectorClient {
     pub async fn get_event_stream(
         &self,
         source_id: u64,
-        props: DbConnectorProperties,
+        source_type: String,
+        start_offset: Option<String>,
+        properties: HashMap<String, String>,
     ) -> Result<Streaming<GetEventStreamResponse>> {
         Ok(self
             .0
             .to_owned()
             .get_event_stream(GetEventStreamRequest {
                 source_id,
-                properties: Some(props),
+                source_type,
+                start_offset: start_offset.unwrap_or_default(),
+                properties,
             })
             .await
             .inspect_err(|_| {

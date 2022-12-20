@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { MetaBackupManifestId } from "./backup_service";
 import { Database, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import {
   HostAddress,
@@ -12,14 +13,7 @@ import {
 } from "./common";
 import { HummockSnapshot, HummockVersion, HummockVersionDeltas } from "./hummock";
 import { ConnectorSplits } from "./source";
-import {
-  Dispatcher,
-  FragmentType,
-  fragmentTypeFromJSON,
-  fragmentTypeToJSON,
-  StreamActor,
-  StreamNode,
-} from "./stream_plan";
+import { Dispatcher, StreamActor, StreamNode } from "./stream_plan";
 import { UserInfo } from "./user";
 
 export const protobufPackage = "meta";
@@ -202,7 +196,8 @@ export function tableFragments_ActorStatus_ActorStateToJSON(object: TableFragmen
 
 export interface TableFragments_Fragment {
   fragmentId: number;
-  fragmentType: FragmentType;
+  /** Bitwise-OR of FragmentTypeFlags */
+  fragmentTypeMask: number;
   distributionType: TableFragments_Fragment_FragmentDistributionType;
   actors: StreamActor[];
   /**
@@ -385,6 +380,7 @@ export interface MetaSnapshot {
   hummockSnapshot: HummockSnapshot | undefined;
   hummockVersion: HummockVersion | undefined;
   version: MetaSnapshot_SnapshotVersion | undefined;
+  metaBackupManifestId: MetaBackupManifestId | undefined;
 }
 
 export interface MetaSnapshot_SnapshotVersion {
@@ -410,7 +406,8 @@ export interface SubscribeResponse {
     | { $case: "node"; node: WorkerNode }
     | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
     | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
-    | { $case: "snapshot"; snapshot: MetaSnapshot };
+    | { $case: "snapshot"; snapshot: MetaSnapshot }
+    | { $case: "metaBackupManifestId"; metaBackupManifestId: MetaBackupManifestId };
 }
 
 export const SubscribeResponse_Operation = {
@@ -743,7 +740,7 @@ export const TableFragments_ActorStatus = {
 function createBaseTableFragments_Fragment(): TableFragments_Fragment {
   return {
     fragmentId: 0,
-    fragmentType: FragmentType.FRAGMENT_UNSPECIFIED,
+    fragmentTypeMask: 0,
     distributionType: TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED,
     actors: [],
     vnodeMapping: undefined,
@@ -756,15 +753,11 @@ export const TableFragments_Fragment = {
   fromJSON(object: any): TableFragments_Fragment {
     return {
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
-      fragmentType: isSet(object.fragmentType)
-        ? fragmentTypeFromJSON(object.fragmentType)
-        : FragmentType.FRAGMENT_UNSPECIFIED,
+      fragmentTypeMask: isSet(object.fragmentTypeMask) ? Number(object.fragmentTypeMask) : 0,
       distributionType: isSet(object.distributionType)
         ? tableFragments_Fragment_FragmentDistributionTypeFromJSON(object.distributionType)
         : TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED,
-      actors: Array.isArray(object?.actors)
-        ? object.actors.map((e: any) => StreamActor.fromJSON(e))
-        : [],
+      actors: Array.isArray(object?.actors) ? object.actors.map((e: any) => StreamActor.fromJSON(e)) : [],
       vnodeMapping: isSet(object.vnodeMapping) ? ParallelUnitMapping.fromJSON(object.vnodeMapping) : undefined,
       stateTableIds: Array.isArray(object?.stateTableIds) ? object.stateTableIds.map((e: any) => Number(e)) : [],
       upstreamFragmentIds: Array.isArray(object?.upstreamFragmentIds)
@@ -776,7 +769,7 @@ export const TableFragments_Fragment = {
   toJSON(message: TableFragments_Fragment): unknown {
     const obj: any = {};
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
-    message.fragmentType !== undefined && (obj.fragmentType = fragmentTypeToJSON(message.fragmentType));
+    message.fragmentTypeMask !== undefined && (obj.fragmentTypeMask = Math.round(message.fragmentTypeMask));
     message.distributionType !== undefined &&
       (obj.distributionType = tableFragments_Fragment_FragmentDistributionTypeToJSON(message.distributionType));
     if (message.actors) {
@@ -802,7 +795,7 @@ export const TableFragments_Fragment = {
   fromPartial<I extends Exact<DeepPartial<TableFragments_Fragment>, I>>(object: I): TableFragments_Fragment {
     const message = createBaseTableFragments_Fragment();
     message.fragmentId = object.fragmentId ?? 0;
-    message.fragmentType = object.fragmentType ?? FragmentType.FRAGMENT_UNSPECIFIED;
+    message.fragmentTypeMask = object.fragmentTypeMask ?? 0;
     message.distributionType = object.distributionType ?? TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED;
     message.actors = object.actors?.map((e) => StreamActor.fromPartial(e)) || [];
     message.vnodeMapping = (object.vnodeMapping !== undefined && object.vnodeMapping !== null)
@@ -1472,6 +1465,7 @@ function createBaseMetaSnapshot(): MetaSnapshot {
     hummockSnapshot: undefined,
     hummockVersion: undefined,
     version: undefined,
+    metaBackupManifestId: undefined,
   };
 }
 
@@ -1495,6 +1489,9 @@ export const MetaSnapshot = {
       hummockSnapshot: isSet(object.hummockSnapshot) ? HummockSnapshot.fromJSON(object.hummockSnapshot) : undefined,
       hummockVersion: isSet(object.hummockVersion) ? HummockVersion.fromJSON(object.hummockVersion) : undefined,
       version: isSet(object.version) ? MetaSnapshot_SnapshotVersion.fromJSON(object.version) : undefined,
+      metaBackupManifestId: isSet(object.metaBackupManifestId)
+        ? MetaBackupManifestId.fromJSON(object.metaBackupManifestId)
+        : undefined,
     };
   },
 
@@ -1556,6 +1553,9 @@ export const MetaSnapshot = {
       (obj.hummockVersion = message.hummockVersion ? HummockVersion.toJSON(message.hummockVersion) : undefined);
     message.version !== undefined &&
       (obj.version = message.version ? MetaSnapshot_SnapshotVersion.toJSON(message.version) : undefined);
+    message.metaBackupManifestId !== undefined && (obj.metaBackupManifestId = message.metaBackupManifestId
+      ? MetaBackupManifestId.toJSON(message.metaBackupManifestId)
+      : undefined);
     return obj;
   },
 
@@ -1579,6 +1579,9 @@ export const MetaSnapshot = {
       : undefined;
     message.version = (object.version !== undefined && object.version !== null)
       ? MetaSnapshot_SnapshotVersion.fromPartial(object.version)
+      : undefined;
+    message.metaBackupManifestId = (object.metaBackupManifestId !== undefined && object.metaBackupManifestId !== null)
+      ? MetaBackupManifestId.fromPartial(object.metaBackupManifestId)
       : undefined;
     return message;
   },
@@ -1661,6 +1664,11 @@ export const SubscribeResponse = {
         }
         : isSet(object.snapshot)
         ? { $case: "snapshot", snapshot: MetaSnapshot.fromJSON(object.snapshot) }
+        : isSet(object.metaBackupManifestId)
+        ? {
+          $case: "metaBackupManifestId",
+          metaBackupManifestId: MetaBackupManifestId.fromJSON(object.metaBackupManifestId),
+        }
         : undefined,
     };
   },
@@ -1696,6 +1704,9 @@ export const SubscribeResponse = {
       : undefined);
     message.info?.$case === "snapshot" &&
       (obj.snapshot = message.info?.snapshot ? MetaSnapshot.toJSON(message.info?.snapshot) : undefined);
+    message.info?.$case === "metaBackupManifestId" && (obj.metaBackupManifestId = message.info?.metaBackupManifestId
+      ? MetaBackupManifestId.toJSON(message.info?.metaBackupManifestId)
+      : undefined);
     return obj;
   },
 
@@ -1765,6 +1776,16 @@ export const SubscribeResponse = {
     }
     if (object.info?.$case === "snapshot" && object.info?.snapshot !== undefined && object.info?.snapshot !== null) {
       message.info = { $case: "snapshot", snapshot: MetaSnapshot.fromPartial(object.info.snapshot) };
+    }
+    if (
+      object.info?.$case === "metaBackupManifestId" &&
+      object.info?.metaBackupManifestId !== undefined &&
+      object.info?.metaBackupManifestId !== null
+    ) {
+      message.info = {
+        $case: "metaBackupManifestId",
+        metaBackupManifestId: MetaBackupManifestId.fromPartial(object.info.metaBackupManifestId),
+      };
     }
     return message;
   },

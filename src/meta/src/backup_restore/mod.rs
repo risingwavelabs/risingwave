@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
-
 mod backup_manager;
 pub use backup_manager::*;
 mod error;
 mod meta_snapshot_builder;
+mod metrics;
 mod restore;
 mod utils;
 

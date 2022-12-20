@@ -58,7 +58,7 @@ impl AvroParser {
         })?;
         let (schema, schema_resolver) = if use_schema_registry {
             let kafka_topic = get_kafka_topic(&props)?;
-            let client = Client::new(url)?;
+            let client = Client::new(url, &props)?;
             let (schema, resolver) =
                 ConfluentSchemaResolver::new(format!("{}-value", kafka_topic).as_str(), client)
                     .await?;
@@ -331,7 +331,7 @@ mod test {
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
-    use risingwave_common::row::Row2;
+    use risingwave_common::row::Row;
     use risingwave_common::types::{
         DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl,
     };

@@ -1,0 +1,34 @@
+query TR
+select n_name, round(sum(ol_amount)::decimal, 0) as revenue
+from customer, orders, orderline, stock, supplier, nation, region
+where c_id = o_c_id
+	 and c_w_id = o_w_id
+	 and c_d_id = o_d_id
+	 and ol_o_id = o_id
+	 and ol_w_id = o_w_id
+	 and ol_d_id=o_d_id
+	 and ol_w_id = s_w_id
+	 and ol_i_id = s_i_id
+	 and (s_w_id * s_i_id)%10000 = su_suppkey
+	 -- and ascii(substr(c_state,1,1)) = su_nationkey
+	 and su_nationkey = n_nationkey
+	 and n_regionkey = r_regionkey
+	 and r_name = 'EUROPE'
+	 and o_entry_d >= '2007-01-02 00:00:00.000000'
+group by n_name
+order by revenue desc;
+----
+ITALY           281346
+UNITED KINGDOM  187124
+GREECE          120320
+UKRAINE         106360
+PORTUGAL        106034
+ROMANIA         100531
+BELGIUM          90277
+NETHERLANDS      82625
+RUSSIA           76785
+POLAND           74822
+SPAIN            62534
+FRANCE           46961
+FINLAND          31240
+GERMANY          28440
