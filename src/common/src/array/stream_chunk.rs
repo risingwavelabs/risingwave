@@ -276,13 +276,22 @@ impl StreamChunk {
 
 impl fmt::Debug for StreamChunk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamChunk {{ cardinality = {}, capacity = {}, data = \n{} }}",
-            self.cardinality(),
-            self.capacity(),
-            self.to_pretty_string()
-        )
+        if f.alternate() {
+            write!(
+                f,
+                "StreamChunk {{ cardinality = {}, capacity = {}, data = \n{} }}",
+                self.cardinality(),
+                self.capacity(),
+                self.to_pretty_string()
+            )
+        } else {
+            write!(
+                f,
+                "StreamChunk {{ cardinality = {}, capacity = {}, data = ... }}",
+                self.cardinality(),
+                self.capacity(),
+            )
+        }
     }
 }
 
