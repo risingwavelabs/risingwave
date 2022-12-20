@@ -27,6 +27,22 @@ pub struct AggFuncSig {
     pub ret_type: DataTypeName,
 }
 
+impl AggFuncSig {
+    /// Returns a string describing the aggregation without return type.
+    pub fn to_string_no_return(&self) -> String {
+        format!(
+            "{}({})",
+            self.func.to_string(),
+            self.inputs_type
+                .iter()
+                .map(|t| format!("{t:?}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+        .to_lowercase()
+    }
+}
+
 // Same as FuncSigMap in func.rs except this is for aggregate function
 #[derive(Default)]
 pub struct AggFuncSigMap(HashMap<(AggKind, usize), Vec<AggFuncSig>>);

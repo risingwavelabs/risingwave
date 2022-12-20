@@ -37,6 +37,22 @@ pub struct FuncSign {
     pub ret_type: DataTypeName,
 }
 
+impl FuncSign {
+    /// Returns a string describing the function without return type.
+    pub fn to_string_no_return(&self) -> String {
+        format!(
+            "{}({})",
+            self.func.as_str_name(),
+            self.inputs_type
+                .iter()
+                .map(|t| format!("{t:?}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+        .to_lowercase()
+    }
+}
+
 #[derive(Default)]
 pub struct FuncSigMap(HashMap<(ExprType, usize), Vec<FuncSign>>);
 
