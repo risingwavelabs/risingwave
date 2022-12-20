@@ -241,6 +241,7 @@ impl<S: StateStore> StorageTable<S> {
         wait_epoch: HummockReadEpoch,
     ) -> StorageResult<Option<OwnedRow>> {
         let epoch = wait_epoch.get_epoch();
+        let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
         self.store.try_wait_epoch(wait_epoch).await?;
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
@@ -253,6 +254,7 @@ impl<S: StateStore> StorageTable<S> {
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
+            read_version_from_backup: read_backup,
         };
         if let Some(value) = self.store.get(&serialized_pk, epoch, read_options).await? {
             let full_row = self.row_deserializer.deserialize(value)?;
@@ -330,6 +332,7 @@ impl<S: StateStore> StorageTable<S> {
         let iterators: Vec<_> = try_join_all(raw_key_ranges.map(|raw_key_range| {
             let prefix_hint = prefix_hint.clone();
             let wait_epoch = wait_epoch.clone();
+            let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
             async move {
                 let check_bloom_filter = prefix_hint.is_some();
                 let read_options = ReadOptions {
@@ -338,6 +341,7 @@ impl<S: StateStore> StorageTable<S> {
                     ignore_range_tombstone: false,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
+                    read_version_from_backup: read_backup,
                 };
                 let iter = StorageTableIterInner::<S>::new(
                     &self.store,

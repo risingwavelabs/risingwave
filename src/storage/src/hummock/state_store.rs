@@ -61,8 +61,11 @@ impl HummockStorage {
             Bound::Included(TableKey(key.to_vec())),
         );
 
-        let read_version_tuple =
-            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?;
+        let read_version_tuple = if read_options.read_version_from_backup {
+            self.build_read_version_tuple_from_backup(epoch).await?
+        } else {
+            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?
+        };
 
         self.hummock_version_reader
             .get(TableKey(key), epoch, read_options, read_version_tuple)
@@ -75,12 +78,33 @@ impl HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
-        let read_version_tuple =
-            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?;
+        let read_version_tuple = if read_options.read_version_from_backup {
+            self.build_read_version_tuple_from_backup(epoch).await?
+        } else {
+            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?
+        };
 
         self.hummock_version_reader
             .iter(key_range, epoch, read_options, read_version_tuple)
             .await
+    }
+
+    async fn build_read_version_tuple_from_backup(
+        &self,
+        epoch: u64,
+    ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+        match self.backup_reader.try_get_hummock_version(epoch).await {
+            Ok(Some(backup_version)) => {
+                validate_epoch(backup_version.safe_epoch(), epoch)?;
+                Ok((Vec::default(), Vec::default(), backup_version))
+            }
+            Ok(None) => Err(HummockError::read_backup_error(format!(
+                "backup include epoch {} not found",
+                epoch
+            ))
+            .into()),
+            Err(e) => Err(e),
+        }
     }
 
     fn build_read_version_tuple(
@@ -172,7 +196,7 @@ impl StateStore for HummockStorage {
                     );
                     return Ok(());
                 }
-                HummockReadEpoch::NoWait(_) => return Ok(()),
+                HummockReadEpoch::NoWait(_) | HummockReadEpoch::Backup(_) => return Ok(()),
             };
             if wait_epoch == HummockEpoch::MAX {
                 panic!("epoch should not be u64::MAX");

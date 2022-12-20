@@ -19,7 +19,7 @@ use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{pin_mut, TryStreamExt};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_test::test_utils::get_test_notification_client;
+use risingwave_hummock_test::get_test_notification_client;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
@@ -100,6 +100,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                         check_bloom_filter: false,
                         retention_seconds: None,
                         table_id: Default::default(),
+                        read_version_from_backup: false,
                     },
                 ))
                 .unwrap();
