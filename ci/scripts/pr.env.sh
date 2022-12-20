@@ -16,6 +16,8 @@ set -e
 export RUN_COMPACTION=0;
 # Don't run meta store backup/recovery test
 export RUN_META_BACKUP=0;
+# Don't run delete-range random test
+export RUN_DELETE_RANGE=0;
 
 if [[ -n "$CHANGED" ]]; then
     echo "origin/main SHA: $(git rev-parse origin/main)";
