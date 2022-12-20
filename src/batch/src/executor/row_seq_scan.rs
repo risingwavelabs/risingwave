@@ -53,6 +53,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 
     table: StorageTable<S>,
     scan_ranges: Vec<ScanRange>,
+    ordered: bool,
     epoch: BatchQueryEpoch,
 }
 
@@ -132,6 +133,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
     pub fn new(
         table: StorageTable<S>,
         scan_ranges: Vec<ScanRange>,
+        ordered: bool,
         epoch: BatchQueryEpoch,
         chunk_size: usize,
         identity: String,
@@ -143,6 +145,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             metrics,
             table,
             scan_ranges,
+            ordered,
             epoch,
         }
     }
@@ -224,17 +227,18 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .map(|&k| k as usize)
             .collect_vec();
         let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
-        let scan_ranges = seq_scan_node.scan_ranges.clone();
         let scan_ranges = {
+            let scan_ranges = &seq_scan_node.scan_ranges;
             if scan_ranges.is_empty() {
                 vec![ScanRange::full()]
             } else {
                 scan_ranges
-                    .into_iter()
-                    .map(|scan_range| ScanRange::new(scan_range, pk_types.iter().cloned()))
+                    .iter()
+                    .map(|scan_range| ScanRange::new(scan_range.clone(), pk_types.iter().cloned()))
                     .try_collect()?
             }
         };
+        let ordered = seq_scan_node.ordered;
 
         let epoch = source.epoch.clone();
         let chunk_size = source.context.get_config().developer.batch_chunk_size;
@@ -257,6 +261,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             Ok(Box::new(RowSeqScanExecutor::new(
                 table,
                 scan_ranges,
+                ordered,
                 epoch,
                 chunk_size,
                 source.plan_node().get_identity().clone(),
@@ -289,6 +294,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             metrics,
             table,
             scan_ranges,
+            ordered,
             epoch,
         } = *self;
         let table = Arc::new(table);
@@ -306,6 +312,13 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         } else {
             None
         };
+
+        if ordered {
+            // Currently we execute range-scans concurrently so the order is not guaranteed if
+            // there're multiple ranges.
+            // TODO: reserve the order for multiple ranges.
+            assert_eq!(scan_ranges.len(), 1);
+        }
 
         let (point_gets, range_scans): (Vec<ScanRange>, Vec<ScanRange>) = scan_ranges
             .into_iter()
@@ -335,6 +348,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             Box::pin(Self::execute_range(
                 table,
                 range_scan,
+                ordered,
                 epoch.clone(),
                 chunk_size,
                 histogram,
@@ -371,6 +385,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
     async fn execute_range(
         table: Arc<StorageTable<S>>,
         scan_range: ScanRange,
+        ordered: bool,
         epoch: BatchQueryEpoch,
         chunk_size: usize,
         histogram: Option<Histogram>,
@@ -390,7 +405,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     next_col_bounds.0.map(|x| OwnedRow::new(vec![x])),
                     next_col_bounds.1.map(|x| OwnedRow::new(vec![x])),
                 ),
-                true,
+                ordered,
             )
             .await?;
 
