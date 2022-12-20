@@ -49,15 +49,15 @@ struct ElectionResult {
 
 /// Runs for election in an attempt to become leader
 ///
-/// ## Returns
-/// Returns `ElectionResult`, containing infos about the node who won the election or
-/// `MetaError` if the election ran into an error
-///
 /// ## Arguments
 /// `meta_store`: The meta store which holds the lease, deciding about the election result
 /// `addr`: Address of the node that runs for election
 /// `lease_time_sec`: Amount of seconds that this lease will be valid
 /// `next_lease_id`: If the node wins, the lease used until the next election will have this id
+///
+/// ## Returns
+/// Returns `ElectionResult`, containing infos about the node who won the election or
+/// `MetaError` if the election ran into an error
 async fn campaign<S: MetaStore>(
     meta_store: &Arc<S>,
     addr: &String,
@@ -165,15 +165,16 @@ async fn campaign<S: MetaStore>(
 
 /// Try to renew/acquire the leader lease
 ///
-/// ## Returns
-/// True if node was leader and was able to renew/acquire the lease.
-/// False if node was follower and thus could not renew/acquire lease.
-/// `MetaError` if operation ran into an error
 ///
 /// ## Arguments
 /// `leader_info`: Info of the node that trie
 /// `lease_time_sec`: Time in seconds that the lease is valid
-/// `meta_store`: Store which holds the lease
+/// `meta_store`: Store which holds the lease#
+///
+/// ## Returns
+/// True if node was leader and was able to renew/acquire the lease.
+/// False if node was follower and thus could not renew/acquire lease.
+/// `MetaError` if operation ran into an error
 async fn renew_lease<S: MetaStore>(
     leader_info: &MetaLeaderInfo,
     lease_time_sec: u64,
@@ -210,7 +211,7 @@ async fn renew_lease<S: MetaStore>(
 
 /// Retrieve infos about the current leader
 ///
-/// ## Attributes:
+/// ## Arguments:
 /// `meta_store`: The store holding information about the leader
 ///
 /// ## Returns
