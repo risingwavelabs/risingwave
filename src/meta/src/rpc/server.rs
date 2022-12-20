@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use etcd_client::ConnectOptions;
-use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::addr::{leader_info_to_host_addr, HostAddr};
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -27,6 +27,7 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
+use risingwave_pb::meta::MetaLeaderInfo;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::channel as OneChannel;
 use tokio::sync::watch::{channel as WatchChannel, Sender as WatchSender};
@@ -146,7 +147,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 .expect("Leader sender dropped");
 
             let (leader_info, is_leader) = note_status_leader_rx.borrow().clone();
-            let leader_addr = HostAddr::from(leader_info);
+            let leader_addr = leader_info_to_host_addr(leader_info);
 
             tracing::info!(
                 "This node currently is a {} at {}:{}",
