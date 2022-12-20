@@ -16,7 +16,7 @@ use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-/// The catalog pg_shdescription stores optional descriptions (comments) for shared database
+/// The catalog `pg_shdescription` stores optional descriptions (comments) for shared database
 /// objects. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-shdescription.html`]
 pub const PG_SHDESCRIPTION_TABLE_NAME: &str = "pg_shdescription";
 pub const PG_SHDESCRIPTION_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[

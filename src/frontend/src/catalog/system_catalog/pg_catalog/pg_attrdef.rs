@@ -17,8 +17,8 @@ use risingwave_common::types::DataType;
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// The catalog `pg_attrdef` stores column default values. The main information about columns is
-/// stored in pg_attribute. Only columns for which a default value has been explicitly set will have
-/// an entry here. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-attrdef.html`]
+/// stored in `pg_attribute`. Only columns for which a default value has been explicitly set will
+/// have an entry here. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-attrdef.html`]
 pub const PG_ATTRDEF_TABLE_NAME: &str = "pg_attrdef";
 pub const PG_ATTRDEF_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),

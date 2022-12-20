@@ -17,7 +17,7 @@ use risingwave_common::types::DataType;
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// The catalog `pg_roles` provides access to information about database roles. This is simply a
-/// publicly readable view of pg_authid that blanks out the password field.
+/// publicly readable view of `pg_authid` that blanks out the password field.
 /// Ref: [`https://www.postgresql.org/docs/current/view-pg-roles.html`]
 pub const PG_ROLES_TABLE_NAME: &str = "pg_roles";
 pub const PG_ROLES_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
