@@ -724,3 +724,20 @@
             ├─LogicalAgg { group_key: [strings.v1], aggs: [] }
             | └─LogicalScan { table: strings, columns: [strings.v1] }
             └─LogicalScan { table: strings, columns: [strings.v1] }
+- sql: |
+    create table t1(a STRUCT<x INTEGER, y INTEGER>);
+    create table t2(a STRUCT<x INTEGER, y INTEGER>);
+    select * from t1 where exists(select * from t2 where (a).y = 100 and (t1.a).x = (t2).a.x and (a).x = 1000 and (t1).a.y = (t2.a).y);
+  logical_plan: |
+    LogicalProject { exprs: [t1.a] }
+    └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
+      ├─LogicalScan { table: t1, columns: [t1.a, t1._row_id] }
+      └─LogicalProject { exprs: [t2.a] }
+        └─LogicalFilter { predicate: (Field(t2.a, 1:Int32) = 100:Int32) AND (Field(CorrelatedInputRef { index: 0, correlated_id: 1 }, 0:Int32) = Field(t2.a, 0:Int32)) AND (Field(t2.a, 0:Int32) = 1000:Int32) AND (Field(CorrelatedInputRef { index: 0, correlated_id: 1 }, 1:Int32) = Field(t2.a, 1:Int32)) }
+          └─LogicalScan { table: t2, columns: [t2.a, t2._row_id] }
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftSemi, on: (Field(t1.a, 0:Int32) = Field(t2.a, 0:Int32)) AND (Field(t1.a, 1:Int32) = Field(t2.a, 1:Int32)), output: [t1.a] }
+    ├─LogicalProject { exprs: [t1.a, Field(t1.a, 0:Int32), Field(t1.a, 1:Int32)] }
+    | └─LogicalScan { table: t1, columns: [t1.a] }
+    └─LogicalProject { exprs: [Field(t2.a, 0:Int32), Field(t2.a, 1:Int32)] }
+      └─LogicalScan { table: t2, columns: [t2.a], predicate: (Field(t2.a, 1:Int32) = 100:Int32) AND (Field(t2.a, 0:Int32) = 1000:Int32) }

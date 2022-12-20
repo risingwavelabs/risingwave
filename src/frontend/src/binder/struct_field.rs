@@ -22,63 +22,40 @@ use crate::binder::Binder;
 use crate::expr::{Expr as RwExpr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 
 impl Binder {
-    /// This function will accept three expr type: `CompoundIdentifier`,`Identifier`,`Cast(Todo)`
+    /// This function will accept three expr type: `CompoundIdentifier`,`Identifier`,`Cast`
     /// We will extract ident from `expr` to get the `column_binding`.
     /// Will return `column_binding` and field `idents`.
     fn bind_field_access(&mut self, expr: Expr, ids: Vec<Ident>) -> Result<(ExprImpl, Vec<Ident>)> {
-        let (column_ident, ids) = match &expr {
-            // For CompoundIdentifier, we will use the first ident as table name and the second
-            // ident as column name.
-            Expr::CompoundIdentifier(idents) => {
-                let (table_name, column_name) = match &idents[..] {
-                    [table, column] => (table.real_value(), column.real_value()),
-                    _ => {
-                        bail!("Too many idents: {:?}", idents);
-                    }
-                };
-                (Some((Some(table_name), column_name)), ids)
+        match expr {
+            Expr::CompoundIdentifier(idents) => self.bind_field_access_inner(idents, ids),
+            Expr::Identifier(ident) => self.bind_field_access_inner(vec![ident], ids),
+            Expr::Cast { expr, data_type } => {
+                let cast = self.bind_cast(*expr, data_type)?;
+                Ok((cast, ids))
             }
-            // For Identifier, we will first use the ident as column name to get `column_desc`.
-            // If column name does not exist, we will use the ident as table name.
-            // The reason is that in pgsql, if table name v3 have a column name v3, which
-            // has a field name v3. `SELECT (v3).v3 FROM v3` will return the field value instead
-            // of column value.
-            Expr::Identifier(ident) => match self.context.indices_of.get(&ident.real_value()) {
-                Some(indices) => {
-                    if indices.len() == 1 {
-                        (Some((None, ident.real_value())), ids)
-                    } else {
-                        // When there are multiple tables having the same column, the table name
-                        // must be explicitly specified.
-                        let column_name = ids[0].real_value();
-                        (
-                            Some((Some(ident.real_value()), column_name)),
-                            ids[1..].to_vec(),
-                        )
-                    }
+            _ => unreachable!(),
+        }
+    }
+
+    fn bind_field_access_inner(
+        &mut self,
+        mut expr_idents: Vec<Ident>,
+        mut field_idents: Vec<Ident>,
+    ) -> Result<(ExprImpl, Vec<Ident>)> {
+        match self.bind_column(&expr_idents) {
+            // `(table.struct_col).field` or `(struct_col).field`
+            Ok(expr) => Ok((expr, field_idents)),
+            Err(err) => {
+                if field_idents.is_empty() {
+                    Err(err)
+                } else {
+                    // try `(table).struct_col.field` if still can not bind a result, give the old
+                    // error
+                    expr_idents.push(field_idents.remove(0));
+                    self.bind_column(&expr_idents)
+                        .map_err(|_| err)
+                        .map(|expr| (expr, field_idents))
                 }
-                None => {
-                    let table_name = ident.real_value();
-                    let column_name = ids[0].real_value();
-                    (Some((Some(table_name), column_name)), ids[1..].to_vec())
-                }
-            },
-            _ => (None, ids),
-        };
-        if let Some((table_name, column_name)) = column_ident {
-            let index = self
-                .context
-                .get_column_binding_index(&table_name, &column_name)?;
-            let binding = &self.context.columns[index];
-            let expr = InputRef::new(binding.index, binding.field.data_type.clone()).into();
-            Ok((expr, ids))
-        } else {
-            match expr {
-                Expr::Cast { expr, data_type } => {
-                    let cast = self.bind_cast(*expr, data_type)?;
-                    Ok((cast, ids))
-                }
-                _ => unreachable!(),
             }
         }
     }
