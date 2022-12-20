@@ -1,5 +1,6 @@
 [tasks.meta-backup-restore-test]
 category = "RiseDev - Test"
+dependencies = ["pre-start-dev"]
 description = "Run meta backup/restore test"
 condition = { env_set = [ "PREFIX_BIN", "PREFIX_DATA" ] }
 script = """
