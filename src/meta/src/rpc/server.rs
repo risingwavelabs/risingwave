@@ -19,8 +19,11 @@ use std::time::Duration;
 use etcd_client::ConnectOptions;
 use risingwave_common::util::addr::leader_info_to_host_addr;
 use risingwave_pb::health::health_server::HealthServer;
+use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::oneshot::channel as OneChannel;
-use tokio::sync::watch::{channel as WatchChannel, Sender as WatchSender};
+use tokio::sync::watch::{
+    channel as WatchChannel, Receiver as WatchReceiver, Sender as WatchSender,
+};
 use tokio::task::JoinHandle;
 
 use super::elections::run_elections;
@@ -106,6 +109,10 @@ pub async fn rpc_serve(
     }
 }
 
+fn node_is_leader(leader_rx: &WatchReceiver<(MetaLeaderInfo, bool)>) -> bool {
+    leader_rx.borrow().clone().1
+}
+
 pub async fn rpc_serve_with_store<S: MetaStore>(
     meta_store: Arc<S>,
     address_info: AddressInfo,
@@ -114,7 +121,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, WatchSender<()>)> {
     // Initialize managers.
-    let (_, election_handle, election_shutdown, leader_rx) = run_elections(
+    let (_, election_handle, election_shutdown, mut leader_rx) = run_elections(
         address_info.listen_addr.clone().to_string(),
         meta_store.clone(),
         lease_interval_secs,
@@ -209,11 +216,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         };
 
         // wait until this node becomes a leader
-        while !services_leader_rx.borrow().clone().1 {
-            services_leader_rx
-                .changed()
-                .await
-                .expect("Leader sender dropped");
+        while !node_is_leader(&leader_rx) {
+            leader_rx.changed().await.expect("Leader sender dropped");
         }
 
         // shut down follower svc if node used to be follower
