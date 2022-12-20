@@ -14,8 +14,10 @@
 
 use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools;
+
 use crate::catalog::SourceId;
-use crate::optimizer::plan_node::{LogicalShare, LogicalSource};
+use crate::optimizer::plan_node::{LogicalShare, LogicalSource, PlanTreeNode};
 use crate::optimizer::plan_rewriter::PlanRewriter;
 use crate::optimizer::PlanVisitor;
 use crate::PlanRef;
@@ -26,6 +28,9 @@ pub struct ShareSourceRewriter {
     share_ids: HashSet<SourceId>,
     // Source id to share node.
     share_source: HashMap<SourceId, PlanRef>,
+    // Original share node plan id to new share node.
+    // Rewriter will rewrite all nodes, but we need to keep the shape of the DAG.
+    share_map: HashMap<i32, PlanRef>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -48,6 +53,7 @@ impl ShareSourceRewriter {
                 .map(|(k, _)| k)
                 .collect(),
             share_source: Default::default(),
+            share_map: Default::default(),
         };
         // Rewrite source to share source
         share_source_rewriter.rewrite(plan)
@@ -69,6 +75,25 @@ impl PlanRewriter for ShareSourceRewriter {
                 share_source
             }
             Some(share_source) => share_source.clone(),
+        }
+    }
+
+    fn rewrite_logical_share(&mut self, share: &LogicalShare) -> PlanRef {
+        // When we use plan rewriter, we need to take care of share operator, because our plan is a
+        // DAG rather than a tree.
+        let plan_node_id = share.base.id.0;
+        match self.share_map.get(&plan_node_id) {
+            None => {
+                let new_inputs = share
+                    .inputs()
+                    .into_iter()
+                    .map(|input| self.rewrite(input.clone()))
+                    .collect_vec();
+                let new_share = share.clone_with_inputs(&new_inputs);
+                self.share_map.insert(plan_node_id, new_share.clone());
+                new_share
+            }
+            Some(new_share) => new_share.clone(),
         }
     }
 }

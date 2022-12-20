@@ -239,6 +239,7 @@ impl PlanRoot {
                 ApplyFilterTransposeRule::create(),
                 ApplyProjectTransposeRule::create(),
                 ApplyJoinTransposeRule::create(),
+                ApplyShareEliminateRule::create(),
                 ApplyScanRule::create(),
             ],
             ApplyOrder::TopDown,
@@ -487,6 +488,10 @@ impl PlanRoot {
 
                 // Replace source to share source.
                 let plan = ShareSourceRewriter::share_source(plan);
+                if explain_trace {
+                    ctx.trace("Reuse Source:");
+                    ctx.trace(plan.explain_to_string().unwrap());
+                }
 
                 let (plan, out_col_change) =
                     plan.logical_rewrite_for_stream(&mut Default::default())?;
