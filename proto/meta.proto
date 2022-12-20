@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package meta;
 
+import "backup_service.proto";
 import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
@@ -206,6 +207,7 @@ message MetaSnapshot {
   hummock.HummockVersion hummock_version = 12;
 
   SnapshotVersion version = 13;
+  backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
 }
 
 message SubscribeResponse {
@@ -233,6 +235,7 @@ message SubscribeResponse {
     hummock.HummockSnapshot hummock_snapshot = 14;
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
     MetaSnapshot snapshot = 16;
+    backup_service.MetaBackupManifestId meta_backup_manifest_id = 17;
   }
 }
 

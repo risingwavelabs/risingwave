@@ -5996,6 +5996,7 @@ dependencies = [
  "prost 0.11.2",
  "rand 0.8.5",
  "regex",
+ "risingwave_backup",
  "risingwave_common",
  "risingwave_common_service",
  "risingwave_hummock_sdk",

@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
+
 use risingwave_pb::backup_service::backup_service_server::BackupService;
 use risingwave_pb::backup_service::{
     BackupMetaRequest, BackupMetaResponse, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse,
-    GetBackupJobStatusRequest, GetBackupJobStatusResponse,
+    GetBackupJobStatusRequest, GetBackupJobStatusResponse, GetMetaSnapshotManifestRequest,
+    GetMetaSnapshotManifestResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -67,5 +70,14 @@ where
         let snapshot_ids = request.into_inner().snapshot_ids;
         self.backup_manager.delete_backups(&snapshot_ids).await?;
         Ok(Response::new(DeleteMetaSnapshotResponse {}))
+    }
+
+    async fn get_meta_snapshot_manifest(
+        &self,
+        _request: Request<GetMetaSnapshotManifestRequest>,
+    ) -> Result<Response<GetMetaSnapshotManifestResponse>, Status> {
+        Ok(Response::new(GetMetaSnapshotManifestResponse {
+            manifest: Some(self.backup_manager.manifest().deref().into()),
+        }))
     }
 }

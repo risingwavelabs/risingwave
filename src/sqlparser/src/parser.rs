@@ -69,7 +69,7 @@ pub enum WildcardExpr {
     Expr(Expr),
     /// Expr and Qualified wildcard, expr is a table or a column struct, object_name is field.
     /// e.g. `(table.v1).*` or `(table).v1.*`
-    ExprQualifiedWildcard(Expr, ObjectName),
+    ExprQualifiedWildcard(Expr, Option<ObjectName>),
     QualifiedWildcard(ObjectName),
     Wildcard,
 }
@@ -181,7 +181,13 @@ impl Parser {
                 Keyword::ALTER => Ok(self.parse_alter()?),
                 Keyword::COPY => Ok(self.parse_copy()?),
                 Keyword::SET => Ok(self.parse_set()?),
-                Keyword::SHOW => Ok(self.parse_show()?),
+                Keyword::SHOW => {
+                    if self.parse_keyword(Keyword::CREATE) {
+                        Ok(self.parse_show_create()?)
+                    } else {
+                        Ok(self.parse_show()?)
+                    }
+                }
                 Keyword::DESCRIBE => Ok(Statement::Describe {
                     name: self.parse_object_name()?,
                 }),
@@ -271,6 +277,8 @@ impl Parser {
             let mut id_parts = vec![ident];
             id_parts.append(&mut idents.0);
             Ok(WildcardExpr::QualifiedWildcard(ObjectName(id_parts)))
+        } else if let WildcardExpr::Wildcard = expr {
+            Ok(WildcardExpr::QualifiedWildcard(ObjectName(vec![ident])))
         } else {
             Ok(expr)
         }
@@ -289,14 +297,16 @@ impl Parser {
                 idents.append(&mut id_parts);
                 Ok(WildcardExpr::ExprQualifiedWildcard(
                     *expr,
-                    ObjectName(idents),
+                    Some(ObjectName(idents)),
                 ))
             } else {
                 Ok(WildcardExpr::ExprQualifiedWildcard(
                     expr,
-                    ObjectName(id_parts),
+                    Some(ObjectName(id_parts)),
                 ))
             }
+        } else if let WildcardExpr::Wildcard = wildcard_expr {
+            Ok(WildcardExpr::ExprQualifiedWildcard(expr, None))
         } else {
             Ok(wildcard_expr)
         }
@@ -312,7 +322,11 @@ impl Parser {
             match self.next_token() {
                 Token::Word(w) => id_parts.push(w.to_ident()),
                 Token::Mul => {
-                    return Ok(WildcardExpr::QualifiedWildcard(ObjectName(id_parts)));
+                    return if id_parts.is_empty() {
+                        Ok(WildcardExpr::Wildcard)
+                    } else {
+                        Ok(WildcardExpr::QualifiedWildcard(ObjectName(id_parts)))
+                    }
                 }
                 unexpected => {
                     return self.expected("an identifier or a '*' after '.'", unexpected);
@@ -2923,6 +2937,40 @@ impl Parser {
         } else {
             Ok(None)
         }
+    }
+
+    /// Parse object type and name after `show create`.
+    pub fn parse_show_create(&mut self) -> Result<Statement, ParserError> {
+        if let Token::Word(w) = self.next_token() {
+            let show_type = match w.keyword {
+                Keyword::TABLE => ShowCreateType::Table,
+                Keyword::MATERIALIZED => {
+                    if self.parse_keyword(Keyword::VIEW) {
+                        ShowCreateType::MaterializedView
+                    } else {
+                        return self.expected("VIEW after MATERIALIZED", self.peek_token());
+                    }
+                }
+                Keyword::VIEW => ShowCreateType::View,
+                Keyword::INDEX => ShowCreateType::Index,
+                Keyword::SOURCE => ShowCreateType::Source,
+                Keyword::SINK => ShowCreateType::Sink,
+                _ => {
+                    return self.expected(
+                        "TABLE, MATERIALIZED VIEW, VIEW, INDEX, SOURCE or SINK",
+                        self.peek_token(),
+                    )
+                }
+            };
+            return Ok(Statement::ShowCreateObject {
+                create_type: show_type,
+                name: self.parse_object_name()?,
+            });
+        }
+        self.expected(
+            "TABLE, MATERIALIZED VIEW, VIEW, INDEX, SOURCE or SINK",
+            self.peek_token(),
+        )
     }
 
     pub fn parse_table_and_joins(&mut self) -> Result<TableWithJoins, ParserError> {
