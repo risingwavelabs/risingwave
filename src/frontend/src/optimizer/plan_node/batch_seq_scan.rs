@@ -238,6 +238,7 @@ impl ToBatchProst for BatchSeqScan {
                 scan_ranges: self.scan_ranges.iter().map(|r| r.to_protobuf()).collect(),
                 // To be filled by the scheduler.
                 vnode_bitmap: None,
+                ordered: !self.order().is_any(),
             })
         }
     }
