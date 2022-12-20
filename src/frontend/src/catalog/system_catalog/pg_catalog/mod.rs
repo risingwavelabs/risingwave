@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod pg_am;
+pub mod pg_attrdef;
 pub mod pg_attribute;
 pub mod pg_cast;
 pub mod pg_class;
@@ -25,7 +26,9 @@ pub mod pg_matviews;
 pub mod pg_namespace;
 pub mod pg_opclass;
 pub mod pg_operator;
+pub mod pg_roles;
 pub mod pg_settings;
+pub mod pg_shdescription;
 pub mod pg_type;
 pub mod pg_user;
 pub mod pg_views;
@@ -34,6 +37,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 pub use pg_am::*;
+pub use pg_attrdef::*;
 pub use pg_attribute::*;
 pub use pg_cast::*;
 pub use pg_class::*;
@@ -46,7 +50,9 @@ pub use pg_matviews::*;
 pub use pg_namespace::*;
 pub use pg_opclass::*;
 pub use pg_operator::*;
+pub use pg_roles::*;
 pub use pg_settings::*;
+pub use pg_shdescription::*;
 pub use pg_type::*;
 pub use pg_user::*;
 pub use pg_views::*;
@@ -230,6 +236,34 @@ impl SysCatalogReaderImpl {
     // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
     pub(super) fn read_collation_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
+    }
+
+    pub(super) fn read_attrdef_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+
+    pub(crate) fn read_shdescription_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+
+    pub(super) fn read_roles_info(&self) -> Result<Vec<OwnedRow>> {
+        let reader = self.user_info_reader.read_guard();
+        let users = reader.get_all_users();
+        Ok(users
+            .iter()
+            .map(|user| {
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int32(user.id as i32)),
+                    Some(ScalarImpl::Utf8(user.name.clone().into())),
+                    Some(ScalarImpl::Bool(user.is_super)),
+                    Some(ScalarImpl::Bool(true)),
+                    Some(ScalarImpl::Bool(user.can_create_user)),
+                    Some(ScalarImpl::Bool(user.can_create_db)),
+                    Some(ScalarImpl::Bool(user.can_login)),
+                    Some(ScalarImpl::Utf8("********".into())),
+                ])
+            })
+            .collect_vec())
     }
 
     pub(super) fn read_class_info(&self) -> Result<Vec<OwnedRow>> {
@@ -439,6 +473,7 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int16(column.data_type().type_len())),
                             Some(ScalarImpl::Int16(index as i16 + 1)),
                             Some(ScalarImpl::Bool(false)),
+                            Some(ScalarImpl::Bool(false)),
                         ])
                     })
                 });
@@ -458,6 +493,7 @@ impl SysCatalogReaderImpl {
                                     Some(ScalarImpl::Int32(column.data_type().to_oid())),
                                     Some(ScalarImpl::Int16(column.data_type().type_len())),
                                     Some(ScalarImpl::Int16(index as i16 + 1)),
+                                    Some(ScalarImpl::Bool(false)),
                                     Some(ScalarImpl::Bool(false)),
                                 ])
                             })
