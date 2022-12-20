@@ -5244,6 +5244,8 @@ dependencies = [
  "static_assertions",
  "strum",
  "strum_macros",
+ "sysinfo",
+ "tempfile",
  "thiserror",
  "tokio-stream",
  "toml",
