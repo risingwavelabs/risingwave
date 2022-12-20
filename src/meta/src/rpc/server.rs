@@ -17,26 +17,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use etcd_client::ConnectOptions;
-use risingwave_common::util::addr::{leader_info_to_host_addr, HostAddr};
-use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
-use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
+use risingwave_common::util::addr::leader_info_to_host_addr;
 use risingwave_pb::health::health_server::HealthServer;
-use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
-use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
-use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::leader_service_server::LeaderServiceServer;
-use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
-use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
-use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
-use risingwave_pb::meta::MetaLeaderInfo;
-use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::channel as OneChannel;
 use tokio::sync::watch::Sender as WatchSender;
 use tokio::task::JoinHandle;
 
 use super::elections::run_elections;
 use super::intercept::MetricsMiddlewareLayer;
-use super::leader_svs::get_leader_srv;
+use super::leader_svs::start_leader_srv;
 use super::service::health_service::HealthServiceImpl;
 use crate::manager::MetaOpts;
 use crate::rpc::metrics::MetaMetrics;
@@ -194,7 +184,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     // TODO: maybe do not use a channel here
     // What I need is basically a oneshot channel with one producer and multiple consumers
-    let (svc_shutdown_tx, mut svc_shutdown_rx) = tokio::sync::watch::channel(());
+    let (svc_shutdown_tx, svc_shutdown_rx) = WatchChannel(());
 
     let join_handle = tokio::spawn(async move {
         let span = tracing::span!(tracing::Level::INFO, "services");
@@ -281,7 +271,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             };
         }
 
-        let svc = get_leader_srv(
+        start_leader_srv(
             meta_store,
             address_info.clone(),
             max_heartbeat_interval,
@@ -289,54 +279,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             leader_rx,
             election_handle,
             election_shutdown,
+            svc_shutdown_rx,
         )
         .await
         .expect("Unable to start leader services");
-
-        let shutdown_all = async move {
-            for (join_handle, shutdown_sender) in svc.sub_tasks {
-                if let Err(_err) = shutdown_sender.send(()) {
-                    // Maybe it is already shut down
-                    continue;
-                }
-                if let Err(err) = join_handle.await {
-                    tracing::warn!("Failed to join shutdown: {:?}", err);
-                }
-            }
-        };
-
-        let leader_srv = LeaderServiceImpl::new(l_leader_svc_leader_rx);
-
-        tonic::transport::Server::builder()
-            .layer(MetricsMiddlewareLayer::new(svc.meta_metrics))
-            .add_service(LeaderServiceServer::new(leader_srv))
-            .add_service(HeartbeatServiceServer::new(svc.heartbeat_srv))
-            .add_service(ClusterServiceServer::new(svc.cluster_srv))
-            .add_service(StreamManagerServiceServer::new(svc.stream_srv))
-            .add_service(HummockManagerServiceServer::new(svc.hummock_srv))
-            .add_service(NotificationServiceServer::new(svc.notification_srv))
-            .add_service(DdlServiceServer::new(svc.ddl_srv))
-            .add_service(UserServiceServer::new(svc.user_srv))
-            .add_service(ScaleServiceServer::new(svc.scale_srv))
-            .add_service(HealthServer::new(svc.health_srv))
-            .add_service(BackupServiceServer::new(svc.backup_srv))
-            .serve_with_shutdown(address_info.listen_addr, async move {
-                tokio::select! {
-                    _ = tokio::signal::ctrl_c() => {},
-                    res = svc_shutdown_rx.changed() => {
-                        match res {
-                            Ok(_) => tracing::info!("Shutting down services"),
-                            Err(_) => tracing::error!("Service shutdown receiver dropped")
-                        }
-                        shutdown_all.await;
-                    },
-                    _ = svc.idle_recv => {
-                        shutdown_all.await;
-                    },
-                }
-            })
-            .await
-            .unwrap();
     });
 
     Ok((join_handle, svc_shutdown_tx))
@@ -348,6 +294,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
 
+    use risingwave_common::util::addr::HostAddr;
     use risingwave_pb::common::WorkerType;
     use risingwave_rpc_client::MetaClient;
     use tokio::time::sleep;
