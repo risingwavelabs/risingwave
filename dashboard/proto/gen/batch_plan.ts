@@ -33,7 +33,11 @@ export interface RowSeqScanNode {
    *
    * Will be filled by the scheduler.
    */
-  vnodeBitmap: Buffer | undefined;
+  vnodeBitmap:
+    | Buffer
+    | undefined;
+  /** Whether the order on output columns should be preserved. */
+  ordered: boolean;
 }
 
 export interface SysRowSeqScanNode {
@@ -405,7 +409,7 @@ export interface PlanFragment {
 }
 
 function createBaseRowSeqScanNode(): RowSeqScanNode {
-  return { tableDesc: undefined, columnIds: [], scanRanges: [], vnodeBitmap: undefined };
+  return { tableDesc: undefined, columnIds: [], scanRanges: [], vnodeBitmap: undefined, ordered: false };
 }
 
 export const RowSeqScanNode = {
@@ -415,6 +419,7 @@ export const RowSeqScanNode = {
       columnIds: Array.isArray(object?.columnIds) ? object.columnIds.map((e: any) => Number(e)) : [],
       scanRanges: Array.isArray(object?.scanRanges) ? object.scanRanges.map((e: any) => ScanRange.fromJSON(e)) : [],
       vnodeBitmap: isSet(object.vnodeBitmap) ? Buffer.fromJSON(object.vnodeBitmap) : undefined,
+      ordered: isSet(object.ordered) ? Boolean(object.ordered) : false,
     };
   },
 
@@ -434,6 +439,7 @@ export const RowSeqScanNode = {
     }
     message.vnodeBitmap !== undefined &&
       (obj.vnodeBitmap = message.vnodeBitmap ? Buffer.toJSON(message.vnodeBitmap) : undefined);
+    message.ordered !== undefined && (obj.ordered = message.ordered);
     return obj;
   },
 
@@ -447,6 +453,7 @@ export const RowSeqScanNode = {
     message.vnodeBitmap = (object.vnodeBitmap !== undefined && object.vnodeBitmap !== null)
       ? Buffer.fromPartial(object.vnodeBitmap)
       : undefined;
+    message.ordered = object.ordered ?? false;
     return message;
   },
 };

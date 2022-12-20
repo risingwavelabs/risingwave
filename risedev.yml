@@ -553,6 +553,11 @@ risedev:
       - use: etcd
       - use: minio
 
+  ci-delete-range-test:
+    config-path: src/config/ci-delete-range-test.toml
+    steps:
+      - use: minio
+
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"
