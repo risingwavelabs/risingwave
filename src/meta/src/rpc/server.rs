@@ -28,7 +28,7 @@ use tokio::task::JoinHandle;
 
 use super::elections::run_elections;
 use super::intercept::MetricsMiddlewareLayer;
-use super::leader_svs::start_leader_srv;
+use super::leader_svc::start_leader_srv;
 use super::service::health_service::HealthServiceImpl;
 use crate::manager::MetaOpts;
 use crate::rpc::metrics::MetaMetrics;
