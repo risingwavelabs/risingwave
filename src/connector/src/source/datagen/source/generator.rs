@@ -54,7 +54,7 @@ impl DatagenEventGenerator {
     #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(mut self) {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
-        const MAX_ROWS: u64 = 1024;
+        const MAX_ROWS_PER_YIELD: u64 = 1024;
         loop {
             // generate `partition_rows_per_second` rows per second
             interval.tick().await;
@@ -62,7 +62,7 @@ impl DatagenEventGenerator {
             while rows_generated_this_second < self.partition_rows_per_second {
                 let mut msgs = vec![];
                 let num_rows_to_generate = std::cmp::min(
-                    MAX_ROWS,
+                    MAX_ROWS_PER_YIELD,
                     self.partition_rows_per_second - rows_generated_this_second,
                 );
                 for _ in 0..num_rows_to_generate {
