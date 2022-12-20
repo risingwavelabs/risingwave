@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{anyhow, bail, Result};
-use glob::glob;
 use itertools::Itertools;
 use yaml_rust::{Yaml, YamlEmitter, YamlLoader};
 
@@ -33,8 +32,8 @@ use use_expander::UseExpander;
 
 /// The main configuration file name.
 pub const RISEDEV_CONFIG_FILE: &str = "risedev.yml";
-/// The glob pattern for profile include files.
-pub const RISEDEV_PROFILE_INCLUDE_GLOB: &str = "risedev-profile-include.*.yml";
+/// The extra user profiles file name.
+pub const RISEDEV_USER_PROFILES_FILE: &str = "risedev-profiles.user.yml";
 
 pub struct ConfigExpander;
 
@@ -49,8 +48,7 @@ impl ConfigExpander {
         Ok(config)
     }
 
-    /// Transforms [`risedev.yml`] and `risedev-profile-include.*.yml` to a fully expanded yaml
-    /// file.
+    /// Transforms [`risedev.yml`] and `risedev-profiles.user.yml` to a fully expanded yaml file.
     ///
     /// # Arguments
     ///
@@ -89,25 +87,17 @@ impl ConfigExpander {
                 .ok_or_else(|| anyhow!("expect `profile` section to be a hashmap"))?
                 .to_owned();
 
-            for include_path in glob(
-                &root
-                    .as_ref()
-                    .join(RISEDEV_PROFILE_INCLUDE_GLOB)
-                    .to_string_lossy(),
-            )? {
-                let path = include_path?;
-                let yaml = Self::load_yaml(&path)?;
-                let map = yaml
-                    .as_hash()
-                    .ok_or_else(|| anyhow!("expect `{}` to be a hashmap", path.display()))?;
+            // Add user profiles if exists.
+            if Path::new(RISEDEV_USER_PROFILES_FILE).is_file() {
+                let yaml = Self::load_yaml(RISEDEV_USER_PROFILES_FILE)?;
+                let map = yaml.as_hash().ok_or_else(|| {
+                    anyhow!("expect `{RISEDEV_USER_PROFILES_FILE}` to be a hashmap")
+                })?;
                 for (k, v) in map {
-                    match all.entry(k.clone()) {
-                        linked_hash_map::Entry::Occupied(_) => {
-                            bail!("config key `{k:?}` in `{}` already exists", path.display());
-                        }
-                        linked_hash_map::Entry::Vacant(e) => {
-                            e.insert(v.clone());
-                        }
+                    if all.insert(k.clone(), v.clone()).is_some() {
+                        bail!(
+                            "find duplicated config key `{k:?}` in `{RISEDEV_USER_PROFILES_FILE}`"
+                        );
                     }
                 }
             }

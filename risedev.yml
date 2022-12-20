@@ -5,7 +5,7 @@
 # ```
 #     "yaml.schemas": {
 #         "src/risedevtool/schemas/risedev.json": "risedev.yml",
-#         "src/risedevtool/schemas/risedev-profile-include.json": "risedev-profile-include.*.yml"
+#         "src/risedevtool/schemas/risedev-profiles.user.json": "risedev-profiles.user.yml"
 #     }
 # ```
 

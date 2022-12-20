@@ -94,7 +94,7 @@ That's all! RiseDev will generate a new `server.properties` for the frontend nod
 
 RiseDev has some built-in profiles defined under the `profile` section of `risedev.yml`. You can add new profiles by adding new items under the `profile` section.
 
-RiseDev also supports including profiles from other files. Currently, all files named `risedev-profile-include.*.yml` will be included for extra profiles. These files are designed to be not version controlled, so you can add your own profiles here for customized purposes. Check `risedev-profile-include.template.yml` for an example.
+RiseDev also supports including profiles from other files. Currently, all files named `risedev-profiles.user*.yml` will be included for extra profiles. These files are designed to be not version controlled, so you can add your own profiles here for customized purposes. Check `risedev-profiles.usertemplate.yml` for an example.
 
 ### Logs and Artifacts
 
@@ -142,7 +142,7 @@ All steps for downloading components, copying config, and building RisingWave ar
 > ```json
 >     "yaml.schemas": {
 >         "src/risedevtool/schemas/risedev.json": "risedev.yml",
->         "src/risedevtool/schemas/risedev-profile-include.json": "risedev-profile-include.*.yml"
+>         "src/risedevtool/schemas/risedev-profiles.userjson": "risedev-profiles.user*.yml"
 >     }
 > ```
 
