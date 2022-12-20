@@ -142,7 +142,7 @@ All steps for downloading components, copying config, and building RisingWave ar
 > ```json
 >     "yaml.schemas": {
 >         "src/risedevtool/schemas/risedev.json": "risedev.yml",
->         "src/risedevtool/schemas/risedev-profiles.userjson": "risedev-profiles.user*.yml"
+>         "src/risedevtool/schemas/risedev-profiles.user.json": "risedev-profiles.user.yml"
 >     }
 > ```
 

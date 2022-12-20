@@ -48,7 +48,7 @@ impl ConfigExpander {
         Ok(config)
     }
 
-    /// Transforms [`risedev.yml`] and `risedev-profiles.user.yml` to a fully expanded yaml file.
+    /// Transforms `risedev.yml` and `risedev-profiles.user.yml` to a fully expanded yaml file.
     ///
     /// # Arguments
     ///
@@ -88,8 +88,9 @@ impl ConfigExpander {
                 .to_owned();
 
             // Add user profiles if exists.
-            if Path::new(RISEDEV_USER_PROFILES_FILE).is_file() {
-                let yaml = Self::load_yaml(RISEDEV_USER_PROFILES_FILE)?;
+            let user_profiles_path = root.as_ref().join(RISEDEV_USER_PROFILES_FILE);
+            if user_profiles_path.is_file() {
+                let yaml = Self::load_yaml(user_profiles_path)?;
                 let map = yaml.as_hash().ok_or_else(|| {
                     anyhow!("expect `{RISEDEV_USER_PROFILES_FILE}` to be a hashmap")
                 })?;
