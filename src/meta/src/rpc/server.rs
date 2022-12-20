@@ -174,7 +174,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .expect("Leader sender dropped");
 
         let is_leader = services_leader_rx.borrow().clone().1;
-        let was_follower = !is_leader;
 
         // run follower services until node becomes leader
         // FIXME: Add service discovery for follower
@@ -221,7 +220,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         }
 
         // shut down follower svc if node used to be follower
-        if was_follower {
+        if follower_handle.is_some() {
             match follower_shutdown_tx.send(()) {
                 Ok(_) => tracing::info!("Shutting down follower services"),
                 Err(_) => tracing::error!("Follower service receiver dropped"),
