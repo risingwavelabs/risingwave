@@ -26,6 +26,7 @@ pub use plan_visitor::PlanVisitor;
 mod optimizer_context;
 mod rule;
 mod share_parent_counter;
+mod share_source_rewriter;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
@@ -52,6 +53,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::plan_visitor::has_batch_source;
 use crate::optimizer::property::Distribution;
+use crate::optimizer::share_source_rewriter::ShareSourceRewriter;
 use crate::utils::Condition;
 use crate::WithOptions;
 
@@ -482,6 +484,10 @@ impl PlanRoot {
         let plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan()?;
+
+                // Replace source to share source.
+                let plan = ShareSourceRewriter::share_source(plan);
+
                 let (plan, out_col_change) =
                     plan.logical_rewrite_for_stream(&mut Default::default())?;
 
