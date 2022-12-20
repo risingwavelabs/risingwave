@@ -279,18 +279,16 @@ impl fmt::Debug for StreamChunk {
         if f.alternate() {
             write!(
                 f,
-                "StreamChunk {{ cardinality = {}, capacity = {}, data = \n{} }}",
+                "StreamChunk {{ cardinality: {}, capacity: {}, data: \n{}\n }}",
                 self.cardinality(),
                 self.capacity(),
                 self.to_pretty_string()
             )
         } else {
-            write!(
-                f,
-                "StreamChunk {{ cardinality = {}, capacity = {}, data = ... }}",
-                self.cardinality(),
-                self.capacity(),
-            )
+            f.debug_struct("StreamChunk")
+                .field("cardinality", &self.cardinality())
+                .field("capacity", &self.capacity())
+                .finish_non_exhaustive()
         }
     }
 }
