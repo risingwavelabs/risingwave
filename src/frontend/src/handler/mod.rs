@@ -173,6 +173,9 @@ pub async fn handle(
         }
         Statement::Describe { name } => describe::handle_describe(handler_args, name),
         Statement::ShowObjects(show_object) => show::handle_show_object(handler_args, show_object),
+        Statement::ShowCreateObject { create_type, name } => {
+            show::handle_show_create_object(handler_args, create_type, name)
+        }
         Statement::Drop(DropStatement {
             object_type,
             object_name,

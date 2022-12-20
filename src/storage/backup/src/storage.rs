@@ -17,12 +17,13 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_object_store::object::{ObjectError, ObjectStoreRef};
-use serde::{Deserialize, Serialize};
 
 use crate::meta_snapshot::MetaSnapshot;
-use crate::{BackupError, BackupResult, MetaSnapshotId, MetaSnapshotMetadata};
+use crate::{
+    BackupError, BackupResult, MetaSnapshotId, MetaSnapshotManifest, MetaSnapshotMetadata,
+};
 
-pub type BackupStorageRef = Arc<dyn MetaSnapshotStorage>;
+pub type MetaSnapshotStorageRef = Arc<dyn MetaSnapshotStorage>;
 
 #[async_trait::async_trait]
 pub trait MetaSnapshotStorage: 'static + Sync + Send {
@@ -32,40 +33,32 @@ pub trait MetaSnapshotStorage: 'static + Sync + Send {
     /// Gets a snapshot by id.
     async fn get(&self, id: MetaSnapshotId) -> BackupResult<MetaSnapshot>;
 
-    /// List all snapshots' metadata.
-    async fn list(&self) -> BackupResult<Vec<MetaSnapshotMetadata>>;
+    /// Gets local snapshot manifest.
+    fn manifest(&self) -> Arc<MetaSnapshotManifest>;
+
+    /// Refreshes local snapshot manifest.
+    async fn refresh_manifest(&self) -> BackupResult<()>;
 
     /// Deletes snapshots by ids.
     async fn delete(&self, ids: &[MetaSnapshotId]) -> BackupResult<()>;
-}
-
-/// `MetaSnapshotManifest` is the source of truth for valid `MetaSnapshot`.
-#[derive(Serialize, Deserialize, Default, Clone)]
-struct MetaSnapshotManifest {
-    pub manifest_id: u64,
-    pub snapshot_metadata: Vec<MetaSnapshotMetadata>,
 }
 
 #[derive(Clone)]
 pub struct ObjectStoreMetaSnapshotStorage {
     path: String,
     store: ObjectStoreRef,
-    manifest: Arc<parking_lot::RwLock<MetaSnapshotManifest>>,
+    manifest: Arc<parking_lot::RwLock<Arc<MetaSnapshotManifest>>>,
 }
 
 // TODO #6482: purge stale snapshots that is not in manifest.
 impl ObjectStoreMetaSnapshotStorage {
     pub async fn new(path: &str, store: ObjectStoreRef) -> BackupResult<Self> {
-        let mut instance = Self {
+        let instance = Self {
             path: path.to_string(),
             store,
             manifest: Default::default(),
         };
-        let manifest = match instance.get_manifest().await? {
-            None => MetaSnapshotManifest::default(),
-            Some(manifest) => manifest,
-        };
-        instance.manifest = Arc::new(parking_lot::RwLock::new(manifest));
+        instance.refresh_manifest().await?;
         Ok(instance)
     }
 
@@ -75,7 +68,7 @@ impl ObjectStoreMetaSnapshotStorage {
         self.store
             .upload(&self.get_manifest_path(), bytes.into())
             .await?;
-        *self.manifest.write() = new_manifest;
+        *self.manifest.write() = Arc::new(new_manifest);
         Ok(())
     }
 
@@ -107,6 +100,7 @@ impl ObjectStoreMetaSnapshotStorage {
         format!("{}/{}.snapshot", self.path, id)
     }
 
+    #[allow(dead_code)]
     fn get_snapshot_id_from_path(path: &str) -> MetaSnapshotId {
         let split = path.split(&['/', '.']).collect_vec();
         debug_assert!(split.len() > 2);
@@ -124,7 +118,7 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
         self.store.upload(&path, snapshot.encode().into()).await?;
 
         // update manifest last
-        let mut new_manifest = self.manifest.read().clone();
+        let mut new_manifest = (**self.manifest.read()).clone();
         new_manifest.manifest_id += 1;
         new_manifest
             .snapshot_metadata
@@ -142,14 +136,24 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
         MetaSnapshot::decode(&data)
     }
 
-    async fn list(&self) -> BackupResult<Vec<MetaSnapshotMetadata>> {
-        Ok(self.manifest.read().snapshot_metadata.clone())
+    fn manifest(&self) -> Arc<MetaSnapshotManifest> {
+        self.manifest.read().clone()
+    }
+
+    async fn refresh_manifest(&self) -> BackupResult<()> {
+        if let Some(manifest) = self.get_manifest().await? {
+            let mut guard = self.manifest.write();
+            if manifest.manifest_id > guard.manifest_id {
+                *guard = Arc::new(manifest);
+            }
+        }
+        Ok(())
     }
 
     async fn delete(&self, ids: &[MetaSnapshotId]) -> BackupResult<()> {
         // update manifest first
         let to_delete: HashSet<MetaSnapshotId> = HashSet::from_iter(ids.iter().cloned());
-        let mut new_manifest = self.manifest.read().clone();
+        let mut new_manifest = (**self.manifest.read()).clone();
         new_manifest.manifest_id += 1;
         new_manifest
             .snapshot_metadata
@@ -171,10 +175,13 @@ impl From<ObjectError> for BackupError {
     }
 }
 
-pub struct DummyBackupStorage {}
+#[derive(Default)]
+pub struct DummyMetaSnapshotStorage {
+    manifest: Arc<MetaSnapshotManifest>,
+}
 
 #[async_trait::async_trait]
-impl MetaSnapshotStorage for DummyBackupStorage {
+impl MetaSnapshotStorage for DummyMetaSnapshotStorage {
     async fn create(&self, _snapshot: &MetaSnapshot) -> BackupResult<()> {
         panic!("should not create from DummyBackupStorage")
     }
@@ -183,9 +190,12 @@ impl MetaSnapshotStorage for DummyBackupStorage {
         panic!("should not get from DummyBackupStorage")
     }
 
-    async fn list(&self) -> BackupResult<Vec<MetaSnapshotMetadata>> {
-        // Satisfy `BackupManager`
-        Ok(vec![])
+    fn manifest(&self) -> Arc<MetaSnapshotManifest> {
+        self.manifest.clone()
+    }
+
+    async fn refresh_manifest(&self) -> BackupResult<()> {
+        Ok(())
     }
 
     async fn delete(&self, _ids: &[MetaSnapshotId]) -> BackupResult<()> {

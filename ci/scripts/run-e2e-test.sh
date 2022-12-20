@@ -124,19 +124,3 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     echo "--- Kill cluster"
     cargo make ci-kill
 fi
-
-if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
-    echo "--- e2e, ci-3cn-1fe, fuzzing"
-    buildkite-agent artifact download sqlsmith-"$profile" target/debug/
-    mv target/debug/sqlsmith-"$profile" target/debug/sqlsmith
-    chmod +x ./target/debug/sqlsmith
-
-    cargo make ci-start ci-3cn-1fe
-    timeout 20m ./target/debug/sqlsmith test --count "$SQLSMITH_COUNT" --testdata ./src/tests/sqlsmith/tests/testdata
-
-    # Using `kill` instead of `ci-kill` avoids storing excess logs.
-    # If there's errors, the failing query will be printed to stderr.
-    # Use that to reproduce logs on local machine.
-    echo "--- Kill cluster"
-    cargo make kill
-fi

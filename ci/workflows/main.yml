@@ -199,6 +199,21 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
+  - label: "fuzz test"
+    command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"
+    depends_on:
+      - "build"
+    plugins:
+      - ./ci/plugins/swapfile
+      - gencer/cache#v2.4.10: *cargo-cache
+      - docker-compose#v3.9.0:
+          run: rw-build-env
+          config: ci/docker-compose.yml
+          mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
     retry: *auto-retry
 
