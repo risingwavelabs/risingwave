@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, ValueAccess};
 
 use crate::impl_common_parser_logic;
 use crate::parser::common::simd_json_parse_value;
+use crate::parser::util::at_least_one_ok;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::SourceColumnDesc;
 
@@ -35,6 +37,22 @@ impl JsonParser {
         Ok(Self { rw_columns })
     }
 
+    fn parse_single_value(
+        value: BorrowedValue<'_>,
+        writer: &mut SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
+        writer.insert(|desc| {
+            simd_json_parse_value(
+                &desc.data_type,
+                value.get(desc.name.to_ascii_lowercase().as_str()),
+            )
+            .map_err(|e| {
+                tracing::error!("failed to process value ({}): {}", value, e);
+                e.into()
+            })
+        })
+    }
+
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
@@ -46,20 +64,16 @@ impl JsonParser {
         let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        writer.insert(|desc| {
-            simd_json_parse_value(
-                &desc.data_type,
-                value.get(desc.name.to_ascii_lowercase().as_str()),
-            )
-            .map_err(|e| {
-                tracing::error!(
-                    "failed to process value ({}): {}",
-                    String::from_utf8_lossy(payload),
-                    e
-                );
-                e.into()
-            })
-        })
+        let results = match value {
+            BorrowedValue::Array(objects) => objects
+                .into_iter()
+                .map(|obj| Self::parse_single_value(obj, &mut writer))
+                .collect_vec(),
+            _ => {
+                return Self::parse_single_value(value, &mut writer);
+            }
+        };
+        at_least_one_ok(results)
     }
 }
 
@@ -77,8 +91,20 @@ mod tests {
 
     use crate::parser::{JsonParser, SourceColumnDesc, SourceStreamChunkBuilder};
 
-    #[tokio::test]
-    async fn test_json_parser() {
+    fn get_payload() -> Vec<&'static [u8]> {
+        vec![
+            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}"#.as_slice(),
+            br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.as_slice(),
+        ]
+    }
+
+    fn get_array_top_level_payload() -> Vec<&'static [u8]> {
+        vec![
+            br#"[{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}, {"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}]"#.as_slice()
+        ]
+    }
+
+    async fn test_json_parser(get_payload: fn() -> Vec<&'static [u8]>) {
         let descs = vec![
             SourceColumnDesc::simple("i32", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("bool", DataType::Boolean, 2.into()),
@@ -96,10 +122,7 @@ mod tests {
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
-        for payload in [
-            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}"#.as_slice(),
-            br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.as_slice(),
-        ] {
+        for payload in get_payload() {
             let writer = builder.row_writer();
             parser.parse_inner(payload, writer).await.unwrap();
         }
@@ -175,6 +198,16 @@ mod tests {
                 (Some(ScalarImpl::Decimal(12345.into())))
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_json_parse_object_top_level() {
+        test_json_parser(get_payload).await;
+    }
+
+    #[tokio::test]
+    async fn test_json_parse_array_top_level() {
+        test_json_parser(get_array_top_level_payload).await;
     }
 
     #[tokio::test]
