@@ -8230,6 +8230,7 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
+ "openssl-sys",
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.4",
  "petgraph",

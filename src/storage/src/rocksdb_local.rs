@@ -15,22 +15,25 @@
 use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
-use std::sync::{Arc, Mutex}; 
-use futures::{pin_mut, StreamExt};
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
+use futures::{pin_mut, StreamExt};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, RwError};
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
-use rocksdb::{DBIterator, ReadOptions as RocksDBReadOptions, SeekKey, Writable, WriteBatch, WriteOptions as RocksDBWriteOptions, DB};
+use risingwave_hummock_sdk::HummockReadEpoch;
+use rocksdb::{
+    DBIterator, ReadOptions as RocksDBReadOptions, SeekKey, Writable, WriteBatch,
+    WriteOptions as RocksDBWriteOptions, DB,
+};
 use tokio::sync::OnceCell;
 use tokio::task;
 
-use crate::error::{StorageResult, StorageError};
+use crate::error::{StorageError, StorageResult};
 use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::utils::{to_full_key_range, BytesFullKeyRange, BytesFullKey};
+use crate::utils::{to_full_key_range, BytesFullKey, BytesFullKeyRange};
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
 #[derive(Clone)]
@@ -56,11 +59,16 @@ impl RocksDBStateStore {
 
 impl StateStoreRead for RocksDBStateStore {
     type IterStream = StreamTypeOfIter<RocksDBStateStoreIter>;
+
     define_state_store_read_associated_type!();
 
-    fn iter(&self, key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>), epoch: u64, read_options: ReadOptions) -> Self::IterFuture<'_>
-    {
-        let to_encoded = |bound: Bound<BytesFullKey>| -> Bound<Vec<u8>> { 
+    fn iter(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> Self::IterFuture<'_> {
+        let to_encoded = |bound: Bound<BytesFullKey>| -> Bound<Vec<u8>> {
             match bound {
                 Included(x) => Included(x.encode_reverse_epoch()),
                 Excluded(x) => Excluded(x.encode_reverse_epoch()),
@@ -70,21 +78,34 @@ impl StateStoreRead for RocksDBStateStore {
         let full_key_range = to_full_key_range(read_options.table_id, key_range);
         async move {
             Ok(RocksDBStateStoreIter::new(
-                self.clone(), 
+                self.clone(),
                 (to_encoded(full_key_range.0), to_encoded(full_key_range.1)),
                 epoch,
-            ).await?.into_stream())
+            )
+            .await?
+            .into_stream())
         }
     }
 
-    fn get<'a>(&'a self, key: &'a [u8], epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get<'a>(
+        &'a self,
+        key: &'a [u8],
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> Self::GetFuture<'_> {
         async move {
-            let stream = self.iter((Included(key.to_vec()), Included(key.to_vec())), epoch, read_options).await?;
+            let stream = self
+                .iter(
+                    (Included(key.to_vec()), Included(key.to_vec())),
+                    epoch,
+                    read_options,
+                )
+                .await?;
             pin_mut!(stream);
             let item = stream.next().await;
             match item {
                 None => Ok(None),
-                Some(res) => Ok(Some(res?.1))
+                Some(res) => Ok(Some(res?.1)),
             }
         }
     }
@@ -92,17 +113,21 @@ impl StateStoreRead for RocksDBStateStore {
 
 impl StateStoreWrite for RocksDBStateStore {
     define_state_store_write_associated_type!();
-    
+
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
         _delete_ranges: Vec<(Bytes, Bytes)>,
         write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
-        async move { self.storage().await.write_batch(kv_pairs, write_options.table_id, write_options.epoch).await }
+        async move {
+            self.storage()
+                .await
+                .write_batch(kv_pairs, write_options.table_id, write_options.epoch)
+                .await
+        }
     }
 }
-
 
 impl LocalStateStore for RocksDBStateStore {}
 
@@ -175,7 +200,9 @@ impl RocksDBStateStoreIter {
                 is_start_unbounded = true;
             }
             _ => {
-                return Err(StorageError::InternalError("invalid range start".to_string()));
+                return Err(StorageError::InternalError(
+                    "invalid range start".to_string(),
+                ));
             }
         };
 
@@ -210,7 +237,7 @@ impl RocksDBStateStoreIter {
                 key_range: range,
                 epoch,
                 end_key_data: Arc::new(EndKeyData {
-                    end_key, 
+                    end_key,
                     is_end_exclude,
                     is_end_unbounded,
                 }),
@@ -222,7 +249,7 @@ impl RocksDBStateStoreIter {
         .map_err(|e| StorageError::InternalError(e.to_string()))?
     }
 
-    async fn next_inner(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Option<Bytes>)>>  {
+    async fn next_inner(&mut self) -> StorageResult<Option<(FullKey<Vec<u8>>, Option<Bytes>)>> {
         let iter = self.iter.clone();
         let end_key_data = self.end_key_data.clone();
 
@@ -247,7 +274,9 @@ impl RocksDBStateStoreIter {
             if end_key_data.is_end_unbounded {
                 return Ok(Some((FullKey::decode_reverse_epoch(&k[..]).to_vec(), v)));
             }
-            if iter.key() > &end_key_data.end_key[..] || (k == &end_key_data.end_key[..] && end_key_data.is_end_exclude) {
+            if iter.key() > &end_key_data.end_key[..]
+                || (k == &end_key_data.end_key[..] && end_key_data.is_end_exclude)
+            {
                 return Ok(None);
             }
             if let Err(e) = iter.next().map_err(|e| StorageError::InternalError(e)) {
@@ -264,10 +293,11 @@ impl RocksDBStateStoreIter {
 
 impl StateStoreIter for RocksDBStateStoreIter {
     type Item = StateStoreIterItem;
+
     type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
-        async move { 
+        async move {
             if self.stopped {
                 Ok(None)
             } else {
@@ -275,7 +305,8 @@ impl StateStoreIter for RocksDBStateStoreIter {
                     if key.epoch > self.epoch {
                         continue;
                     }
-                    if Some(key.user_key.as_ref()) != self.last_key.as_ref().map(|key| key.as_ref()) {
+                    if Some(key.user_key.as_ref()) != self.last_key.as_ref().map(|key| key.as_ref())
+                    {
                         self.last_key = Some(key.user_key.clone());
                         if let Some(value) = value {
                             return Ok(Some((key, value)));
@@ -325,7 +356,12 @@ impl RocksDBStorage {
         .map_err(|e| StorageError::InternalError(e.to_string()))?
     }
 
-    async fn write_batch(&self, kv_pairs: Vec<(Bytes, StorageValue)>, table_id: TableId, epoch: u64) -> StorageResult<usize> {
+    async fn write_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        table_id: TableId,
+        epoch: u64,
+    ) -> StorageResult<usize> {
         let mut size = 0;
         let wb = WriteBatch::new();
         for (key, value) in kv_pairs {
@@ -376,7 +412,6 @@ mod tests {
         let state_store = RocksDBStateStore::new("/tmp/default");
         test_snapshot_isolation_inner(state_store).await;
     }
-
 
     async fn test_snapshot_isolation_inner(state_store: RocksDBStateStore) {
         state_store

@@ -15,10 +15,10 @@
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 
-use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use bytes::Bytes;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::{FullKey, TableKey};
+use risingwave_hummock_sdk::HummockEpoch;
 
 pub type BytesFullKey = FullKey<Bytes>;
 pub type BytesFullKeyRange = (Bound<BytesFullKey>, Bound<BytesFullKey>);

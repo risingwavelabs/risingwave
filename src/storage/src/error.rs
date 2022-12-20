@@ -40,9 +40,7 @@ pub enum StorageError {
     ),
 
     #[error("Internal error: {0}")]
-    InternalError(
-        String,
-    )
+    InternalError(String),
 }
 
 pub type StorageResult<T> = std::result::Result<T, StorageError>;

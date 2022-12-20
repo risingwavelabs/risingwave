@@ -14,8 +14,7 @@
 
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::ops::Bound::{Excluded, Included, Unbounded};
-use std::ops::{Bound, RangeBounds};
+use std::ops::Bound;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
@@ -27,7 +26,7 @@ use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::utils::{to_full_key_range, BytesFullKeyRange, BytesFullKey};
+use crate::utils::{to_full_key_range, BytesFullKey, BytesFullKeyRange};
 use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type,
     define_state_store_write_associated_type,
@@ -351,6 +350,8 @@ mod batched_iter {
 
     #[cfg(test)]
     mod tests {
+        use std::ops::RangeBounds;
+
         use rand::Rng;
         use risingwave_hummock_sdk::key::FullKey;
 

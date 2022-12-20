@@ -34,8 +34,9 @@ use crate::hummock::{
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
-use crate::StateStore;
+#[cfg(feature = "rocksdb-local")]
 use crate::rocksdb_local::RocksDBStateStore;
+use crate::StateStore;
 
 pub type HummockStorageType = impl StateStore + AsHummockTrait;
 pub type HummockStorageV1Type = impl StateStore + AsHummockTrait;
@@ -63,11 +64,11 @@ pub enum StateStoreImpl {
     /// state. (e.g., no read_epoch support, no async checkpoint)
     MemoryStateStore(Monitored<MemoryStateStoreType>),
     SledStateStore(Monitored<SledStateStoreType>),
-    /// RocksDB state store. This is meant for benchmarking purposes. It should not be used in 
-    /// a production setting and is not maintained on the `main` branch, but rather on the `rocksdb`
-    /// branch.
-    /// The state store cannot recover from failure. It may possibly undergo scaling on a single-node,
-    /// but it may not work correctly.
+    /// RocksDB state store. This is meant for benchmarking purposes. It should not be used in
+    /// a production setting and is not maintained on the `main` branch, but rather on the
+    /// `rocksdb` branch.
+    /// The state store cannot recover from failure. It may possibly undergo scaling on a
+    /// single-node, but it may not work correctly.
     /// This implementation runs a single RocksDB instance for a single compute node.
     #[cfg(feature = "rocksdb-local")]
     RocksDBStateStore(Monitored<RocksDBStateStoreType>),
@@ -151,7 +152,10 @@ impl StateStoreImpl {
     }
 
     #[cfg(feature = "rocksdb-local")]
-    pub fn rocksdb_state_store(state_store: RocksDBStateStore, state_store_metrics: Arc<StateStoreMetrics>) -> Self {
+    pub fn rocksdb_state_store(
+        state_store: RocksDBStateStore,
+        state_store_metrics: Arc<StateStoreMetrics>,
+    ) -> Self {
         Self::RocksDBStateStore(may_dynamic_dispatch(state_store).monitored(state_store_metrics))
     }
 
