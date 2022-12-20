@@ -15,24 +15,33 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_backup::error::BackupError;
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
+use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
+use risingwave_pb::health::health_server::HealthServer;
+use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
+use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
+use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
+use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
+use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
+use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::MetaLeaderInfo;
-use tokio::sync::oneshot::{Receiver as OneReceiver, Sender as OneSender};
+use risingwave_pb::user::user_service_server::UserServiceServer;
+use tokio::sync::oneshot::Sender as OneSender;
 use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio::task::JoinHandle;
 
+use super::intercept::MetricsMiddlewareLayer;
 use super::service::health_service::HealthServiceImpl;
 use super::service::notification_service::NotificationServiceImpl;
 use super::service::scale_service::ScaleServiceImpl;
 use super::DdlServiceImpl;
 use crate::backup_restore::BackupManager;
 use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
-use crate::hummock;
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
@@ -47,37 +56,15 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManager, SourceManager};
+use crate::{hummock, MetaResult};
 
-/// Simple struct containing everything required to start services on a meta leader node
-pub struct LeaderServices<S: MetaStore> {
-    pub backup_srv: BackupServiceImpl<S>,
-    pub cluster_srv: ClusterServiceImpl<S>,
-    pub ddl_srv: DdlServiceImpl<S>,
-    pub health_srv: HealthServiceImpl,
-    pub heartbeat_srv: HeartbeatServiceImpl<S>,
-    pub hummock_srv: HummockServiceImpl<S>,
-
-    /// OneShot receiver that signals if sub tasks is idle
-    pub idle_recv: OneReceiver<()>,
-
-    pub meta_metrics: Arc<MetaMetrics>,
-    pub notification_srv: NotificationServiceImpl<S>,
-    pub scale_srv: ScaleServiceImpl<S>,
-    pub stream_srv: StreamServiceImpl<S>,
-
-    /// sub_tasks executed concurrently. Can be shutdown via shutdown_all
-    pub sub_tasks: Vec<(JoinHandle<()>, OneSender<()>)>,
-
-    pub user_srv: UserServiceImpl<S>,
-}
-
-/// Initializing all services needed for the meta leader node
+/// Starts all services needed for the meta leader node
 /// Only call this function once, since initializing the services multiple times will result in an
 /// inconsistent state
 ///
 /// ## Returns
-/// Returns an instance of `LeaderServices` or an Error if initializing leader services failed
-pub async fn get_leader_srv<S: MetaStore>(
+/// Returns an error if the service initialization failed
+pub async fn start_leader_srv<S: MetaStore>(
     meta_store: Arc<S>,
     address_info: AddressInfo,
     max_heartbeat_interval: Duration,
@@ -85,7 +72,8 @@ pub async fn get_leader_srv<S: MetaStore>(
     leader_rx: WatchReceiver<(MetaLeaderInfo, bool)>,
     election_handle: JoinHandle<()>,
     election_shutdown: OneSender<()>,
-) -> Result<LeaderServices<S>, BackupError> {
+    mut svc_shutdown_rx: WatchReceiver<()>,
+) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
     let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), leader_rx).await;
@@ -298,19 +286,50 @@ pub async fn get_leader_srv<S: MetaStore>(
         IdleManager::start_idle_checker(env.idle_manager_ref(), Duration::from_secs(30), idle_send)
             .await,
     );
-    Ok(LeaderServices {
-        backup_srv,
-        cluster_srv,
-        ddl_srv,
-        health_srv,
-        heartbeat_srv,
-        hummock_srv,
-        idle_recv,
-        meta_metrics,
-        notification_srv,
-        scale_srv,
-        stream_srv,
-        sub_tasks,
-        user_srv,
-    })
+
+    let shutdown_all = async move {
+        for (join_handle, shutdown_sender) in sub_tasks {
+            if let Err(_err) = shutdown_sender.send(()) {
+                // Maybe it is already shut down
+                continue;
+            }
+            if let Err(err) = join_handle.await {
+                tracing::warn!("Failed to join shutdown: {:?}", err);
+            }
+        }
+    };
+
+    // FIXME: Add service discovery for leader
+    // https://github.com/risingwavelabs/risingwave/issues/6755
+
+    tonic::transport::Server::builder()
+        .layer(MetricsMiddlewareLayer::new(meta_metrics))
+        .add_service(HeartbeatServiceServer::new(heartbeat_srv))
+        .add_service(ClusterServiceServer::new(cluster_srv))
+        .add_service(StreamManagerServiceServer::new(stream_srv))
+        .add_service(HummockManagerServiceServer::new(hummock_srv))
+        .add_service(NotificationServiceServer::new(notification_srv))
+        .add_service(DdlServiceServer::new(ddl_srv))
+        .add_service(UserServiceServer::new(user_srv))
+        .add_service(ScaleServiceServer::new(scale_srv))
+        .add_service(HealthServer::new(health_srv))
+        .add_service(BackupServiceServer::new(backup_srv))
+        .serve_with_shutdown(address_info.listen_addr, async move {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {},
+                res = svc_shutdown_rx.changed() => {
+                    match res {
+                        Ok(_) => tracing::info!("Shutting down services"),
+                        Err(_) => tracing::error!("Service shutdown receiver dropped")
+                    }
+                    shutdown_all.await;
+                },
+                _ = idle_recv => {
+                    shutdown_all.await;
+                },
+            }
+        })
+        .await
+        .unwrap();
+    Ok(())
 }
