@@ -248,8 +248,8 @@
 - name: eq-predicate derived condition is banned for impure function e.g. `now()`
   sql: |
     create table t1(v1 timestamp);
-    create table t2(v3 timestamp);
-    select * from t1 join t2 where v1 = v3 and v1 > now();
+    create table t2(v2 timestamp);
+    select * from t1 join t2 where v1 = v2 and v1 > now();
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.v1 > Now) AND (t1.v1 = t2.v3), output: [t1.v1, t2.v3] }
     ├─LogicalProject { exprs: [t1.v1, t1.v1] }
