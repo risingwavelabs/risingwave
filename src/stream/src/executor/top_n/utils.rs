@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -22,17 +23,16 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
-use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::OrderPair;
 
 use super::top_n_cache::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndices, PkIndicesRef,
+    ExecutorInfo, Message, PkIndicesRef,
 };
 
 #[async_trait]
@@ -168,29 +168,6 @@ pub fn generate_output(
     }
 }
 
-/// Separate the information of `storage_key` into different `Vec`s. The `Vec`s have the same
-/// length as `storage_key`.
-pub fn generate_storage_key_info(
-    storage_key: &[OrderPair],
-    schema: &Schema,
-) -> (PkIndices, Vec<DataType>, Vec<OrderType>) {
-    let mut storage_key_indices = vec![];
-    let mut internal_order_types = vec![];
-    for order_pair in storage_key {
-        storage_key_indices.push(order_pair.column_idx);
-        internal_order_types.push(order_pair.order_type);
-    }
-    let internal_data_types = storage_key_indices
-        .iter()
-        .map(|idx| schema.fields()[*idx].data_type())
-        .collect();
-    (
-        storage_key_indices,
-        internal_data_types,
-        internal_order_types,
-    )
-}
-
 /// For a given pk (Row), it can be split into `order_key` and `additional_pk` according to
 /// `order_by_len`, and the two split parts are serialized separately.
 pub fn serialize_pk_to_cache_key(pk: impl Row, cache_key_serde: &CacheKeySerde) -> CacheKey {
@@ -208,14 +185,39 @@ pub fn serialize_pk_to_cache_key(pk: impl Row, cache_key_serde: &CacheKeySerde) 
 /// The last `usize` is the length of `order_by`, i.e., the first part of the key.
 pub type CacheKeySerde = (OrderedRowSerde, OrderedRowSerde, usize);
 
-/// `cache_key_data_types` and `cache_key_order_types` correspond to the full [`CacheKey`].
-///
-/// Split them into two parts according to `order_by_len`.
 pub fn create_cache_key_serde(
-    cache_key_data_types: &[DataType],
-    cache_key_order_types: &[OrderType],
-    order_by_len: usize,
+    storage_key: &[OrderPair],
+    pk_indices: PkIndicesRef<'_>,
+    schema: &Schema,
+    order_by: &[OrderPair],
+    group_by: &[usize],
 ) -> CacheKeySerde {
+    {
+        // validate storage_key = group_by + order_by + additional_pk
+        for i in 0..group_by.len() {
+            assert_eq!(storage_key[i].column_idx, group_by[i]);
+        }
+        for i in group_by.len()..(group_by.len() + order_by.len()) {
+            assert_eq!(storage_key[i], order_by[i - group_by.len()]);
+        }
+        let pk_indices = pk_indices.iter().copied().collect::<HashSet<_>>();
+        for i in (group_by.len() + order_by.len())..storage_key.len() {
+            assert!(
+                pk_indices.contains(&storage_key[i].column_idx),
+                "storage_key = {:?}, pk_indices = {:?}",
+                storage_key,
+                pk_indices
+            );
+        }
+    }
+
+    let (cache_key_data_types, cache_key_order_types): (Vec<_>, Vec<_>) = storage_key
+        [group_by.len()..]
+        .iter()
+        .map(|o| (schema[o.column_idx].data_type(), o.order_type))
+        .unzip();
+
+    let order_by_len = order_by.len();
     let (first_key_data_types, second_key_data_types) = cache_key_data_types.split_at(order_by_len);
     let (first_key_order_types, second_key_order_types) =
         cache_key_order_types.split_at(order_by_len);

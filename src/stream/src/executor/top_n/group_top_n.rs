@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -45,7 +44,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
         ctx: ActorContextRef,
         storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
-        order_by_len: usize,
+        order_by: Vec<OrderPair>,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
@@ -60,7 +59,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
                 info,
                 storage_key,
                 offset_and_limit,
-                order_by_len,
+                order_by,
                 executor_id,
                 group_by,
                 state_table,
@@ -101,7 +100,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
         input_info: ExecutorInfo,
         storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
-        order_by_len: usize,
+        order_by: Vec<OrderPair>,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
@@ -111,20 +110,9 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
         let ExecutorInfo {
             pk_indices, schema, ..
         } = input_info;
-        // storage_key is superset of pk
-        assert!(storage_key
-            .iter()
-            .map(|x| x.column_idx)
-            .collect::<HashSet<_>>()
-            .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
-        let (storage_key_indices, storage_key_data_types, storage_key_order_types) =
-            generate_storage_key_info(&storage_key, &schema);
 
-        let cache_key_serde = create_cache_key_serde(
-            &storage_key_data_types[group_by.len()..],
-            &storage_key_order_types[group_by.len()..],
-            order_by_len,
-        );
+        let cache_key_serde =
+            create_cache_key_serde(&storage_key, &pk_indices, &schema, &order_by, &group_by);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
         Ok(Self {
@@ -136,7 +124,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_state,
-            storage_key_indices,
+            storage_key_indices: storage_key.into_iter().map(|op| op.column_idx).collect(),
             group_by,
             caches: GroupTopNCache::new(lru_manager, cache_size),
             cache_key_serde,
@@ -289,12 +277,26 @@ mod tests {
         }
     }
 
-    fn create_storage_key() -> Vec<OrderPair> {
+    fn storage_key() -> Vec<OrderPair> {
         vec![
             OrderPair::new(1, OrderType::Ascending),
             OrderPair::new(2, OrderType::Ascending),
             OrderPair::new(0, OrderType::Ascending),
         ]
+    }
+
+    /// group by 1, order by 2
+    fn order_by_1() -> Vec<OrderPair> {
+        vec![OrderPair::new(2, OrderType::Ascending)]
+    }
+
+    /// group by 1,2, order by 0
+    fn order_by_2() -> Vec<OrderPair> {
+        vec![OrderPair::new(0, OrderType::Ascending)]
+    }
+
+    fn pk_indices() -> PkIndices {
+        vec![1, 2, 0]
     }
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
@@ -334,7 +336,7 @@ mod tests {
         let schema = create_schema();
         Box::new(MockSource::with_messages(
             schema,
-            PkIndices::new(),
+            pk_indices(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
@@ -351,7 +353,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_without_offset_and_with_limits() {
-        let order_types = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
@@ -360,15 +361,15 @@ mod tests {
                 OrderType::Ascending,
                 OrderType::Ascending,
             ],
-            &[1, 2, 0],
+            &pk_indices(),
         )
         .await;
         let a = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
             source as Box<dyn Executor>,
             ActorContext::create(0),
-            order_types,
+            storage_key(),
             (0, 2),
-            1,
+            order_by_1(),
             1,
             vec![1],
             state_table,
@@ -449,7 +450,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_offset_and_with_limits() {
-        let order_types = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
@@ -458,16 +458,16 @@ mod tests {
                 OrderType::Ascending,
                 OrderType::Ascending,
             ],
-            &[1, 2, 0],
+            &pk_indices(),
         )
         .await;
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
-                order_types,
+                storage_key(),
                 (1, 2),
-                1,
+                order_by_1(),
                 1,
                 vec![1],
                 state_table,
@@ -540,7 +540,6 @@ mod tests {
     }
     #[tokio::test]
     async fn test_multi_group_key() {
-        let order_types = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
@@ -549,16 +548,16 @@ mod tests {
                 OrderType::Ascending,
                 OrderType::Ascending,
             ],
-            &[1, 2, 0],
+            &pk_indices(),
         )
         .await;
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
-                order_types.clone(),
+                storage_key(),
                 (0, 2),
-                1,
+                order_by_2(),
                 1,
                 vec![1, 2],
                 state_table.clone(),

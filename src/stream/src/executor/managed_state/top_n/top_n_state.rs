@@ -229,8 +229,9 @@ impl<S: StateStore> ManagedTopNState<S> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
     // use std::collections::BTreeMap;
     use super::*;
@@ -239,10 +240,21 @@ mod tests {
     use crate::executor::top_n::create_cache_key_serde;
     use crate::row_nonnull;
 
+    fn cache_key_serde() -> CacheKeySerde {
+        let data_types = vec![DataType::Varchar, DataType::Int64];
+        let schema = Schema::new(data_types.into_iter().map(Field::unnamed).collect());
+        let storage_key = vec![
+            OrderPair::new(0, OrderType::Ascending),
+            OrderPair::new(1, OrderType::Ascending),
+        ];
+        let pk = vec![0, 1];
+        let order_by = vec![OrderPair::new(0, OrderType::Ascending)];
+
+        create_cache_key_serde(&storage_key, &pk, &schema, &order_by, &[])
+    }
+
     #[tokio::test]
     async fn test_managed_top_n_state() {
-        let data_types = vec![DataType::Varchar, DataType::Int64];
-        let order_types = vec![OrderType::Ascending, OrderType::Ascending];
         let state_table = {
             let mut tb = create_in_memory_state_table(
                 &[DataType::Varchar, DataType::Int64],
@@ -254,7 +266,7 @@ mod tests {
             tb
         };
 
-        let cache_key_serde = create_cache_key_serde(&data_types, &order_types, 1);
+        let cache_key_serde = cache_key_serde();
         let mut managed_state = ManagedTopNState::new(state_table, cache_key_serde.clone());
 
         let row1 = row_nonnull!["abc", 2i64];
@@ -322,8 +334,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_top_n_state_fill_cache() {
-        let data_types = vec![DataType::Varchar, DataType::Int64];
-        let order_types = vec![OrderType::Ascending, OrderType::Ascending];
         let state_table = {
             let mut tb = create_in_memory_state_table(
                 &[DataType::Varchar, DataType::Int64],
@@ -335,7 +345,7 @@ mod tests {
             tb
         };
 
-        let cache_key_serde = create_cache_key_serde(&data_types, &order_types, 1);
+        let cache_key_serde = cache_key_serde();
         let mut managed_state = ManagedTopNState::new(state_table, cache_key_serde.clone());
 
         let row1 = row_nonnull!["abc", 2i64];
