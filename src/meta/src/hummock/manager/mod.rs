@@ -200,7 +200,7 @@ use self::compaction_group_manager::CompactionGroupManagerInner;
 use super::Compactor;
 use crate::hummock::manager::worker::HummockManagerEventSender;
 
-static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
+pub static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     [
         TaskStatus::ManualCanceled,
         TaskStatus::SendFailCanceled,

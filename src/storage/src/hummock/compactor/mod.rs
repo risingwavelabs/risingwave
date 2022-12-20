@@ -377,6 +377,15 @@ impl Compactor {
         }
     }
 
+    pub fn pre_process_task(task: &mut Task, workload: &CompactorWorkload) {
+        const CPU_THRESHOLD: u32 = 80;
+        if let Task::CompactTask(mut compact_task) = task.clone() {
+            if workload.cpu > CPU_THRESHOLD && compact_task.input_ssts[0].level_idx != 0 {
+                compact_task.set_task_status(TaskStatus::ManualCanceled);
+            }
+        }
+    }
+
     /// The background compaction thread that receives compaction tasks from hummock compaction
     /// manager and runs compaction tasks.
     #[cfg_attr(coverage, no_coverage)]
@@ -393,6 +402,9 @@ impl Compactor {
             let shutdown_map = CompactionShutdownMap::default();
             let mut min_interval = tokio::time::interval(stream_retry_interval);
             let mut task_progress_interval = tokio::time::interval(task_progress_update_interval);
+
+            tokio::time::sleep(Duration::from_secs(1)).await;
+
             // This outer loop is to recreate stream.
             'start_stream: loop {
                 tokio::select! {
@@ -426,6 +438,7 @@ impl Compactor {
 
                 let executor = compactor_context.context.compaction_executor.clone();
                 let mut process_collector = LocalProcessCollector::new().unwrap();
+                let mut last_workload = CompactorWorkload::default();
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
                     let message = tokio::select! {
@@ -451,6 +464,8 @@ impl Compactor {
                                 cpu,
                             };
 
+                            last_workload = workload.clone();
+
                             if let Err(e) = hummock_meta_client.compactor_heartbeat(progress_list, workload).await {
                                 // ignore any errors while trying to report task progress
                                 tracing::warn!("Failed to report task progress. {e:?}");
@@ -468,68 +483,96 @@ impl Compactor {
                     match message {
                         Some(Ok(SubscribeCompactTasksResponse { task })) => {
                             let task = match task {
-                                Some(task) => task,
+                                Some(mut task) => {
+                                    Self::pre_process_task(&mut task, &last_workload);
+                                    task
+                                }
                                 None => continue 'consume_stream,
                             };
 
                             let shutdown = shutdown_map.clone();
                             let context = compactor_context.clone();
                             let meta_client = hummock_meta_client.clone();
+
                             executor.spawn(async move {
-                                match task {
-                                    Task::CompactTask(compact_task) => {
+                            match task {
+                                Task::CompactTask(compact_task) => {
+                                    if matches!(
+                                        compact_task.task_status(),
+                                        TaskStatus::ManualCanceled
+                                    ) {
+                                        let table_stats_map = TableStatsMap::default();
+                                        if let Err(e) = meta_client
+                                            .report_compaction_task(
+                                                compact_task.clone(),
+                                                table_stats_map,
+                                            )
+                                            .await
+                                        {
+                                            tracing::warn!(
+                                                "Failed to cancel compaction task: {}, error: {} last_cpu {}",
+                                                compact_task.task_id,
+                                                e,
+                                                last_workload.cpu
+                                             );
+                                        } else {
+                                            tracing::debug!(
+                                                "ManualCancel by cpu {} compaction task: {}",
+                                                last_workload.cpu,
+                                                compact_task.task_id,
+                                            );
+                                        }
+                                    } else {
                                         let (tx, rx) = tokio::sync::oneshot::channel();
                                         let task_id = compact_task.task_id;
-                                        shutdown
-                                            .lock()
-                                            .unwrap()
-                                            .insert(task_id, tx);
+                                        shutdown.lock().unwrap().insert(task_id, tx);
                                         Compactor::compact(context, compact_task, rx).await;
                                         shutdown.lock().unwrap().remove(&task_id);
                                     }
-                                    Task::VacuumTask(vacuum_task) => {
-                                        Vacuum::vacuum(
-                                            vacuum_task,
-                                            context.context.sstable_store.clone(),
-                                            meta_client,
-                                        )
-                                        .await;
-                                    }
-                                    Task::FullScanTask(full_scan_task) => {
-                                        Vacuum::full_scan(
-                                            full_scan_task,
-                                            context.context.sstable_store.clone(),
-                                            meta_client,
-                                        )
-                                        .await;
-                                    }
-                                    Task::ValidationTask(validation_task) => {
-                                        validate_ssts(
-                                            validation_task,
-                                            context.context.sstable_store.clone(),
-                                        )
-                                        .await;
-                                    }
-                                    Task::CancelCompactTask(cancel_compact_task) => {
-                                        if let Some(tx) = shutdown
-                                            .lock()
-                                            .unwrap()
-                                            .remove(&cancel_compact_task.task_id)
-                                        {
-                                            if tx.send(()).is_err() {
-                                                tracing::warn!(
+                                }
+                                Task::VacuumTask(vacuum_task) => {
+                                    Vacuum::vacuum(
+                                        vacuum_task,
+                                        context.context.sstable_store.clone(),
+                                        meta_client,
+                                    )
+                                    .await;
+                                }
+                                Task::FullScanTask(full_scan_task) => {
+                                    Vacuum::full_scan(
+                                        full_scan_task,
+                                        context.context.sstable_store.clone(),
+                                        meta_client,
+                                    )
+                                    .await;
+                                }
+                                Task::ValidationTask(validation_task) => {
+                                    validate_ssts(
+                                        validation_task,
+                                        context.context.sstable_store.clone(),
+                                    )
+                                    .await;
+                                }
+                                Task::CancelCompactTask(cancel_compact_task) => {
+                                    if let Some(tx) = shutdown
+                                        .lock()
+                                        .unwrap()
+                                        .remove(&cancel_compact_task.task_id)
+                                    {
+                                        if tx.send(()).is_err() {
+                                            tracing::warn!(
                                                     "Cancellation of compaction task failed. task_id: {}",
                                                     cancel_compact_task.task_id
                                                 );
-                                            }
-                                        } else {
-                                            tracing::warn!(
+                                        }
+                                    } else {
+                                        tracing::warn!(
                                                 "Attempting to cancel non-existent compaction task. task_id: {}",
                                                 cancel_compact_task.task_id
                                             );
-                                        }
                                     }
                                 }
+                            }
                             });
                         }
                         Some(Err(e)) => {

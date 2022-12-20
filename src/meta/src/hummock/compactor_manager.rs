@@ -473,14 +473,14 @@ impl CompactorManager {
                 compactor.try_down_state();
             }
 
-            self.policy.write().refresh_state();
-
             tracing::info!(
                 "update_compactor_state cpu {} state {:?}",
                 workload.cpu,
                 compactor.state(),
             );
         }
+
+        self.policy.write().refresh_state();
     }
 }
 

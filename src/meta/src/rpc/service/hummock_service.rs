@@ -24,6 +24,7 @@ use tonic::{Request, Response, Status};
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::{
     CompactionResumeTrigger, CompactorManagerRef, HummockManagerRef, VacuumManagerRef,
+    CANCEL_STATUS_SET,
 };
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
@@ -159,13 +160,20 @@ where
                 status: None,
             })),
             Some(mut compact_task) => {
-                self.hummock_manager
-                    .report_compact_task(
-                        req.context_id,
-                        &mut compact_task,
-                        Some(req.table_stats_change),
-                    )
-                    .await?;
+                let task_status = compact_task.task_status();
+                if CANCEL_STATUS_SET.contains(&task_status) {
+                    self.hummock_manager
+                        .cancel_compact_task(&mut compact_task, task_status)
+                        .await?;
+                } else {
+                    self.hummock_manager
+                        .report_compact_task(
+                            req.context_id,
+                            &mut compact_task,
+                            Some(req.table_stats_change),
+                        )
+                        .await?;
+                }
                 Ok(Response::new(ReportCompactionTasksResponse {
                     status: None,
                 }))
