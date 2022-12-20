@@ -17,6 +17,7 @@ mod fragment;
 mod user;
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::iter;
 use std::option::Option::Some;
 use std::sync::Arc;
 
@@ -27,7 +28,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     valid_table_name, TableId as StreamingJobId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
     DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID,
-    DEFAULT_SUPER_USER_ID, INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
+    DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -170,11 +171,7 @@ where
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
         databases.insert(database.id, database.clone());
         let mut schemas_added = vec![];
-        for schema_name in [
-            DEFAULT_SCHEMA_NAME,
-            PG_CATALOG_SCHEMA_NAME,
-            INFORMATION_SCHEMA_SCHEMA_NAME,
-        ] {
+        for schema_name in iter::once(DEFAULT_SCHEMA_NAME).chain(SYSTEM_SCHEMAS) {
             let schema = Schema {
                 id: self
                     .env

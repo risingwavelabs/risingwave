@@ -244,10 +244,15 @@ impl ToStream for LogicalFilter {
                             if try_match_expand!(&now_expr.inputs()[0], ExprImpl::FunctionCall)?
                                 .get_expr_type()
                                 != Type::Now
+                                || !matches!(
+                                    &now_expr.inputs()[1],
+                                    ExprImpl::Literal(_) | ExprImpl::FunctionCall(_)
+                                )
+                                || now_expr.inputs()[1].has_input_ref()
                             {
                                 return Err(ExprError::InvalidParam {
                                     name: "now",
-                                    reason: String::from("now() must appear in the left side of the now delta expression directly"),
+                                    reason: String::from("expressions containing now must be of the form `col [cmp] now() +- [literal]`"),
                                 }
                                 .into());
                             }
