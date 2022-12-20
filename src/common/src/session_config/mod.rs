@@ -28,7 +28,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 11] = [
+const CONFIG_KEYS: [&str; 12] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -40,6 +40,7 @@ const CONFIG_KEYS: [&str; 11] = [
     "SEARCH_PATH",
     "TRANSACTION ISOLATION LEVEL",
     "QUERY_EPOCH",
+    "RW_BATCH_ENABLE_SORT_AGG",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -55,6 +56,7 @@ const MAX_SPLIT_RANGE_GAP: usize = 7;
 const SEARCH_PATH: usize = 8;
 const TRANSACTION_ISOLATION_LEVEL: usize = 9;
 const QUERY_EPOCH: usize = 10;
+const BATCH_ENABLE_SORT_AGG: usize = 11;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -245,6 +247,7 @@ type ExtraFloatDigit = ConfigI32<EXTRA_FLOAT_DIGITS, 1>;
 // TODO: We should use more specified type here.
 type DateStyle = ConfigString<DATE_STYLE>;
 type BatchEnableLookupJoin = ConfigBool<BATCH_ENABLE_LOOKUP_JOIN, true>;
+type BatchEnableSortAgg = ConfigBool<BATCH_ENABLE_SORT_AGG, true>;
 type MaxSplitRangeGap = ConfigI32<MAX_SPLIT_RANGE_GAP, 8>;
 type QueryEpoch = ConfigU64<QUERY_EPOCH, 0>;
 
@@ -274,6 +277,10 @@ pub struct ConfigMap {
 
     /// To force the usage of lookup join instead of hash join in batch execution
     batch_enable_lookup_join: BatchEnableLookupJoin,
+
+    /// To open the usage of sortAgg instead of hash agg when order property is satisfied in batch
+    /// execution
+    batch_enable_sort_agg: BatchEnableSortAgg,
 
     /// It's the max gap allowed to transform small range scan scan into multi point lookup.
     max_split_range_gap: MaxSplitRangeGap,
@@ -305,6 +312,8 @@ impl ConfigMap {
             self.date_style = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
             self.batch_enable_lookup_join = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(BatchEnableSortAgg::entry_name()) {
+            self.batch_enable_sort_agg = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(MaxSplitRangeGap::entry_name()) {
             self.max_split_range_gap = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
@@ -333,6 +342,8 @@ impl ConfigMap {
             Ok(self.date_style.to_string())
         } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
             Ok(self.batch_enable_lookup_join.to_string())
+        } else if key.eq_ignore_ascii_case(BatchEnableSortAgg::entry_name()) {
+            Ok(self.batch_enable_sort_agg.to_string())
         } else if key.eq_ignore_ascii_case(MaxSplitRangeGap::entry_name()) {
             Ok(self.max_split_range_gap.to_string())
         } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
@@ -384,6 +395,11 @@ impl ConfigMap {
                 description : String::from("To enable the usage of lookup join instead of hash join when possible for local batch execution.")
             },
             VariableInfo{
+                name : BatchEnableSortAgg::entry_name().to_lowercase(),
+                setting : self.batch_enable_sort_agg.to_string(),
+                description : String::from("To enable the usage of sort agg instead of hash join when order property is satisfied for batch execution.")
+            },
+            VariableInfo{
                 name : MaxSplitRangeGap::entry_name().to_lowercase(),
                 setting : self.max_split_range_gap.to_string(),
                 description : String::from("It's the max gap allowed to transform small range scan scan into multi point lookup.")
@@ -427,6 +443,10 @@ impl ConfigMap {
 
     pub fn get_batch_enable_lookup_join(&self) -> bool {
         *self.batch_enable_lookup_join
+    }
+
+    pub fn get_batch_enable_sort_agg(&self) -> bool {
+        *self.batch_enable_sort_agg
     }
 
     pub fn get_max_split_range_gap(&self) -> u64 {
