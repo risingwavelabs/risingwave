@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::addr::{leader_info_to_host_addr, HostAddr};
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::leader_service_server::LeaderService;
 use risingwave_pb::meta::{LeaderRequest, LeaderResponse, MetaLeaderInfo};
@@ -45,7 +45,7 @@ impl LeaderService for LeaderServiceImpl {
         // TODO: change request. Need only a simple ping
         // let req = request.into_inner();
         let leader_info = self.leader_rx.borrow().0.clone();
-        let leader_addr = HostAddr::from(leader_info);
+        let leader_addr = leader_info_to_host_addr(leader_info);
         let leader_address = HostAddress {
             host: leader_addr.host,
             port: leader_addr.port.into(),
