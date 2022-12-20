@@ -377,6 +377,82 @@ mod tests {
     use crate::{array, empty_array};
 
     #[test]
+    fn bool() {
+        let array = BoolArray::from_iter([None, Some(false), Some(true)]);
+        let arrow = arrow_array::BooleanArray::from(&array);
+        assert_eq!(BoolArray::from(&arrow), array);
+    }
+
+    #[test]
+    fn i16() {
+        let array = I16Array::from_iter([None, Some(-7), Some(25)]);
+        let arrow = arrow_array::Int16Array::from(&array);
+        assert_eq!(I16Array::from(&arrow), array);
+    }
+
+    #[test]
+    fn f32() {
+        let array = F32Array::from_iter([
+            None,
+            Some(OrderedF32::from(-7.0)),
+            Some(OrderedF32::from(25.0)),
+        ]);
+        let arrow = arrow_array::Float32Array::from(&array);
+        assert_eq!(F32Array::from(&arrow), array);
+    }
+
+    #[test]
+    fn date() {
+        let array = NaiveDateArray::from_iter([
+            None,
+            NaiveDateWrapper::with_days(12345).ok(),
+            NaiveDateWrapper::with_days(-12345).ok(),
+        ]);
+        let arrow = arrow_array::Date32Array::from(&array);
+        assert_eq!(NaiveDateArray::from(&arrow), array);
+    }
+
+    #[test]
+    fn time() {
+        let array = NaiveTimeArray::from_iter([
+            None,
+            NaiveTimeWrapper::with_secs_nano(12345, 123456789).ok(),
+            NaiveTimeWrapper::with_secs_nano(1, 0).ok(),
+        ]);
+        let arrow = arrow_array::Time64NanosecondArray::from(&array);
+        assert_eq!(NaiveTimeArray::from(&arrow), array);
+    }
+
+    #[test]
+    fn timestamp() {
+        let array = NaiveDateTimeArray::from_iter([
+            None,
+            NaiveDateTimeWrapper::with_secs_nsecs(12345, 123456789).ok(),
+            NaiveDateTimeWrapper::with_secs_nsecs(1, 0).ok(),
+        ]);
+        let arrow = arrow_array::TimestampNanosecondArray::from(&array);
+        assert_eq!(NaiveDateTimeArray::from(&arrow), array);
+    }
+
+    #[test]
+    fn interval() {
+        let array = IntervalArray::from_iter([
+            None,
+            Some(IntervalUnit::from_millis(123456789)),
+            Some(IntervalUnit::from_millis(-123456789)),
+        ]);
+        let arrow = arrow_array::IntervalMonthDayNanoArray::from(&array);
+        assert_eq!(IntervalArray::from(&arrow), array);
+    }
+
+    #[test]
+    fn string() {
+        let array = Utf8Array::from_iter([None, Some("array"), Some("arrow")]);
+        let arrow = arrow_array::StringArray::from(&array);
+        assert_eq!(Utf8Array::from(&arrow), array);
+    }
+
+    #[test]
     fn decimal() {
         let array = DecimalArray::from_iter([
             None,

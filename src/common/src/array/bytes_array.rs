@@ -26,7 +26,7 @@ use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
 /// `BytesArray` is a collection of Rust `[u8]`s.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BytesArray {
     offset: Vec<u32>,
     bitmap: Bitmap,

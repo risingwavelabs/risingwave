@@ -21,7 +21,7 @@ use crate::array::ArrayBuilderImpl;
 use crate::buffer::Bitmap;
 
 /// `Utf8Array` is a collection of Rust Utf8 `str`s. It's a wrapper of `BytesArray`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Utf8Array {
     bytes: BytesArray,
 }
