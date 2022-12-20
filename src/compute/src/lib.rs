@@ -88,12 +88,32 @@ pub struct ComputeNodeOpts {
     pub config_path: String,
 
     /// Total available memory in bytes, used by LRU Manager
-    #[clap(long, default_value_t = default_total_memory_bytes())]
+    #[clap(long)]
     pub total_memory_bytes: usize,
 
     /// The parallelism that the compute node will register to the scheduler of the meta service.
-    #[clap(long, default_value_t = default_parallelism())]
+    #[clap(long)]
     pub parallelism: usize,
+}
+
+fn validate_opts(opts: &ComputeNodeOpts) {
+    use risingwave_common::util::resource_util::cpu::total_cpu_available;
+    use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
+    let total_memory_available_bytes = total_memory_available_bytes();
+    if opts.total_memory_bytes > total_memory_available_bytes {
+        let error_msg = format!("total_memory_bytes {} is larger than the total memory available bytes {} that can be acquired.", opts.total_memory_bytes, total_memory_available_bytes);
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+    let total_cpu_available = total_cpu_available() as usize;
+    if opts.parallelism > total_cpu_available {
+        let error_msg = format!(
+            "parallelism {} is larger than the total cpu available {} that can be acquired.",
+            opts.parallelism, total_cpu_available
+        );
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
 }
 
 use std::future::Future;
@@ -107,6 +127,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
     // slow compile in release mode.
     Box::pin(async move {
         tracing::info!("Compute node options: {:?}", opts);
+        validate_opts(&opts);
 
         let listen_address = opts.host.parse().unwrap();
         tracing::info!("Server Listening at {}", listen_address);
@@ -129,16 +150,4 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             join_handle.await.unwrap();
         }
     })
-}
-
-fn default_total_memory_bytes() -> usize {
-    use sysinfo::{System, SystemExt};
-
-    let mut sys = System::new();
-    sys.refresh_memory();
-    sys.total_memory() as usize
-}
-
-fn default_parallelism() -> usize {
-    std::thread::available_parallelism().unwrap().get()
 }
