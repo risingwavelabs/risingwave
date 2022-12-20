@@ -13,13 +13,12 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Scalar};
 use risingwave_sqlparser::ast::{Expr, Ident};
 
 use crate::binder::Binder;
-use crate::expr::{Expr as RwExpr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::expr::{Expr as RwExpr, ExprImpl, ExprType, FunctionCall, Literal};
 
 impl Binder {
     /// This function will accept three expr type: `CompoundIdentifier`,`Identifier`,`Cast`
