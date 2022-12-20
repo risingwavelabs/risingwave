@@ -290,16 +290,6 @@ async fn run_compare_result(
                 let key = format!("{:010}", key_number);
                 let a = normal.get(key.as_bytes()).await;
                 let b = delete_range.get(key.as_bytes()).await;
-                if a.is_some() && b.is_none() {
-                    let d = overlap_ranges
-                        .iter()
-                        .filter(|(left, right, _, _)| *left <= key_number && key_number < *right)
-                        .cloned()
-                        .collect_vec();
-                    println!("delete ranges: \n{:?}", d);
-                    delete_range.enable_debug();
-                    let _ = delete_range.get(key.as_bytes()).await;
-                }
                 assert!(
                     a.eq(&b),
                     "query {} {:?} vs {:?} in epoch-{}",
@@ -308,6 +298,17 @@ async fn run_compare_result(
                     b.map(|raw| String::from_utf8(raw.to_vec()).unwrap()),
                     epoch,
                 );
+            } else if op < 10 {
+                let end_key = key_number + (rng.next_u64() % range_mod) + 1;
+                let start_key = format!("{:010}", key_number);
+                let end_key = format!("{:010}", end_key);
+                let ret1= normal
+                    .scan(start_key.as_bytes(), end_key.as_bytes())
+                    .await;
+                let ret2 = delete_range
+                    .scan(start_key.as_bytes(), end_key.as_bytes())
+                    .await;
+                assert_eq!(ret1, ret2);
             } else {
                 let overlap = overlap_ranges
                     .iter()
@@ -340,7 +341,6 @@ struct NormalState {
     storage: LocalHummockStorage,
     cache: BTreeMap<Vec<u8>, StorageValue>,
     table_id: TableId,
-    debug: bool,
     epoch: u64,
 }
 
@@ -355,10 +355,6 @@ impl DeleteRangeState {
             inner: NormalState::new(hummock, table_id, epoch).await,
             delete_ranges: vec![],
         }
-    }
-
-    fn enable_debug(&mut self) {
-        self.inner.enable_debug();
     }
 }
 
@@ -380,12 +376,7 @@ impl NormalState {
             storage,
             epoch,
             table_id,
-            debug: false,
         }
-    }
-
-    fn enable_debug(&mut self) {
-        self.debug = true;
     }
 
     async fn commit_impl(
@@ -431,12 +422,55 @@ impl NormalState {
 
     async fn get_impl(&self, key: &[u8], ignore_range_tombstone: bool) -> Option<Bytes> {
         if let Some(val) = self.cache.get(key) {
-            if self.debug {
-                println!("delete by cache");
-            }
             return val.user_value.clone();
         }
         self.get_from_storage(key, ignore_range_tombstone).await
+    }
+
+    async fn scan_impl(&self, left: &[u8], right: &[u8], ignore_range_tombstone: bool) -> Vec<(Bytes, Bytes)> {
+        let mut iter = Box::pin(
+            self.storage
+                .iter(
+                    (
+                        Bound::Included(left.to_vec()),
+                        Bound::Excluded(right.to_vec()),
+                    ),
+                    self.epoch,
+                    ReadOptions {
+                        prefix_hint: None,
+                        ignore_range_tombstone,
+                        check_bloom_filter: false,
+                        retention_seconds: None,
+                        table_id: self.table_id,
+                    },
+                )
+                .await
+                .unwrap(),
+        );
+        let mut ret = vec![];
+        while let Some(item) = iter.next().await {
+            let (full_key, val) = item.unwrap();
+            let tkey = full_key.user_key.table_key.0.clone();
+            if let Some(cache_val) = self.cache.get(&tkey) {
+                if cache_val.user_value.is_some() {
+                    ret.push((Bytes::from(tkey), cache_val.user_value.clone().unwrap()));
+                } else {
+                    continue;
+                }
+            } else {
+                ret.push((Bytes::from(tkey), val));
+            }
+        }
+        for (key, val) in self.cache.range((
+            Bound::Included(left.to_vec()),
+            Bound::Excluded(right.to_vec()),
+        )) {
+            if let Some(uval) = val.user_value.as_ref() {
+                ret.push((Bytes::from(key.clone()), uval.clone()));
+            }
+        }
+        ret.sort_by(|a, b| a.0.cmp(&b.0));
+        ret
     }
 }
 
@@ -481,49 +515,7 @@ impl CheckState for NormalState {
     }
 
     async fn scan(&self, left: &[u8], right: &[u8]) -> Vec<(Bytes, Bytes)> {
-        let mut iter = Box::pin(
-            self.storage
-                .iter(
-                    (
-                        Bound::Included(left.to_vec()),
-                        Bound::Excluded(right.to_vec()),
-                    ),
-                    self.epoch,
-                    ReadOptions {
-                        prefix_hint: None,
-                        ignore_range_tombstone: true,
-                        check_bloom_filter: false,
-                        retention_seconds: None,
-                        table_id: self.table_id,
-                    },
-                )
-                .await
-                .unwrap(),
-        );
-        let mut ret = vec![];
-        while let Some(item) = iter.next().await {
-            let (full_key, val) = item.unwrap();
-            let tkey = full_key.user_key.table_key.0.clone();
-            if let Some(cache_val) = self.cache.get(&tkey) {
-                if cache_val.user_value.is_some() {
-                    ret.push((Bytes::from(tkey), cache_val.user_value.clone().unwrap()));
-                } else {
-                    continue;
-                }
-            } else {
-                ret.push((Bytes::from(tkey), val));
-            }
-        }
-        for (key, val) in self.cache.range((
-            Bound::Included(left.to_vec()),
-            Bound::Excluded(right.to_vec()),
-        )) {
-            if let Some(uval) = val.user_value.as_ref() {
-                ret.push((Bytes::from(key.clone()), uval.clone()));
-            }
-        }
-        ret.sort_by(|a, b| a.0.cmp(&b.0));
-        ret
+        self.scan_impl(left,right, true).await
     }
 
     async fn commit(&mut self, epoch: u64) -> Result<(), String> {
@@ -541,9 +533,6 @@ impl CheckState for DeleteRangeState {
     async fn get(&self, key: &[u8]) -> Option<Bytes> {
         for (left, right) in &self.delete_ranges {
             if left.as_ref().le(key) && right.as_ref().gt(key) {
-                if self.inner.debug {
-                    println!("delete by memory range");
-                }
                 return None;
             }
         }
@@ -551,10 +540,10 @@ impl CheckState for DeleteRangeState {
     }
 
     async fn scan(&self, left: &[u8], right: &[u8]) -> Vec<(Bytes, Bytes)> {
-        let mut ret = self.inner.scan(left, right).await;
+        let mut ret = self.inner.scan_impl(left, right, false).await;
         ret.retain(|(key, _)| {
             for (left, right) in &self.delete_ranges {
-                if left.as_ref().lt(key) && right.as_ref().gt(key) {
+                if left.as_ref().le(key) && right.as_ref().gt(key) {
                     return false;
                 }
             }
