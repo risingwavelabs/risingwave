@@ -91,9 +91,6 @@ pub struct InnerGroupTopNExecutorNew<K: HashKey, S: StateStore, const WITH_TIES:
     /// group key -> cache for this group
     caches: GroupTopNCache<K, WITH_TIES>,
 
-    /// The number of fields of the ORDER BY clause, and will be used to split key into `CacheKey`.
-    order_by_len: usize,
-
     /// Used for serializing pk into CacheKey.
     cache_key_serde: CacheKeySerde,
 }
@@ -142,7 +139,6 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
             storage_key_indices,
             group_by,
             caches: GroupTopNCache::new(lru_manager, cache_size),
-            order_by_len,
             cache_key_serde,
         })
     }
@@ -197,17 +193,16 @@ where
         for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq(keys.iter()) {
             // The pk without group by
             let pk_row = row_ref.project(&self.storage_key_indices[self.group_by.len()..]);
-            let cache_key =
-                serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
+            let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
 
             let group_key = row_ref.project(&self.group_by);
 
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
-                let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
+                let mut topn_cache = TopNCache::new(self.offset, self.limit);
                 self.managed_state
-                    .init_topn_cache(Some(group_key), &mut topn_cache, self.order_by_len)
+                    .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
                 self.caches.insert(group_cache_key.clone(), topn_cache);
             }

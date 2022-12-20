@@ -107,8 +107,6 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore, const WITH_TIES: bool> {
     /// TODO: support WITH TIES
     cache: TopNCache<WITH_TIES>,
 
-    order_by_len: usize,
-
     /// Used for serializing pk into CacheKey.
     cache_key_serde: CacheKeySerde,
 }
@@ -153,8 +151,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
             },
             managed_state,
             storage_key_indices,
-            cache: TopNCache::new(num_offset, num_limit, order_by_len),
-            order_by_len,
+            cache: TopNCache::new(num_offset, num_limit),
             cache_key_serde,
         })
     }
@@ -175,8 +172,7 @@ where
         for (op, row_ref) in chunk.rows() {
             debug_assert_eq!(op, Op::Insert);
             let pk_row = row_ref.project(&self.storage_key_indices);
-            let cache_key =
-                serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
+            let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
             self.cache.insert(
                 cache_key,
                 row_ref,
@@ -201,7 +197,7 @@ where
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
-            .init_topn_cache(NO_GROUP_KEY, &mut self.cache, self.order_by_len)
+            .init_topn_cache(NO_GROUP_KEY, &mut self.cache)
             .await
     }
 }

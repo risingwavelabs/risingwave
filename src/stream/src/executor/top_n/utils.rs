@@ -193,14 +193,10 @@ pub fn generate_storage_key_info(
 
 /// For a given pk (Row), it can be split into `order_key` and `additional_pk` according to
 /// `order_by_len`, and the two split parts are serialized separately.
-pub fn serialize_pk_to_cache_key(
-    pk: impl Row,
-    order_by_len: usize,
-    cache_key_serde: &CacheKeySerde,
-) -> CacheKey {
+pub fn serialize_pk_to_cache_key(pk: impl Row, cache_key_serde: &CacheKeySerde) -> CacheKey {
     // TODO(row trait): may support splitting row
     let pk = pk.into_owned_row().into_inner();
-    let (cache_key_first, cache_key_second) = pk.split_at(order_by_len);
+    let (cache_key_first, cache_key_second) = pk.split_at(cache_key_serde.2);
     (
         cache_key_first.memcmp_serialize(&cache_key_serde.0),
         cache_key_second.memcmp_serialize(&cache_key_serde.1),
@@ -208,7 +204,9 @@ pub fn serialize_pk_to_cache_key(
 }
 
 /// See [`CacheKey`].
-pub type CacheKeySerde = (OrderedRowSerde, OrderedRowSerde);
+///
+/// The last `usize` is the length of `order_by`, i.e., the first part of the key.
+pub type CacheKeySerde = (OrderedRowSerde, OrderedRowSerde, usize);
 
 /// `cache_key_data_types` and `cache_key_order_types` correspond to the full [`CacheKey`].
 ///
@@ -229,5 +227,5 @@ pub fn create_cache_key_serde(
         second_key_data_types.to_vec(),
         second_key_order_types.to_vec(),
     );
-    (first_key_serde, second_key_serde)
+    (first_key_serde, second_key_serde, order_by_len)
 }

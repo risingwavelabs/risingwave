@@ -53,9 +53,6 @@ pub struct TopNCache<const WITH_TIES: bool> {
     pub offset: usize,
     /// Assumption: `limit != 0`
     pub limit: usize,
-
-    /// The number of fields of the ORDER BY clause, and will be used to split key into `CacheKey`.
-    pub order_by_len: usize,
 }
 
 /// `CacheKey` is composed of `(order_by, remaining columns of pk)`.
@@ -99,7 +96,7 @@ pub trait TopNCacheTrait {
 }
 
 impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
-    pub fn new(offset: usize, limit: usize, order_by_len: usize) -> Self {
+    pub fn new(offset: usize, limit: usize) -> Self {
         assert!(limit != 0);
         if WITH_TIES {
             // It's trickier to support.
@@ -116,7 +113,6 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
                 .unwrap_or(usize::MAX),
             offset,
             limit,
-            order_by_len,
         }
     }
 
@@ -255,7 +251,6 @@ impl TopNCacheTrait for TopNCache<false> {
                         self,
                         self.middle.last_key_value().unwrap().0.clone(),
                         self.high_capacity,
-                        self.order_by_len,
                     )
                     .await?;
             }
@@ -290,7 +285,6 @@ impl TopNCacheTrait for TopNCache<false> {
                             self,
                             self.middle.last_key_value().unwrap().0.clone(),
                             self.high_capacity,
-                            self.order_by_len,
                         )
                         .await?;
                 }
@@ -443,7 +437,6 @@ impl TopNCacheTrait for TopNCache<true> {
                         self,
                         self.middle.last_key_value().unwrap().0.clone(),
                         self.high_capacity,
-                        self.order_by_len,
                     )
                     .await?;
             }
