@@ -34,7 +34,7 @@ pub mod alter_user;
 mod create_database;
 pub mod create_index;
 pub mod create_mv;
-mod create_schema;
+pub mod create_schema;
 pub mod create_sink;
 pub mod create_source;
 pub mod create_table;
