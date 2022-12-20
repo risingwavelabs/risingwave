@@ -409,8 +409,8 @@ impl CompactionSchedulePolicy for ScoredPolicy {
                 if last_idle_time.elapsed().as_secs() > MAX_IDLE_TIME {
                     let decrease_core = self
                         .score_to_compactor
-                        .iter()
-                        .map(|(_, compactor)| compactor.max_concurrent_task_number())
+                        .values()
+                        .map(|compactor| compactor.max_concurrent_task_number())
                         .min()
                         .unwrap_or(0);
                     return ScalePolicy::ScaleIn(decrease_core);

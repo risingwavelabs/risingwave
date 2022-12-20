@@ -20,7 +20,7 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, CompactionGroup, CompactorWorkload, HummockSnapshot,
-    HummockVersion, SubscribeCompactTasksResponse, VacuumTask,
+    HummockVersion, VacuumTask,
 };
 
 use crate::error::Result;
