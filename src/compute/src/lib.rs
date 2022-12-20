@@ -58,6 +58,7 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "0")]
     pub metrics_level: u32,
 
+    // address of the leader meta node
     #[clap(long, default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
 

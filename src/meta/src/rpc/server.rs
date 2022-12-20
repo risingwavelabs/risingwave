@@ -221,6 +221,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 let _ = tracing::span!(tracing::Level::INFO, "follower services").enter();
                 tracing::info!("Starting follower services");
                 let health_srv = HealthServiceImpl::new();
+                let err_msg = format!(
+                    "Starting node at listen_addr {} failed",
+                    address_info.listen_addr
+                );
                 tonic::transport::Server::builder()
                     .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
                     .add_service(HealthServer::new(health_srv))
@@ -245,7 +249,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                         }
                     })
                     .await
-                    .unwrap();
+                    .expect(&err_msg); // TODO: just use unwrap
                 match follower_finished_tx.send(()) {
                     Ok(_) => tracing::info!("Shutting down follower services done"),
                     Err(_) => {
@@ -341,64 +345,166 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 // Print the sleep intervals
 // use pseudo rand gen with seed
 mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use risingwave_pb::common::WorkerType;
+    use risingwave_rpc_client::MetaClient;
     use tokio::time::sleep;
 
     use super::*;
 
+    async fn setup_n_nodes(n: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
+        let meta_store = Arc::new(MemStore::default());
+
+        let mut node_controllers: Vec<(JoinHandle<()>, WatchSender<()>)> = vec![];
+        for i in 0..n {
+            // TODO: add pseudo random sleep here
+            let node = format!("node{}", i);
+            let err_msg = format!("Meta {} failed in setup", node);
+            let err_msg = err_msg.as_str();
+
+            let info = AddressInfo {
+                addr: node,
+                listen_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234 + i),
+                prometheus_addr: None,
+                dashboard_addr: None,
+                ui_path: None,
+            };
+            node_controllers.push(
+                rpc_serve_with_store(
+                    meta_store.clone(),
+                    info,
+                    Duration::from_secs(4), // What values do we want to use here
+                    2,                      // What values do we want to use here
+                    MetaOpts::test(true),   // True or false?
+                )
+                .await
+                .expect(err_msg),
+            );
+        } // sleep duration of election cycle, not fixed duration
+        sleep(Duration::from_secs(10)).await;
+        node_controllers
+    }
+
     #[tokio::test]
-    async fn test_leader_lease() {}
+    async fn test_single_leader_setup() {
+        // make n also pseudo random?
+        let n = 5;
+        let _node_controllers = setup_n_nodes(n).await;
+
+        let mut leader_count = 0;
+        for i in 0..n {
+            // create client connecting against meta_i
+            let port = 5678 + i;
+            let meta_addr = format!("127.0.0.1:{}", port);
+            let host_addr = "127.0.0.1:5688".parse::<HostAddr>().unwrap();
+            let host_addr = HostAddr {
+                host: host_addr.host,
+                port: host_addr.port + i, // Do I need to change the port?
+            };
+
+            // register_new fails
+            // Do I need to start some service first?
+            // are the other services still running here?
+            //      yes! Check via lsof -i @localhost
+            let res = MetaClient::register_new(
+                meta_addr.as_str(),
+                WorkerType::ComputeNode,
+                &host_addr,
+                0,
+            )
+            .await;
+            if res.is_err() {
+                panic!("Unable to connect against client {}", i);
+            }
+            let client_i = res.unwrap();
+
+            match client_i.send_heartbeat(i as u32, vec![]).await {
+                Ok(_) => {
+                    leader_count = leader_count + 1;
+                    tracing::info!("Node {} is leader", i);
+                }
+                Err(_) => tracing::info!("Node {} is follower", i),
+            }
+        }
+
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
+
+        // Also use pseudo random delays here?
+        // https://github.com/risingwavelabs/risingwave/issues/6884
+
+        // Use heartbeat to determine if node is leader
+        // Use health service to determine if node is up
+
+        // Tests:
+        // Check if nodes conflict when they report leader
+        // Check if the reported leader node is the actual leader node
+        // Check if there are != 1 leader nodes
+        // No failover should happen here, since system is idle
+    }
+
+    // Kill nodes via sender
+    // Where do I write the logs to?
+    // TODO: how do I know if a node is a leader or a follower?
+
+    // TODO: implement failover test
 }
 
 // Old test below
-#[cfg(test)]
-mod testsdeprecated {
-    use tokio::time::sleep;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn test_leader_lease() {
-        let info = AddressInfo {
-            addr: "node1".to_string(),
-            ..Default::default()
-        };
-        let meta_store = Arc::new(MemStore::default());
-        let (handle, closer) = rpc_serve_with_store(
-            meta_store.clone(),
-            info,
-            Duration::from_secs(10),
-            2,
-            MetaOpts::test(false),
-        )
-        .await
-        .unwrap();
-        sleep(Duration::from_secs(4)).await;
-        let info2 = AddressInfo {
-            addr: "node2".to_string(),
-            ..Default::default()
-        };
-        let ret = rpc_serve_with_store(
-            meta_store.clone(),
-            info2.clone(),
-            Duration::from_secs(10),
-            2,
-            MetaOpts::test(false),
-        )
-        .await;
-        assert!(ret.is_err());
-        closer.send(()).unwrap();
-        handle.await.unwrap();
-        sleep(Duration::from_secs(3)).await;
-        rpc_serve_with_store(
-            meta_store.clone(),
-            info2,
-            Duration::from_secs(10),
-            2,
-            MetaOpts::test(false),
-        )
-        .await
-        .unwrap();
-    }
-}
-
+// TODO: remove
+// #[cfg(test)]
+// mod testsdeprecated {
+// use tokio::time::sleep;
+//
+// use super::*;
+//
+// #[tokio::test]
+// async fn test_leader_lease() {
+// let info = AddressInfo {
+// addr: "node1".to_string(),
+// ..Default::default()
+// };
+// let meta_store = Arc::new(MemStore::default());
+// let (handle, closer) = rpc_serve_with_store(
+// meta_store.clone(),
+// info,
+// Duration::from_secs(10),
+// 2,
+// MetaOpts::test(false),
+// )
+// .await
+// .unwrap();
+// sleep(Duration::from_secs(4)).await;
+// let info2 = AddressInfo {
+// addr: "node2".to_string(),
+// ..Default::default()
+// };
+// let ret = rpc_serve_with_store(
+// meta_store.clone(),
+// info2.clone(),
+// Duration::from_secs(10),
+// 2,
+// MetaOpts::test(false),
+// )
+// .await;
+// assert!(ret.is_err());
+// closer.send(()).unwrap();
+// handle.await.unwrap();
+// sleep(Duration::from_secs(3)).await;
+// rpc_serve_with_store(
+// meta_store.clone(),
+// info2,
+// Duration::from_secs(10),
+// 2,
+// MetaOpts::test(false),
+// )
+// .await
+// .unwrap();
+// }
+// }
+//
 // Old test above

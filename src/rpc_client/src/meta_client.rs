@@ -125,8 +125,7 @@ impl MetaClient {
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
         let resp = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let request = request.clone();
-            grpc_meta_client.add_worker_node(request).await
+            grpc_meta_client.add_worker_node(request.clone()).await
         })
         .await?;
         let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
