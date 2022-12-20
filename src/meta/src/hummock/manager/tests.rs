@@ -715,8 +715,7 @@ async fn test_print_compact_task() {
     );
 
     let s = compact_task_to_string(&compact_task);
-    println!("{:?}", s);
-    assert!(s.contains("Compaction task id: 1, target level: 0"));
+    assert!(s.contains("Compaction task id: 1, group-id: 2, target level: 0"));
 }
 
 #[tokio::test]
