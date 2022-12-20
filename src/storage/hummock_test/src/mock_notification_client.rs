@@ -20,6 +20,7 @@ use risingwave_common_service::observer_manager::{Channel, NotificationClient};
 use risingwave_meta::hummock::{HummockManager, HummockManagerRef};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_meta::storage::{MemStore, MetaStore};
+use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::{MetaSnapshot, SubscribeResponse, SubscribeType};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -65,6 +66,7 @@ impl<S: MetaStore> NotificationClient for MockNotificationClient<S> {
         let meta_snapshot = MetaSnapshot {
             hummock_version: Some(hummock_version),
             version: Some(Default::default()),
+            meta_backup_manifest_id: Some(MetaBackupManifestId { id: 0 }),
             ..Default::default()
         };
 

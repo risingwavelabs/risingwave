@@ -39,6 +39,7 @@ use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroup, TableOption};
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::hummock::backup_reader::BackupReader;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext, Context};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
@@ -191,6 +192,7 @@ async fn compaction_test(
     let store = HummockStorage::new(
         config.clone(),
         sstable_store.clone(),
+        BackupReader::unused(),
         meta_client.clone(),
         get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
         state_store_metrics.clone(),
@@ -302,9 +304,7 @@ async fn run_compare_result(
                 let end_key = key_number + (rng.next_u64() % range_mod) + 1;
                 let start_key = format!("{:010}", key_number);
                 let end_key = format!("{:010}", end_key);
-                let ret1= normal
-                    .scan(start_key.as_bytes(), end_key.as_bytes())
-                    .await;
+                let ret1 = normal.scan(start_key.as_bytes(), end_key.as_bytes()).await;
                 let ret2 = delete_range
                     .scan(start_key.as_bytes(), end_key.as_bytes())
                     .await;
@@ -414,6 +414,7 @@ impl NormalState {
                     check_bloom_filter: false,
                     retention_seconds: None,
                     table_id: self.table_id,
+                    read_version_from_backup: false,
                 },
             )
             .await
@@ -427,7 +428,12 @@ impl NormalState {
         self.get_from_storage(key, ignore_range_tombstone).await
     }
 
-    async fn scan_impl(&self, left: &[u8], right: &[u8], ignore_range_tombstone: bool) -> Vec<(Bytes, Bytes)> {
+    async fn scan_impl(
+        &self,
+        left: &[u8],
+        right: &[u8],
+        ignore_range_tombstone: bool,
+    ) -> Vec<(Bytes, Bytes)> {
         let mut iter = Box::pin(
             self.storage
                 .iter(
@@ -442,6 +448,7 @@ impl NormalState {
                         check_bloom_filter: false,
                         retention_seconds: None,
                         table_id: self.table_id,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -493,6 +500,7 @@ impl CheckState for NormalState {
                         check_bloom_filter: false,
                         retention_seconds: None,
                         table_id: self.table_id,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -515,7 +523,7 @@ impl CheckState for NormalState {
     }
 
     async fn scan(&self, left: &[u8], right: &[u8]) -> Vec<(Bytes, Bytes)> {
-        self.scan_impl(left,right, true).await
+        self.scan_impl(left, right, true).await
     }
 
     async fn commit(&mut self, epoch: u64) -> Result<(), String> {

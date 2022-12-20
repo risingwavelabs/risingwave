@@ -35,7 +35,6 @@ use risingwave_meta::hummock::test_utils::{
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_meta::storage::{MemStore, MetaStore};
-use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_storage::error::StorageResult;
@@ -57,83 +56,6 @@ use risingwave_storage::{
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::mock_notification_client::get_test_notification_client;
-pub struct TestNotificationClient<S: MetaStore> {
-    addr: HostAddr,
-    notification_manager: NotificationManagerRef<S>,
-    hummock_manager: HummockManagerRef<S>,
-}
-
-pub struct TestChannel<T>(UnboundedReceiver<std::result::Result<T, MessageStatus>>);
-
-#[async_trait::async_trait]
-impl<T: Send + 'static> Channel for TestChannel<T> {
-    type Item = T;
-
-    async fn message(&mut self) -> std::result::Result<Option<T>, MessageStatus> {
-        match self.0.recv().await {
-            None => Ok(None),
-            Some(result) => result.map(|r| Some(r)),
-        }
-    }
-}
-
-impl<S: MetaStore> TestNotificationClient<S> {
-    pub fn new(
-        addr: HostAddr,
-        notification_manager: NotificationManagerRef<S>,
-        hummock_manager: HummockManagerRef<S>,
-    ) -> Self {
-        Self {
-            addr,
-            notification_manager,
-            hummock_manager,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl<S: MetaStore> NotificationClient for TestNotificationClient<S> {
-    type Channel = TestChannel<SubscribeResponse>;
-
-    async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel> {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-
-        let worker_key = WorkerKey(self.addr.to_protobuf());
-        self.notification_manager
-            .insert_sender(subscribe_type, worker_key.clone(), tx.clone())
-            .await;
-
-        let hummock_version = self
-            .hummock_manager
-            .get_read_guard()
-            .await
-            .current_version
-            .clone();
-        let meta_snapshot = MetaSnapshot {
-            hummock_version: Some(hummock_version),
-            version: Some(Default::default()),
-            meta_backup_manifest_id: Some(MetaBackupManifestId { id: 0 }),
-            ..Default::default()
-        };
-
-        self.notification_manager
-            .notify_snapshot(worker_key, meta_snapshot);
-
-        Ok(TestChannel(rx))
-    }
-}
-
-pub fn get_test_notification_client(
-    env: MetaSrvEnv<MemStore>,
-    hummock_manager_ref: Arc<HummockManager<MemStore>>,
-    worker_node: WorkerNode,
-) -> TestNotificationClient<MemStore> {
-    TestNotificationClient::new(
-        worker_node.get_host().unwrap().into(),
-        env.notification_manager_ref(),
-        hummock_manager_ref,
-    )
-}
 
 pub async fn prepare_first_valid_version(
     env: MetaSrvEnv<MemStore>,
