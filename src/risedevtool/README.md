@@ -88,13 +88,13 @@ profile:
 
 If you don't want to download some components, you may use the interactive configuration tool `./risedev configure` to disable some components.
 
-That's all! RiseDev will generate a new `server.properties` for the frontend node, and everything will be fine.
+That's all! RiseDev will generate all other configurations for you, and everything will be fine.
 
 ### Add New Profiles
 
 RiseDev has some built-in profiles defined under the `profile` section of `risedev.yml`. You can add new profiles by adding new items under the `profile` section.
 
-RiseDev also supports including profiles from other files. Currently, all files named `risedev-profiles.user*.yml` will be included for extra profiles. These files are designed to be not version controlled, so you can add your own profiles here for customized purposes. Check `risedev-profiles.usertemplate.yml` for an example.
+RiseDev also supports including profiles from `risedev-profiles.user.yml`, which is automatically generated on the first run. This file is designed to be not version controlled, so you can add your own profiles here for customized purposes. Check this file for more information.
 
 ### Logs and Artifacts
 
