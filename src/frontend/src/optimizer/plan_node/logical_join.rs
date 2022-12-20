@@ -787,8 +787,9 @@ impl ColPrunable for LogicalJoin {
 fn is_pure_fn_except_for_input_ref(expr: &ExprImpl) -> bool {
     match expr {
         ExprImpl::Literal(_) => true,
-        // TODO: also handle impure functions.
-        ExprImpl::FunctionCall(inner) => inner.inputs().iter().all(is_pure_fn_except_for_input_ref),
+        ExprImpl::FunctionCall(inner) => {
+            inner.is_pure() && inner.inputs().iter().all(is_pure_fn_except_for_input_ref)
+        }
         ExprImpl::InputRef(_) => true,
         _ => false,
     }
