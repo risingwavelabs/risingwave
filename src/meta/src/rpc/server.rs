@@ -174,9 +174,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         // https://github.com/risingwavelabs/risingwave/issues/6755
         let mut svc_shutdown_rx_clone = svc_shutdown_rx.clone();
         let (follower_shutdown_tx, follower_shutdown_rx) = OneChannel::<()>();
-        let (follower_finished_tx, follower_finished_rx) = OneChannel::<()>();
-        if !is_leader {
-            tokio::spawn(async move {
+        let follower_handle: Option<JoinHandle<()>> = if !is_leader {
+            Some(tokio::spawn(async move {
                 let _ = tracing::span!(tracing::Level::INFO, "follower services").enter();
                 tracing::info!("Starting follower services");
                 let health_srv = HealthServiceImpl::new();
@@ -204,14 +203,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                     })
                     .await
                     .unwrap();
-                match follower_finished_tx.send(()) {
-                    Ok(_) => tracing::info!("Shutting down follower services done"),
-                    Err(_) => {
-                        tracing::error!("Follower service shutdown done sender receiver dropped")
-                    }
-                }
-            });
-        }
+            }))
+        } else {
+            None
+        };
 
         // wait until this node becomes a leader
         while !services_leader_rx.borrow().clone().1 {
@@ -228,10 +223,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 Err(_) => tracing::error!("Follower service receiver dropped"),
             }
             // Wait until follower service is down
-            match follower_finished_rx.await {
-                Ok(_) => tracing::info!("Follower services shut down"),
-                Err(_) => tracing::error!("Follower service shutdown finished sender dropped"),
-            };
+            let _ = follower_handle.unwrap().await;
         }
 
         start_leader_srv(
