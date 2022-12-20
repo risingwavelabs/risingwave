@@ -17,7 +17,7 @@ use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{DataType, DataTypeName};
-pub use risingwave_expr::sig::*;
+pub use risingwave_expr::sig::func::*;
 
 use super::{align_types, cast_ok_base, CastContext};
 use crate::expr::type_inference::cast::align_array_and_element;

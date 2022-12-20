@@ -16,12 +16,10 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use risingwave_common::types::{DataType, DataTypeName};
-use risingwave_expr::expr::AggKind;
 
-// Use AggCall to infer return type
-use super::super::AggCall;
+use crate::expr::AggKind;
 
-// Same as FuncSign in type_inference/func.rs except this is for aggregate function
+// Same as FuncSign in func.rs except this is for aggregate function
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 pub struct AggFuncSig {
     pub func: AggKind,
@@ -29,7 +27,7 @@ pub struct AggFuncSig {
     pub ret_type: DataTypeName,
 }
 
-// Same as FuncSigMap in type_inference/func.rs except this is for aggregate function
+// Same as FuncSigMap in func.rs except this is for aggregate function
 #[derive(Default)]
 pub struct AggFuncSigMap(HashMap<(AggKind, usize), Vec<AggFuncSig>>);
 impl AggFuncSigMap {
@@ -78,9 +76,8 @@ static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| {
         A::ApproxCountDistinct,
     ] {
         for input in all_types {
-            match AggCall::infer_return_type(&agg, &[DataType::from(input)]) {
-                Ok(v) => map.insert(agg, vec![input], DataTypeName::from(v)),
-                Err(_e) => continue,
+            if let Some(v) = infer_return_type(&agg, &[DataType::from(input)]) {
+                map.insert(agg, vec![input], DataTypeName::from(v));
             }
         }
     }
@@ -96,4 +93,63 @@ static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| {
 /// The table of function signatures.
 pub fn agg_func_sigs() -> impl Iterator<Item = &'static AggFuncSig> {
     AGG_FUNC_SIG_MAP.0.values().flatten()
+}
+
+/// Infer the return type for the given agg call.
+/// Returns `None` if not supported or the arguments are invalid.
+pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<DataType> {
+    // The function signatures are aligned with postgres, see
+    // https://www.postgresql.org/docs/current/functions-aggregate.html.
+    let return_type = match (&agg_kind, inputs) {
+        // Min, Max, FirstValue
+        (AggKind::Min | AggKind::Max | AggKind::FirstValue, [input]) => input.clone(),
+        (AggKind::Min | AggKind::Max | AggKind::FirstValue, _) => return None,
+
+        // Avg
+        (AggKind::Avg, [input]) => match input {
+            DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Decimal => {
+                DataType::Decimal
+            }
+            DataType::Float32 | DataType::Float64 => DataType::Float64,
+            DataType::Interval => DataType::Interval,
+            _ => return None,
+        },
+        (AggKind::Avg, _) => return None,
+
+        // Sum
+        (AggKind::Sum, [input]) => match input {
+            DataType::Int16 => DataType::Int64,
+            DataType::Int32 => DataType::Int64,
+            DataType::Int64 => DataType::Decimal,
+            DataType::Decimal => DataType::Decimal,
+            DataType::Float32 => DataType::Float32,
+            DataType::Float64 => DataType::Float64,
+            DataType::Interval => DataType::Interval,
+            _ => return None,
+        },
+        (AggKind::Sum, _) => return None,
+
+        (AggKind::Sum0, [DataType::Int64]) => DataType::Int64,
+        (AggKind::Sum0, _) => return None,
+
+        // ApproxCountDistinct
+        (AggKind::ApproxCountDistinct, [_]) => DataType::Int64,
+        (AggKind::ApproxCountDistinct, _) => return None,
+
+        // Count
+        (AggKind::Count, [] | [_]) => DataType::Int64,
+        (AggKind::Count, _) => return None,
+
+        // StringAgg
+        (AggKind::StringAgg, [DataType::Varchar, DataType::Varchar]) => DataType::Varchar,
+        (AggKind::StringAgg, _) => return None,
+
+        // ArrayAgg
+        (AggKind::ArrayAgg, [input]) => DataType::List {
+            datatype: Box::new(input.clone()),
+        },
+        (AggKind::ArrayAgg, _) => return None,
+    };
+
+    Some(return_type)
 }
