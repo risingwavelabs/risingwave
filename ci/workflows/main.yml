@@ -205,7 +205,7 @@ steps:
   - label: "fuzz test"
     command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"
     depends_on:
-      - "build"
+      - "build-dev"
     plugins:
       - ./ci/plugins/swapfile
       - gencer/cache#v2.4.10: *cargo-cache
