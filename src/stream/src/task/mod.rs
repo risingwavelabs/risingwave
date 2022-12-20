@@ -171,8 +171,8 @@ impl SharedContext {
     #[inline]
     pub fn add_channel_pairs(&self, ids: UpDownActorIds) {
         let (tx, rx) = permit::channel(
-            self.config.developer.stream_initial_permits,
-            self.config.developer.stream_batched_permits,
+            self.config.developer.stream_exchange_initial_permits,
+            self.config.developer.stream_exchange_batched_permits,
         );
         assert!(
             self.lock_channel_map()

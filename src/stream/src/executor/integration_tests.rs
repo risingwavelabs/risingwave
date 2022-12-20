@@ -23,7 +23,7 @@ use risingwave_common::types::*;
 use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
 
-use super::exchange::permit::channel;
+use super::exchange::permit::channel_for_test;
 use super::*;
 use crate::executor::actor::ActorContext;
 use crate::executor::aggregation::{AggArgs, AggCall};
@@ -34,9 +34,6 @@ use crate::executor::receiver::ReceiverExecutor;
 use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
 use crate::executor::{Executor, LocalSimpleAggExecutor, MergeExecutor, ProjectExecutor};
 use crate::task::SharedContext;
-
-const INITIAL_PERMITS: usize = 8192;
-const BATCHED_PERMITS: usize = 1024;
 
 /// This test creates a merger-dispatcher pair, and run a sum. Each chunk
 /// has 0~9 elements. We first insert the 10 chunks, then delete them,
@@ -77,7 +74,7 @@ async fn test_merger_sum_aggr() {
             1,
         )
         .unwrap();
-        let (tx, rx) = channel(INITIAL_PERMITS, BATCHED_PERMITS);
+        let (tx, rx) = channel_for_test();
         let consumer = SenderConsumer {
             input: aggregator.boxed(),
             channel: Box::new(LocalOutput::new(233, tx)),
@@ -105,7 +102,7 @@ async fn test_merger_sum_aggr() {
 
     // create 17 local aggregation actors
     for _ in 0..17 {
-        let (tx, rx) = channel(INITIAL_PERMITS, BATCHED_PERMITS);
+        let (tx, rx) = channel_for_test();
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
@@ -113,7 +110,7 @@ async fn test_merger_sum_aggr() {
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
-    let (input, rx) = channel(INITIAL_PERMITS, BATCHED_PERMITS);
+    let (input, rx) = channel_for_test();
     let _schema = Schema {
         fields: vec![Field::unnamed(DataType::Int64)],
     };

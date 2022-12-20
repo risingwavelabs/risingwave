@@ -48,6 +48,23 @@ pub fn channel(initial_permits: usize, batched_permits: usize) -> (Sender, Recei
     )
 }
 
+pub fn channel_for_test() -> (Sender, Receiver) {
+    // Use an unbounded channel since we manage the permits manually.
+    let (tx, rx) = mpsc::unbounded_channel();
+    const INITIAL_PERMITS: usize = 8192;
+    const BATCHED_PERMITS: usize = 1024;
+    let permits = Arc::new(Semaphore::new(INITIAL_PERMITS));
+    let max_chunk_permits: usize = INITIAL_PERMITS - BATCHED_PERMITS;
+    (
+        Sender {
+            tx,
+            permits: permits.clone(),
+            max_chunk_permits,
+        },
+        Receiver { rx, permits },
+    )
+}
+
 /// The sender of the exchange service with permit-based back-pressure.
 pub struct Sender {
     tx: mpsc::UnboundedSender<MessageWithPermits>,

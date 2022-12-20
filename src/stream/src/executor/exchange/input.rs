@@ -258,7 +258,7 @@ pub(crate) fn new_input(
             (upstream_actor_id, actor_id),
             (upstream_fragment_id, fragment_id),
             metrics,
-            context.config.developer.stream_batched_permits,
+            context.config.developer.stream_exchange_batched_permits,
         )
         .boxed_input()
     };

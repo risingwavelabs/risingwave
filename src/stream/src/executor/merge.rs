@@ -474,7 +474,7 @@ mod tests {
 
     use super::*;
     use crate::executor::exchange::input::RemoteInput;
-    use crate::executor::exchange::permit::channel;
+    use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::{Barrier, Executor, Mutation};
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
@@ -487,12 +487,10 @@ mod tests {
     #[tokio::test]
     async fn test_merger() {
         const CHANNEL_NUMBER: usize = 10;
-        const INITIAL_PERMITS: usize = 8192;
-        const BATCHED_PERMITS: usize = 1024;
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
         let mut rxs = Vec::with_capacity(CHANNEL_NUMBER);
         for _i in 0..CHANNEL_NUMBER {
-            let (tx, rx) = channel(INITIAL_PERMITS, BATCHED_PERMITS);
+            let (tx, rx) = channel_for_test();
             txs.push(tx);
             rxs.push(rx);
         }

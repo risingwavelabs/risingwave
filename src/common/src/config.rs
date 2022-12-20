@@ -363,13 +363,13 @@ pub struct DeveloperConfig {
 
     /// The initial permits that a channel holds, i.e., the maximum row count can be buffered in
     /// the channel.
-    #[serde(default = "default::developer::stream_initial_permits")]
-    pub stream_initial_permits: usize,
+    #[serde(default = "default::developer::stream_exchange_initial_permits")]
+    pub stream_exchange_initial_permits: usize,
 
     /// The permits that are batched to add back, for reducing the backward `AddPermits` messages
     /// in remote exchange.
-    #[serde(default = "default::developer::stream_batched_permits")]
-    pub stream_batched_permits: usize,
+    #[serde(default = "default::developer::stream_exchange_batched_permits")]
+    pub stream_exchange_batched_permits: usize,
 }
 
 impl Default for DeveloperConfig {
@@ -613,11 +613,11 @@ mod default {
             1024
         }
 
-        pub fn stream_initial_permits() -> usize {
+        pub fn stream_exchange_initial_permits() -> usize {
             8192
         }
 
-        pub fn stream_batched_permits() -> usize {
+        pub fn stream_exchange_batched_permits() -> usize {
             1024
         }
     }
