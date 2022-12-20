@@ -117,6 +117,22 @@ pub async fn rpc_serve(
     }
 }
 
+/// Starts a meta server with meta store
+/// The server will start either as a leader or follower node, depending on the election outcome
+/// Servers may failover from follower to leader, but not from leader to follower
+/// Follower meta nodes start a limited range of services and should only be used to retrieve the
+/// current leaders address
+///
+/// ## Arguments:
+/// `meta_store`: Store in which to hold meta information
+/// `address_info`: Address of this node
+/// `max_heartbeat_interval`: TODO
+/// `lease_interval_secs`: Timeout in seconds that a leader lease is valid. See election mod for
+/// details
+/// `opts`: MetaOpts TODO
+///
+/// ## Returns:
+/// TODO
 pub async fn rpc_serve_with_store<S: MetaStore>(
     meta_store: Arc<S>,
     address_info: AddressInfo,
@@ -320,3 +336,69 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     Ok((join_handle, svc_shutdown_tx))
 }
+
+// TODO: repeat test 100 times. Start test with different sleep intervals and so on
+// Print the sleep intervals
+// use pseudo rand gen with seed
+mod tests {
+    use tokio::time::sleep;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_leader_lease() {}
+}
+
+// Old test below
+#[cfg(test)]
+mod testsdeprecated {
+    use tokio::time::sleep;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_leader_lease() {
+        let info = AddressInfo {
+            addr: "node1".to_string(),
+            ..Default::default()
+        };
+        let meta_store = Arc::new(MemStore::default());
+        let (handle, closer) = rpc_serve_with_store(
+            meta_store.clone(),
+            info,
+            Duration::from_secs(10),
+            2,
+            MetaOpts::test(false),
+        )
+        .await
+        .unwrap();
+        sleep(Duration::from_secs(4)).await;
+        let info2 = AddressInfo {
+            addr: "node2".to_string(),
+            ..Default::default()
+        };
+        let ret = rpc_serve_with_store(
+            meta_store.clone(),
+            info2.clone(),
+            Duration::from_secs(10),
+            2,
+            MetaOpts::test(false),
+        )
+        .await;
+        assert!(ret.is_err());
+        closer.send(()).unwrap();
+        handle.await.unwrap();
+        sleep(Duration::from_secs(3)).await;
+        rpc_serve_with_store(
+            meta_store.clone(),
+            info2,
+            Duration::from_secs(10),
+            2,
+            MetaOpts::test(false),
+        )
+        .await
+        .unwrap();
+    }
+}
+
+// Old test above
