@@ -92,6 +92,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -137,6 +138,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await;
@@ -151,6 +153,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await;
@@ -166,6 +169,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -200,6 +204,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -216,6 +221,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await

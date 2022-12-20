@@ -218,7 +218,8 @@ impl Binder {
                     aliases.extend(names);
                 }
                 SelectItem::ExprQualifiedWildcard(expr, idents) => {
-                    let (exprs, names) = self.bind_wildcard_field_column(expr, &idents.0)?;
+                    let idents = idents.map_or_else(Vec::new, |idents| idents.0);
+                    let (exprs, names) = self.bind_wildcard_field_column(expr, &idents)?;
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }

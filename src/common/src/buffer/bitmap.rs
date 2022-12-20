@@ -33,7 +33,8 @@
 //! This is called a "validity bitmap" in the Arrow documentation.
 //! This file is adapted from [arrow-rs](https://github.com/apache/arrow-rs)
 
-use std::ops::{BitAnd, BitOr, Not};
+use std::iter;
+use std::ops::{BitAnd, BitOr, Not, RangeInclusive};
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -302,11 +303,34 @@ impl Bitmap {
         Bitmap::from_bytes_with_num_bits(bits, lhs.num_bits)
     }
 
+    /// Returns an iterator which yields the positions of high bits.
     pub fn ones(&self) -> impl Iterator<Item = usize> + '_ {
         self.iter()
             .enumerate()
             .filter(|(_, bit)| *bit)
             .map(|(pos, _)| pos)
+    }
+
+    /// Returns an iterator which yields the position ranges of continuous high bits.
+    pub fn high_ranges(&self) -> impl Iterator<Item = RangeInclusive<usize>> + '_ {
+        let mut start = None;
+
+        self.iter()
+            .chain(iter::once(false))
+            .enumerate()
+            .filter_map(move |(i, bit)| match (bit, start) {
+                // A new high range starts.
+                (true, None) => {
+                    start = Some(i);
+                    None
+                }
+                // The current high range ends.
+                (false, Some(s)) => {
+                    start = None;
+                    Some(s..=(i - 1))
+                }
+                _ => None,
+            })
     }
 
     #[cfg(test)]
@@ -481,7 +505,7 @@ pub struct BitmapIter<'a> {
     num_bits: usize,
 }
 
-impl<'a> std::iter::Iterator for BitmapIter<'a> {
+impl<'a> iter::Iterator for BitmapIter<'a> {
     type Item = bool;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -654,6 +678,24 @@ mod tests {
                 assert!(b);
             }
         }
+    }
+
+    #[test]
+    fn test_bitmap_high_ranges_iter() {
+        fn test(bits: impl IntoIterator<Item = bool>, expected: Vec<RangeInclusive<usize>>) {
+            let bitmap = Bitmap::from_iter(bits);
+            let high_ranges = bitmap.high_ranges().collect::<Vec<_>>();
+            assert_eq!(high_ranges, expected);
+        }
+
+        test(
+            vec![
+                true, true, true, false, false, true, true, true, false, true,
+            ],
+            vec![0..=2, 5..=7, 9..=9],
+        );
+        test(vec![true, true, true], vec![0..=2]);
+        test(vec![false, false, false], vec![]);
     }
 
     #[test]

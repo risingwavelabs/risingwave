@@ -4,3 +4,4 @@ SELECT nspname FROM pg_catalog.pg_namespace;
 information_schema
 pg_catalog
 public
+rw_catalog
