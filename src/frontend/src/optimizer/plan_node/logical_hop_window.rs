@@ -442,7 +442,10 @@ mod test {
         .into();
         // Perform the prune
         let required_cols = vec![4, 2, 3];
-        let plan = hop_window.prune_col(&required_cols, &mut Default::default());
+        let plan = hop_window.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(hop_window.clone()),
+        );
         println!(
             "{}\n{}",
             hop_window.explain_to_string().unwrap(),

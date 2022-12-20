@@ -319,11 +319,14 @@ mod tests {
 
         let values2 = values1.clone();
 
-        let union = LogicalUnion::new(false, vec![values1.into(), values2.into()]);
+        let union: PlanRef = LogicalUnion::new(false, vec![values1.into(), values2.into()]).into();
 
         // Perform the prune
         let required_cols = vec![1, 2];
-        let plan = union.prune_col(&required_cols, &mut Default::default());
+        let plan = union.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(union.clone()),
+        );
 
         // Check the result
         let union = plan.as_logical_union().unwrap();

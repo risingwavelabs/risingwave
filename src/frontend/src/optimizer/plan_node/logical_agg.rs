@@ -1134,10 +1134,10 @@ mod tests {
             Field::with_name(ty.clone(), "v2"),
             Field::with_name(ty.clone(), "v3"),
         ];
-        let agg = generate_agg_call(ty.clone(), fields.clone()).await;
+        let agg: PlanRef = generate_agg_call(ty.clone(), fields.clone()).await.into();
         // Perform the prune
         let required_cols = vec![0, 1];
-        let plan = agg.prune_col(&required_cols, &mut Default::default());
+        let plan = agg.prune_col(&required_cols, &mut ColumnPruningContext::new(agg.clone()));
 
         // Check the result
         let agg_new = plan.as_logical_agg().unwrap();
@@ -1173,10 +1173,10 @@ mod tests {
             Field::with_name(ty.clone(), "v2"),
             Field::with_name(ty.clone(), "v3"),
         ];
-        let agg = generate_agg_call(ty.clone(), fields.clone()).await;
+        let agg: PlanRef = generate_agg_call(ty.clone(), fields.clone()).await.into();
         // Perform the prune
         let required_cols = vec![1, 0];
-        let plan = agg.prune_col(&required_cols, &mut Default::default());
+        let plan = agg.prune_col(&required_cols, &mut ColumnPruningContext::new(agg.clone()));
         // Check the result
         let proj = plan.as_logical_project().unwrap();
         assert_eq!(proj.exprs().len(), 2);
@@ -1232,11 +1232,11 @@ mod tests {
             order_by_fields: vec![],
             filter: Condition::true_cond(),
         };
-        let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
+        let agg: PlanRef = LogicalAgg::new(vec![agg_call], vec![1], values.into()).into();
 
         // Perform the prune
         let required_cols = vec![1];
-        let plan = agg.prune_col(&required_cols, &mut Default::default());
+        let plan = agg.prune_col(&required_cols, &mut ColumnPruningContext::new(agg.clone()));
 
         // Check the result
         let project = plan.as_logical_project().unwrap();
@@ -1306,11 +1306,11 @@ mod tests {
                 filter: Condition::true_cond(),
             },
         ];
-        let agg = LogicalAgg::new(agg_calls, vec![1, 2], values.into());
+        let agg: PlanRef = LogicalAgg::new(agg_calls, vec![1, 2], values.into()).into();
 
         // Perform the prune
         let required_cols = vec![0, 3];
-        let plan = agg.prune_col(&required_cols, &mut Default::default());
+        let plan = agg.prune_col(&required_cols, &mut ColumnPruningContext::new(agg.clone()));
         // Check the result
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 2);

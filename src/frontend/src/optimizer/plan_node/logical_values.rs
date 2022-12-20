@@ -157,17 +157,21 @@ mod tests {
             Field::with_name(DataType::Int32, "v3"),
         ]);
         // Values([[0, 1, 2], [3, 4, 5])
-        let values = LogicalValues::new(
+        let values: PlanRef = LogicalValues::new(
             vec![
                 vec![literal(0), literal(1), literal(2)],
                 vec![literal(3), literal(4), literal(5)],
             ],
             schema,
             ctx,
-        );
+        )
+        .into();
 
         let required_cols = vec![0, 2];
-        let pruned = values.prune_col(&required_cols, &mut Default::default());
+        let pruned = values.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(values.clone()),
+        );
 
         let values = pruned.as_logical_values().unwrap();
         let rows: &[Vec<ExprImpl>] = values.rows();

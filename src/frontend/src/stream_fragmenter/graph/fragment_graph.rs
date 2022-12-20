@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
-type LocalFragmentId = u32;
+pub type LocalFragmentId = u32;
 
 /// [`StreamFragment`] represent a fragment node in fragment DAG.
 #[derive(Clone, Debug)]
@@ -115,6 +115,10 @@ impl StreamFragmentGraph {
         let id = stream_fragment.fragment_id;
         let ret = self.fragments.insert(id, stream_fragment);
         assert!(ret.is_none(), "fragment already exists: {:?}", id);
+    }
+
+    pub fn get_fragment(&self, fragment_id: &LocalFragmentId) -> Option<&StreamFragment> {
+        self.fragments.get(fragment_id)
     }
 
     /// Links upstream to downstream in the graph.

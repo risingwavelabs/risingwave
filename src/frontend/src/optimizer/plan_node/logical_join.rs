@@ -1287,16 +1287,17 @@ mod tests {
             .unwrap(),
         ));
         let join_type = JoinType::Inner;
-        let join = LogicalJoin::new(
+        let join: PlanRef = LogicalJoin::new(
             left.into(),
             right.into(),
             join_type,
             Condition::with_expr(on),
-        );
+        )
+        .into();
 
         // Perform the prune
         let required_cols = vec![2, 3];
-        let plan = join.prune_col(&required_cols, &mut Default::default());
+        let plan = join.prune_col(&required_cols, &mut ColumnPruningContext::new(join.clone()));
 
         // Check the result
         let join = plan.as_logical_join().unwrap();
@@ -1363,11 +1364,11 @@ mod tests {
             );
 
             let offset = if join.is_right_join() { 3 } else { 0 };
-
+            let join: PlanRef = join.into();
             // Perform the prune
             let required_cols = vec![0];
             // key 0 is never used in the join (always key 1)
-            let plan = join.prune_col(&required_cols, &mut Default::default());
+            let plan = join.prune_col(&required_cols, &mut ColumnPruningContext::new(join.clone()));
             let as_plan = plan.as_logical_join().unwrap();
             // Check the result
             assert_eq!(as_plan.schema().fields().len(), 1);
@@ -1376,7 +1377,7 @@ mod tests {
             // Perform the prune
             let required_cols = vec![0, 1, 2];
             // should not panic here
-            let plan = join.prune_col(&required_cols, &mut Default::default());
+            let plan = join.prune_col(&required_cols, &mut ColumnPruningContext::new(join.clone()));
             let as_plan = plan.as_logical_join().unwrap();
             // Check the result
             assert_eq!(as_plan.schema().fields().len(), 3);
@@ -1430,16 +1431,17 @@ mod tests {
             .unwrap(),
         ));
         let join_type = JoinType::Inner;
-        let join = LogicalJoin::new(
+        let join: PlanRef = LogicalJoin::new(
             left.into(),
             right.into(),
             join_type,
             Condition::with_expr(on),
-        );
+        )
+        .into();
 
         // Perform the prune
         let required_cols = vec![1, 3];
-        let plan = join.prune_col(&required_cols, &mut Default::default());
+        let plan = join.prune_col(&required_cols, &mut ColumnPruningContext::new(join.clone()));
 
         // Check the result
         let join = plan.as_logical_join().unwrap();
@@ -1673,16 +1675,17 @@ mod tests {
             .unwrap(),
         ));
         let join_type = JoinType::Inner;
-        let join = LogicalJoin::new(
+        let join: PlanRef = LogicalJoin::new(
             left.into(),
             right.into(),
             join_type,
             Condition::with_expr(on),
-        );
+        )
+        .into();
 
         // Perform the prune
         let required_cols = vec![3, 2];
-        let plan = join.prune_col(&required_cols, &mut Default::default());
+        let plan = join.prune_col(&required_cols, &mut ColumnPruningContext::new(join.clone()));
 
         // Check the result
         let join = plan.as_logical_join().unwrap();

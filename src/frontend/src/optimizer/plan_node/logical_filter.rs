@@ -395,7 +395,10 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![2];
-        let plan = filter.prune_col(&required_cols, &mut Default::default());
+        let plan = filter.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(filter.clone()),
+        );
 
         // Check the result
         let project = plan.as_logical_project().unwrap();
@@ -460,7 +463,10 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![1, 0];
-        let plan = filter.prune_col(&required_cols, &mut Default::default());
+        let plan = filter.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(filter.clone()),
+        );
 
         // Check the result
         let project = plan.as_logical_project().unwrap();
@@ -521,11 +527,15 @@ mod tests {
             )
             .unwrap(),
         ));
-        let filter = LogicalFilter::new(values.into(), Condition::with_expr(predicate));
+        let filter: PlanRef =
+            LogicalFilter::new(values.into(), Condition::with_expr(predicate)).into();
 
         // Perform the prune
         let required_cols = vec![1, 2];
-        let plan = filter.prune_col(&required_cols, &mut Default::default());
+        let plan = filter.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(filter.clone()),
+        );
 
         // Check the result
         let filter = plan.as_logical_filter().unwrap();

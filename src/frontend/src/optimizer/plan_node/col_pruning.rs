@@ -18,6 +18,8 @@ use paste::paste;
 
 use super::*;
 pub use crate::expr::CollectInputRef;
+use crate::optimizer::share_parent_counter::ShareParentCounter;
+use crate::optimizer::PlanVisitor;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 
 /// The trait for column pruning, only logical plan node will use it, though all plan node impl it.
@@ -51,12 +53,26 @@ macro_rules! impl_prune_col {
 for_batch_plan_nodes! { impl_prune_col }
 for_stream_plan_nodes! { impl_prune_col }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ColumnPruningContext {
     share_required_cols_map: HashMap<i32, Vec<Vec<usize>>>,
+    share_parent_counter: ShareParentCounter,
 }
 
 impl ColumnPruningContext {
+    pub fn new(root: PlanRef) -> Self {
+        let mut share_parent_counter = ShareParentCounter::default();
+        share_parent_counter.visit(root.clone());
+        Self {
+            share_required_cols_map: Default::default(),
+            share_parent_counter,
+        }
+    }
+
+    pub fn get_parent_num(&self, share: &LogicalShare) -> usize {
+        self.share_parent_counter.get_parent_num(share)
+    }
+
     pub fn add_required_cols(
         &mut self,
         plan_node_id: PlanNodeId,

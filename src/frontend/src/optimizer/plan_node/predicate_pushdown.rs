@@ -17,8 +17,11 @@ use std::collections::HashMap;
 use paste::paste;
 
 use super::*;
+use crate::optimizer::share_parent_counter::ShareParentCounter;
+use crate::optimizer::PlanVisitor;
 use crate::utils::Condition;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
+
 /// The trait for predicate pushdown, only logical plan node will use it, though all plan node impl
 /// it.
 pub trait PredicatePushdown {
@@ -70,12 +73,26 @@ pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary + PlanNode>(
     LogicalFilter::create(Rc::new(new_node), filter_predicate)
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PredicatePushdownContext {
     share_predicate_map: HashMap<i32, Vec<Condition>>,
+    share_parent_counter: ShareParentCounter,
 }
 
 impl PredicatePushdownContext {
+    pub fn new(root: PlanRef) -> Self {
+        let mut share_parent_counter = ShareParentCounter::default();
+        share_parent_counter.visit(root.clone());
+        Self {
+            share_predicate_map: Default::default(),
+            share_parent_counter,
+        }
+    }
+
+    pub fn get_parent_num(&self, share: &LogicalShare) -> usize {
+        self.share_parent_counter.get_parent_num(share)
+    }
+
     pub fn add_predicate(&mut self, plan_node_id: PlanNodeId, predicate: Condition) -> usize {
         self.share_predicate_map
             .entry(plan_node_id.0)

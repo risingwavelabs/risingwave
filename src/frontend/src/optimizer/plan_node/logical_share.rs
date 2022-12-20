@@ -15,16 +15,18 @@
 use std::cell::RefCell;
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::error::Result;
 
 use super::generic::{self, GenericPlanNode};
 use super::{
     ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
+use crate::expr::{ExprImpl, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamShare,
-    ToStreamContext,
+    ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,
+    StreamShare, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -36,14 +38,9 @@ pub struct LogicalShare {
 
 impl LogicalShare {
     pub fn new(input: PlanRef) -> Self {
-        Self::new_with_parent_num(input, 1)
-    }
-
-    pub fn new_with_parent_num(input: PlanRef, parent_num: usize) -> Self {
         let ctx = input.ctx();
         let functional_dependency = input.functional_dependency().clone();
         let core = generic::Share {
-            parent_num: RefCell::new(parent_num),
             input: RefCell::new(input),
         };
         let schema = core.schema();
@@ -62,13 +59,7 @@ impl LogicalShare {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(
-            f,
-            "{} id = {} parent_num = {}",
-            name,
-            &self.base.id.0,
-            self.parent_num()
-        )
+        write!(f, "{} id = {}", name, &self.base.id.0,)
     }
 }
 
@@ -78,7 +69,7 @@ impl PlanTreeNodeUnary for LogicalShare {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new_with_parent_num(input, self.parent_num())
+        Self::new(input)
     }
 
     #[must_use]
@@ -87,10 +78,7 @@ impl PlanTreeNodeUnary for LogicalShare {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        (
-            Self::new_with_parent_num(input, self.parent_num()),
-            input_col_change,
-        )
+        (Self::new(input), input_col_change)
     }
 }
 
@@ -99,18 +87,6 @@ impl_plan_tree_node_for_unary! {LogicalShare}
 impl LogicalShare {
     pub fn replace_input(&self, plan: PlanRef) {
         *self.core.input.borrow_mut() = plan;
-    }
-
-    pub fn parent_num(&self) -> usize {
-        *self.core.parent_num.borrow()
-    }
-
-    pub fn inc_parent_num(&self) {
-        *self.core.parent_num.borrow_mut() += 1;
-    }
-
-    pub fn dec_parent_num(&self) {
-        *self.core.parent_num.borrow_mut() -= 1;
     }
 }
 
@@ -166,8 +142,21 @@ impl ToStream for LogicalShare {
             None => {
                 let (new_input, col_change) = self.input().logical_rewrite_for_stream(ctx)?;
                 let new_share: PlanRef = self.clone_with_input(new_input).into();
-                ctx.add_rewrite_result(self.base.id, new_share.clone(), col_change.clone());
-                Ok((new_share, col_change))
+
+                // FIXME: Add an identity project here to avoid parent exchange connecting directly to the share operator.
+                let exprs = new_share
+                    .schema()
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, field)| {
+                        ExprImpl::InputRef(Box::new(InputRef::new(i, field.data_type.clone())))
+                    })
+                    .collect_vec();
+                let project = LogicalProject::create(new_share, exprs);
+
+                ctx.add_rewrite_result(self.base.id, project.clone(), col_change.clone());
+                Ok((project, col_change))
             }
             Some(cache) => Ok(cache.clone()),
         }

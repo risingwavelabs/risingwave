@@ -91,7 +91,7 @@ impl ColPrunable for PlanRef {
             // Basically, we need to wait for all parents of `LogicalShare` to prune columns before
             // we merge the required columns and prune.
             let parent_has_pushed = ctx.add_required_cols(self.id(), required_cols.into());
-            if parent_has_pushed == logical_share.parent_num() {
+            if parent_has_pushed == ctx.get_parent_num(logical_share) {
                 let merge_require_cols = ctx
                     .take_required_cols(self.id())
                     .expect("must have required columns")
@@ -145,7 +145,7 @@ impl PredicatePushdown for PlanRef {
             // Basically, we need to wait for all parents of `LogicalShare` to push down the
             // predicate before we merge the predicates and pushdown.
             let parent_has_pushed = ctx.add_predicate(self.id(), predicate.clone());
-            if parent_has_pushed == logical_share.parent_num() {
+            if parent_has_pushed == ctx.get_parent_num(logical_share) {
                 let merge_predicate = ctx
                     .take_predicate(self.id())
                     .expect("must have predicate")
@@ -298,6 +298,9 @@ impl dyn PlanNode {
         }
         if let Some(stream_index_scan) = self.as_stream_index_scan() {
             return stream_index_scan.adhoc_to_stream_prost();
+        }
+        if let Some(stream_share) = self.as_stream_share() {
+            return stream_share.adhoc_to_stream_prost(state);
         }
 
         let node = Some(self.to_stream_prost_body(state));

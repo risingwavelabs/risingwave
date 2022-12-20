@@ -418,8 +418,9 @@ mod tests {
 
     use super::LogicalTopN;
     use crate::optimizer::optimizer_context::OptimizerContext;
-    use crate::optimizer::plan_node::{ColPrunable, LogicalValues};
+    use crate::optimizer::plan_node::{ColPrunable, ColumnPruningContext, LogicalValues};
     use crate::optimizer::property::Order;
+    use crate::PlanRef;
 
     #[tokio::test]
     async fn test_prune_col() {
@@ -436,8 +437,11 @@ mod tests {
         let original_logical =
             LogicalTopN::with_group(input, 1, 0, false, Order::default(), vec![1]);
         assert_eq!(original_logical.group_key(), &[1]);
-
-        let pruned_node = original_logical.prune_col(&[0, 1, 2], &mut Default::default());
+        let original_logical: PlanRef = original_logical.into();
+        let pruned_node = original_logical.prune_col(
+            &[0, 1, 2],
+            &mut ColumnPruningContext::new(original_logical.clone()),
+        );
 
         let pruned_logical = pruned_node.as_logical_top_n().unwrap();
         assert_eq!(pruned_logical.group_key(), &[1]);

@@ -96,9 +96,6 @@ impl Rule for TranslateApplyRule {
 
             // Use Share
             let logical_share = LogicalShare::new(left);
-            // Increase parent number to 2;
-            logical_share.inc_parent_num();
-            assert_eq!(2, logical_share.parent_num());
             left = logical_share.into();
             let distinct = LogicalAgg::new(
                 vec![],

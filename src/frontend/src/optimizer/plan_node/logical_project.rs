@@ -368,7 +368,7 @@ mod tests {
             },
             ctx,
         );
-        let project = LogicalProject::new(
+        let project: PlanRef = LogicalProject::new(
             values.into(),
             vec![
                 ExprImpl::Literal(Box::new(Literal::new(None, ty.clone()))),
@@ -384,11 +384,15 @@ mod tests {
                     .unwrap(),
                 )),
             ],
-        );
+        )
+        .into();
 
         // Perform the prune
         let required_cols = vec![1, 2];
-        let plan = project.prune_col(&required_cols, &mut Default::default());
+        let plan = project.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(project.clone()),
+        );
 
         // Check the result
         let project = plan.as_logical_project().unwrap();
