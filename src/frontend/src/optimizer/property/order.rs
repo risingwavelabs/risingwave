@@ -34,8 +34,7 @@ impl Order {
         Self { field_order }
     }
 
-    /// Convert into protobuf.
-    pub fn to_protobuf(&self, _schema: &Schema) -> Vec<ColumnOrder> {
+    pub fn to_protobuf(&self) -> Vec<ColumnOrder> {
         self.field_order
             .iter()
             .map(FieldOrder::to_protobuf)
