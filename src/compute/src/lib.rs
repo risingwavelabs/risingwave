@@ -27,6 +27,8 @@ pub mod server;
 
 use clap::clap_derive::ArgEnum;
 use clap::Parser;
+use risingwave_common::util::resource_util::cpu::total_cpu_available;
+use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 
 #[derive(Debug, Clone, ArgEnum)]
 pub enum AsyncStackTraceOption {
@@ -88,17 +90,15 @@ pub struct ComputeNodeOpts {
     pub config_path: String,
 
     /// Total available memory in bytes, used by LRU Manager
-    #[clap(long)]
+    #[clap(long, default_value_t = default_total_memory_bytes())]
     pub total_memory_bytes: usize,
 
     /// The parallelism that the compute node will register to the scheduler of the meta service.
-    #[clap(long)]
+    #[clap(long, default_value_t = default_parallelism())]
     pub parallelism: usize,
 }
 
 fn validate_opts(opts: &ComputeNodeOpts) {
-    use risingwave_common::util::resource_util::cpu::total_cpu_available;
-    use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
     let total_memory_available_bytes = total_memory_available_bytes();
     if opts.total_memory_bytes > total_memory_available_bytes {
         let error_msg = format!("total_memory_bytes {} is larger than the total memory available bytes {} that can be acquired.", opts.total_memory_bytes, total_memory_available_bytes);
@@ -150,4 +150,12 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
             join_handle.await.unwrap();
         }
     })
+}
+
+fn default_total_memory_bytes() -> usize {
+    total_memory_available_bytes()
+}
+
+fn default_parallelism() -> usize {
+    total_cpu_available() as usize
 }
