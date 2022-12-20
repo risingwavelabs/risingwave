@@ -479,17 +479,20 @@ impl StageRunner {
         for chunk in &mut terminated_chunk_stream {
             if let Err(ref e) = chunk {
                 let err_str = e.to_string();
-                result_tx
-                    .send(chunk.map_err(|e| e.into()))
-                    .await
-                    .expect("Receiver should always exist! ");
+
+                // This is possible if The Query Runner drop early before schedule the root
+                // executor. Detail described in https://github.com/risingwavelabs/risingwave/issues/6883#issuecomment-1348102037.
+                // The error format is just channel closed so no care.
+                if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
+                    warn!("Root executor has been dropped before receive any events so the send is failed");
+                }
                 // Different from below, return this function and report error.
                 return Err(SchedulerError::TaskExecutionError(err_str));
             } else {
-                result_tx
-                    .send(chunk.map_err(|e| e.into()))
-                    .await
-                    .expect("Receiver should always exist! ");
+                // Same for below.
+                if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
+                    warn!("Root executor has been dropped before receive any events so the send is failed");
+                }
             }
         }
 
