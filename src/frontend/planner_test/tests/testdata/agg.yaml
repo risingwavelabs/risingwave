@@ -231,8 +231,8 @@
     select v1, max(v2) from mv group by v1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchSortAgg { group_key: [mv.v1], aggs: [max(mv.v2)] }
-      └─BatchExchange { order: [mv.v1 DESC], dist: HashShard(mv.v1) }
+    └─BatchHashAgg { group_key: [mv.v1], aggs: [max(mv.v2)] }
+      └─BatchExchange { order: [], dist: HashShard(mv.v1) }
         └─BatchScan { table: mv, columns: [mv.v1, mv.v2], distribution: SomeShard }
   with_config_map:
     RW_BATCH_ENABLE_SORT_AGG: 'false'
@@ -242,10 +242,11 @@
     select v1, max(v2) from t group by v1 order by v1 desc;
   batch_plan: |
     BatchExchange { order: [t.v1 DESC], dist: Single }
-    └─BatchSortAgg { group_key: [t.v1], aggs: [max(t.v2)] }
-      └─BatchExchange { order: [t.v1 DESC], dist: HashShard(t.v1) }
-        └─BatchSort { order: [t.v1 DESC] }
-          └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+    └─BatchSort { order: [t.v1 DESC] }
+      └─BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
+        └─BatchExchange { order: [], dist: HashShard(t.v1) }
+          └─BatchSort { order: [t.v1 DESC] }
+            └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   with_config_map:
     RW_BATCH_ENABLE_SORT_AGG: 'false'
 - name: Not use BatchSortAgg, when required order satisfies input order
@@ -255,10 +256,11 @@
   batch_plan: |
     BatchExchange { order: [t.k1 ASC], dist: Single }
     └─BatchProject { exprs: [max(t.v1), t.k1, t.k2] }
-      └─BatchSortAgg { group_key: [t.k1, t.k2], aggs: [max(t.v1)] }
-        └─BatchExchange { order: [t.k1 ASC, t.k2 ASC], dist: HashShard(t.k1, t.k2) }
-          └─BatchSort { order: [t.k1 ASC, t.k2 ASC] }
-            └─BatchScan { table: t, columns: [t.k1, t.k2, t.v1], distribution: SomeShard }
+      └─BatchSort { order: [t.k1 ASC] }
+        └─BatchHashAgg { group_key: [t.k1, t.k2], aggs: [max(t.v1)] }
+          └─BatchExchange { order: [], dist: HashShard(t.k1, t.k2) }
+            └─BatchSort { order: [t.k1 ASC, t.k2 ASC] }
+              └─BatchScan { table: t, columns: [t.k1, t.k2, t.v1], distribution: SomeShard }
   with_config_map:
     RW_BATCH_ENABLE_SORT_AGG: 'false'
 - name: Not use BatchSortAgg, when output requires order with swapped output
@@ -268,10 +270,11 @@
   batch_plan: |
     BatchExchange { order: [t.v1 DESC], dist: Single }
     └─BatchProject { exprs: [max(t.v2), t.v1] }
-      └─BatchSortAgg { group_key: [t.v1], aggs: [max(t.v2)] }
-        └─BatchExchange { order: [t.v1 DESC], dist: HashShard(t.v1) }
-          └─BatchSort { order: [t.v1 DESC] }
-            └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+      └─BatchSort { order: [t.v1 DESC] }
+        └─BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
+          └─BatchExchange { order: [], dist: HashShard(t.v1) }
+            └─BatchSort { order: [t.v1 DESC] }
+              └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   with_config_map:
     RW_BATCH_ENABLE_SORT_AGG: 'false'
 - sql: |
