@@ -22,7 +22,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashKey;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::StateStore;
 
@@ -81,10 +80,9 @@ pub struct InnerGroupTopNExecutorNew<K: HashKey, S: StateStore, const WITH_TIES:
     /// `OFFSET XXX`. `0` means no offset.
     offset: usize,
 
-    /// The internal key indices of the `GroupTopNExecutor`
-    internal_key_indices: PkIndices,
+    /// The storage key indices of the `GroupTopNExecutor`
+    storage_key_indices: PkIndices,
 
-    /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNState<S>,
 
     /// which column we used to group the data.
@@ -97,7 +95,7 @@ pub struct InnerGroupTopNExecutorNew<K: HashKey, S: StateStore, const WITH_TIES:
     order_by_len: usize,
 
     /// Used for serializing pk into CacheKey.
-    cache_key_serde: (OrderedRowSerde, OrderedRowSerde),
+    cache_key_serde: CacheKeySerde,
 }
 
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<K, S, WITH_TIES> {
@@ -122,29 +120,16 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
             .map(|x| x.column_idx)
             .collect::<HashSet<_>>()
             .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
-        let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&storage_key, &schema);
+        let (storage_key_indices, storage_key_data_types, storage_key_order_types) =
+            generate_storage_key_info(&storage_key, &schema);
 
-        let managed_state = ManagedTopNState::<S>::new(
-            state_table,
-            &internal_key_data_types[group_by.len()..],
-            &internal_key_order_types[group_by.len()..],
+        let cache_key_serde = create_cache_key_serde(
+            &storage_key_data_types[group_by.len()..],
+            &storage_key_order_types[group_by.len()..],
             order_by_len,
         );
-        let (first_key_data_types, second_key_data_types) =
-            internal_key_data_types[group_by.len()..].split_at(order_by_len);
-        let (first_key_order_types, second_key_order_types) =
-            internal_key_order_types[group_by.len()..].split_at(order_by_len);
-        let first_key_serde = OrderedRowSerde::new(
-            first_key_data_types.to_vec(),
-            first_key_order_types.to_vec(),
-        );
-        let second_key_serde = OrderedRowSerde::new(
-            second_key_data_types.to_vec(),
-            second_key_order_types.to_vec(),
-        );
+        let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
-        let cache_key_serde = (first_key_serde, second_key_serde);
         Ok(Self {
             info: ExecutorInfo {
                 schema,
@@ -154,7 +139,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_state,
-            internal_key_indices,
+            storage_key_indices,
             group_by,
             caches: GroupTopNCache::new(lru_manager, cache_size),
             order_by_len,
@@ -211,7 +196,7 @@ where
 
         for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq(keys.iter()) {
             // The pk without group by
-            let pk_row = row_ref.project(&self.internal_key_indices[self.group_by.len()..]);
+            let pk_row = row_ref.project(&self.storage_key_indices[self.group_by.len()..]);
             let cache_key =
                 serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
 
@@ -576,12 +561,12 @@ mod tests {
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
-                order_types,
+                order_types.clone(),
                 (0, 2),
                 1,
                 1,
                 vec![1, 2],
-                state_table,
+                state_table.clone(),
                 None,
                 0,
             )

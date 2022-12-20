@@ -18,7 +18,6 @@ use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::StateStore;
 
@@ -98,8 +97,8 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S, true> {
 pub struct InnerAppendOnlyTopNExecutor<S: StateStore, const WITH_TIES: bool> {
     info: ExecutorInfo,
 
-    /// The internal key indices of the `TopNExecutor`
-    internal_key_indices: PkIndices,
+    /// The storage key indices of the `TopNExecutor`
+    storage_key_indices: PkIndices,
 
     /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNState<S>,
@@ -111,7 +110,7 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore, const WITH_TIES: bool> {
     order_by_len: usize,
 
     /// Used for serializing pk into CacheKey.
-    cache_key_serde: (OrderedRowSerde, OrderedRowSerde),
+    cache_key_serde: CacheKeySerde,
 }
 
 impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_TIES> {
@@ -133,30 +132,19 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
             .map(|x| x.column_idx)
             .collect::<HashSet<_>>()
             .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
-        let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&storage_key, &schema);
+        let (storage_key_indices, storage_key_data_types, storage_key_order_types) =
+            generate_storage_key_info(&storage_key, &schema);
 
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
-        let managed_state = ManagedTopNState::<S>::new(
-            state_table,
-            &internal_key_data_types,
-            &internal_key_order_types,
+
+        let cache_key_serde = create_cache_key_serde(
+            &storage_key_data_types,
+            &storage_key_order_types,
             order_by_len,
         );
-        let (first_key_data_types, second_key_data_types) =
-            internal_key_data_types.split_at(order_by_len);
-        let (first_key_order_types, second_key_order_types) =
-            internal_key_order_types.split_at(order_by_len);
-        let first_key_serde = OrderedRowSerde::new(
-            first_key_data_types.to_vec(),
-            first_key_order_types.to_vec(),
-        );
-        let second_key_serde = OrderedRowSerde::new(
-            second_key_data_types.to_vec(),
-            second_key_order_types.to_vec(),
-        );
-        let cache_key_serde = (first_key_serde, second_key_serde);
+        let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
+
         Ok(Self {
             info: ExecutorInfo {
                 schema,
@@ -164,7 +152,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
                 identity: format!("AppendOnlyTopNExecutor {:X}", executor_id),
             },
             managed_state,
-            internal_key_indices,
+            storage_key_indices,
             cache: TopNCache::new(num_offset, num_limit, order_by_len),
             order_by_len,
             cache_key_serde,
@@ -186,7 +174,7 @@ where
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
             debug_assert_eq!(op, Op::Insert);
-            let pk_row = row_ref.project(&self.internal_key_indices);
+            let pk_row = row_ref.project(&self.storage_key_indices);
             let cache_key =
                 serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
             self.cache.insert(

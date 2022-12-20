@@ -170,22 +170,22 @@ pub fn generate_output(
 
 /// Separate the information of `storage_key` into different `Vec`s. The `Vec`s have the same
 /// length as `storage_key`.
-pub fn generate_executor_pk_indices_info(
+pub fn generate_storage_key_info(
     storage_key: &[OrderPair],
     schema: &Schema,
 ) -> (PkIndices, Vec<DataType>, Vec<OrderType>) {
-    let mut internal_key_indices = vec![];
+    let mut storage_key_indices = vec![];
     let mut internal_order_types = vec![];
     for order_pair in storage_key {
-        internal_key_indices.push(order_pair.column_idx);
+        storage_key_indices.push(order_pair.column_idx);
         internal_order_types.push(order_pair.order_type);
     }
-    let internal_data_types = internal_key_indices
+    let internal_data_types = storage_key_indices
         .iter()
         .map(|idx| schema.fields()[*idx].data_type())
         .collect();
     (
-        internal_key_indices,
+        storage_key_indices,
         internal_data_types,
         internal_order_types,
     )
@@ -196,7 +196,7 @@ pub fn generate_executor_pk_indices_info(
 pub fn serialize_pk_to_cache_key(
     pk: impl Row,
     order_by_len: usize,
-    cache_key_serde: &(OrderedRowSerde, OrderedRowSerde),
+    cache_key_serde: &CacheKeySerde,
 ) -> CacheKey {
     // TODO(row trait): may support splitting row
     let pk = pk.into_owned_row().into_inner();
@@ -205,4 +205,29 @@ pub fn serialize_pk_to_cache_key(
         cache_key_first.memcmp_serialize(&cache_key_serde.0),
         cache_key_second.memcmp_serialize(&cache_key_serde.1),
     )
+}
+
+/// See [`CacheKey`].
+pub type CacheKeySerde = (OrderedRowSerde, OrderedRowSerde);
+
+/// `cache_key_data_types` and `cache_key_order_types` correspond to the full [`CacheKey`].
+///
+/// Split them into two parts according to `order_by_len`.
+pub fn create_cache_key_serde(
+    cache_key_data_types: &[DataType],
+    cache_key_order_types: &[OrderType],
+    order_by_len: usize,
+) -> CacheKeySerde {
+    let (first_key_data_types, second_key_data_types) = cache_key_data_types.split_at(order_by_len);
+    let (first_key_order_types, second_key_order_types) =
+        cache_key_order_types.split_at(order_by_len);
+    let first_key_serde = OrderedRowSerde::new(
+        first_key_data_types.to_vec(),
+        first_key_order_types.to_vec(),
+    );
+    let second_key_serde = OrderedRowSerde::new(
+        second_key_data_types.to_vec(),
+        second_key_order_types.to_vec(),
+    );
+    (first_key_serde, second_key_serde)
 }

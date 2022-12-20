@@ -15,15 +15,12 @@
 use futures::{pin_mut, StreamExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::OrderedRowSerde;
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::DataType;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::GroupKey;
-use crate::executor::top_n::{serialize_pk_to_cache_key, CacheKey, TopNCache};
+use crate::executor::top_n::{serialize_pk_to_cache_key, CacheKey, CacheKeySerde, TopNCache};
 
 /// * For TopN, the storage key is: `[ order_by + remaining columns of pk ]`
 /// * For group TopN, the storage key is: `[ group_key + order_by + remaining columns of pk ]`
@@ -35,12 +32,11 @@ pub struct ManagedTopNState<S: StateStore> {
     pub(crate) state_table: StateTable<S>,
 
     /// Used for serializing pk into CacheKey.
-    cache_key_serde: (OrderedRowSerde, OrderedRowSerde),
+    cache_key_serde: CacheKeySerde,
 }
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct TopNStateRow {
-    // (order_key|input_pk)
     pub cache_key: CacheKey,
     pub row: OwnedRow,
 }
@@ -52,23 +48,7 @@ impl TopNStateRow {
 }
 
 impl<S: StateStore> ManagedTopNState<S> {
-    pub fn new(
-        state_table: StateTable<S>,
-        pk_data_types: &[DataType],
-        pk_order_types: &[OrderType],
-        order_by_len: usize,
-    ) -> Self {
-        let (first_key_data_types, second_key_data_types) = pk_data_types.split_at(order_by_len);
-        let (first_key_order_types, second_key_order_types) = pk_order_types.split_at(order_by_len);
-        let first_key_serde = OrderedRowSerde::new(
-            first_key_data_types.to_vec(),
-            first_key_order_types.to_vec(),
-        );
-        let second_key_serde = OrderedRowSerde::new(
-            second_key_data_types.to_vec(),
-            second_key_order_types.to_vec(),
-        );
-        let cache_key_serde = (first_key_serde, second_key_serde);
+    pub fn new(state_table: StateTable<S>, cache_key_serde: CacheKeySerde) -> Self {
         Self {
             state_table,
             cache_key_serde,
@@ -258,13 +238,13 @@ impl<S: StateStore> ManagedTopNState<S> {
 #[cfg(test)]
 mod tests {
     use risingwave_common::types::DataType;
-    use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
 
     // use std::collections::BTreeMap;
     use super::*;
     use crate::executor::managed_state::top_n::NO_GROUP_KEY;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
+    use crate::executor::top_n::create_cache_key_serde;
     use crate::row_nonnull;
 
     #[tokio::test]
@@ -282,18 +262,8 @@ mod tests {
             tb
         };
 
-        let (first_key_data_types, second_key_data_types) = data_types.split_at(1);
-        let (first_key_order_types, second_key_order_types) = order_types.split_at(1);
-        let first_key_serde = OrderedRowSerde::new(
-            first_key_data_types.to_vec(),
-            first_key_order_types.to_vec(),
-        );
-        let second_key_serde = OrderedRowSerde::new(
-            second_key_data_types.to_vec(),
-            second_key_order_types.to_vec(),
-        );
-        let cache_key_serde = (first_key_serde, second_key_serde);
-        let mut managed_state = ManagedTopNState::new(state_table, &data_types, &order_types, 1);
+        let cache_key_serde = create_cache_key_serde(&data_types, &order_types, 1);
+        let mut managed_state = ManagedTopNState::new(state_table, cache_key_serde.clone());
 
         let row1 = row_nonnull!["abc", 2i64];
         let row2 = row_nonnull!["abc", 3i64];
@@ -373,19 +343,8 @@ mod tests {
             tb
         };
 
-        let (first_key_data_types, second_key_data_types) = data_types.split_at(1);
-        let (first_key_order_types, second_key_order_types) = order_types.split_at(1);
-        let first_key_serde = OrderedRowSerde::new(
-            first_key_data_types.to_vec(),
-            first_key_order_types.to_vec(),
-        );
-        let second_key_serde = OrderedRowSerde::new(
-            second_key_data_types.to_vec(),
-            second_key_order_types.to_vec(),
-        );
-
-        let cache_key_serde = (first_key_serde, second_key_serde);
-        let mut managed_state = ManagedTopNState::new(state_table, &data_types, &order_types, 1);
+        let cache_key_serde = create_cache_key_serde(&data_types, &order_types, 1);
+        let mut managed_state = ManagedTopNState::new(state_table, cache_key_serde.clone());
 
         let row1 = row_nonnull!["abc", 2i64];
         let row2 = row_nonnull!["abc", 3i64];

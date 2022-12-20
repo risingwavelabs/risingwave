@@ -27,7 +27,7 @@ const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 
 /// Cache for [`ManagedTopNState`].
 ///
-/// The key in the maps is `[ order_by + remaining columns of pk ]`. `group_key` is not
+/// The key in the maps [`CacheKey`] is `[ order_by + remaining columns of pk ]`. `group_key` is not
 /// included.
 ///
 /// # `WITH_TIES`
@@ -58,7 +58,7 @@ pub struct TopNCache<const WITH_TIES: bool> {
     pub order_by_len: usize,
 }
 
-// the CacheKey is composed of order_key and input_pk.
+/// `CacheKey` is composed of `(order_by, remaining columns of pk)`.
 pub type CacheKey = (Vec<u8>, Vec<u8>);
 
 /// This trait is used as a bound. It is needed since
