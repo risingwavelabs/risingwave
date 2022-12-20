@@ -23,8 +23,8 @@ use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp, str_to_timestampz};
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
-use super::util::at_least_one_ok;
 use crate::parser::canal::operators::*;
+use crate::parser::util::at_least_one_ok;
 use crate::{
     ensure_rust_type, ensure_str, ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard,
 };

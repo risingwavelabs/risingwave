@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use futures::future::ready;
+use itertools::Itertools;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
+use crate::parser::util::at_least_one_ok;
 use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for JSON format
@@ -28,18 +30,22 @@ pub struct JsonParser;
     target_feature = "neon",
     target_feature = "simd128"
 )))]
+use serde_json::Value;
+
+#[cfg(not(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+)))]
 impl JsonParser {
-    fn parse_inner(
-        &self,
+    #[inline]
+    fn parse_single_value(
         payload: &[u8],
-        mut writer: SourceStreamChunkRowWriter<'_>,
+        value: Value,
+        writer: &mut SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        use serde_json::Value;
-
         use crate::parser::common::json_parse_value;
-
-        let value: Value = serde_json::from_slice(payload)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         writer.insert(|desc| {
             json_parse_value(&desc.data_type, value.get(&desc.name)).map_err(|e| {
@@ -51,6 +57,27 @@ impl JsonParser {
                 e.into()
             })
         })
+    }
+
+    fn parse_inner(
+        &self,
+        payload: &[u8],
+        mut writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
+        let value: Value = serde_json::from_slice(payload)
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+
+        let results = match value {
+            Value::Array(objects) => objects
+                .into_iter()
+                .map(|obj| Self::parse_single_value(payload, obj, &mut writer))
+                .collect_vec(),
+            _ => {
+                return Self::parse_single_value(payload, value, &mut writer);
+            }
+        };
+
+        at_least_one_ok(results)
     }
 }
 
@@ -82,20 +109,22 @@ impl SourceParser for JsonParser {
     target_feature = "neon",
     target_feature = "simd128"
 ))]
+use simd_json::{BorrowedValue, ValueAccess};
+
+#[cfg(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+))]
 impl JsonParser {
-    fn parse_inner(
-        &self,
+    #[inline]
+    fn parse_single_value(
         payload: &[u8],
-        mut writer: SourceStreamChunkRowWriter<'_>,
+        value: BorrowedValue<'_>,
+        writer: &mut SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        use simd_json::{BorrowedValue, ValueAccess};
-
         use crate::parser::common::simd_json_parse_value;
-
-        let mut payload_mut = payload.to_vec();
-
-        let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         writer.insert(|desc| {
             simd_json_parse_value(&desc.data_type, value.get(desc.name.as_str())).map_err(|e| {
@@ -107,6 +136,28 @@ impl JsonParser {
                 e.into()
             })
         })
+    }
+
+    fn parse_inner(
+        &self,
+        payload: &[u8],
+        mut writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
+        let mut payload_mut = payload.to_vec();
+
+        let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+
+        let results = match value {
+            BorrowedValue::Array(objects) => objects
+                .into_iter()
+                .map(|obj| Self::parse_single_value(payload, obj, &mut writer))
+                .collect_vec(),
+            _ => {
+                return Self::parse_single_value(payload, value, &mut writer);
+            }
+        };
+        at_least_one_ok(results)
     }
 }
 
@@ -146,8 +197,20 @@ mod tests {
 
     use crate::{JsonParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
-    #[tokio::test]
-    async fn test_json_parser() {
+    fn get_payload() -> Vec<&'static [u8]> {
+        vec![
+            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}"#.as_slice(),
+            br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.as_slice(),
+        ]
+    }
+
+    fn get_array_top_level_payload() -> Vec<&'static [u8]> {
+        vec![
+            br#"[{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}, {"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}]"#.as_slice()
+        ]
+    }
+
+    async fn test_json_parser(get_payload: fn() -> Vec<&'static [u8]>) {
         let parser = JsonParser;
         let descs = vec![
             SourceColumnDesc::simple("i32", DataType::Int32, 0.into()),
@@ -164,10 +227,7 @@ mod tests {
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
-        for payload in [
-            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}"#.as_slice(),
-            br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.as_slice(),
-        ] {
+        for payload in get_payload() {
             let writer = builder.row_writer();
             parser.parse(payload, writer).await.unwrap();
         }
@@ -243,6 +303,16 @@ mod tests {
                 (Some(ScalarImpl::Decimal(12345.into())))
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_json_parse_object_top_level() {
+        test_json_parser(get_payload).await;
+    }
+
+    #[tokio::test]
+    async fn test_json_parse_array_top_level() {
+        test_json_parser(get_array_top_level_payload).await;
     }
 
     #[tokio::test]

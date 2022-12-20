@@ -29,7 +29,6 @@ mod json_parser;
 mod simd_json_parser;
 
 mod operators;
-mod util;
 
 #[cfg(not(any(
     target_feature = "sse4.2",
