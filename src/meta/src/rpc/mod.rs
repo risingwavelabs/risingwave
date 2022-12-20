@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod elections;
+mod follower_svc;
 mod intercept;
 mod leader_svc;
 pub mod metrics;

@@ -18,7 +18,6 @@ use std::time::Duration;
 
 use etcd_client::ConnectOptions;
 use risingwave_common::util::addr::leader_info_to_host_addr;
-use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::oneshot::channel as OneChannel;
 use tokio::sync::watch::{
@@ -27,11 +26,9 @@ use tokio::sync::watch::{
 use tokio::task::JoinHandle;
 
 use super::elections::run_elections;
-use super::intercept::MetricsMiddlewareLayer;
+use super::follower_svc::start_follower_srv;
 use super::leader_svc::start_leader_srv;
-use super::service::health_service::HealthServiceImpl;
 use crate::manager::MetaOpts;
-use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::MetaResult;
 
@@ -178,37 +175,18 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         // run follower services until node becomes leader
         // FIXME: Add service discovery for follower
         // https://github.com/risingwavelabs/risingwave/issues/6755
-        let mut svc_shutdown_rx_clone = svc_shutdown_rx.clone();
+        let svc_shutdown_rx_clone = svc_shutdown_rx.clone();
         let (follower_shutdown_tx, follower_shutdown_rx) = OneChannel::<()>();
         let follower_handle: Option<JoinHandle<()>> = if !is_leader {
+            let address_info_clone = address_info.clone();
             Some(tokio::spawn(async move {
                 let _ = tracing::span!(tracing::Level::INFO, "follower services").enter();
-                tracing::info!("Starting follower services");
-                let health_srv = HealthServiceImpl::new();
-                tonic::transport::Server::builder()
-                    .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
-                    .add_service(HealthServer::new(health_srv))
-                    .serve_with_shutdown(address_info.listen_addr, async move {
-                        tokio::select! {
-                            _ = tokio::signal::ctrl_c() => {},
-                            // shutdown service if all services should be shut down
-                            res = svc_shutdown_rx_clone.changed() =>  {
-                                match res {
-                                    Ok(_) => tracing::info!("Shutting down services"),
-                                    Err(_) => tracing::error!("Service shutdown sender dropped")
-                                }
-                            },
-                            // shutdown service if follower becomes leader
-                            res = follower_shutdown_rx =>  {
-                                match res {
-                                    Ok(_) => tracing::info!("Shutting down follower services"),
-                                    Err(_) => tracing::error!("Follower service shutdown sender dropped")
-                                }
-                            },
-                        }
-                    })
-                    .await
-                    .unwrap();
+                start_follower_srv(
+                    svc_shutdown_rx_clone,
+                    follower_shutdown_rx,
+                    address_info_clone,
+                )
+                .await;
             }))
         } else {
             None
@@ -231,7 +209,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
         start_leader_srv(
             meta_store,
-            address_info.clone(),
+            address_info,
             max_heartbeat_interval,
             opts,
             leader_rx,
