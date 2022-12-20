@@ -64,11 +64,6 @@ pub enum StateStoreImpl {
     /// state. (e.g., no read_epoch support, no async checkpoint)
     MemoryStateStore(Monitored<MemoryStateStoreType>),
     SledStateStore(Monitored<SledStateStoreType>),
-    /// RocksDB state store. This is meant for benchmarking purposes. It should not be used in
-    /// a production setting and is not maintained on the `main` branch, but rather on the
-    /// `rocksdb` branch.
-    /// The state store cannot recover from failure. It may possibly undergo scaling on a
-    /// single-node, but it may not work correctly.
     /// This implementation runs a single RocksDB instance for a single compute node.
     #[cfg(feature = "rocksdb-local")]
     RocksDBStateStore(Monitored<RocksDBStateStoreType>),
@@ -679,6 +674,13 @@ impl AsHummockTrait for MemoryStateStore {
 }
 
 impl AsHummockTrait for SledStateStore {
+    fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
+        None
+    }
+}
+
+#[cfg(feature = "rocksdb-local")]
+impl AsHummockTrait for RocksDBStateStore {
     fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
         None
     }

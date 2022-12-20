@@ -20,7 +20,6 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{Result, RwError};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use rocksdb::{
@@ -33,7 +32,7 @@ use tokio::task;
 use crate::error::{StorageError, StorageResult};
 use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::utils::{to_full_key_range, BytesFullKey, BytesFullKeyRange};
+use crate::utils::{to_full_key_range, BytesFullKey};
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
 #[derive(Clone)]
@@ -171,7 +170,6 @@ pub fn next_prefix(prefix: &[u8]) -> Vec<u8> {
 // it is `Send` and `Sync` after wrapping in an `Arc(Mutex)`
 pub struct RocksDBStateStoreIter {
     iter: Arc<Mutex<DBIterator<Arc<DB>>>>,
-    key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     epoch: u64,
     end_key_data: Arc<EndKeyData>,
     stopped: bool,
@@ -234,7 +232,6 @@ impl RocksDBStateStoreIter {
                 .map_err(|e| StorageError::InternalError(e))?;
             Ok(Self {
                 iter: Arc::new(Mutex::new(iter)),
-                key_range: range,
                 epoch,
                 end_key_data: Arc::new(EndKeyData {
                     end_key,
@@ -403,8 +400,6 @@ impl RocksDBStorage {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-
     use super::*;
 
     #[tokio::test]
