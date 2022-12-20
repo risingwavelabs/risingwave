@@ -487,10 +487,12 @@ mod tests {
     #[tokio::test]
     async fn test_merger() {
         const CHANNEL_NUMBER: usize = 10;
+        const INITIAL_PERMITS: usize = 8192;
+        const BATCHED_PERMITS: usize = 1024;
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
         let mut rxs = Vec::with_capacity(CHANNEL_NUMBER);
         for _i in 0..CHANNEL_NUMBER {
-            let (tx, rx) = channel();
+            let (tx, rx) = channel(INITIAL_PERMITS, BATCHED_PERMITS);
             txs.push(tx);
             rxs.push(rx);
         }
@@ -731,6 +733,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_exchange_client() {
+        const BATCHED_PERMITS: usize = 1024;
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
         let addr = "127.0.0.1:12348".parse().unwrap();
@@ -763,6 +766,7 @@ mod tests {
                 (0, 0),
                 (0, 0),
                 Arc::new(StreamingMetrics::unused()),
+                BATCHED_PERMITS,
             )
         };
 

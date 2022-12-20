@@ -973,7 +973,9 @@ mod tests {
     #[tokio::test]
     async fn test_configuration_change() {
         let _schema = Schema { fields: vec![] };
-        let (tx, rx) = channel();
+        const INITIAL_PERMITS: usize = 8192;
+        const BATCHED_PERMITS: usize = 1024;
+        let (tx, rx) = channel(INITIAL_PERMITS, BATCHED_PERMITS);
         let actor_id = 233;
         let input = Box::new(ReceiverExecutor::for_test(rx));
         let ctx = Arc::new(SharedContext::for_test());
