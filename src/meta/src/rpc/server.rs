@@ -27,7 +27,7 @@ use tokio::task::JoinHandle;
 
 use super::elections::run_elections;
 use super::follower_svc::start_follower_srv;
-use super::leader_svc::start_leader_srv;
+use super::leader_svc::{start_leader_srv, ElectionCoordination};
 use crate::manager::MetaOpts;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::MetaResult;
@@ -207,14 +207,18 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             let _ = follower_handle.unwrap().await;
         }
 
+        let elect_coord = ElectionCoordination {
+            election_handle,
+            election_shutdown,
+        };
+
         start_leader_srv(
             meta_store,
             address_info,
             max_heartbeat_interval,
             opts,
             leader_rx,
-            election_handle,
-            election_shutdown,
+            elect_coord,
             svc_shutdown_rx,
         )
         .await

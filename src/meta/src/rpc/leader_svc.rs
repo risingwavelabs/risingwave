@@ -58,6 +58,12 @@ use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::{hummock, MetaResult};
 
+// simple wrapper containing election sync related objects
+pub struct ElectionCoordination {
+    pub election_handle: JoinHandle<()>,
+    pub election_shutdown: OneSender<()>,
+}
+
 /// Starts all services needed for the meta leader node
 /// Only call this function once, since initializing the services multiple times will result in an
 /// inconsistent state
@@ -70,8 +76,7 @@ pub async fn start_leader_srv<S: MetaStore>(
     max_heartbeat_interval: Duration,
     opts: MetaOpts,
     leader_rx: WatchReceiver<(MetaLeaderInfo, bool)>,
-    election_handle: JoinHandle<()>,
-    election_shutdown: OneSender<()>,
+    election_coordination: ElectionCoordination,
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
@@ -274,7 +279,10 @@ pub async fn start_leader_srv<S: MetaStore>(
         .await,
     );
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
-    sub_tasks.push((election_handle, election_shutdown));
+    sub_tasks.push((
+        election_coordination.election_handle,
+        election_coordination.election_shutdown,
+    ));
     if cfg!(not(test)) {
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
