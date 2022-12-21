@@ -303,7 +303,7 @@ mod tests {
                         meta_addr.as_str(),
                         WorkerType::ComputeNode,
                         &host_addr,
-                        1,
+                        5,
                     )
                     .await;
                     match client_i {
@@ -323,12 +323,16 @@ mod tests {
         leader_count
     }
 
+    async fn _leader_count_with_setup(number_of_nodes: u16, meta_port: u16, host_port: u16) -> u16 {
+        let _ = _setup_n_nodes(number_of_nodes, meta_port).await;
+        _number_of_leaders(number_of_nodes, meta_port, host_port).await
+    }
+
     // Writing these tests as separate functions instead of one loop, because functions get executed
     // in parallel
     #[tokio::test]
     async fn test_single_leader_setup_1() {
-        let _node_controllers = _setup_n_nodes(1, 1234).await;
-        let leader_count = _number_of_leaders(1, 1234, 5678).await;
+        let leader_count = _leader_count_with_setup(1, 1234, 5678).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
@@ -338,8 +342,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_leader_setup_3() {
-        let _node_controllers = _setup_n_nodes(3, 2345).await;
-        let leader_count = _number_of_leaders(3, 2345, 6789).await;
+        let leader_count = _leader_count_with_setup(3, 2345, 6789).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
@@ -349,8 +352,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_leader_setup_10() {
-        let _node_controllers = _setup_n_nodes(10, 3456).await;
-        let leader_count = _number_of_leaders(10, 3456, 7890).await;
+        let leader_count = _leader_count_with_setup(10, 3456, 7890).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
@@ -361,8 +363,7 @@ mod tests {
     #[tokio::test]
     async fn test_single_leader_setup_100() {
         // TODO: helper func that calls both of these functions below
-        let _node_controllers = _setup_n_nodes(100, 4567).await;
-        let leader_count = _number_of_leaders(100, 4567, 8901).await;
+        let leader_count = _leader_count_with_setup(100, 4567, 8901).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
