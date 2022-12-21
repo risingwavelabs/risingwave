@@ -130,6 +130,10 @@ where
         Ok(map.values().cloned().collect())
     }
 
+    pub async fn has_any_table_fragments(&self) -> bool {
+        !self.core.read().await.table_fragments.is_empty()
+    }
+
     pub async fn batch_update_table_fragments(
         &self,
         table_fragments: &[TableFragments],
