@@ -143,8 +143,14 @@ pub async fn handle(
                 .into());
             }
             if let Some(query) = query {
-                return create_table_as::handle_create_as(handler_args, name, if_not_exists, query)
-                    .await;
+                return create_table_as::handle_create_as(
+                    handler_args,
+                    name,
+                    if_not_exists,
+                    query,
+                    columns,
+                )
+                .await;
             }
             create_table::handle_create_table(
                 handler_args,
