@@ -130,6 +130,12 @@ where
         Ok(map.values().cloned().collect())
     }
 
+    pub async fn has_any_table_fragments(&self) -> MetaResult<bool> {
+        let map = &self.core.read().await.table_fragments;
+
+        Ok(!map.is_empty())
+    }
+
     pub async fn batch_update_table_fragments(
         &self,
         table_fragments: &[TableFragments],

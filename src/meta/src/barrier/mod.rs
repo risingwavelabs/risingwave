@@ -533,6 +533,17 @@ where
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
                 .unwrap();
+        } else {
+            if self
+                .fragment_manager
+                .has_any_table_fragments()
+                .await
+                .unwrap()
+            {
+                panic!(
+                    "Streaming jobs already exists in meta, please enable recovery to recover them"
+                );
+            }
         }
         self.set_status(BarrierManagerStatus::Running).await;
         let mut min_interval = tokio::time::interval(self.interval);
