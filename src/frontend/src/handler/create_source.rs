@@ -167,6 +167,7 @@ pub async fn handle_create_source(
                     row_schema_location: protobuf_schema.row_schema_location.0.clone(),
                     use_schema_registry: protobuf_schema.use_schema_registry,
                     proto_message_name: protobuf_schema.message_name.0.clone(),
+                    ..Default::default()
                 },
             )
         }
@@ -184,6 +185,7 @@ pub async fn handle_create_source(
                     row_schema_location: avro_schema.row_schema_location.0.clone(),
                     use_schema_registry: avro_schema.use_schema_registry,
                     proto_message_name: "".to_owned(),
+                    ..Default::default()
                 },
             )
         }
@@ -242,6 +244,15 @@ pub async fn handle_create_source(
                 },
             )
         }
+        SourceSchema::CSV(csv_info) => (
+            columns,
+            StreamSourceInfo {
+                row_format: RowFormatType::Csv as i32,
+                csv_delimiter: csv_info.delimiter as i32,
+                csv_has_header: csv_info.has_header,
+                ..Default::default()
+            },
+        ),
     };
 
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
