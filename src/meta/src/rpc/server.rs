@@ -434,10 +434,4 @@ mod tests {
             leader_count
         );
     }
-
-    // TODO: After failover there should be one leader
-    // How do we simulate failover? -> Kill current leader
-    // Failover tests should work with 1, 3, 10, 100 nodes
-    // Afterwards we still want to have 1 leader only
-    // utilize number_of_leaders function
 }
