@@ -374,7 +374,7 @@ mod tests {
     async fn _test_failover(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
         let vec_meta_handlers = _setup_n_nodes(number_of_nodes, meta_port).await;
 
-        // we should have 1 leader at the moment
+        // we should have 1 leader on startup
         let leader_count = _number_of_leaders(number_of_nodes, meta_port, compute_port).await;
         assert_eq!(
             leader_count, 1,
