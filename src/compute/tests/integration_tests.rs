@@ -245,6 +245,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let scan = Box::new(RowSeqScanExecutor::new(
         table.clone(),
         vec![ScanRange::full()],
+        true,
         to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqExecutor2".to_string(),
@@ -307,6 +308,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let scan = Box::new(RowSeqScanExecutor::new(
         table.clone(),
         vec![ScanRange::full()],
+        true,
         to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqScanExecutor2".to_string(),
@@ -379,6 +381,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let scan = Box::new(RowSeqScanExecutor::new(
         table,
         vec![ScanRange::full()],
+        true,
         to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqScanExecutor2".to_string(),
@@ -446,6 +449,7 @@ async fn test_row_seq_scan() -> Result<()> {
     let executor = Box::new(RowSeqScanExecutor::new(
         table,
         vec![ScanRange::full()],
+        true,
         to_committed_batch_query_epoch(u64::MAX),
         1,
         "RowSeqScanExecutor2".to_string(),

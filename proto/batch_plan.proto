@@ -21,6 +21,8 @@ message RowSeqScanNode {
   //
   // Will be filled by the scheduler.
   common.Buffer vnode_bitmap = 4;
+  // Whether the order on output columns should be preserved.
+  bool ordered = 5;
 }
 
 message SysRowSeqScanNode {

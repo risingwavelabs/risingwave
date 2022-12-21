@@ -869,7 +869,7 @@ mod tests {
 
     use super::*;
     use crate::executor::exchange::output::Output;
-    use crate::executor::exchange::permit::channel;
+    use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::receiver::ReceiverExecutor;
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
@@ -973,7 +973,7 @@ mod tests {
     #[tokio::test]
     async fn test_configuration_change() {
         let _schema = Schema { fields: vec![] };
-        let (tx, rx) = channel();
+        let (tx, rx) = channel_for_test();
         let actor_id = 233;
         let input = Box::new(ReceiverExecutor::for_test(rx));
         let ctx = Arc::new(SharedContext::for_test());

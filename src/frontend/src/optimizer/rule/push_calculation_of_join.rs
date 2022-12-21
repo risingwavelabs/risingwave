@@ -128,6 +128,10 @@ impl PushCalculationOfJoinRule {
             if !is_comparison_type(func.get_expr_type()) {
                 continue;
             }
+            // Do not decompose the comparison if it contains `now()`
+            if expr.count_nows() > 0 {
+                continue;
+            }
             let (ty, left, right) = func.clone().decompose_as_binary();
             // we just cast the return types of inputs of binary predicates for `HashJoin` and
             // `DynamicFilter`.

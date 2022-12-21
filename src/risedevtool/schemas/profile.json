@@ -1,0 +1,36 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "description": "List of profiles used by `dev`, `playground`, or `compose`.",
+    "type": "object",
+    "patternProperties": {
+        "^[_a-zA-Z0-9][a-zA-Z0-9_-]*$": {
+            "description": "Each entry defines a profile. The key is its name. Valid properties are `steps` and `config-path`.",
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "description": "An array of the components to be used. A component can be used multiple times for multi-node setup.\nThey will be started in the order of the array.",
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "use": {
+                                "description": "The name of the component to use. It refers to the templates defined in the top-level `template` section.\nOther key-value pairs here will be used to override the template's default values.\nA component can be used multiple times for multi-node setup."
+                            }
+                        },
+                        "required": [
+                            "use"
+                        ]
+                    }
+                },
+                "config-path": {
+                    "description": "The path to a toml config file for this profile.\nIt will be copied to `.risingwave/config/risingwave.toml` , which is the `config-path` arg passed to risingwave nodes by risedev.\n"
+                }
+            },
+            "additionalProperties": false,
+            "required": [
+                "steps"
+            ]
+        }
+    },
+    "additionalProperties": false
+}
