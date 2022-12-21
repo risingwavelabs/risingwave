@@ -242,6 +242,8 @@ mod tests {
 
     use super::*;
 
+    /// Start `n` meta nodes on localhost. First node will be started at `meta_port`, 2nd node on
+    /// `meta_port + 1`, ...
     async fn setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
         let meta_store = Arc::new(MemStore::default());
 
@@ -276,6 +278,12 @@ mod tests {
         node_controllers
     }
 
+    /// Check for `number_of_nodes` meta leader nodes, starting at `meta_port`, `meta_port + 1`, ...
+    /// Simulates `number_of_nodes` compute nodes, starting at `meta_port`, `meta_port + 1`, ...
+    ///
+    /// ## Returns
+    /// Number of nodes which currently are leaders. Number is not snapshoted. If there is a
+    /// leader failover in process, you may get an incorrect result
     async fn number_of_leaders(number_of_nodes: u16, meta_port: u16, host_port: u16) -> u16 {
         let _node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
 
@@ -359,5 +367,12 @@ mod tests {
         );
     }
 
-    // TODO: implement failover test
+    #[tokio::test]
+    async fn test_failover() {
+        // TODO: After failover there should be one leader
+        // How do we simulate failover? -> Kill current leader
+        // Failover tests should work with 1, 3, 10, 100 nodes
+        // Afterwards we still want to have 1 leader only
+        // utilize number_of_leaders function
+    }
 }
