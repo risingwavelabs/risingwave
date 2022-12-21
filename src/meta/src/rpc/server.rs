@@ -21,7 +21,7 @@ use risingwave_common::util::addr::leader_info_to_host_addr;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::meta::leader_service_server::LeaderServiceServer;
 use tokio::sync::oneshot::channel as OneChannel;
-use tokio::sync::watch::Sender as WatchSender;
+use tokio::sync::watch::{channel as WatchChannel, Sender as WatchSender};
 use tokio::task::JoinHandle;
 
 use super::elections::run_elections;
