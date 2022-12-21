@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::ops::Bound;
-use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
 use either::Either;
@@ -31,7 +30,7 @@ use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
-use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message};
+use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
 use crate::executor::PkIndices;
 use crate::task::{ActorId, CreateMviewProgress};
 
@@ -63,7 +62,7 @@ pub struct BackfillExecutor<S: StateStore> {
     upstream: BoxedExecutor,
 
     /// The column indices need to be forwarded to the downstream.
-    upstream_indices: Arc<[usize]>,
+    upstream_indices: Vec<usize>,
 
     progress: CreateMviewProgress,
 
@@ -94,7 +93,7 @@ where
             },
             table,
             upstream,
-            upstream_indices: upstream_indices.into(),
+            upstream_indices,
             actor_id: progress.actor_id(),
             progress,
         }
@@ -103,8 +102,8 @@ where
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         // Table storage primary key.
-        let table_pk_indices = self.table.pk_indices().to_vec();
-        let upstream_indices = self.upstream_indices.to_vec();
+        let table_pk_indices = self.table.pk_indices();
+        let upstream_indices = self.upstream_indices;
 
         let mut upstream = self.upstream.execute();
 
@@ -178,7 +177,7 @@ where
         'backfill_loop: loop {
             let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
 
-            let mut left_upstream = (&mut upstream).map(Either::Left);
+            let left_upstream = upstream.by_ref().map(Either::Left);
 
             let right_snapshot = Box::pin(
                 Self::snapshot_read(&self.table, snapshot_read_epoch, current_pos.clone())
@@ -188,7 +187,7 @@ where
             // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
             // comes.
             let backfill_stream =
-                select_with_strategy(&mut left_upstream, right_snapshot, |_: &mut ()| {
+                select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
                     stream::PollNext::Left
                 });
 
@@ -205,7 +204,7 @@ where
                                 for chunk in upstream_chunk_buffer.drain(..) {
                                     if let Some(current_pos) = &current_pos {
                                         yield Message::Chunk(Self::mapping_chunk(
-                                            Self::mark_chunk(chunk, current_pos, &table_pk_indices),
+                                            Self::mark_chunk(chunk, current_pos, table_pk_indices),
                                             &upstream_indices,
                                         ));
                                     }
@@ -258,14 +257,11 @@ where
                                         .last()
                                         .unwrap()
                                         .1
-                                        .project(&table_pk_indices)
+                                        .project(table_pk_indices)
                                         .into_owned_row(),
                                 );
 
-                                yield Message::Chunk(Self::mapping_chunk(
-                                    chunk,
-                                    &self.upstream_indices,
-                                ));
+                                yield Message::Chunk(Self::mapping_chunk(chunk, &upstream_indices));
                             }
                         }
                     }
@@ -340,7 +336,7 @@ where
     fn mark_chunk(
         chunk: StreamChunk,
         current_pos: &OwnedRow,
-        table_pk_indices: &PkIndices,
+        table_pk_indices: PkIndicesRef<'_>,
     ) -> StreamChunk {
         let chunk = chunk.compact();
         let (data, ops) = chunk.into_parts();
