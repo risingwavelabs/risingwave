@@ -28,6 +28,8 @@ impl NativeParser {
         payload: &[u8],
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
+        // Reclaim the ownership of the memory.
+        // Previously leak the memory in `DatagenEventGenerator`.
         let boxed_row: Box<OwnedRow> = unsafe { Box::from_raw(payload.as_ptr() as *mut OwnedRow) };
         let mut idx = 0;
         writer.insert(|_desc| {

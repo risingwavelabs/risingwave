@@ -71,6 +71,9 @@ impl DatagenEventGenerator {
                         .iter_mut()
                         .map(|field_generator| field_generator.generate_datum(self.offset))
                         .collect();
+                    // Leak the memory.
+                    // We will reclaim the ownership of this piece of memory during parsing.
+                    // see `NativeParser`
                     let value = unsafe {
                         let row = OwnedRow::new(data);
                         let row = Box::new(row);
