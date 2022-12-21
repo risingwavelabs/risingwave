@@ -1815,7 +1815,11 @@ impl Parser {
 
     fn parse_column_def(&mut self) -> Result<ColumnDef, ParserError> {
         let name = self.parse_identifier_non_reserved()?;
-        let data_type = self.parse_data_type()?;
+        let data_type = if let Token::Word(_) = self.peek_token() {
+            Some(self.parse_data_type()?)
+        } else {
+            None
+        };
 
         let collation = if self.parse_keyword(Keyword::COLLATE) {
             Some(self.parse_object_name()?)

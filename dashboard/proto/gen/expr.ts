@@ -13,6 +13,11 @@ export interface ExprNode {
   };
 }
 
+/**
+ * a "pure function" will be defined as having `1 < expr_node as i32 <= 600`.
+ * Please modify this definition if adding a pure function that does not belong
+ * to this range.
+ */
 export const ExprNode_Type = {
   UNSPECIFIED: "UNSPECIFIED",
   INPUT_REF: "INPUT_REF",
