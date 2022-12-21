@@ -24,7 +24,7 @@ impl Binder {
     /// Extracts and binds struct column from `expr`.
     /// Returns the bound column and the remaining fields.
     ///
-    /// Specifcally,
+    /// Specifically,
     /// - `(table).struct_col.fields` -> `(bound_struct_col, fields)`
     /// - Otherwise, `expr` corresponds to a column. `(expr).fields` -> `(bound_expr, fields)`
     fn extract_struct_column(
