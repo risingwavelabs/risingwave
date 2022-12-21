@@ -232,6 +232,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 // Print the sleep intervals
 // use pseudo rand gen with seed
 mod tests {
+    use core::panic;
     use std::net::{IpAddr, Ipv4Addr};
 
     use risingwave_common::util::addr::HostAddr;
@@ -246,16 +247,16 @@ mod tests {
 
         let mut node_controllers: Vec<(JoinHandle<()>, WatchSender<()>)> = vec![];
         for i in 0..n {
-            // TODO: add pseudo random sleep here
-            let node = format!("node{}", i);
+            // TODO: use http or https here?
+            let addr = format!("http://127.0.0.1:{}", meta_port + i);
 
             let info = AddressInfo {
-                addr: node,
+                addr,
                 listen_addr: SocketAddr::new(
                     IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                     meta_port + i,
                 ),
-                prometheus_addr: None,
+                prometheus_addr: None, // TODO: use default here
                 dashboard_addr: None,
                 ui_path: None,
             };
@@ -286,6 +287,7 @@ mod tests {
         for i in 0..n {
             // create client connecting against meta_i
             let port = meta_port + i;
+            // https or http?
             let meta_addr = format!("http://127.0.0.1:{}", port);
             let host_addr = "127.0.0.1:5688".parse::<HostAddr>().unwrap();
             let host_addr = HostAddr {
@@ -297,22 +299,35 @@ mod tests {
             // Do I need to start some service first?
             // are the other services still running here?
             //      yes! Check via lsof -i @localhost
-            let err_msg = format!("Unable to connect against client {}", i);
-            let client_i = MetaClient::register_new(
-                meta_addr.as_str(),
-                WorkerType::ComputeNode,
-                &host_addr,
-                0,
-            )
-            .await
-            .expect(&err_msg);
+            // unspecified: Got error gRPC error (Internal error): worker_type
+            // Compactor: Got error gRPC error (Operation is not implemented or not supported)
+            // Frontend: (Operation is not implemented or not supported)
+            // ComputeNode: Got error gRPC error (Operation is not implemented or not supported)
+            // RiseCtl: Got error gRPC error (Operation is not implemented or not supported)
 
-            match client_i.send_heartbeat(i as u32, vec![]).await {
-                Ok(_) => {
-                    leader_count += 1;
-                    tracing::info!("Node {} is leader", i);
+            // I get this error because I am talking to a non-leader?
+            let is_leader = tokio::time::timeout(std::time::Duration::from_secs(1), async move {
+                let client_i = MetaClient::register_new(
+                    meta_addr.as_str(),
+                    WorkerType::ComputeNode,
+                    &host_addr,
+                    1,
+                )
+                .await;
+                match client_i {
+                    Ok(client_i) => {
+                        match client_i.send_heartbeat(client_i.worker_id(), vec![]).await {
+                            Ok(_) => true,
+                            Err(_) => false,
+                        }
+                    }
+                    Err(_) => false,
                 }
-                Err(_) => tracing::info!("Node {} is follower", i),
+            })
+            .await
+            .unwrap_or(false);
+            if is_leader {
+                leader_count += 1;
             }
         }
 
