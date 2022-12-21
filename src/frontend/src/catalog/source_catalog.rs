@@ -22,8 +22,6 @@ use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, SourceId};
 use crate::WithOptions;
 
-pub const KAFKA_CONNECTOR: &str = "kafka";
-
 /// This struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
 ///
