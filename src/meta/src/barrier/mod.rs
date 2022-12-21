@@ -541,7 +541,7 @@ where
                 .unwrap()
             {
                 panic!(
-                    "Streaming jobs already exists in meta, please enable recovery to recover them"
+                    "Some streaming jobs already exist in meta, please start with recovery enabled"
                 );
             }
         }
