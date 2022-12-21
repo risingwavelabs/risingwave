@@ -40,19 +40,6 @@ impl Array for Utf8Array {
         std::str::from_utf8_unchecked(bytes)
     }
 
-    fn value_at(&self, idx: usize) -> Option<&str> {
-        self.bytes
-            .value_at(idx)
-            .map(|bytes| unsafe { std::str::from_utf8_unchecked(bytes) })
-    }
-
-    #[inline]
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<&str> {
-        self.bytes
-            .value_at_unchecked(idx)
-            .map(|bytes| unsafe { std::str::from_utf8_unchecked(bytes) })
-    }
-
     #[inline]
     fn len(&self) -> usize {
         self.bytes.len()

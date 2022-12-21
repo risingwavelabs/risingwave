@@ -73,23 +73,6 @@ impl Array for BoolArray {
         self.data.is_set_unchecked(idx)
     }
 
-    fn value_at(&self, idx: usize) -> Option<bool> {
-        if !self.is_null(idx) {
-            // Safety: the above `is_null` check ensures that the index is valid.
-            unsafe { Some(self.data.is_set_unchecked(idx)) }
-        } else {
-            None
-        }
-    }
-
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<bool> {
-        if !self.is_null_unchecked(idx) {
-            Some(self.data.is_set_unchecked(idx))
-        } else {
-            None
-        }
-    }
-
     fn len(&self) -> usize {
         self.data.len()
     }

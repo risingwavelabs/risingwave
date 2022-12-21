@@ -186,12 +186,27 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_>;
 
     /// Retrieve a reference to value.
-    fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>>;
+    #[inline]
+    fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>> {
+        if !self.is_null(idx) {
+            // Safety: the above `is_null` check ensures that the index is valid.
+            Some(unsafe { self.raw_value_at_unchecked(idx) })
+        } else {
+            None
+        }
+    }
 
     /// # Safety
     ///
     /// Retrieve a reference to value without checking the index boundary.
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>>;
+    #[inline]
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>> {
+        if !self.is_null_unchecked(idx) {
+            Some(self.raw_value_at_unchecked(idx))
+        } else {
+            None
+        }
+    }
 
     /// Number of items of array.
     fn len(&self) -> usize;

@@ -170,27 +170,6 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         *self.data.get_unchecked(idx)
     }
 
-    fn value_at(&self, idx: usize) -> Option<T> {
-        if self.is_null(idx) {
-            None
-        } else {
-            // Safety: the above `is_null` check ensures that the index is valid.
-            Some(unsafe { *self.data.get_unchecked(idx) })
-        }
-    }
-
-    /// # Safety
-    ///
-    /// This function is unsafe because it does not check whether the index is within the bounds of
-    /// the array.
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<T> {
-        if self.is_null_unchecked(idx) {
-            None
-        } else {
-            Some(*self.data.get_unchecked(idx))
-        }
-    }
-
     fn len(&self) -> usize {
         self.data.len()
     }

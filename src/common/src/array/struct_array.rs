@@ -164,22 +164,6 @@ impl Array for StructArray {
         StructRef::Indexed { arr: self, idx }
     }
 
-    fn value_at(&self, idx: usize) -> Option<StructRef<'_>> {
-        if !self.is_null(idx) {
-            Some(StructRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
-    }
-
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<StructRef<'_>> {
-        if !self.is_null_unchecked(idx) {
-            Some(StructRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
-    }
-
     fn len(&self) -> usize {
         self.len
     }

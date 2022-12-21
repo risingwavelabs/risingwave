@@ -46,23 +46,6 @@ impl Array for BytesArray {
         self.data.get_unchecked(begin..end)
     }
 
-    fn value_at(&self, idx: usize) -> Option<&[u8]> {
-        if !self.is_null(idx) {
-            // SAFETY: The idx is checked in `is_null` and the offset should always be valid.
-            Some(unsafe { self.raw_value_at_unchecked(idx) })
-        } else {
-            None
-        }
-    }
-
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<&[u8]> {
-        if !self.is_null_unchecked(idx) {
-            Some(self.raw_value_at_unchecked(idx))
-        } else {
-            None
-        }
-    }
-
     fn len(&self) -> usize {
         self.offset.len() - 1
     }
