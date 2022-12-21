@@ -277,7 +277,6 @@ mod tests {
     }
 
     async fn number_of_leaders(number_of_nodes: u16, meta_port: u16, host_port: u16) -> u16 {
-        // make n also pseudo random?
         let _node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
 
         let mut leader_count = 0;
@@ -290,8 +289,6 @@ mod tests {
                 port: host_port + i,
             };
 
-            //            let is_leader = tokio::time::timeout(std::time::Duration::from_secs(1),
-            // async move {
             let is_leader =
                 tokio::time::timeout(std::time::Duration::from_millis(100), async move {
                     let client_i = MetaClient::register_new(
@@ -318,18 +315,6 @@ mod tests {
             }
         }
         leader_count
-
-        // Also use pseudo random delays here?
-        // https://github.com/risingwavelabs/risingwave/issues/6884
-
-        // Use heartbeat to determine if node is leader
-        // Use health service to determine if node is up
-
-        // Tests:
-        // Check if nodes conflict when they report leader
-        // Check if the reported leader node is the actual leader node
-        // Check if there are != 1 leader nodes
-        // No failover should happen here, since system is idle
     }
 
     // Writing these tests as separate functions instead of one loop, because functions get executed
@@ -373,10 +358,6 @@ mod tests {
             leader_count
         );
     }
-
-    // Kill nodes via sender
-    // Where do I write the logs to?
-    // TODO: how do I know if a node is a leader or a follower?
 
     // TODO: implement failover test
 }
