@@ -27,7 +27,7 @@ const TOPN_CACHE_HIGH_CAPACITY_FACTOR: usize = 2;
 
 /// Cache for [`ManagedTopNState`].
 ///
-/// The key in the maps is `[ order_by + remaining columns of pk ]`. `group_key` is not
+/// The key in the maps [`CacheKey`] is `[ order_by + remaining columns of pk ]`. `group_key` is not
 /// included.
 ///
 /// # `WITH_TIES`
@@ -53,12 +53,9 @@ pub struct TopNCache<const WITH_TIES: bool> {
     pub offset: usize,
     /// Assumption: `limit != 0`
     pub limit: usize,
-
-    /// The number of fields of the ORDER BY clause, and will be used to split key into `CacheKey`.
-    pub order_by_len: usize,
 }
 
-// the CacheKey is composed of order_key and input_pk.
+/// `CacheKey` is composed of `(order_by, remaining columns of pk)`.
 pub type CacheKey = (Vec<u8>, Vec<u8>);
 
 /// This trait is used as a bound. It is needed since
@@ -99,7 +96,7 @@ pub trait TopNCacheTrait {
 }
 
 impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
-    pub fn new(offset: usize, limit: usize, order_by_len: usize) -> Self {
+    pub fn new(offset: usize, limit: usize) -> Self {
         assert!(limit != 0);
         if WITH_TIES {
             // It's trickier to support.
@@ -116,7 +113,6 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
                 .unwrap_or(usize::MAX),
             offset,
             limit,
-            order_by_len,
         }
     }
 
@@ -255,7 +251,6 @@ impl TopNCacheTrait for TopNCache<false> {
                         self,
                         self.middle.last_key_value().unwrap().0.clone(),
                         self.high_capacity,
-                        self.order_by_len,
                     )
                     .await?;
             }
@@ -290,7 +285,6 @@ impl TopNCacheTrait for TopNCache<false> {
                             self,
                             self.middle.last_key_value().unwrap().0.clone(),
                             self.high_capacity,
-                            self.order_by_len,
                         )
                         .await?;
                 }
@@ -443,7 +437,6 @@ impl TopNCacheTrait for TopNCache<true> {
                         self,
                         self.middle.last_key_value().unwrap().0.clone(),
                         self.high_capacity,
-                        self.order_by_len,
                     )
                     .await?;
             }
