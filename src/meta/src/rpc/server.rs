@@ -241,19 +241,20 @@ mod tests {
 
     use super::*;
 
-    async fn setup_n_nodes(n: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
+    async fn setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
         let meta_store = Arc::new(MemStore::default());
 
         let mut node_controllers: Vec<(JoinHandle<()>, WatchSender<()>)> = vec![];
         for i in 0..n {
             // TODO: add pseudo random sleep here
             let node = format!("node{}", i);
-            let err_msg = format!("Meta {} failed in setup", node);
-            let err_msg = err_msg.as_str();
 
             let info = AddressInfo {
                 addr: node,
-                listen_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 1234 + i),
+                listen_addr: SocketAddr::new(
+                    IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                    meta_port + i,
+                ),
                 prometheus_addr: None,
                 dashboard_addr: None,
                 ui_path: None,
@@ -267,7 +268,7 @@ mod tests {
                     MetaOpts::test(true),   // True or false?
                 )
                 .await
-                .expect(err_msg),
+                .unwrap_or_else(|e| panic!("Meta node{} failed in setup. Err: {}", i, e)),
             );
         } // sleep duration of election cycle, not fixed duration
         sleep(Duration::from_secs(6)).await;
@@ -278,12 +279,13 @@ mod tests {
     async fn test_single_leader_setup() {
         // make n also pseudo random?
         let n = 5;
-        let _node_controllers = setup_n_nodes(n).await;
+        let meta_port = 1234;
+        let _node_controllers = setup_n_nodes(n, meta_port).await;
 
         let mut leader_count = 0;
         for i in 0..n {
             // create client connecting against meta_i
-            let port = 1234 + i;
+            let port = meta_port + i;
             let meta_addr = format!("http://127.0.0.1:{}", port);
             let host_addr = "127.0.0.1:5688".parse::<HostAddr>().unwrap();
             let host_addr = HostAddr {
