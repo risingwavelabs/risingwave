@@ -276,53 +276,48 @@ mod tests {
         node_controllers
     }
 
-    #[tokio::test]
-    async fn test_single_leader_setup() {
+    async fn number_of_leaders(number_of_nodes: u16, meta_port: u16, host_port: u16) -> u16 {
         // make n also pseudo random?
-        let n = 5;
-        let meta_port = 1234;
-        let _node_controllers = setup_n_nodes(n, meta_port).await;
+        let _node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
 
         let mut leader_count = 0;
-        for i in 0..n {
+        for i in 0..number_of_nodes {
             let local = "127.0.0.1".to_owned();
             let port = meta_port + i;
             let meta_addr = format!("http://{}:{}", local, port);
             let host_addr = HostAddr {
                 host: local,
-                port: 5688 + i,
+                port: host_port + i,
             };
 
-            let is_leader = tokio::time::timeout(std::time::Duration::from_secs(1), async move {
-                let client_i = MetaClient::register_new(
-                    meta_addr.as_str(),
-                    WorkerType::ComputeNode,
-                    &host_addr,
-                    1,
-                )
-                .await;
-                match client_i {
-                    Ok(client_i) => {
-                        match client_i.send_heartbeat(client_i.worker_id(), vec![]).await {
-                            Ok(_) => true,
-                            Err(_) => false,
+            //            let is_leader = tokio::time::timeout(std::time::Duration::from_secs(1),
+            // async move {
+            let is_leader =
+                tokio::time::timeout(std::time::Duration::from_millis(100), async move {
+                    let client_i = MetaClient::register_new(
+                        meta_addr.as_str(),
+                        WorkerType::ComputeNode,
+                        &host_addr,
+                        1,
+                    )
+                    .await;
+                    match client_i {
+                        Ok(client_i) => {
+                            match client_i.send_heartbeat(client_i.worker_id(), vec![]).await {
+                                Ok(_) => true,
+                                Err(_) => false,
+                            }
                         }
+                        Err(_) => false,
                     }
-                    Err(_) => false,
-                }
-            })
-            .await
-            .unwrap_or(false);
+                })
+                .await
+                .unwrap_or(false);
             if is_leader {
                 leader_count += 1;
             }
         }
-
-        assert_eq!(
-            leader_count, 1,
-            "Expected to have 1 leader, instead got {} leaders",
-            leader_count
-        );
+        leader_count
 
         // Also use pseudo random delays here?
         // https://github.com/risingwavelabs/risingwave/issues/6884
@@ -335,6 +330,48 @@ mod tests {
         // Check if the reported leader node is the actual leader node
         // Check if there are != 1 leader nodes
         // No failover should happen here, since system is idle
+    }
+
+    // Writing these tests as separate functions instead of one loop, because functions get executed
+    // in parallel
+    #[tokio::test]
+    async fn test_single_leader_setup_1() {
+        let leader_count = number_of_leaders(1, 1234, 5678).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
+    }
+
+    #[tokio::test]
+    async fn test_single_leader_setup_3() {
+        let leader_count = number_of_leaders(3, 2345, 6789).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
+    }
+
+    #[tokio::test]
+    async fn test_single_leader_setup_10() {
+        let leader_count = number_of_leaders(10, 3456, 7890).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
+    }
+
+    #[tokio::test]
+    async fn test_single_leader_setup_100() {
+        let leader_count = number_of_leaders(100, 4567, 8901).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
     }
 
     // Kill nodes via sender
