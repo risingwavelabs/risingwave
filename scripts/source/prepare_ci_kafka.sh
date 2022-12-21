@@ -15,6 +15,8 @@ cd "$SCRIPT_PATH/.." || exit 1
 
 KAFKA_BIN="$SCRIPT_PATH/../../.risingwave/bin/kafka/bin"
 
+tar -xf test_data.tgz -C "$SCRIPT_PATH"/test_data
+
 echo "Create topics"
 for filename in "$SCRIPT_PATH"/test_data/*; do
     ([ -e "$filename" ]
