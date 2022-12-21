@@ -147,7 +147,7 @@ DROP TABLE t.t;
 statement ok
 DROP SCHEMA t;
 
-# (original test's syntax is different): https://github.com/risingwavelabs/risingwave/issues/6772
+# (original test's syntax is different) https://www.postgresql.org/docs/current/rowtypes.html#ROWTYPES-ACCESSING.
 # **ORIGINAL TEST BEGIN**
 # statement ok
 # CREATE SCHEMA t
