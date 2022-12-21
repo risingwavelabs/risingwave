@@ -25,8 +25,10 @@ use risingwave_common::types::{
     DataType, DataTypeName, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, OrderedF32, OrderedF64,
 };
+use risingwave_expr::expr::expr_unary::new_unary_expr;
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
+use risingwave_expr::sig::cast::cast_sigs;
 use risingwave_expr::sig::func::func_sigs;
 use risingwave_expr::vector_op::agg::create_agg_state_unary;
 use risingwave_expr::ExprError;
@@ -109,6 +111,48 @@ fn bench_expr(c: &mut Criterion) {
             // 18: extract field for timestampz
             Utf8Array::from_iter_display(["EPOCH"].into_iter().cycle().take(CHUNK_SIZE).map(Some))
                 .into(),
+            // 19: boolean string
+            Utf8Array::from_iter_display([Some(true)].into_iter().cycle().take(CHUNK_SIZE)).into(),
+            // 20: date string
+            Utf8Array::from_iter_display(
+                [Some(NaiveDateWrapper::default())]
+                    .into_iter()
+                    .cycle()
+                    .take(CHUNK_SIZE),
+            )
+            .into(),
+            // 21: time string
+            Utf8Array::from_iter_display(
+                [Some(NaiveTimeWrapper::default())]
+                    .into_iter()
+                    .cycle()
+                    .take(CHUNK_SIZE),
+            )
+            .into(),
+            // 22: timestamp string
+            Utf8Array::from_iter_display(
+                [Some(NaiveDateTimeWrapper::default())]
+                    .into_iter()
+                    .cycle()
+                    .take(CHUNK_SIZE),
+            )
+            .into(),
+            // 23: timestampz string
+            Utf8Array::from_iter_display(
+                [Some("2021-04-01 00:00:00+00:00")]
+                    .into_iter()
+                    .cycle()
+                    .take(CHUNK_SIZE),
+            )
+            .into(),
+            // 24: interval string
+            Utf8Array::from_iter_display(
+                [Some(IntervalUnit::default())]
+                    .into_iter()
+                    .cycle()
+                    .take(CHUNK_SIZE),
+            )
+            .into(),
         ],
         CHUNK_SIZE,
     );
@@ -140,6 +184,13 @@ fn bench_expr(c: &mut Criterion) {
     const EXTRACT_FIELD_TIME: i32 = 17;
     const EXTRACT_FIELD_TIMESTAMP: i32 = 16;
     const EXTRACT_FIELD_TIMESTAMPZ: i32 = 18;
+    const BOOL_STRING: i32 = 19;
+    const NUMBER_STRING: i32 = 12;
+    const DATE_STRING: i32 = 20;
+    const TIME_STRING: i32 = 21;
+    const TIMESTAMP_STRING: i32 = 22;
+    const TIMESTAMPZ_STRING: i32 = 23;
+    const INTERVAL_STRING: i32 = 24;
 
     c.bench_function("inputref", |bencher| {
         let inputref = inputrefs[0].clone().boxed();
@@ -201,6 +252,7 @@ fn bench_expr(c: &mut Criterion) {
 
     for sig in agg_func_sigs() {
         if sig.inputs_type.len() != 1 {
+            println!("TODO: {}", sig.to_string_no_return());
             continue;
         }
         let mut agg = match create_agg_state_unary(
@@ -218,6 +270,42 @@ fn bench_expr(c: &mut Criterion) {
         };
         c.bench_function(&sig.to_string_no_return(), |bencher| {
             bencher.iter(|| agg.update_multi(&input, 0, CHUNK_SIZE).unwrap())
+        });
+    }
+
+    for sig in cast_sigs() {
+        let expr = match new_unary_expr(
+            ExprType::Cast,
+            sig.to_type.into(),
+            if matches!(sig.from_type, DataTypeName::Varchar) {
+                use DataTypeName::*;
+                let idx = match sig.to_type {
+                    Boolean => BOOL_STRING,
+                    Int16 | Int32 | Int64 | Float32 | Float64 | Decimal => NUMBER_STRING,
+                    Date => DATE_STRING,
+                    Time => TIME_STRING,
+                    Timestamp => TIMESTAMP_STRING,
+                    Timestampz => TIMESTAMPZ_STRING,
+                    Interval => INTERVAL_STRING,
+                    Bytea => NUMBER_STRING, // any
+                    _ => {
+                        println!("TODO: {}", sig.to_string_no_return());
+                        continue;
+                    }
+                };
+                InputRefExpression::new(DataType::Varchar, idx as usize).boxed()
+            } else {
+                inputref_for_type(sig.from_type.into()).clone().boxed()
+            },
+        ) {
+            Ok(expr) => expr,
+            Err(e) => {
+                println!("{e}");
+                continue;
+            }
+        };
+        c.bench_function(&sig.to_string_no_return(), |bencher| {
+            bencher.iter(|| expr.eval(&input).unwrap())
         });
     }
 
