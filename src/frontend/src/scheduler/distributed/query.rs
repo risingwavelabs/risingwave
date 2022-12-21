@@ -235,6 +235,9 @@ impl QueryRunner {
                 stage_id
             );
         }
+        let mut stages_with_table_scan = self.query.stages_with_table_scan();
+        // To convince the compiler that `pinned_snapshot` will only be dropped once.
+        let mut pinned_snapshot_to_drop = Some(pinned_snapshot);
         while let Some(msg_inner) = self.msg_receiver.recv().await {
             match msg_inner {
                 Stage(Scheduled(stage_id)) => {
@@ -244,6 +247,14 @@ impl QueryRunner {
                         stage_id
                     );
                     self.scheduled_stages_count += 1;
+                    stages_with_table_scan.remove(&stage_id);
+                    if stages_with_table_scan.is_empty() {
+                        // We can be sure here that all the Hummock iterators have been created,
+                        // thus they all successfully pinned a HummockVersion.
+                        // So we can now unpin their epoch.
+                        tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
+                        pinned_snapshot_to_drop.take();
+                    }
 
                     // For root stage, we execute in frontend local. We will pass the root fragment
                     // to QueryResultFetcher and execute to get a Chunk stream.
@@ -282,8 +293,6 @@ impl QueryRunner {
                 }
             }
         }
-        // Drop pinned snapshot at last (Completed, Failed or Cancel).
-        drop(pinned_snapshot);
     }
 
     /// The `shutdown_tx` will only be Some if the stage is 1. In that case, we should keep the life
