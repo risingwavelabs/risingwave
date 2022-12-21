@@ -100,11 +100,10 @@ SELECT t.t.t FROM t.t;
 # (original query)SELECT t.t.t.t FROM t.t;
 # (syntax)the behavior is different with PG https://www.postgresql.org/docs/current/rowtypes.html#ROWTYPES-ACCESSING.
 
-# (TODO): https://github.com/risingwavelabs/risingwave/issues/6772
-# query I
-# SELECT (t.t.t).t FROM t.t;
-# ----
-# 42
+query I
+SELECT (t.t.t).t FROM t.t;
+----
+42
 
 # (original DDL)
 # TODO: drop schema cascade https://github.com/risingwavelabs/risingwave/issues/6773
