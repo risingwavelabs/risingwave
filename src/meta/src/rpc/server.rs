@@ -285,27 +285,14 @@ mod tests {
 
         let mut leader_count = 0;
         for i in 0..n {
-            // create client connecting against meta_i
             let port = meta_port + i;
-            // https or http?
             let meta_addr = format!("http://127.0.0.1:{}", port);
             let host_addr = "127.0.0.1:5688".parse::<HostAddr>().unwrap();
             let host_addr = HostAddr {
                 host: host_addr.host,
-                port: host_addr.port + i, // Do I need to change the port?
+                port: host_addr.port + i,
             };
 
-            // register_new fails
-            // Do I need to start some service first?
-            // are the other services still running here?
-            //      yes! Check via lsof -i @localhost
-            // unspecified: Got error gRPC error (Internal error): worker_type
-            // Compactor: Got error gRPC error (Operation is not implemented or not supported)
-            // Frontend: (Operation is not implemented or not supported)
-            // ComputeNode: Got error gRPC error (Operation is not implemented or not supported)
-            // RiseCtl: Got error gRPC error (Operation is not implemented or not supported)
-
-            // I get this error because I am talking to a non-leader?
             let is_leader = tokio::time::timeout(std::time::Duration::from_secs(1), async move {
                 let client_i = MetaClient::register_new(
                     meta_addr.as_str(),
@@ -356,58 +343,3 @@ mod tests {
 
     // TODO: implement failover test
 }
-
-// Old test below
-// TODO: remove
-// #[cfg(test)]
-// mod testsdeprecated {
-// use tokio::time::sleep;
-//
-// use super::*;
-//
-// #[tokio::test]
-// async fn test_leader_lease() {
-// let info = AddressInfo {
-// addr: "node1".to_string(),
-// ..Default::default()
-// };
-// let meta_store = Arc::new(MemStore::default());
-// let (handle, closer) = rpc_serve_with_store(
-// meta_store.clone(),
-// info,
-// Duration::from_secs(10),
-// 2,
-// MetaOpts::test(false),
-// )
-// .await
-// .unwrap();
-// sleep(Duration::from_secs(4)).await;
-// let info2 = AddressInfo {
-// addr: "node2".to_string(),
-// ..Default::default()
-// };
-// let ret = rpc_serve_with_store(
-// meta_store.clone(),
-// info2.clone(),
-// Duration::from_secs(10),
-// 2,
-// MetaOpts::test(false),
-// )
-// .await;
-// assert!(ret.is_err());
-// closer.send(()).unwrap();
-// handle.await.unwrap();
-// sleep(Duration::from_secs(3)).await;
-// rpc_serve_with_store(
-// meta_store.clone(),
-// info2,
-// Duration::from_secs(10),
-// 2,
-// MetaOpts::test(false),
-// )
-// .await
-// .unwrap();
-// }
-// }
-//
-// Old test above
