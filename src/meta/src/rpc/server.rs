@@ -246,7 +246,11 @@ mod tests {
 
     /// Start `n` meta nodes on localhost. First node will be started at `meta_port`, 2nd node on
     /// `meta_port + 1`, ...
-    async fn _setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
+    async fn _setup_n_nodes(
+        n: u16,
+        meta_port: u16,
+        enable_recovery: bool, // TODO: remove. Is always false
+    ) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
         let meta_store = Arc::new(MemStore::default());
 
         let mut node_controllers: Vec<(JoinHandle<()>, WatchSender<()>)> = vec![];
@@ -268,9 +272,9 @@ mod tests {
                 rpc_serve_with_store(
                     meta_store.clone(),
                     info,
-                    Duration::from_secs(4), // What values do we want to use here
-                    2,                      // What values do we want to use here
-                    MetaOpts::test(true),   // True or false?
+                    Duration::from_secs(4),
+                    2,
+                    MetaOpts::test(enable_recovery),
                 )
                 .await
                 .unwrap_or_else(|e| panic!("Meta node{} failed in setup. Err: {}", i, e)),
@@ -323,57 +327,80 @@ mod tests {
         leader_count
     }
 
-    async fn _leader_count_with_setup(number_of_nodes: u16, meta_port: u16, host_port: u16) -> u16 {
-        let _ = _setup_n_nodes(number_of_nodes, meta_port).await;
-        _number_of_leaders(number_of_nodes, meta_port, host_port).await
+    async fn _leader_count_with_setup(
+        number_of_nodes: u16,
+        meta_port: u16,
+        host_port: u16,
+    ) -> (u16, Vec<JoinHandle<()>>) {
+        let vec = _setup_n_nodes(number_of_nodes, meta_port, false).await;
+        let mut handles: Vec<JoinHandle<()>> = vec![];
+        for v in vec {
+            handles.push(v.0);
+        }
+        (
+            _number_of_leaders(number_of_nodes, meta_port, host_port).await,
+            handles,
+        )
     }
 
     // Writing these tests as separate functions instead of one loop, because functions get executed
     // in parallel
     #[tokio::test]
     async fn test_single_leader_setup_1() {
-        let leader_count = _leader_count_with_setup(1, 1234, 5678).await;
+        let (leader_count, handles) = _leader_count_with_setup(1, 1234, 5678).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
+        for handle in handles {
+            handle.abort();
+        }
     }
 
     #[tokio::test]
     async fn test_single_leader_setup_3() {
-        let leader_count = _leader_count_with_setup(3, 2345, 6789).await;
+        let (leader_count, handles) = _leader_count_with_setup(3, 2345, 6789).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
+        for handle in handles {
+            handle.abort();
+        }
     }
 
     #[tokio::test]
     async fn test_single_leader_setup_10() {
-        let leader_count = _leader_count_with_setup(10, 3456, 7890).await;
+        let (leader_count, handles) = _leader_count_with_setup(10, 3456, 7890).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
+        for handle in handles {
+            handle.abort();
+        }
     }
 
     #[tokio::test]
     async fn test_single_leader_setup_100() {
-        // TODO: helper func that calls both of these functions below
-        let leader_count = _leader_count_with_setup(100, 4567, 8901).await;
+        let (leader_count, handles) = _leader_count_with_setup(100, 4567, 8901).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
+        for handle in handles {
+            handle.abort();
+        }
     }
 
     /// returns number of leaders after failover
     async fn _test_failover(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
-        let vec_meta_handlers = _setup_n_nodes(number_of_nodes, meta_port).await;
+        // TODO: change to false?
+        let vec_meta_handlers = _setup_n_nodes(number_of_nodes, meta_port, true).await;
 
         // we should have 1 leader on startup
         let leader_count = _number_of_leaders(number_of_nodes, meta_port, compute_port).await;
