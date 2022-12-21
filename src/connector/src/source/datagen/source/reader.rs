@@ -220,9 +220,16 @@ mod tests {
     use std::sync::Arc;
 
     use maplit::{convert_args, hashmap};
+    use risingwave_common::array::StructValue;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::struct_type::StructType;
+    use risingwave_common::types::ScalarImpl;
 
     use super::*;
+
+    fn turn_payload_into_boxed_owned_row(payload: &[u8]) -> Box<OwnedRow> {
+        unsafe { Box::from_raw(payload.as_ptr() as *mut OwnedRow) }
+    }
 
     #[tokio::test]
     async fn test_generator() -> Result<()> {
@@ -277,13 +284,19 @@ mod tests {
         let mut reader = DatagenSplitReader::new(properties, state, Some(mock_datum))
             .await?
             .into_stream();
+        let random_float = Some(ScalarImpl::Float32(533.1488647460938.into()));
+        let random_int = Some(ScalarImpl::Int32(533.into()));
+        let sequence_int = Some(ScalarImpl::Int32(1.into()));
+        let struct_int = Some(ScalarImpl::Struct(StructValue::new(vec![
+            ScalarImpl::Int32(1533).into(),
+        ])));
+        // The order should be the same as `mock_datum`
+        let expected_row = OwnedRow::new(vec![random_int, random_float, sequence_int, struct_int]);
 
         let msg = reader.next().await.unwrap().unwrap();
-        assert_eq!(
-            std::str::from_utf8(msg[0].payload.as_ref().unwrap().as_ref()).unwrap(),
-            "{\"random_float\":533.1488647460938,\"random_int\":533,\"sequence_int\":1,\"struct\":{\"random_int\":1533}}"
-        );
-
+        let real_row: Box<OwnedRow> =
+            turn_payload_into_boxed_owned_row(msg[0].payload.as_ref().unwrap());
+        assert_eq!(&expected_row, real_row.as_ref());
         Ok(())
     }
 
@@ -307,12 +320,20 @@ mod tests {
         let properties = DatagenProperties {
             split_num: None,
             rows_per_second: 10,
-            fields: HashMap::new(),
+            fields: convert_args!(hashmap!(
+                "fields.random_int.min" => "1",
+                "fields.random_int.max" => "1000",
+                "fields.random_int.seed" => "12345",
+            )),
         };
         let stream = DatagenSplitReader::new(properties.clone(), state, Some(mock_datum.clone()))
             .await?
             .into_stream();
         let v1 = stream.skip(1).next().await.unwrap()?;
+        let v1_rows: Vec<Box<OwnedRow>> = v1
+            .into_iter()
+            .map(|source_msg| turn_payload_into_boxed_owned_row(&source_msg.payload.unwrap()))
+            .collect::<Vec<_>>();
 
         let state = Some(vec![SplitImpl::Datagen(DatagenSplit {
             split_index: 0,
@@ -323,8 +344,14 @@ mod tests {
             .await?
             .into_stream();
         let v2 = stream.next().await.unwrap()?;
+        let v2_rows: Vec<Box<OwnedRow>> = v2
+            .into_iter()
+            .map(|source_msg| turn_payload_into_boxed_owned_row(&source_msg.payload.unwrap()))
+            .collect::<Vec<_>>();
 
-        assert_eq!(v1, v2);
+        // Because now SourceMassage's payload contain Box's layout,
+        // so we have to turn payload into OwnedRow before comparing them.
+        assert_eq!(v1_rows, v2_rows);
         Ok(())
     }
 }

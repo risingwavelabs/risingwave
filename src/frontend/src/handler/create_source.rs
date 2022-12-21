@@ -253,6 +253,13 @@ pub async fn handle_create_source(
                 ..Default::default()
             },
         ),
+        SourceSchema::Native => (
+            columns,
+            StreamSourceInfo {
+                row_format: RowFormatType::Native as i32,
+                ..Default::default()
+            },
+        ),
     };
 
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });

@@ -91,6 +91,7 @@ pub enum SourceSchema {
     Maxwell,          // Keyword::MAXWELL
     CanalJson,        // Keyword::CANAL_JSON
     CSV(CsvInfo),     // Keyword::CSV
+    Native,
 }
 
 impl ParseTo for SourceSchema {
@@ -112,6 +113,8 @@ impl ParseTo for SourceSchema {
         } else if p.parse_keywords(&[Keyword::CSV]) {
             impl_parse_to!(csv_info: CsvInfo, p);
             SourceSchema::CSV(csv_info)
+        } else if p.parse_keywords(&[Keyword::NATIVE]) {
+            SourceSchema::Native
         } else {
             return Err(ParserError::ParserError(
                 "expected JSON | PROTOBUF | DEBEZIUM_JSON | AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
@@ -131,6 +134,7 @@ impl fmt::Display for SourceSchema {
             SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
             SourceSchema::CanalJson => write!(f, "CANAL JSON"),
             SourceSchema::CSV(csv_ingo) => write!(f, "CSV {}", csv_ingo),
+            SourceSchema::Native => write!(f, "NATIVE"),
         }
     }
 }

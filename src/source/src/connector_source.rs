@@ -334,6 +334,7 @@ impl SourceDescBuilderV2 {
             ProstRowFormatType::Maxwell => SourceFormat::Maxwell,
             ProstRowFormatType::CanalJson => SourceFormat::CanalJson,
             ProstRowFormatType::Csv => SourceFormat::Csv,
+            ProstRowFormatType::Native => SourceFormat::Native,
             ProstRowFormatType::RowUnspecified => unreachable!(),
         };
 

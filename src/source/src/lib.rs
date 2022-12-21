@@ -62,6 +62,7 @@ pub enum SourceFormat {
     Maxwell,
     CanalJson,
     Csv,
+    Native,
 }
 
 #[derive(Debug, EnumAsInner)]

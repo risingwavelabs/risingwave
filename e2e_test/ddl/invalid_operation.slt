@@ -137,7 +137,7 @@ create materialized source msrc (v int) with (
     fields.v.end  = '10',
     datagen.rows.per.second='15',
     datagen.split.num = '1'
-) row format json;
+) row format native;
 
 statement error Use `DROP SOURCE`
 drop table msrc;
@@ -165,7 +165,7 @@ create source src (v int) with (
     fields.v.end  = '10',
     datagen.rows.per.second='15',
     datagen.split.num = '1'
-) row format json;
+) row format native;
 
 # FIXME: improve the error message
 statement error not found

@@ -24,6 +24,7 @@ use enum_as_inner::EnumAsInner;
 use futures::Future;
 use itertools::Itertools;
 pub use json_parser::*;
+use native_parser::NativeParser;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::error::ErrorCode::ProtocolError;
@@ -42,6 +43,7 @@ mod debezium;
 mod json_parser;
 mod macros;
 mod maxwell;
+mod native_parser;
 mod protobuf;
 mod schema_registry;
 mod util;
@@ -300,6 +302,7 @@ pub enum SourceParserImpl {
     Avro(AvroParser),
     Maxwell(MaxwellParser),
     CanalJson(CanalJsonParser),
+    Native(NativeParser),
 }
 
 impl SourceParserImpl {
@@ -315,6 +318,7 @@ impl SourceParserImpl {
             Self::Avro(avro_parser) => avro_parser.parse(payload, writer).await,
             Self::Maxwell(maxwell_parser) => maxwell_parser.parse(payload, writer).await,
             Self::CanalJson(parser) => parser.parse(payload, writer).await,
+            Self::Native(parser) => parser.parse(payload, writer).await,
         }
     }
 
@@ -344,6 +348,7 @@ impl SourceParserImpl {
             ),
             SourceFormat::Maxwell => SourceParserImpl::Maxwell(MaxwellParser),
             SourceFormat::CanalJson => SourceParserImpl::CanalJson(CanalJsonParser),
+            SourceFormat::Native => SourceParserImpl::Native(NativeParser),
             _ => {
                 return Err(RwError::from(ProtocolError(
                     "format not support".to_string(),
