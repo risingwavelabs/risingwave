@@ -122,12 +122,12 @@ impl ToBatch for LogicalShare {
 
 impl ToStream for LogicalShare {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        match ctx.get_to_stream_result(self.base.id) {
+        match ctx.get_to_stream_result(self.id()) {
             None => {
                 let new_input = self.input().to_stream(ctx)?;
                 let new_logical = self.clone_with_input(new_input);
                 let stream_share_ref: PlanRef = StreamShare::new(new_logical).into();
-                ctx.add_to_stream_result(self.base.id, stream_share_ref.clone());
+                ctx.add_to_stream_result(self.id(), stream_share_ref.clone());
                 Ok(stream_share_ref)
             }
             Some(cache) => Ok(cache.clone()),
@@ -138,7 +138,7 @@ impl ToStream for LogicalShare {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        match ctx.get_rewrite_result(self.base.id) {
+        match ctx.get_rewrite_result(self.id()) {
             None => {
                 let (new_input, col_change) = self.input().logical_rewrite_for_stream(ctx)?;
                 let new_share: PlanRef = self.clone_with_input(new_input).into();
@@ -156,7 +156,7 @@ impl ToStream for LogicalShare {
                     .collect_vec();
                 let project = LogicalProject::create(new_share, exprs);
 
-                ctx.add_rewrite_result(self.base.id, project.clone(), col_change.clone());
+                ctx.add_rewrite_result(self.id(), project.clone(), col_change.clone());
                 Ok((project, col_change))
             }
             Some(cache) => Ok(cache.clone()),

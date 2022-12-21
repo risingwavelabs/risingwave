@@ -55,7 +55,7 @@ for_stream_plan_nodes! { impl_prune_col }
 
 #[derive(Debug, Clone)]
 pub struct ColumnPruningContext {
-    share_required_cols_map: HashMap<i32, Vec<Vec<usize>>>,
+    share_required_cols_map: HashMap<PlanNodeId, Vec<Vec<usize>>>,
     share_parent_counter: ShareParentCounter,
 }
 
@@ -79,13 +79,13 @@ impl ColumnPruningContext {
         required_cols: Vec<usize>,
     ) -> usize {
         self.share_required_cols_map
-            .entry(plan_node_id.0)
+            .entry(plan_node_id)
             .and_modify(|e| e.push(required_cols.clone()))
             .or_insert_with(|| vec![required_cols])
             .len()
     }
 
     pub fn take_required_cols(&mut self, plan_node_id: PlanNodeId) -> Option<Vec<Vec<usize>>> {
-        self.share_required_cols_map.remove(&plan_node_id.0)
+        self.share_required_cols_map.remove(&plan_node_id)
     }
 }

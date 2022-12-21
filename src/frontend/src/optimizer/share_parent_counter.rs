@@ -14,20 +14,20 @@
 
 use std::collections::HashMap;
 
-use crate::optimizer::plan_node::{LogicalShare, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{LogicalShare, PlanNodeId, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 
 #[derive(Debug, Clone, Default)]
 pub struct ShareParentCounter {
-    // share id to parent number mapping.
-    parent_counter: HashMap<i32, usize>,
+    // Plan node id to parent number mapping.
+    parent_counter: HashMap<PlanNodeId, usize>,
 }
 
 impl ShareParentCounter {
     pub fn get_parent_num(&self, share: &LogicalShare) -> usize {
         *self
             .parent_counter
-            .get(&share.base.id.0)
+            .get(&share.id())
             .expect("share must exist")
     }
 }
@@ -36,10 +36,9 @@ impl PlanVisitor<()> for ShareParentCounter {
     fn merge(_: (), _: ()) {}
 
     fn visit_logical_share(&mut self, share: &LogicalShare) {
-        let plan_node_id = share.base.id.0;
         let v = self
             .parent_counter
-            .entry(plan_node_id)
+            .entry(share.id())
             .and_modify(|counter| *counter += 1)
             .or_insert(1);
         if *v == 1 {

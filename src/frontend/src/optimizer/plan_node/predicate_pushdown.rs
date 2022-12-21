@@ -75,7 +75,7 @@ pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary + PlanNode>(
 
 #[derive(Debug, Clone)]
 pub struct PredicatePushdownContext {
-    share_predicate_map: HashMap<i32, Vec<Condition>>,
+    share_predicate_map: HashMap<PlanNodeId, Vec<Condition>>,
     share_parent_counter: ShareParentCounter,
 }
 
@@ -95,13 +95,13 @@ impl PredicatePushdownContext {
 
     pub fn add_predicate(&mut self, plan_node_id: PlanNodeId, predicate: Condition) -> usize {
         self.share_predicate_map
-            .entry(plan_node_id.0)
+            .entry(plan_node_id)
             .and_modify(|e| e.push(predicate.clone()))
             .or_insert_with(|| vec![predicate])
             .len()
     }
 
     pub fn take_predicate(&mut self, plan_node_id: PlanNodeId) -> Option<Vec<Condition>> {
-        self.share_predicate_map.remove(&plan_node_id.0)
+        self.share_predicate_map.remove(&plan_node_id)
     }
 }

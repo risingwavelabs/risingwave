@@ -60,7 +60,7 @@ pub trait ToStream {
 
 #[derive(Debug, Clone, Default)]
 pub struct RewriteStreamContext {
-    share_rewrite_map: HashMap<i32, (PlanRef, ColIndexMapping)>,
+    share_rewrite_map: HashMap<PlanNodeId, (PlanRef, ColIndexMapping)>,
 }
 
 impl RewriteStreamContext {
@@ -72,7 +72,7 @@ impl RewriteStreamContext {
     ) {
         let prev = self
             .share_rewrite_map
-            .insert(plan_node_id.0, (plan_ref, col_change));
+            .insert(plan_node_id, (plan_ref, col_change));
         assert!(prev.is_none());
     }
 
@@ -80,23 +80,23 @@ impl RewriteStreamContext {
         &self,
         plan_node_id: PlanNodeId,
     ) -> Option<&(PlanRef, ColIndexMapping)> {
-        self.share_rewrite_map.get(&plan_node_id.0)
+        self.share_rewrite_map.get(&plan_node_id)
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct ToStreamContext {
-    share_to_stream_map: HashMap<i32, PlanRef>,
+    share_to_stream_map: HashMap<PlanNodeId, PlanRef>,
 }
 
 impl ToStreamContext {
     pub fn add_to_stream_result(&mut self, plan_node_id: PlanNodeId, plan_ref: PlanRef) {
-        let prev = self.share_to_stream_map.insert(plan_node_id.0, plan_ref);
+        let prev = self.share_to_stream_map.insert(plan_node_id, plan_ref);
         assert!(prev.is_none());
     }
 
     pub fn get_to_stream_result(&self, plan_node_id: PlanNodeId) -> Option<&PlanRef> {
-        self.share_to_stream_map.get(&plan_node_id.0)
+        self.share_to_stream_map.get(&plan_node_id)
     }
 }
 
