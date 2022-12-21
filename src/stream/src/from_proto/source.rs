@@ -20,7 +20,7 @@ use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
 use crate::executor::state_table_handler::SourceStateTableHandler;
-use crate::executor::SourceExecutor;
+use crate::executor::{FsSourceExecutor, SourceExecutor};
 
 pub struct SourceExecutorBuilder;
 
@@ -78,22 +78,49 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             SourceStateTableHandler::from_table_catalog(node.state_table.as_ref().unwrap(), store)
                 .await;
 
-        Ok(Box::new(SourceExecutor::new(
-            params.actor_context,
-            source_builder,
-            source_id,
-            source_name,
-            vnodes,
-            state_table_handler,
-            column_ids,
-            schema,
-            params.pk_indices,
-            barrier_receiver,
-            params.executor_id,
-            params.operator_id,
-            params.op_info,
-            params.executor_stats,
-            stream.config.barrier_interval_ms as u64,
-        )?))
+        // so ugly here, need some graceful method
+        let is_s3 = node
+            .properties
+            .get("connector")
+            .map(|s| s.to_lowercase())
+            .unwrap_or_default()
+            .eq("s3");
+        if is_s3 {
+            Ok(Box::new(FsSourceExecutor::new(
+                params.actor_context,
+                source_builder,
+                source_id,
+                source_name,
+                vnodes,
+                state_table_handler,
+                column_ids,
+                schema,
+                params.pk_indices,
+                barrier_receiver,
+                params.executor_id,
+                params.operator_id,
+                params.op_info,
+                params.executor_stats,
+                stream.config.barrier_interval_ms as u64,
+            )?))
+        } else {
+            Ok(Box::new(SourceExecutor::new(
+                params.actor_context,
+                source_builder,
+                source_id,
+                source_name,
+                vnodes,
+                state_table_handler,
+                column_ids,
+                schema,
+                params.pk_indices,
+                barrier_receiver,
+                params.executor_id,
+                params.operator_id,
+                params.op_info,
+                params.executor_stats,
+                stream.config.barrier_interval_ms as u64,
+            )?))
+        }
     }
 }
