@@ -29,10 +29,10 @@ pub mod pg_operator;
 pub mod pg_roles;
 pub mod pg_settings;
 pub mod pg_shdescription;
+pub mod pg_tablespace;
 pub mod pg_type;
 pub mod pg_user;
 pub mod pg_views;
-pub mod pg_tablespace;
 
 use std::collections::HashMap;
 
@@ -54,10 +54,10 @@ pub use pg_operator::*;
 pub use pg_roles::*;
 pub use pg_settings::*;
 pub use pg_shdescription::*;
+pub use pg_tablespace::*;
 pub use pg_type::*;
 pub use pg_user::*;
 pub use pg_views::*;
-pub use pg_tablespace::*;
 use risingwave_common::array::ListValue;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
@@ -288,8 +288,8 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(table.owner as i32)),
                             Some(ScalarImpl::Utf8("r".into())),
-                            Some(ScalarImpl::Int32(0 as i32)),
-                            Some(ScalarImpl::Int32(0 as i32)),
+                            Some(ScalarImpl::Int32(0)),
+                            Some(ScalarImpl::Int32(0)),
                         ])
                     })
                     .collect_vec();
@@ -303,8 +303,8 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(mv.owner as i32)),
                             Some(ScalarImpl::Utf8("m".into())),
-                            Some(ScalarImpl::Int32(0 as i32)),
-                            Some(ScalarImpl::Int32(0 as i32)),
+                            Some(ScalarImpl::Int32(0)),
+                            Some(ScalarImpl::Int32(0)),
                         ])
                     })
                     .collect_vec();
@@ -318,8 +318,8 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(index.index_table.owner as i32)),
                             Some(ScalarImpl::Utf8("i".into())),
-                            Some(ScalarImpl::Int32(0 as i32)),
-                            Some(ScalarImpl::Int32(0 as i32)),
+                            Some(ScalarImpl::Int32(0)),
+                            Some(ScalarImpl::Int32(0)),
                         ])
                     })
                     .collect_vec();
@@ -333,8 +333,8 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(source.owner as i32)),
                             Some(ScalarImpl::Utf8("x".into())),
-                            Some(ScalarImpl::Int32(0 as i32)),
-                            Some(ScalarImpl::Int32(0 as i32)),
+                            Some(ScalarImpl::Int32(0)),
+                            Some(ScalarImpl::Int32(0)),
                         ])
                     })
                     .collect_vec();
@@ -348,8 +348,8 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(table.owner as i32)),
                             Some(ScalarImpl::Utf8("r".into())),
-                            Some(ScalarImpl::Int32(0 as i32)),
-                            Some(ScalarImpl::Int32(0 as i32)),
+                            Some(ScalarImpl::Int32(0)),
+                            Some(ScalarImpl::Int32(0)),
                         ])
                     })
                     .collect_vec();
@@ -363,8 +363,8 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(schema_info.id as i32)),
                             Some(ScalarImpl::Int32(view.owner as i32)),
                             Some(ScalarImpl::Utf8("v".into())),
-                            Some(ScalarImpl::Int32(0 as i32)),
-                            Some(ScalarImpl::Int32(0 as i32)),
+                            Some(ScalarImpl::Int32(0)),
+                            Some(ScalarImpl::Int32(0)),
                         ])
                     })
                     .collect_vec();

@@ -18,7 +18,7 @@ use risingwave_common::{row::OwnedRow, types::DataType};
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-/// The catalog pg_tablespace stores information about the available tablespaces. 
+/// The catalog `pg_tablespace` stores information about the available tablespaces. 
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-tablespace.html`]
 /// This is introduced only for pg compatibility and is not used in our system. 
 pub const PG_TABLESPACE_TABLE_NAME: &str = "pg_tablespace";
