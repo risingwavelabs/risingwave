@@ -231,6 +231,7 @@ mod tests {
         unsafe { Box::from_raw(payload.as_ptr() as *mut OwnedRow) }
     }
 
+    #[allow(clippy::excessive_precision)]
     #[tokio::test]
     async fn test_generator() -> Result<()> {
         let mock_datum = vec![
@@ -285,8 +286,8 @@ mod tests {
             .await?
             .into_stream();
         let random_float = Some(ScalarImpl::Float32(533.1488647460938.into()));
-        let random_int = Some(ScalarImpl::Int32(533.into()));
-        let sequence_int = Some(ScalarImpl::Int32(1.into()));
+        let random_int = Some(ScalarImpl::Int32(533));
+        let sequence_int = Some(ScalarImpl::Int32(1));
         let struct_int = Some(ScalarImpl::Struct(StructValue::new(vec![
             ScalarImpl::Int32(1533).into(),
         ])));

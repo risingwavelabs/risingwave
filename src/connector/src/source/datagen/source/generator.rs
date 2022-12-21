@@ -108,31 +108,25 @@ mod tests {
         expected_length: usize,
     ) {
         let split_id = format!("{}-{}", split_num, split_index).into();
-        let mut fields_vec = vec![];
-        fields_vec.push(
-            FieldGeneratorImpl::with_number_sequence(
-                risingwave_common::types::DataType::Int32,
-                Some("1".to_string()),
-                Some("10".to_string()),
-                split_index,
-                split_num,
-            )
-            .unwrap(),
-        );
-
-        fields_vec.push(
-            FieldGeneratorImpl::with_number_sequence(
-                risingwave_common::types::DataType::Float32,
-                Some("1".to_string()),
-                Some("10".to_string()),
-                split_index,
-                split_num,
-            )
-            .unwrap(),
-        );
+        let generator1 = FieldGeneratorImpl::with_number_sequence(
+            risingwave_common::types::DataType::Int32,
+            Some("1".to_string()),
+            Some("10".to_string()),
+            split_index,
+            split_num,
+        )
+        .unwrap();
+        let generator2 = FieldGeneratorImpl::with_number_sequence(
+            risingwave_common::types::DataType::Float32,
+            Some("1".to_string()),
+            Some("10".to_string()),
+            split_index,
+            split_num,
+        )
+        .unwrap();
 
         let generator = DatagenEventGenerator::new(
-            fields_vec,
+            vec![generator1, generator2],
             rows_per_second,
             0,
             split_id,
