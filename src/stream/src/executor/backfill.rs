@@ -65,10 +65,6 @@ pub struct BackfillExecutor<S: StateStore> {
     /// The column indices need to be forwarded to the downstream.
     upstream_indices: Arc<[usize]>,
 
-    /// Current position of the table storage primary key.
-    /// None means it starts from the beginning.
-    current_pos: Option<OwnedRow>,
-
     progress: CreateMviewProgress,
 
     actor_id: ActorId,
@@ -99,7 +95,6 @@ where
             table,
             upstream,
             upstream_indices: upstream_indices.into(),
-            current_pos: None,
             actor_id: progress.actor_id(),
             progress,
         }
@@ -117,14 +112,25 @@ where
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
 
-        // If the barrier is a conf change of creating this mview, init backfill from its epoch.
-        // Otherwise, it means we've recovered and the backfill is already finished.
-        let to_backfill = first_barrier.is_add_dispatcher(self.actor_id);
-
-        // The first barrier message should be propagated.
-        yield Message::Barrier(first_barrier.clone());
+        // If the barrier is a conf change of creating this mview, we follow the procedure of
+        // backfill. Otherwise, it means we've recovered and we can forward the upstream messages
+        // directly.
+        let is_create_mv = first_barrier.is_add_dispatcher(self.actor_id);
+        // If the snapshot is empty, we don't need to backfill.
+        let is_snapshot_empty: bool = {
+            let snapshot = Self::snapshot_read(&self.table, init_epoch, None);
+            pin_mut!(snapshot);
+            snapshot.next().await.is_none()
+        };
+        let to_backfill = is_create_mv && !is_snapshot_empty;
 
         if !to_backfill {
+            // Directly finish the progress. For recovery, this is a no-op.
+            self.progress.finish(first_barrier.epoch.curr);
+
+            // The first barrier message should be propagated.
+            yield Message::Barrier(first_barrier);
+
             // Forward messages directly to the downstream.
             let upstream = upstream
                 .map(move |result| result.map(|msg| Self::mapping_message(msg, &upstream_indices)));
@@ -132,11 +138,19 @@ where
             for message in upstream {
                 yield message?;
             }
+
             return Ok(());
         }
 
+        // The first barrier message should be propagated.
+        yield Message::Barrier(first_barrier);
+
         // The epoch used to snapshot read upstream mv.
         let mut snapshot_read_epoch = init_epoch;
+
+        // Current position of the table storage primary key.
+        // `None` means it starts from the beginning.
+        let mut current_pos: Option<OwnedRow> = None;
 
         // Backfill Algorithm:
         //
@@ -167,7 +181,7 @@ where
             let mut left_upstream = (&mut upstream).map(Either::Left);
 
             let right_snapshot = Box::pin(
-                Self::snapshot_read(&self.table, snapshot_read_epoch, self.current_pos.clone())
+                Self::snapshot_read(&self.table, snapshot_read_epoch, current_pos.clone())
                     .map(Either::Right),
             );
 
@@ -189,7 +203,7 @@ where
 
                                 // Consume upstream buffer chunk
                                 for chunk in upstream_chunk_buffer.drain(..) {
-                                    if let Some(current_pos) = self.current_pos.as_ref() {
+                                    if let Some(current_pos) = &current_pos {
                                         yield Message::Chunk(Self::mapping_chunk(
                                             Self::mark_chunk(chunk, current_pos, &table_pk_indices),
                                             &upstream_indices,
@@ -238,7 +252,7 @@ where
                                 // Raise the current position.
                                 // As snapshot read streams are ordered by pk, so we can
                                 // just use the last row to update `current_pos`.
-                                self.current_pos = Some(
+                                current_pos = Some(
                                     chunk
                                         .rows()
                                         .last()
