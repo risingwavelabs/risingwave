@@ -79,7 +79,10 @@ impl From<&ProstSource> for SourceCatalog {
             .clone()
             .map(|row_id_index| row_id_index.index as _);
 
-        let append_only = with_options.append_only();
+        let append_only = match &info {
+            SourceInfo::StreamSource(_) => row_id_index.is_some(),
+            SourceInfo::TableSource(_) => with_options.append_only(),
+        };
         let owner = prost.owner;
 
         Self {
