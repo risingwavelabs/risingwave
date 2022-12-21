@@ -21,22 +21,31 @@ use crate::binder::Binder;
 use crate::expr::{Expr as RwExpr, ExprImpl, ExprType, FunctionCall, Literal};
 
 impl Binder {
-    /// This function will accept three expr type: `CompoundIdentifier`,`Identifier`,`Cast`
-    /// We will extract ident from `expr` to get the `column_binding`.
-    /// Will return `column_binding` and field `idents`.
-    fn bind_field_access(&mut self, expr: Expr, ids: Vec<Ident>) -> Result<(ExprImpl, Vec<Ident>)> {
+    /// Extracts and binds struct column from `expr`.
+    /// Returns the bound column and the remaining fields.
+    ///
+    /// Specifcally,
+    /// - `(table).struct_col.fields` -> `(bound_struct_col, fields)`
+    /// - Otherwise, `expr` corresponds to a column. `(expr).fields` -> `(bound_expr, fields)`
+    fn extract_struct_column(
+        &mut self,
+        expr: Expr,
+        field_idents: Vec<Ident>,
+    ) -> Result<(ExprImpl, Vec<Ident>)> {
         match expr {
-            Expr::CompoundIdentifier(idents) => self.bind_field_access_inner(idents, ids),
-            Expr::Identifier(ident) => self.bind_field_access_inner(vec![ident], ids),
+            Expr::CompoundIdentifier(idents) => {
+                self.extract_struct_column_inner(idents, field_idents)
+            }
+            Expr::Identifier(ident) => self.extract_struct_column_inner(vec![ident], field_idents),
             Expr::Cast { expr, data_type } => {
                 let cast = self.bind_cast(*expr, data_type)?;
-                Ok((cast, ids))
+                Ok((cast, field_idents))
             }
-            _ => unreachable!(),
+            _ => unreachable!("{expr:?}"),
         }
     }
 
-    fn bind_field_access_inner(
+    fn extract_struct_column_inner(
         &mut self,
         mut expr_idents: Vec<Ident>,
         mut field_idents: Vec<Ident>,
@@ -48,36 +57,40 @@ impl Binder {
                 if field_idents.is_empty() {
                     Err(err)
                 } else {
-                    // try `(table).struct_col.field` if still can not bind a result, give the old
-                    // error
+                    // Try `(table).struct_col.field`.
+                    // If still failed, give the old error.
                     expr_idents.push(field_idents.remove(0));
-                    self.bind_column(&expr_idents)
-                        .map_err(|_| err)
-                        .map(|expr| (expr, field_idents))
+                    match self.bind_column(&expr_idents) {
+                        Ok(expr) => Ok((expr, field_idents)),
+                        Err(_) => Err(err),
+                    }
                 }
             }
         }
     }
 
-    /// Bind wildcard field column, e.g. `(table.v1).*`.
-    /// Will return a vector of `Field(expr, int)` expressions and aliases.
+    /// Binds wildcard field column, e.g. `(table.v1).*` or `(table).v1.*`.
+    ///
+    /// Returns a vector of `Field(expr, int)` expressions and aliases.
     pub fn bind_wildcard_field_column(
         &mut self,
         expr: Expr,
-        ids: &[Ident],
+        prefix: Vec<Ident>,
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
-        let (expr, idents) = self.bind_field_access(expr, ids.to_vec())?;
+        let (expr, idents) = self.extract_struct_column(expr, prefix)?;
         let fields = Self::bind_field("".to_string(), expr, &idents, true)?;
-        let exprs = fields.iter().map(|(e, _)| e.clone()).collect_vec();
-        let names = fields.into_iter().map(|(_, s)| Some(s)).collect_vec();
+        let (exprs, names) = fields
+            .into_iter()
+            .map(|(e, s)| (e.clone(), Some(s)))
+            .unzip();
         Ok((exprs, names))
     }
 
-    /// Bind single field column, e.g. `(table.v1).v2`.
-    /// Will return `Field(expr, int)` expression and the corresponding alias.
-    /// `int` in the signature of `Field` represents the field index.
-    pub fn bind_single_field_column(&mut self, expr: Expr, ids: &[Ident]) -> Result<ExprImpl> {
-        let (expr, idents) = self.bind_field_access(expr, ids.to_vec())?;
+    /// Binds single field column, e.g. `(table.v1).v2` or `(table).v1.v2`.
+    ///
+    /// Returns a `Field(expr, int)` expression.
+    pub fn bind_single_field_column(&mut self, expr: Expr, idents: &[Ident]) -> Result<ExprImpl> {
+        let (expr, idents) = self.extract_struct_column(expr, idents.to_vec())?;
         let exprs = Self::bind_field("".to_string(), expr, &idents, false)?;
         Ok(exprs[0].clone().0)
     }
