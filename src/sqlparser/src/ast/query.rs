@@ -286,7 +286,7 @@ pub enum SelectItem {
     UnnamedExpr(Expr),
     /// expr is a table or a column struct, object_name is field.
     /// e.g. `(table.v1).*` or `(table).v1.*`
-    ExprQualifiedWildcard(Expr, ObjectName),
+    ExprQualifiedWildcard(Expr, Option<ObjectName>),
     /// An expression, followed by `[ AS ] alias`
     ExprWithAlias { expr: Expr, alias: Ident },
     /// `alias.*` or even `schema.table.*`
@@ -300,7 +300,14 @@ impl fmt::Display for SelectItem {
         match &self {
             SelectItem::UnnamedExpr(expr) => write!(f, "{}", expr),
             SelectItem::ExprWithAlias { expr, alias } => write!(f, "{} AS {}", expr, alias),
-            SelectItem::ExprQualifiedWildcard(expr, prefix) => write!(f, "{}.{}.*", expr, prefix),
+            SelectItem::ExprQualifiedWildcard(expr, prefix) => write!(
+                f,
+                "({}){}.*",
+                expr,
+                prefix
+                    .as_ref()
+                    .map_or_else(|| "".to_string(), |p| format!(".{}", p))
+            ),
             SelectItem::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
             SelectItem::Wildcard => write!(f, "*"),
         }
