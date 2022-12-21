@@ -737,6 +737,12 @@ impl LogicalAgg {
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         self.core.fmt_with_name(f, name)
     }
+
+    fn to_batch_simple_agg(&self) -> Result<PlanRef> {
+        let new_input = self.input().to_batch()?;
+        let new_logical = self.clone_with_input(new_input);
+        Ok(BatchSimpleAgg::new(new_logical).into())
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalAgg {
@@ -889,24 +895,33 @@ impl ToBatch for LogicalAgg {
     }
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
-        let mut input_order = Order::any();
-        let (output_requires_order, group_key_order) =
-            self.output_requires_order_on_group_keys(required_order);
-        if output_requires_order {
-            // Push down sort before aggregation
-            input_order = self
-                .o2i_col_mapping()
-                .rewrite_provided_order(&group_key_order);
-        }
-        let new_input = self.input().to_batch_with_order_required(&input_order)?;
-        let new_logical = self.clone_with_input(new_input);
-        if self.group_key().is_empty() {
-            required_order.enforce_if_not_satisfies(BatchSimpleAgg::new(new_logical).into())
-        } else if self.input_provides_order_on_group_keys(&new_logical) || output_requires_order {
-            required_order.enforce_if_not_satisfies(BatchSortAgg::new(new_logical).into())
+        let agg_plan = if self.group_key().is_empty() {
+            self.to_batch_simple_agg()?
         } else {
-            required_order.enforce_if_not_satisfies(BatchHashAgg::new(new_logical).into())
-        }
+            let mut input_order = Order::any();
+            let (output_requires_order, group_key_order) =
+                self.output_requires_order_on_group_keys(required_order);
+            if output_requires_order {
+                // Push down sort before aggregation
+                input_order = self
+                    .o2i_col_mapping()
+                    .rewrite_provided_order(&group_key_order);
+            }
+            let new_input = self.input().to_batch_with_order_required(&input_order)?;
+            let new_logical = self.clone_with_input(new_input);
+            if self
+                .ctx()
+                .session_ctx()
+                .config()
+                .get_batch_enable_sort_agg()
+                && (self.input_provides_order_on_group_keys(&new_logical) || output_requires_order)
+            {
+                BatchSortAgg::new(new_logical).into()
+            } else {
+                BatchHashAgg::new(new_logical).into()
+            }
+        };
+        required_order.enforce_if_not_satisfies(agg_plan)
     }
 }
 
