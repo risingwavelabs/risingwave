@@ -114,7 +114,7 @@ impl ToBatch for LogicalLimit {
 impl ToStream for LogicalLimit {
     fn to_stream(&self) -> Result<PlanRef> {
         Err(RwError::from(ErrorCode::InvalidInputSyntax(
-            "The LIMIT clause can not appear alone in streaming query, please add an ORDER BY clause before the LIMIT"
+            "The LIMIT clause can not appear alone in a streaming query. Please add an ORDER BY clause before the LIMIT"
                 .to_string(),
         )))
     }
