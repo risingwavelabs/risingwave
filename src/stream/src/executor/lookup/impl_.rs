@@ -125,7 +125,7 @@ impl<S: StateStore> LookupExecutor<S> {
             schema: output_schema,
             column_mapping,
             state_table,
-            watermark_epoch: lru_manager,
+            watermark_epoch,
             cache_size,
             chunk_size,
         } = params;
@@ -223,7 +223,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(lru_manager, cache_size),
+            lookup_cache: LookupCache::new(watermark_epoch, cache_size),
             chunk_size,
         }
     }

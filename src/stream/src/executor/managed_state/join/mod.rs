@@ -271,10 +271,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         };
 
         let cache = if let Some(lru_manager) = watermark_epoch {
-            ExecutorCache::Managed(
-                // lru_manager.create_cache_with_hasher_in(PrecomputedBuildHasher, alloc),
-                new_with_hasher_in(lru_manager, PrecomputedBuildHasher, alloc),
-            )
+            ExecutorCache::Managed(new_with_hasher_in(
+                lru_manager,
+                PrecomputedBuildHasher,
+                alloc,
+            ))
         } else {
             ExecutorCache::Local(EvictableHashMap::with_hasher_in(
                 cache_size,

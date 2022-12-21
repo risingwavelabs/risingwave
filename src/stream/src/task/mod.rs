@@ -22,11 +22,8 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::ActorInfo;
 use risingwave_rpc_client::ComputeClientPool;
 
-// use crate::cache::{LruManager, LruManagerRef};
-// use risingwave_batch::task::BatchManager;
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::{self, Receiver, Sender};
-use crate::executor::monitor::StreamingMetrics;
 
 mod barrier_manager;
 mod env;
@@ -94,13 +91,7 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(
-        addr: HostAddr,
-        state_store: StateStoreImpl,
-        _streaming_metrics: Arc<StreamingMetrics>,
-        config: &StreamingConfig,
-        _total_memory_available_bytes: usize,
-    ) -> Self {
+    pub fn new(addr: HostAddr, state_store: StateStoreImpl, config: &StreamingConfig) -> Self {
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
@@ -188,12 +179,6 @@ impl SharedContext {
             .cloned()
             .ok_or_else(|| anyhow!("actor {} not found in info table", actor_id).into())
     }
-
-    // pub fn set_lru_manager(&self, lru_manager: Option<LruManagerRef>) {
-    //     // let guard = self.lru_manager.lock();
-    //     // *guard = lru_manager;
-    //     todo
-    // }
 }
 
 /// Generate a globally unique executor id.

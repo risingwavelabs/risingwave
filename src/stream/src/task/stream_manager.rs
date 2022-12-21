@@ -162,7 +162,6 @@ impl LocalStreamManager {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         async_stack_trace_config: Option<TraceConfig>,
-        total_memory_available_bytes: usize,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
@@ -170,7 +169,6 @@ impl LocalStreamManager {
             streaming_metrics,
             config,
             async_stack_trace_config,
-            total_memory_available_bytes,
         ))
     }
 
@@ -367,10 +365,8 @@ impl LocalStreamManager {
         core.config.clone()
     }
 
-    // pub fn set_lru_manager(&self, lru_mgr: Option<LruManagerRef>) {
-    //     self.context.set_lru_manager(lru_mgr)
-    // }
-
+    /// After memory manager is created, it will store the watermark epoch in stream manager, so
+    /// stream executor can get it to build managed cache.
     pub async fn set_watermark_epoch(&self, watermark_epoch: Option<Arc<AtomicU64>>) {
         let mut guard = self.core.lock().await;
         guard.watermark_epoch = watermark_epoch;
@@ -392,15 +388,8 @@ impl LocalStreamManagerCore {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         async_stack_trace_config: Option<TraceConfig>,
-        total_memory_available_bytes: usize,
     ) -> Self {
-        let context = SharedContext::new(
-            addr,
-            state_store.clone(),
-            streaming_metrics.clone(),
-            &config,
-            total_memory_available_bytes,
-        );
+        let context = SharedContext::new(addr, state_store.clone(), &config);
         Self::new_inner(
             state_store,
             context,
@@ -851,6 +840,7 @@ impl LocalStreamManagerCore {
         Ok(())
     }
 
+    /// When executor need to create cache, it will call this needs the watermark epoch for evict.
     pub fn get_watermark_epoch(&self) -> AtomicU64RefOpt {
         self.watermark_epoch.clone()
     }

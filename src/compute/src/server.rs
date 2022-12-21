@@ -213,7 +213,6 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
         config.streaming.clone(),
         async_stack_trace_config,
-        opts.total_memory_bytes,
     ));
 
     // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.

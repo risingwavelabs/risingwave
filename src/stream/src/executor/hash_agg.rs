@@ -159,7 +159,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         group_key_indices: Vec<usize>,
         group_by_cache_size: usize,
         extreme_cache_size: usize,
-        lru_manager: AtomicU64RefOpt,
+        watermark_epoch: AtomicU64RefOpt,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
     ) -> StreamResult<Self> {
@@ -186,7 +186,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 group_key_indices,
                 group_by_cache_size,
                 extreme_cache_size,
-                watermark_epoch: lru_manager,
+                watermark_epoch,
                 group_change_set: HashSet::new(),
                 lookup_miss_count: AtomicU64::new(0),
                 total_lookup_count: AtomicU64::new(0),
@@ -524,7 +524,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // The cached state managers. `HashKey -> AggStates`.
         let mut agg_states = if let Some(lru_manager) = extra.watermark_epoch.clone() {
-            // ExecutorCache::Managed(lru_manager.create_cache_with_hasher(PrecomputedBuildHasher))
             ExecutorCache::Managed(new_with_hasher(lru_manager, PrecomputedBuildHasher))
         } else {
             ExecutorCache::Local(EvictableHashMap::with_hasher(

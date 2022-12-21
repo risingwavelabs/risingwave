@@ -23,8 +23,8 @@ use risingwave_stream::task::LocalStreamManager;
 use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 use tracing;
 
-/// When `enable_managed_cache` is set, compute node will launch a [`LruManager`] to limit the
-/// memory usage.
+/// When `enable_managed_cache` is set, compute node will launch a [`GlobalMemoryManager`] to limit
+/// the memory usage.
 pub struct GlobalMemoryManager {
     /// All cached data before the watermark should be evicted.
     watermark_epoch: Arc<AtomicU64>,
@@ -68,6 +68,9 @@ impl GlobalMemoryManager {
         watermark_epoch.store(epoch, Ordering::Relaxed);
     }
 
+    /// Memory manager will get memory usage from batch and streaming, and do some actions.
+    /// 1. if batch exceeds, kill running query.
+    /// 2. if streaming exceeds, evict cache by watermark.
     pub async fn run(
         self: Arc<Self>,
         _batch_mgr: Arc<BatchManager>,
