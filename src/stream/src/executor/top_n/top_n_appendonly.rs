@@ -16,7 +16,6 @@ use std::collections::HashSet;
 
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::Schema;
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -30,7 +29,7 @@ use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::{ManagedTopNState, NO_GROUP_KEY};
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
 /// to keep all the data records/rows that have been seen. As long as a record
@@ -45,26 +44,22 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S, false> {
     pub fn new_without_ties(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        order_pairs: Vec<OrderPair>,
+        storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
-        pk_indices: PkIndices,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
         let info = input.info();
-        let schema = input.schema().clone();
 
         Ok(TopNExecutorWrapper {
             input,
             ctx,
             inner: InnerAppendOnlyTopNExecutor::new(
                 info,
-                schema,
-                order_pairs,
+                storage_key,
                 offset_and_limit,
                 order_by_len,
-                pk_indices,
                 executor_id,
                 state_table,
             )?,
@@ -77,26 +72,22 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S, true> {
     pub fn new_with_ties(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        order_pairs: Vec<OrderPair>,
+        storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
-        pk_indices: PkIndices,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
         let info = input.info();
-        let schema = input.schema().clone();
 
         Ok(TopNExecutorWrapper {
             input,
             ctx,
             inner: InnerAppendOnlyTopNExecutor::new(
                 info,
-                schema,
-                order_pairs,
+                storage_key,
                 offset_and_limit,
                 order_by_len,
-                pk_indices,
                 executor_id,
                 state_table,
             )?,
@@ -106,12 +97,6 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S, true> {
 
 pub struct InnerAppendOnlyTopNExecutor<S: StateStore, const WITH_TIES: bool> {
     info: ExecutorInfo,
-
-    /// Schema of the executor.
-    schema: Schema,
-
-    /// The primary key indices of the `AppendOnlyTopNExecutor`
-    pk_indices: PkIndices,
 
     /// The internal key indices of the `TopNExecutor`
     internal_key_indices: PkIndices,
@@ -133,22 +118,23 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
-        schema: Schema,
-        order_pairs: Vec<OrderPair>,
+        storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
-        pk_indices: PkIndices,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
-        // order_pairs is superset of pk
-        assert!(order_pairs
+        let ExecutorInfo {
+            pk_indices, schema, ..
+        } = input_info;
+        // storage_key is superset of pk
+        assert!(storage_key
             .iter()
             .map(|x| x.column_idx)
             .collect::<HashSet<_>>()
             .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&order_pairs, &schema);
+            generate_executor_pk_indices_info(&storage_key, &schema);
 
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
@@ -173,13 +159,11 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
         let cache_key_serde = (first_key_serde, second_key_serde);
         Ok(Self {
             info: ExecutorInfo {
-                schema: input_info.schema,
-                pk_indices: input_info.pk_indices,
+                schema,
+                pk_indices,
                 identity: format!("AppendOnlyTopNExecutor {:X}", executor_id),
             },
-            schema,
             managed_state,
-            pk_indices,
             internal_key_indices,
             cache: TopNCache::new(num_offset, num_limit, order_by_len),
             order_by_len,
@@ -215,23 +199,15 @@ where
             )?;
         }
 
-        generate_output(res_rows, res_ops, &self.schema)
+        generate_output(res_rows, res_ops, self.schema())
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.flush(epoch).await
     }
 
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -294,7 +270,7 @@ mod tests {
         }
     }
 
-    fn create_order_pairs() -> Vec<OrderPair> {
+    fn create_storage_key() -> Vec<OrderPair> {
         vec![
             OrderPair::new(0, OrderType::Ascending),
             OrderPair::new(1, OrderType::Ascending),
@@ -320,7 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_only_top_n_executor_with_limit() {
-        let order_pairs = create_order_pairs();
+        let storage_key = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64],
@@ -333,10 +309,9 @@ mod tests {
             AppendOnlyTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
-                order_pairs,
+                storage_key,
                 (0, 5),
                 2,
-                vec![0, 1],
                 1,
                 state_table,
             )
@@ -404,7 +379,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_only_top_n_executor_with_offset_and_limit() {
-        let order_pairs = create_order_pairs();
+        let storage_key = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64],
@@ -417,10 +392,9 @@ mod tests {
             AppendOnlyTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
-                order_pairs,
+                storage_key,
                 (3, 4),
                 2,
-                vec![0, 1],
                 1,
                 state_table,
             )

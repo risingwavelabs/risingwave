@@ -555,13 +555,13 @@ impl HummockVersionReader {
                 ) {
                     continue;
                 }
+            }
 
-                if !table_holder.value().meta.range_tombstone_list.is_empty()
-                    && !read_options.ignore_range_tombstone
-                {
-                    delete_range_iter
-                        .add_sst_iter(SstableDeleteRangeIterator::new(table_holder.clone()));
-                }
+            if !table_holder.value().meta.range_tombstone_list.is_empty()
+                && !read_options.ignore_range_tombstone
+            {
+                delete_range_iter
+                    .add_sst_iter(SstableDeleteRangeIterator::new(table_holder.clone()));
             }
             staging_sst_iter_count += 1;
             staging_iters.push(HummockIteratorUnion::Second(SstableIterator::new(

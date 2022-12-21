@@ -121,7 +121,7 @@ pub async fn compaction_test_main(
     Ok(())
 }
 
-async fn start_meta_node(listen_addr: String, config_path: String) {
+pub async fn start_meta_node(listen_addr: String, config_path: String) {
     let opts = risingwave_meta::MetaNodeOpts::parse_from([
         "meta-node",
         "--listen-addr",
@@ -161,7 +161,7 @@ async fn start_compactor_node(
     risingwave_compactor::start(opts).await
 }
 
-fn start_compactor_thread(
+pub fn start_compactor_thread(
     meta_endpoint: String,
     client_addr: String,
     state_store: String,

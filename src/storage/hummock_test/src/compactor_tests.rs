@@ -58,9 +58,9 @@ pub(crate) mod tests {
         ReadOptions, StateStoreReadExt, StateStoreWrite, WriteOptions,
     };
 
+    use crate::get_test_notification_client;
     use crate::test_utils::{
-        get_test_notification_client, register_test_tables, HummockV2MixedStateStore,
-        HummockV2MixedStateStore as HummockStorage,
+        register_test_tables, HummockV2MixedStateStore, HummockV2MixedStateStore as HummockStorage,
     };
 
     pub(crate) async fn get_hummock_storage<S: MetaStore>(

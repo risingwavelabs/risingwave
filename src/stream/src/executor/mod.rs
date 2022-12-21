@@ -134,7 +134,7 @@ pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
 /// Static information of an executor.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ExecutorInfo {
     /// See [`Executor::schema`].
     pub schema: Schema,

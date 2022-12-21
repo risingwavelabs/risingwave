@@ -32,9 +32,10 @@ use risingwave_storage::store::{
     ReadOptions, StateStore, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
 };
 
+use crate::get_test_notification_client;
 use crate::test_utils::{
-    get_test_notification_client, with_hummock_storage_v1, with_hummock_storage_v2,
-    HummockStateStoreTestTrait, HummockV2MixedStateStore,
+    with_hummock_storage_v1, with_hummock_storage_v2, HummockStateStoreTestTrait,
+    HummockV2MixedStateStore,
 };
 
 #[tokio::test]

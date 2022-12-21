@@ -88,6 +88,21 @@ if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     cargo make kill
 fi
 
+if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
+    echo "--- e2e, ci-delete-range-test"
+    cargo make clean-data
+    cargo make ci-start ci-delete-range-test
+    buildkite-agent artifact download delete-range-test-"$profile" target/debug/
+    mv target/debug/delete-range-test-"$profile" target/debug/delete-range-test
+    chmod +x ./target/debug/delete-range-test
+
+    config_path=".risingwave/config/risingwave.toml"
+    ./target/debug/delete-range-test --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
+
+    echo "--- Kill cluster"
+    cargo make ci-kill
+fi
+
 if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     echo "--- e2e, ci-compaction-test, nexmark_q7"
     cargo make ci-start ci-compaction-test

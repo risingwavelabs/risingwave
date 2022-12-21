@@ -43,7 +43,7 @@ use serial_test::serial;
 use super::compactor_tests::tests::{
     flush_and_commit, get_hummock_storage, prepare_compactor_and_filter,
 };
-use crate::test_utils::get_test_notification_client;
+use crate::get_test_notification_client;
 
 #[tokio::test]
 #[cfg(feature = "sync_point")]
