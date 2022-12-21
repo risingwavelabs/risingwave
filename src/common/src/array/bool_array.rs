@@ -16,7 +16,7 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
 use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::buffer::{Bitmap, BitmapBuilder, BitmapIter};
 
 #[derive(Debug, Clone)]
 pub struct BoolArray {
@@ -30,16 +30,35 @@ impl BoolArray {
         Self { bitmap, data }
     }
 
-    pub fn from_slice(data: &[Option<bool>]) -> Self {
-        let mut builder = <Self as Array>::Builder::new(data.len());
-        for i in data {
-            builder.append(*i);
+    pub fn to_bitmap(&self) -> Bitmap {
+        &self.data & self.null_bitmap()
+    }
+}
+
+impl FromIterator<Option<bool>> for BoolArray {
+    fn from_iter<I: IntoIterator<Item = Option<bool>>>(iter: I) -> Self {
+        let iter = iter.into_iter();
+        let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
+        for i in iter {
+            builder.append(i);
         }
         builder.finish()
     }
+}
 
-    pub fn to_bitmap(&self) -> Bitmap {
-        &self.data & self.null_bitmap()
+impl<'a> FromIterator<&'a Option<bool>> for BoolArray {
+    fn from_iter<I: IntoIterator<Item = &'a Option<bool>>>(iter: I) -> Self {
+        iter.into_iter().cloned().collect()
+    }
+}
+
+impl FromIterator<bool> for BoolArray {
+    fn from_iter<I: IntoIterator<Item = bool>>(iter: I) -> Self {
+        let data: Bitmap = iter.into_iter().collect();
+        BoolArray {
+            bitmap: Bitmap::all_high_bits(data.len()),
+            data,
+        }
     }
 }
 
@@ -47,7 +66,12 @@ impl Array for BoolArray {
     type Builder = BoolArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = bool;
+    type RawIter<'a> = BitmapIter<'a>;
     type RefItem<'a> = bool;
+
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> bool {
+        self.data.is_set_unchecked(idx)
+    }
 
     fn value_at(&self, idx: usize) -> Option<bool> {
         if !self.is_null(idx) {
@@ -72,6 +96,10 @@ impl Array for BoolArray {
 
     fn iter(&self) -> Self::Iter<'_> {
         ArrayIterator::new(self)
+    }
+
+    fn raw_iter(&self) -> Self::RawIter<'_> {
+        self.data.iter()
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -122,15 +150,15 @@ impl ArrayBuilder for BoolArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<bool>) {
+    fn append_n(&mut self, n: usize, value: Option<bool>) {
         match value {
             Some(x) => {
-                self.bitmap.append(true);
-                self.data.append(x);
+                self.bitmap.append_n(n, true);
+                self.data.append_n(n, x);
             }
             None => {
-                self.bitmap.append(false);
-                self.data.append(bool::default());
+                self.bitmap.append_n(n, false);
+                self.data.append_n(n, false);
             }
         }
     }

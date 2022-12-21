@@ -543,9 +543,10 @@ impl HummockVersionReader {
         let mut staging_sst_iter_count = 0;
         // encode once
         let bloom_filter_prefix_hash = read_options
-            .dist_key_hint
+            .prefix_hint
             .as_ref()
             .map(|hint| Sstable::hash_for_bloom_filter(hint));
+
         for sstable_info in &uncommitted_ssts {
             let table_holder = self
                 .sstable_store
@@ -557,6 +558,7 @@ impl HummockVersionReader {
                     continue;
                 }
             }
+
             if !table_holder.value().meta.range_tombstone_list.is_empty()
                 && !read_options.ignore_range_tombstone
             {
@@ -621,6 +623,7 @@ impl HummockVersionReader {
                         .sstable(sstable_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
+
                     if let Some(key_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(sstable.value(), *key_hash, &mut local_stats) {
                             continue;

@@ -46,7 +46,6 @@ pub use tiered_cache::*;
 pub mod sstable;
 pub use sstable::*;
 
-pub mod compaction_group_client;
 pub mod compactor;
 pub mod conflict_detector;
 mod error;
@@ -61,6 +60,7 @@ pub mod test_utils;
 pub mod utils;
 pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
+pub mod backup_reader;
 pub mod event_handler;
 pub mod local_version;
 pub mod observer_manager;
@@ -84,6 +84,7 @@ use self::iterator::{BackwardUserIterator, HummockIterator, UserIterator};
 pub use self::sstable_store::*;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
+use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::Context;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
@@ -136,6 +137,8 @@ pub struct HummockStorage {
     read_version_mapping: Arc<ReadVersionMappingType>,
 
     tracing: Arc<risingwave_tracing::RwTracingService>,
+
+    backup_reader: BackupReaderRef,
 }
 
 impl HummockStorage {
@@ -143,6 +146,7 @@ impl HummockStorage {
     pub async fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
+        backup_reader: BackupReaderRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
@@ -159,10 +163,14 @@ impl HummockStorage {
 
         let observer_manager = ObserverManager::new(
             notification_client,
-            HummockObserverNode::new(filter_key_extractor_manager.clone(), event_tx.clone()),
+            HummockObserverNode::new(
+                filter_key_extractor_manager.clone(),
+                backup_reader.clone(),
+                event_tx.clone(),
+            ),
         )
         .await;
-        let _ = observer_manager.start().await;
+        observer_manager.start().await;
 
         let hummock_version = match event_rx.recv().await {
             Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,
@@ -205,6 +213,7 @@ impl HummockStorage {
             }),
             read_version_mapping: hummock_event_handler.read_version_mapping(),
             tracing,
+            backup_reader,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -300,6 +309,7 @@ impl HummockStorage {
         Self::new(
             options,
             sstable_store,
+            BackupReader::unused(),
             hummock_meta_client,
             notification_client,
             Arc::new(StateStoreMetrics::unused()),
@@ -329,6 +339,7 @@ pub async fn get_from_sstable_info(
     } else {
         get_delete_range_epoch_from_sstable(sstable.value().as_ref(), &full_key)
     };
+
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
     if read_options.check_bloom_filter
@@ -494,13 +505,17 @@ impl HummockStorageV1 {
 
         let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
         let (event_tx, mut event_rx) = unbounded_channel();
-
+        let backup_manager = BackupReader::unused();
         let observer_manager = ObserverManager::new(
             notification_client,
-            HummockObserverNode::new(filter_key_extractor_manager.clone(), event_tx.clone()),
+            HummockObserverNode::new(
+                filter_key_extractor_manager.clone(),
+                backup_manager,
+                event_tx.clone(),
+            ),
         )
         .await;
-        let _ = observer_manager.start().await;
+        observer_manager.start().await;
 
         let hummock_version = match event_rx.recv().await {
             Some(HummockEvent::VersionUpdate(pin_version_response::Payload::PinnedVersion(version))) => version,

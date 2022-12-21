@@ -62,7 +62,7 @@ pub(crate) fn gen_create_index_plan(
         (table.clone(), schema_name.to_string())
     };
 
-    if table.is_index {
+    if table.is_index() {
         return Err(
             ErrorCode::InvalidInputSyntax(format!("\"{}\" is an index", table.name)).into(),
         );
@@ -86,7 +86,7 @@ pub(crate) fn gen_create_index_plan(
         .collect::<HashMap<_, _>>();
 
     let to_column_indices = |ident: &Ident| {
-        let x = ident.to_string();
+        let x = ident.real_value();
         table_desc_map
             .get(&x)
             .cloned()

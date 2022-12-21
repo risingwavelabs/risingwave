@@ -13,6 +13,7 @@ CREATE TABLE integers (i int);
 statement ok
 INSERT INTO integers SELECT 1 FROM generate_series(0, 9999, 1) tbl(i);
 
+
 query III
 SELECT MIN(i), MAX(i), COUNT(*) FROM integers
 ----
@@ -49,7 +50,6 @@ SELECT MIN(i), MAX(i), COUNT(*) FROM integers2
 
 # we need a rowsort here because we don't preserve insertion order
 # note that rowsort is a string-based sort
-
 query I rowsort
 SELECT * FROM integers2 WHERE i IN (337, 1957, 4425, 9943)
 ----
@@ -60,7 +60,6 @@ SELECT * FROM integers2 WHERE i IN (337, 1957, 4425, 9943)
 
 # when insertion order is disabled, there is no guarantee on which tuples come out of a LIMIT clause
 # for the LIMIT test select everything
-
 query I rowsort
 SELECT * FROM integers2 WHERE i IN (337, 1957, 4425, 9943) LIMIT 4
 ----

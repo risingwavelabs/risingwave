@@ -281,8 +281,8 @@ macro_rules! gen_binary_expr_bitwise {
             { int32, int16, int32, $general_f },
             { int32, int32, int32, $general_f },
             { int32, int64, int64, $general_f },
-            { int64, int16,int64, $general_f },
-            { int64, int32,int64, $general_f },
+            { int64, int16, int64, $general_f },
+            { int64, int32, int64, $general_f },
             { int64, int64, int64, $general_f },
             $(
                 { $i1, $i2, $rt, $func },
@@ -761,8 +761,8 @@ mod tests {
             }
         }
 
-        let col1 = I32Array::from_slice(&lhs).into();
-        let col2 = I32Array::from_slice(&rhs).into();
+        let col1 = I32Array::from_iter(&lhs).into();
+        let col2 = I32Array::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Int32, TypeName::Int32], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -774,7 +774,7 @@ mod tests {
         }
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|int| int.to_scalar_value()),
                 rhs[i].map(|int| int.to_scalar_value()),
             ]);
@@ -809,8 +809,8 @@ mod tests {
             }
         }
 
-        let col1 = NaiveDateArray::from_slice(&lhs).into();
-        let col2 = IntervalArray::from_slice(&rhs).into();
+        let col1 = NaiveDateArray::from_iter(&lhs).into();
+        let col2 = IntervalArray::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Date, TypeName::Interval], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -822,7 +822,7 @@ mod tests {
         }
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|date| date.to_scalar_value()),
                 rhs[i].map(|date| date.to_scalar_value()),
             ]);
@@ -862,8 +862,8 @@ mod tests {
             }
         }
 
-        let col1 = DecimalArray::from_slice(&lhs).into();
-        let col2 = DecimalArray::from_slice(&rhs).into();
+        let col1 = DecimalArray::from_iter(&lhs).into();
+        let col2 = DecimalArray::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Decimal, TypeName::Decimal], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -875,7 +875,7 @@ mod tests {
         }
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|dec| dec.to_scalar_value()),
                 rhs[i].map(|dec| dec.to_scalar_value()),
             ]);

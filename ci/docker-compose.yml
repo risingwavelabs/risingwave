@@ -13,6 +13,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    command: [ "postgres", "-c", "wal_level=logical" ]
 
   mysql:
     image: mysql:8.0
@@ -61,14 +62,15 @@ services:
       - "5980:8681"
 
   source-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221123
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221212
     depends_on:
       - mysql
+      - db
     volumes:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221123
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221212
     depends_on:
       - mysql
       - db
@@ -76,12 +78,12 @@ services:
       - ..:/risingwave
 
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221123
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221212
     volumes:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221123
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221212
     depends_on:
       db:
         condition: service_healthy
@@ -89,7 +91,7 @@ services:
       - ..:/risingwave
 
   benchmark-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221123
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20221212
     depends_on:
       - kafka
     volumes:

@@ -300,7 +300,7 @@ impl HummockStorageV1 {
         assert!(pinned_version.is_valid());
         // encode once
         let bloom_filter_prefix_hash = read_options
-            .dist_key_hint
+            .prefix_hint
             .as_ref()
             .map(|hint| Sstable::hash_for_bloom_filter(hint));
         for level in pinned_version.levels(table_id) {
@@ -505,7 +505,7 @@ impl StateStore for HummockStorageV1 {
                         );
                     return Ok(());
                 }
-                HummockReadEpoch::NoWait(_) => return Ok(()),
+                HummockReadEpoch::NoWait(_) | HummockReadEpoch::Backup(_) => return Ok(()),
             };
             if wait_epoch == HummockEpoch::MAX {
                 panic!("epoch should not be u64::MAX");

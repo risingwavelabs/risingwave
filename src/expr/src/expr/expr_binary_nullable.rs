@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use itertools::{multizip, Itertools};
 use risingwave_common::array::*;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_pb::expr::expr_node::Type;
 
@@ -154,7 +155,7 @@ impl Expression for BinaryShortCircuitExpression {
         Ok(Arc::new(builder.finish().into()))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let ret_ia1 = self.expr_ia1.eval_row(input)?.map(|x| x.into_bool());
         match self.expr_type {
             Type::Or => {
@@ -298,7 +299,7 @@ pub fn new_not_distinct_from_expr(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::Scalar;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type;
@@ -346,7 +347,7 @@ mod tests {
         let vec_executor = build_from_prost(&expr).unwrap();
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);
@@ -396,7 +397,7 @@ mod tests {
         let vec_executor = build_from_prost(&expr).unwrap();
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);
@@ -420,7 +421,7 @@ mod tests {
         let vec_executor = build_from_prost(&expr).unwrap();
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);
@@ -450,7 +451,7 @@ mod tests {
         let vec_executor = build_from_prost(&expr).unwrap();
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);

@@ -38,11 +38,14 @@ pub struct TableDesc {
     pub stream_key: Vec<usize>,
 
     /// Whether the table source is append-only
-    pub appendonly: bool,
+    pub append_only: bool,
 
     pub retention_seconds: u32,
 
     pub value_indices: Vec<usize>,
+
+    /// The prefix len of pk, used in bloom filter.
+    pub read_prefix_len_hint: usize,
 }
 
 impl TableDesc {
@@ -70,6 +73,7 @@ impl TableDesc {
             dist_key_indices: self.distribution_key.iter().map(|&k| k as u32).collect(),
             retention_seconds: self.retention_seconds,
             value_indices: self.value_indices.iter().map(|&v| v as u32).collect(),
+            read_prefix_len_hint: self.read_prefix_len_hint as u32,
         }
     }
 

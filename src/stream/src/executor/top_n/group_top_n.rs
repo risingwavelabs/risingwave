@@ -19,8 +19,8 @@ use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
+use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
@@ -34,7 +34,7 @@ use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerGroupTopNExecutorNew<K, S, WITH_TIES>>;
@@ -44,10 +44,9 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
     pub fn new(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        order_pairs: Vec<OrderPair>,
+        storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
-        pk_indices: PkIndices,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
@@ -55,17 +54,14 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
         cache_size: usize,
     ) -> StreamResult<Self> {
         let info = input.info();
-        let schema = input.schema().clone();
         Ok(TopNExecutorWrapper {
             input,
             ctx,
             inner: InnerGroupTopNExecutorNew::new(
                 info,
-                schema,
-                order_pairs,
+                storage_key,
                 offset_and_limit,
                 order_by_len,
-                pk_indices,
                 executor_id,
                 group_by,
                 state_table,
@@ -79,17 +75,11 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
 pub struct InnerGroupTopNExecutorNew<K: HashKey, S: StateStore, const WITH_TIES: bool> {
     info: ExecutorInfo,
 
-    /// Schema of the executor.
-    schema: Schema,
-
     /// `LIMIT XXX`. None means no limit.
     limit: usize,
 
     /// `OFFSET XXX`. `0` means no offset.
     offset: usize,
-
-    /// The primary key indices of the `GroupTopNExecutor`
-    pk_indices: PkIndices,
 
     /// The internal key indices of the `GroupTopNExecutor`
     internal_key_indices: PkIndices,
@@ -114,25 +104,26 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
-        schema: Schema,
-        order_pairs: Vec<OrderPair>,
+        storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
         order_by_len: usize,
-        pk_indices: PkIndices,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         lru_manager: Option<LruManagerRef>,
         cache_size: usize,
     ) -> StreamResult<Self> {
-        // order_pairs is superset of pk
-        assert!(order_pairs
+        let ExecutorInfo {
+            pk_indices, schema, ..
+        } = input_info;
+        // storage_key is superset of pk
+        assert!(storage_key
             .iter()
             .map(|x| x.column_idx)
             .collect::<HashSet<_>>()
             .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
         let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&order_pairs, &schema);
+            generate_executor_pk_indices_info(&storage_key, &schema);
 
         let managed_state = ManagedTopNState::<S>::new(
             state_table,
@@ -156,15 +147,13 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
         let cache_key_serde = (first_key_serde, second_key_serde);
         Ok(Self {
             info: ExecutorInfo {
-                schema: input_info.schema,
-                pk_indices: input_info.pk_indices,
+                schema,
+                pk_indices,
                 identity: format!("TopNExecutorNew {:X}", executor_id),
             },
-            schema,
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_state,
-            pk_indices,
             internal_key_indices,
             group_by,
             caches: GroupTopNCache::new(lru_manager, cache_size),
@@ -222,18 +211,18 @@ where
 
         for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq(keys.iter()) {
             // The pk without group by
-            let pk_row = row_ref.row_by_indices(&self.internal_key_indices[self.group_by.len()..]);
+            let pk_row = row_ref.project(&self.internal_key_indices[self.group_by.len()..]);
             let cache_key =
                 serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
 
-            let group_key = row_ref.row_by_indices(&self.group_by);
+            let group_key = row_ref.project(&self.group_by);
 
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
                 let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
                 self.managed_state
-                    .init_topn_cache(Some(&group_key), &mut topn_cache, self.order_by_len)
+                    .init_topn_cache(Some(group_key), &mut topn_cache, self.order_by_len)
                     .await?;
                 self.caches.insert(group_cache_key.clone(), topn_cache);
             }
@@ -250,7 +239,7 @@ where
                     self.managed_state.delete(row_ref);
                     cache
                         .delete(
-                            Some(&group_key),
+                            Some(group_key),
                             &mut self.managed_state,
                             cache_key,
                             row_ref,
@@ -262,23 +251,15 @@ where
             }
         }
 
-        generate_output(res_rows, res_ops, &self.schema)
+        generate_output(res_rows, res_ops, self.schema())
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.flush(epoch).await
     }
 
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
     }
 
     fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
@@ -307,7 +288,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::catalog::Field;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
@@ -328,7 +309,7 @@ mod tests {
         }
     }
 
-    fn create_order_pairs() -> Vec<OrderPair> {
+    fn create_storage_key() -> Vec<OrderPair> {
         vec![
             OrderPair::new(1, OrderType::Ascending),
             OrderPair::new(2, OrderType::Ascending),
@@ -390,7 +371,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_without_offset_and_with_limits() {
-        let order_types = create_order_pairs();
+        let order_types = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
@@ -402,22 +383,20 @@ mod tests {
             &[1, 2, 0],
         )
         .await;
-        let top_n_executor = Box::new(
-            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
-                source as Box<dyn Executor>,
-                ActorContext::create(0),
-                order_types,
-                (0, 2),
-                1,
-                vec![1, 2, 0],
-                1,
-                vec![1],
-                state_table,
-                None,
-                0,
-            )
-            .unwrap(),
-        );
+        let a = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
+            source as Box<dyn Executor>,
+            ActorContext::create(0),
+            order_types,
+            (0, 2),
+            1,
+            1,
+            vec![1],
+            state_table,
+            None,
+            0,
+        )
+        .unwrap();
+        let top_n_executor = Box::new(a);
         let mut top_n_executor = top_n_executor.execute();
 
         // consume the init barrier
@@ -490,7 +469,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_offset_and_with_limits() {
-        let order_types = create_order_pairs();
+        let order_types = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
@@ -509,7 +488,6 @@ mod tests {
                 order_types,
                 (1, 2),
                 1,
-                vec![1, 2, 0],
                 1,
                 vec![1],
                 state_table,
@@ -582,7 +560,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_multi_group_key() {
-        let order_types = create_order_pairs();
+        let order_types = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
@@ -601,7 +579,6 @@ mod tests {
                 order_types,
                 (0, 2),
                 1,
-                vec![1, 2, 0],
                 1,
                 vec![1, 2],
                 state_table,

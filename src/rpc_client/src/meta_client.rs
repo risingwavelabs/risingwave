@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures::stream::BoxStream;
 use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
@@ -26,6 +27,8 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
     SstIdRange,
 };
+use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
+use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
     Source as ProstSource, Table as ProstTable, View as ProstView,
@@ -56,7 +59,7 @@ use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
 
 use crate::error::Result;
-use crate::hummock_meta_client::HummockMetaClient;
+use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
 use crate::{rpc_client_method_impl, ExtraInfoSourceRef};
 
 type DatabaseId = u32;
@@ -646,6 +649,32 @@ impl MetaClient {
         let _resp = self.inner.rise_ctl_update_compaction_config(req).await?;
         Ok(())
     }
+
+    pub async fn backup_meta(&self) -> Result<u64> {
+        let req = BackupMetaRequest {};
+        let resp = self.inner.backup_meta(req).await?;
+        Ok(resp.job_id)
+    }
+
+    pub async fn get_backup_job_status(&self, job_id: u64) -> Result<BackupJobStatus> {
+        let req = GetBackupJobStatusRequest { job_id };
+        let resp = self.inner.get_backup_job_status(req).await?;
+        Ok(resp.job_status())
+    }
+
+    pub async fn delete_meta_snapshot(&self, snapshot_ids: &[u64]) -> Result<()> {
+        let req = DeleteMetaSnapshotRequest {
+            snapshot_ids: snapshot_ids.to_vec(),
+        };
+        let _resp = self.inner.delete_meta_snapshot(req).await?;
+        Ok(())
+    }
+
+    pub async fn get_meta_snapshot_manifest(&self) -> Result<MetaSnapshotManifest> {
+        let req = GetMetaSnapshotManifestRequest {};
+        let resp = self.inner.get_meta_snapshot_manifest(req).await?;
+        Ok(resp.manifest.expect("should exist"))
+    }
 }
 
 #[async_trait]
@@ -734,15 +763,20 @@ impl HummockMetaClient for MetaClient {
         panic!("Only meta service can commit_epoch in production.")
     }
 
+    async fn update_current_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
+        panic!("Only meta service can update_current_epoch in production.")
+    }
+
     async fn subscribe_compact_tasks(
         &self,
         max_concurrent_task_number: u64,
-    ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+    ) -> Result<BoxStream<'static, CompactTaskItem>> {
         let req = SubscribeCompactTasksRequest {
             context_id: self.worker_id(),
             max_concurrent_task_number,
         };
-        self.inner.subscribe_compact_tasks(req).await
+        let stream = self.inner.subscribe_compact_tasks(req).await?;
+        Ok(Box::pin(stream))
     }
 
     async fn report_compaction_task_progress(
@@ -819,6 +853,7 @@ struct GrpcMetaClient {
     stream_client: StreamManagerServiceClient<Channel>,
     user_client: UserServiceClient<Channel>,
     scale_client: ScaleServiceClient<Channel>,
+    backup_client: BackupServiceClient<Channel>,
 }
 
 impl GrpcMetaClient {
@@ -871,7 +906,8 @@ impl GrpcMetaClient {
         let notification_client = NotificationServiceClient::new(channel.clone());
         let stream_client = StreamManagerServiceClient::new(channel.clone());
         let user_client = UserServiceClient::new(channel.clone());
-        let scale_client = ScaleServiceClient::new(channel);
+        let scale_client = ScaleServiceClient::new(channel.clone());
+        let backup_client = BackupServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
@@ -881,6 +917,7 @@ impl GrpcMetaClient {
             stream_client,
             user_client,
             scale_client,
+            backup_client,
         })
     }
 
@@ -958,6 +995,10 @@ macro_rules! for_all_meta_rpc {
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
+            ,{ backup_client, backup_meta, BackupMetaRequest, BackupMetaResponse }
+            ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
+            ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
+            ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
         }
     };
 }

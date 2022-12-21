@@ -22,7 +22,7 @@ use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{Row as RowData, Row2, RowDeserializer};
+use risingwave_common::row::{OwnedRow as RowData, Row, RowDeserializer};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
@@ -112,7 +112,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         });
 
         for (idx, (row, op)) in data_chunk.rows().zip_eq(ops.iter()).enumerate() {
-            let left_val = row.value_at(self.key_l).to_owned_datum();
+            let left_val = row.datum_at(self.key_l).to_owned_datum();
 
             let res = if let Some(array) = &eval_results {
                 if let ArrayImpl::Bool(results) = &**array {
@@ -171,10 +171,10 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             if let Some(val) = left_val {
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
-                        self.range_cache.insert(&val, row.into_owned_row())?;
+                        self.range_cache.insert(&val, row)?;
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        self.range_cache.delete(&val, row.into_owned_row())?;
+                        self.range_cache.delete(&val, row)?;
                     }
                 }
             }
@@ -300,6 +300,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             left_to_output,
         );
 
+        let watermark_can_clean_state = !matches!(self.comparator, LessThan | LessThanOrEqual);
+        let mut unused_clean_hint = None;
+
         #[for_await]
         for msg in aligned_stream {
             match msg? {
@@ -332,14 +335,14 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     for (row, op) in data_chunk.rows().zip_eq(ops.iter()) {
                         match *op {
                             Op::UpdateInsert | Op::Insert => {
-                                current_epoch_value = Some(row.value_at(0).to_owned_datum());
+                                current_epoch_value = Some(row.datum_at(0).to_owned_datum());
                                 current_epoch_row = Some(row.into_owned_row());
                             }
                             _ => {
                                 // To be consistent, there must be an existing `current_epoch_value`
                                 // equivalent to row indicated for
                                 // deletion.
-                                if Some(row.value_at(0))
+                                if Some(row.datum_at(0))
                                     != current_epoch_value.as_ref().map(ToDatumRef::to_datum_ref)
                                 {
                                     bail!(
@@ -352,6 +355,14 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                                 current_epoch_row = None;
                             }
                         }
+                    }
+                }
+                AlignedMessage::WatermarkLeft(_) => {
+                    // Do nothing.
+                }
+                AlignedMessage::WatermarkRight(watermark) => {
+                    if watermark_can_clean_state {
+                        unused_clean_hint = Some(watermark);
                     }
                 }
                 AlignedMessage::Barrier(barrier) => {
@@ -382,6 +393,12 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             yield Message::Chunk(chunk);
                         }
                     }
+
+                    if let Some(mut watermark) = unused_clean_hint.take() {
+                        self.range_cache.shrink(watermark.val.clone());
+                        watermark.col_idx = self.key_l;
+                        yield Message::Watermark(watermark);
+                    };
 
                     // Update the committed value on RHS if it has changed.
                     if last_committed_epoch_row != current_epoch_row {

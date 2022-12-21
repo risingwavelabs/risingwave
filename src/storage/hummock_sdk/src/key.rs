@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::fmt::Debug;
 use std::ops::Bound::*;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::ptr;
@@ -331,12 +332,23 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
 ///
 /// Its name come from the assumption that Hummock is always accessed by a table-like structure
 /// identified by a [`TableId`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TableKey<T: AsRef<[u8]>>(pub T);
 
 impl<T: AsRef<[u8]>> TableKey<T> {
     pub fn dist_key(&self) -> &[u8] {
         &self.0.as_ref()[VirtualNode::SIZE..]
+    }
+}
+
+impl<T: AsRef<[u8]>> Debug for TableKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TableKey")
+            .field(
+                "table_key",
+                &String::from_utf8(self.0.as_ref().to_vec()).unwrap(),
+            )
+            .finish()
     }
 }
 

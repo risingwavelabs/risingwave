@@ -1,5 +1,5 @@
-query ITIIT
-SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class ORDER BY oid limit 7;
+query ITIT
+SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class ORDER BY oid limit 15;
 ----
 1 pg_type 1 r
 2 pg_namespace 1 r
@@ -8,3 +8,16 @@ SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class ORDER BY oid limit 
 5 pg_user 1 r
 6 pg_class 1 r
 7 pg_index 1 r
+8 pg_opclass 1 r
+9 pg_collation 1 r
+10 pg_am 1 r
+11 pg_operator 1 r
+12 pg_views 1 r
+13 pg_attribute 1 r
+14 pg_database 1 r
+15 pg_description 1 r
+
+query ITIT
+SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class WHERE oid = 'pg_namespace'::regclass;
+----
+2 pg_namespace 1 r

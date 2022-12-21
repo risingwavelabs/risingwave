@@ -31,8 +31,8 @@ use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use super::top_n_cache::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
-    PkIndices, PkIndicesRef,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    ExecutorInfo, Message, PkIndices, PkIndicesRef,
 };
 
 #[async_trait]
@@ -43,14 +43,22 @@ pub trait TopNExecutorBase: Send + 'static {
     /// Flush the buffered chunk to the storage backend.
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 
+    fn info(&self) -> &ExecutorInfo;
+
     /// See [`Executor::schema`].
-    fn schema(&self) -> &Schema;
+    fn schema(&self) -> &Schema {
+        &self.info().schema
+    }
 
     /// See [`Executor::pk_indices`].
-    fn pk_indices(&self) -> PkIndicesRef<'_>;
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
+        self.info().pk_indices.as_ref()
+    }
 
     /// See [`Executor::identity`].
-    fn identity(&self) -> &str;
+    fn identity(&self) -> &str {
+        &self.info().identity
+    }
 
     /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
     /// by Group Top-N since it's distributed.
@@ -87,6 +95,10 @@ where
 
     fn identity(&self) -> &str {
         self.inner.identity()
+    }
+
+    fn info(&self) -> ExecutorInfo {
+        self.inner.info().clone()
     }
 }
 
@@ -156,13 +168,15 @@ pub fn generate_output(
     }
 }
 
+/// Separate the information of `storage_key` into different `Vec`s. The `Vec`s have the same
+/// length as `storage_key`.
 pub fn generate_executor_pk_indices_info(
-    order_pairs: &[OrderPair],
+    storage_key: &[OrderPair],
     schema: &Schema,
 ) -> (PkIndices, Vec<DataType>, Vec<OrderType>) {
     let mut internal_key_indices = vec![];
     let mut internal_order_types = vec![];
-    for order_pair in order_pairs {
+    for order_pair in storage_key {
         internal_key_indices.push(order_pair.column_idx);
         internal_order_types.push(order_pair.order_type);
     }
@@ -180,21 +194,15 @@ pub fn generate_executor_pk_indices_info(
 /// For a given pk (Row), it can be split into `order_key` and `additional_pk` according to
 /// `order_by_len`, and the two split parts are serialized separately.
 pub fn serialize_pk_to_cache_key(
-    pk: Row,
+    pk: impl Row,
     order_by_len: usize,
     cache_key_serde: &(OrderedRowSerde, OrderedRowSerde),
 ) -> CacheKey {
-    let pk = pk.into_inner();
+    // TODO(row trait): may support splitting row
+    let pk = pk.into_owned_row().into_inner();
     let (cache_key_first, cache_key_second) = pk.split_at(order_by_len);
-    let mut cache_key_first_bytes = vec![];
-    let mut cache_key_second_bytes = vec![];
-    cache_key_serde.0.serialize(
-        &Row::new(cache_key_first.to_vec()),
-        &mut cache_key_first_bytes,
-    );
-    cache_key_serde.1.serialize(
-        &Row::new(cache_key_second.to_vec()),
-        &mut cache_key_second_bytes,
-    );
-    (cache_key_first_bytes, cache_key_second_bytes)
+    (
+        cache_key_first.memcmp_serialize(&cache_key_serde.0),
+        cache_key_second.memcmp_serialize(&cache_key_serde.1),
+    )
 }

@@ -35,7 +35,7 @@ use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
-    HummockSnapshotGuard, LocalQueryExecution, LocalQueryStream,
+    LocalQueryExecution, LocalQueryStream, PinnedHummockSnapshot,
 };
 use crate::session::SessionImpl;
 use crate::PlanRef;
@@ -128,22 +128,27 @@ pub async fn handle_query(
         .collect_vec();
 
     let mut row_stream = {
-        // Acquire hummock snapshot for execution.
-        // TODO: if there's no table scan, we don't need to acquire snapshot.
-        let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
-        let query_id = query.query_id().clone();
-        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
-
+        let query_epoch = session.config().get_query_epoch();
+        let query_snapshot = if let Some(query_epoch) = query_epoch {
+            PinnedHummockSnapshot::Other(query_epoch)
+        } else {
+            // Acquire hummock snapshot for execution.
+            // TODO: if there's no table scan, we don't need to acquire snapshot.
+            let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
+            let query_id = query.query_id().clone();
+            let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
+            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot)
+        };
         match query_mode {
             QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-                local_execute(session.clone(), query, pinned_snapshot).await?,
+                local_execute(session.clone(), query, query_snapshot).await?,
                 column_types,
                 format,
             )),
             // Local mode do not support cancel tasks.
             QueryMode::Distributed => {
                 PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                    distribute_execute(session.clone(), query, pinned_snapshot).await?,
+                    distribute_execute(session.clone(), query, query_snapshot).await?,
                     column_types,
                     format,
                 ))
@@ -224,7 +229,7 @@ fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
 pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
-    pinned_snapshot: HummockSnapshotGuard,
+    pinned_snapshot: PinnedHummockSnapshot,
 ) -> Result<DistributedQueryStream> {
     let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
     let query_manager = session.env().query_manager().clone();
@@ -235,10 +240,10 @@ pub async fn distribute_execute(
 }
 
 #[expect(clippy::unused_async)]
-async fn local_execute(
+pub async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
-    pinned_snapshot: HummockSnapshotGuard,
+    pinned_snapshot: PinnedHummockSnapshot,
 ) -> Result<LocalQueryStream> {
     let front_env = session.env();
 
@@ -254,7 +259,7 @@ async fn local_execute(
     Ok(execution.stream_rows())
 }
 
-async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
+pub async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
     match stmt_type {
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             let client = session.env().meta_client();
