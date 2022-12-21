@@ -11,4 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-mod s3_file_reader;
+
+mod reader;
+pub use reader::S3FileReader;

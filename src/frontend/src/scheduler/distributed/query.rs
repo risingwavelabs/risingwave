@@ -236,6 +236,7 @@ impl QueryRunner {
             );
         }
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
+        let has_lookup_join_stage = self.query.has_lookup_join_stage();
         // To convince the compiler that `pinned_snapshot` will only be dropped once.
         let mut pinned_snapshot_to_drop = Some(pinned_snapshot);
         while let Some(msg_inner) = self.msg_receiver.recv().await {
@@ -248,7 +249,9 @@ impl QueryRunner {
                     );
                     self.scheduled_stages_count += 1;
                     stages_with_table_scan.remove(&stage_id);
-                    if stages_with_table_scan.is_empty() {
+                    // If query contains lookup join we need to delay epoch unpin util the end of
+                    // the query.
+                    if !has_lookup_join_stage && stages_with_table_scan.is_empty() {
                         // We can be sure here that all the Hummock iterators have been created,
                         // thus they all successfully pinned a HummockVersion.
                         // So we can now unpin their epoch.
