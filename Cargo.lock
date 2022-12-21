@@ -1559,6 +1559,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "csv-core"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b2466559f260f48ad25fe6317b3c8dac77b5bdb5763ac7d9d6103530663bc90"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "ctor"
 version = "0.1.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5278,16 +5287,20 @@ name = "risingwave_compaction_test"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bytes",
  "clap 3.2.23",
  "futures",
  "itertools",
+ "lazy_static",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
+ "rand 0.8.5",
  "risingwave_common",
  "risingwave_compactor",
  "risingwave_hummock_sdk",
+ "risingwave_hummock_test",
  "risingwave_meta",
  "risingwave_object_store",
  "risingwave_pb",
@@ -5864,6 +5877,7 @@ dependencies = [
  "chrono",
  "crc32fast",
  "criterion",
+ "csv-core",
  "enum-as-inner",
  "farmhash",
  "futures",

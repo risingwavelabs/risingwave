@@ -46,6 +46,9 @@ impl OrderType {
     }
 }
 
+/// Column index with an order type (ASC or DESC). Used to represent a sort key (`Vec<OrderPair>`).
+///
+/// Corresponds to protobuf [`ColumnOrder`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrderPair {
     pub column_idx: usize,
