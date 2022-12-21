@@ -15,4 +15,5 @@
 //! Metadata of expressions.
 
 pub mod agg;
+pub mod cast;
 pub mod func;
