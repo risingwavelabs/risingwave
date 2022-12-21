@@ -21,7 +21,6 @@ use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::*;
-
 use crate::common::table::state_table::StateTable;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
@@ -120,7 +119,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             degree_state_table_l,
             state_table_r,
             degree_state_table_r,
-            lru_manager: stream.get_watermark_epoch().await,
+            lru_manager: stream.get_watermark_epoch(),
             is_append_only,
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,

@@ -39,7 +39,6 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
-
 use crate::error::{StreamError, StreamResult};
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
@@ -852,7 +851,7 @@ impl LocalStreamManagerCore {
         Ok(())
     }
 
-    pub async fn get_watermark_epoch(&self) -> AtomicU64RefOpt {
+    pub fn get_watermark_epoch(&self) -> AtomicU64RefOpt {
         self.watermark_epoch.clone()
     }
 }

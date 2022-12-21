@@ -22,7 +22,6 @@ use risingwave_pb::stream_plan::HashAggNode;
 
 use super::agg_common::{build_agg_call_from_prost, build_agg_state_storages_from_proto};
 use super::*;
-
 use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::{AggCall, AggStateStorage};
 use crate::executor::monitor::StreamingMetrics;
@@ -127,7 +126,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             group_by_cache_size: stream.config.developer.unsafe_stream_hash_agg_cache_size,
             extreme_cache_size: stream.config.developer.unsafe_stream_extreme_cache_size,
             executor_id: params.executor_id,
-            watermark_epoch: stream.get_watermark_epoch().await,
+            watermark_epoch: stream.get_watermark_epoch(),
             metrics: params.executor_stats,
             chunk_size: params.env.config().developer.stream_chunk_size,
         };

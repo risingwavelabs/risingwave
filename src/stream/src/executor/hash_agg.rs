@@ -34,9 +34,7 @@ use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorag
 use super::{
     expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult, Watermark,
 };
-use crate::cache::{
-    cache_may_stale, new_with_hasher, EvictableHashMap, ExecutorCache
-};
+use crate::cache::{cache_may_stale, new_with_hasher, EvictableHashMap, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggCall, AggChangesInfo, AggGroup};

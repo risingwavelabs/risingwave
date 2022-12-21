@@ -412,7 +412,6 @@ pub struct MaterializeCache {
 }
 
 impl MaterializeCache {
-
     pub fn new(lru_manager: AtomicU64RefOpt, cache_size: usize) -> Self {
         let cache = if let Some(lru_manager) = lru_manager {
             ExecutorCache::Managed(new_unbounded(lru_manager))

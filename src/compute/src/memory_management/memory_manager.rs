@@ -12,16 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::alloc::Allocator;
-use std::hash::{BuildHasher, Hash};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use lru::LruCache;
 use risingwave_batch::task::BatchManager;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_stream::cache::ManagedLruCache;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
 use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
@@ -62,8 +58,6 @@ impl GlobalMemoryManager {
         })
     }
 
-
-
     pub fn get_watermark_epoch(&self) -> Arc<AtomicU64> {
         self.watermark_epoch.clone()
     }
@@ -76,8 +70,8 @@ impl GlobalMemoryManager {
 
     pub async fn run(
         self: Arc<Self>,
-        batch_mgr: Arc<BatchManager>,
-        stream_mgr: Arc<LocalStreamManager>,
+        _batch_mgr: Arc<BatchManager>,
+        _stream_mgr: Arc<LocalStreamManager>,
     ) {
         let mem_threshold_graceful =
             (self.total_memory_available_bytes as f64 * Self::EVICTION_THRESHOLD_GRACEFUL) as usize;

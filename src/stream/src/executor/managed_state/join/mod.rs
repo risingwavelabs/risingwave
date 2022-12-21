@@ -36,9 +36,7 @@ use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::StateStore;
 
-use crate::cache::{
-    cache_may_stale, new_with_hasher_in, EvictableHashMap, ExecutorCache,
-};
+use crate::cache::{cache_may_stale, new_with_hasher_in, EvictableHashMap, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;

@@ -27,9 +27,7 @@ use risingwave_storage::StateStore;
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::TopNCache;
-use crate::cache::{
-    cache_may_stale, new_unbounded, EvictableHashMap, ExecutorCache,
-};
+use crate::cache::{cache_may_stale, new_unbounded, EvictableHashMap, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
@@ -140,7 +138,6 @@ pub struct GroupTopNCache<K: HashKey, const WITH_TIES: bool> {
 }
 
 impl<K: HashKey, const WITH_TIES: bool> GroupTopNCache<K, WITH_TIES> {
-
     pub fn new(lru_manager: AtomicU64RefOpt, cache_size: usize) -> Self {
         let cache = if let Some(lru_manager) = lru_manager {
             ExecutorCache::Managed(new_unbounded(lru_manager))

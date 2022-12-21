@@ -14,13 +14,10 @@
 
 use std::collections::BTreeSet;
 
-use prometheus::core::AtomicU64;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 
-use crate::cache::{
-    new_unbounded, EvictableHashMap, ExecutorCache, ManagedLruCache,
-};
+use crate::cache::{new_unbounded, EvictableHashMap, ExecutorCache};
 use crate::task::AtomicU64RefOpt;
 
 /// A cache for lookup's arrangement side.
@@ -66,7 +63,6 @@ impl LookupCache {
     pub fn update_epoch(&mut self, epoch: u64) {
         self.data.update_epoch(epoch);
     }
-
 
     pub fn new(watermark_epoch: AtomicU64RefOpt, cache_size: usize) -> Self {
         let cache = if let Some(watermark_epoch) = watermark_epoch {

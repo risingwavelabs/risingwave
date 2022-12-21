@@ -77,7 +77,7 @@ pub fn new_with_hasher_in<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator>
 ) -> ManagedLruCache<K, V, S, A> {
     ManagedLruCache {
         inner: LruCache::unbounded_with_hasher_in(hasher, alloc),
-        watermark_epoch: watermark_epoch.clone(),
+        watermark_epoch,
     }
 }
 
@@ -87,6 +87,6 @@ pub fn new_with_hasher<K: Hash + Eq, V, S: BuildHasher>(
 ) -> ManagedLruCache<K, V, S> {
     ManagedLruCache {
         inner: LruCache::unbounded_with_hasher(hasher),
-        watermark_epoch: watermark_epoch.clone(),
+        watermark_epoch,
     }
 }

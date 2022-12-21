@@ -37,8 +37,6 @@ pub use env::*;
 use risingwave_storage::StateStoreImpl;
 pub use stream_manager::*;
 
-
-
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
 pub type ActorId = u32;
 pub type FragmentId = u32;
@@ -101,29 +99,15 @@ impl SharedContext {
     pub fn new(
         addr: HostAddr,
         state_store: StateStoreImpl,
-        streaming_metrics: Arc<StreamingMetrics>,
-        config: &StreamingConfig,
-        total_memory_available_bytes: usize,
-        // create
+        _streaming_metrics: Arc<StreamingMetrics>,
+        _config: &StreamingConfig,
+        _total_memory_available_bytes: usize,
     ) -> Self {
-        // let create_lru_manager = || {
-        //     let mgr = crate::cache::LruManager::new(
-        //         total_memory_available_bytes,
-        //         config.barrier_interval_ms,
-        //         streaming_metrics,
-        //     );
-        //     // Run a background memory monitor
-        //     tokio::spawn(mgr.clone().run());
-        //     mgr
-        // };
-
-        let enable_managed_cache = config.developer.stream_enable_managed_cache;
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
             compute_client_pool: ComputeClientPool::default(),
-            // lru_manager: None,
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(state_store))),
             config: config.clone(),
         }

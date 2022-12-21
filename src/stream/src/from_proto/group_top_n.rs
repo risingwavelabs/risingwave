@@ -20,7 +20,6 @@ use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::stream_plan::GroupTopNNode;
 
 use super::*;
-
 use crate::common::table::state_table::StateTable;
 use crate::executor::{ActorContextRef, GroupTopNExecutor, PkIndices};
 use crate::task::AtomicU64RefOpt;
@@ -60,7 +59,7 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
             executor_id: params.executor_id,
             group_by,
             state_table,
-            watermark_epoch: stream.get_watermark_epoch().await,
+            watermark_epoch: stream.get_watermark_epoch(),
             cache_size: 1 << 16,
             with_ties: node.with_ties,
             group_key_types,
