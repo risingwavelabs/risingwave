@@ -120,9 +120,9 @@ impl ToBatch for LogicalLimit {
 
 impl ToStream for LogicalLimit {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        Err(RwError::from(ErrorCode::NotImplemented(
-            "there is no limit stream operator".to_string(),
-            None.into(),
+        Err(RwError::from(ErrorCode::InvalidInputSyntax(
+            "The LIMIT clause can not appear alone in a streaming query. Please add an ORDER BY clause before the LIMIT"
+                .to_string(),
         )))
     }
 
