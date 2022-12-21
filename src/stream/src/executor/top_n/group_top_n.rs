@@ -32,7 +32,7 @@ use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
 use crate::task::AtomicU64RefOpt;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =

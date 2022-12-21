@@ -82,8 +82,6 @@ pub struct SharedContext {
 
     pub(crate) barrier_manager: Arc<Mutex<LocalBarrierManager>>,
 
-    pub(crate) lru_manager: Option<LruManagerRef>,
-
     pub(crate) config: StreamingConfig,
 }
 
@@ -100,7 +98,7 @@ impl SharedContext {
         addr: HostAddr,
         state_store: StateStoreImpl,
         _streaming_metrics: Arc<StreamingMetrics>,
-        _config: &StreamingConfig,
+        config: &StreamingConfig,
         _total_memory_available_bytes: usize,
     ) -> Self {
         Self {
@@ -123,7 +121,6 @@ impl SharedContext {
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(
                 StateStoreImpl::for_test(),
             ))),
-            lru_manager: None,
             config: StreamingConfig::default(),
         }
     }
