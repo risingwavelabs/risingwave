@@ -242,6 +242,8 @@ mod tests {
 
     use super::*;
 
+    static SLEEP_SEC: u64 = 6;
+
     /// Start `n` meta nodes on localhost. First node will be started at `meta_port`, 2nd node on
     /// `meta_port + 1`, ...
     async fn setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
@@ -273,8 +275,8 @@ mod tests {
                 .await
                 .unwrap_or_else(|e| panic!("Meta node{} failed in setup. Err: {}", i, e)),
             );
-        } // sleep duration of election cycle, not fixed duration
-        sleep(Duration::from_secs(6)).await;
+        }
+        sleep(Duration::from_secs(SLEEP_SEC)).await;
         node_controllers
     }
 
@@ -285,8 +287,6 @@ mod tests {
     /// Number of nodes which currently are leaders. Number is not snapshoted. If there is a
     /// leader failover in process, you may get an incorrect result
     async fn number_of_leaders(number_of_nodes: u16, meta_port: u16, host_port: u16) -> u16 {
-        let _node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
-
         let mut leader_count = 0;
         for i in 0..number_of_nodes {
             let local = "127.0.0.1".to_owned();
@@ -329,6 +329,7 @@ mod tests {
     // in parallel
     #[tokio::test]
     async fn test_single_leader_setup_1() {
+        let _node_controllers = setup_n_nodes(1, 1234).await;
         let leader_count = number_of_leaders(1, 1234, 5678).await;
         assert_eq!(
             leader_count, 1,
@@ -339,6 +340,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_leader_setup_3() {
+        let _node_controllers = setup_n_nodes(3, 2345).await;
         let leader_count = number_of_leaders(3, 2345, 6789).await;
         assert_eq!(
             leader_count, 1,
@@ -349,6 +351,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_leader_setup_10() {
+        let _node_controllers = setup_n_nodes(10, 3456).await;
         let leader_count = number_of_leaders(10, 3456, 7890).await;
         assert_eq!(
             leader_count, 1,
@@ -359,6 +362,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_leader_setup_100() {
+        let _node_controllers = setup_n_nodes(100, 4567).await;
         let leader_count = number_of_leaders(100, 4567, 8901).await;
         assert_eq!(
             leader_count, 1,
@@ -369,10 +373,38 @@ mod tests {
 
     #[tokio::test]
     async fn test_failover() {
-        // TODO: After failover there should be one leader
-        // How do we simulate failover? -> Kill current leader
-        // Failover tests should work with 1, 3, 10, 100 nodes
-        // Afterwards we still want to have 1 leader only
-        // utilize number_of_leaders function
+        let meta_port = 1234;
+        let number_of_nodes = 2;
+        let compute_port = 2345;
+        let vec_meta_handlers = setup_n_nodes(number_of_nodes, meta_port).await;
+
+        // we should have 1 leader at the moment
+        let leader_count = number_of_leaders(number_of_nodes, meta_port, compute_port).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
+
+        // kill leader to trigger failover
+        let leader_shutdown_sender = &vec_meta_handlers[0].1;
+        leader_shutdown_sender
+            .send(())
+            .expect("Sending shutdown to leader should not fail");
+        sleep(Duration::from_secs(SLEEP_SEC)).await;
+
+        // expect that we still have 1 leader
+        let leader_count = number_of_leaders(number_of_nodes, meta_port, compute_port).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
     }
+
+    // TODO: After failover there should be one leader
+    // How do we simulate failover? -> Kill current leader
+    // Failover tests should work with 1, 3, 10, 100 nodes
+    // Afterwards we still want to have 1 leader only
+    // utilize number_of_leaders function
 }
