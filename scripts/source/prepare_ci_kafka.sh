@@ -17,10 +17,10 @@ KAFKA_BIN="$SCRIPT_PATH/../../.risingwave/bin/kafka/bin"
 
 
 echo "--- Extract data for Kafka"
-cd ./scripts/source/
+cd ./source/
 mkdir -p ./test_data
 unzip -o test_data.zip -d ./test_data
-cd ../../
+cd ..
 
 echo "Create topics"
 for filename in "$SCRIPT_PATH"/test_data/*; do
