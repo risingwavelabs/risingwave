@@ -32,7 +32,7 @@ impl AggFuncSig {
     pub fn to_string_no_return(&self) -> String {
         format!(
             "{}({})",
-            self.func.to_string(),
+            self.func,
             self.inputs_type
                 .iter()
                 .map(|t| format!("{t:?}"))

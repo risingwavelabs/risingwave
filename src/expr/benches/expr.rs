@@ -48,7 +48,7 @@ fn bench_expr(c: &mut Criterion) {
             I64Array::from_iter((1..=CHUNK_SIZE).map(|_| 1)).into(),
             F32Array::from_iter((1..=CHUNK_SIZE).map(|i| OrderedF32::from(i as f32))).into(),
             F64Array::from_iter((1..=CHUNK_SIZE).map(|i| OrderedF64::from(i as f64))).into(),
-            DecimalArray::from_iter((1..=CHUNK_SIZE).map(|i| Decimal::from(i))).into(),
+            DecimalArray::from_iter((1..=CHUNK_SIZE).map(Decimal::from)).into(),
             NaiveDateArray::from_iter((1..=CHUNK_SIZE).map(|_| NaiveDateWrapper::default())).into(),
             NaiveTimeArray::from_iter((1..=CHUNK_SIZE).map(|_| NaiveTimeWrapper::default())).into(),
             NaiveDateTimeArray::from_iter(
