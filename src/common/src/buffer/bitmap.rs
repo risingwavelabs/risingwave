@@ -33,28 +33,29 @@
 //! This is called a "validity bitmap" in the Arrow documentation.
 //! This file is adapted from [arrow-rs](https://github.com/apache/arrow-rs)
 
+// allow `zip` for performance reasons
+#![allow(clippy::disallowed_methods)]
+
 use std::iter;
 use std::ops::{BitAnd, BitOr, Not, RangeInclusive};
 
-use bytes::Bytes;
-use itertools::Itertools;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer as ProstBuffer;
-
-use crate::util::bit_util;
 
 #[derive(Default, Debug)]
 pub struct BitmapBuilder {
     len: usize,
-    data: Vec<u8>,
+    data: Vec<usize>,
     num_high_bits: usize,
 }
+
+const BITS: usize = usize::BITS as usize;
 
 impl BitmapBuilder {
     pub fn with_capacity(capacity: usize) -> BitmapBuilder {
         BitmapBuilder {
             len: 0,
-            data: Vec::with_capacity((capacity + 7) / 8),
+            data: Vec::with_capacity(Bitmap::vec_len(capacity)),
             num_high_bits: 0,
         }
     }
@@ -62,7 +63,7 @@ impl BitmapBuilder {
     pub fn zeroed(len: usize) -> BitmapBuilder {
         BitmapBuilder {
             len,
-            data: vec![0; (len + 7) / 8],
+            data: vec![0; Bitmap::vec_len(len)],
             num_high_bits: 0,
         }
     }
@@ -70,9 +71,9 @@ impl BitmapBuilder {
     pub fn set(&mut self, n: usize, val: bool) {
         assert!(n < self.len);
 
-        let byte = &mut self.data[n / 8];
-        let mask = 1 << (n % 8);
-        match (*byte & mask > 0, val) {
+        let byte = &mut self.data[n / BITS];
+        let mask = 1 << (n % BITS);
+        match (*byte & mask != 0, val) {
             (true, false) => {
                 *byte &= !mask;
                 self.num_high_bits -= 1;
@@ -87,32 +88,34 @@ impl BitmapBuilder {
 
     pub fn is_set(&self, n: usize) -> bool {
         assert!(n < self.len);
-        let byte = &self.data[n / 8];
-        let mask = 1 << (n % 8);
+        let byte = &self.data[n / BITS];
+        let mask = 1 << (n % BITS);
         *byte & mask != 0
     }
 
     pub fn append(&mut self, bit_set: bool) -> &mut Self {
-        if self.len % 8 == 0 {
+        if self.len % BITS == 0 {
             self.data.push(0);
         }
-        self.data[self.len / 8] |= (bit_set as u8) << (self.len % 8);
+        self.data[self.len / BITS] |= (bit_set as usize) << (self.len % BITS);
         self.num_high_bits += bit_set as usize;
         self.len += 1;
         self
     }
 
     pub fn append_n(&mut self, mut n: usize, bit_set: bool) -> &mut Self {
-        while n != 0 && self.len % 8 != 0 {
+        while n != 0 && self.len % BITS != 0 {
             self.append(bit_set);
             n -= 1;
         }
         self.len += n;
-        self.data
-            .resize((self.len + 7) / 8, if bit_set { 0xFF } else { 0x00 });
-        if bit_set && self.len % 8 != 0 {
+        self.data.resize(
+            Bitmap::vec_len(self.len),
+            if bit_set { usize::MAX } else { 0 },
+        );
+        if bit_set && self.len % BITS != 0 {
             // remove tailing 1s
-            *self.data.last_mut().unwrap() &= (1 << (self.len % 8)) - 1;
+            *self.data.last_mut().unwrap() &= (1 << (self.len % BITS)) - 1;
         }
         if bit_set {
             self.num_high_bits += n;
@@ -125,15 +128,15 @@ impl BitmapBuilder {
             return None;
         }
         self.len -= 1;
-        self.data.truncate((self.len + 7) / 8);
-        if self.len % 8 != 0 {
-            *self.data.last_mut().unwrap() &= (1 << (self.len % 8)) - 1;
+        self.data.truncate(Bitmap::vec_len(self.len));
+        if self.len % BITS != 0 {
+            *self.data.last_mut().unwrap() &= (1 << (self.len % BITS)) - 1;
         }
         Some(())
     }
 
     pub fn append_bitmap(&mut self, other: &Bitmap) -> &mut Self {
-        if self.len % 8 == 0 {
+        if self.len % BITS == 0 {
             // self is aligned, so just append the bytes
             self.len += other.len();
             self.data.extend_from_slice(&other.bits);
@@ -149,7 +152,7 @@ impl BitmapBuilder {
     pub fn finish(self) -> Bitmap {
         Bitmap {
             num_bits: self.len(),
-            bits: self.data.into(),
+            bits: self.data,
             num_high_bits: self.num_high_bits,
         }
     }
@@ -160,16 +163,16 @@ impl BitmapBuilder {
 }
 
 /// An immutable bitmap. Use [`BitmapBuilder`] to build it.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Bitmap {
-    bits: Bytes,
-
     // The useful bits in the bitmap. The total number of bits will usually
     // be larger than the useful bits due to byte-padding.
     num_bits: usize,
 
     // The number of high bits in the bitmap.
     num_high_bits: usize,
+
+    bits: Vec<usize>,
 }
 
 impl std::fmt::Debug for Bitmap {
@@ -189,30 +192,27 @@ impl std::fmt::Debug for Bitmap {
 }
 
 impl Bitmap {
+    pub fn zeros(len: usize) -> Self {
+        BitmapBuilder::zeroed(len).finish()
+    }
+
     pub fn all_high_bits(num_bits: usize) -> Self {
-        let len = Self::num_bytes(num_bits);
+        let len = Self::vec_len(num_bits);
+        let mut bits = vec![usize::MAX; len];
+        if num_bits % BITS != 0 {
+            bits[len - 1] &= (1 << (num_bits % BITS)) - 1;
+        }
         Self {
-            bits: vec![0xff; len].into(),
+            bits,
             num_bits,
             num_high_bits: num_bits,
         }
     }
 
-    fn from_bytes_with_num_bits(buf: Bytes, num_bits: usize) -> Self {
-        debug_assert!(num_bits <= buf.len() << 3);
-
-        let rem = num_bits % 8;
-
-        let num_high_bits = if rem == 0 {
-            buf.iter().map(|&x| x.count_ones()).sum::<u32>() as usize
-        } else {
-            let (last, prefix) = buf.split_last().unwrap();
-            prefix.iter().map(|&x| x.count_ones()).sum::<u32>() as usize
-                + (last & ((1u8 << rem) - 1)).count_ones() as usize
-        };
-
+    fn from_slice_with_len(buf: Vec<usize>, num_bits: usize) -> Self {
+        debug_assert_eq!(buf.len(), Self::vec_len(num_bits));
+        let num_high_bits = buf.iter().map(|&x| x.count_ones()).sum::<u32>() as usize;
         debug_assert!(num_high_bits <= num_bits);
-
         Self {
             num_bits,
             bits: buf,
@@ -220,9 +220,16 @@ impl Bitmap {
         }
     }
 
-    pub fn from_bytes(buf: Bytes) -> Self {
-        let num_bits = buf.len() << 3;
-        Self::from_bytes_with_num_bits(buf, num_bits)
+    pub fn from_bytes(buf: &[u8]) -> Self {
+        let num_bits = buf.len() * 8;
+        let mut bits = Vec::with_capacity(Self::vec_len(num_bits));
+        let slice = unsafe {
+            bits.set_len(bits.capacity());
+            std::slice::from_raw_parts_mut(bits.as_ptr() as *mut u8, bits.len() * (BITS / 8))
+        };
+        slice[..buf.len()].copy_from_slice(buf);
+        slice[buf.len()..].fill(0);
+        Self::from_slice_with_len(bits, num_bits)
     }
 
     /// Return the next set bit index on or after `bit_idx`.
@@ -234,8 +241,8 @@ impl Bitmap {
         self.num_high_bits
     }
 
-    fn num_bytes(num_bits: usize) -> usize {
-        num_bits / 8 + usize::from(num_bits % 8 > 0)
+    fn vec_len(num_bits: usize) -> usize {
+        (num_bits + BITS - 1) / BITS
     }
 
     /// Returns the number of valid bits in the bitmap,
@@ -254,7 +261,7 @@ impl Bitmap {
     ///
     /// Makes clippy happy.
     pub unsafe fn is_set_unchecked(&self, idx: usize) -> bool {
-        bit_util::get_bit_raw(self.bits.as_ptr(), idx)
+        self.bits.get_unchecked(idx / BITS) & (1 << (idx % BITS)) != 0
     }
 
     pub fn is_set(&self, idx: usize) -> bool {
@@ -294,13 +301,11 @@ impl Bitmap {
     /// `bit_saturate_subtract(lhs, rhs)` results in [01000]
     pub fn bit_saturate_subtract(lhs: &Bitmap, rhs: &Bitmap) -> Bitmap {
         assert_eq!(lhs.num_bits, rhs.num_bits);
-        let bits = lhs
-            .bits
-            .iter()
-            .zip_eq(rhs.bits.iter())
+        let bits = (lhs.bits.iter())
+            .zip(rhs.bits.iter())
             .map(|(&a, &b)| (!(a & b)) & a)
             .collect();
-        Bitmap::from_bytes_with_num_bits(bits, lhs.num_bits)
+        Bitmap::from_slice_with_len(bits, lhs.num_bits)
     }
 
     /// Returns an iterator which yields the positions of high bits.
@@ -347,13 +352,11 @@ impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
 
     fn bitand(self, rhs: &'b Bitmap) -> Bitmap {
         assert_eq!(self.num_bits, rhs.num_bits);
-        let bits = self
-            .bits
-            .iter()
-            .zip_eq(rhs.bits.iter())
+        let bits = (self.bits.iter())
+            .zip(rhs.bits.iter())
             .map(|(&a, &b)| a & b)
             .collect();
-        Bitmap::from_bytes_with_num_bits(bits, self.num_bits)
+        Bitmap::from_slice_with_len(bits, self.num_bits)
     }
 }
 
@@ -386,13 +389,11 @@ impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
 
     fn bitor(self, rhs: &'b Bitmap) -> Bitmap {
         assert_eq!(self.num_bits, rhs.num_bits);
-        let bits = self
-            .bits
-            .iter()
-            .zip_eq(rhs.bits.iter())
+        let bits = (self.bits.iter())
+            .zip(rhs.bits.iter())
             .map(|(&a, &b)| a | b)
             .collect();
-        Bitmap::from_bytes_with_num_bits(bits, self.num_bits)
+        Bitmap::from_slice_with_len(bits, self.num_bits)
     }
 }
 
@@ -424,8 +425,15 @@ impl<'a> Not for &'a Bitmap {
     type Output = Bitmap;
 
     fn not(self) -> Self::Output {
-        let bits = self.bits.iter().map(|b| !b).collect();
-        Bitmap::from_bytes_with_num_bits(bits, self.num_bits)
+        let mut bits: Vec<usize> = self.bits.iter().map(|b| !b).collect();
+        if self.num_bits % BITS != 0 {
+            bits[self.num_bits / BITS] &= (1 << (self.num_bits % BITS)) - 1;
+        }
+        Bitmap {
+            num_bits: self.num_bits,
+            num_high_bits: self.num_bits - self.num_high_bits,
+            bits,
+        }
     }
 }
 
@@ -461,12 +469,11 @@ impl FromIterator<Option<bool>> for Bitmap {
 
 impl Bitmap {
     pub fn to_protobuf(&self) -> ProstBuffer {
-        let last_byte_num_bits = ((self.num_bits % 8) as u8).to_be_bytes();
-        let body = last_byte_num_bits
-            .into_iter()
-            .chain(self.bits.iter().copied())
-            .collect();
-
+        let mut body = Vec::with_capacity((self.num_bits + 7) % 8 + 1);
+        body.push((self.num_bits % 8) as u8);
+        body.extend_from_slice(unsafe {
+            std::slice::from_raw_parts(self.bits.as_ptr() as *const u8, (self.num_bits + 7) / 8)
+        });
         ProstBuffer {
             body,
             compression: CompressionType::None as i32,
@@ -476,31 +483,17 @@ impl Bitmap {
 
 impl From<&ProstBuffer> for Bitmap {
     fn from(buf: &ProstBuffer) -> Self {
-        let last_byte_num_bits = u8::from_be_bytes(buf.body[..1].try_into().unwrap());
-        let bits = Bytes::copy_from_slice(&buf.body[1..]); // TODO: avoid this allocation
-        let num_bits = (bits.len() << 3) - ((8 - last_byte_num_bits) % 8) as usize;
+        let last_byte_num_bits = buf.body[0];
+        let num_bits = ((buf.body.len() - 1) * 8) - ((8 - last_byte_num_bits) % 8) as usize;
 
-        Self::from_bytes_with_num_bits(bits, num_bits)
-    }
-}
-
-impl PartialEq for Bitmap {
-    fn eq(&self, other: &Self) -> bool {
-        // buffer equality considers capacity, but here we want to only compare
-        // actual data contents
-        if self.num_bits != other.num_bits {
-            return false;
-        }
-        // assume unset bits are always 0, and num_bits is always consistent with bits length.
-        // Note: If you new a Buffer without init, the PartialEq may have UB due to uninit mem cuz
-        // we are comparing bytes by bytes instead of bits by bits.
-        let length = (self.num_bits + 7) / 8;
-        self.bits[..length] == other.bits[..length]
+        let mut bitmap = Self::from_bytes(&buf.body[1..]);
+        bitmap.num_bits = num_bits;
+        bitmap
     }
 }
 
 pub struct BitmapIter<'a> {
-    bits: &'a Bytes,
+    bits: &'a [usize],
     idx: usize,
     num_bits: usize,
 }
@@ -512,7 +505,7 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
         if self.idx >= self.num_bits {
             return None;
         }
-        let b = unsafe { bit_util::get_bit_raw(self.bits.as_ptr(), self.idx) };
+        let b = unsafe { self.bits.get_unchecked(self.idx / BITS) } & (1 << (self.idx % BITS)) != 0;
         self.idx += 1;
         Some(b)
     }
@@ -542,7 +535,7 @@ mod tests {
         };
         let byte1 = 0b0101_0110_u8;
         let byte2 = 0b1010_1101_u8;
-        let expected = Bitmap::from_bytes(Bytes::copy_from_slice(&[byte1, byte2]));
+        let expected = Bitmap::from_bytes(&[byte1, byte2]);
         assert_eq!(bitmap1, expected);
         assert_eq!(
             bitmap1.num_high_bits(),
@@ -561,7 +554,7 @@ mod tests {
             builder.finish()
         };
         let byte1 = 0b0101_0110_u8;
-        let expected = Bitmap::from_bytes(Bytes::copy_from_slice(&[byte1]));
+        let expected = Bitmap::from_bytes(&[byte1]);
         assert_eq!(bitmap2, expected);
     }
 
@@ -631,27 +624,24 @@ mod tests {
 
     #[test]
     fn test_bitwise_or() {
-        let bitmap1 = Bitmap::from_bytes(Bytes::from_static(&[0b01101010]));
-        let bitmap2 = Bitmap::from_bytes(Bytes::from_static(&[0b01001110]));
-        assert_eq!(
-            Bitmap::from_bytes(Bytes::from_static(&[0b01101110])),
-            (bitmap1 | bitmap2)
-        );
+        let bitmap1 = Bitmap::from_bytes(&[0b01101010]);
+        let bitmap2 = Bitmap::from_bytes(&[0b01001110]);
+        assert_eq!(Bitmap::from_bytes(&[0b01101110]), (bitmap1 | bitmap2));
     }
 
     #[test]
     fn test_bitwise_saturate_subtract() {
-        let bitmap1 = Bitmap::from_bytes(Bytes::from_static(&[0b01101010]));
-        let bitmap2 = Bitmap::from_bytes(Bytes::from_static(&[0b01001110]));
+        let bitmap1 = Bitmap::from_bytes(&[0b01101010]);
+        let bitmap2 = Bitmap::from_bytes(&[0b01001110]);
         assert_eq!(
-            Bitmap::from_bytes(Bytes::from_static(&[0b00100000])),
+            Bitmap::from_bytes(&[0b00100000]),
             Bitmap::bit_saturate_subtract(&bitmap1, &bitmap2)
         );
     }
 
     #[test]
     fn test_bitmap_is_set() {
-        let bitmap = Bitmap::from_bytes(Bytes::from_static(&[0b01001010]));
+        let bitmap = Bitmap::from_bytes(&[0b01001010]);
         assert!(!bitmap.is_set(0));
         assert!(bitmap.is_set(1));
         assert!(!bitmap.is_set(2));
@@ -665,7 +655,7 @@ mod tests {
     #[test]
     fn test_bitmap_iter() {
         {
-            let bitmap = Bitmap::from_bytes(Bytes::from_static(&[0b01001010]));
+            let bitmap = Bitmap::from_bytes(&[0b01001010]);
             let mut booleans = vec![];
             for b in bitmap.iter() {
                 booleans.push(b as u8);
@@ -700,7 +690,7 @@ mod tests {
 
     #[test]
     fn test_bitmap_from_protobuf() {
-        let bitmap_bytes = vec![3u8 /* len % 8 */, 0b0101_0010, 0b110];
+        let bitmap_bytes = vec![3u8 /* len % BITS */, 0b0101_0010, 0b110];
         let buf = ProstBuffer {
             body: bitmap_bytes,
             compression: CompressionType::None as _,
@@ -716,7 +706,7 @@ mod tests {
     fn test_bitmap_from_buffer() {
         let byte1 = 0b0110_1010_u8;
         let byte2 = 0b1011_0101_u8;
-        let bitmap = Bitmap::from_bytes(Bytes::from_static(&[0b0110_1010, 0b1011_0101]));
+        let bitmap = Bitmap::from_bytes(&[0b0110_1010, 0b1011_0101]);
         let expected = Bitmap::from_iter(vec![
             false, true, false, true, false, true, true, false, true, false, true, false, true,
             true, false, true,
@@ -729,8 +719,8 @@ mod tests {
 
     #[test]
     fn test_bitmap_eq() {
-        let b1: Bitmap = (vec![false; 3]).into_iter().collect();
-        let b2: Bitmap = (vec![false; 5]).into_iter().collect();
+        let b1: Bitmap = Bitmap::zeros(3);
+        let b2: Bitmap = Bitmap::zeros(5);
         assert_ne!(b1, b2);
 
         let b1: Bitmap = [true, false]
@@ -772,7 +762,7 @@ mod tests {
         assert_eq!(b.num_high_bits, 3);
 
         let b = b.finish();
-        assert_eq!(b.bits.to_vec(), &[0b0000_0001, 0b0000_0110]);
+        assert_eq!(b.bits, &[0b0110_0000_0001]);
     }
 
     #[test]
