@@ -62,33 +62,10 @@ impl GlobalMemoryManager {
         })
     }
 
-    pub fn create_cache<K: Hash + Eq, V>(&self) -> ManagedLruCache<K, V> {
-        ManagedLruCache::new(LruCache::unbounded(), self.watermark_epoch.clone())
-    }
+
 
     pub fn get_watermark_epoch(&self) -> Arc<AtomicU64> {
         self.watermark_epoch.clone()
-    }
-
-    pub fn create_cache_with_hasher_in<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator>(
-        &self,
-        hasher: S,
-        alloc: A,
-    ) -> ManagedLruCache<K, V, S, A> {
-        ManagedLruCache::new(
-            LruCache::unbounded_with_hasher_in(hasher, alloc),
-            self.watermark_epoch.clone(),
-        )
-    }
-
-    pub fn create_cache_with_hasher<K: Hash + Eq, V, S: BuildHasher>(
-        &self,
-        hasher: S,
-    ) -> ManagedLruCache<K, V, S> {
-        ManagedLruCache::new(
-            LruCache::unbounded_with_hasher(hasher),
-            self.watermark_epoch.clone(),
-        )
     }
 
     fn set_watermark_time_ms(&self, time_ms: u64) {
