@@ -32,5 +32,9 @@ pub static PG_INDEX_COLUMNS: LazyLock<Vec<SystemCatalogColumnsDef<'_>>> = LazyLo
             },
             "indkey",
         ),
+        // None. We don't have `pg_node_tree` type yet, so we use `text` instead.
+        (DataType::Varchar, "indexprs"),
+        // None. We don't have `pg_node_tree` type yet, so we use `text` instead.
+        (DataType::Varchar, "indpred"),
     ]
 });
