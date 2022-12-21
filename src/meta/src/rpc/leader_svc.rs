@@ -187,6 +187,7 @@ pub async fn start_leader_srv<S: MetaStore>(
             &env.opts.backup_storage_url,
             Arc::new(ObjectStoreMetrics::unused()),
             true,
+            "Meta Backup",
         )
         .await,
     );

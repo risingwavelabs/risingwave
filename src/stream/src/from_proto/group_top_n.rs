@@ -47,13 +47,15 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
         let storage_key = table.get_pk().iter().map(OrderPair::from_prost).collect();
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let group_key_types = input.schema().data_types()[..group_by.len()].to_vec();
+        let order_by = node.order_by.iter().map(OrderPair::from_prost).collect();
+
         assert_eq!(&params.pk_indices, input.pk_indices());
         let args = GroupTopNExecutorDispatcherArgs {
             input,
             ctx: params.actor_context,
             storage_key,
             offset_and_limit: (node.offset as usize, node.limit as usize),
-            order_by_len: node.order_by_len as usize,
+            order_by,
             executor_id: params.executor_id,
             group_by,
             state_table,
@@ -71,7 +73,7 @@ struct GroupTopNExecutorDispatcherArgs<S: StateStore> {
     ctx: ActorContextRef,
     storage_key: Vec<OrderPair>,
     offset_and_limit: (usize, usize),
-    order_by_len: usize,
+    order_by: Vec<OrderPair>,
     executor_id: u64,
     group_by: Vec<usize>,
     state_table: StateTable<S>,
@@ -91,7 +93,7 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
                 self.ctx,
                 self.storage_key,
                 self.offset_and_limit,
-                self.order_by_len,
+                self.order_by,
                 self.executor_id,
                 self.group_by,
                 self.state_table,
@@ -104,7 +106,7 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
                 self.ctx,
                 self.storage_key,
                 self.offset_and_limit,
-                self.order_by_len,
+                self.order_by,
                 self.executor_id,
                 self.group_by,
                 self.state_table,

@@ -1475,7 +1475,7 @@ fn parse_alter_table() {
         } => {
             assert_eq!("tab", name.to_string());
             assert_eq!("foo", column_def.name.to_string());
-            assert_eq!("TEXT", column_def.data_type.to_string());
+            assert_eq!("TEXT", column_def.data_type.unwrap().to_string());
         }
         _ => unreachable!(),
     };
