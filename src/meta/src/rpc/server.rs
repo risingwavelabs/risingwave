@@ -285,12 +285,12 @@ mod tests {
 
         let mut leader_count = 0;
         for i in 0..n {
+            let local = "127.0.0.1".to_owned();
             let port = meta_port + i;
-            let meta_addr = format!("http://127.0.0.1:{}", port);
-            let host_addr = "127.0.0.1:5688".parse::<HostAddr>().unwrap();
+            let meta_addr = format!("http://{}:{}", local, port);
             let host_addr = HostAddr {
-                host: host_addr.host,
-                port: host_addr.port + i,
+                host: local,
+                port: 5688 + i,
             };
 
             let is_leader = tokio::time::timeout(std::time::Duration::from_secs(1), async move {
