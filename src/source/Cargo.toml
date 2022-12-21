@@ -18,6 +18,7 @@ byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 crc32fast = "1"
+csv-core = "0.1.10"
 enum-as-inner = "0.5"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
