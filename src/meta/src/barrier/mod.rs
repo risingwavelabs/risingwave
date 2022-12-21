@@ -540,6 +540,11 @@ where
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
                 .unwrap();
+        } else if self.fragment_manager.has_any_table_fragments().await {
+            panic!(
+                "Some streaming jobs already exist in meta, please start with recovery enabled \
+            or clean up the metadata using `./risedev clean-data`"
+            );
         }
         self.set_status(BarrierManagerStatus::Running).await;
         let mut min_interval = tokio::time::interval(self.interval);

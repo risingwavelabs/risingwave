@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::max;
+use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -783,6 +784,76 @@ impl ColPrunable for LogicalJoin {
     }
 }
 
+fn is_pure_fn_except_for_input_ref(expr: &ExprImpl) -> bool {
+    match expr {
+        ExprImpl::Literal(_) => true,
+        ExprImpl::FunctionCall(inner) => {
+            inner.is_pure() && inner.inputs().iter().all(is_pure_fn_except_for_input_ref)
+        }
+        ExprImpl::InputRef(_) => true,
+        _ => false,
+    }
+}
+
+// We are trying to derive a predicate to apply to the other side of a join if all
+// the `InputRef`s in the predicate are eq condition columns, and can hence be substituted
+// with the corresponding eq condition columns of the other side.
+//
+// Strategy:
+// 1. If the function is pure except for any `InputRef`, then we proceed. Else abort.
+// 2. Then, we collect `InputRef`s in the conjunction.
+// 3. If they are all columns in the given side of join eq condition, then we proceed. Else abort.
+// 4. We then rewrite the `ExprImpl`, by replacing `InputRef` column indices with
+//    the equivalent in the other side.
+fn derive_predicate_from_eq_condition(
+    expr: &ExprImpl,
+    eq_condition: &EqJoinPredicate,
+    cols_num: usize,
+    expr_is_left: bool,
+) -> Option<ExprImpl> {
+    if !is_pure_fn_except_for_input_ref(expr) {
+        return None;
+    }
+    let input_ref_indices = expr.collect_input_refs(cols_num);
+    let eq_predicate_indices = if expr_is_left {
+        eq_condition.left_eq_indexes()
+    } else {
+        eq_condition.right_eq_indexes()
+    };
+    let only_eq_indices = input_ref_indices
+        .ones()
+        .all(|index| eq_predicate_indices.contains(&index));
+    if !only_eq_indices {
+        return None;
+    }
+    // The function is pure except for `InputRef` and all `InputRef`s are `eq_condition` indices.
+    // Hence, we can substitute those `InputRef`s with indices from the other side.
+    let other_side_mapping = if expr_is_left {
+        eq_condition.eq_indexes().into_iter().collect()
+    } else {
+        eq_condition
+            .eq_indexes()
+            .into_iter()
+            .map(|(x, y)| (y, x))
+            .collect()
+    };
+    struct InputRefsRewriter {
+        mapping: HashMap<usize, usize>,
+    }
+    impl ExprRewriter for InputRefsRewriter {
+        fn rewrite_input_ref(&mut self, mut input_ref: InputRef) -> ExprImpl {
+            input_ref.index = *self.mapping.get(&input_ref.index).unwrap();
+            input_ref.into()
+        }
+    }
+    Some(
+        InputRefsRewriter {
+            mapping: other_side_mapping,
+        }
+        .rewrite_expr(expr.clone()),
+    )
+}
+
 impl PredicatePushdown for LogicalJoin {
     /// Pushes predicates above and within a join node into the join node and/or its children nodes.
     ///
@@ -842,6 +913,55 @@ impl PredicatePushdown for LogicalJoin {
 
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);
+
+        // Derive conditions to push to the other side based on eq condition columns
+        let left_cols_num = self.left().schema().len();
+        let right_cols_num = self.right().schema().len();
+        let eq_condition = EqJoinPredicate::create(left_cols_num, right_cols_num, new_on.clone());
+
+        // Only push to RHS if RHS is inner side of a join (RHS requires match on LHS)
+        let right_derived_predicate = if matches!(
+            join_type,
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi | JoinType::LeftSemi
+        ) {
+            Condition {
+                conjunctions: left_predicate
+                    .conjunctions
+                    .iter()
+                    .filter_map(|expr| {
+                        derive_predicate_from_eq_condition(expr, &eq_condition, left_cols_num, true)
+                    })
+                    .collect(),
+            }
+        } else {
+            Condition::true_cond()
+        };
+
+        // Only push to LHS if LHS is inner side of a join (LHS requires match on RHS)
+        let left_derived_predicate = if matches!(
+            join_type,
+            JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi | JoinType::RightSemi
+        ) {
+            Condition {
+                conjunctions: right_predicate
+                    .conjunctions
+                    .iter()
+                    .filter_map(|expr| {
+                        derive_predicate_from_eq_condition(
+                            expr,
+                            &eq_condition,
+                            right_cols_num,
+                            false,
+                        )
+                    })
+                    .collect(),
+            }
+        } else {
+            Condition::true_cond()
+        };
+
+        let left_predicate = left_predicate.and(left_derived_predicate);
+        let right_predicate = right_predicate.and(right_derived_predicate);
 
         let new_left = self.left().predicate_pushdown(left_predicate);
         let new_right = self.right().predicate_pushdown(right_predicate);
