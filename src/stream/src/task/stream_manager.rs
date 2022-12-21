@@ -16,6 +16,7 @@ use core::time::Duration;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::Write;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -38,6 +39,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
+
 use crate::error::{StreamError, StreamResult};
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
@@ -51,6 +53,8 @@ pub static LOCAL_TEST_ADDR: std::sync::LazyLock<HostAddr> =
     std::sync::LazyLock::new(|| "127.0.0.1:2333".parse().unwrap());
 
 pub type ActorHandle = JoinHandle<()>;
+
+pub type AtomicU64RefOpt = Option<Arc<AtomicU64>>;
 
 pub struct LocalStreamManagerCore {
     /// Runtime for the streaming actors.
@@ -80,6 +84,9 @@ pub struct LocalStreamManagerCore {
 
     /// Manages the stack traces of all actors.
     stack_trace_manager: Option<StackTraceManager<ActorId>>,
+
+    /// Watermark epoch number.
+    watermark_epoch: Option<Arc<AtomicU64>>,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -360,6 +367,15 @@ impl LocalStreamManager {
         let core = self.core.lock().await;
         core.config.clone()
     }
+
+    // pub fn set_lru_manager(&self, lru_mgr: Option<LruManagerRef>) {
+    //     self.context.set_lru_manager(lru_mgr)
+    // }
+
+    pub async fn set_watermark_epoch(&self, watermark_epoch: Option<Arc<AtomicU64>>) {
+        let mut guard = self.core.lock().await;
+        guard.watermark_epoch = watermark_epoch;
+    }
 }
 
 fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
@@ -425,6 +441,7 @@ impl LocalStreamManagerCore {
             streaming_metrics,
             config,
             stack_trace_manager: async_stack_trace_config.map(StackTraceManager::new),
+            watermark_epoch: None,
         }
     }
 
@@ -833,6 +850,10 @@ impl LocalStreamManagerCore {
             }
         }
         Ok(())
+    }
+
+    pub async fn get_watermark_epoch(&self) -> AtomicU64RefOpt {
+        self.watermark_epoch.clone()
     }
 }
 

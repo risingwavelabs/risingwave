@@ -22,7 +22,8 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::ActorInfo;
 use risingwave_rpc_client::ComputeClientPool;
 
-use crate::cache::{LruManager, LruManagerRef};
+// use crate::cache::{LruManager, LruManagerRef};
+// use risingwave_batch::task::BatchManager;
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::{self, Receiver, Sender};
 use crate::executor::monitor::StreamingMetrics;
@@ -35,6 +36,8 @@ pub use barrier_manager::*;
 pub use env::*;
 use risingwave_storage::StateStoreImpl;
 pub use stream_manager::*;
+
+
 
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
 pub type ActorId = u32;
@@ -101,24 +104,26 @@ impl SharedContext {
         streaming_metrics: Arc<StreamingMetrics>,
         config: &StreamingConfig,
         total_memory_available_bytes: usize,
+        // create
     ) -> Self {
-        let create_lru_manager = || {
-            let mgr = LruManager::new(
-                total_memory_available_bytes,
-                config.barrier_interval_ms,
-                streaming_metrics,
-            );
-            // Run a background memory monitor
-            tokio::spawn(mgr.clone().run());
-            mgr
-        };
+        // let create_lru_manager = || {
+        //     let mgr = crate::cache::LruManager::new(
+        //         total_memory_available_bytes,
+        //         config.barrier_interval_ms,
+        //         streaming_metrics,
+        //     );
+        //     // Run a background memory monitor
+        //     tokio::spawn(mgr.clone().run());
+        //     mgr
+        // };
+
         let enable_managed_cache = config.developer.stream_enable_managed_cache;
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
             compute_client_pool: ComputeClientPool::default(),
-            lru_manager: enable_managed_cache.then(create_lru_manager),
+            // lru_manager: None,
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(state_store))),
             config: config.clone(),
         }
@@ -202,6 +207,12 @@ impl SharedContext {
             .cloned()
             .ok_or_else(|| anyhow!("actor {} not found in info table", actor_id).into())
     }
+
+    // pub fn set_lru_manager(&self, lru_manager: Option<LruManagerRef>) {
+    //     // let guard = self.lru_manager.lock();
+    //     // *guard = lru_manager;
+    //     todo
+    // }
 }
 
 /// Generate a globally unique executor id.
