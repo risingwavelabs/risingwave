@@ -296,15 +296,9 @@ impl Parser {
             let mut id_parts = idents.0;
             if let Expr::FieldIdentifier(expr, mut idents) = expr {
                 idents.append(&mut id_parts);
-                Ok(WildcardOrExpr::ExprQualifiedWildcard(
-                    *expr,
-                    idents
-                ))
+                Ok(WildcardOrExpr::ExprQualifiedWildcard(*expr, idents))
             } else {
-                Ok(WildcardOrExpr::ExprQualifiedWildcard(
-                    expr,
-                    id_parts,
-                ))
+                Ok(WildcardOrExpr::ExprQualifiedWildcard(expr, id_parts))
             }
         } else if let WildcardOrExpr::Wildcard = wildcard_expr {
             Ok(WildcardOrExpr::ExprQualifiedWildcard(expr, vec![]))

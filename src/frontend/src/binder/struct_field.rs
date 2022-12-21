@@ -79,10 +79,7 @@ impl Binder {
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
         let (expr, idents) = self.extract_struct_column(expr, prefix)?;
         let fields = Self::bind_field("".to_string(), expr, &idents, true)?;
-        let (exprs, names) = fields
-            .into_iter()
-            .map(|(e, s)| (e.clone(), Some(s)))
-            .unzip();
+        let (exprs, names) = fields.into_iter().map(|(e, s)| (e, Some(s))).unzip();
         Ok((exprs, names))
     }
 
