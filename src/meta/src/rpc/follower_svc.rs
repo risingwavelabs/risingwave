@@ -25,7 +25,7 @@ use crate::rpc::metrics::MetaMetrics;
 
 /// Starts all services needed for the meta follower node
 pub async fn start_follower_srv(
-    mut svc_shutdown_rx_clone: WatchReceiver<()>,
+    mut svc_shutdown_rx: WatchReceiver<()>,
     follower_shutdown_rx: OneReceiver<()>,
     address_info: AddressInfo,
 ) {
@@ -37,7 +37,7 @@ pub async fn start_follower_srv(
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {},
                 // shutdown service if all services should be shut down
-                res = svc_shutdown_rx_clone.changed() =>  {
+                res = svc_shutdown_rx.changed() =>  {
                     match res {
                         Ok(_) => tracing::info!("Shutting down services"),
                         Err(_) => tracing::error!("Service shutdown sender dropped")
