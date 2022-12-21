@@ -307,12 +307,10 @@ mod tests {
                     )
                     .await;
                     match client_i {
-                        Ok(client_i) => {
-                            match client_i.send_heartbeat(client_i.worker_id(), vec![]).await {
-                                Ok(_) => true,
-                                Err(_) => false,
-                            }
-                        }
+                        Ok(client_i) => client_i
+                            .send_heartbeat(client_i.worker_id(), vec![])
+                            .await
+                            .is_ok(),
                         Err(_) => false,
                     }
                 })
