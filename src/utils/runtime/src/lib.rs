@@ -25,11 +25,18 @@ use tracing_subscriber::filter;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
 
+// ============================================================================
+// BEGIN SECTION: frequently used log configurations for debugging
+// ============================================================================
+
 /// Dump logs of all SQLs, i.e., tracing target `pgwire_query_log` to `.risingwave/log/query.log`.
 ///
 /// Changing the level of `pgwire` to `TRACE` in `configure_risingwave_targets_fmt` can also turn on
 /// the logs, but without a dedicated file.
 const ENABLE_QUERY_LOG_FILE: bool = false;
+/// Use an [excessively pretty, human-readable formatter](tracing_subscriber::fmt::format::Pretty).
+/// Includes line numbers for each log.
+const ENABLE_PRETTY_LOG: bool = false;
 
 /// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
 /// logs are needed, add them here.
@@ -57,6 +64,10 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
     //     targets
     // }
 }
+
+/// ===========================================================================
+/// END SECTION
+/// ===========================================================================
 
 pub struct LoggerSettings {
     /// Enable tokio console output.
@@ -94,11 +105,18 @@ pub fn set_panic_hook() {
 
 /// Init logger for RisingWave binaries.
 pub fn init_risingwave_logger(settings: LoggerSettings) {
-    let fmt_layer = {
-        // Configure log output to stdout
+    let mut layers = vec![];
+
+    // fmt layer (formatting and logging to stdout)
+    {
         let fmt_layer = tracing_subscriber::fmt::layer()
             .compact()
             .with_ansi(settings.colorful);
+        let fmt_layer = if ENABLE_PRETTY_LOG {
+            fmt_layer.pretty().boxed()
+        } else {
+            fmt_layer.boxed()
+        };
 
         let filter = filter::Targets::new()
             .with_target("aws_sdk_s3", Level::INFO)
@@ -114,18 +132,14 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("reqwest", Level::WARN)
             .with_target("sled", Level::INFO);
 
-        // Configure RisingWave's own crates to log at TRACE level, uncomment the following line if
-        // needed.
-
         let filter = configure_risingwave_targets_fmt(filter);
 
         // Enable DEBUG level for all other crates
-        // TODO: remove this in release mode
+        #[cfg(debug_assertions)]
         let filter = filter.with_default(Level::DEBUG);
 
-        fmt_layer.with_filter(filter)
+        layers.push(fmt_layer.with_filter(filter).boxed());
     };
-    let mut layers = vec![fmt_layer.boxed()];
 
     if ENABLE_QUERY_LOG_FILE {
         let query_log_path = ".risingwave/log/query.log";
