@@ -149,6 +149,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             if was_leader {
                 // && !is_leader {
                 // TODO: enable this again to give leader chance to claim lease again?
+                // I would say no
                 panic!(
                     "This node lost its leadership. New host address is {}:{}. Killing node",
                     leader_addr.host, leader_addr.port
@@ -256,9 +257,12 @@ mod tests {
 
     /// Start `n` meta nodes on localhost. First node will be started at `meta_port`, 2nd node on
     /// `meta_port + 1`, ...
-    async fn _setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
-        let meta_store = Arc::new(MemStore::default());
-
+    /// Call this, if you need more control over your `meta_store` in your test
+    async fn _setup_n_nodes_inner(
+        n: u16,
+        meta_port: u16,
+        meta_store: &Arc<MemStore>,
+    ) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
         let mut node_controllers: Vec<(JoinHandle<()>, WatchSender<()>)> = vec![];
         for i in 0..n {
             let addr = format!("http://127.0.0.1:{}", meta_port + i);
@@ -285,6 +289,13 @@ mod tests {
         }
         sleep(Duration::from_secs(_SLEEP_SEC)).await;
         node_controllers
+    }
+
+    /// Start `n` meta nodes on localhost. First node will be started at `meta_port`, 2nd node on
+    /// `meta_port + 1`, ...
+    async fn _setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
+        let meta_store = Arc::new(MemStore::default());
+        _setup_n_nodes_inner(n, meta_port, &meta_store).await
     }
 
     /// Check for `number_of_nodes` meta leader nodes, starting at `meta_port`, `meta_port + 1`, ...
@@ -462,6 +473,76 @@ mod tests {
     #[tokio::test]
     async fn test_failover_100() {
         let leader_count = _test_failover(100, 1500, 1600).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
+    }
+
+    /// returns number of leaders after activating fencing by deleting leader lease info
+    async fn _test_fencing(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
+        let meta_store = Arc::new(MemStore::default());
+        let vec_meta_handlers = _setup_n_nodes_inner(number_of_nodes, meta_port, &meta_store).await;
+
+        // we should have 1 leader on startup
+        let leader_count = _number_of_leaders(number_of_nodes, meta_port, compute_port).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
+
+        // delete leader/lease info in meta store
+        meta_store
+            .delete_cf("cf", "meta".as_bytes())
+            .await
+            .expect("Deleting meta store leader/lease info failed");
+
+        sleep(Duration::from_secs(_SLEEP_SEC)).await;
+
+        // expect that we still have 1 leader
+        // skipping first meta_port, since that node was former leader and got killed
+        let leaders = _number_of_leaders(number_of_nodes - 1, meta_port + 1, compute_port).await;
+        for ele in vec_meta_handlers {
+            ele.0.abort();
+        }
+        leaders
+    }
+
+    #[tokio::test]
+    async fn test_fencing_1() {
+        let leader_count = _test_failover(1, 1600, 1700).await;
+        assert_eq!(
+            leader_count, 0,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fencing_3() {
+        let leader_count = _test_failover(3, 1800, 1900).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fencing_10() {
+        let leader_count = _test_failover(10, 2000, 2100).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fencing_100() {
+        let leader_count = _test_failover(100, 2200, 2300).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
