@@ -228,9 +228,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     Ok((join_handle, svc_shutdown_tx))
 }
 
-// TODO: repeat test 100 times. Start test with different sleep intervals and so on
-// Print the sleep intervals
-// use pseudo rand gen with seed
 mod tests {
     use core::panic;
     use std::net::{IpAddr, Ipv4Addr};
@@ -249,16 +246,11 @@ mod tests {
 
     /// Start `n` meta nodes on localhost. First node will be started at `meta_port`, 2nd node on
     /// `meta_port + 1`, ...
-    async fn _setup_n_nodes(
-        n: u16,
-        meta_port: u16,
-        enable_recovery: bool, // TODO: remove. Is always false
-    ) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
+    async fn _setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
         let meta_store = Arc::new(MemStore::default());
 
         let mut node_controllers: Vec<(JoinHandle<()>, WatchSender<()>)> = vec![];
         for i in 0..n {
-            // TODO: use http or https here?
             let addr = format!("http://127.0.0.1:{}", meta_port + i);
 
             let info = AddressInfo {
@@ -267,9 +259,7 @@ mod tests {
                     IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                     meta_port + i,
                 ),
-                prometheus_addr: None, // TODO: use default here
-                dashboard_addr: None,
-                ui_path: None,
+                ..AddressInfo::default()
             };
             node_controllers.push(
                 rpc_serve_with_store(
@@ -277,7 +267,7 @@ mod tests {
                     info,
                     Duration::from_secs(4),
                     2,
-                    MetaOpts::test(enable_recovery),
+                    MetaOpts::test(false),
                 )
                 .await
                 .unwrap_or_else(|e| panic!("Meta node{} failed in setup. Err: {}", i, e)),
@@ -298,7 +288,7 @@ mod tests {
         for i in 0..number_of_nodes {
             let local = "127.0.0.1".to_owned();
             let port = meta_port + i;
-            let meta_addr = format!("http://{}:{}", local, port); // http, https, no protocol
+            let meta_addr = format!("http://{}:{}", local, port);
             let host_addr = HostAddr {
                 host: local,
                 port: host_port + i,
@@ -347,7 +337,7 @@ mod tests {
     // in parallel
     #[tokio::test]
     async fn test_single_leader_setup_1() {
-        let v = _setup_n_nodes(1, 1234, false).await; // TODO: parameter false not needed. Always false
+        let v = _setup_n_nodes(1, 1234).await;
         let leader_count = _number_of_leaders(1, 1234, 5678).await;
         assert_eq!(
             leader_count, 1,
@@ -361,7 +351,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_leader_setup_3() {
-        let v = _setup_n_nodes(3, 2345, false).await;
+        let v = _setup_n_nodes(3, 2345).await;
         let leader_count = _number_of_leaders(3, 2345, 6789).await;
         assert_eq!(
             leader_count, 1,
@@ -375,7 +365,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_leader_setup_10() {
-        let v = _setup_n_nodes(10, 3456, false).await;
+        let v = _setup_n_nodes(10, 3456).await;
         let leader_count = _number_of_leaders(10, 3456, 7890).await;
         assert_eq!(
             leader_count, 1,
@@ -389,7 +379,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_leader_setup_100() {
-        let v = _setup_n_nodes(100, 4567, false).await;
+        let v = _setup_n_nodes(100, 4567).await;
         let leader_count = _number_of_leaders(100, 4567, 8901).await;
         assert_eq!(
             leader_count, 1,
@@ -403,8 +393,7 @@ mod tests {
 
     /// returns number of leaders after failover
     async fn _test_failover(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
-        // TODO: change to false?
-        let vec_meta_handlers = _setup_n_nodes(number_of_nodes, meta_port, false).await;
+        let vec_meta_handlers = _setup_n_nodes(number_of_nodes, meta_port).await;
 
         // we should have 1 leader on startup
         let leader_count = _number_of_leaders(number_of_nodes, meta_port, compute_port).await;
