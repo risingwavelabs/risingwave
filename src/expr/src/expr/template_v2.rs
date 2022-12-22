@@ -11,6 +11,74 @@ use risingwave_common::types::{DataType, Datum};
 
 use super::{BoxedExpression, Expression};
 
+pub struct UnaryExpression<F, A, T> {
+    child: BoxedExpression,
+    func: F,
+    _marker: PhantomData<(A, T)>,
+}
+
+impl<F, A, T> fmt::Debug for UnaryExpression<F, A, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UnaryExpression")
+            .field("child", &self.child)
+            .finish()
+    }
+}
+
+impl<F, A, T> UnaryExpression<F, A, T>
+where
+    F: Fn(A) -> T + Send + Sync,
+    A: PrimitiveArrayItemType,
+    T: PrimitiveArrayItemType,
+    for<'a> &'a PrimitiveArray<A>: From<&'a ArrayImpl>,
+{
+    pub fn new(child: BoxedExpression, func: F) -> Self {
+        UnaryExpression {
+            child,
+            func,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<F, A, T> Expression for UnaryExpression<F, A, T>
+where
+    F: Fn(A) -> T + Send + Sync,
+    A: PrimitiveArrayItemType,
+    T: PrimitiveArrayItemType,
+    for<'a> &'a PrimitiveArray<A>: From<&'a ArrayImpl>,
+{
+    fn return_type(&self) -> DataType {
+        T::data_type()
+    }
+
+    fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
+        let child = self.child.eval_checked(data_chunk)?;
+
+        let bitmap = match data_chunk.get_visibility_ref() {
+            Some(vis) => vis | child.null_bitmap(),
+            None => child.null_bitmap().clone(),
+        };
+        let a: &PrimitiveArray<A> = (&*child).into();
+        let c = PrimitiveArray::<T>::from_iter_bitmap(a.raw_iter().map(|a| (self.func)(a)), bitmap);
+        Ok(Arc::new(c.into()))
+    }
+
+    fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
+        let datum = self.child.eval_row(row)?;
+        let scalar = datum
+            .as_ref()
+            .map(|s| s.as_scalar_ref_impl().try_into().unwrap());
+
+        let output_scalar = match scalar {
+            Some(l) => Some((self.func)(l)),
+            _ => None,
+        };
+        let output_datum = output_scalar.map(|s| s.to_scalar_value());
+        Ok(output_datum)
+    }
+}
+
 pub struct BinaryExpression<F, A, B, T> {
     left: BoxedExpression,
     right: BoxedExpression,

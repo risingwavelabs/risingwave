@@ -92,6 +92,6 @@ where
 }
 
 #[inline(always)]
-pub fn general_bitnot<T1: Not<Output = T1>>(expr: T1) -> Result<T1> {
-    Ok(!expr)
+pub fn general_bitnot<T1: Not<Output = T1>>(expr: T1) -> T1 {
+    !expr
 }
