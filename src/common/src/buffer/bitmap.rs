@@ -37,7 +37,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::iter::{self, TrustedLen};
-use std::ops::{BitAnd, BitOr, Not, RangeInclusive};
+use std::ops::{BitAnd, BitOr, BitOrAssign, Not, RangeInclusive};
 
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer as ProstBuffer;
@@ -408,6 +408,18 @@ impl<'b> BitOr<&'b Bitmap> for Bitmap {
 
     fn bitor(self, rhs: &'b Bitmap) -> Self::Output {
         rhs.bitor(self)
+    }
+}
+
+impl BitOrAssign<&Bitmap> for Bitmap {
+    fn bitor_assign(&mut self, rhs: &Bitmap) {
+        assert_eq!(self.num_bits, rhs.num_bits);
+        let mut num_high_bits = 0;
+        for (a, &b) in self.bits.iter_mut().zip(rhs.bits.iter()) {
+            *a |= b;
+            num_high_bits += a.count_ones();
+        }
+        self.num_high_bits = num_high_bits as usize;
     }
 }
 

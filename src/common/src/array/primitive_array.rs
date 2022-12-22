@@ -27,7 +27,8 @@ use crate::for_all_native_types;
 use crate::types::decimal::Decimal;
 use crate::types::interval::IntervalUnit;
 use crate::types::{
-    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar, ScalarRef,
+    DataType, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar,
+    ScalarRef,
 };
 
 /// Physical type of array items which have fixed size.
@@ -48,6 +49,8 @@ where
     fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>>;
     /// Returns array type of the primitive array
     fn array_type() -> ArrayType;
+    /// Returns the data type.
+    fn data_type() -> DataType;
     /// Creates an `ArrayBuilder` for this primitive type
     fn create_array_builder(capacity: usize) -> ArrayBuilderImpl;
 
@@ -77,6 +80,10 @@ macro_rules! impl_array_methods {
 
         fn array_type() -> ArrayType {
             ArrayType::$array_type_pb
+        }
+
+        fn data_type() -> DataType {
+            DataType::$array_type_pb
         }
 
         fn create_array_builder(capacity: usize) -> ArrayBuilderImpl {
@@ -159,6 +166,18 @@ impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
     }
 }
 
+impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
+    /// Build a PrimitiveArray from iterator and bitmap.
+    ///
+    /// NOTE: The length of `bitmap` must be equal to the length of `iter`.
+    pub fn from_iter_bitmap(iter: impl IntoIterator<Item = T>, bitmap: Bitmap) -> Self {
+        PrimitiveArray {
+            bitmap,
+            data: iter.into_iter().collect(),
+        }
+    }
+}
+
 impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     type Builder = PrimitiveArrayBuilder<T>;
     type OwnedItem = T;
@@ -166,6 +185,10 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
         *self.data.get_unchecked(idx)
+    }
+
+    fn raw_iter<'a>(&'a self) -> impl DoubleEndedIterator<Item = Self::RefItem<'a>> {
+        self.data.iter().cloned()
     }
 
     fn len(&self) -> usize {

@@ -22,7 +22,7 @@ use risingwave_pb::expr::expr_node::Type;
 use super::Expression;
 use crate::expr::expr_binary_bytes::new_concat_op;
 use crate::expr::template::BinaryExpression;
-use crate::expr::BoxedExpression;
+use crate::expr::{template_v2 as v2, BoxedExpression};
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cmp::*;
@@ -69,6 +69,31 @@ macro_rules! gen_atm_impl {
                             $func::< <$i1! { type_array } as Array>::OwnedItem, <$i2! { type_array } as Array>::OwnedItem, <$rt! { type_array } as Array>::OwnedItem>,
                         )
                     ) as BoxedExpression
+                },
+            )*
+            _ => {
+                return Err(ExprError::UnsupportedFunction(format!(
+                    "{:?} atm {:?}",
+                    $l.return_type(), $r.return_type()
+                )));
+            }
+        }
+    };
+}
+
+macro_rules! gen_atm_impl_v2 {
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $rt:ident, $func:ident },)*) => {
+        match ($l.return_type(), $r.return_type()) {
+            $(
+                ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
+                    v2::BinaryExpression::new(
+                        $l, $r,
+                        $func::<
+                            <$i1! { type_array } as Array>::OwnedItem,
+                            <$i2! { type_array } as Array>::OwnedItem,
+                            <$rt! { type_array } as Array>::OwnedItem
+                        >,
+                    ).boxed()
                 },
             )*
             _ => {
@@ -573,7 +598,7 @@ pub fn new_binary_expr(
         }
         Type::BitwiseAnd => {
             gen_binary_expr_bitwise! {
-                gen_atm_impl,
+                gen_atm_impl_v2,
                 l, r, ret,
                 general_bitand,
                 {
@@ -582,7 +607,7 @@ pub fn new_binary_expr(
         }
         Type::BitwiseOr => {
             gen_binary_expr_bitwise! {
-                gen_atm_impl,
+                gen_atm_impl_v2,
                 l, r, ret,
                 general_bitor,
                 {
@@ -591,7 +616,7 @@ pub fn new_binary_expr(
         }
         Type::BitwiseXor => {
             gen_binary_expr_bitwise! {
-                gen_atm_impl,
+                gen_atm_impl_v2,
                 l, r, ret,
                 general_bitxor,
                 {
