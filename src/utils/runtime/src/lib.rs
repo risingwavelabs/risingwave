@@ -16,14 +16,16 @@
 
 #![feature(panic_update_hook)]
 
+use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::Future;
 use tracing::Level;
-use tracing_subscriber::filter;
+use tracing_subscriber::filter::{Directive, Targets};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::{filter, EnvFilter};
 
 // ============================================================================
 // BEGIN SECTION: frequently used log configurations for debugging
@@ -138,7 +140,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         #[cfg(debug_assertions)]
         let filter = filter.with_default(Level::DEBUG);
 
-        layers.push(fmt_layer.with_filter(filter).boxed());
+        layers.push(fmt_layer.with_filter(to_env_filter(filter)).boxed());
     };
 
     if ENABLE_QUERY_LOG_FILE {
@@ -204,6 +206,34 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     tracing_subscriber::registry().with(layers).init();
 
     // TODO: add file-appender tracing subscriber in the future
+}
+
+/// Returns a `EnvFilter` that
+/// 1. inherits given `filter`'s target-LevelFilter pairs and default-LevelFilter.
+/// 2. parses `RUST_LOG` environment variable and adds these filters.
+///
+/// Filters from step 1 will be overwritten by filters from step 2 that matches.
+fn to_env_filter(filter: Targets) -> EnvFilter {
+    let mut env_filter = EnvFilter::new("");
+    for (target, level) in filter.iter() {
+        let directive = format!("{}={}", target, level).parse().unwrap();
+        env_filter = env_filter.add_directive(directive);
+    }
+    if let Some(g) = filter.default_level() {
+        env_filter = env_filter.add_directive(g.into());
+    }
+    if let Ok(rust_log) = env::var(EnvFilter::DEFAULT_ENV) {
+        if rust_log.is_empty() {
+            return env_filter;
+        }
+        let directives = rust_log
+            .split(',')
+            .map(|s: &str| s.parse::<Directive>().expect("failed to parse RUST_LOG"));
+        for directive in directives {
+            env_filter = env_filter.add_directive(directive);
+        }
+    }
+    env_filter
 }
 
 /// Enable parking lot's deadlock detection.
