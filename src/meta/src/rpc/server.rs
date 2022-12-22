@@ -134,6 +134,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     // print current leader/follower status of this node
     tokio::spawn(async move {
         let _ = tracing::span!(tracing::Level::INFO, "node_status").enter();
+        let mut was_leader = false;
         loop {
             if note_status_leader_rx.changed().await.is_err() {
                 tracing::error!("Leader sender dropped");
@@ -142,6 +143,18 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
             let (leader_info, is_leader) = note_status_leader_rx.borrow().clone();
             let leader_addr = leader_info_to_host_addr(leader_info);
+
+            // Implementation of naive fencing mechanism:
+            // leader nodes should panic if they loose their leader position
+            if was_leader {
+                // && !is_leader {
+                // TODO: enable this again to give leader chance to claim lease again?
+                panic!(
+                    "This node lost its leadership. New host address is {}:{}. Killing node",
+                    leader_addr.host, leader_addr.port
+                )
+            }
+            was_leader = is_leader;
 
             tracing::info!(
                 "This node currently is a {} at {}:{}",
