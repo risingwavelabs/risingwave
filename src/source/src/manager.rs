@@ -299,6 +299,7 @@ impl SourceDescBuilder {
             RowFormatType::Avro => SourceFormat::Avro,
             RowFormatType::Maxwell => SourceFormat::Maxwell,
             RowFormatType::CanalJson => SourceFormat::CanalJson,
+            RowFormatType::Native => SourceFormat::Native,
             _ => unreachable!(),
         };
 
