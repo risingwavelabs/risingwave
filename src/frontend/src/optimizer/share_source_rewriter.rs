@@ -17,7 +17,9 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 
 use crate::catalog::SourceId;
-use crate::optimizer::plan_node::{LogicalShare, LogicalSource, PlanNodeId, PlanTreeNode};
+use crate::optimizer::plan_node::{
+    LogicalShare, LogicalSource, PlanNodeId, PlanTreeNode, StreamShare,
+};
 use crate::optimizer::plan_rewriter::PlanRewriter;
 use crate::optimizer::PlanVisitor;
 use crate::PlanRef;
@@ -79,8 +81,8 @@ impl PlanRewriter for ShareSourceRewriter {
     }
 
     fn rewrite_logical_share(&mut self, share: &LogicalShare) -> PlanRef {
-        // When we use plan rewriter, we need to take care of share operator, because our plan is a
-        // DAG rather than a tree.
+        // When we use the plan rewriter, we need to take care of the share operator,
+        // because our plan is a DAG rather than a tree.
         match self.share_map.get(&share.id()) {
             None => {
                 let new_inputs = share
@@ -94,6 +96,11 @@ impl PlanRewriter for ShareSourceRewriter {
             }
             Some(new_share) => new_share.clone(),
         }
+    }
+
+    fn rewrite_stream_share(&mut self, _share: &StreamShare) -> PlanRef {
+        // We only access logical node here, so stream share is unreachable.
+        unreachable!()
     }
 }
 
