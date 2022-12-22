@@ -390,6 +390,10 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
     fn identity(&self) -> &str {
         self.info.identity.as_str()
     }
+
+    fn info(&self) -> ExecutorInfo {
+        self.info.clone()
+    }
 }
 
 impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {

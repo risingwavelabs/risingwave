@@ -88,6 +88,10 @@ impl<S: StateStore> Executor for WatermarkFilterExecutor<S> {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> ExecutorInfo {
+        self.info.clone()
+    }
 }
 
 impl<S: StateStore> WatermarkFilterExecutor<S> {

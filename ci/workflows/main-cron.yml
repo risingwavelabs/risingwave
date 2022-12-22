@@ -99,7 +99,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 8
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "unit test"
@@ -130,8 +130,6 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           environment:
-            - RUN_SQLSMITH: 1
-            - SQLSMITH_COUNT: 1000
             - RW_RANDOM_SEED_SQLSMITH: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20

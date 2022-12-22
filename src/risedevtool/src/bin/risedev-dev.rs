@@ -14,8 +14,7 @@
 
 use std::env;
 use std::fmt::Write;
-use std::fs::{File, OpenOptions};
-use std::io::Read;
+use std::fs::OpenOptions;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -345,17 +344,11 @@ fn task_main(
 fn main() -> Result<()> {
     preflight_check()?;
 
-    let risedev_config = {
-        let mut content = String::new();
-        File::open("risedev.yml")?.read_to_string(&mut content)?;
-        content
-    };
-
     let task_name = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "default".to_string());
 
-    let (config_path, risedev_config) = ConfigExpander::expand(&risedev_config, &task_name)?;
+    let (config_path, risedev_config) = ConfigExpander::expand(".", &task_name)?;
 
     if let Some(config_path) = &config_path {
         let target = Path::new(&env::var("PREFIX_CONFIG")?).join("risingwave.toml");

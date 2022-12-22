@@ -62,6 +62,7 @@ enum OrderType {
   DESCENDING = 2;
 }
 
+// Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`).
 message ColumnOrder {
   // maybe other name
   OrderType order_type = 1;
@@ -76,4 +77,5 @@ enum RowFormatType {
   AVRO = 4;
   MAXWELL = 5;
   CANAL_JSON = 6;
+  CSV = 7;
 }
