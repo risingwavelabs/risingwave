@@ -1463,8 +1463,8 @@ impl DataChunkMutator {
     ) -> Self {
         let mut new_visibility = BitmapBuilder::zeroed(self.0.capacity());
 
-        for (&start_row_id, &end_row_id) in iter::once(&0)
-            .chain(first_output_row_ids.iter())
+        for (&start_row_id, &end_row_id) in first_output_row_ids
+            .iter()
             .tuple_windows()
             .filter(|(start_row_id, end_row_id)| start_row_id < end_row_id)
         {
