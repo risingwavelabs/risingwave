@@ -128,9 +128,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let mut services_leader_rx = leader_rx.clone();
     let mut note_status_leader_rx = leader_rx.clone();
 
-    // FIXME: add fencing mechanism
-    // https://github.com/risingwavelabs/risingwave/issues/6786
-
     // print current leader/follower status of this node
     tokio::spawn(async move {
         let _ = tracing::span!(tracing::Level::INFO, "node_status").enter();
