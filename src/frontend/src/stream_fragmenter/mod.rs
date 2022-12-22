@@ -18,6 +18,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod rewrite;
 
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use derivative::Derivative;
 use risingwave_common::catalog::TableId;
@@ -192,7 +193,7 @@ fn generate_fragment_graph(
 pub(self) fn build_and_add_fragment(
     state: &mut BuildFragmentGraphState,
     stream_node: StreamNode,
-) -> Result<StreamFragment> {
+) -> Result<Rc<StreamFragment>> {
     let operator_id = stream_node.operator_id as u32;
     match state.share_mapping.get(&operator_id) {
         None => {
@@ -201,12 +202,13 @@ pub(self) fn build_and_add_fragment(
 
             assert!(fragment.node.is_none());
             fragment.node = Some(Box::new(node));
+            let fragment_ref = Rc::new(fragment);
 
-            state.fragment_graph.add_fragment(fragment.clone());
+            state.fragment_graph.add_fragment(fragment_ref.clone());
             state
                 .share_mapping
-                .insert(operator_id, fragment.fragment_id);
-            Ok(fragment)
+                .insert(operator_id, fragment_ref.fragment_id);
+            Ok(fragment_ref)
         }
         Some(fragment_id) => Ok(state
             .fragment_graph
