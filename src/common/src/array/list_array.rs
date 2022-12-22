@@ -23,10 +23,7 @@ use itertools::Itertools;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
 use serde::{Deserializer, Serializer};
 
-use super::iterator::ArrayRawIter;
-use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult, RowRef,
-};
+use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult, RowRef};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::row::Row;
 use crate::types::to_text::ToText;
@@ -162,9 +159,7 @@ pub struct ListArray {
 
 impl Array for ListArray {
     type Builder = ListArrayBuilder;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = ListValue;
-    type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = ListRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
@@ -173,14 +168,6 @@ impl Array for ListArray {
 
     fn len(&self) -> usize {
         self.len
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        ArrayIterator::new(self)
-    }
-
-    fn raw_iter(&self) -> Self::RawIter<'_> {
-        ArrayRawIter::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {

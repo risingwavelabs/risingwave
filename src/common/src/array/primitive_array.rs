@@ -20,7 +20,7 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayResult};
+use super::{Array, ArrayBuilder, ArrayResult};
 use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::for_all_native_types;
@@ -161,9 +161,7 @@ impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
 
 impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     type Builder = PrimitiveArrayBuilder<T>;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = T;
-    type RawIter<'a> = std::iter::Cloned<std::slice::Iter<'a, T>>;
     type RefItem<'a> = T;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
@@ -172,14 +170,6 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
 
     fn len(&self) -> usize {
         self.data.len()
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        ArrayIterator::new(self)
-    }
-
-    fn raw_iter(&self) -> Self::RawIter<'_> {
-        self.data.iter().cloned()
     }
 
     fn to_protobuf(&self) -> ProstArray {

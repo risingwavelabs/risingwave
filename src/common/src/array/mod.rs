@@ -50,7 +50,7 @@ pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
-pub use iterator::{ArrayImplIterator, ArrayIterator};
+pub use iterator::ArrayIterator;
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
@@ -165,16 +165,6 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     /// Corresponding builder of this array, which is reciprocal to `Array`.
     type Builder: ArrayBuilder<ArrayType = Self>;
 
-    /// Iterator type of this array.
-    type Iter<'a>: Iterator<Item = Option<Self::RefItem<'a>>>
-    where
-        Self: 'a;
-
-    /// Raw iterator type of this array.
-    type RawIter<'a>: Iterator<Item = Self::RefItem<'a>>
-    where
-        Self: 'a;
-
     /// Retrieve a reference to value regardless of whether it is null
     /// without checking the index boundary.
     ///
@@ -212,13 +202,17 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     fn len(&self) -> usize;
 
     /// Get iterator of current array.
-    fn iter(&self) -> Self::Iter<'_>;
+    fn iter<'a>(&'a self) -> ArrayIterator<'a, Self> {
+        ArrayIterator::new(self)
+    }
 
     /// Get raw iterator of current array.
     ///
     /// The raw iterator simply iterates values without checking the null bitmap.
     /// The returned value for NULL values is undefined.
-    fn raw_iter(&self) -> Self::RawIter<'_>;
+    fn raw_iter<'a>(&'a self) -> impl DoubleEndedIterator<Item = Self::RefItem<'a>> {
+        (0..self.len()).map(|i| unsafe { self.raw_value_at_unchecked(i) })
+    }
 
     /// Serialize to protobuf
     fn to_protobuf(&self) -> ProstArray;
@@ -645,8 +639,8 @@ macro_rules! impl_array {
 for_all_variants! { impl_array }
 
 impl ArrayImpl {
-    pub fn iter(&self) -> ArrayImplIterator<'_> {
-        ArrayImplIterator::new(self)
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> {
+        (0..self.len()).map(|i| self.value_at(i))
     }
 
     pub fn from_protobuf(array: &ProstArray, cardinality: usize) -> ArrayResult<Self> {
