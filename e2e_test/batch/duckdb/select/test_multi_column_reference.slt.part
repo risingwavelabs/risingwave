@@ -100,11 +100,10 @@ SELECT t.t.t FROM t.t;
 # (original query)SELECT t.t.t.t FROM t.t;
 # (syntax)the behavior is different with PG https://www.postgresql.org/docs/current/rowtypes.html#ROWTYPES-ACCESSING.
 
-# (TODO): https://github.com/risingwavelabs/risingwave/issues/6772
-# query I
-# SELECT (t.t.t).t FROM t.t;
-# ----
-# 42
+query I
+SELECT (t.t.t).t FROM t.t;
+----
+42
 
 # (original DDL)
 # TODO: drop schema cascade https://github.com/risingwavelabs/risingwave/issues/6773
@@ -118,8 +117,38 @@ statement ok
 DROP SCHEMA t;
 
 # test long nested struct
-# (TODO): https://github.com/risingwavelabs/risingwave/issues/6772
-# **TODO BEGIN**
+statement ok
+CREATE SCHEMA t
+
+statement ok
+CREATE TABLE t.t(t STRUCT<t STRUCT<t STRUCT<t INTEGER>>>);
+
+statement ok
+INSERT INTO t.t VALUES (ROW(ROW(ROW(42))));
+
+query I
+SELECT (t.t.t).t FROM t.t;
+----
+((42))
+
+query I
+SELECT (t.t.t).t.t FROM t.t;
+----
+(42)
+
+query I
+SELECT (t.t.t).t.t.t FROM t.t;
+----
+42
+
+statement ok
+DROP TABLE t.t;
+
+statement ok
+DROP SCHEMA t;
+
+# (original test's syntax is different) https://www.postgresql.org/docs/current/rowtypes.html#ROWTYPES-ACCESSING.
+# **ORIGINAL TEST BEGIN**
 # statement ok
 # CREATE SCHEMA t
 
@@ -168,7 +197,7 @@ DROP SCHEMA t;
 
 # statement ok
 # DROP SCHEMA t CASCADE
-# **TODO END**
+# **ORIGINAL TEST END**
 
 # test multiple tables with the same name but a different schema
 # we don't allow this (duplicate alias in query)

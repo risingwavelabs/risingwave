@@ -65,24 +65,25 @@ pub enum IsLateral {
 
 use IsLateral::*;
 
-pub enum WildcardExpr {
+pub enum WildcardOrExpr {
     Expr(Expr),
-    /// Expr and Qualified wildcard, expr is a table or a column struct, object_name is field.
+    /// Expr is a table or a column struct.
+    /// Idents are the prefix of `*`, which are consecutive field accesses.
     /// e.g. `(table.v1).*` or `(table).v1.*`
-    ExprQualifiedWildcard(Expr, Option<ObjectName>),
+    ExprQualifiedWildcard(Expr, Vec<Ident>),
     QualifiedWildcard(ObjectName),
     Wildcard,
 }
 
-impl From<WildcardExpr> for FunctionArgExpr {
-    fn from(wildcard_expr: WildcardExpr) -> Self {
+impl From<WildcardOrExpr> for FunctionArgExpr {
+    fn from(wildcard_expr: WildcardOrExpr) -> Self {
         match wildcard_expr {
-            WildcardExpr::Expr(expr) => Self::Expr(expr),
-            WildcardExpr::ExprQualifiedWildcard(expr, prefix) => {
+            WildcardOrExpr::Expr(expr) => Self::Expr(expr),
+            WildcardOrExpr::ExprQualifiedWildcard(expr, prefix) => {
                 Self::ExprQualifiedWildcard(expr, prefix)
             }
-            WildcardExpr::QualifiedWildcard(prefix) => Self::QualifiedWildcard(prefix),
-            WildcardExpr::Wildcard => Self::Wildcard,
+            WildcardOrExpr::QualifiedWildcard(prefix) => Self::QualifiedWildcard(prefix),
+            WildcardOrExpr::Wildcard => Self::Wildcard,
         }
     }
 }
@@ -231,7 +232,7 @@ impl Parser {
     }
 
     /// Parse a new expression including wildcard & qualified wildcard
-    pub fn parse_wildcard_expr(&mut self) -> Result<WildcardExpr, ParserError> {
+    pub fn parse_wildcard_or_expr(&mut self) -> Result<WildcardOrExpr, ParserError> {
         let index = self.index;
 
         match self.next_token() {
@@ -242,7 +243,7 @@ impl Parser {
                 return self.word_concat_wildcard_expr(w.to_ident(), wildcard_expr);
             }
             Token::Mul => {
-                return Ok(WildcardExpr::Wildcard);
+                return Ok(WildcardOrExpr::Wildcard);
             }
             // TODO: support (((table.v1).v2).*)
             // parser wildcard field selection expression
@@ -263,7 +264,7 @@ impl Parser {
         };
 
         self.index = index;
-        self.parse_expr().map(WildcardExpr::Expr)
+        self.parse_expr().map(WildcardOrExpr::Expr)
     }
 
     /// Will return a `WildcardExpr::QualifiedWildcard(ObjectName)` with word concat or
@@ -271,14 +272,14 @@ impl Parser {
     pub fn word_concat_wildcard_expr(
         &mut self,
         ident: Ident,
-        expr: WildcardExpr,
-    ) -> Result<WildcardExpr, ParserError> {
-        if let WildcardExpr::QualifiedWildcard(mut idents) = expr {
+        expr: WildcardOrExpr,
+    ) -> Result<WildcardOrExpr, ParserError> {
+        if let WildcardOrExpr::QualifiedWildcard(mut idents) = expr {
             let mut id_parts = vec![ident];
             id_parts.append(&mut idents.0);
-            Ok(WildcardExpr::QualifiedWildcard(ObjectName(id_parts)))
-        } else if let WildcardExpr::Wildcard = expr {
-            Ok(WildcardExpr::QualifiedWildcard(ObjectName(vec![ident])))
+            Ok(WildcardOrExpr::QualifiedWildcard(ObjectName(id_parts)))
+        } else if let WildcardOrExpr::Wildcard = expr {
+            Ok(WildcardOrExpr::QualifiedWildcard(ObjectName(vec![ident])))
         } else {
             Ok(expr)
         }
@@ -289,24 +290,18 @@ impl Parser {
     pub fn expr_concat_wildcard_expr(
         &mut self,
         expr: Expr,
-        wildcard_expr: WildcardExpr,
-    ) -> Result<WildcardExpr, ParserError> {
-        if let WildcardExpr::QualifiedWildcard(idents) = wildcard_expr {
+        wildcard_expr: WildcardOrExpr,
+    ) -> Result<WildcardOrExpr, ParserError> {
+        if let WildcardOrExpr::QualifiedWildcard(idents) = wildcard_expr {
             let mut id_parts = idents.0;
             if let Expr::FieldIdentifier(expr, mut idents) = expr {
                 idents.append(&mut id_parts);
-                Ok(WildcardExpr::ExprQualifiedWildcard(
-                    *expr,
-                    Some(ObjectName(idents)),
-                ))
+                Ok(WildcardOrExpr::ExprQualifiedWildcard(*expr, idents))
             } else {
-                Ok(WildcardExpr::ExprQualifiedWildcard(
-                    expr,
-                    Some(ObjectName(id_parts)),
-                ))
+                Ok(WildcardOrExpr::ExprQualifiedWildcard(expr, id_parts))
             }
-        } else if let WildcardExpr::Wildcard = wildcard_expr {
-            Ok(WildcardExpr::ExprQualifiedWildcard(expr, None))
+        } else if let WildcardOrExpr::Wildcard = wildcard_expr {
+            Ok(WildcardOrExpr::ExprQualifiedWildcard(expr, vec![]))
         } else {
             Ok(wildcard_expr)
         }
@@ -316,16 +311,16 @@ impl Parser {
     pub fn parse_simple_wildcard_expr(
         &mut self,
         index: usize,
-    ) -> Result<WildcardExpr, ParserError> {
+    ) -> Result<WildcardOrExpr, ParserError> {
         let mut id_parts = vec![];
         while self.consume_token(&Token::Period) {
             match self.next_token() {
                 Token::Word(w) => id_parts.push(w.to_ident()),
                 Token::Mul => {
                     return if id_parts.is_empty() {
-                        Ok(WildcardExpr::Wildcard)
+                        Ok(WildcardOrExpr::Wildcard)
                     } else {
-                        Ok(WildcardExpr::QualifiedWildcard(ObjectName(id_parts)))
+                        Ok(WildcardOrExpr::QualifiedWildcard(ObjectName(id_parts)))
                     }
                 }
                 unexpected => {
@@ -334,7 +329,7 @@ impl Parser {
             }
         }
         self.index = index;
-        self.parse_expr().map(WildcardExpr::Expr)
+        self.parse_expr().map(WildcardOrExpr::Expr)
     }
 
     /// Parse a new expression
@@ -1786,7 +1781,11 @@ impl Parser {
 
     fn parse_column_def(&mut self) -> Result<ColumnDef, ParserError> {
         let name = self.parse_identifier_non_reserved()?;
-        let data_type = self.parse_data_type()?;
+        let data_type = if let Token::Word(_) = self.peek_token() {
+            Some(self.parse_data_type()?)
+        } else {
+            None
+        };
 
         let collation = if self.parse_keyword(Keyword::COLLATE) {
             Some(self.parse_object_name()?)
@@ -3377,11 +3376,11 @@ impl Parser {
             let name = self.parse_identifier()?;
 
             self.expect_token(&Token::RArrow)?;
-            let arg = self.parse_wildcard_expr()?.into();
+            let arg = self.parse_wildcard_or_expr()?.into();
 
             Ok(FunctionArg::Named { name, arg })
         } else {
-            Ok(FunctionArg::Unnamed(self.parse_wildcard_expr()?.into()))
+            Ok(FunctionArg::Unnamed(self.parse_wildcard_or_expr()?.into()))
         }
     }
 
@@ -3404,18 +3403,18 @@ impl Parser {
 
     /// Parse a comma-delimited list of projections after SELECT
     pub fn parse_select_item(&mut self) -> Result<SelectItem, ParserError> {
-        match self.parse_wildcard_expr()? {
-            WildcardExpr::Expr(expr) => self
+        match self.parse_wildcard_or_expr()? {
+            WildcardOrExpr::Expr(expr) => self
                 .parse_optional_alias(keywords::RESERVED_FOR_COLUMN_ALIAS)
                 .map(|alias| match alias {
                     Some(alias) => SelectItem::ExprWithAlias { expr, alias },
                     None => SelectItem::UnnamedExpr(expr),
                 }),
-            WildcardExpr::QualifiedWildcard(prefix) => Ok(SelectItem::QualifiedWildcard(prefix)),
-            WildcardExpr::ExprQualifiedWildcard(expr, prefix) => {
+            WildcardOrExpr::QualifiedWildcard(prefix) => Ok(SelectItem::QualifiedWildcard(prefix)),
+            WildcardOrExpr::ExprQualifiedWildcard(expr, prefix) => {
                 Ok(SelectItem::ExprQualifiedWildcard(expr, prefix))
             }
-            WildcardExpr::Wildcard => Ok(SelectItem::Wildcard),
+            WildcardOrExpr::Wildcard => Ok(SelectItem::Wildcard),
         }
     }
 

@@ -133,6 +133,7 @@ export const RowFormatType = {
   AVRO: "AVRO",
   MAXWELL: "MAXWELL",
   CANAL_JSON: "CANAL_JSON",
+  CSV: "CSV",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -161,6 +162,9 @@ export function rowFormatTypeFromJSON(object: any): RowFormatType {
     case 6:
     case "CANAL_JSON":
       return RowFormatType.CANAL_JSON;
+    case 7:
+    case "CSV":
+      return RowFormatType.CSV;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -184,6 +188,8 @@ export function rowFormatTypeToJSON(object: RowFormatType): string {
       return "MAXWELL";
     case RowFormatType.CANAL_JSON:
       return "CANAL_JSON";
+    case RowFormatType.CSV:
+      return "CSV";
     case RowFormatType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";

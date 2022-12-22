@@ -292,3 +292,50 @@
       | └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamProject { exprs: [(now + '30 min':Varchar::Interval)] }
         └─StreamNow { output: [now] }
+- name: eq-predicate derived condition other side pushdown in inner join
+  sql: |
+    create table t1(v1 int, v2 int);
+    create table t2(v1 int, v2 int);
+    select * from t1 join t2 where t1.v1 = t2.v1 and t1.v1 > 1000;
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: (t1.v1 = t2.v1), output: all }
+    ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (t1.v1 > 1000:Int32) }
+    └─LogicalScan { table: t2, columns: [t2.v1, t2.v2], predicate: (t2.v1 > 1000:Int32) }
+- name: eq-predicate derived condition other side pushdown in semi join
+  sql: |
+    create table t1(v1 int, v2 int);
+    create table t2(v1 int, v2 int);
+    select * from t1 where exists (select * from t2 where t1.v1 = t2.v1 and t2.v1 < 2000) and t1.v1 > 1000;
+  optimized_logical_plan: |
+    LogicalJoin { type: LeftSemi, on: (t1.v1 = t2.v1), output: all }
+    ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (t1.v1 > 1000:Int32) }
+    └─LogicalScan { table: t2, columns: [t2.v1], predicate: (t2.v1 > 1000:Int32) AND (t2.v1 < 2000:Int32) }
+- name: eq-predicate derived condition other side pushdown in outer join
+  sql: |
+    create table t1(v1 int, v2 int);
+    create table t2(v1 int, v2 int);
+    select * from t1 left join t2 on t1.v1 = t2.v1 where t2.v1 is not null and t1.v1 + 5 is not null;
+  optimized_logical_plan: |
+    LogicalFilter { predicate: IsNotNull(t2.v1) }
+    └─LogicalJoin { type: LeftOuter, on: (t1.v1 = t2.v1), output: all }
+      ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: IsNotNull((t1.v1 + 5:Int32)) }
+      └─LogicalScan { table: t2, columns: [t2.v1, t2.v2], predicate: IsNotNull((t2.v1 + 5:Int32)) }
+- name: eq-predicate derived condition is banned for impure function e.g. `now()`
+  sql: |
+    create table t1(v1 timestamp);
+    create table t2(v2 timestamp);
+    select * from t1 join t2 where v1 = v2 and v1 > now();
+  optimized_logical_plan: |
+    LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
+    ├─LogicalFilter { predicate: (t1.v1 > Now) }
+    | └─LogicalScan { table: t1, columns: [t1.v1] }
+    └─LogicalScan { table: t2, columns: [t2.v2] }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, v1, v2] }
+    └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
+      ├─StreamExchange { dist: HashShard(t1.v1) }
+      | └─StreamDynamicFilter { predicate: (t1.v1 > now), output: [t1.v1, t1._row_id] }
+      |   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      |   └─StreamNow { output: [now] }
+      └─StreamExchange { dist: HashShard(t2.v2) }
+        └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
