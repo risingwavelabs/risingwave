@@ -49,7 +49,7 @@ use crate::hummock::utils::{
 };
 use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, DeleteRangeAggregator,
-    SstableDeleteRangeIterator, SstableIterator,
+    Sstable, SstableDeleteRangeIterator, SstableIterator,
 };
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIter};
@@ -418,15 +418,16 @@ impl HummockVersionReader {
         }
 
         // 2. order guarantee: imm -> sst
+        let dist_key_hash = Sstable::hash_for_bloom_filter(table_key.dist_key());
         let full_key = FullKey::new(read_options.table_id, table_key, epoch);
         for local_sst in &uncommitted_ssts {
             table_counts += 1;
-
             if let Some(data) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 local_sst,
                 full_key,
                 &read_options,
+                dist_key_hash,
                 &mut local_stats,
             )
             .await?
@@ -458,6 +459,7 @@ impl HummockVersionReader {
                             sstable_info,
                             full_key,
                             &read_options,
+                            dist_key_hash,
                             &mut local_stats,
                         )
                         .await?
@@ -495,6 +497,7 @@ impl HummockVersionReader {
                         &level.table_infos[table_info_idx],
                         full_key,
                         &read_options,
+                        dist_key_hash,
                         &mut local_stats,
                     )
                     .await?
@@ -539,7 +542,10 @@ impl HummockVersionReader {
         }
         let mut staging_sst_iter_count = 0;
         // encode once
-        let bloom_filter_key = read_options.prefix_hint.as_ref();
+        let bloom_filter_prefix_hash = read_options
+            .prefix_hint
+            .as_ref()
+            .map(|hint| Sstable::hash_for_bloom_filter(hint));
 
         for sstable_info in &uncommitted_ssts {
             let table_holder = self
@@ -547,12 +553,8 @@ impl HummockVersionReader {
                 .sstable(sstable_info, &mut local_stats)
                 .in_span(Span::enter_with_local_parent("get_sstable"))
                 .await?;
-            if let Some(bloom_filter_key) = bloom_filter_key.as_ref() {
-                if !hit_sstable_bloom_filter(
-                    table_holder.value(),
-                    bloom_filter_key,
-                    &mut local_stats,
-                ) {
+            if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
+                if !hit_sstable_bloom_filter(table_holder.value(), *prefix_hash, &mut local_stats) {
                     continue;
                 }
             }
@@ -621,12 +623,9 @@ impl HummockVersionReader {
                         .sstable(sstable_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if let Some(bloom_filter_key) = read_options.prefix_hint.as_deref() {
-                        if !hit_sstable_bloom_filter(
-                            sstable.value(),
-                            bloom_filter_key,
-                            &mut local_stats,
-                        ) {
+
+                    if let Some(key_hash) = bloom_filter_prefix_hash.as_ref() {
+                        if !hit_sstable_bloom_filter(sstable.value(), *key_hash, &mut local_stats) {
                             continue;
                         }
                     }
@@ -661,14 +660,11 @@ impl HummockVersionReader {
                         .sstable(table_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if let Some(bloom_filter_key) = bloom_filter_key.as_ref()
-                        && !hit_sstable_bloom_filter(
-                            sstable.value(),
-                            bloom_filter_key,
-                            &mut local_stats,
-                        )
-                    {
-                        continue;
+                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
+                        if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
+                        {
+                            continue;
+                        }
                     }
                     if !sstable.value().meta.range_tombstone_list.is_empty()
                         && !read_options.ignore_range_tombstone

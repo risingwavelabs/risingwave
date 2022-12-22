@@ -219,3 +219,21 @@ drop table n1;
 
 statement ok
 drop table t;
+
+statement ok 
+create table t (v1 int,v2 int);
+
+statement ok
+create table t1(a,b) as select v1,v2 from t;
+
+statement ok
+create table t2(a) as select v1,v2 from t;
+
+statement ok 
+drop table t;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;

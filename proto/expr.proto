@@ -8,6 +8,9 @@ import "plan_common.proto";
 option optimize_for = SPEED;
 
 message ExprNode {
+  // a "pure function" will be defined as having `1 < expr_node as i32 <= 600`.
+  // Please modify this definition if adding a pure function that does not belong
+  // to this range.
   enum Type {
     UNSPECIFIED = 0;
     INPUT_REF = 1;

@@ -333,6 +333,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             &env.opts.backup_storage_url,
             Arc::new(ObjectStoreMetrics::unused()),
             true,
+            "Meta Backup",
         )
         .await,
     );
