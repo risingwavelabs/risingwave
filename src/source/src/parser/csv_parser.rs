@@ -130,7 +130,7 @@ impl CsvParser {
             Some(strings) => strings,
         };
         writer
-            .insert(move |desc| {
+            .insert(move |_idx, desc| {
                 let column_id = desc.column_id.get_id();
                 let column_type = &desc.data_type;
                 let v = match columns_string.get(column_id as usize) {

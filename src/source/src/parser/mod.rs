@@ -189,7 +189,7 @@ impl OpAction for OpActionUpdate {
 impl SourceStreamChunkRowWriter<'_> {
     fn do_action<A: OpAction>(
         &mut self,
-        mut f: impl FnMut(&SourceColumnDesc) -> Result<A::Output>,
+        mut f: impl FnMut(usize, &SourceColumnDesc) -> Result<A::Output>,
     ) -> Result<WriteGuard> {
         // The closure `f` may fail so that a part of builders were appended incompletely.
         // Loop invariant: `builders[0..appended_idx)` has been appended on every iter ended or loop
@@ -204,7 +204,7 @@ impl SourceStreamChunkRowWriter<'_> {
                 let output = if desc.skip_parse {
                     A::DEFAULT_OUTPUT
                 } else {
-                    f(desc)?
+                    f(idx, desc)?
                 };
                 A::apply(builder, output);
                 appended_idx = idx + 1;
@@ -231,7 +231,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
     pub fn insert(
         &mut self,
-        f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
+        f: impl FnMut(usize, &SourceColumnDesc) -> Result<Datum>,
     ) -> Result<WriteGuard> {
         self.do_action::<OpActionInsert>(f)
     }
@@ -244,7 +244,7 @@ impl SourceStreamChunkRowWriter<'_> {
     /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
     pub fn delete(
         &mut self,
-        f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
+        f: impl FnMut(usize, &SourceColumnDesc) -> Result<Datum>,
     ) -> Result<WriteGuard> {
         self.do_action::<OpActionDelete>(f)
     }
@@ -258,7 +258,7 @@ impl SourceStreamChunkRowWriter<'_> {
     ///   [`SourceColumnDesc`].
     pub fn update(
         &mut self,
-        f: impl FnMut(&SourceColumnDesc) -> Result<(Datum, Datum)>,
+        f: impl FnMut(usize, &SourceColumnDesc) -> Result<(Datum, Datum)>,
     ) -> Result<WriteGuard> {
         self.do_action::<OpActionUpdate>(f)
     }

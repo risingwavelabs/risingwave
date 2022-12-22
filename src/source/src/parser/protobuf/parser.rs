@@ -166,7 +166,7 @@ impl ProtobufParser {
 
         let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
             .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
-        writer.insert(|column_desc| {
+        writer.insert(|_idx, column_desc| {
             let field_desc = message
                 .descriptor()
                 .get_field_by_name(&column_desc.name)

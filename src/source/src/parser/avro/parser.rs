@@ -205,7 +205,7 @@ impl AvroParser {
         };
         // parse the valur to rw value
         if let Value::Record(fields) = avro_value {
-            writer.insert(|column| {
+            writer.insert(|_idx, column| {
                 let tuple = fields.iter().find(|val| column.name.eq(&val.0)).unwrap();
                 from_avro_value(tuple.1.clone()).map_err(|e| {
                     tracing::error!(

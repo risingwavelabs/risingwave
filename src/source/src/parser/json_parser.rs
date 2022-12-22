@@ -97,7 +97,7 @@ impl JsonParser {
         let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        writer.insert(|desc| {
+        writer.insert(|_idx, desc| {
             simd_json_parse_value(&desc.data_type, value.get(desc.name.as_str())).map_err(|e| {
                 tracing::error!(
                     "failed to process value ({}): {}",

@@ -781,7 +781,7 @@ mod tests {
         let row_id_index = Some(ProstColumnIndex { index: 0 });
         let pk_column_ids = vec![0];
         let stream_source_info = StreamSourceInfo {
-            row_format: ProstRowFormatType::Json as i32,
+            row_format: ProstRowFormatType::Native as i32,
             ..Default::default()
         };
         let source_manager = Arc::new(TableSourceManager::default());

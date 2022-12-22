@@ -79,7 +79,7 @@ impl DebeziumJsonParser {
                         ))
                     })?;
 
-                writer.update(|column| {
+                writer.update(|_idx, column| {
                     let before =
                         simd_json_parse_value(&column.data_type, before.get(column.name.as_str()))?;
                     let after =
@@ -98,7 +98,7 @@ impl DebeziumJsonParser {
                         ))
                     })?;
 
-                writer.insert(|column| {
+                writer.insert(|_idx, column| {
                     simd_json_parse_value(&column.data_type, after.get(column.name.as_str()))
                         .map_err(Into::into)
                 })
@@ -113,7 +113,7 @@ impl DebeziumJsonParser {
                         ))
                     })?;
 
-                writer.delete(|column| {
+                writer.delete(|_idx, column| {
                     simd_json_parse_value(&column.data_type, before.get(column.name.as_str()))
                         .map_err(Into::into)
                 })

@@ -54,7 +54,7 @@ impl MaxwellParser {
                         "data is missing for creating event".to_string(),
                     ))
                 })?;
-                writer.insert(|column| {
+                writer.insert(|_idx, column| {
                     json_parse_value(&column.data_type, after.get(&column.name)).map_err(Into::into)
                 })
             }
@@ -70,7 +70,7 @@ impl MaxwellParser {
                     ))
                 })?;
 
-                writer.update(|column| {
+                writer.update(|_idx, column| {
                     // old only contains the changed columns but data contains all columns.
                     let before_value = before
                         .get(column.name.as_str())
@@ -84,7 +84,7 @@ impl MaxwellParser {
                 let before = event.after.as_ref().ok_or_else(|| {
                     RwError::from(ProtocolError("old is missing for delete event".to_string()))
                 })?;
-                writer.delete(|column| {
+                writer.delete(|_idx, column| {
                     json_parse_value(&column.data_type, before.get(&column.name))
                         .map_err(Into::into)
                 })

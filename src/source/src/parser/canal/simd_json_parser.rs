@@ -79,7 +79,7 @@ impl CanalJsonParser {
                 let results = inserted
                     .into_iter()
                     .map(|v| {
-                        writer.insert(|column| {
+                        writer.insert(|_idx, column| {
                             cannal_simd_json_parse_value(
                                 &column.data_type,
                                 v.get(column.name.as_str()),
@@ -117,7 +117,7 @@ impl CanalJsonParser {
                 let results = before
                     .zip_eq(after)
                     .map(|(before, after)| {
-                        writer.update(|column| {
+                        writer.update(|_idx, column| {
                             // in origin canal, old only contains the changed columns but data
                             // contains all columns.
                             // in ticdc, old contains all fields
@@ -151,7 +151,7 @@ impl CanalJsonParser {
                 let results = deleted
                     .into_iter()
                     .map(|v| {
-                        writer.delete(|column| {
+                        writer.delete(|_idx, column| {
                             cannal_simd_json_parse_value(
                                 &column.data_type,
                                 v.get(column.name.as_str()),

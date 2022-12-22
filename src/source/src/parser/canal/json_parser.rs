@@ -76,7 +76,7 @@ impl CanalJsonParser {
 
                 let results = inserted
                     .map(|v| {
-                        writer.insert(|columns| {
+                        writer.insert(|_idx, columns| {
                             canal_json_parse_value(&columns.data_type, v.get(&columns.name))
                                 .map_err(Into::into)
                         })
@@ -106,7 +106,7 @@ impl CanalJsonParser {
                 let results = before
                     .zip(after)
                     .map(|(before, after)| {
-                        writer.update(|column| {
+                        writer.update(|_idx, column| {
                             // in origin canal, old only contains the changed columns but data
                             // contains all columns.
                             // in ticdc, old contains all fields
@@ -133,7 +133,7 @@ impl CanalJsonParser {
                     })?;
                 let results = deleted
                     .map(|v| {
-                        writer.delete(|columns| {
+                        writer.delete(|_idx, columns| {
                             canal_json_parse_value(&columns.data_type, v.get(&columns.name))
                                 .map_err(Into::into)
                         })

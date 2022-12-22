@@ -31,10 +31,8 @@ impl NativeParser {
         // Reclaim the ownership of the memory.
         // Previously leak the memory in `DatagenEventGenerator`.
         let boxed_row: Box<OwnedRow> = unsafe { Box::from_raw(payload.as_ptr() as *mut OwnedRow) };
-        let mut idx = 0;
-        writer.insert(|_desc| {
+        writer.insert(|idx, _desc| {
             let datum = boxed_row.datum_at(idx).to_owned_datum();
-            idx += 1;
             Ok(datum)
         })
     }

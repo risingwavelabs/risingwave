@@ -65,7 +65,7 @@ impl DebeziumJsonParser {
                     ))
                 })?;
 
-                writer.update(|column| {
+                writer.update(|_idx, column| {
                     let before = json_parse_value(&column.data_type, before.get(&column.name))?;
                     let after = json_parse_value(&column.data_type, after.get(&column.name))?;
 
@@ -79,7 +79,7 @@ impl DebeziumJsonParser {
                     ))
                 })?;
 
-                writer.insert(|column| {
+                writer.insert(|_idx, column| {
                     json_parse_value(&column.data_type, after.get(&column.name)).map_err(Into::into)
                 })
             }
@@ -90,7 +90,7 @@ impl DebeziumJsonParser {
                     ))
                 })?;
 
-                writer.delete(|column| {
+                writer.delete(|_idx, column| {
                     json_parse_value(&column.data_type, before.get(&column.name))
                         .map_err(Into::into)
                 })
