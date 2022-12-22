@@ -81,17 +81,21 @@ where
         Ok(Arc::new(c.into()))
     }
 
-    /// `eval_row()` first calls `eval_row()` on the inner expressions to get the resulting datums,
-    /// then directly calls `$macro_row` to evaluate the current expression.
     fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
-        todo!()
-        //     $(
-        //         let [<datum_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_row(row)?;
-        //         let [<scalar_ref_ $arg:lower>] = [<datum_ $arg:lower>].as_ref().map(|s|
-        // s.as_scalar_ref_impl().try_into().unwrap());     )*
+        let datum1 = self.left.eval_row(row)?;
+        let datum2 = self.right.eval_row(row)?;
+        let scalar1 = datum1
+            .as_ref()
+            .map(|s| s.as_scalar_ref_impl().try_into().unwrap());
+        let scalar2 = datum2
+            .as_ref()
+            .map(|s| s.as_scalar_ref_impl().try_into().unwrap());
 
-        //     let output_scalar = $macro_row!(self, $([<scalar_ref_ $arg:lower>],)*);
-        //     let output_datum = output_scalar.map(|s| s.to_scalar_value());
-        //     Ok(output_datum)
+        let output_scalar = match (scalar1, scalar2) {
+            (Some(l), Some(r)) => Some((self.func)(l, r)),
+            _ => None,
+        };
+        let output_datum = output_scalar.map(|s| s.to_scalar_value());
+        Ok(output_datum)
     }
 }
