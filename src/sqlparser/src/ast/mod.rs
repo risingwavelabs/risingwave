@@ -212,7 +212,7 @@ pub enum Expr {
     /// See also <https://www.postgresql.org/docs/current/rowtypes.html#ROWTYPES-ACCESSING>
     ///
     /// The left parentheses must be put at the beginning of the expression.
-    /// The first parenthesed part is the `expr` part, and the rest are flattened into `idents`.
+    /// The first parenthesized part is the `expr` part, and the rest are flattened into `idents`.
     /// e.g., `((v1).v2.v3).v4` is equivalent to `(v1).v2.v3.v4`.
     FieldIdentifier(Box<Expr>, Vec<Ident>),
     /// `IS NULL` operator

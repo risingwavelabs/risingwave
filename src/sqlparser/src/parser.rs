@@ -234,7 +234,7 @@ impl Parser {
         Ok(Statement::Analyze { table_name })
     }
 
-    /// Trys to parse a wildcard expression. If it is not a wildcard, parses an expression.
+    /// Tries to parse a wildcard expression. If it is not a wildcard, parses an expression.
     ///
     /// A wildcard expression either means:
     /// - Selecting all fields from a struct. In this case, it is a
@@ -332,7 +332,7 @@ impl Parser {
         Ok(WildcardOrExpr::ExprQualifiedWildcard(expr, idents))
     }
 
-    /// Trys to parses a wildcard expression without any parentheses.
+    /// Tries to parses a wildcard expression without any parentheses.
     ///
     /// If wildcard is not found, go back to `index` and parse an expression.
     pub fn parse_simple_wildcard_expr(
