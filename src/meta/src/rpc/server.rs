@@ -135,10 +135,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     tokio::spawn(async move {
         let _ = tracing::span!(tracing::Level::INFO, "node_status").enter();
         loop {
-            note_status_leader_rx
-                .changed()
-                .await
-                .expect("Leader sender dropped");
+            if note_status_leader_rx.changed().await.is_err() {
+                tracing::error!("Leader sender dropped");
+                return;
+            }
 
             let (leader_info, is_leader) = note_status_leader_rx.borrow().clone();
             let leader_addr = leader_info_to_host_addr(leader_info);
@@ -303,20 +303,16 @@ mod tests {
 
             let is_leader =
                 tokio::time::timeout(std::time::Duration::from_millis(100), async move {
-                    let client_i = MetaClient::register_new(
+                    // TODO: Write client that does not use retry logic
+                    // https://risingwave-labs.slack.com/archives/D046HNJ0H4P/p1671629148333139
+                    MetaClient::register_new(
                         meta_addr.as_str(),
                         WorkerType::ComputeNode,
                         &host_addr,
                         5,
                     )
-                    .await;
-                    match client_i {
-                        Ok(client_i) => client_i
-                            .send_heartbeat(client_i.worker_id(), vec![])
-                            .await
-                            .is_ok(),
-                        Err(_) => false,
-                    }
+                    .await
+                    .is_ok()
                 })
                 .await
                 .unwrap_or(false);
@@ -400,7 +396,7 @@ mod tests {
     /// returns number of leaders after failover
     async fn _test_failover(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
         // TODO: change to false?
-        let vec_meta_handlers = _setup_n_nodes(number_of_nodes, meta_port, true).await;
+        let vec_meta_handlers = _setup_n_nodes(number_of_nodes, meta_port, false).await;
 
         // we should have 1 leader on startup
         let leader_count = _number_of_leaders(number_of_nodes, meta_port, compute_port).await;
