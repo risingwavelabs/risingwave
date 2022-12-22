@@ -156,8 +156,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         }
     });
 
-    // FIXME: maybe do not use a channel here
-    // What I need is basically a oneshot channel with one producer and multiple consumers
     let (svc_shutdown_tx, svc_shutdown_rx) = WatchChannel(());
 
     let join_handle = tokio::spawn(async move {
@@ -170,14 +168,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .await
             .expect("Leader sender dropped");
 
-        let is_leader = services_leader_rx.borrow().clone().1;
-
         // run follower services until node becomes leader
         // FIXME: Add service discovery for follower
         // https://github.com/risingwavelabs/risingwave/issues/6755
         let svc_shutdown_rx_clone = svc_shutdown_rx.clone();
         let (follower_shutdown_tx, follower_shutdown_rx) = OneChannel::<()>();
-        let follower_handle: Option<JoinHandle<()>> = if !is_leader {
+        let follower_handle: Option<JoinHandle<()>> = if !node_is_leader(&leader_rx) {
             let address_info_clone = address_info.clone();
             Some(tokio::spawn(async move {
                 let _ = tracing::span!(tracing::Level::INFO, "follower services").enter();
@@ -460,5 +456,3 @@ mod tests {
         );
     }
 }
-
-// Tests fail, because address already in use. Test addresses overlap?
