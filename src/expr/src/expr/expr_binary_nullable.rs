@@ -16,8 +16,8 @@
 
 use std::sync::Arc;
 
-use itertools::{multizip, Itertools};
 use risingwave_common::array::*;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_pb::expr::expr_node::Type;
@@ -88,87 +88,42 @@ impl Expression for BinaryShortCircuitExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let init_vis = input.vis();
-        let mut input = input.clone();
-        let len = input.capacity();
-        let mut children_array = Vec::with_capacity(2);
-        for child in [&self.expr_ia1, &self.expr_ia2] {
-            let res = child.eval_checked(&input)?;
-            let res_bool = res.as_bool();
-            let orig_vis = input.vis();
-            let res_vis: Vis = match self.expr_type {
-                // For `Or` operator, if res of left part is not null and is true, we do not want to
-                // calculate right part because the result must be true.
-                Type::Or => (!(res_bool.to_bitmap())).into(),
-                // For `And` operator, If res of left part is not null and is false, we do not want
-                // to calculate right part because the result must be false.
-                Type::And => (res_bool.to_bitmap() | !res_bool.null_bitmap()).into(),
-                _ => unimplemented!(),
-            };
-            let new_vis = orig_vis & res_vis;
-            input.set_vis(new_vis);
-            children_array.push(res);
-        }
-        let mut builder =
-            <BoolArray as Array>::Builder::with_meta(len, (&self.return_type()).into());
-        match self.expr_type {
+        let left = self.expr_ia1.eval_checked(input)?;
+        let right = self.expr_ia2.eval_checked(input)?;
+        let left = left.as_bool();
+        let right = right.as_bool();
+        assert_eq!(left.len(), right.len());
+
+        let mut bitmap = match input.get_visibility_ref() {
+            Some(vis) => vis.clone(),
+            None => Bitmap::all_high_bits(input.capacity()),
+        };
+        bitmap &= left.null_bitmap();
+        bitmap &= right.null_bitmap();
+
+        let c = match self.expr_type {
             Type::Or => {
-                for (((v_ia1, v_ia2), init_visible), final_visible) in multizip((
-                    children_array[0].as_bool().iter(),
-                    children_array[1].as_bool().iter(),
-                ))
-                .zip_eq(init_vis.iter())
-                .zip_eq(input.vis().iter())
-                {
-                    if init_visible {
-                        builder.append(if final_visible {
-                            or(v_ia1, v_ia2)?
-                        } else {
-                            Some(true)
-                        });
-                    } else {
-                        builder.append_null()
-                    }
-                }
+                let data = left.to_bitmap() | right.to_bitmap();
+                bitmap |= &data; // is_true || is_true
+                BoolArray::new(data, bitmap)
             }
             Type::And => {
-                for (((v_ia1, v_ia2), init_visible), final_visible) in multizip((
-                    children_array[0].as_bool().iter(),
-                    children_array[1].as_bool().iter(),
-                ))
-                .zip_eq(init_vis.iter())
-                .zip_eq(input.vis().iter())
-                {
-                    if init_visible {
-                        builder.append(if final_visible {
-                            and(v_ia1, v_ia2)?
-                        } else {
-                            Some(false)
-                        });
-                    } else {
-                        builder.append_null()
-                    }
-                }
+                let data = left.to_bitmap() & right.to_bitmap();
+                bitmap |= !left.data() & left.null_bitmap(); // is_false
+                bitmap |= !right.data() & right.null_bitmap(); // is_false
+                BoolArray::new(data, bitmap)
             }
             _ => unimplemented!(),
-        }
-        Ok(Arc::new(builder.finish().into()))
+        };
+        Ok(Arc::new(c.into()))
     }
 
     fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let ret_ia1 = self.expr_ia1.eval_row(input)?.map(|x| x.into_bool());
         match self.expr_type {
-            Type::Or => {
-                if ret_ia1 == Some(true) {
-                    return Ok(Some(true.to_scalar_value()));
-                }
-            }
-            Type::And => {
-                if ret_ia1 == Some(false) {
-                    return Ok(Some(false.to_scalar_value()));
-                }
-            }
-            _ => unimplemented!(),
+            Type::Or if ret_ia1 == Some(true) => return Ok(Some(true.to_scalar_value())),
+            Type::And if ret_ia1 == Some(false) => return Ok(Some(false.to_scalar_value())),
+            _ => {}
         }
         let ret_ia2 = self.expr_ia2.eval_row(input)?.map(|x| x.into_bool());
         match self.expr_type {

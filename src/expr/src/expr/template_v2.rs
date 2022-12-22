@@ -109,7 +109,7 @@ where
         let child = self.child.eval_checked(data_chunk)?;
 
         let bitmap = match data_chunk.get_visibility_ref() {
-            Some(vis) => vis | child.null_bitmap(),
+            Some(vis) => vis & child.null_bitmap(),
             None => child.null_bitmap().clone(),
         };
         let a: &PrimitiveArray<A> = (&*child).into();
@@ -189,8 +189,8 @@ where
             Some(vis) => vis.clone(),
             None => Bitmap::all_high_bits(data_chunk.capacity()),
         };
-        bitmap |= left.null_bitmap();
-        bitmap |= right.null_bitmap();
+        bitmap &= left.null_bitmap();
+        bitmap &= right.null_bitmap();
         let a: &PrimitiveArray<A> = (&*left).into();
         let b: &PrimitiveArray<B> = (&*right).into();
         let c = PrimitiveArray::<T>::from_iter_bitmap(
