@@ -298,11 +298,11 @@ statement error Get source table id not exists
 insert into msrc values (1);
 
 # FIXME: what's this?
-statement error Get source table id not exists
+statement error
 update msrc set v = 2;
 
 # FIXME: what's this?
-statement error Get source table id not exists
+statement error
 delete from msrc;
 
 # 6.5 non-materialized source
