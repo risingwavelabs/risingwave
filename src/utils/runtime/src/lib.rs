@@ -208,6 +208,11 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     // TODO: add file-appender tracing subscriber in the future
 }
 
+/// Returns a `EnvFilter` that
+/// 1. inherits given `filter`'s target-LevelFilter pairs and default-LevelFilter.
+/// 2. parses RUST_LOG environment variable and adds these filters.
+///
+/// Filters from step 1 will be overwritten by filters from step 2 that matches.
 fn to_env_filter(filter: Targets) -> EnvFilter {
     let mut env_filter = EnvFilter::new("");
     for (target, level) in filter.iter() {
