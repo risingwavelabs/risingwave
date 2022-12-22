@@ -27,7 +27,6 @@
     "d3-selection": "^3.0.0",
     "fabric": "^5.2.1",
     "framer-motion": "^6.5.1",
-    "gen-proto": "^0.0.1",
     "lodash": "^4.17.21",
     "next": "^12.0.9",
     "react": "^18.2.0",
