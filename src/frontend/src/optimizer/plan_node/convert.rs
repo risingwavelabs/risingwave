@@ -91,8 +91,7 @@ pub struct ToStreamContext {
 
 impl ToStreamContext {
     pub fn add_to_stream_result(&mut self, plan_node_id: PlanNodeId, plan_ref: PlanRef) {
-        let prev = self.share_to_stream_map.insert(plan_node_id, plan_ref);
-        assert!(prev.is_none());
+        self.share_to_stream_map.try_insert(plan_node_id, plan_ref).unwrap();
     }
 
     pub fn get_to_stream_result(&self, plan_node_id: PlanNodeId) -> Option<&PlanRef> {

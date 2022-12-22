@@ -15,14 +15,12 @@
 use std::cell::RefCell;
 use std::fmt;
 
-use itertools::Itertools;
 use risingwave_common::error::Result;
 
 use super::generic::{self, GenericPlanNode};
 use super::{
     ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{ExprImpl, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,
@@ -59,7 +57,7 @@ impl LogicalShare {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(f, "{} id = {}", name, &self.base.id.0,)
+        write!(f, "{} {{ id = {} }}", name, &self.id().0)
     }
 }
 
@@ -145,16 +143,8 @@ impl ToStream for LogicalShare {
 
                 // FIXME: Add an identity project here to avoid parent exchange connecting directly
                 // to the share operator.
-                let exprs = new_share
-                    .schema()
-                    .fields
-                    .iter()
-                    .enumerate()
-                    .map(|(i, field)| {
-                        ExprImpl::InputRef(Box::new(InputRef::new(i, field.data_type.clone())))
-                    })
-                    .collect_vec();
-                let project = LogicalProject::create(new_share, exprs);
+                let identity = ColIndexMapping::identity(new_share.schema().len());
+                let project: PlanRef = LogicalProject::with_mapping(new_share, identity).into();
 
                 ctx.add_rewrite_result(self.id(), project.clone(), col_change.clone());
                 Ok((project, col_change))
