@@ -379,7 +379,7 @@ impl Compactor {
 
     pub fn pre_process_task(task: &mut Task, workload: &CompactorWorkload) {
         const CPU_THRESHOLD: u32 = 80;
-        if let Task::CompactTask(mut compact_task) = task.clone() {
+        if let Task::CompactTask(compact_task) = task {
             if workload.cpu > CPU_THRESHOLD && compact_task.input_ssts[0].level_idx != 0 {
                 compact_task.set_task_status(TaskStatus::ManualCanceled);
             }
