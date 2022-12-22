@@ -307,7 +307,7 @@ mod tests {
             let endpoint = Endpoint::from_shared(meta_addr.to_string())
                 .unwrap()
                 .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
-            let channel = match endpoint
+            let channel = endpoint
                 .http2_keep_alive_interval(Duration::from_secs(60))
                 .keep_alive_timeout(Duration::from_secs(60))
                 .connect_timeout(Duration::from_secs(5))
@@ -319,12 +319,8 @@ mod tests {
                         meta_addr,
                         e
                     );
-                }) {
-                Ok(c) => c,
-                Err(_) => {
-                    continue;
-                }
-            };
+                })
+                .unwrap();
 
             let cluster_client = ClusterServiceClient::new(channel);
             let resp = cluster_client
@@ -426,7 +422,8 @@ mod tests {
         sleep(Duration::from_secs(_SLEEP_SEC)).await;
 
         // expect that we still have 1 leader
-        let leaders = _number_of_leaders(number_of_nodes, meta_port, compute_port).await;
+        // skipping first meta_port, since that node was former leader and got killed
+        let leaders = _number_of_leaders(number_of_nodes - 1, meta_port + 1, compute_port).await;
         for ele in vec_meta_handlers {
             ele.0.abort();
         }
