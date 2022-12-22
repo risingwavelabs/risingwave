@@ -519,22 +519,22 @@ DROP MATERIALIZED VIEW nexmark_q105;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
     }
 
-    pub mod q111 {
+    pub mod q106 {
         //! A self-made query that covers singleton top-n (and local-phase group top-n).
         //!
         //! Show the top 1000 auctions by the number of bids.
 
         use super::*;
         pub const CREATE: &str = r#"
-CREATE MATERIALIZED VIEW nexmark_q111
+CREATE MATERIALIZED VIEW nexmark_q106
 AS
 select count(*) cnt from auction A join auction B on A.id = B.id;
 "#;
         pub const SELECT: &str = r#"
-SELECT * FROM nexmark_q111;
+SELECT * FROM nexmark_q106;
 "#;
         pub const DROP: &str = r#"
-DROP MATERIALIZED VIEW nexmark_q111;
+DROP MATERIALIZED VIEW nexmark_q106;
 "#;
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
