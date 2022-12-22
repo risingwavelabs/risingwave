@@ -303,14 +303,11 @@ mod tests {
                 host: local,
                 port: host_port + i,
             };
-            // single leader test 1
-            // should be http://127.0.0.1:1234
-            // is        http://127.0.0.1:1234
 
             let endpoint = Endpoint::from_shared(meta_addr.to_string())
                 .unwrap()
                 .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
-            let channel = endpoint
+            let channel = match endpoint
                 .http2_keep_alive_interval(Duration::from_secs(60))
                 .keep_alive_timeout(Duration::from_secs(60))
                 .connect_timeout(Duration::from_secs(5))
@@ -322,8 +319,12 @@ mod tests {
                         meta_addr,
                         e
                     );
-                })
-                .unwrap();
+                }) {
+                Ok(c) => c,
+                Err(_) => {
+                    continue;
+                }
+            };
 
             let cluster_client = ClusterServiceClient::new(channel);
             let resp = cluster_client
@@ -425,7 +426,11 @@ mod tests {
         sleep(Duration::from_secs(_SLEEP_SEC)).await;
 
         // expect that we still have 1 leader
-        _number_of_leaders(number_of_nodes, meta_port, compute_port).await
+        let leaders = _number_of_leaders(number_of_nodes, meta_port, compute_port).await;
+        for ele in vec_meta_handlers {
+            ele.0.abort();
+        }
+        leaders
     }
 
     #[tokio::test]
