@@ -75,13 +75,13 @@ pub async fn start_leader_srv<S: MetaStore>(
     address_info: AddressInfo,
     max_heartbeat_interval: Duration,
     opts: MetaOpts,
-    leader_rx: WatchReceiver<(MetaLeaderInfo, bool)>,
+    current_leader: MetaLeaderInfo,
     election_coordination: ElectionCoordination,
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
-    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), leader_rx).await;
+    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), current_leader).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let registry = meta_metrics.registry();

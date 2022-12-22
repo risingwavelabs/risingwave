@@ -212,12 +212,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             election_shutdown,
         };
 
+        let current_leader = services_leader_rx.borrow().0.clone();
         start_leader_srv(
             meta_store,
             address_info,
             max_heartbeat_interval,
             opts,
-            leader_rx,
+            current_leader,
             elect_coord,
             svc_shutdown_rx,
         )

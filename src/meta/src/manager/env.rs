@@ -22,7 +22,6 @@ use risingwave_pb::meta::MetaLeaderInfo;
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::meta::MetaLeaseInfo;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
-use tokio::sync::watch::{channel as WatchChannel, Receiver as WatchReceiver};
 
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
@@ -56,7 +55,7 @@ where
     /// idle status manager.
     idle_manager: IdleManagerRef,
 
-    leader_rx: WatchReceiver<(MetaLeaderInfo, bool)>,
+    info: MetaLeaderInfo,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -134,11 +133,7 @@ impl<S> MetaSrvEnv<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
-        opts: MetaOpts,
-        meta_store: Arc<S>,
-        leader_rx: WatchReceiver<(MetaLeaderInfo, bool)>,
-    ) -> Self {
+    pub async fn new(opts: MetaOpts, meta_store: Arc<S>, info: MetaLeaderInfo) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
@@ -151,7 +146,7 @@ where
             notification_manager,
             stream_client_pool,
             idle_manager,
-            leader_rx,
+            info,
             opts: opts.into(),
         }
     }
@@ -197,7 +192,7 @@ where
     }
 
     pub fn get_leader_info(&self) -> MetaLeaderInfo {
-        self.leader_rx.borrow().0.clone()
+        self.info.clone()
     }
 }
 
@@ -214,8 +209,6 @@ impl MetaSrvEnv<MemStore> {
             lease_id: 0,
             node_address: "".to_string(),
         };
-        let (_, leader_rx) = WatchChannel((leader_info.clone(), true));
-
         let lease_info = MetaLeaseInfo {
             leader: Some(leader_info.clone()),
             lease_register_time: 0,
@@ -249,7 +242,7 @@ impl MetaSrvEnv<MemStore> {
             notification_manager,
             stream_client_pool,
             idle_manager,
-            leader_rx,
+            info: leader_info,
             opts,
         }
     }
