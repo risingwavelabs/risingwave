@@ -526,7 +526,7 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_kilobytes(
+                panels.timeseries_bytes(
                     "Waiting compaction bytes",
                     "Compaction bytes which need to be schedule in new task",
                     [

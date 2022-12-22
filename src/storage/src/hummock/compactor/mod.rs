@@ -377,13 +377,16 @@ impl Compactor {
         }
     }
 
-    pub fn pre_process_task(task: &mut Task, workload: &CompactorWorkload) {
-        const CPU_THRESHOLD: u32 = 80;
+    pub fn pre_process_task(task: &mut Task, workload: &CompactorWorkload) -> bool {
+        const CPU_THRESHOLD: u32 = 85;
         if let Task::CompactTask(compact_task) = task {
             if workload.cpu > CPU_THRESHOLD && compact_task.input_ssts[0].level_idx != 0 {
                 compact_task.set_task_status(TaskStatus::ManualCanceled);
+                return false;
             }
         }
+
+        true
     }
 
     /// The background compaction thread that receives compaction tasks from hummock compaction
@@ -402,8 +405,6 @@ impl Compactor {
             let shutdown_map = CompactionShutdownMap::default();
             let mut min_interval = tokio::time::interval(stream_retry_interval);
             let mut task_progress_interval = tokio::time::interval(task_progress_update_interval);
-
-            tokio::time::sleep(Duration::from_secs(1)).await;
 
             // This outer loop is to recreate stream.
             'start_stream: loop {
@@ -484,7 +485,9 @@ impl Compactor {
                         Some(Ok(SubscribeCompactTasksResponse { task })) => {
                             let task = match task {
                                 Some(mut task) => {
-                                    Self::pre_process_task(&mut task, &last_workload);
+                                    if !Self::pre_process_task(&mut task, &last_workload) {
+                                        tokio::time::sleep(Duration::from_secs(1)).await;
+                                    }
                                     task
                                 }
                                 None => continue 'consume_stream,

@@ -26,9 +26,10 @@ use crate::hummock::error::{Error, Result};
 use crate::MetaResult;
 
 const STREAM_BUFFER_SIZE: usize = 4;
-const MAX_BURST_TIME: u64 = 120;
+const MIN_LAST_STATE_TIME: u64 = 60;
 const MAX_IDLE_TIME: u64 = 600;
 
+#[derive(Debug)]
 pub enum ScalePolicy {
     ScaleOut,
     ScaleIn(u64),
@@ -406,7 +407,9 @@ impl CompactionSchedulePolicy for ScoredPolicy {
             CompactorState::Busy(_) => return ScalePolicy::ScaleOut,
             CompactorState::Burst(_) => (),
             CompactorState::Idle(last_idle_time) => {
-                if last_idle_time.elapsed().as_secs() > MAX_IDLE_TIME {
+                if last_idle_time.elapsed().as_secs() > MAX_IDLE_TIME
+                    && self.score_to_compactor.len() > 1
+                {
                     let decrease_core = self
                         .score_to_compactor
                         .values()
@@ -428,19 +431,21 @@ impl CompactionSchedulePolicy for ScoredPolicy {
     }
 
     fn refresh_state(&mut self) {
-        let busy_count = self
+        let idle_count = self
             .score_to_compactor
             .values()
-            .filter(|compactor| matches!(compactor.state(), CompactorState::Busy(_)))
+            .filter(|compactor| matches!(compactor.state(), CompactorState::Idle(_)))
             .count();
 
-        if busy_count == self.score_to_compactor.len() {
+        if idle_count == 0 {
             match self.state {
-                CompactorState::Idle(_) => {
-                    self.state = CompactorState::Burst(Instant::now());
+                CompactorState::Idle(last_update) => {
+                    if last_update.elapsed().as_secs() > MIN_LAST_STATE_TIME {
+                        self.state = CompactorState::Burst(Instant::now());
+                    }
                 }
-                CompactorState::Burst(last_burst) => {
-                    if last_burst.elapsed().as_secs() > MAX_BURST_TIME {
+                CompactorState::Burst(last_update) => {
+                    if last_update.elapsed().as_secs() > MIN_LAST_STATE_TIME {
                         self.state = CompactorState::Busy(Instant::now());
                     }
                 }
@@ -450,14 +455,14 @@ impl CompactionSchedulePolicy for ScoredPolicy {
             match self.state {
                 CompactorState::Idle(_) => {}
 
-                CompactorState::Burst(last_burst) => {
-                    if last_burst.elapsed().as_secs() > 60 {
+                CompactorState::Burst(last_update) => {
+                    if last_update.elapsed().as_secs() > MIN_LAST_STATE_TIME {
                         self.state = CompactorState::Idle(Instant::now());
                     }
                 }
 
-                CompactorState::Busy(last_busy) => {
-                    if last_busy.elapsed().as_secs() > 60 {
+                CompactorState::Busy(last_update) => {
+                    if last_update.elapsed().as_secs() > MIN_LAST_STATE_TIME {
                         self.state = CompactorState::Burst(Instant::now());
                     }
                 }
@@ -465,10 +470,11 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         }
 
         tracing::info!(
-            "refresh_state busy_count {} total {} state {:?}",
-            busy_count,
+            "refresh_state idle_count {} total {} state {:?} suggest_scale_policy {:?}",
+            idle_count,
             self.score_to_compactor.len(),
-            self.state
+            self.state,
+            self.suggest_scale_policy(),
         );
     }
 }
