@@ -217,12 +217,16 @@ fn to_env_filter(filter: Targets) -> EnvFilter {
     if let Some(g) = filter.default_level() {
         env_filter = env_filter.add_directive(g.into());
     }
-    let rust_log = env::var(EnvFilter::DEFAULT_ENV).unwrap_or_default();
-    let directives = rust_log
-        .split(',')
-        .map(|s: &str| s.parse::<Directive>().expect("failed to parse RUST_LOG"));
-    for directive in directives {
-        env_filter = env_filter.add_directive(directive);
+    if let Ok(rust_log) = env::var(EnvFilter::DEFAULT_ENV) {
+        if rust_log.is_empty() {
+            return env_filter;
+        }
+        let directives = rust_log
+            .split(',')
+            .map(|s: &str| s.parse::<Directive>().expect("failed to parse RUST_LOG"));
+        for directive in directives {
+            env_filter = env_filter.add_directive(directive);
+        }
     }
     env_filter
 }
