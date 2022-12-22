@@ -367,16 +367,12 @@ impl StreamGraphBuilder {
         let exchange_operator_id = edge.link_id;
         let same_worker_node = edge.same_worker_node;
         let dispatch_strategy = edge.dispatch_strategy.unwrap();
-        let edge_upstream_id = edge.upstream_id;
-        let edge_downstream_id = edge.downstream_id;
         // We can't use the exchange operator id directly as the dispatch id, because an exchange
-        // could belong to more than one downstream in DAG. We can use the exchange operator
-        // id together with edge upstream and downstream id as an unique id. In this way we
-        // can ensure the dispatchers of `StreamActor` would have different id, even though they
-        // come from the same exchange operator.
-        let dispatch_id = exchange_operator_id
-            + edge_upstream_id as u64 * 1000
-            + edge_downstream_id as u64 * 1000000;
+        // could belong to more than one downstream in DAG.
+        // We can use downstream fragment id as an unique id for dispatcher.
+        // In this way we can ensure the dispatchers of `StreamActor` would have different id,
+        // even though they come from the same exchange operator.
+        let dispatch_id = edge.downstream_id as u64;
 
         if dispatch_strategy.get_type().unwrap() == DispatcherType::NoShuffle {
             assert_eq!(

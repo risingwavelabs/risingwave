@@ -1039,7 +1039,7 @@ where
                 }
             }
 
-            let downstream_fragment_id =
+            let downstream_fragment_ids =
                 if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(&fragment_id) {
                     // Skip NoShuffle fragments' downstream
                     if ctx
@@ -1100,7 +1100,7 @@ where
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
-                    downstream_fragment_ids: downstream_fragment_id,
+                    downstream_fragment_ids,
                     actor_splits,
                 },
             );
