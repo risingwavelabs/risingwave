@@ -346,6 +346,7 @@ mod tests {
         leader_count
     }
 
+    // TODO: return the stuff from setup_n_nodes straight away?
     async fn _leader_count_with_setup(
         number_of_nodes: u16,
         meta_port: u16,
@@ -423,14 +424,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_leader_setup_3() {
-        let (leader_count, handles) = _leader_count_with_setup(3, 2345, 6789).await;
+        let v = _setup_n_nodes(3, 2345, false).await;
+        let leader_count = _number_of_leaders(3, 2345, 6789).await;
+        // let (leader_count, handles) = _leader_count_with_setup(3, 2345, 6789).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
-        for handle in handles {
-            handle.abort();
+        for handle in v {
+            handle.0.abort();
         }
     }
 
