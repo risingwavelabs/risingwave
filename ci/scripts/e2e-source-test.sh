@@ -85,9 +85,15 @@ echo "check mviews after cluster recovery"
 # check results
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 
-
 echo "--- Kill cluster"
 pkill -f connector-service.jar
+cargo make ci-kill
+
+echo "--- e2e, ci-3cn-1fe, nexmark endless"
+cargo make ci-start ci-3cn-1fe
+sqllogictest -p 4566 -d dev -j 16 './e2e_test/source/nexmark_endless/*.slt'
+
+echo "--- Kill cluster"
 cargo make ci-kill
 
 echo "--- e2e, ci-kafka-plus-pubsub, kafka and pubsub source"
@@ -95,10 +101,6 @@ cargo make ci-start ci-kafka-plus-pubsub
 ./scripts/source/prepare_ci_kafka.sh
 cargo run --bin prepare_ci_pubsub
 sqllogictest -p 4566 -d dev  './e2e_test/source/basic/*.slt'
-
-echo "--- e2e, ci-3cn-1fe, nexmark endless"
-cargo make ci-start ci-3cn-1fe
-sqllogictest -p 4566 -d dev -j 16 './e2e_test/source/nexmark_endless/*.slt'
 
 echo "--- Run CH-benCHmark"
 ./risedev slt -p 4566 -d dev './e2e_test/ch_benchmark/batch/ch_benchmark.slt'

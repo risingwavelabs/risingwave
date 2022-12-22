@@ -46,13 +46,13 @@ cargo build \
 artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risedev-dev delete-range-test)
 
 echo "--- Compress debug info for artifacts"
-echo -n "$artifacts" | parallel -d ' ' objcopy --compress-debug-sections=zlib-gnu target/"$target"/{}
+echo -n "$artifacts" | parallel -d ' ' "objcopy --compress-debug-sections=zlib-gnu target/\"$target\"/{} && echo \"compressed {}\""
 
 echo "--- Show link info"
 ldd target/"$target"/risingwave
 
 echo "--- Upload artifacts"
 for artifact in "${artifacts[@]}"; do
-    cp target/"$target"/"$artifact" "./$artifact-$profile"
+    mv target/"$target"/"$artifact" "./$artifact-$profile"
     buildkite-agent artifact upload "./$artifact-$profile"
 done
