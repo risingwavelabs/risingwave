@@ -362,10 +362,22 @@ impl StreamGraphBuilder {
         upstream_fragment_id: GlobalFragmentId,
         upstream_actor_ids: &[LocalActorId],
         downstream_actor_ids: &[LocalActorId],
-        exchange_operator_id: u64,
-        dispatch_strategy: DispatchStrategy,
-        same_worker_node: bool,
+        edge: StreamFragmentEdge,
     ) {
+        let exchange_operator_id = edge.link_id;
+        let same_worker_node = edge.same_worker_node;
+        let dispatch_strategy = edge.dispatch_strategy.unwrap();
+        let edge_upstream_id = edge.upstream_id;
+        let edge_downstream_id = edge.downstream_id;
+        // We can't use the exchange operator id directly as the dispatch id, because an exchange
+        // could belong to more than one downstream in DAG. We can use the exchange operator
+        // id together with edge upstream and downstream id as an unique id. In this way we
+        // can ensure the dispatchers of `StreamActor` would have different id, even though they
+        // come from the same exchange operator.
+        let dispatch_id = exchange_operator_id
+            + edge_upstream_id as u64 * 1000
+            + edge_downstream_id as u64 * 1000000;
+
         if dispatch_strategy.get_type().unwrap() == DispatcherType::NoShuffle {
             assert_eq!(
                 upstream_actor_ids.len(),
@@ -386,7 +398,7 @@ impl StreamGraphBuilder {
                         .unwrap()
                         .add_dispatcher(
                             dispatch_strategy.clone(),
-                            exchange_operator_id,
+                            dispatch_id,
                             OrderedActorLink(vec![*downstream_id]),
                             same_worker_node,
                         );
@@ -431,7 +443,7 @@ impl StreamGraphBuilder {
                 .unwrap()
                 .add_dispatcher(
                     dispatch_strategy.clone(),
-                    exchange_operator_id,
+                    dispatch_id,
                     OrderedActorLink(downstream_actor_ids.to_vec()),
                     same_worker_node,
                 );
@@ -1047,9 +1059,7 @@ impl ActorGraphBuilder {
                         fragment_id,
                         &actor_ids,
                         downstream_actors,
-                        dispatch_edge.link_id,
-                        dispatch_strategy.clone(),
-                        dispatch_edge.same_worker_node,
+                        dispatch_edge.clone(),
                     );
                 }
                 DispatcherType::Unspecified => unreachable!(),

@@ -1046,14 +1046,12 @@ where
                         .no_shuffle_source_fragment_ids
                         .contains(&fragment.fragment_id)
                     {
-                        None
+                        vec![]
                     } else {
-                        let downstream_fragment_id =
-                            downstream_fragments.iter().exactly_one().unwrap().0;
-                        Some(*downstream_fragment_id as FragmentId)
+                        downstream_fragments.keys().copied().collect_vec()
                     }
                 } else {
-                    None
+                    vec![]
                 };
 
             let vnode_bitmap_updates = match fragment.distribution_type() {
@@ -1102,7 +1100,7 @@ where
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
-                    downstream_fragment_id,
+                    downstream_fragment_ids: downstream_fragment_id,
                     actor_splits,
                 },
             );
