@@ -235,10 +235,13 @@ mod tests {
     use core::panic;
     use std::net::{IpAddr, Ipv4Addr};
 
+    use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
     use risingwave_common::util::addr::HostAddr;
-    use risingwave_pb::common::WorkerType;
-    use risingwave_rpc_client::MetaClient;
+    use risingwave_pb::common::{HostAddress, WorkerType};
+    use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
+    use risingwave_pb::meta::AddWorkerNodeRequest;
     use tokio::time::sleep;
+    use tonic::transport::Endpoint;
 
     use super::*;
 
@@ -295,27 +298,47 @@ mod tests {
         for i in 0..number_of_nodes {
             let local = "127.0.0.1".to_owned();
             let port = meta_port + i;
-            let meta_addr = format!("http://{}:{}", local, port);
+            let meta_addr = format!("http://{}:{}", local, port); // http, https, no protocol
             let host_addr = HostAddr {
                 host: local,
                 port: host_port + i,
             };
+            // single leader test 1
+            // should be http://127.0.0.1:1234
+            // is        http://127.0.0.1:1234
 
-            let is_leader =
-                tokio::time::timeout(std::time::Duration::from_millis(100), async move {
-                    // TODO: Write client that does not use retry logic
-                    // https://risingwave-labs.slack.com/archives/D046HNJ0H4P/p1671629148333139
-                    MetaClient::register_new(
-                        meta_addr.as_str(),
-                        WorkerType::ComputeNode,
-                        &host_addr,
-                        5,
-                    )
-                    .await
-                    .is_ok()
-                })
+            let endpoint = Endpoint::from_shared(meta_addr.to_string())
+                .unwrap()
+                .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
+            let channel = endpoint
+                .http2_keep_alive_interval(Duration::from_secs(60))
+                .keep_alive_timeout(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(5))
+                .connect()
                 .await
-                .unwrap_or(false);
+                .inspect_err(|e| {
+                    tracing::warn!(
+                        "Failed to connect to meta server {}, wait for online: {}",
+                        meta_addr,
+                        e
+                    );
+                })
+                .unwrap();
+
+            let cluster_client = ClusterServiceClient::new(channel);
+            let resp = cluster_client
+                .to_owned()
+                .add_worker_node(AddWorkerNodeRequest {
+                    worker_type: WorkerType::ComputeNode as i32,
+                    host: Some(HostAddress {
+                        host: host_addr.host,
+                        port: host_addr.port as i32,
+                    }),
+                    worker_node_parallelism: 5,
+                })
+                .await;
+            let is_leader = resp.is_ok();
+
             if is_leader {
                 leader_count += 1;
             }
@@ -339,6 +362,49 @@ mod tests {
         )
     }
 
+    // Is it maybe that we should not drop the handlers?
+    // What if we abort?
+    // This seems to work
+    #[tokio::test]
+    async fn kinda_like_actual_test_2() {
+        let v = _setup_n_nodes(1, 15690, false).await;
+        let x = _number_of_leaders(1, 15690, 5678).await;
+        assert_eq!(x, 1);
+        for hanlde_send in v {
+            hanlde_send.0.abort();
+        }
+    }
+
+    // TODO: test only for debugging. remove
+    // This no longer works. Do I need to await the handlers. I think so
+    // below works, but never terminates
+    #[tokio::test]
+    async fn kinda_like_actual_test() {
+        let v = _setup_n_nodes(1, 15690, false).await;
+        let x = _number_of_leaders(1, 15690, 5678).await;
+        assert_eq!(x, 1);
+        for hanlde_send in v {
+            hanlde_send.0.await.unwrap();
+        }
+    }
+
+    // TODO: test only for debugging. remove
+    // keel meta node running able to connect against it
+    #[tokio::test]
+    async fn test_test_remove_me_setup() {
+        let x = _setup_n_nodes(1, 15690, false).await;
+        for hanlde_send in x {
+            hanlde_send.0.await.unwrap();
+        }
+    }
+
+    // TODO: test only for debugging. remove
+    #[tokio::test]
+    async fn test_test_remove_me() {
+        let x = _number_of_leaders(1, 15690, 5678).await; // always returns 1
+        assert_eq!(x, 1);
+    }
+
     // Writing these tests as separate functions instead of one loop, because functions get executed
     // in parallel
     #[tokio::test]
@@ -349,6 +415,7 @@ mod tests {
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
+        // TODO: Do I need to abort handles?
         for handle in handles {
             handle.abort();
         }
