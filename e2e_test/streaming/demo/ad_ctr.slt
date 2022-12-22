@@ -2,7 +2,7 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 # Refer to the blog:
-# https://www.risingwave.dev/docs/latest/real-time-ad-performance-analysis/
+# https://www.risingwave.dev/docs/current/real-time-ad-performance-analysis/
 
 statement ok
 CREATE TABLE ad_impression (

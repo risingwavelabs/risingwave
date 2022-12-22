@@ -22,7 +22,7 @@ use alloc::{
 };
 use core::fmt;
 
-use tracing::debug;
+use tracing::{debug, instrument};
 
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
@@ -135,13 +135,13 @@ impl Parser {
     }
 
     /// Parse a SQL statement and produce an Abstract Syntax Tree (AST)
+    #[instrument(level = "debug")]
     pub fn parse_sql(sql: &str) -> Result<Vec<Statement>, ParserError> {
         let mut tokenizer = Tokenizer::new(sql);
         let tokens = tokenizer.tokenize()?;
         let mut parser = Parser::new(tokens);
         let mut stmts = Vec::new();
         let mut expecting_statement_delimiter = false;
-        debug!("Parsing sql '{}'...", sql);
         loop {
             // ignore empty statements (between successive statement delimiters)
             while parser.consume_token(&Token::SemiColon) {
@@ -159,6 +159,7 @@ impl Parser {
             stmts.push(statement);
             expecting_statement_delimiter = true;
         }
+        debug!("parsed statements:\n{:#?}", stmts);
         Ok(stmts)
     }
 
