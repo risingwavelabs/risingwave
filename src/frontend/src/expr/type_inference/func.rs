@@ -61,7 +61,7 @@ pub fn infer_some_all(
     inputs: &mut Vec<ExprImpl>,
 ) -> Result<DataType> {
     // handle `null` outside this function.
-    assert!(!inputs[1].is_null());
+    assert!(!inputs[1].is_unknown());
 
     if let DataType::List { box datatype } = inputs[1].return_type() {
         let final_type = func_types.pop().unwrap();

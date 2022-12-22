@@ -203,7 +203,7 @@ impl FunctionCall {
                     }
                 };
 
-                if inputs[1].is_null() {
+                if inputs[1].is_unknown() {
                     inputs[1] = ExprImpl::literal_null(DataType::Varchar);
                     let inner_func = Self::new_binary_op_func(func_types, inputs)?;
                     return ensure_return_boolean(&inner_func.return_type())

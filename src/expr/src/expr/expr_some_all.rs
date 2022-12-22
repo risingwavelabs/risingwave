@@ -15,9 +15,9 @@
 use std::sync::Arc;
 
 use itertools::{multizip, Itertools};
-use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk};
+use risingwave_common::array::{Array, ArrayMeta, ArrayRef, BoolArray, DataChunk};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl, ScalarRefImpl};
 use risingwave_pb::expr::expr_node::Type;
 
 use super::{BoxedExpression, Expression};
@@ -46,56 +46,31 @@ impl SomeAllExpression {
         }
     }
 
-    fn resolve_scalar_vec(&self, scalar_vec: Vec<Option<ScalarImpl>>) -> Option<ScalarImpl> {
-        let boolean_vec = scalar_vec
-            .into_iter()
-            .map(|scalar_ref| scalar_ref.map(|s| s.into_bool()))
-            .collect::<Vec<_>>();
+    fn resolve_boolean_vec(&self, boolean_vec: Vec<Option<bool>>) -> Option<bool> {
+        if boolean_vec.is_empty() {
+            return None;
+        }
+
         match self.expr_type {
             Type::Some => {
                 if boolean_vec.iter().any(|b| b.unwrap_or(false)) {
-                    Some(true).map(|b| b.to_scalar_value())
+                    Some(true)
                 } else if boolean_vec.iter().any(|b| b.is_none()) {
                     None
                 } else {
-                    Some(false).map(|b| b.to_scalar_value())
+                    Some(false)
                 }
             }
             Type::All => {
                 if boolean_vec.iter().all(|b| b.unwrap_or(false)) {
-                    Some(true).map(|b| b.to_scalar_value())
+                    Some(true)
                 } else if boolean_vec.iter().any(|b| !b.unwrap_or(true)) {
-                    Some(false).map(|b| b.to_scalar_value())
+                    Some(false)
                 } else {
                     None
                 }
             }
             _ => unreachable!(),
-        }
-    }
-
-    fn compare_left_right(
-        &self,
-        datum_left: Option<ScalarImpl>,
-        datum_right: Option<ScalarImpl>,
-    ) -> Result<Datum> {
-        if let Some(array) = datum_right {
-            match array {
-                ScalarImpl::List(array) => {
-                    let scalar_vec = array
-                        .values()
-                        .iter()
-                        .map(|d| {
-                            self.func
-                                .eval_row(&OwnedRow::new(vec![datum_left.clone(), d.clone()]))
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-                    Ok(self.resolve_scalar_vec(scalar_vec))
-                }
-                _ => unreachable!(),
-            }
-        } else {
-            Ok(None)
         }
     }
 }
@@ -108,47 +83,113 @@ impl Expression for SomeAllExpression {
     fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
         let arr_left = self.left_expr.eval_checked(data_chunk)?;
         let arr_right = self.right_expr.eval_checked(data_chunk)?;
-
         let bitmap = data_chunk.get_visibility_ref();
-        let mut output_array = BoolArrayBuilder::new(data_chunk.capacity());
+        let mut num_array = Vec::with_capacity(data_chunk.capacity());
+
+        let arr_right_inner = arr_right.as_list();
+        let ArrayMeta::List { datatype } = arr_right_inner.array_meta() else {
+            unreachable!()
+        };
+        let capacity = arr_right_inner
+            .iter()
+            .flatten()
+            .map(|list_ref| list_ref.flatten().len())
+            .sum();
+
+        let mut unfolded_arr_left_builder = arr_left.create_builder(capacity);
+        let mut unfolded_arr_right_builder = datatype.create_array_builder(capacity);
+
+        let mut unfolded_left_right =
+            |left: Option<ScalarRefImpl<'_>>,
+             right: Option<ScalarRefImpl<'_>>,
+             num_array: &mut Vec<usize>| {
+                let datum_left = left.map(|s| s.into_scalar_impl());
+                let datum_right = right.map(|s| s.into_scalar_impl());
+                if datum_right.is_none() {
+                    num_array.push(0);
+                    return;
+                }
+
+                let datum_right = datum_right.unwrap();
+                match datum_right {
+                    ScalarImpl::List(array) => {
+                        let len = array.values().len();
+                        num_array.push(len);
+                        unfolded_arr_left_builder.append_datum_n(len, datum_left.as_ref());
+                        for item in array.values() {
+                            unfolded_arr_right_builder.append_datum(item.as_ref());
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            };
+
         match bitmap {
             Some(bitmap) => {
                 for ((left, right), visible) in
                     multizip((arr_left.iter(), arr_right.iter())).zip_eq(bitmap.iter())
                 {
                     if !visible {
-                        output_array.append_null();
+                        num_array.push(0);
                         continue;
                     }
-
-                    output_array.append(
-                        self.compare_left_right(
-                            left.map(|s| s.into_scalar_impl()),
-                            right.map(|s| s.into_scalar_impl()),
-                        )?
-                        .map(|s| s.into_bool()),
-                    );
+                    unfolded_left_right(left, right, &mut num_array);
                 }
-                Ok(Arc::new(output_array.finish().into()))
             }
             None => {
                 for (left, right) in multizip((arr_left.iter(), arr_right.iter())) {
-                    output_array.append(
-                        self.compare_left_right(
-                            left.map(|s| s.into_scalar_impl()),
-                            right.map(|s| s.into_scalar_impl()),
-                        )?
-                        .map(|s| s.into_bool()),
-                    );
+                    unfolded_left_right(left, right, &mut num_array);
                 }
-                Ok(Arc::new(output_array.finish().into()))
             }
         }
+
+        let data_chunk = DataChunk::new(
+            vec![
+                unfolded_arr_left_builder.finish().into(),
+                unfolded_arr_right_builder.finish().into(),
+            ],
+            capacity,
+        );
+
+        let func_results = self.func.eval(&data_chunk)?;
+        let mut func_results_iter = func_results.as_bool().iter();
+        Ok(Arc::new(
+            num_array
+                .into_iter()
+                .map(|num| {
+                    self.resolve_boolean_vec(func_results_iter.by_ref().take(num).collect_vec())
+                })
+                .collect::<BoolArray>()
+                .into(),
+        ))
     }
 
     fn eval_row(&self, row: &OwnedRow) -> Result<Datum> {
         let datum_left = self.left_expr.eval_row(row)?;
         let datum_right = self.right_expr.eval_row(row)?;
-        self.compare_left_right(datum_left, datum_right)
+        if let Some(array) = datum_right {
+            match array {
+                ScalarImpl::List(array) => {
+                    let scalar_vec = array
+                        .values()
+                        .iter()
+                        .map(|d| {
+                            self.func
+                                .eval_row(&OwnedRow::new(vec![datum_left.clone(), d.clone()]))
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let boolean_vec = scalar_vec
+                        .into_iter()
+                        .map(|scalar_ref| scalar_ref.map(|s| s.into_bool()))
+                        .collect_vec();
+                    Ok(self
+                        .resolve_boolean_vec(boolean_vec)
+                        .map(|b| b.to_scalar_value()))
+                }
+                _ => unreachable!(),
+            }
+        } else {
+            Ok(None)
+        }
     }
 }

@@ -381,10 +381,10 @@
 - sql: |
     select 1 < SOME(null::integer[]);
   logical_plan: |
-    LogicalProject { exprs: [null:Boolean] }
+    LogicalProject { exprs: [Some((1:Int32 < null:List { datatype: Int32 }))] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [null:Boolean] }
+    BatchProject { exprs: [Some((1:Int32 < null:List { datatype: Int32 }))] }
     └─BatchValues { rows: [[]] }
 - sql: |
     select 1 < SOME(array[null]::integer[]);

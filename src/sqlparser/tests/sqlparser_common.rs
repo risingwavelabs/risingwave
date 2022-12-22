@@ -798,7 +798,7 @@ fn parse_bitwise_ops() {
 }
 
 #[test]
-fn parse_binary_any() {
+fn parse_binary_some() {
     let select = verified_only_select("SELECT a = SOME(b)");
     assert_eq!(
         SelectItem::UnnamedExpr(Expr::BinaryOp {
