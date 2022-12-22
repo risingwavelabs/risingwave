@@ -785,7 +785,9 @@ export interface Dispatcher {
     | undefined;
   /**
    * Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-   * - For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+   * - For dispatchers within actors, the id is the same as its downstream fragment id.
+   *   We can't use the exchange operator id directly as the dispatch id, because an exchange
+   *   could belong to more than one downstream in DAG.
    * - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
    */
   dispatcherId: number;
