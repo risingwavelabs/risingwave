@@ -41,7 +41,7 @@ impl JsonParser {
         let value: Value = serde_json::from_slice(payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
-        writer.insert(|desc| {
+        writer.insert(|_idx, desc| {
             json_parse_value(&desc.data_type, value.get(&desc.name)).map_err(|e| {
                 tracing::error!(
                     "failed to process value ({}): {}",
