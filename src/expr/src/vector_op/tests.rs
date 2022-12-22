@@ -30,29 +30,26 @@ use crate::ExprError;
 #[test]
 fn test_arithmetic() {
     assert_eq!(
-        general_add::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 1).unwrap(),
-        Decimal::from_str("2.0").unwrap()
+        general_add::<Decimal, i32, Decimal>(dec("1.0"), 1).unwrap(),
+        dec("2.0")
     );
     assert_eq!(
-        general_sub::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap(),
-        Decimal::from_str("-1.0").unwrap()
+        general_sub::<Decimal, i32, Decimal>(dec("1.0"), 2).unwrap(),
+        dec("-1.0")
     );
     assert_eq!(
-        general_mul::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap(),
-        Decimal::from_str("2.0").unwrap()
+        general_mul::<Decimal, i32, Decimal>(dec("1.0"), 2).unwrap(),
+        dec("2.0")
     );
     assert_eq!(
-        general_div::<Decimal, i32, Decimal>(Decimal::from_str("2.0").unwrap(), 2).unwrap(),
-        Decimal::from_str("1.0").unwrap()
+        general_div::<Decimal, i32, Decimal>(dec("2.0"), 2).unwrap(),
+        dec("1.0")
     );
     assert_eq!(
-        general_mod::<Decimal, i32, Decimal>(Decimal::from_str("2.0").unwrap(), 2).unwrap(),
-        Decimal::from_str("0").unwrap()
+        general_mod::<Decimal, i32, Decimal>(dec("2.0"), 2).unwrap(),
+        dec("0")
     );
-    assert_eq!(
-        general_neg::<Decimal>(Decimal::from_str("1.0").unwrap()).unwrap(),
-        Decimal::from_str("-1.0").unwrap()
-    );
+    assert_eq!(general_neg::<Decimal>(dec("1.0")).unwrap(), dec("-1.0"));
     assert_eq!(general_add::<i16, i32, i32>(1i16, 1i32).unwrap(), 2i32);
     assert_eq!(general_sub::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
     assert_eq!(general_mul::<i16, i32, i32>(1i16, 1i32).unwrap(), 1i32);
@@ -61,24 +58,24 @@ fn test_arithmetic() {
     assert_eq!(general_neg::<i16>(1i16).unwrap(), -1i16);
 
     assert_eq!(
-        general_add::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), -1f32).unwrap(),
-        Decimal::from_str("0.0").unwrap()
+        general_add::<Decimal, f32, Decimal>(dec("1.0"), -1f32).unwrap(),
+        dec("0.0")
     );
     assert_eq!(
-        general_sub::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 1f32).unwrap(),
-        Decimal::from_str("0.0").unwrap()
+        general_sub::<Decimal, f32, Decimal>(dec("1.0"), 1f32).unwrap(),
+        dec("0.0")
     );
     assert_eq!(
-        general_div::<Decimal, f32, Decimal>(Decimal::from_str("0.0").unwrap(), 1f32).unwrap(),
-        Decimal::from_str("0.0").unwrap()
+        general_div::<Decimal, f32, Decimal>(dec("0.0"), 1f32).unwrap(),
+        dec("0.0")
     );
     assert_eq!(
-        general_mul::<Decimal, f32, Decimal>(Decimal::from_str("0.0").unwrap(), 1f32).unwrap(),
-        Decimal::from_str("0.0").unwrap()
+        general_mul::<Decimal, f32, Decimal>(dec("0.0"), 1f32).unwrap(),
+        dec("0.0")
     );
     assert_eq!(
-        general_mod::<Decimal, f32, Decimal>(Decimal::from_str("0.0").unwrap(), 1f32).unwrap(),
-        Decimal::from_str("0.0").unwrap()
+        general_mod::<Decimal, f32, Decimal>(dec("0.0"), 1f32).unwrap(),
+        dec("0.0")
     );
     assert!(
         general_add::<i32, OrderedF32, OrderedF64>(-1i32, 1f32.into())
@@ -172,53 +169,48 @@ fn test_bitwise() {
 
 #[test]
 fn test_comparison() {
-    assert!(general_eq::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 1).unwrap());
-    assert!(general_eq::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 1.0).unwrap());
-    assert!(!general_ne::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 1).unwrap());
-    assert!(!general_ne::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 1.0).unwrap());
-    assert!(!general_gt::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
-    assert!(!general_gt::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.0).unwrap());
-    assert!(general_le::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
-    assert!(general_le::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap());
-    assert!(!general_ge::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
-    assert!(!general_ge::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap());
-    assert!(general_lt::<Decimal, i32, Decimal>(Decimal::from_str("1.0").unwrap(), 2).unwrap());
-    assert!(general_lt::<Decimal, f32, Decimal>(Decimal::from_str("1.0").unwrap(), 2.1).unwrap());
-    assert!(general_is_distinct_from::<Decimal, i32, Decimal>(
-        Some(Decimal::from_str("1.0").unwrap()),
-        Some(2)
-    )
-    .unwrap()
-    .unwrap());
-    assert!(general_is_distinct_from::<Decimal, f32, Decimal>(
-        Some(Decimal::from_str("1.0").unwrap()),
-        Some(2.0)
-    )
-    .unwrap()
-    .unwrap());
-    assert!(general_is_distinct_from::<Decimal, f32, Decimal>(
-        Some(Decimal::from_str("1.0").unwrap()),
-        None
-    )
-    .unwrap()
-    .unwrap());
+    assert!(general_eq::<Decimal, i32, Decimal>(dec("1.0"), 1).unwrap());
+    assert!(general_eq::<Decimal, f32, Decimal>(dec("1.0"), 1.0).unwrap());
+    assert!(!general_ne::<Decimal, i32, Decimal>(dec("1.0"), 1).unwrap());
+    assert!(!general_ne::<Decimal, f32, Decimal>(dec("1.0"), 1.0).unwrap());
+    assert!(!general_gt::<Decimal, i32, Decimal>(dec("1.0"), 2).unwrap());
+    assert!(!general_gt::<Decimal, f32, Decimal>(dec("1.0"), 2.0).unwrap());
+    assert!(general_le::<Decimal, i32, Decimal>(dec("1.0"), 2).unwrap());
+    assert!(general_le::<Decimal, f32, Decimal>(dec("1.0"), 2.1).unwrap());
+    assert!(!general_ge::<Decimal, i32, Decimal>(dec("1.0"), 2).unwrap());
+    assert!(!general_ge::<Decimal, f32, Decimal>(dec("1.0"), 2.1).unwrap());
+    assert!(general_lt::<Decimal, i32, Decimal>(dec("1.0"), 2).unwrap());
+    assert!(general_lt::<Decimal, f32, Decimal>(dec("1.0"), 2.1).unwrap());
+    assert!(
+        general_is_distinct_from::<Decimal, i32, Decimal>(Some(dec("1.0")), Some(2))
+            .unwrap()
+            .unwrap()
+    );
+    assert!(
+        general_is_distinct_from::<Decimal, f32, Decimal>(Some(dec("1.0")), Some(2.0))
+            .unwrap()
+            .unwrap()
+    );
+    assert!(
+        general_is_distinct_from::<Decimal, f32, Decimal>(Some(dec("1.0")), None)
+            .unwrap()
+            .unwrap()
+    );
     assert!(
         general_is_distinct_from::<Decimal, i32, Decimal>(None, Some(1))
             .unwrap()
             .unwrap()
     );
-    assert!(!general_is_distinct_from::<Decimal, i32, Decimal>(
-        Some(Decimal::from_str("1.0").unwrap()),
-        Some(1)
-    )
-    .unwrap()
-    .unwrap());
-    assert!(!general_is_distinct_from::<Decimal, f32, Decimal>(
-        Some(Decimal::from_str("1.0").unwrap()),
-        Some(1.0)
-    )
-    .unwrap()
-    .unwrap());
+    assert!(
+        !general_is_distinct_from::<Decimal, i32, Decimal>(Some(dec("1.0")), Some(1))
+            .unwrap()
+            .unwrap()
+    );
+    assert!(
+        !general_is_distinct_from::<Decimal, f32, Decimal>(Some(dec("1.0")), Some(1.0))
+            .unwrap()
+            .unwrap()
+    );
     assert!(
         !general_is_distinct_from::<Decimal, f32, Decimal>(None, None)
             .unwrap()
@@ -263,4 +255,8 @@ fn test_cast() {
             NaiveDateTime::parse_from_str("1994-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
         )
     )
+}
+
+fn dec(s: &str) -> Decimal {
+    Decimal::from_str(s).unwrap()
 }
