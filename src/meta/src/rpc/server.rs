@@ -346,55 +346,11 @@ mod tests {
         leader_count
     }
 
-    // TODO: test only for debugging. remove
-    // Is it maybe that we should not drop the handlers?
-    // What if we abort?
-    // This seems to work
-    #[tokio::test]
-    async fn kinda_like_actual_test_2() {
-        let v = _setup_n_nodes(1, 15690, false).await;
-        let x = _number_of_leaders(1, 15690, 5678).await;
-        assert_eq!(x, 1);
-        for hanlde_send in v {
-            hanlde_send.0.abort();
-        }
-    }
-
-    // TODO: test only for debugging. remove
-    // This no longer works. Do I need to await the handlers. I think so
-    // below works, but never terminates
-    #[tokio::test]
-    async fn kinda_like_actual_test() {
-        let v = _setup_n_nodes(1, 15690, false).await;
-        let x = _number_of_leaders(1, 15690, 5678).await;
-        assert_eq!(x, 1);
-        for hanlde_send in v {
-            hanlde_send.0.await.unwrap();
-        }
-    }
-
-    // TODO: test only for debugging. remove
-    // keel meta node running able to connect against it
-    #[tokio::test]
-    async fn test_test_remove_me_setup() {
-        let x = _setup_n_nodes(1, 15690, false).await;
-        for hanlde_send in x {
-            hanlde_send.0.await.unwrap();
-        }
-    }
-
-    // TODO: test only for debugging. remove
-    #[tokio::test]
-    async fn test_test_remove_me() {
-        let x = _number_of_leaders(1, 15690, 5678).await; // always returns 1
-        assert_eq!(x, 1);
-    }
-
     // Writing these tests as separate functions instead of one loop, because functions get executed
     // in parallel
     #[tokio::test]
     async fn test_single_leader_setup_1() {
-        let v = _setup_n_nodes(1, 1234, false).await;
+        let v = _setup_n_nodes(1, 1234, false).await; // TODO: parameter false not needed. Always false
         let leader_count = _number_of_leaders(1, 1234, 5678).await;
         assert_eq!(
             leader_count, 1,
@@ -512,3 +468,5 @@ mod tests {
         );
     }
 }
+
+// Tests fail, because address already in use. Test addresses overlap?
