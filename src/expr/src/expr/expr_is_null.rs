@@ -25,36 +25,28 @@ use crate::Result;
 #[derive(Debug)]
 pub struct IsNullExpression {
     child: BoxedExpression,
-    return_type: DataType,
 }
 
 #[derive(Debug)]
 pub struct IsNotNullExpression {
     child: BoxedExpression,
-    return_type: DataType,
 }
 
 impl IsNullExpression {
     pub(crate) fn new(child: BoxedExpression) -> Self {
-        Self {
-            child,
-            return_type: DataType::Boolean,
-        }
+        Self { child }
     }
 }
 
 impl IsNotNullExpression {
     pub(crate) fn new(child: BoxedExpression) -> Self {
-        Self {
-            child,
-            return_type: DataType::Boolean,
-        }
+        Self { child }
     }
 }
 
 impl Expression for IsNullExpression {
     fn return_type(&self) -> DataType {
-        self.return_type.clone()
+        DataType::Boolean
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
@@ -73,7 +65,7 @@ impl Expression for IsNullExpression {
 
 impl Expression for IsNotNullExpression {
     fn return_type(&self) -> DataType {
-        self.return_type.clone()
+        DataType::Boolean
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {

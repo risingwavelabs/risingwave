@@ -30,6 +30,10 @@ impl BoolArray {
         Self { bitmap, data }
     }
 
+    pub fn data(&self) -> &Bitmap {
+        &self.data
+    }
+
     pub fn to_bitmap(&self) -> Bitmap {
         &self.data & self.null_bitmap()
     }

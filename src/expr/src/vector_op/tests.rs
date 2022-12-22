@@ -242,7 +242,7 @@ fn test_comparison() {
 
 #[test]
 fn test_conjunction() {
-    assert!(not(Some(false)).unwrap().unwrap());
+    assert!(not(Some(false)).unwrap());
     assert!(!and(Some(true), Some(false)).unwrap().unwrap());
     assert!(or(Some(true), Some(false)).unwrap().unwrap());
 }

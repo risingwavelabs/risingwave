@@ -3,13 +3,66 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use risingwave_common::array::{
-    Array, ArrayImpl, ArrayRef, DataChunk, PrimitiveArray, PrimitiveArrayItemType,
+    Array, ArrayImpl, ArrayRef, BoolArray, DataChunk, PrimitiveArray, PrimitiveArrayItemType,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::{DataType, Datum, Scalar};
 
 use super::{BoxedExpression, Expression};
+
+pub struct BooleanExpression<FA, FV> {
+    child: BoxedExpression,
+    f_array: FA,
+    f_value: FV,
+}
+
+impl<FA, FV> fmt::Debug for BooleanExpression<FA, FV> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BooleanExpression")
+            .field("child", &self.child)
+            .finish()
+    }
+}
+
+impl<FA, FV> BooleanExpression<FA, FV>
+where
+    FA: Fn(&BoolArray) -> BoolArray + Send + Sync,
+    FV: Fn(Option<bool>) -> Option<bool> + Send + Sync,
+{
+    pub fn new(child: BoxedExpression, f_array: FA, f_value: FV) -> Self {
+        BooleanExpression {
+            child,
+            f_array,
+            f_value,
+        }
+    }
+}
+
+impl<FA, FV> Expression for BooleanExpression<FA, FV>
+where
+    FA: Fn(&BoolArray) -> BoolArray + Send + Sync,
+    FV: Fn(Option<bool>) -> Option<bool> + Send + Sync,
+{
+    fn return_type(&self) -> DataType {
+        DataType::Boolean
+    }
+
+    fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
+        let child = self.child.eval_checked(data_chunk)?;
+        let a = child.as_bool();
+        let c = (self.f_array)(a);
+        Ok(Arc::new(c.into()))
+    }
+
+    fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
+        let datum = self.child.eval_row(row)?;
+        let scalar = datum.map(|s| *s.as_bool());
+        let output_scalar = (self.f_value)(scalar);
+        let output_datum = output_scalar.map(|s| s.to_scalar_value());
+        Ok(output_datum)
+    }
+}
 
 pub struct UnaryExpression<F, A, T> {
     child: BoxedExpression,

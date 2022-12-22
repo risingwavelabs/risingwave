@@ -190,33 +190,33 @@ pub fn str_is_not_distinct_from(l: Option<&str>, r: Option<&str>) -> Result<Opti
 }
 
 #[inline(always)]
-pub fn is_true(v: Option<bool>) -> Result<Option<bool>> {
-    Ok(Some(v == Some(true)))
+pub fn is_true(v: Option<bool>) -> Option<bool> {
+    Some(v == Some(true))
 }
 
 #[inline(always)]
-pub fn is_not_true(v: Option<bool>) -> Result<Option<bool>> {
-    Ok(Some(v != Some(true)))
+pub fn is_not_true(v: Option<bool>) -> Option<bool> {
+    Some(v != Some(true))
 }
 
 #[inline(always)]
-pub fn is_false(v: Option<bool>) -> Result<Option<bool>> {
-    Ok(Some(v == Some(false)))
+pub fn is_false(v: Option<bool>) -> Option<bool> {
+    Some(v == Some(false))
 }
 
 #[inline(always)]
-pub fn is_not_false(v: Option<bool>) -> Result<Option<bool>> {
-    Ok(Some(v != Some(false)))
+pub fn is_not_false(v: Option<bool>) -> Option<bool> {
+    Some(v != Some(false))
 }
 
 #[inline(always)]
-pub fn is_unknown(v: Option<bool>) -> Result<Option<bool>> {
-    Ok(Some(v.is_none()))
+pub fn is_unknown(v: Option<bool>) -> Option<bool> {
+    Some(v.is_none())
 }
 
 #[inline(always)]
-pub fn is_not_unknown(v: Option<bool>) -> Result<Option<bool>> {
-    Ok(Some(v.is_some()))
+pub fn is_not_unknown(v: Option<bool>) -> Option<bool> {
+    Some(v.is_some())
 }
 
 #[cfg(test)]
