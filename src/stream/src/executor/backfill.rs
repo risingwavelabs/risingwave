@@ -114,24 +114,24 @@ where
         // If the barrier is a conf change of creating this mview, we follow the procedure of
         // backfill. Otherwise, it means we've recovered and we can forward the upstream messages
         // directly.
-        let is_create_mv = first_barrier.is_add_dispatcher(self.actor_id);
+        let to_create_mv = first_barrier.is_add_dispatcher(self.actor_id);
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
             let snapshot = Self::snapshot_read(&self.table, init_epoch, None, false);
             pin_mut!(snapshot);
             snapshot.try_next().await?.unwrap().is_none()
         };
-        let to_backfill = is_create_mv && !is_snapshot_empty;
+        let to_backfill = to_create_mv && !is_snapshot_empty;
+
+        if to_create_mv && is_snapshot_empty {
+            // Directly finish the progress as the snapshot is empty.
+            self.progress.finish(first_barrier.epoch.curr);
+        }
+
+        // The first barrier message should be propagated.
+        yield Message::Barrier(first_barrier);
 
         if !to_backfill {
-            if is_create_mv {
-                // Directly finish the progress. For recovery, this is a no-op.
-                self.progress.finish(first_barrier.epoch.curr);
-            }
-
-            // The first barrier message should be propagated.
-            yield Message::Barrier(first_barrier);
-
             // Forward messages directly to the downstream.
             let upstream = upstream
                 .map(move |result| result.map(|msg| Self::mapping_message(msg, &upstream_indices)));
@@ -142,9 +142,6 @@ where
 
             return Ok(());
         }
-
-        // The first barrier message should be propagated.
-        yield Message::Barrier(first_barrier);
 
         // The epoch used to snapshot read upstream mv.
         let mut snapshot_read_epoch = init_epoch;
@@ -271,12 +268,6 @@ where
             }
         }
 
-        let mut finish_on_barrier = |msg: &Message| {
-            if let Some(barrier) = msg.as_barrier() {
-                self.progress.finish(barrier.epoch.curr);
-            }
-        };
-
         tracing::trace!(
             actor = self.actor_id,
             "Backfill has already finished and forward messages directly to the downstream"
@@ -289,7 +280,9 @@ where
         #[for_await]
         for msg in upstream {
             let msg: Message = msg?;
-            finish_on_barrier(&msg);
+            if let Some(barrier) = msg.as_barrier() {
+                self.progress.finish(barrier.epoch.curr);
+            }
             yield msg;
         }
     }
