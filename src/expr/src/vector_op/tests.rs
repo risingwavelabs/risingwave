@@ -156,15 +156,15 @@ fn test_bitwise() {
     assert_eq!(general_shr::<i64, i32>(1i64, 0i32).unwrap(), 1i64);
     // truth table
     assert_eq!(
-        general_bitand::<u32, u32, u64>(0b0011u32, 0b0101u32).unwrap(),
+        general_bitand::<u32, u32, u64>(0b0011u32, 0b0101u32),
         0b1u64
     );
     assert_eq!(
-        general_bitor::<u32, u32, u64>(0b0011u32, 0b0101u32).unwrap(),
+        general_bitor::<u32, u32, u64>(0b0011u32, 0b0101u32),
         0b0111u64
     );
     assert_eq!(
-        general_bitxor::<u32, u32, u64>(0b0011u32, 0b0101u32).unwrap(),
+        general_bitxor::<u32, u32, u64>(0b0011u32, 0b0101u32),
         0b0110u64
     );
     assert_eq!(general_bitnot::<i32>(0b01i32).unwrap(), -2i32);
