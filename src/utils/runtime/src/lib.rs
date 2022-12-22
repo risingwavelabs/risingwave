@@ -210,7 +210,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
 
 /// Returns a `EnvFilter` that
 /// 1. inherits given `filter`'s target-LevelFilter pairs and default-LevelFilter.
-/// 2. parses RUST_LOG environment variable and adds these filters.
+/// 2. parses `RUST_LOG` environment variable and adds these filters.
 ///
 /// Filters from step 1 will be overwritten by filters from step 2 that matches.
 fn to_env_filter(filter: Targets) -> EnvFilter {
