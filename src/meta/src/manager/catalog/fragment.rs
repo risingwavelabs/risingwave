@@ -130,6 +130,10 @@ where
         Ok(map.values().cloned().collect())
     }
 
+    pub async fn has_any_table_fragments(&self) -> bool {
+        !self.core.read().await.table_fragments.is_empty()
+    }
+
     pub async fn batch_update_table_fragments(
         &self,
         table_fragments: &[TableFragments],
@@ -635,7 +639,7 @@ where
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
-                    downstream_fragment_id,
+                    downstream_fragment_ids,
                     actor_splits,
                 } = reschedule;
 
@@ -738,7 +742,7 @@ where
                 }
 
                 // Update the merge executor of the downstream fragment.
-                if let Some(downstream_fragment_id) = downstream_fragment_id {
+                for &downstream_fragment_id in &downstream_fragment_ids {
                     let downstream_fragment = table_fragment
                         .fragments
                         .get_mut(&downstream_fragment_id)
