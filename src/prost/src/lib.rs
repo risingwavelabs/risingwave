@@ -135,6 +135,9 @@ pub mod monitor_service_serde;
 #[path = "backup_service.serde.rs"]
 pub mod backup_service_serde;
 
+#[cfg_attr(madsim, path = "sim/leader.rs")]
+pub mod leader;
+#[rustfmt::skip]
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ProstFieldNotFound(pub &'static str);

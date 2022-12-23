@@ -157,6 +157,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     });
 
     let (svc_shutdown_tx, mut svc_shutdown_rx) = WatchChannel(());
+    let f_leader_rx = leader_rx.clone();
 
     let join_handle = tokio::spawn(async move {
         let span = tracing::span!(tracing::Level::INFO, "services");
@@ -181,6 +182,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                     svc_shutdown_rx_clone,
                     follower_shutdown_rx,
                     address_info_clone,
+                    f_leader_rx,
                 )
                 .await;
             }))
@@ -215,6 +217,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let elect_coord = ElectionCoordination {
             election_handle,
             election_shutdown,
+            leader_rx,
         };
 
         let current_leader = services_leader_rx.borrow().0.clone();
@@ -438,4 +441,14 @@ mod tests {
             leader_count
         );
     }
+
+    // TODO: Write service discovery tests
+    // All nodes should always agree on the leader
+    // even though you delete the leader
+    // delete a follower
+    // delete leader lease info
+    // delete lease info
+    // delete lease
+    // add one more node node
+    // Validate if the node that is supposed to be the leader also is the leader
 }
