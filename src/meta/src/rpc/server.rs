@@ -213,6 +213,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             }
         }
 
+        // TODO: Should we wait right here when starting the leader mode on a former
+        // follower? This way we could make sure that fencing kicked in at the old leader
+        // and we have no split-brain However this would also delay the failover process
+
         // shut down follower svc if node used to be follower
         if let Some(handle) = follower_handle {
             match follower_shutdown_tx.send(()) {
