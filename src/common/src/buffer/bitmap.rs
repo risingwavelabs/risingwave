@@ -513,23 +513,14 @@ impl Not for Bitmap {
 
 impl FromIterator<bool> for Bitmap {
     fn from_iter<T: IntoIterator<Item = bool>>(iter: T) -> Self {
-        let iter = iter.into_iter();
-        let mut builder = BitmapBuilder::with_capacity(iter.size_hint().0);
-        for b in iter {
-            builder.append(b);
-        }
-        builder.finish()
+        let vec = iter.into_iter().collect::<Vec<_>>();
+        Self::from_bool_slice(&vec)
     }
 }
 
 impl FromIterator<Option<bool>> for Bitmap {
     fn from_iter<T: IntoIterator<Item = Option<bool>>>(iter: T) -> Self {
-        let iter = iter.into_iter();
-        let mut builder = BitmapBuilder::with_capacity(iter.size_hint().0);
-        for b in iter {
-            builder.append(b.unwrap_or(false));
-        }
-        builder.finish()
+        iter.into_iter().map(|b| b.unwrap_or(false)).collect()
     }
 }
 

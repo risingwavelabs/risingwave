@@ -353,10 +353,11 @@ where
         bitmap &= right.null_bitmap();
         let a: &PrimitiveArray<A> = (&*left).into();
         let b: &PrimitiveArray<B> = (&*right).into();
-        let c = BoolArray::from_iter_bitmap(
+        let c = BoolArray::new(
             a.raw_iter()
                 .zip(b.raw_iter())
-                .map(|(a, b)| (self.func)(a, b)),
+                .map(|(a, b)| (self.func)(a, b))
+                .collect(),
             bitmap,
         );
         Ok(Arc::new(c.into()))
