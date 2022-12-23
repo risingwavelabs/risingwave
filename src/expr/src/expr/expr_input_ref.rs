@@ -25,7 +25,7 @@ use crate::expr::Expression;
 use crate::{bail, ensure, ExprError, Result};
 
 /// `InputRefExpression` references to a column in input relation
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InputRefExpression {
     return_type: DataType,
     idx: usize,
