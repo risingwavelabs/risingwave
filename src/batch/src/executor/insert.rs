@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::repeat;
+
 use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
-    ArrayBuilder, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
+    ArrayBuilder, DataChunk, I64Array, Op, PrimitiveArrayBuilder, StreamChunk,
 };
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
@@ -89,10 +91,9 @@ impl InsertExecutor {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
-            let len = data_chunk.cardinality();
-            assert!(data_chunk.visibility().is_none());
+            let cap = data_chunk.capacity();
 
-            let (mut columns, _) = data_chunk.into_parts();
+            let (mut columns, visibility) = data_chunk.into_parts();
 
             // No need to check for duplicate columns. This is already validated in binder
             if !&self.column_idxs.is_sorted() {
@@ -105,14 +106,11 @@ impl InsertExecutor {
 
             // if user did not specify primary ID then we need to add a col it
             if let Some(row_id_index) = row_id_index {
-                let mut builder = I64ArrayBuilder::new(len);
-                for _ in 0..len {
-                    builder.append_null();
-                }
-                columns.insert(row_id_index, Column::from(builder.finish()))
+                let array: I64Array = repeat(None).take(cap).collect();
+                columns.insert(row_id_index, Column::from(array))
             }
 
-            let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
+            let chunk = StreamChunk::new(vec![Op::Insert; cap], columns, visibility.into_bitmap());
 
             let notifier = source.write_chunk(chunk)?;
             notifiers.push(notifier);

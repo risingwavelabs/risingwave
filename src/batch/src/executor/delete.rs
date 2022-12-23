@@ -84,10 +84,9 @@ impl DeleteExecutor {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
-            let len = data_chunk.cardinality();
-            assert!(data_chunk.visibility().is_none());
+            let cap = data_chunk.capacity();
 
-            let chunk = StreamChunk::from_parts(vec![Op::Delete; len], data_chunk);
+            let chunk = StreamChunk::from_parts(vec![Op::Delete; cap], data_chunk);
 
             let notifier = source.write_chunk(chunk)?;
             notifiers.push(notifier);

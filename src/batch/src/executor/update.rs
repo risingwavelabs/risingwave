@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -20,13 +20,12 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::TableSourceManagerRef;
 
-use crate::error::BatchError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -41,6 +40,7 @@ pub struct UpdateExecutor {
     source_manager: TableSourceManagerRef,
     child: BoxedExecutor,
     exprs: Vec<BoxedExpression>,
+    chunk_size: usize,
     schema: Schema,
     identity: String,
 }
@@ -51,6 +51,7 @@ impl UpdateExecutor {
         source_manager: TableSourceManagerRef,
         child: BoxedExecutor,
         exprs: Vec<BoxedExpression>,
+        chunk_size: usize,
         identity: String,
     ) -> Self {
         assert_eq!(
@@ -59,11 +60,14 @@ impl UpdateExecutor {
             "bad update schema"
         );
 
+        let chunk_size = chunk_size.next_multiple_of(2);
+
         Self {
             table_id,
             source_manager,
             child,
             exprs,
+            chunk_size,
             // TODO: support `RETURNING`
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
@@ -93,8 +97,25 @@ impl UpdateExecutor {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
         let source = source_desc.source.as_table().expect("not table source");
 
-        let schema = self.child.schema().clone();
+        let data_types = self.child.schema().data_types();
+        let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
+
         let mut notifiers = Vec::new();
+
+        // Transform the data chunk to a stream chunk, then write to the source.
+        let mut write_chunk = |chunk: DataChunk| -> Result<()> {
+            let ops = [Op::UpdateDelete, Op::UpdateInsert]
+                .into_iter()
+                .cycle()
+                .take(chunk.capacity())
+                .collect_vec();
+            let stream_chunk = StreamChunk::from_parts(ops, chunk);
+
+            let notifier = source.write_chunk(stream_chunk)?;
+            notifiers.push(notifier);
+
+            Ok(())
+        };
 
         #[for_await]
         for data_chunk in self.child.execute() {
@@ -111,38 +132,24 @@ impl UpdateExecutor {
                 DataChunk::new(columns, len)
             };
 
-            // Merge two data chunks into (U-, U+) pairs.
-            // TODO: split chunks
-            let mut builders = schema.create_array_builders(len * 2);
-            for row in data_chunk
-                .rows()
-                .zip_eq(updated_data_chunk.rows())
-                .flat_map(|(a, b)| [a, b])
-            {
-                for (datum_ref, builder) in row.iter().zip_eq(builders.iter_mut()) {
-                    builder.append_datum(datum_ref);
+            for (row_delete, row_insert) in data_chunk.rows().zip_eq(updated_data_chunk.rows()) {
+                let None = builder.append_one_row(row_delete) else {
+                    unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
+                };
+                if let Some(chunk) = builder.append_one_row(row_insert) {
+                    write_chunk(chunk)?;
                 }
             }
-            let columns = builders.into_iter().map(|b| b.finish().into()).collect();
+        }
 
-            let ops = [Op::UpdateDelete, Op::UpdateInsert]
-                .into_iter()
-                .cycle()
-                .take(len * 2)
-                .collect();
-
-            let stream_chunk = StreamChunk::new(ops, columns, None);
-
-            let notifier = source.write_chunk(stream_chunk)?;
-            notifiers.push(notifier);
+        if let Some(chunk) = builder.consume_all() {
+            write_chunk(chunk)?;
         }
 
         // Wait for all chunks to be taken / written.
         let rows_updated = try_join_all(notifiers)
             .await
-            .map_err(|_| {
-                BatchError::Internal(anyhow!("failed to wait chunks to be written".to_owned(),))
-            })?
+            .context("failed to wait chunks to be written")?
             .into_iter()
             .sum::<usize>()
             / 2;
@@ -186,6 +193,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             source.context().source_manager(),
             child,
             exprs,
+            source.context.get_config().developer.batch_chunk_size,
             source.plan_node().get_identity().clone(),
         )))
     }
@@ -257,6 +265,7 @@ mod tests {
             source_manager.clone(),
             Box::new(mock_executor),
             exprs,
+            5,
             "UpdateExecutor".to_string(),
         ));
 
@@ -279,36 +288,42 @@ mod tests {
         });
 
         // Read
-        let chunk = reader.next().await.unwrap()?.chunk;
+        // As we set the chunk size to 5, we'll get 2 chunks. Note that the update records for one
+        // row cannot be cut into two chunks, so the first chunk will actually have 6 rows.
+        for updated_rows in [1..=3, 4..=5] {
+            let chunk = reader.next().await.unwrap()?.chunk;
 
-        assert_eq!(
-            chunk.ops().chunks(2).collect_vec(),
-            vec![&[Op::UpdateDelete, Op::UpdateInsert]; 5]
-        );
+            assert_eq!(
+                chunk.ops().chunks(2).collect_vec(),
+                vec![&[Op::UpdateDelete, Op::UpdateInsert]; updated_rows.clone().count()]
+            );
 
-        assert_eq!(
-            chunk.columns()[0]
-                .array()
-                .as_int32()
-                .iter()
-                .collect::<Vec<_>>(),
-            (1..=5)
-                .flat_map(|i| [i * 2 - 1, i * 2]) // -1, +2, -3, +4, ...
-                .map(Some)
-                .collect_vec()
-        );
+            assert_eq!(
+                chunk.columns()[0]
+                    .array()
+                    .as_int32()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                updated_rows
+                    .clone()
+                    .flat_map(|i| [i * 2 - 1, i * 2]) // -1, +2, -3, +4, ...
+                    .map(Some)
+                    .collect_vec()
+            );
 
-        assert_eq!(
-            chunk.columns()[1]
-                .array()
-                .as_int32()
-                .iter()
-                .collect::<Vec<_>>(),
-            (1..=5)
-                .flat_map(|i| [i * 2, i * 2 - 1]) // -2, +1, -4, +3, ...
-                .map(Some)
-                .collect_vec()
-        );
+            assert_eq!(
+                chunk.columns()[1]
+                    .array()
+                    .as_int32()
+                    .iter()
+                    .collect::<Vec<_>>(),
+                updated_rows
+                    .clone()
+                    .flat_map(|i| [i * 2, i * 2 - 1]) // -2, +1, -4, +3, ...
+                    .map(Some)
+                    .collect_vec()
+            );
+        }
 
         handle.await.unwrap();
 
