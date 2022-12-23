@@ -371,23 +371,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_single_leader_setup_10() {
-        let v = setup_n_nodes(10, 3456).await;
-        let leader_count = number_of_leaders(10, 3456, 7890).await;
-        assert_eq!(
-            leader_count, 1,
-            "Expected to have 1 leader, instead got {} leaders",
-            leader_count
-        );
-        for element in v {
-            element.0.abort();
-        }
-    }
-
-    #[tokio::test]
-    async fn test_single_leader_setup_100() {
-        let v = setup_n_nodes(100, 4567).await;
-        let leader_count = number_of_leaders(100, 4567, 8901).await;
+    async fn test_single_leader_setup_5() {
+        let v = setup_n_nodes(5, 3456).await;
+        let leader_count = number_of_leaders(5, 3456, 7890).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
