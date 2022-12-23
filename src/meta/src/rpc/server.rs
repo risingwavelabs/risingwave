@@ -460,8 +460,62 @@ mod tests {
         );
     }
 
+    // TODO: use only this function
+    async fn test_fencing(
+        number_of_nodes: u16,
+        meta_port: u16,
+        compute_port: u16,
+        delete_leader: bool,
+        delete_lease: bool,
+    ) -> u16 {
+        use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
+        use crate::storage::Transaction;
+
+        assert!(
+            delete_leader || delete_lease,
+            "please delete the lease and/or the leader for this test to work"
+        );
+
+        let meta_store = Arc::new(MemStore::default());
+        let vec_meta_handlers = setup_n_nodes_inner(number_of_nodes, meta_port, &meta_store).await;
+
+        // we should have 1 leader on startup
+        let leader_count = number_of_leaders(number_of_nodes, meta_port, compute_port).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
+
+        // TODO: What happens if we only delete the leader info?
+        // TODO: What happens if we only delete the lease info?
+
+        // delete leader/lease info in meta store
+        let mut txn = Transaction::default();
+        if delete_leader {
+            txn.delete(
+                META_CF_NAME.to_string(),
+                META_LEADER_KEY.as_bytes().to_vec(),
+            );
+        }
+        if delete_lease {
+            txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
+        }
+        meta_store.txn(txn).await.unwrap();
+
+        sleep(WAIT_INTERVAL * 3).await;
+
+        // expect that we still have 1 leader
+        // skipping first meta_port, since that node was former leader and got killed
+        let leaders = number_of_leaders(number_of_nodes - 1, meta_port + 1, compute_port).await;
+        for ele in vec_meta_handlers {
+            ele.0.abort();
+        }
+        leaders
+    }
+
     /// returns number of leaders after activating fencing by deleting leader lease info
-    async fn test_fencing(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
+    async fn test_fencing_(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
         use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
         use crate::storage::Transaction;
 
@@ -506,7 +560,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fencing_1() {
-        let leader_count = test_fencing(1, 1600, 1700).await;
+        let leader_count = test_fencing(1, 1600, 1700, true, true).await;
         assert_eq!(
             leader_count, 0,
             "Expected to have 1 leader, instead got {} leaders",
@@ -516,7 +570,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fencing_3() {
-        let leader_count = test_fencing(3, 1800, 1900).await;
+        let leader_count = test_fencing(3, 1800, 1900, true, true).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
@@ -526,7 +580,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fencing_5() {
-        let leader_count = test_fencing(5, 2000, 2100).await;
+        let leader_count = test_fencing(5, 2000, 2100, true, true).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
