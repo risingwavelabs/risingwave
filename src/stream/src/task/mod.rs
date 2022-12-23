@@ -82,6 +82,8 @@ pub struct SharedContext {
     pub(crate) barrier_manager: Arc<Mutex<LocalBarrierManager>>,
 
     pub(crate) lru_manager: Option<LruManagerRef>,
+
+    pub(crate) config: StreamingConfig,
 }
 
 impl std::fmt::Debug for SharedContext {
@@ -118,6 +120,7 @@ impl SharedContext {
             compute_client_pool: ComputeClientPool::default(),
             lru_manager: enable_managed_cache.then(create_lru_manager),
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(state_store))),
+            config: config.clone(),
         }
     }
 
@@ -132,6 +135,7 @@ impl SharedContext {
                 StateStoreImpl::for_test(),
             ))),
             lru_manager: None,
+            config: StreamingConfig::default(),
         }
     }
 
@@ -166,7 +170,10 @@ impl SharedContext {
 
     #[inline]
     pub fn add_channel_pairs(&self, ids: UpDownActorIds) {
-        let (tx, rx) = permit::channel();
+        let (tx, rx) = permit::channel(
+            self.config.developer.stream_exchange_initial_permits,
+            self.config.developer.stream_exchange_batched_permits,
+        );
         assert!(
             self.lock_channel_map()
                 .insert(ids, (Some(tx), Some(rx)))

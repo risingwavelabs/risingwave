@@ -84,7 +84,7 @@ impl StreamNode for StreamGroupTopN {
             with_ties: self.with_ties(),
             group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
             table: Some(table.to_internal_table_prost()),
-            order_by_len: self.topn_order().len() as u32,
+            order_by: self.topn_order().to_protobuf(),
         };
 
         ProstStreamNode::GroupTopN(group_topn_node)

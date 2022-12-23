@@ -19,8 +19,8 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::ScalarImpl;
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundWindowTableFunction, Relation,
-    WindowTableFunctionKind,
+    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundWatermark,
+    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, TableFunction};
 use crate::optimizer::plan_node::{
@@ -43,6 +43,7 @@ impl Planner {
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
             Relation::TableFunction(tf) => self.plan_table_function(*tf),
+            Relation::Watermark(tf) => self.plan_watermark(*tf),
         }
     }
 
@@ -113,6 +114,10 @@ impl Planner {
 
     pub(super) fn plan_table_function(&mut self, table_function: TableFunction) -> Result<PlanRef> {
         Ok(LogicalTableFunction::new(table_function, self.ctx()).into())
+    }
+
+    pub(super) fn plan_watermark(&mut self, _watermark: BoundWatermark) -> Result<PlanRef> {
+        todo!("plan watermark");
     }
 
     fn plan_tumble_window(

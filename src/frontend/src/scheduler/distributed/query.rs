@@ -36,8 +36,7 @@ use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    ExecutionContextRef, HummockSnapshotGuard, PinnedHummockSnapshot, SchedulerError,
-    SchedulerResult,
+    ExecutionContextRef, PinnedHummockSnapshot, SchedulerError, SchedulerResult,
 };
 
 /// Message sent to a `QueryRunner` to control its execution.
@@ -115,7 +114,7 @@ impl QueryExecution {
         &self,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeManagerRef,
-        pinned_snapshot: HummockSnapshotGuard,
+        pinned_snapshot: PinnedHummockSnapshot,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
@@ -209,7 +208,7 @@ impl QueryExecution {
 
             let stage_exec = Arc::new(StageExecution::new(
                 // TODO: Add support to use current epoch when needed
-                pinned_snapshot.get_committed_epoch(),
+                pinned_snapshot.get_batch_query_epoch(),
                 self.query.stage_graph.stages[&stage_id].clone(),
                 worker_node_manager.clone(),
                 self.shutdown_tx.clone(),
@@ -237,6 +236,7 @@ impl QueryRunner {
             );
         }
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
+        let has_lookup_join_stage = self.query.has_lookup_join_stage();
         // To convince the compiler that `pinned_snapshot` will only be dropped once.
         let mut pinned_snapshot_to_drop = Some(pinned_snapshot);
         while let Some(msg_inner) = self.msg_receiver.recv().await {
@@ -249,7 +249,9 @@ impl QueryRunner {
                     );
                     self.scheduled_stages_count += 1;
                     stages_with_table_scan.remove(&stage_id);
-                    if stages_with_table_scan.is_empty() {
+                    // If query contains lookup join we need to delay epoch unpin util the end of
+                    // the query.
+                    if !has_lookup_join_stage && stages_with_table_scan.is_empty() {
                         // We can be sure here that all the Hummock iterators have been created,
                         // thus they all successfully pinned a HummockVersion.
                         // So we can now unpin their epoch.
@@ -424,7 +426,7 @@ pub(crate) mod tests {
             .start(
                 ExecutionContext::new(SessionImpl::mock().into()).into(),
                 worker_node_manager,
-                pinned_snapshot,
+                pinned_snapshot.into(),
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,

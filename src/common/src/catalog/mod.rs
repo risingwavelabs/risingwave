@@ -36,6 +36,7 @@ pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
 pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
 pub const INFORMATION_SCHEMA_SCHEMA_NAME: &str = "information_schema";
+pub const RW_CATALOG_SCHEMA_NAME: &str = "rw_catalog";
 pub const RESERVED_PG_SCHEMA_PREFIX: &str = "pg_";
 pub const DEFAULT_SUPER_USER: &str = "root";
 pub const DEFAULT_SUPER_USER_ID: u32 = 1;
@@ -45,6 +46,12 @@ pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
 pub const NON_RESERVED_USER_ID: i32 = 11;
 pub const NON_RESERVED_PG_CATALOG_TABLE_ID: i32 = 1001;
+
+pub const SYSTEM_SCHEMAS: [&str; 3] = [
+    PG_CATALOG_SCHEMA_NAME,
+    INFORMATION_SCHEMA_SCHEMA_NAME,
+    RW_CATALOG_SCHEMA_NAME,
+];
 
 /// The local system catalog reader in the frontend node.
 #[async_trait]

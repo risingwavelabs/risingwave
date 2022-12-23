@@ -88,6 +88,21 @@ if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     cargo make kill
 fi
 
+if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
+    echo "--- e2e, ci-delete-range-test"
+    cargo make clean-data
+    cargo make ci-start ci-delete-range-test
+    buildkite-agent artifact download delete-range-test-"$profile" target/debug/
+    mv target/debug/delete-range-test-"$profile" target/debug/delete-range-test
+    chmod +x ./target/debug/delete-range-test
+
+    config_path=".risingwave/config/risingwave.toml"
+    ./target/debug/delete-range-test --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
+
+    echo "--- Kill cluster"
+    cargo make ci-kill
+fi
+
 if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     echo "--- e2e, ci-compaction-test, nexmark_q7"
     cargo make ci-start ci-compaction-test
@@ -119,24 +134,8 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     chmod +x ./target/debug/compaction-test
     # Use the config of ci-compaction-test for replay.
     config_path=".risingwave/config/risingwave.toml"
-    ./target/debug/compaction-test --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
+    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" ./target/debug/compaction-test --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
 
     echo "--- Kill cluster"
     cargo make ci-kill
-fi
-
-if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
-    echo "--- e2e, ci-3cn-1fe, fuzzing"
-    buildkite-agent artifact download sqlsmith-"$profile" target/debug/
-    mv target/debug/sqlsmith-"$profile" target/debug/sqlsmith
-    chmod +x ./target/debug/sqlsmith
-
-    cargo make ci-start ci-3cn-1fe
-    timeout 20m ./target/debug/sqlsmith test --count "$SQLSMITH_COUNT" --testdata ./src/tests/sqlsmith/tests/testdata
-
-    # Using `kill` instead of `ci-kill` avoids storing excess logs.
-    # If there's errors, the failing query will be printed to stderr.
-    # Use that to reproduce logs on local machine.
-    echo "--- Kill cluster"
-    cargo make kill
 fi

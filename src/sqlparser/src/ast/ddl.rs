@@ -257,7 +257,7 @@ impl fmt::Display for TableConstraint {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ColumnDef {
     pub name: Ident,
-    pub data_type: DataType,
+    pub data_type: Option<DataType>,
     pub collation: Option<ObjectName>,
     pub options: Vec<ColumnOptionDef>,
 }
@@ -271,7 +271,7 @@ impl ColumnDef {
     ) -> Self {
         ColumnDef {
             name,
-            data_type,
+            data_type: Some(data_type),
             collation,
             options,
         }
@@ -280,7 +280,16 @@ impl ColumnDef {
 
 impl fmt::Display for ColumnDef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {}", self.name, self.data_type)?;
+        write!(
+            f,
+            "{} {}",
+            self.name,
+            if let Some(data_type) = &self.data_type {
+                data_type.to_string()
+            } else {
+                "None".to_string()
+            }
+        )?;
         for option in &self.options {
             write!(f, " {}", option)?;
         }

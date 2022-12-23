@@ -126,6 +126,13 @@ pub fn new_unary_expr(
             return_type,
             move |input| str_to_list(input, &target_elem_type),
         )),
+        (ProstType::Cast, DataType::Struct(rty), DataType::Struct(lty)) => {
+            Box::new(UnaryExpression::<StructArray, StructArray, _>::new(
+                child_expr,
+                return_type,
+                move |input| struct_cast(input, &lty, &rty),
+            ))
+        }
         (
             ProstType::Cast,
             DataType::List {

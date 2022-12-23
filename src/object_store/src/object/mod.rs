@@ -792,6 +792,7 @@ pub async fn parse_remote_object_store(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
     object_store_use_batch_delete: bool,
+    ident: &str,
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
@@ -825,16 +826,16 @@ pub async fn parse_remote_object_store(
             DiskObjectStore::new(disk.strip_prefix("disk://").unwrap()).monitored(metrics),
         ),
         "memory" => {
-            tracing::warn!("You're using Hummock in-memory remote object store. This should never be used in benchmarks and production environment.");
+            tracing::warn!("You're using in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
             ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
         }
         "memory-shared" => {
-            tracing::warn!("You're using Hummock shared in-memory remote object store. This should never be used in benchmarks and production environment.");
+            tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
             ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics))
         }
         other => {
             unimplemented!(
-                "{} hummock remote object store only supports s3, minio, disk, memory, and memory-shared for now.",
+                "{} remote object store only supports s3, minio, disk, memory, and memory-shared for now.",
                 other
             )
         }
