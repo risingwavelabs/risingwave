@@ -238,7 +238,7 @@ mod tests {
     use super::*;
 
     #[cfg(test)]
-    const WAIT_INTERVAL: Duration = Duration::from_secs(4);
+    const WAIT_INTERVAL: Duration = Duration::from_secs(5);
 
     /// Start `n` meta nodes on localhost. First node will be started at `meta_port`, 2nd node on
     /// `meta_port + 1`, ...
