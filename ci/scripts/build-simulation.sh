@@ -9,7 +9,7 @@ echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.env risedev-components.user.env
 
 echo "--- Build deterministic simulation e2e test runner"
-cargo make sslt --profile ci-sim -- --help
+cargo make sslt-build-all --profile ci-sim
 
 echo "--- Build and archive deterministic scaling simulation tests"
 NEXTEST_PROFILE=ci-scaling cargo make sarchive-scale-test --cargo-profile ci-sim
