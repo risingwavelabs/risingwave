@@ -396,7 +396,7 @@ mod tests {
     }
 
     // Get the current leader as reported by this node
-    async fn get_leader_info(meta_port: u16) {
+    async fn get_leader_addr(meta_port: u16) -> HostAddress {
         use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
         use risingwave_pb::meta::leader_service_client::LeaderServiceClient;
 
@@ -433,27 +433,37 @@ mod tests {
             .into_inner()
             .leader_addr
             .expect("Node should always know who leader is");
+        reported_leader_addr
     }
 
     // TODO: Write service discovery tests
     // All nodes should always agree on the leader
     // even though you delete the leader
     // delete a follower
-    // delete leader lease info
+    // delete leader and lease info
     // delete lease info
     // delete lease
     // add one more node node
     // Validate if the node that is supposed to be the leader also is the leader
     // Delete all leaders as reported by the leader infos
-    async fn test_leader_svc(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
+    #[tokio::test]
+    async fn test_leader_svc() {
+        let number_of_nodes = 10;
+        let meta_port = 1250;
         let node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
 
-        // we should have 1 leader on startup
-        let leader_count = number_of_leaders(number_of_nodes, meta_port, compute_port).await;
+        // All nodes should agree on who the leader is
+        let mut reported_leader_addr: Vec<HostAddress> = vec![];
+        for i in 0..number_of_nodes {
+            let leader_addr = get_leader_addr(meta_port + i).await;
+            reported_leader_addr.push(leader_addr);
+        }
+        reported_leader_addr.dedup();
         assert_eq!(
-            leader_count, 1,
-            "Expected to have 1 leader, instead got {} leaders",
-            leader_count
+            1,
+            reported_leader_addr.len(),
+            "0 All nodes should agree on who leader is. Instead we got the following leaders {:?}",
+            reported_leader_addr
         );
 
         // FIXME: Delete lease and/or leader info after PR is merged
@@ -465,15 +475,24 @@ mod tests {
             .send(())
             .expect("Sending shutdown to leader should not fail");
         sleep(WAIT_INTERVAL).await;
+        let mut reported_leader_addr: Vec<HostAddress> = vec![];
+        for i in 1..number_of_nodes {
+            let leader_addr = get_leader_addr(meta_port + i).await;
+            reported_leader_addr.push(leader_addr);
+        }
+        reported_leader_addr.dedup();
+        assert_eq!(
+            1,
+            reported_leader_addr.len(),
+            "1 All nodes should agree on who leader is. Instead we got the following leaders {:?}",
+            reported_leader_addr
+        );
 
-        // expect that we still have 1 leader
-        // skipping first meta_port, since that node was former leader and got killed
-        let leaders = number_of_leaders(number_of_nodes - 1, meta_port + 1, compute_port).await;
+        // send shutdown to all nodes, even if already shut down
         for (join_handle, shutdown_tx) in node_controllers {
             let _ = shutdown_tx.send(());
             join_handle.await.unwrap();
         }
-        leaders
     }
 
     /// returns number of leaders after failover
