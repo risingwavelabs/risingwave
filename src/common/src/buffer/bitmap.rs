@@ -385,12 +385,12 @@ impl BitAnd for Bitmap {
 impl BitAndAssign<&Bitmap> for Bitmap {
     fn bitand_assign(&mut self, rhs: &Bitmap) {
         assert_eq!(self.num_bits, rhs.num_bits);
-        let mut num_high_bits = 0;
+        let mut count_ones = 0;
         for (a, &b) in self.bits.iter_mut().zip(rhs.bits.iter()) {
             *a &= b;
-            num_high_bits += a.count_ones();
+            count_ones += a.count_ones();
         }
-        self.num_high_bits = num_high_bits as usize;
+        self.count_ones = count_ones as usize;
     }
 }
 
@@ -426,12 +426,12 @@ impl<'b> BitOr<&'b Bitmap> for Bitmap {
 impl BitOrAssign<&Bitmap> for Bitmap {
     fn bitor_assign(&mut self, rhs: &Bitmap) {
         assert_eq!(self.num_bits, rhs.num_bits);
-        let mut num_high_bits = 0;
+        let mut count_ones = 0;
         for (a, &b) in self.bits.iter_mut().zip(rhs.bits.iter()) {
             *a |= b;
-            num_high_bits += a.count_ones();
+            count_ones += a.count_ones();
         }
-        self.num_high_bits = num_high_bits as usize;
+        self.count_ones = count_ones as usize;
     }
 }
 

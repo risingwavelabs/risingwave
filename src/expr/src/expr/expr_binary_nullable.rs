@@ -96,7 +96,7 @@ impl Expression for BinaryShortCircuitExpression {
 
         let mut bitmap = match input.get_visibility_ref() {
             Some(vis) => vis.clone(),
-            None => Bitmap::all_high_bits(input.capacity()),
+            None => Bitmap::ones(input.capacity()),
         };
         bitmap &= left.null_bitmap();
         bitmap &= right.null_bitmap();

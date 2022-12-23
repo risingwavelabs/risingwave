@@ -199,22 +199,22 @@ pub fn new_unary_expr(
         )),
         (ProstType::IsTrue, _, _) => Box::new(BooleanExpression::new(
             child_expr,
-            |a| BoolArray::new(a.to_bitmap(), Bitmap::all_high_bits(a.len())),
+            |a| BoolArray::new(a.to_bitmap(), Bitmap::ones(a.len())),
             is_true,
         )),
         (ProstType::IsNotTrue, _, _) => Box::new(BooleanExpression::new(
             child_expr,
-            |a| BoolArray::new(!a.to_bitmap(), Bitmap::all_high_bits(a.len())),
+            |a| BoolArray::new(!a.to_bitmap(), Bitmap::ones(a.len())),
             is_not_true,
         )),
         (ProstType::IsFalse, _, _) => Box::new(BooleanExpression::new(
             child_expr,
-            |a| BoolArray::new(!a.data() & a.null_bitmap(), Bitmap::all_high_bits(a.len())),
+            |a| BoolArray::new(!a.data() & a.null_bitmap(), Bitmap::ones(a.len())),
             is_false,
         )),
         (ProstType::IsNotFalse, _, _) => Box::new(BooleanExpression::new(
             child_expr,
-            |a| BoolArray::new(a.data() | !a.null_bitmap(), Bitmap::all_high_bits(a.len())),
+            |a| BoolArray::new(a.data() | !a.null_bitmap(), Bitmap::ones(a.len())),
             is_not_false,
         )),
         (ProstType::IsNull, _, _) => Box::new(IsNullExpression::new(child_expr)),

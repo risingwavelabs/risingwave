@@ -187,7 +187,7 @@ where
 
         let mut bitmap = match data_chunk.get_visibility_ref() {
             Some(vis) => vis.clone(),
-            None => Bitmap::all_high_bits(data_chunk.capacity()),
+            None => Bitmap::ones(data_chunk.capacity()),
         };
         bitmap &= left.null_bitmap();
         bitmap &= right.null_bitmap();
