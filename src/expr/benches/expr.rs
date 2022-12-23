@@ -153,6 +153,15 @@ fn bench_expr(c: &mut Criterion) {
                     .take(CHUNK_SIZE),
             )
             .into(),
+            // 25: timestamp format
+            Utf8Array::from_iter_display(
+                ["HH12:MI:SS"]
+                    .into_iter()
+                    .cycle()
+                    .take(CHUNK_SIZE)
+                    .map(Some),
+            )
+            .into(),
         ],
         CHUNK_SIZE,
     );
@@ -191,6 +200,7 @@ fn bench_expr(c: &mut Criterion) {
     const TIMESTAMP_STRING: i32 = 22;
     const TIMESTAMPZ_STRING: i32 = 23;
     const INTERVAL_STRING: i32 = 24;
+    const TIMESTAMP_FORMAT: i32 = 25;
 
     c.bench_function("inputref", |bencher| {
         let inputref = inputrefs[0].clone().boxed();
@@ -224,6 +234,7 @@ fn bench_expr(c: &mut Criterion) {
                 .iter()
                 .enumerate()
                 .map(|(idx, t)| match (sig.func, idx) {
+                    (ExprType::ToChar, 1) => TIMESTAMP_FORMAT,
                     (ExprType::AtTimeZone, 1) => TIMEZONE,
                     (ExprType::DateTrunc, 0) => TIME_FIELD,
                     (ExprType::DateTrunc, 2) => TIMEZONE,
