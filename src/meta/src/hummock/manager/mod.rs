@@ -1484,13 +1484,13 @@ where
         epoch: HummockEpoch,
         sstables: Vec<impl Into<ExtendedSstableInfo>>,
         sst_to_context: HashMap<HummockSstableId, HummockContextId>,
-    ) -> Result<()> {
+    ) -> Result<Option<HummockSnapshot>> {
         let mut sstables = sstables.into_iter().map(|s| s.into()).collect_vec();
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         // Prevent commit new epochs if this flag is set
         if versioning_guard.disable_commit_epochs {
-            return Ok(());
+            return Ok(None);
         }
         let (raw_compaction_groups, compaction_group_index) =
             self.compaction_groups_and_index().await;
@@ -1684,12 +1684,6 @@ where
 
         self.env
             .notification_manager()
-            .notify_frontend_without_version(
-                Operation::Update, // Frontends don't care about operation.
-                Info::HummockSnapshot(snapshot),
-            );
-        self.env
-            .notification_manager()
             .notify_hummock_without_version(
                 Operation::Add,
                 Info::HummockVersionDeltas(risingwave_pb::hummock::HummockVersionDeltas {
@@ -1714,11 +1708,11 @@ where
         {
             self.check_state_consistency().await;
         }
-        Ok(())
+        Ok(Some(snapshot))
     }
 
     /// We don't commit an epoch without checkpoint. We will only update the `max_current_epoch`.
-    pub fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> Result<()> {
+    pub fn update_current_epoch(&self, max_current_epoch: HummockEpoch) -> HummockSnapshot {
         // We only update `max_current_epoch`!
         let prev_snapshot = self.latest_snapshot.rcu(|snapshot| HummockSnapshot {
             committed_epoch: snapshot.committed_epoch,
@@ -1727,16 +1721,10 @@ where
         assert!(prev_snapshot.current_epoch < max_current_epoch);
 
         tracing::trace!("new current epoch {}", max_current_epoch);
-        self.env
-            .notification_manager()
-            .notify_frontend_without_version(
-                Operation::Update, // Frontends don't care about operation.
-                Info::HummockSnapshot(HummockSnapshot {
-                    committed_epoch: prev_snapshot.committed_epoch,
-                    current_epoch: max_current_epoch,
-                }),
-            );
-        Ok(())
+        HummockSnapshot {
+            committed_epoch: prev_snapshot.committed_epoch,
+            current_epoch: max_current_epoch,
+        }
     }
 
     pub async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
