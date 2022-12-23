@@ -109,7 +109,7 @@ impl DataChunk {
     /// `cardinality` returns the number of visible tuples
     pub fn cardinality(&self) -> usize {
         match &self.vis2 {
-            Vis::Bitmap(b) => b.num_high_bits(),
+            Vis::Bitmap(b) => b.count_ones(),
             Vis::Compact(len) => *len,
         }
     }
