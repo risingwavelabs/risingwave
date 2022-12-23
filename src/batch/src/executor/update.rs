@@ -30,10 +30,11 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
+
 /// [`UpdateExecutor`] implements table updation with values from its child executor and given
 /// expressions.
-// TODO: multiple `UPDATE`s in a single epoch may cause problems. Need validation on materialize.
-// TODO: concurrent `UPDATE` may cause problems. A scheduler might be required.
+// Note: multiple `UPDATE`s in a single epoch, or concurrent `UPDATE`s may lead to conflicting
+// records. This is validated and filtered on the first `Materialize`.
 pub struct UpdateExecutor {
     /// Target table id.
     table_id: TableId,

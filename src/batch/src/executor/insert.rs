@@ -31,6 +31,7 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
+
 /// [`InsertExecutor`] implements table insertion with values from its child executor.
 pub struct InsertExecutor {
     /// Target table id.

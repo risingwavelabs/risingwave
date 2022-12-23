@@ -29,7 +29,8 @@ use crate::executor::{
 use crate::task::BatchTaskContext;
 
 /// [`DeleteExecutor`] implements table deletion with values from its child executor.
-// TODO: concurrent `DELETE` may cause problems. A scheduler might be required.
+// Note: multiple `DELETE`s in a single epoch, or concurrent `DELETE`s may lead to conflicting
+// records. This is validated and filtered on the first `Materialize`.
 pub struct DeleteExecutor {
     /// Target table id.
     table_id: TableId,
