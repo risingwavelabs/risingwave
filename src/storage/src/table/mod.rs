@@ -58,7 +58,7 @@ impl Distribution {
     pub fn all_vnodes(dist_key_indices: Vec<usize>) -> Self {
         /// A bitmap that all vnodes are set.
         static ALL_VNODES: LazyLock<Arc<Bitmap>> =
-            LazyLock::new(|| Bitmap::all_high_bits(VirtualNode::COUNT).into());
+            LazyLock::new(|| Bitmap::ones(VirtualNode::COUNT).into());
         Self {
             dist_key_indices,
             vnodes: ALL_VNODES.clone(),
