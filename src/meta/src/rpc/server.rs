@@ -432,24 +432,4 @@ mod tests {
             leader_count
         );
     }
-
-    #[tokio::test]
-    async fn test_failover_10() {
-        let leader_count = test_failover(10, 1300, 1400).await;
-        assert_eq!(
-            leader_count, 1,
-            "Expected to have 1 leader, instead got {} leaders",
-            leader_count
-        );
-    }
-
-    #[tokio::test]
-    async fn test_failover_100() {
-        let leader_count = test_failover(100, 1500, 1600).await;
-        assert_eq!(
-            leader_count, 1,
-            "Expected to have 1 leader, instead got {} leaders",
-            leader_count
-        );
-    }
 }
