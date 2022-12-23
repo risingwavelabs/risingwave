@@ -395,8 +395,12 @@ mod tests {
         }
     }
 
-    // Get the current leader as reported by this node
-    async fn get_leader_addr(meta_port: u16) -> HostAddress {
+    /// Get the current leader as reported by this node
+    ///
+    /// ## Return
+    /// None if it can not reach the node at localhost: `meta_port`, else the reported leader
+    /// address
+    async fn get_leader_addr(meta_port: u16) -> Option<HostAddress> {
         use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
         use risingwave_pb::meta::leader_service_client::LeaderServiceClient;
 
@@ -409,7 +413,7 @@ mod tests {
         let endpoint = Endpoint::from_shared(meta_addr.to_string())
             .unwrap()
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
-        let channel = endpoint
+        let channel = match endpoint
             .http2_keep_alive_interval(Duration::from_secs(60))
             .keep_alive_timeout(Duration::from_secs(60))
             .connect_timeout(Duration::from_secs(5))
@@ -421,8 +425,10 @@ mod tests {
                     meta_addr,
                     e
                 );
-            })
-            .unwrap();
+            }) {
+            Ok(c) => c,
+            Err(_) => return None,
+        };
 
         let leader_client = LeaderServiceClient::new(channel);
         let reported_leader_addr: HostAddress = leader_client
@@ -433,7 +439,7 @@ mod tests {
             .into_inner()
             .leader_addr
             .expect("Node should always know who leader is");
-        reported_leader_addr
+        Some(reported_leader_addr)
     }
 
     // TODO: Write service discovery tests
@@ -446,53 +452,77 @@ mod tests {
     // add one more node node
     // Validate if the node that is supposed to be the leader also is the leader
     // Delete all leaders as reported by the leader infos
+    // FIXME: Delete lease and/or leader info after PR is merged
+    // https://github.com/risingwavelabs/risingwave/pull/7022
+
+    /// Deletes all leader nodes one after another
+    /// Asserts that all nodes agree on who leader is
+    /// Gets next leader by using leader service from nodes
     #[tokio::test]
-    async fn test_leader_svc() {
-        let number_of_nodes = 10;
+    async fn test_leader_svc_delete_everything() {
+        let number_of_nodes = 5;
         let meta_port = 1250;
         let node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
 
-        // All nodes should agree on who the leader is
+        // All nodes should agree on who the leader is on beginning
         let mut reported_leader_addr: Vec<HostAddress> = vec![];
         for i in 0..number_of_nodes {
-            let leader_addr = get_leader_addr(meta_port + i).await;
-            reported_leader_addr.push(leader_addr);
+            if let Some(leader_addr) = get_leader_addr(meta_port + i).await {
+                reported_leader_addr.push(leader_addr);
+            }
         }
         reported_leader_addr.dedup();
         assert_eq!(
             1,
             reported_leader_addr.len(),
-            "0 All nodes should agree on who leader is. Instead we got the following leaders {:?}",
+            "After Setup: All nodes should agree on who leader is. Instead we got the following leaders {:?}",
             reported_leader_addr
         );
 
-        // FIXME: Delete lease and/or leader info after PR is merged
-        // https://github.com/risingwavelabs/risingwave/pull/7022
-
-        // kill leader to trigger failover
-        let leader_shutdown_sender = &node_controllers[0].1;
-        leader_shutdown_sender
-            .send(())
-            .expect("Sending shutdown to leader should not fail");
-        sleep(WAIT_INTERVAL).await;
-        let mut reported_leader_addr: Vec<HostAddress> = vec![];
+        // delete all nodes on after another
+        let mut current_leader = reported_leader_addr.first().unwrap().clone();
         for i in 1..number_of_nodes {
-            let leader_addr = get_leader_addr(meta_port + i).await;
-            reported_leader_addr.push(leader_addr);
-        }
-        reported_leader_addr.dedup();
-        assert_eq!(
-            1,
-            reported_leader_addr.len(),
-            "1 All nodes should agree on who leader is. Instead we got the following leaders {:?}",
-            reported_leader_addr
-        );
+            // Shutdown current reported leader
+            let leader_port = current_leader.port as u16;
+            let offset = leader_port - meta_port;
+            let _ = &node_controllers[offset as usize]
+                .1
+                .send(())
+                .expect("Sending shutdown to leader should not fail");
+            sleep(WAIT_INTERVAL).await;
 
-        // send shutdown to all nodes, even if already shut down
+            // Check if all nodes agree on who leader is
+            let mut reported_leader_addr: Vec<HostAddress> = vec![];
+            for i in 0..number_of_nodes {
+                if let Some(leader_addr) = get_leader_addr(meta_port + i).await {
+                    reported_leader_addr.push(leader_addr);
+                }
+            }
+            reported_leader_addr.dedup();
+            assert_eq!(
+                1,
+                reported_leader_addr.len(),
+                "Iteration {}: All nodes should agree on who leader is. Instead we got the following leaders {:?}",
+               i, reported_leader_addr
+            );
+            // update leader
+            current_leader = reported_leader_addr.first().unwrap().clone();
+        }
+
+        // send shutdown to all nodes. There should only be one more node left
+        let mut active_nodes = 0;
         for (join_handle, shutdown_tx) in node_controllers {
-            let _ = shutdown_tx.send(());
+            active_nodes = match shutdown_tx.send(()) {
+                Ok(_) => active_nodes + 1,
+                Err(_) => active_nodes,
+            };
             join_handle.await.unwrap();
         }
+        assert_eq!(
+            active_nodes, 1,
+            "After end there should only be one meta node left, but there were {} nodes alive",
+            active_nodes
+        );
     }
 
     /// returns number of leaders after failover
