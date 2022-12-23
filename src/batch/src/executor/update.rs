@@ -121,8 +121,7 @@ impl UpdateExecutor {
 
         #[for_await]
         for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?.compact();
-            let len = data_chunk.cardinality();
+            let data_chunk = data_chunk?;
 
             let updated_data_chunk = {
                 let columns: Vec<_> = self
@@ -131,7 +130,7 @@ impl UpdateExecutor {
                     .map(|expr| expr.eval(&data_chunk).map(Column::new))
                     .try_collect()?;
 
-                DataChunk::new(columns, len)
+                DataChunk::new(columns, data_chunk.vis().clone())
             };
 
             for (row_delete, row_insert) in data_chunk.rows().zip_eq(updated_data_chunk.rows()) {
