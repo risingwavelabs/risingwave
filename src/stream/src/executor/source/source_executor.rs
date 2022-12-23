@@ -521,7 +521,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use bytes::Bytes;
     use futures::StreamExt;
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
@@ -593,7 +592,7 @@ mod tests {
             MemoryStateStore::new(),
         )
         .await;
-        let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+        let vnodes = Bitmap::from_bytes(&[0b11111111]);
 
         let executor = SourceExecutor::new(
             ActorContext::create(0x3f3f3f),
@@ -698,7 +697,7 @@ mod tests {
         )
         .await;
 
-        let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+        let vnodes = Bitmap::from_bytes(&[0b11111111]);
         let executor = SourceExecutor::new(
             ActorContext::create(0x3f3f3f),
             source_builder,
@@ -822,7 +821,7 @@ mod tests {
         let schema = get_schema(&column_ids, &source_desc);
         let pk_indices = vec![0_usize];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
-        let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+        let vnodes = Bitmap::from_bytes(&[0b11111111]);
         let source_state_handler = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             mem_state_store.clone(),

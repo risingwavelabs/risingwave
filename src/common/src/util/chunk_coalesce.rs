@@ -80,7 +80,7 @@ impl DataChunkBuilder {
         let mut new_return_offset = input_chunk.offset;
         match input_chunk.data_chunk.visibility() {
             Some(vis) => {
-                for vis in vis.iter_from(input_chunk.offset) {
+                for vis in vis.iter().skip(input_chunk.offset) {
                     new_return_offset += 1;
                     if !vis {
                         continue;
