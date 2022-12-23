@@ -1965,11 +1965,15 @@ mod tests {
             .unwrap()
         }
 
-        fn create_join_executor(&self, has_non_equi_cond: bool, null_safe: bool) -> BoxedExecutor {
+        fn create_join_executor_with_chunk_size_and_executors(
+            &self,
+            has_non_equi_cond: bool,
+            null_safe: bool,
+            chunk_size: usize,
+            left_child: BoxedExecutor,
+            right_child: BoxedExecutor,
+        ) -> BoxedExecutor {
             let join_type = self.join_type;
-
-            let left_child = self.create_left_executor();
-            let right_child = self.create_right_executor();
 
             let output_indices = (0..match join_type {
                 JoinType::LeftSemi | JoinType::LeftAnti => left_child.schema().fields().len(),
@@ -1994,12 +1998,40 @@ mod tests {
                 vec![null_safe],
                 cond,
                 "HashJoinExecutor".to_string(),
-                CHUNK_SIZE,
+                chunk_size,
             ))
         }
 
         async fn do_test(&self, expected: DataChunk, has_non_equi_cond: bool, null_safe: bool) {
-            let join_executor = self.create_join_executor(has_non_equi_cond, null_safe);
+            let left_executor = self.create_left_executor();
+            let right_executor = self.create_right_executor();
+            self.do_test_with_chunk_size_and_executors(
+                expected,
+                has_non_equi_cond,
+                null_safe,
+                self::CHUNK_SIZE,
+                left_executor,
+                right_executor,
+            )
+            .await
+        }
+
+        async fn do_test_with_chunk_size_and_executors(
+            &self,
+            expected: DataChunk,
+            has_non_equi_cond: bool,
+            null_safe: bool,
+            chunk_size: usize,
+            left_executor: BoxedExecutor,
+            right_executor: BoxedExecutor,
+        ) {
+            let join_executor = self.create_join_executor_with_chunk_size_and_executors(
+                has_non_equi_cond,
+                null_safe,
+                chunk_size,
+                left_executor,
+                right_executor,
+            );
 
             let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
 
@@ -2025,6 +2057,8 @@ mod tests {
             }
 
             let result_chunk = data_chunk_merger.finish().unwrap();
+            println!("expected: {:?}", expected);
+            println!("result: {:?}", result_chunk);
 
             // TODO: Replace this with unsorted comparison
             // assert_eq!(expected, result_chunk);
@@ -2377,6 +2411,62 @@ mod tests {
         );
 
         test_fixture.do_test(expected_chunk, true, false).await;
+    }
+
+    /// Test behaviour when we spill with already matched rows
+    #[tokio::test]
+    async fn test_left_semi_join_with_non_equi_condition_split() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Float32),
+            ],
+        };
+
+        // Build side
+        let mut left_executor = MockExecutor::new(schema);
+        left_executor.add(DataChunk::from_pretty(
+            "i f
+                 1 1.0
+                 1 1.0
+                 1 1.0
+                 1 1.0
+                 2 1.0",
+        ));
+
+        // Probe side
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Float64),
+            ],
+        };
+        let mut right_executor = MockExecutor::new(schema);
+        right_executor.add(DataChunk::from_pretty(
+            "i F
+                 1 2.0
+                 1 2.0
+                 1 2.0
+                 1 2.0
+                 2 2.0",
+        ));
+
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftSemi);
+        let expected_chunk = DataChunk::from_pretty(
+            "i   f
+             4   6.6",
+        );
+
+        test_fixture
+            .do_test_with_chunk_size_and_executors(
+                expected_chunk,
+                true,
+                false,
+                3,
+                Box::new(left_executor),
+                Box::new(right_executor),
+            )
+            .await;
     }
 
     #[tokio::test]
