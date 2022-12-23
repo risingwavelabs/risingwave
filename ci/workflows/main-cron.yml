@@ -25,7 +25,7 @@ steps:
     key: "build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
+      - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -39,7 +39,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GITHUB_TOKEN: github-token
-      - docker-compose#v3.9.0:
+      - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -53,7 +53,7 @@ steps:
     key: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
+      - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -65,7 +65,7 @@ steps:
     key: "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
+      - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -79,7 +79,7 @@ steps:
       - "docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
+      - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -94,7 +94,7 @@ steps:
       - "build-other"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
+      - docker-compose#v4.9.0:
           run: source-test-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -110,7 +110,7 @@ steps:
       - seek-oss/aws-sm#v2.3.1:
           env:
             CODECOV_TOKEN: my-codecov-token
-      - docker-compose#v3.9.0:
+      - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           environment:
@@ -125,13 +125,11 @@ steps:
     plugins:
       - ./ci/plugins/swapfile
       - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
+      - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
           environment:
-            - RUN_SQLSMITH: 1
-            - SQLSMITH_COUNT: 1000
             - RW_RANDOM_SEED_SQLSMITH: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 20
@@ -141,7 +139,7 @@ steps:
     command: "ci/scripts/deterministic-unit-test.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
+      - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -153,7 +151,7 @@ steps:
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
+      - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -165,7 +163,7 @@ steps:
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
+      - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -178,7 +176,7 @@ steps:
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
+      - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -190,7 +188,7 @@ steps:
     command: "ci/scripts/misc-check.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v3.9.0:
+      - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
       - shellcheck#v1.2.0:

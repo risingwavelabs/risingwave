@@ -98,7 +98,7 @@ mod tests {
             assert!(*b, "vnode {} should be set", idx);
         }
 
-        let vnodes = bitmaps.values().map(|bitmap| bitmap.num_high_bits());
+        let vnodes = bitmaps.values().map(|bitmap| bitmap.count_ones());
         let (min, max) = vnodes.minmax().into_option().unwrap();
 
         assert!((max - min) <= 1, "min {} max {}", min, max);
@@ -249,7 +249,7 @@ mod tests {
             check_bitmaps(&result);
 
             let (_, bitmap) = result.iter().exactly_one().unwrap();
-            assert!(bitmap.is_all_set());
+            assert!(bitmap.all());
         }
     }
 

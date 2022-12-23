@@ -322,7 +322,7 @@ impl PlanRoot {
                 ProjectEliminateRule::create(),
                 // project-join merge should be applied after merge
                 // and eliminate
-                ProjectJoinRule::create(),
+                ProjectJoinMergeRule::create(),
                 AggProjectMergeRule::create(),
             ],
             ApplyOrder::BottomUp,

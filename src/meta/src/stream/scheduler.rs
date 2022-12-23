@@ -400,7 +400,7 @@ mod test {
             assert_ne!(fragment.vnode_mapping, None,);
             let mut vnode_sum = 0;
             for actor in fragment.actors {
-                vnode_sum += Bitmap::from(actor.get_vnode_bitmap()?).num_high_bits();
+                vnode_sum += Bitmap::from(actor.get_vnode_bitmap()?).count_ones();
             }
             assert_eq!(vnode_sum, VirtualNode::COUNT);
         }

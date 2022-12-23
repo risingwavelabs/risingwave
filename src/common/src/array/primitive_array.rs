@@ -153,7 +153,7 @@ impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let data: Vec<T> = iter.into_iter().collect();
         PrimitiveArray {
-            bitmap: Bitmap::all_high_bits(data.len()),
+            bitmap: Bitmap::ones(data.len()),
             data,
         }
     }
