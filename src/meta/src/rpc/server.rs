@@ -475,7 +475,7 @@ mod tests {
         assert_eq!(
             1,
             reported_leader_addr.len(),
-            "After Setup: All nodes should agree on who leader is. Instead we got the following leaders {:?}",
+            "Iteration 0: All nodes should agree on who leader is. Instead we got the following leaders {:?}",
             reported_leader_addr
         );
 
@@ -520,7 +520,7 @@ mod tests {
         }
         assert_eq!(
             active_nodes, 1,
-            "After end there should only be one meta node left, but there were {} nodes alive",
+            "After test there should only be one meta node left, but there were {} nodes alive",
             active_nodes
         );
     }
