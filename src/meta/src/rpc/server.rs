@@ -457,7 +457,7 @@ mod tests {
 
     /// Deletes all leader nodes one after another
     /// Asserts that all nodes agree on who leader is
-    /// Gets next leader by using leader service from nodes
+    /// Gets next leader to delete by using leader service from nodes
     #[tokio::test]
     async fn test_leader_svc_delete_everything() {
         let number_of_nodes = 5;
