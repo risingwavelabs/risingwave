@@ -20,6 +20,7 @@ use std::ops::{Deref, RangeBounds};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use futures::future::try_join_all;
 use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
@@ -610,20 +611,26 @@ impl HummockVersionReader {
                 );
 
                 let mut sstables = vec![];
-                for sstable_info in &level.table_infos[start_table_idx..=end_table_idx] {
-                    if sstable_info
-                        .table_ids
-                        .binary_search(&read_options.table_id.table_id)
-                        .is_err()
-                    {
-                        continue;
-                    }
-                    let sstable = self
-                        .sstable_store
-                        .sstable(sstable_info, &mut local_stats)
+                let fetch_meta_req = level.table_infos[start_table_idx..=end_table_idx]
+                    .iter()
+                    .filter(|sstable_info| {
+                        sstable_info
+                            .table_ids
+                            .binary_search(&read_options.table_id.table_id)
+                            .is_ok()
+                    })
+                    .collect_vec();
+                let fetch_meta_resp = try_join_all(fetch_meta_req.iter().map(|sstable_info| {
+                    self.sstable_store
+                        .sstable_syncable(sstable_info, &local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
-                        .await?;
-
+                }))
+                .await?;
+                for (sstable_info, (sstable, local_cache_meta_block_miss)) in fetch_meta_req
+                    .into_iter()
+                    .zip_eq(fetch_meta_resp.into_iter())
+                {
+                    local_stats.apply_meta_fetch(local_cache_meta_block_miss);
                     if let Some(key_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(sstable.value(), *key_hash, &mut local_stats) {
                             continue;
@@ -654,12 +661,15 @@ impl HummockVersionReader {
                 }
                 // Overlapping
                 let mut iters = Vec::new();
-                for table_info in table_infos.into_iter().rev() {
-                    let sstable = self
-                        .sstable_store
-                        .sstable(table_info, &mut local_stats)
-                        .in_span(Span::enter_with_local_parent("get_sstable"))
-                        .await?;
+                let fetch_meta_resp =
+                    try_join_all(table_infos.into_iter().rev().map(|sstable_info| {
+                        self.sstable_store
+                            .sstable_syncable(sstable_info, &local_stats)
+                            .in_span(Span::enter_with_local_parent("get_sstable"))
+                    }))
+                    .await?;
+                for (sstable, local_cache_meta_block_miss) in fetch_meta_resp {
+                    local_stats.apply_meta_fetch(local_cache_meta_block_miss);
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
                         {
