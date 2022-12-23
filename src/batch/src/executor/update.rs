@@ -105,6 +105,7 @@ impl UpdateExecutor {
 
         // Transform the data chunk to a stream chunk, then write to the source.
         let mut write_chunk = |chunk: DataChunk| -> Result<()> {
+            // TODO: if the primary key is updated, we should use plain `+,-` instead of `U+,U-`.
             let ops = [Op::UpdateDelete, Op::UpdateInsert]
                 .into_iter()
                 .cycle()
