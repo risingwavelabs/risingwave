@@ -36,7 +36,7 @@
 // allow `zip` for performance reasons
 #![allow(clippy::disallowed_methods)]
 
-use std::iter;
+use std::iter::{self, TrustedLen};
 use std::ops::{BitAnd, BitOr, Not, RangeInclusive};
 
 use risingwave_pb::common::buffer::CompressionType;
@@ -46,28 +46,31 @@ use risingwave_pb::common::Buffer as ProstBuffer;
 pub struct BitmapBuilder {
     len: usize,
     data: Vec<usize>,
-    num_high_bits: usize,
+    count_ones: usize,
 }
 
 const BITS: usize = usize::BITS as usize;
 
 impl BitmapBuilder {
+    /// Creates a new empty bitmap with at least the specified capacity.
     pub fn with_capacity(capacity: usize) -> BitmapBuilder {
         BitmapBuilder {
             len: 0,
             data: Vec::with_capacity(Bitmap::vec_len(capacity)),
-            num_high_bits: 0,
+            count_ones: 0,
         }
     }
 
+    /// Creates a new bitmap with all bits set to 0.
     pub fn zeroed(len: usize) -> BitmapBuilder {
         BitmapBuilder {
             len,
             data: vec![0; Bitmap::vec_len(len)],
-            num_high_bits: 0,
+            count_ones: 0,
         }
     }
 
+    /// Writes a new value into a single bit.
     pub fn set(&mut self, n: usize, val: bool) {
         assert!(n < self.len);
 
@@ -76,16 +79,17 @@ impl BitmapBuilder {
         match (*byte & mask != 0, val) {
             (true, false) => {
                 *byte &= !mask;
-                self.num_high_bits -= 1;
+                self.count_ones -= 1;
             }
             (false, true) => {
                 *byte |= mask;
-                self.num_high_bits += 1;
+                self.count_ones += 1;
             }
             _ => {}
         }
     }
 
+    /// Tests a single bit.
     pub fn is_set(&self, n: usize) -> bool {
         assert!(n < self.len);
         let byte = &self.data[n / BITS];
@@ -93,16 +97,18 @@ impl BitmapBuilder {
         *byte & mask != 0
     }
 
+    /// Appends a single bit to the back.
     pub fn append(&mut self, bit_set: bool) -> &mut Self {
         if self.len % BITS == 0 {
             self.data.push(0);
         }
         self.data[self.len / BITS] |= (bit_set as usize) << (self.len % BITS);
-        self.num_high_bits += bit_set as usize;
+        self.count_ones += bit_set as usize;
         self.len += 1;
         self
     }
 
+    /// Appends `n` bits to the back.
     pub fn append_n(&mut self, mut n: usize, bit_set: bool) -> &mut Self {
         while n != 0 && self.len % BITS != 0 {
             self.append(bit_set);
@@ -118,11 +124,12 @@ impl BitmapBuilder {
             *self.data.last_mut().unwrap() &= (1 << (self.len % BITS)) - 1;
         }
         if bit_set {
-            self.num_high_bits += n;
+            self.count_ones += n;
         }
         self
     }
 
+    /// Removes the last bit.
     pub fn pop(&mut self) -> Option<()> {
         if self.len == 0 {
             return None;
@@ -135,12 +142,13 @@ impl BitmapBuilder {
         Some(())
     }
 
+    /// Appends a bitmap to the back.
     pub fn append_bitmap(&mut self, other: &Bitmap) -> &mut Self {
         if self.len % BITS == 0 {
             // self is aligned, so just append the bytes
             self.len += other.len();
             self.data.extend_from_slice(&other.bits);
-            self.num_high_bits += other.num_high_bits;
+            self.count_ones += other.count_ones;
         } else {
             for bit in other.iter() {
                 self.append(bit);
@@ -153,7 +161,7 @@ impl BitmapBuilder {
         Bitmap {
             num_bits: self.len(),
             bits: self.data.into(),
-            num_high_bits: self.num_high_bits,
+            count_ones: self.count_ones,
         }
     }
 
@@ -170,33 +178,28 @@ pub struct Bitmap {
     num_bits: usize,
 
     // The number of high bits in the bitmap.
-    num_high_bits: usize,
+    count_ones: usize,
 
     bits: Box<[usize]>,
 }
 
 impl std::fmt::Debug for Bitmap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[")?;
-        let mut is_first = true;
         for data in self.iter() {
-            if is_first {
-                write!(f, "{}", data)?;
-            } else {
-                write!(f, ", {}", data)?;
-            }
-            is_first = false;
+            write!(f, "{}", if data { '1' } else { '0' })?;
         }
-        write!(f, "]")
+        Ok(())
     }
 }
 
 impl Bitmap {
+    /// Creates a new bitmap with all bits set to 0.
     pub fn zeros(len: usize) -> Self {
         BitmapBuilder::zeroed(len).finish()
     }
 
-    pub fn all_high_bits(num_bits: usize) -> Self {
+    /// Creates a new bitmap with all bits set to 1.
+    pub fn ones(num_bits: usize) -> Self {
         let len = Self::vec_len(num_bits);
         let mut bits = vec![usize::MAX; len];
         if num_bits % BITS != 0 {
@@ -205,21 +208,23 @@ impl Bitmap {
         Self {
             bits: bits.into(),
             num_bits,
-            num_high_bits: num_bits,
+            count_ones: num_bits,
         }
     }
 
-    fn from_slice_with_len(buf: Vec<usize>, num_bits: usize) -> Self {
+    /// Creates a new bitmap from vector.
+    fn from_vec_with_len(buf: Vec<usize>, num_bits: usize) -> Self {
         debug_assert_eq!(buf.len(), Self::vec_len(num_bits));
-        let num_high_bits = buf.iter().map(|&x| x.count_ones()).sum::<u32>() as usize;
-        debug_assert!(num_high_bits <= num_bits);
+        let count_ones = buf.iter().map(|&x| x.count_ones()).sum::<u32>() as usize;
+        debug_assert!(count_ones <= num_bits);
         Self {
             num_bits,
             bits: buf.into(),
-            num_high_bits,
+            count_ones,
         }
     }
 
+    /// Creates a new bitmap from bytes.
     pub fn from_bytes(buf: &[u8]) -> Self {
         let num_bits = buf.len() * 8;
         let mut bits = Vec::with_capacity(Self::vec_len(num_bits));
@@ -229,7 +234,7 @@ impl Bitmap {
         };
         slice[..buf.len()].copy_from_slice(buf);
         slice[buf.len()..].fill(0);
-        Self::from_slice_with_len(bits, num_bits)
+        Self::from_vec_with_len(bits, num_bits)
     }
 
     /// Return the next set bit index on or after `bit_idx`.
@@ -237,10 +242,12 @@ impl Bitmap {
         (bit_idx..self.len()).find(|&idx| unsafe { self.is_set_unchecked(idx) })
     }
 
-    pub fn num_high_bits(&self) -> usize {
-        self.num_high_bits
+    /// Counts the number of bits set to 1.
+    pub fn count_ones(&self) -> usize {
+        self.count_ones
     }
 
+    /// Returns the length of vector to store `num_bits` bits.
     fn vec_len(num_bits: usize) -> usize {
         (num_bits + BITS - 1) / BITS
     }
@@ -254,26 +261,30 @@ impl Bitmap {
 
     /// Returns true if the `Bitmap` has a length of 0.
     pub fn is_empty(&self) -> bool {
-        self.bits.is_empty()
+        self.num_bits == 0
     }
 
+    /// Returns true if the bit at `idx` is set, without doing bounds checking.
+    ///
     /// # Safety
     ///
-    /// Makes clippy happy.
+    /// Index must be in range.
     pub unsafe fn is_set_unchecked(&self, idx: usize) -> bool {
         self.bits.get_unchecked(idx / BITS) & (1 << (idx % BITS)) != 0
     }
 
+    /// Returns true if the bit at `idx` is set.
     pub fn is_set(&self, idx: usize) -> bool {
         assert!(idx < self.len());
         unsafe { self.is_set_unchecked(idx) }
     }
 
-    /// Check if the bitmap is all set to 1.
-    pub fn is_all_set(&self) -> bool {
-        self.num_high_bits == self.len()
+    /// Tests if every bit is set to 1.
+    pub fn all(&self) -> bool {
+        self.count_ones == self.len()
     }
 
+    /// Produces an iterator over each bit.
     pub fn iter(&self) -> BitmapIter<'_> {
         BitmapIter {
             bits: &self.bits,
@@ -282,34 +293,21 @@ impl Bitmap {
         }
     }
 
-    /// Returns an iterator which starts from `offset`.
-    ///
-    /// # Panics
-    /// Panics if `offset > len`.
-    pub fn iter_from(&self, offset: usize) -> BitmapIter<'_> {
-        assert!(offset < self.len());
-        BitmapIter {
-            bits: &self.bits,
-            idx: offset,
-            num_bits: self.num_bits,
-        }
-    }
-
     /// Performs bitwise saturate subtract on two equal-length bitmaps.
     ///
     /// For example, lhs = [01110] and rhs = [00111], then
     /// `bit_saturate_subtract(lhs, rhs)` results in [01000]
-    pub fn bit_saturate_subtract(lhs: &Bitmap, rhs: &Bitmap) -> Bitmap {
-        assert_eq!(lhs.num_bits, rhs.num_bits);
-        let bits = (lhs.bits.iter())
+    pub fn bit_saturate_subtract(&self, rhs: &Bitmap) -> Bitmap {
+        assert_eq!(self.num_bits, rhs.num_bits);
+        let bits = (self.bits.iter())
             .zip(rhs.bits.iter())
             .map(|(&a, &b)| (!(a & b)) & a)
             .collect();
-        Bitmap::from_slice_with_len(bits, lhs.num_bits)
+        Bitmap::from_vec_with_len(bits, self.num_bits)
     }
 
-    /// Returns an iterator which yields the positions of high bits.
-    pub fn ones(&self) -> impl Iterator<Item = usize> + '_ {
+    /// Enumerates the index of each bit set to 1.
+    pub fn iter_ones(&self) -> impl Iterator<Item = usize> + '_ {
         self.iter()
             .enumerate()
             .filter(|(_, bit)| *bit)
@@ -342,7 +340,7 @@ impl Bitmap {
     fn assert_valid(&self) {
         assert_eq!(
             self.iter().map(|x| x as usize).sum::<usize>(),
-            self.num_high_bits
+            self.count_ones
         )
     }
 }
@@ -356,7 +354,7 @@ impl<'a, 'b> BitAnd<&'b Bitmap> for &'a Bitmap {
             .zip(rhs.bits.iter())
             .map(|(&a, &b)| a & b)
             .collect();
-        Bitmap::from_slice_with_len(bits, self.num_bits)
+        Bitmap::from_vec_with_len(bits, self.num_bits)
     }
 }
 
@@ -393,7 +391,7 @@ impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
             .zip(rhs.bits.iter())
             .map(|(&a, &b)| a | b)
             .collect();
-        Bitmap::from_slice_with_len(bits, self.num_bits)
+        Bitmap::from_vec_with_len(bits, self.num_bits)
     }
 }
 
@@ -431,7 +429,7 @@ impl<'a> Not for &'a Bitmap {
         }
         Bitmap {
             num_bits: self.num_bits,
-            num_high_bits: self.num_bits - self.num_high_bits,
+            count_ones: self.num_bits - self.count_ones,
             bits: bits.into(),
         }
     }
@@ -492,6 +490,7 @@ impl From<&ProstBuffer> for Bitmap {
     }
 }
 
+/// Bitmap iterator.
 pub struct BitmapIter<'a> {
     bits: &'a [usize],
     idx: usize,
@@ -509,12 +508,22 @@ impl<'a> iter::Iterator for BitmapIter<'a> {
         self.idx += 1;
         Some(b)
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.num_bits - self.idx;
+        (remaining, Some(remaining))
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.idx += n;
+        self.next()
+    }
 }
+
+unsafe impl TrustedLen for BitmapIter<'_> {}
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-
     use super::*;
 
     #[test]
@@ -538,7 +547,7 @@ mod tests {
         let expected = Bitmap::from_bytes(&[byte1, byte2]);
         assert_eq!(bitmap1, expected);
         assert_eq!(
-            bitmap1.num_high_bits(),
+            bitmap1.count_ones(),
             (byte1.count_ones() + byte2.count_ones()) as usize
         );
 
@@ -561,9 +570,9 @@ mod tests {
     #[test]
     fn test_bitmap_all_high() {
         let num_bits = 3;
-        let bitmap = Bitmap::all_high_bits(num_bits);
+        let bitmap = Bitmap::ones(num_bits);
         assert_eq!(bitmap.len(), num_bits);
-        assert!(bitmap.is_all_set());
+        assert!(bitmap.all());
         for i in 0..num_bits {
             assert!(bitmap.is_set(i));
         }
@@ -699,7 +708,7 @@ mod tests {
         let actual_bytes: Vec<u8> = bitmap.iter().map(|b| b as u8).collect();
 
         assert_eq!(actual_bytes, vec![0, 1, 0, 0, 1, 0, 1, 0, /*  */ 0, 1, 1]); // in reverse order
-        assert_eq!(bitmap.num_high_bits(), 5);
+        assert_eq!(bitmap.count_ones(), 5);
     }
 
     #[test]
@@ -711,10 +720,10 @@ mod tests {
             false, true, false, true, false, true, true, false, true, false, true, false, true,
             true, false, true,
         ]);
-        let num_high_bits = (byte1.count_ones() + byte2.count_ones()) as usize;
+        let count_ones = (byte1.count_ones() + byte2.count_ones()) as usize;
         assert_eq!(expected, bitmap);
-        assert_eq!(bitmap.num_high_bits(), num_high_bits);
-        assert_eq!(expected.num_high_bits(), num_high_bits);
+        assert_eq!(bitmap.count_ones(), count_ones);
+        assert_eq!(expected.count_ones(), count_ones);
     }
 
     #[test]
@@ -723,43 +732,29 @@ mod tests {
         let b2: Bitmap = Bitmap::zeros(5);
         assert_ne!(b1, b2);
 
-        let b1: Bitmap = [true, false]
-            .iter()
-            .cycle()
-            .cloned()
-            .take(10000)
-            .collect_vec()
-            .into_iter()
-            .collect();
-        let b2: Bitmap = [true, false]
-            .iter()
-            .cycle()
-            .cloned()
-            .take(10000)
-            .collect_vec()
-            .into_iter()
-            .collect();
+        let b1: Bitmap = [true, false].iter().cycle().cloned().take(10000).collect();
+        let b2: Bitmap = [true, false].iter().cycle().cloned().take(10000).collect();
         assert_eq!(b1, b2);
     }
 
     #[test]
     fn test_bitmap_set() {
         let mut b = BitmapBuilder::zeroed(10);
-        assert_eq!(b.num_high_bits, 0);
+        assert_eq!(b.count_ones, 0);
 
         b.set(0, true);
         b.set(7, true);
         b.set(8, true);
         b.set(9, true);
-        assert_eq!(b.num_high_bits, 4);
+        assert_eq!(b.count_ones, 4);
 
         b.set(7, false);
         b.set(8, false);
-        assert_eq!(b.num_high_bits, 2);
+        assert_eq!(b.count_ones, 2);
 
         b.append(true);
         assert_eq!(b.len, 11);
-        assert_eq!(b.num_high_bits, 3);
+        assert_eq!(b.count_ones, 3);
 
         let b = b.finish();
         assert_eq!(&b.bits[..], &[0b0110_0000_0001]);

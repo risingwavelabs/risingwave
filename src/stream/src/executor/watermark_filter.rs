@@ -214,7 +214,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         last_checkpoint_watermark = current_watermark.clone();
                         // Persist the watermark when checkpoint arrives.
                         let vnodes = table.get_vnodes();
-                        for vnode in vnodes.ones() {
+                        for vnode in vnodes.iter_ones() {
                             let pk = Some(ScalarImpl::Int16(vnode as _));
                             let row = [pk, Some(current_watermark.clone())];
                             // FIXME(yuhao): use upsert.
