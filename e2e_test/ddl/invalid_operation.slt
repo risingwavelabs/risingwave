@@ -195,6 +195,9 @@ CREATE SINK sink FROM mv WITH (connector='console', prefix='DEBUG', suffix='');
 statement error not found
 drop table sink;
 
+statement error sink properties not provided
+CREATE SINK sink FROM mv;
+
 # FIXME: improve the error message
 statement error not found
 drop materialized view sink;
