@@ -318,6 +318,8 @@ mod tests {
                 })
                 .unwrap();
 
+            // check if node is leader
+            // Only leader nodes support adding worker nodes
             let cluster_client = ClusterServiceClient::new(channel);
             let resp = cluster_client
                 .to_owned()
@@ -330,9 +332,8 @@ mod tests {
                     worker_node_parallelism: 5,
                 })
                 .await;
-            let is_leader = resp.is_ok();
 
-            if is_leader {
+            if resp.is_ok() {
                 leader_count += 1;
             }
         }
