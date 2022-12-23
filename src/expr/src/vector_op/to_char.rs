@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use aho_corasick::AhoCorasickBuilder;
+use std::sync::LazyLock;
+
+use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use risingwave_common::array::{StringWriter, WrittenGuard};
 use risingwave_common::types::NaiveDateTimeWrapper;
 
@@ -31,18 +33,18 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> String {
         "%H", "%H", "%I", "%I", "%I", "%I", "%M", "%M", "%S", "%S", "%Y", "%Y", "%y", "%y", "%G",
         "%G", "%g", "%g", "%m", "%m", "%d", "%d",
     ];
-
-    let ac = AhoCorasickBuilder::new()
-        .ascii_case_insensitive(false)
-        .match_kind(aho_corasick::MatchKind::LeftmostLongest)
-        .build(PG_PATTERNS);
+    static AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
+        AhoCorasickBuilder::new()
+            .ascii_case_insensitive(false)
+            .match_kind(aho_corasick::MatchKind::LeftmostLongest)
+            .build(PG_PATTERNS)
+    });
 
     let mut chrono_tmpl = String::new();
-    ac.replace_all_with(tmpl, &mut chrono_tmpl, |mat, _, dst| {
+    AC.replace_all_with(tmpl, &mut chrono_tmpl, |mat, _, dst| {
         dst.push_str(CHRONO_PATTERNS[mat.pattern()]);
         true
     });
-
     chrono_tmpl
 }
 
