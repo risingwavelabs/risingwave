@@ -344,50 +344,50 @@ mod tests {
     // in parallel
     #[tokio::test]
     async fn test_single_leader_setup_1() {
-        let v = setup_n_nodes(1, 1234).await;
+        let node_controllers = setup_n_nodes(1, 1234).await;
         let leader_count = number_of_leaders(1, 1234, 5678).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
-        for element in v {
-            element.0.abort();
+        for nc in node_controllers {
+            nc.0.abort();
         }
     }
 
     #[tokio::test]
     async fn test_single_leader_setup_3() {
-        let v = setup_n_nodes(3, 2345).await;
+        let node_controllers = setup_n_nodes(3, 2345).await;
         let leader_count = number_of_leaders(3, 2345, 6789).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
-        for element in v {
-            element.0.abort();
+        for nc in node_controllers {
+            nc.0.abort();
         }
     }
 
     #[tokio::test]
     async fn test_single_leader_setup_5() {
-        let v = setup_n_nodes(5, 3456).await;
+        let node_controllers = setup_n_nodes(5, 3456).await;
         let leader_count = number_of_leaders(5, 3456, 7890).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
-        for element in v {
-            element.0.abort();
+        for nc in node_controllers {
+            nc.0.abort();
         }
     }
 
     /// returns number of leaders after failover
     #[cfg(test)]
     async fn test_failover(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
-        let vec_meta_handlers = setup_n_nodes(number_of_nodes, meta_port).await;
+        let node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
 
         // we should have 1 leader on startup
         let leader_count = number_of_leaders(number_of_nodes, meta_port, compute_port).await;
@@ -398,7 +398,7 @@ mod tests {
         );
 
         // kill leader to trigger failover
-        let leader_shutdown_sender = &vec_meta_handlers[0].1;
+        let leader_shutdown_sender = &node_controllers[0].1;
         leader_shutdown_sender
             .send(())
             .expect("Sending shutdown to leader should not fail");
@@ -407,8 +407,8 @@ mod tests {
         // expect that we still have 1 leader
         // skipping first meta_port, since that node was former leader and got killed
         let leaders = number_of_leaders(number_of_nodes - 1, meta_port + 1, compute_port).await;
-        for ele in vec_meta_handlers {
-            ele.0.abort();
+        for nc in node_controllers {
+            nc.0.abort();
         }
         leaders
     }
