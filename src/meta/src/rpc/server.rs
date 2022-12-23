@@ -143,10 +143,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
             // Implementation of naive fencing mechanism:
             // leader nodes should panic if they loose their leader position
+            // Current implementation panics, if leader looses lease.
+            // Alternative implementation that panics only if leader is unable to re-acquire lease:
+            // if was_leader && !is_leader {
             if was_leader {
-                // && !is_leader {
-                // TODO: enable this again to give leader chance to claim lease again?
-                // I would say no
                 panic!(
                     "This node lost its leadership. New host address is {}:{}. Killing node",
                     leader_addr.host, leader_addr.port
@@ -167,7 +167,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         }
     });
 
-    let (svc_shutdown_tx, svc_shutdown_rx) = WatchChannel(());
+    let (svc_shutdown_tx, mut svc_shutdown_rx) = WatchChannel(());
 
     let join_handle = tokio::spawn(async move {
         let span = tracing::span!(tracing::Level::INFO, "services");
@@ -201,7 +201,16 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
         // wait until this node becomes a leader
         while !node_is_leader(&leader_rx) {
-            leader_rx.changed().await.expect("Leader sender dropped");
+            tokio::select! {
+                _ = leader_rx.changed() => {}
+                res = svc_shutdown_rx.changed() => {
+                    match res {
+                        Ok(_) => tracing::info!("Shutting down meta node"),
+                        Err(_) => tracing::error!("Shutdown sender dropped"),
+                    }
+                    return;
+                }
+            }
         }
 
         // shut down follower svc if node used to be follower
@@ -236,30 +245,27 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     Ok((join_handle, svc_shutdown_tx))
 }
 
+#[cfg(test)]
 mod tests {
     use core::panic;
-    use std::net::{IpAddr, Ipv4Addr};
 
-    use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
-    use risingwave_common::util::addr::HostAddr;
-    use risingwave_pb::common::{HostAddress, WorkerType};
-    use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
-    use risingwave_pb::meta::AddWorkerNodeRequest;
     use tokio::time::sleep;
     use tonic::transport::Endpoint;
 
     use super::*;
 
-    static _SLEEP_SEC: u64 = 6;
+    const WAIT_INTERVAL: Duration = Duration::from_secs(5);
 
     /// Start `n` meta nodes on localhost. First node will be started at `meta_port`, 2nd node on
     /// `meta_port + 1`, ...
     /// Call this, if you need more control over your `meta_store` in your test
-    async fn _setup_n_nodes_inner(
+    async fn setup_n_nodes_inner(
         n: u16,
         meta_port: u16,
         meta_store: &Arc<MemStore>,
     ) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
+        use std::net::{IpAddr, Ipv4Addr};
+
         let mut node_controllers: Vec<(JoinHandle<()>, WatchSender<()>)> = vec![];
         for i in 0..n {
             let addr = format!("http://127.0.0.1:{}", meta_port + i);
@@ -277,22 +283,22 @@ mod tests {
                     meta_store.clone(),
                     info,
                     Duration::from_secs(4),
-                    2,
+                    1,
                     MetaOpts::test(false),
                 )
                 .await
                 .unwrap_or_else(|e| panic!("Meta node{} failed in setup. Err: {}", i, e)),
             );
         }
-        sleep(Duration::from_secs(_SLEEP_SEC)).await;
+        sleep(WAIT_INTERVAL).await;
         node_controllers
     }
 
     /// Start `n` meta nodes on localhost. First node will be started at `meta_port`, 2nd node on
     /// `meta_port + 1`, ...
-    async fn _setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
+    async fn setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
         let meta_store = Arc::new(MemStore::default());
-        _setup_n_nodes_inner(n, meta_port, &meta_store).await
+        setup_n_nodes_inner(n, meta_port, &meta_store).await
     }
 
     /// Check for `number_of_nodes` meta leader nodes, starting at `meta_port`, `meta_port + 1`, ...
@@ -301,7 +307,13 @@ mod tests {
     /// ## Returns
     /// Number of nodes which currently are leaders. Number is not snapshoted. If there is a
     /// leader failover in process, you may get an incorrect result
-    async fn _number_of_leaders(number_of_nodes: u16, meta_port: u16, host_port: u16) -> u16 {
+    async fn number_of_leaders(number_of_nodes: u16, meta_port: u16, host_port: u16) -> u16 {
+        use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
+        use risingwave_common::util::addr::HostAddr;
+        use risingwave_pb::common::{HostAddress, WorkerType};
+        use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
+        use risingwave_pb::meta::AddWorkerNodeRequest;
+
         let mut leader_count = 0;
         for i in 0..number_of_nodes {
             let local = "127.0.0.1".to_owned();
@@ -330,6 +342,8 @@ mod tests {
                 })
                 .unwrap();
 
+            // check if node is leader
+            // Only leader nodes support adding worker nodes
             let cluster_client = ClusterServiceClient::new(channel);
             let resp = cluster_client
                 .to_owned()
@@ -342,9 +356,8 @@ mod tests {
                     worker_node_parallelism: 5,
                 })
                 .await;
-            let is_leader = resp.is_ok();
 
-            if is_leader {
+            if resp.is_ok() {
                 leader_count += 1;
             }
         }
@@ -355,66 +368,55 @@ mod tests {
     // in parallel
     #[tokio::test]
     async fn test_single_leader_setup_1() {
-        let v = _setup_n_nodes(1, 1234).await;
-        let leader_count = _number_of_leaders(1, 1234, 5678).await;
+        let node_controllers = setup_n_nodes(1, 1234).await;
+        let leader_count = number_of_leaders(1, 1234, 5678).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
-        for element in v {
-            element.0.abort();
+        for (join_handle, shutdown_tx) in node_controllers {
+            shutdown_tx.send(()).unwrap();
+            join_handle.await.unwrap();
         }
     }
 
     #[tokio::test]
     async fn test_single_leader_setup_3() {
-        let v = _setup_n_nodes(3, 2345).await;
-        let leader_count = _number_of_leaders(3, 2345, 6789).await;
+        let node_controllers = setup_n_nodes(3, 2345).await;
+        let leader_count = number_of_leaders(3, 2345, 6789).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
-        for element in v {
-            element.0.abort();
+        for (join_handle, shutdown_tx) in node_controllers {
+            shutdown_tx.send(()).unwrap();
+            join_handle.await.unwrap();
         }
     }
 
     #[tokio::test]
-    async fn test_single_leader_setup_10() {
-        let v = _setup_n_nodes(10, 3456).await;
-        let leader_count = _number_of_leaders(10, 3456, 7890).await;
+    async fn test_single_leader_setup_5() {
+        let node_controllers = setup_n_nodes(5, 3456).await;
+        let leader_count = number_of_leaders(5, 3456, 7890).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
-        for element in v {
-            element.0.abort();
-        }
-    }
-
-    #[tokio::test]
-    async fn test_single_leader_setup_100() {
-        let v = _setup_n_nodes(100, 4567).await;
-        let leader_count = _number_of_leaders(100, 4567, 8901).await;
-        assert_eq!(
-            leader_count, 1,
-            "Expected to have 1 leader, instead got {} leaders",
-            leader_count
-        );
-        for element in v {
-            element.0.abort();
+        for (join_handle, shutdown_tx) in node_controllers {
+            shutdown_tx.send(()).unwrap();
+            join_handle.await.unwrap();
         }
     }
 
     /// returns number of leaders after failover
-    async fn _test_failover(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
-        let vec_meta_handlers = _setup_n_nodes(number_of_nodes, meta_port).await;
+    async fn test_failover(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
+        let node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
 
         // we should have 1 leader on startup
-        let leader_count = _number_of_leaders(number_of_nodes, meta_port, compute_port).await;
+        let leader_count = number_of_leaders(number_of_nodes, meta_port, compute_port).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
@@ -422,24 +424,25 @@ mod tests {
         );
 
         // kill leader to trigger failover
-        let leader_shutdown_sender = &vec_meta_handlers[0].1;
+        let leader_shutdown_sender = &node_controllers[0].1;
         leader_shutdown_sender
             .send(())
             .expect("Sending shutdown to leader should not fail");
-        sleep(Duration::from_secs(_SLEEP_SEC)).await;
+        sleep(WAIT_INTERVAL).await;
 
         // expect that we still have 1 leader
         // skipping first meta_port, since that node was former leader and got killed
-        let leaders = _number_of_leaders(number_of_nodes - 1, meta_port + 1, compute_port).await;
-        for ele in vec_meta_handlers {
-            ele.0.abort();
+        let leaders = number_of_leaders(number_of_nodes - 1, meta_port + 1, compute_port).await;
+        for (join_handle, shutdown_tx) in node_controllers {
+            let _ = shutdown_tx.send(());
+            join_handle.await.unwrap();
         }
         leaders
     }
 
     #[tokio::test]
     async fn test_failover_1() {
-        let leader_count = _test_failover(1, 9012, 1012).await;
+        let leader_count = test_failover(1, 9012, 1012).await;
         assert_eq!(
             leader_count, 0,
             "Expected to have 1 leader, instead got {} leaders",
@@ -449,97 +452,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_failover_3() {
-        let leader_count = _test_failover(3, 1100, 1200).await;
-        assert_eq!(
-            leader_count, 1,
-            "Expected to have 1 leader, instead got {} leaders",
-            leader_count
-        );
-    }
-
-    #[tokio::test]
-    async fn test_failover_10() {
-        let leader_count = _test_failover(10, 1300, 1400).await;
-        assert_eq!(
-            leader_count, 1,
-            "Expected to have 1 leader, instead got {} leaders",
-            leader_count
-        );
-    }
-
-    #[tokio::test]
-    async fn test_failover_100() {
-        let leader_count = _test_failover(100, 1500, 1600).await;
-        assert_eq!(
-            leader_count, 1,
-            "Expected to have 1 leader, instead got {} leaders",
-            leader_count
-        );
-    }
-
-    /// returns number of leaders after activating fencing by deleting leader lease info
-    async fn _test_fencing(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
-        let meta_store = Arc::new(MemStore::default());
-        let vec_meta_handlers = _setup_n_nodes_inner(number_of_nodes, meta_port, &meta_store).await;
-
-        // we should have 1 leader on startup
-        let leader_count = _number_of_leaders(number_of_nodes, meta_port, compute_port).await;
-        assert_eq!(
-            leader_count, 1,
-            "Expected to have 1 leader, instead got {} leaders",
-            leader_count
-        );
-
-        // delete leader/lease info in meta store
-        meta_store
-            .delete_cf("cf", "meta".as_bytes())
-            .await
-            .expect("Deleting meta store leader/lease info failed");
-
-        sleep(Duration::from_secs(_SLEEP_SEC)).await;
-
-        // expect that we still have 1 leader
-        // skipping first meta_port, since that node was former leader and got killed
-        let leaders = _number_of_leaders(number_of_nodes - 1, meta_port + 1, compute_port).await;
-        for ele in vec_meta_handlers {
-            ele.0.abort();
-        }
-        leaders
-    }
-
-    #[tokio::test]
-    async fn test_fencing_1() {
-        let leader_count = _test_failover(1, 1600, 1700).await;
-        assert_eq!(
-            leader_count, 0,
-            "Expected to have 1 leader, instead got {} leaders",
-            leader_count
-        );
-    }
-
-    #[tokio::test]
-    async fn test_fencing_3() {
-        let leader_count = _test_failover(3, 1800, 1900).await;
-        assert_eq!(
-            leader_count, 1,
-            "Expected to have 1 leader, instead got {} leaders",
-            leader_count
-        );
-    }
-
-    #[tokio::test]
-    async fn test_fencing_10() {
-        let leader_count = _test_failover(10, 2000, 2100).await;
-        assert_eq!(
-            leader_count, 1,
-            "Expected to have 1 leader, instead got {} leaders",
-            leader_count
-        );
-    }
-
-    #[tokio::test]
-    async fn test_fencing_100() {
-        let leader_count = _test_failover(100, 2200, 2300).await;
+        let leader_count = test_failover(3, 1100, 1200).await;
         assert_eq!(
             leader_count, 1,
             "Expected to have 1 leader, instead got {} leaders",
