@@ -284,7 +284,7 @@ impl fmt::Display for Cte {
 pub enum SelectItem {
     /// Any expression, not followed by `[ AS ] alias`
     UnnamedExpr(Expr),
-    /// Expr is a table or a struct column.
+    /// Expr is an arbitrary expression, returning either a table or a column.
     /// Idents are the prefix of `*`, which are consecutive field accesses.
     /// e.g. `(table.v1).*` or `(table).v1.*`
     ExprQualifiedWildcard(Expr, Vec<Ident>),
