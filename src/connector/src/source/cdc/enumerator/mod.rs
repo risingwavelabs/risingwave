@@ -42,6 +42,7 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
                 props.source_id as u64,
                 props.source_type_enum()?,
                 props.props,
+                props.pk_column_names,
             )
             .await?;
 

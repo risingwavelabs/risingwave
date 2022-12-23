@@ -78,6 +78,7 @@ impl ConnectorClient {
         source_id: u64,
         source_type: SourceType,
         properties: HashMap<String, String>,
+        pk_col_names: Vec<String>,
     ) -> Result<Streaming<GetEventStreamResponse>> {
         Ok(self
             .0
@@ -87,6 +88,7 @@ impl ConnectorClient {
                     source_id,
                     source_type: source_type as _,
                     properties,
+                    pk_col_names,
                 })),
             })
             .await

@@ -38,6 +38,8 @@ pub struct CdcProperties {
     pub source_type: String,
     /// Properties specified in the WITH clause by user
     pub props: HashMap<String, String>,
+    /// Primary key column names
+    pub pk_column_names: Vec<String>,
 }
 
 impl CdcProperties {

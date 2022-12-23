@@ -126,19 +126,17 @@ impl ConnectorProperties {
         }
     }
 
-    pub fn set_source_id_for_cdc(&mut self, source_id: u32) {
+    pub fn init_properties_for_cdc(
+        &mut self,
+        source_id: u32,
+        rpc_addr: String,
+        pk_columns: Option<Vec<String>>,
+    ) {
         match self {
             ConnectorProperties::MySqlCdc(c) | ConnectorProperties::PostgresCdc(c) => {
                 c.source_id = source_id;
-            }
-            _ => {}
-        }
-    }
-
-    pub fn set_connector_node_addr(&mut self, addr: String) {
-        match self {
-            ConnectorProperties::MySqlCdc(c) | ConnectorProperties::PostgresCdc(c) => {
-                c.connector_node_addr = addr;
+                c.connector_node_addr = rpc_addr;
+                c.pk_column_names = pk_columns.unwrap_or_default();
             }
             _ => {}
         }

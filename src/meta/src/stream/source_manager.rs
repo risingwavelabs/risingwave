@@ -20,6 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_connector::source::{
     ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
@@ -68,11 +69,14 @@ impl ConnectorSourceWorker {
         period: Duration,
     ) -> MetaResult<Self> {
         let mut properties = ConnectorProperties::extract(source.properties.clone())?;
-        // set source id for cdc connector if any
-        properties.set_source_id_for_cdc(source.id);
-        // set connector node rpc endpoint
+        // init cdc properties
         if let Some(endpoint) = connector_rpc_endpoint {
-            properties.set_connector_node_addr(endpoint.to_string());
+            let pk_column_names = Self::extract_pk_col_names(source);
+            properties.init_properties_for_cdc(
+                source.id,
+                endpoint.to_string(),
+                Some(pk_column_names),
+            );
         }
         let enumerator = SplitEnumeratorImpl::create(properties).await?;
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
@@ -117,6 +121,22 @@ impl ConnectorSourceWorker {
         );
 
         Ok(())
+    }
+
+    fn extract_pk_col_names(source: &Source) -> Vec<String> {
+        let pk_column_names = source
+            .pk_column_ids
+            .iter()
+            .map(|&id| {
+                let name = source
+                    .columns
+                    .get(id as usize)
+                    .map(|col| col.get_column_desc().unwrap().get_name().clone());
+
+                name.unwrap()
+            })
+            .collect_vec();
+        pk_column_names
     }
 }
 

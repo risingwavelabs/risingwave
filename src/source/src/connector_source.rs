@@ -200,9 +200,8 @@ impl ConnectorSource {
         let mut config = ConnectorProperties::extract(properties.clone())
             .map_err(|e| ConnectorError(e.into()))?;
         if let Some(addr) = connector_node_addr {
-            config.set_connector_node_addr(addr);
             // fixme: require source_id
-            // config.set_source_id_for_cdc(source_id);
+            config.init_properties_for_cdc(0, addr, None)
         }
         let parser = SourceParserImpl::create(
             &format,

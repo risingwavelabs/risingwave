@@ -85,7 +85,7 @@ message SinkResponse {
 
 message CdcMessage {
   string payload = 1;
-  string partition = 2;
+  string partition= 2;
   string offset = 3;
 }
 
@@ -99,7 +99,8 @@ message GetEventStreamRequest {
   message ValidateProperties {
     uint64 source_id = 1;
     SourceType source_type = 2;
-    map<string, string> properties = 4;
+    map<string, string> properties = 3;
+    repeated string pk_col_names = 4;
   }
 
   message StartSource {
