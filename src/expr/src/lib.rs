@@ -29,6 +29,7 @@
 
 pub mod error;
 pub mod expr;
+pub mod sig;
 pub mod table_function;
 pub mod vector_op;
 
