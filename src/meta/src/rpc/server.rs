@@ -241,6 +241,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 mod tests {
     use core::panic;
 
+    use risingwave_pb::meta::LeaderRequest;
     use tokio::time::sleep;
     use tonic::transport::Endpoint;
 
@@ -393,6 +394,81 @@ mod tests {
         }
     }
 
+    // Get the current leader as reported by this node
+    async fn get_leader_info(meta_port: u16) {
+        use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
+        use risingwave_pb::meta::leader_service_client::LeaderServiceClient;
+
+        let local = "127.0.0.1".to_owned();
+        let port = meta_port;
+        let meta_addr = format!("http://{}:{}", local, port);
+
+        // TODO: Write this into a function
+        // DNRY. Also used in number_of_leaders
+        let endpoint = Endpoint::from_shared(meta_addr.to_string())
+            .unwrap()
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
+        let channel = endpoint
+            .http2_keep_alive_interval(Duration::from_secs(60))
+            .keep_alive_timeout(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(5))
+            .connect()
+            .await
+            .inspect_err(|e| {
+                tracing::warn!(
+                    "Failed to connect to meta server {}, wait for online: {}",
+                    meta_addr,
+                    e
+                );
+            })
+            .unwrap();
+
+        let req = LeaderRequest {};
+        let leader_client = LeaderServiceClient::new(channel);
+        let resp = leader_client.to_owned().leader(req).await.unwrap(); // LeaderRequest
+    }
+
+    // TODO: Write service discovery tests
+    // All nodes should always agree on the leader
+    // even though you delete the leader
+    // delete a follower
+    // delete leader lease info
+    // delete lease info
+    // delete lease
+    // add one more node node
+    // Validate if the node that is supposed to be the leader also is the leader
+    // Delete all leaders as reported by the leader infos
+    async fn test_leader_svc(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
+        let node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
+
+        // we should have 1 leader on startup
+        let leader_count = number_of_leaders(number_of_nodes, meta_port, compute_port).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
+
+        // FIXME: Delete lease and/or leader info after PR is merged
+        // https://github.com/risingwavelabs/risingwave/pull/7022
+
+        // kill leader to trigger failover
+        let leader_shutdown_sender = &node_controllers[0].1;
+        leader_shutdown_sender
+            .send(())
+            .expect("Sending shutdown to leader should not fail");
+        sleep(WAIT_INTERVAL).await;
+
+        // expect that we still have 1 leader
+        // skipping first meta_port, since that node was former leader and got killed
+        let leaders = number_of_leaders(number_of_nodes - 1, meta_port + 1, compute_port).await;
+        for (join_handle, shutdown_tx) in node_controllers {
+            let _ = shutdown_tx.send(());
+            join_handle.await.unwrap();
+        }
+        leaders
+    }
+
     /// returns number of leaders after failover
     async fn test_failover(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
         let node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
@@ -441,14 +517,4 @@ mod tests {
             leader_count
         );
     }
-
-    // TODO: Write service discovery tests
-    // All nodes should always agree on the leader
-    // even though you delete the leader
-    // delete a follower
-    // delete leader lease info
-    // delete lease info
-    // delete lease
-    // add one more node node
-    // Validate if the node that is supposed to be the leader also is the leader
 }
