@@ -10,7 +10,7 @@ RisingWave is a cloud-native streaming database that uses SQL as the interface l
 
 RisingWave ingests data from sources like Apache Kafka, Apache Pulsar, Amazon Kinesis, Redpanda, and materialized CDC sources.
 
-Learn more at [Introduction to RisingWave](https://www.risingwave.dev/docs/latest/intro/).
+Learn more at [Introduction to RisingWave](https://www.risingwave.dev/docs/current/intro/).
 
 ## Quick Start
 
@@ -90,7 +90,7 @@ in the terminal.
 
 ### Connecting to an External Source
 
-Please refer to [get started guide](https://www.risingwave.dev/docs/latest/get-started/) for more information.
+Please refer to [get started guide](https://www.risingwave.dev/docs/current/get-started/) for more information.
 
 ## Documentation
 
