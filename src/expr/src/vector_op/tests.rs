@@ -169,18 +169,18 @@ fn test_bitwise() {
 
 #[test]
 fn test_comparison() {
-    assert!(general_eq::<Decimal, i32, Decimal>(dec("1.0"), 1).unwrap());
-    assert!(general_eq::<Decimal, f32, Decimal>(dec("1.0"), 1.0).unwrap());
-    assert!(!general_ne::<Decimal, i32, Decimal>(dec("1.0"), 1).unwrap());
-    assert!(!general_ne::<Decimal, f32, Decimal>(dec("1.0"), 1.0).unwrap());
-    assert!(!general_gt::<Decimal, i32, Decimal>(dec("1.0"), 2).unwrap());
-    assert!(!general_gt::<Decimal, f32, Decimal>(dec("1.0"), 2.0).unwrap());
-    assert!(general_le::<Decimal, i32, Decimal>(dec("1.0"), 2).unwrap());
-    assert!(general_le::<Decimal, f32, Decimal>(dec("1.0"), 2.1).unwrap());
-    assert!(!general_ge::<Decimal, i32, Decimal>(dec("1.0"), 2).unwrap());
-    assert!(!general_ge::<Decimal, f32, Decimal>(dec("1.0"), 2.1).unwrap());
-    assert!(general_lt::<Decimal, i32, Decimal>(dec("1.0"), 2).unwrap());
-    assert!(general_lt::<Decimal, f32, Decimal>(dec("1.0"), 2.1).unwrap());
+    assert!(general_eq::<Decimal, i32, Decimal>(dec("1.0"), 1));
+    assert!(general_eq::<Decimal, f32, Decimal>(dec("1.0"), 1.0));
+    assert!(!general_ne::<Decimal, i32, Decimal>(dec("1.0"), 1));
+    assert!(!general_ne::<Decimal, f32, Decimal>(dec("1.0"), 1.0));
+    assert!(!general_gt::<Decimal, i32, Decimal>(dec("1.0"), 2));
+    assert!(!general_gt::<Decimal, f32, Decimal>(dec("1.0"), 2.0));
+    assert!(general_le::<Decimal, i32, Decimal>(dec("1.0"), 2));
+    assert!(general_le::<Decimal, f32, Decimal>(dec("1.0"), 2.1));
+    assert!(!general_ge::<Decimal, i32, Decimal>(dec("1.0"), 2));
+    assert!(!general_ge::<Decimal, f32, Decimal>(dec("1.0"), 2.1));
+    assert!(general_lt::<Decimal, i32, Decimal>(dec("1.0"), 2));
+    assert!(general_lt::<Decimal, f32, Decimal>(dec("1.0"), 2.1));
     assert!(
         general_is_distinct_from::<Decimal, i32, Decimal>(Some(dec("1.0")), Some(2))
             .unwrap()
@@ -216,23 +216,23 @@ fn test_comparison() {
             .unwrap()
             .unwrap()
     );
-    assert!(general_eq::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
-    assert!(!general_ne::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
-    assert!(!general_lt::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
-    assert!(general_le::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
-    assert!(!general_gt::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
-    assert!(general_ge::<OrderedF32, i32, OrderedF64>(1.0.into(), 1).unwrap());
+    assert!(general_eq::<OrderedF32, i32, OrderedF64>(1.0.into(), 1));
+    assert!(!general_ne::<OrderedF32, i32, OrderedF64>(1.0.into(), 1));
+    assert!(!general_lt::<OrderedF32, i32, OrderedF64>(1.0.into(), 1));
+    assert!(general_le::<OrderedF32, i32, OrderedF64>(1.0.into(), 1));
+    assert!(!general_gt::<OrderedF32, i32, OrderedF64>(1.0.into(), 1));
+    assert!(general_ge::<OrderedF32, i32, OrderedF64>(1.0.into(), 1));
     assert!(
         !general_is_distinct_from::<OrderedF32, i32, OrderedF64>(Some(1.0.into()), Some(1))
             .unwrap()
             .unwrap()
     );
-    assert!(general_eq::<i64, i32, i64>(1i64, 1).unwrap());
-    assert!(!general_ne::<i64, i32, i64>(1i64, 1).unwrap());
-    assert!(!general_lt::<i64, i32, i64>(1i64, 1).unwrap());
-    assert!(general_le::<i64, i32, i64>(1i64, 1).unwrap());
-    assert!(!general_gt::<i64, i32, i64>(1i64, 1).unwrap());
-    assert!(general_ge::<i64, i32, i64>(1i64, 1).unwrap());
+    assert!(general_eq::<i64, i32, i64>(1i64, 1));
+    assert!(!general_ne::<i64, i32, i64>(1i64, 1));
+    assert!(!general_lt::<i64, i32, i64>(1i64, 1));
+    assert!(general_le::<i64, i32, i64>(1i64, 1));
+    assert!(!general_gt::<i64, i32, i64>(1i64, 1));
+    assert!(general_ge::<i64, i32, i64>(1i64, 1));
     assert!(
         !general_is_distinct_from::<i64, i32, i64>(Some(1i64), Some(1))
             .unwrap()

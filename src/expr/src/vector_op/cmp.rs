@@ -18,77 +18,64 @@ use risingwave_common::array::{ListRef, StructRef};
 
 use crate::Result;
 
-fn general_cmp<T1, T2, T3, F>(l: T1, r: T2, cmp: F) -> Result<bool>
+#[inline(always)]
+pub fn general_eq<T1, T2, T3>(l: T1, r: T2) -> bool
 where
     T1: Into<T3> + Debug,
     T2: Into<T3> + Debug,
     T3: Ord,
-    F: FnOnce(T3, T3) -> bool,
 {
-    // TODO: We need to improve the error message
-    let l: T3 = l.into();
-    let r: T3 = r.into();
-    Ok(cmp(l, r))
+    l.into() == r.into()
 }
 
 #[inline(always)]
-pub fn general_eq<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_ne<T1, T2, T3>(l: T1, r: T2) -> bool
 where
     T1: Into<T3> + Debug,
     T2: Into<T3> + Debug,
     T3: Ord,
 {
-    general_cmp(l, r, |a, b| a == b)
+    l.into() != r.into()
 }
 
 #[inline(always)]
-pub fn general_ne<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_ge<T1, T2, T3>(l: T1, r: T2) -> bool
 where
     T1: Into<T3> + Debug,
     T2: Into<T3> + Debug,
     T3: Ord,
 {
-    general_cmp(l, r, |a, b| a != b)
+    l.into() >= r.into()
 }
 
 #[inline(always)]
-pub fn general_ge<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_gt<T1, T2, T3>(l: T1, r: T2) -> bool
 where
     T1: Into<T3> + Debug,
     T2: Into<T3> + Debug,
     T3: Ord,
 {
-    general_cmp(l, r, |a, b| a >= b)
+    l.into() > r.into()
 }
 
 #[inline(always)]
-pub fn general_gt<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_le<T1, T2, T3>(l: T1, r: T2) -> bool
 where
     T1: Into<T3> + Debug,
     T2: Into<T3> + Debug,
     T3: Ord,
 {
-    general_cmp(l, r, |a, b| a > b)
+    l.into() <= r.into()
 }
 
 #[inline(always)]
-pub fn general_le<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_lt<T1, T2, T3>(l: T1, r: T2) -> bool
 where
     T1: Into<T3> + Debug,
     T2: Into<T3> + Debug,
     T3: Ord,
 {
-    general_cmp(l, r, |a, b| a <= b)
-}
-
-#[inline(always)]
-pub fn general_lt<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
-where
-    T1: Into<T3> + Debug,
-    T2: Into<T3> + Debug,
-    T3: Ord,
-{
-    general_cmp(l, r, |a, b| a < b)
+    l.into() < r.into()
 }
 
 pub fn general_is_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> Result<Option<bool>>
@@ -97,12 +84,12 @@ where
     T2: Into<T3> + Debug,
     T3: Ord,
 {
-    match (l, r) {
-        (Some(lv), Some(rv)) => Ok(general_ne::<T1, T2, T3>(lv, rv).ok()),
-        (Some(_), None) => Ok(Some(true)),
-        (None, Some(_)) => Ok(Some(true)),
-        (None, None) => Ok(Some(false)),
-    }
+    Ok(Some(match (l, r) {
+        (Some(lv), Some(rv)) => general_ne::<T1, T2, T3>(lv, rv),
+        (Some(_), None) => true,
+        (None, Some(_)) => true,
+        (None, None) => false,
+    }))
 }
 
 pub fn general_is_not_distinct_from<T1, T2, T3>(
@@ -114,12 +101,12 @@ where
     T2: Into<T3> + Debug,
     T3: Ord,
 {
-    match (l, r) {
-        (Some(lv), Some(rv)) => Ok(general_eq::<T1, T2, T3>(lv, rv).ok()),
-        (Some(_), None) => Ok(Some(false)),
-        (None, Some(_)) => Ok(Some(false)),
-        (None, None) => Ok(Some(true)),
-    }
+    Ok(Some(match (l, r) {
+        (Some(lv), Some(rv)) => general_eq::<T1, T2, T3>(lv, rv),
+        (Some(_), None) => false,
+        (None, Some(_)) => false,
+        (None, None) => true,
+    }))
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -229,6 +216,9 @@ mod tests {
 
     #[test]
     fn test_deci_f() {
-        assert!(general_eq::<_, _, Decimal>(Decimal::from_str("1.1").unwrap(), 1.1f32).unwrap())
+        assert!(general_eq::<_, _, Decimal>(
+            Decimal::from_str("1.1").unwrap(),
+            1.1f32
+        ))
     }
 }

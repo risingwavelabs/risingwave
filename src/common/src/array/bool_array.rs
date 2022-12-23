@@ -66,6 +66,17 @@ impl FromIterator<bool> for BoolArray {
     }
 }
 
+impl BoolArray {
+    /// Build a [`BoolArray`] from iterator and bitmap.
+    ///
+    /// NOTE: The length of `bitmap` must be equal to the length of `iter`.
+    pub fn from_iter_bitmap(iter: impl IntoIterator<Item = bool>, bitmap: Bitmap) -> Self {
+        let vec = iter.into_iter().collect::<Vec<_>>();
+        let data = Bitmap::from_bool_slice(&vec);
+        BoolArray { bitmap, data }
+    }
+}
+
 impl Array for BoolArray {
     type Builder = BoolArrayBuilder;
     type OwnedItem = bool;

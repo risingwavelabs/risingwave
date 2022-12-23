@@ -237,6 +237,26 @@ impl Bitmap {
         Self::from_vec_with_len(bits, num_bits)
     }
 
+    /// Creates a new bitmap from a slice of `bool`.
+    pub fn from_bool_slice(bools: &[bool]) -> Self {
+        // use SIMD to speed up
+        use std::simd::ToBitMask;
+        let mut iter = bools.array_chunks::<BITS>();
+        let mut bits = Vec::with_capacity(Self::vec_len(bools.len()));
+        for chunk in iter.by_ref() {
+            let bitmask = std::simd::Mask::<i8, BITS>::from_array(*chunk).to_bitmask() as usize;
+            bits.push(bitmask);
+        }
+        if !iter.remainder().is_empty() {
+            let mut bitmask = 0;
+            for (i, b) in iter.remainder().iter().enumerate() {
+                bitmask |= (*b as usize) << i;
+            }
+            bits.push(bitmask);
+        }
+        Self::from_vec_with_len(bits, bools.len())
+    }
+
     /// Return the next set bit index on or after `bit_idx`.
     pub fn next_set_bit(&self, bit_idx: usize) -> Option<usize> {
         (bit_idx..self.len()).find(|&idx| unsafe { self.is_set_unchecked(idx) })

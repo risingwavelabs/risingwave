@@ -113,23 +113,15 @@ macro_rules! gen_cmp_impl {
         match ($l.return_type(), $r.return_type()) {
             $(
                 ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
-                    Box::new(
-                        BinaryExpression::<
-                            $i1! { type_array },
-                            $i2! { type_array },
-                            BoolArray,
-                            _
-                        >::new(
-                            $l,
-                            $r,
-                            $ret,
-                            $func::<
-                                <$i1! { type_array } as Array>::OwnedItem,
-                                <$i2! { type_array } as Array>::OwnedItem,
-                                <$cast! { type_array } as Array>::OwnedItem
-                            >,
-                        )
-                    ) as BoxedExpression
+                    template_fast::CompareExpression::new(
+                        $l,
+                        $r,
+                        $func::<
+                            <$i1! { type_array } as Array>::OwnedItem,
+                            <$i2! { type_array } as Array>::OwnedItem,
+                            <$cast! { type_array } as Array>::OwnedItem
+                        >,
+                    ).boxed()
                 }
             ),*
             _ => {
@@ -192,7 +184,7 @@ macro_rules! gen_binary_expr_cmp {
             (DataType::Boolean, DataType::Boolean) => {
                 template_fast::BooleanBinaryExpression::new($l, $r, $boolean_f, |l, r| {
                     match (l, r) {
-                        (Some(l), Some(r)) => $general_f::<bool, bool, bool>(l, r).ok(),
+                        (Some(l), Some(r)) => Some($general_f::<bool, bool, bool>(l, r)),
                         _ => None,
                     }
                 })

@@ -30,6 +30,8 @@
 #![feature(provide_any)]
 #![feature(let_chains)]
 #![feature(return_position_impl_trait_in_trait)]
+#![feature(portable_simd)]
+#![feature(array_chunks)]
 #![allow(incomplete_features)]
 
 #[macro_use]
