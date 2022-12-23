@@ -152,7 +152,7 @@ impl BitmapBuilder {
     pub fn finish(self) -> Bitmap {
         Bitmap {
             num_bits: self.len(),
-            bits: self.data,
+            bits: self.data.into(),
             num_high_bits: self.num_high_bits,
         }
     }
@@ -172,7 +172,7 @@ pub struct Bitmap {
     // The number of high bits in the bitmap.
     num_high_bits: usize,
 
-    bits: Vec<usize>,
+    bits: Box<[usize]>,
 }
 
 impl std::fmt::Debug for Bitmap {
@@ -203,7 +203,7 @@ impl Bitmap {
             bits[len - 1] &= (1 << (num_bits % BITS)) - 1;
         }
         Self {
-            bits,
+            bits: bits.into(),
             num_bits,
             num_high_bits: num_bits,
         }
@@ -215,7 +215,7 @@ impl Bitmap {
         debug_assert!(num_high_bits <= num_bits);
         Self {
             num_bits,
-            bits: buf,
+            bits: buf.into(),
             num_high_bits,
         }
     }
@@ -432,7 +432,7 @@ impl<'a> Not for &'a Bitmap {
         Bitmap {
             num_bits: self.num_bits,
             num_high_bits: self.num_bits - self.num_high_bits,
-            bits,
+            bits: bits.into(),
         }
     }
 }
@@ -762,7 +762,7 @@ mod tests {
         assert_eq!(b.num_high_bits, 3);
 
         let b = b.finish();
-        assert_eq!(b.bits, &[0b0110_0000_0001]);
+        assert_eq!(&b.bits[..], &[0b0110_0000_0001]);
     }
 
     #[test]
