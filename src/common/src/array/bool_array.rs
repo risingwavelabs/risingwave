@@ -25,7 +25,7 @@ pub struct BoolArray {
 }
 
 impl BoolArray {
-    pub fn new(bitmap: Bitmap, data: Bitmap) -> Self {
+    pub fn new(data: Bitmap, bitmap: Bitmap) -> Self {
         assert_eq!(bitmap.len(), data.len());
         Self { bitmap, data }
     }

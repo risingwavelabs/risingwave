@@ -51,7 +51,7 @@ impl Expression for IsNullExpression {
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let child_arr = self.child.eval_checked(input)?;
-        let arr = BoolArray::new(Bitmap::ones(input.capacity()), !child_arr.null_bitmap());
+        let arr = BoolArray::new(!child_arr.null_bitmap(), Bitmap::ones(input.capacity()));
 
         Ok(Arc::new(ArrayImpl::Bool(arr)))
     }
@@ -74,7 +74,7 @@ impl Expression for IsNotNullExpression {
             Ok(child_arr) => child_arr.into_null_bitmap(),
             Err(child_arr) => child_arr.null_bitmap().clone(),
         };
-        let arr = BoolArray::new(Bitmap::ones(input.capacity()), null_bitmap);
+        let arr = BoolArray::new(null_bitmap, Bitmap::ones(input.capacity()));
 
         Ok(Arc::new(ArrayImpl::Bool(arr)))
     }
