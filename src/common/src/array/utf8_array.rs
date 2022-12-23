@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Display, Write};
+
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
 use super::bytes_array::{BytesWriter, PartialBytesWriter, WrittenGuard};
@@ -120,6 +122,25 @@ impl Utf8Array {
             .into_single_value()
             .map(|bytes| unsafe { std::str::from_boxed_utf8_unchecked(bytes) })
     }
+
+    pub fn into_bytes_array(self) -> BytesArray {
+        self.bytes
+    }
+
+    pub fn from_iter_display(iter: impl IntoIterator<Item = Option<impl Display>>) -> Self {
+        let iter = iter.into_iter();
+        let mut builder = Utf8ArrayBuilder::new(iter.size_hint().0);
+        for e in iter {
+            if let Some(s) = e {
+                let mut writer = builder.writer().begin();
+                write!(writer, "{}", s).unwrap();
+                writer.finish();
+            } else {
+                builder.append_null();
+            }
+        }
+        builder.finish()
+    }
 }
 
 /// `Utf8ArrayBuilder` use `&str` to build an `Utf8Array`.
@@ -184,9 +205,7 @@ impl<'a> StringWriter<'a> {
     pub fn write_from_char_iter(self, iter: impl Iterator<Item = char>) -> WrittenGuard {
         let mut writer = self.begin();
         for c in iter {
-            let mut buf = [0; 4];
-            let result = c.encode_utf8(&mut buf);
-            writer.write_ref(result);
+            writer.write_char(c).unwrap();
         }
         writer.finish()
     }
@@ -219,6 +238,13 @@ impl<'a> PartialStringWriter<'a> {
     /// Exactly one new record was appended and the `builder` can be safely used.
     pub fn finish(self) -> WrittenGuard {
         self.bytes.finish()
+    }
+}
+
+impl Write for PartialStringWriter<'_> {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.write_ref(s);
+        Ok(())
     }
 }
 
