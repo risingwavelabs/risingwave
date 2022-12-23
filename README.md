@@ -1,7 +1,7 @@
 ![RisingWave Logo](./docs/images/logo-title.svg)
 
 [![Slack](https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack)](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw)
-[![Build status](https://badge.buildkite.com/9394d2bca0f87e2e97aa78b25f765c92d4207c0b65e7f6648f.svg)](https://buildkite.com/singularity-data/main)
+[![Build status](https://badge.buildkite.com/9394d2bca0f87e2e97aa78b25f765c92d4207c0b65e7f6648f.svg)](https://buildkite.com/risingwavelabs/main)
 [![codecov](https://codecov.io/gh/risingwavelabs/risingwave/branch/main/graph/badge.svg?token=EB44K9K38B)](https://codecov.io/gh/risingwavelabs/risingwave)
 
 **RisingWave is now ready for production! Curious about the use cases? More details coming soon!**
@@ -22,9 +22,9 @@ There are two ways to install RisingWave: use a pre-built package or compile fro
 
 ```shell
 # Download the pre-built binary
-wget https://github.com/risingwavelabs/risingwave/releases/download/v0.1.13/risingwave-v0.1.13-x86_64-unknown-linux.tar.gz
+wget https://github.com/risingwavelabs/risingwave/releases/download/v0.1.14/risingwave-v0.1.14-x86_64-unknown-linux.tar.gz
 # Unzip the binary
-tar xvf risingwave-v0.1.13-x86_64-unknown-linux.tar.gz
+tar xvf risingwave-v0.1.14-x86_64-unknown-linux.tar.gz
 # Start RisingWave in single-binary playground mode
 ./risingwave playground
 ```
@@ -33,7 +33,7 @@ tar xvf risingwave-v0.1.13-x86_64-unknown-linux.tar.gz
 
 ```shell
 # Start RisingWave in single-binary playground mode
-docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/risingwavelabs/risingwave:v0.1.13 playground
+docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/risingwavelabs/risingwave:v0.1.14 playground
 ```
 
 **Compile from Source with [RiseDev](docs/developer-guide.md#set-up-the-development-environment) (Linux and macOS)**
