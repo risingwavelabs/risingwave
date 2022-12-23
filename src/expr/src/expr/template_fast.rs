@@ -3,7 +3,8 @@
 //! Expressions in this module utilize auto-vectorization (SIMD) to speed up evaluation.
 //!
 //! It contains:
-//! - [`BooleanExpression`] for boolean operations, like `not`.
+//! - [`BooleanUnaryExpression`] for boolean operations, like `not`.
+//! - [`BooleanBinaryExpression`] for boolean comparisons, like `eq`.
 //! - [`UnaryExpression`] for unary operations on [`PrimitiveArray`], like `bitwise_not`.
 //! - [`BinaryExpression`] for binary operations on [`PrimitiveArray`], like `bitwise_and`.
 //!
@@ -23,27 +24,27 @@ use risingwave_common::types::{DataType, Datum, Scalar};
 
 use super::{BoxedExpression, Expression};
 
-pub struct BooleanExpression<FA, FV> {
+pub struct BooleanUnaryExpression<FA, FV> {
     child: BoxedExpression,
     f_array: FA,
     f_value: FV,
 }
 
-impl<FA, FV> fmt::Debug for BooleanExpression<FA, FV> {
+impl<FA, FV> fmt::Debug for BooleanUnaryExpression<FA, FV> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BooleanExpression")
+        f.debug_struct("BooleanUnaryExpression")
             .field("child", &self.child)
             .finish()
     }
 }
 
-impl<FA, FV> BooleanExpression<FA, FV>
+impl<FA, FV> BooleanUnaryExpression<FA, FV>
 where
     FA: Fn(&BoolArray) -> BoolArray + Send + Sync,
     FV: Fn(Option<bool>) -> Option<bool> + Send + Sync,
 {
     pub fn new(child: BoxedExpression, f_array: FA, f_value: FV) -> Self {
-        BooleanExpression {
+        BooleanUnaryExpression {
             child,
             f_array,
             f_value,
@@ -51,7 +52,7 @@ where
     }
 }
 
-impl<FA, FV> Expression for BooleanExpression<FA, FV>
+impl<FA, FV> Expression for BooleanUnaryExpression<FA, FV>
 where
     FA: Fn(&BoolArray) -> BoolArray + Send + Sync,
     FV: Fn(Option<bool>) -> Option<bool> + Send + Sync,
@@ -71,6 +72,64 @@ where
         let datum = self.child.eval_row(row)?;
         let scalar = datum.map(|s| *s.as_bool());
         let output_scalar = (self.f_value)(scalar);
+        let output_datum = output_scalar.map(|s| s.to_scalar_value());
+        Ok(output_datum)
+    }
+}
+
+pub struct BooleanBinaryExpression<FA, FV> {
+    left: BoxedExpression,
+    right: BoxedExpression,
+    f_array: FA,
+    f_value: FV,
+}
+
+impl<FA, FV> fmt::Debug for BooleanBinaryExpression<FA, FV> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BooleanBinaryExpression")
+            .field("left", &self.left)
+            .field("right", &self.right)
+            .finish()
+    }
+}
+
+impl<FA, FV> BooleanBinaryExpression<FA, FV>
+where
+    FA: Fn(&BoolArray, &BoolArray) -> BoolArray + Send + Sync,
+    FV: Fn(Option<bool>, Option<bool>) -> Option<bool> + Send + Sync,
+{
+    pub fn new(left: BoxedExpression, right: BoxedExpression, f_array: FA, f_value: FV) -> Self {
+        BooleanBinaryExpression {
+            left,
+            right,
+            f_array,
+            f_value,
+        }
+    }
+}
+
+impl<FA, FV> Expression for BooleanBinaryExpression<FA, FV>
+where
+    FA: Fn(&BoolArray, &BoolArray) -> BoolArray + Send + Sync,
+    FV: Fn(Option<bool>, Option<bool>) -> Option<bool> + Send + Sync,
+{
+    fn return_type(&self) -> DataType {
+        DataType::Boolean
+    }
+
+    fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
+        let left = self.left.eval_checked(data_chunk)?;
+        let right = self.right.eval_checked(data_chunk)?;
+        let a = left.as_bool();
+        let b = right.as_bool();
+        let c = (self.f_array)(a, b);
+        Ok(Arc::new(c.into()))
+    }
+
+    fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
+        let left = self.left.eval_row(row)?.map(|s| *s.as_bool());
+        let right = self.right.eval_row(row)?.map(|s| *s.as_bool());
+        let output_scalar = (self.f_value)(left, right);
         let output_datum = output_scalar.map(|s| s.to_scalar_value());
         Ok(output_datum)
     }

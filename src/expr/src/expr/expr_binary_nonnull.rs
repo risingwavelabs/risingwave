@@ -184,10 +184,20 @@ macro_rules! gen_shift_impl {
 /// * `$ret`: returned expression
 /// * `macro`: a macro helps create expression
 /// * `general_f`: generic cmp function (require a common ``TryInto`` type for two input).
+/// * `boolean_f`: boolean cmp function
 /// * `str_f`: cmp function between str
 macro_rules! gen_binary_expr_cmp {
-    ($macro:ident, $general_f:ident, $op:ident, $l:expr, $r:expr, $ret:expr) => {
+    ($macro:ident, $general_f:ident, $boolean_f:ident, $op:ident, $l:expr, $r:expr, $ret:expr) => {
         match ($l.return_type(), $r.return_type()) {
+            (DataType::Boolean, DataType::Boolean) => {
+                template_fast::BooleanBinaryExpression::new($l, $r, $boolean_f, |l, r| {
+                    match (l, r) {
+                        (Some(l), Some(r)) => $general_f::<bool, bool, bool>(l, r).ok(),
+                        _ => None,
+                    }
+                })
+                .boxed()
+            }
             (DataType::Varchar, DataType::Varchar) => {
                 Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
                     $l,
@@ -472,22 +482,22 @@ pub fn new_binary_expr(
     use crate::expr::data_types::*;
     let expr = match expr_type {
         Type::Equal => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_eq, EQ, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_eq, boolean_eq, EQ, l, r, ret}
         }
         Type::NotEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_ne, NE, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_ne, boolean_ne, NE, l, r, ret}
         }
         Type::LessThan => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_lt, LT, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_lt, boolean_lt, LT, l, r, ret}
         }
         Type::GreaterThan => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_gt, GT, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_gt, boolean_gt, GT, l, r, ret}
         }
         Type::GreaterThanOrEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_ge, GE, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_ge, boolean_ge, GE, l, r, ret}
         }
         Type::LessThanOrEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_le, LE, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_le, boolean_le, LE, l, r, ret}
         }
         Type::Add => {
             gen_binary_expr_atm! {
@@ -702,6 +712,42 @@ pub fn new_like_default(
         return_type,
         like_default,
     ))
+}
+
+fn boolean_eq(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = !(l.data() ^ r.data());
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_ne(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = l.data() ^ r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_gt(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = l.data() & !r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_lt(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = !l.data() & r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_ge(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = l.data() | !r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_le(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = !l.data() | r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
 }
 
 #[cfg(test)]

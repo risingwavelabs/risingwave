@@ -21,7 +21,7 @@ use risingwave_pb::expr::expr_node::Type as ProstType;
 
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
-use crate::expr::template_fast::BooleanExpression;
+use crate::expr::template_fast::BooleanUnaryExpression;
 use crate::expr::{template_fast, BoxedExpression, Expression};
 use crate::vector_op::arithmetic_op::{decimal_abs, general_abs, general_neg};
 use crate::vector_op::ascii::ascii;
@@ -192,27 +192,27 @@ pub fn new_unary_expr(
                 bool_out,
             ))
         }
-        (ProstType::Not, _, _) => Box::new(BooleanExpression::new(
+        (ProstType::Not, _, _) => Box::new(BooleanUnaryExpression::new(
             child_expr,
             |a| BoolArray::new(!a.data() & a.null_bitmap(), a.null_bitmap().clone()),
             conjunction::not,
         )),
-        (ProstType::IsTrue, _, _) => Box::new(BooleanExpression::new(
+        (ProstType::IsTrue, _, _) => Box::new(BooleanUnaryExpression::new(
             child_expr,
             |a| BoolArray::new(a.to_bitmap(), Bitmap::ones(a.len())),
             is_true,
         )),
-        (ProstType::IsNotTrue, _, _) => Box::new(BooleanExpression::new(
+        (ProstType::IsNotTrue, _, _) => Box::new(BooleanUnaryExpression::new(
             child_expr,
             |a| BoolArray::new(!a.to_bitmap(), Bitmap::ones(a.len())),
             is_not_true,
         )),
-        (ProstType::IsFalse, _, _) => Box::new(BooleanExpression::new(
+        (ProstType::IsFalse, _, _) => Box::new(BooleanUnaryExpression::new(
             child_expr,
             |a| BoolArray::new(!a.data() & a.null_bitmap(), Bitmap::ones(a.len())),
             is_false,
         )),
-        (ProstType::IsNotFalse, _, _) => Box::new(BooleanExpression::new(
+        (ProstType::IsNotFalse, _, _) => Box::new(BooleanUnaryExpression::new(
             child_expr,
             |a| BoolArray::new(a.data() | !a.null_bitmap(), Bitmap::ones(a.len())),
             is_not_false,

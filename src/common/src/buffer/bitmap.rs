@@ -37,7 +37,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::iter::{self, TrustedLen};
-use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, Not, RangeInclusive};
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, RangeInclusive};
 
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer as ProstBuffer;
@@ -449,6 +449,19 @@ impl BitOr for Bitmap {
     }
 }
 
+impl BitXor for &Bitmap {
+    type Output = Bitmap;
+
+    fn bitxor(self, rhs: &Bitmap) -> Self::Output {
+        assert_eq!(self.num_bits, rhs.num_bits);
+        let bits = (self.bits.iter())
+            .zip(rhs.bits.iter())
+            .map(|(&a, &b)| a ^ b)
+            .collect();
+        Bitmap::from_vec_with_len(bits, self.num_bits)
+    }
+}
+
 impl<'a> Not for &'a Bitmap {
     type Output = Bitmap;
 
@@ -468,8 +481,13 @@ impl<'a> Not for &'a Bitmap {
 impl Not for Bitmap {
     type Output = Bitmap;
 
-    fn not(self) -> Self::Output {
-        (&self).not()
+    fn not(mut self) -> Self::Output {
+        self.bits.iter_mut().for_each(|x| *x = !*x);
+        if self.num_bits % BITS != 0 {
+            self.bits[self.num_bits / BITS] &= (1 << (self.num_bits % BITS)) - 1;
+        }
+        self.count_ones = self.num_bits - self.count_ones;
+        self
     }
 }
 

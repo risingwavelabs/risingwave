@@ -385,7 +385,6 @@ macro_rules! for_all_cmp_variants {
             { interval, interval, interval, $general_f },
             { time, time, time, $general_f },
             { date, date, date, $general_f },
-            { boolean, boolean, boolean, $general_f },
             { timestamp, date, timestamp, $general_f },
             { date, timestamp, timestamp, $general_f },
             { interval, time, interval, $general_f },
