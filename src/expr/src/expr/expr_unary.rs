@@ -21,8 +21,8 @@ use risingwave_pb::expr::expr_node::Type as ProstType;
 
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
-use crate::expr::template_v2::BooleanExpression;
-use crate::expr::{template_v2 as v2, BoxedExpression, Expression};
+use crate::expr::template_fast::BooleanExpression;
+use crate::expr::{template_fast, BoxedExpression, Expression};
 use crate::vector_op::arithmetic_op::{decimal_abs, general_abs, general_neg};
 use crate::vector_op::ascii::ascii;
 use crate::vector_op::bitwise_op::general_bitnot;
@@ -68,11 +68,11 @@ macro_rules! gen_unary_impl {
     };
 }
 
-macro_rules! gen_unary_impl_v2 {
+macro_rules! gen_unary_impl_fast {
     ([$expr_name: literal, $child:expr, $ret:expr], $( { $input:ident, $rt: ident, $func:ident },)*) => {
         match ($child.return_type()) {
             $(
-                $input! { type_match_pattern } => v2::UnaryExpression::new(
+                $input! { type_match_pattern } => template_fast::UnaryExpression::new(
                     $child,
                     $func::<<$input! { type_array } as Array>::OwnedItem>
                 ).boxed(),
@@ -269,7 +269,7 @@ pub fn new_unary_expr(
             }
         }
         (ProstType::BitwiseNot, _, _) => {
-            gen_unary_impl_v2! {
+            gen_unary_impl_fast! {
                 [ "BitwiseNot", child_expr, return_type],
                 { int16, int16, general_bitnot },
                 { int32, int32, general_bitnot },

@@ -1,3 +1,15 @@
+//! Generic expressions for fast evaluation.
+//!
+//! Expressions in this module utilize auto-vectorization (SIMD) to speed up evaluation.
+//!
+//! It contains:
+//! - [`BooleanExpression`] for boolean operations, like `not`.
+//! - [`UnaryExpression`] for unary operations on [`PrimitiveArray`], like `bitwise_not`.
+//! - [`BinaryExpression`] for binary operations on [`PrimitiveArray`], like `bitwise_and`.
+//!
+//! Note that to enable vectorization, operations must be applied to every element in the array,
+//! without any branching. So it is only suitable for infallible operations.
+
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
