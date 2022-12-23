@@ -14,15 +14,15 @@
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
-pub struct ProjectJoinRule {}
+pub struct ProjectJoinMergeRule {}
 
-impl ProjectJoinRule {
+impl ProjectJoinMergeRule {
     pub fn create() -> BoxedRule {
         Box::new(Self {})
     }
 }
 
-impl Rule for ProjectJoinRule {
+impl Rule for ProjectJoinMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let project = plan.as_logical_project()?;
         let input = project.input();
