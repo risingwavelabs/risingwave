@@ -2453,8 +2453,15 @@ mod tests {
 
         let test_fixture = TestFixture::with_join_type(JoinType::LeftSemi);
         let expected_chunk = DataChunk::from_pretty(
-            "i   f
-             4   6.6",
+            "i f
+            1 1.0
+            1 1.0
+            1 1.0
+            1 1.0
+            1 1.0
+            1 1.0
+            1 1.0
+            2 1.0",
         );
 
         test_fixture
