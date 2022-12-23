@@ -241,6 +241,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 mod tests {
     use core::panic;
 
+    use risingwave_pb::common::HostAddress;
     use risingwave_pb::meta::LeaderRequest;
     use tokio::time::sleep;
     use tonic::transport::Endpoint;
@@ -423,9 +424,15 @@ mod tests {
             })
             .unwrap();
 
-        let req = LeaderRequest {};
         let leader_client = LeaderServiceClient::new(channel);
-        let resp = leader_client.to_owned().leader(req).await.unwrap(); // LeaderRequest
+        let reported_leader_addr: HostAddress = leader_client
+            .to_owned()
+            .leader(LeaderRequest {})
+            .await
+            .unwrap()
+            .into_inner()
+            .leader_addr
+            .expect("Node should always know who leader is");
     }
 
     // TODO: Write service discovery tests
