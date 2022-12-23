@@ -539,6 +539,15 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
+    /// High-level idea:
+    /// 1. For each probe_row, append candidate rows to buffer.
+    ///    Candidate rows: Those satisfying equi_predicate (==).
+    /// 2. If buffer becomes full, process it.
+    ///    Apply non_equi_join predicates e.g. `>=`, `<=` to filter rows.
+    ///    Track if probe_row is matched to avoid duplicates.
+    /// 3. If we matched probe_row in spilled chunk,
+    ///    stop appending its candidate rows,
+    ///    to avoid matching it again in next spilled chunk.
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     pub async fn do_left_semi_join_with_non_equi_condition<'a>(
         EquiJoinParams {
@@ -590,6 +599,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 }
             }
         }
+
+        // Process remaining rows in buffer
         if let Some(spilled) = chunk_builder.consume_all() {
             yield Self::process_left_semi_anti_join_non_equi_condition::<false>(
                 spilled,
@@ -1210,6 +1221,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
             .take())
     }
 
+    /// Filters for candidate rows which satisfy `non_equi` predicate.
+    /// Removes duplicate rows.
     fn process_left_semi_anti_join_non_equi_condition<const ANTI_JOIN: bool>(
         chunk: DataChunk,
         cond: &dyn Expression,
@@ -1457,6 +1470,9 @@ impl DataChunkMutator {
         self
     }
 
+    /// Removes duplicate rows using `filter`
+    /// and only returns the first match for each window.
+    /// Windows are indicated by `first_output_row_ids`.
     fn remove_duplicate_rows_for_left_semi_anti_join<const ANTI_JOIN: bool>(
         mut self,
         filter: &Bitmap,
@@ -2416,9 +2432,12 @@ mod tests {
         test_fixture.do_test(expected_chunk, true, false).await;
     }
 
-    /// Test behaviour when we spill with already matched rows
+    /// Tests handling of edge case:
+    /// Match is found for a probe_row,
+    /// but there are still candidate rows in the iterator for that probe_row.
+    /// These should not be buffered or we will have duplicate rows in output.
     #[tokio::test]
-    async fn test_left_semi_join_with_non_equi_condition_split() {
+    async fn test_left_semi_join_with_non_equi_condition_duplicates() {
         let schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int32),
