@@ -62,6 +62,9 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Opt
                 collation,
                 options,
             } = column;
+            let data_type = data_type.ok_or(ErrorCode::InvalidInputSyntax(
+                "data type is not specified".into(),
+            ))?;
             if let Some(collation) = collation {
                 return Err(ErrorCode::NotImplemented(
                     format!("collation \"{}\"", collation),

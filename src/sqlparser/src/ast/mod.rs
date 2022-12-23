@@ -1674,9 +1674,10 @@ impl fmt::Display for Assignment {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionArgExpr {
     Expr(Expr),
-    /// expr is a table or a column struct, object_name is field.
+    /// Expr is a table or a struct column.
+    /// Idents are the prefix of `*`, which are consecutive field accesses.
     /// e.g. `(table.v1).*` or `(table).v1.*`
-    ExprQualifiedWildcard(Expr, Option<ObjectName>),
+    ExprQualifiedWildcard(Expr, Vec<Ident>),
     /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
     QualifiedWildcard(ObjectName),
     /// An unqualified `*`
@@ -1693,8 +1694,8 @@ impl fmt::Display for FunctionArgExpr {
                     "({}){}.*",
                     expr,
                     prefix
-                        .as_ref()
-                        .map_or_else(|| "".to_string(), |p| format!(".{}", p))
+                        .iter()
+                        .format_with("", |i, f| f(&format_args!(".{i}")))
                 )
             }
             FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),

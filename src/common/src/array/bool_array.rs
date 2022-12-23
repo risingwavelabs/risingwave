@@ -56,7 +56,7 @@ impl FromIterator<bool> for BoolArray {
     fn from_iter<I: IntoIterator<Item = bool>>(iter: I) -> Self {
         let data: Bitmap = iter.into_iter().collect();
         BoolArray {
-            bitmap: Bitmap::all_high_bits(data.len()),
+            bitmap: Bitmap::ones(data.len()),
             data,
         }
     }
