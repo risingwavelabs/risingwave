@@ -73,6 +73,8 @@ mod union_to_distinct;
 pub use union_to_distinct::*;
 mod agg_project_merge;
 pub use agg_project_merge::*;
+mod union_merge_rule;
+pub use union_merge_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -100,6 +102,7 @@ macro_rules! for_all_rules {
             ,{JoinCommuteRule}
             ,{UnionToDistinctRule}
             ,{AggProjectMergeRule}
+            ,{UnionMergeRule}
         }
     };
 }
