@@ -210,7 +210,7 @@ fn bench_expr(c: &mut Criterion) {
             .any(|t| matches!(t, DataTypeName::Struct | DataTypeName::List))
         {
             // TODO: support struct and list
-            println!("TODO: {}", sig.to_string_no_return());
+            println!("todo: {}", sig.to_string_no_return());
             continue;
         }
 
@@ -241,7 +241,7 @@ fn bench_expr(c: &mut Criterion) {
         let expr = match build_from_prost(&prost) {
             Ok(expr) => expr,
             Err(e) => {
-                println!("{e}");
+                println!("error: {e}");
                 continue;
             }
         };
@@ -252,7 +252,7 @@ fn bench_expr(c: &mut Criterion) {
 
     for sig in agg_func_sigs() {
         if sig.inputs_type.len() != 1 {
-            println!("TODO: {}", sig.to_string_no_return());
+            println!("todo: {}", sig.to_string_no_return());
             continue;
         }
         let mut agg = match create_agg_state_unary(
@@ -264,7 +264,7 @@ fn bench_expr(c: &mut Criterion) {
         ) {
             Ok(agg) => agg,
             Err(e) => {
-                println!("{e}");
+                println!("error: {e}");
                 continue;
             }
         };
@@ -289,7 +289,7 @@ fn bench_expr(c: &mut Criterion) {
                     Interval => INTERVAL_STRING,
                     Bytea => NUMBER_STRING, // any
                     _ => {
-                        println!("TODO: {}", sig.to_string_no_return());
+                        println!("todo: {}", sig.to_string_no_return());
                         continue;
                     }
                 };
@@ -300,7 +300,7 @@ fn bench_expr(c: &mut Criterion) {
         ) {
             Ok(expr) => expr,
             Err(e) => {
-                println!("{e}");
+                println!("error: {e}");
                 continue;
             }
         };
