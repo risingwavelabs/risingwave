@@ -569,6 +569,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
                     {
+                        if non_equi_state.found_matched {
+                            break;
+                        }
                         let build_chunk = &build_side[build_row_id.chunk_id()];
                         if let Some(spilled) = Self::append_one_row(
                             &mut chunk_builder,
@@ -2454,9 +2457,6 @@ mod tests {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftSemi);
         let expected_chunk = DataChunk::from_pretty(
             "i f
-            1 1.0
-            1 1.0
-            1 1.0
             1 1.0
             1 1.0
             1 1.0
