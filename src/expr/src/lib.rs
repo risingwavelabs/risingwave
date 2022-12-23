@@ -25,6 +25,7 @@
 #![feature(generators)]
 #![feature(iterator_try_collect)]
 #![feature(exclusive_range_pattern)]
+#![feature(once_cell)]
 
 pub mod error;
 pub mod expr;
