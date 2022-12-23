@@ -156,7 +156,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         }
     });
 
-    let (svc_shutdown_tx, svc_shutdown_rx) = WatchChannel(());
+    let (svc_shutdown_tx, mut svc_shutdown_rx) = WatchChannel(());
 
     let join_handle = tokio::spawn(async move {
         let span = tracing::span!(tracing::Level::INFO, "services");
@@ -190,7 +190,16 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
         // wait until this node becomes a leader
         while !node_is_leader(&leader_rx) {
-            leader_rx.changed().await.expect("Leader sender dropped");
+            tokio::select! {
+                _ = leader_rx.changed() => {}
+                res = svc_shutdown_rx.changed() => {
+                    match res {
+                        Ok(_) => tracing::info!("Shutting down meta node"),
+                        Err(_) => tracing::error!("Shutdown sender dropped"),
+                    }
+                    return;
+                }
+            }
         }
 
         // shut down follower svc if node used to be follower
@@ -225,24 +234,19 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     Ok((join_handle, svc_shutdown_tx))
 }
 
+#[cfg(test)]
 mod tests {
-    #[cfg(test)]
     use core::panic;
 
-    #[cfg(test)]
     use tokio::time::sleep;
-    #[cfg(test)]
     use tonic::transport::Endpoint;
 
-    #[cfg(test)]
     use super::*;
 
-    #[cfg(test)]
     const WAIT_INTERVAL: Duration = Duration::from_secs(5);
 
     /// Start `n` meta nodes on localhost. First node will be started at `meta_port`, 2nd node on
     /// `meta_port + 1`, ...
-    #[cfg(test)]
     async fn setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
         use std::net::{IpAddr, Ipv4Addr};
 
@@ -282,7 +286,6 @@ mod tests {
     /// ## Returns
     /// Number of nodes which currently are leaders. Number is not snapshoted. If there is a
     /// leader failover in process, you may get an incorrect result
-    #[cfg(test)]
     async fn number_of_leaders(number_of_nodes: u16, meta_port: u16, host_port: u16) -> u16 {
         use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
         use risingwave_common::util::addr::HostAddr;
@@ -351,8 +354,9 @@ mod tests {
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
-        for nc in node_controllers {
-            nc.0.abort();
+        for (join_handle, shutdown_tx) in node_controllers {
+            shutdown_tx.send(()).unwrap();
+            join_handle.await.unwrap();
         }
     }
 
@@ -365,8 +369,9 @@ mod tests {
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
-        for nc in node_controllers {
-            nc.0.abort();
+        for (join_handle, shutdown_tx) in node_controllers {
+            shutdown_tx.send(()).unwrap();
+            join_handle.await.unwrap();
         }
     }
 
@@ -379,13 +384,13 @@ mod tests {
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
-        for nc in node_controllers {
-            nc.0.abort();
+        for (join_handle, shutdown_tx) in node_controllers {
+            shutdown_tx.send(()).unwrap();
+            join_handle.await.unwrap();
         }
     }
 
     /// returns number of leaders after failover
-    #[cfg(test)]
     async fn test_failover(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
         let node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
 
@@ -407,8 +412,9 @@ mod tests {
         // expect that we still have 1 leader
         // skipping first meta_port, since that node was former leader and got killed
         let leaders = number_of_leaders(number_of_nodes - 1, meta_port + 1, compute_port).await;
-        for nc in node_controllers {
-            nc.0.abort();
+        for (join_handle, shutdown_tx) in node_controllers {
+            let _ = shutdown_tx.send(());
+            join_handle.await.unwrap();
         }
         leaders
     }
