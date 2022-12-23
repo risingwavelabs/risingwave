@@ -24,36 +24,30 @@ use risingwave_pb::expr::expr_node::Type;
 
 use super::{BoxedExpression, Expression};
 use crate::expr::template::BinaryNullableExpression;
+use crate::expr::template_fast;
 use crate::vector_op::array_access::array_access;
 use crate::vector_op::cmp::{
-    general_is_distinct_from, general_is_not_distinct_from, str_is_distinct_from,
+    general_is_distinct_from, general_is_not_distinct_from, general_ne, str_is_distinct_from,
     str_is_not_distinct_from,
 };
 use crate::vector_op::conjunction::{and, or};
 use crate::{for_all_cmp_variants, ExprError, Result};
 
-macro_rules! gen_nullable_cmp_impl {
+macro_rules! gen_is_distinct_from_impl {
     ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident} ),* $(,)?) => {
         match ($l.return_type(), $r.return_type()) {
             $(
                 ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
-                    Box::new(
-                        BinaryNullableExpression::<
-                            $i1! { type_array },
-                            $i2! { type_array },
-                            BoolArray,
-                            _
-                        >::new(
-                            $l,
-                            $r,
-                            $ret,
-                            $func::<
-                                <$i1! { type_array } as Array>::OwnedItem,
-                                <$i2! { type_array } as Array>::OwnedItem,
-                                <$cast! { type_array } as Array>::OwnedItem
-                            >,
-                        )
-                    )
+                    template_fast::IsDistinctFromExpression::new(
+                        $l,
+                        $r,
+                        general_ne::<
+                            <$i1! { type_array } as Array>::OwnedItem,
+                            <$i2! { type_array } as Array>::OwnedItem,
+                            <$cast! { type_array } as Array>::OwnedItem
+                        >,
+                        $func,
+                    ).boxed()
                 }
             ),*
             _ => {
@@ -214,6 +208,17 @@ pub fn new_distinct_from_expr(
     use crate::expr::data_types::*;
 
     let expr: BoxedExpression = match (l.return_type(), r.return_type()) {
+        (DataType::Boolean, DataType::Boolean) => template_fast::BooleanBinaryExpression::new(
+            l,
+            r,
+            |l, r| {
+                let data = ((l.data() ^ r.data()) & (l.null_bitmap() & r.null_bitmap()))
+                    | (l.null_bitmap() ^ r.null_bitmap());
+                BoolArray::new(data, Bitmap::ones(l.len()))
+            },
+            |l, r| Some(general_is_distinct_from::<bool, bool, bool>(l, r)),
+        )
+        .boxed(),
         (DataType::Varchar, DataType::Varchar) => Box::new(BinaryNullableExpression::<
             Utf8Array,
             Utf8Array,
@@ -223,7 +228,7 @@ pub fn new_distinct_from_expr(
             l, r, ret, str_is_distinct_from
         )),
         _ => {
-            for_all_cmp_variants! {gen_nullable_cmp_impl, l, r, ret, general_is_distinct_from}
+            for_all_cmp_variants! { gen_is_distinct_from_impl, l, r, ret, false }
         }
     };
     Ok(expr)
@@ -237,6 +242,17 @@ pub fn new_not_distinct_from_expr(
     use crate::expr::data_types::*;
 
     let expr: BoxedExpression = match (l.return_type(), r.return_type()) {
+        (DataType::Boolean, DataType::Boolean) => template_fast::BooleanBinaryExpression::new(
+            l,
+            r,
+            |l, r| {
+                let data = !(((l.data() ^ r.data()) & (l.null_bitmap() & r.null_bitmap()))
+                    | (l.null_bitmap() ^ r.null_bitmap()));
+                BoolArray::new(data, Bitmap::ones(l.len()))
+            },
+            |l, r| Some(general_is_not_distinct_from::<bool, bool, bool>(l, r)),
+        )
+        .boxed(),
         (DataType::Varchar, DataType::Varchar) => Box::new(BinaryNullableExpression::<
             Utf8Array,
             Utf8Array,
@@ -246,7 +262,7 @@ pub fn new_not_distinct_from_expr(
             l, r, ret, str_is_not_distinct_from
         )),
         _ => {
-            for_all_cmp_variants! {gen_nullable_cmp_impl, l, r, ret, general_is_not_distinct_from}
+            for_all_cmp_variants! { gen_is_distinct_from_impl, l, r, ret, true }
         }
     };
     Ok(expr)

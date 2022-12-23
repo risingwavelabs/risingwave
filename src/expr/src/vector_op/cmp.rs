@@ -78,35 +78,32 @@ where
     l.into() < r.into()
 }
 
-pub fn general_is_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> Result<Option<bool>>
+pub fn general_is_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
 where
     T1: Into<T3> + Debug,
     T2: Into<T3> + Debug,
     T3: Ord,
 {
-    Ok(Some(match (l, r) {
+    match (l, r) {
         (Some(lv), Some(rv)) => general_ne::<T1, T2, T3>(lv, rv),
         (Some(_), None) => true,
         (None, Some(_)) => true,
         (None, None) => false,
-    }))
+    }
 }
 
-pub fn general_is_not_distinct_from<T1, T2, T3>(
-    l: Option<T1>,
-    r: Option<T2>,
-) -> Result<Option<bool>>
+pub fn general_is_not_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
 where
     T1: Into<T3> + Debug,
     T2: Into<T3> + Debug,
     T3: Ord,
 {
-    Ok(Some(match (l, r) {
+    match (l, r) {
         (Some(lv), Some(rv)) => general_eq::<T1, T2, T3>(lv, rv),
         (Some(_), None) => false,
         (None, Some(_)) => false,
         (None, None) => true,
-    }))
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

@@ -8,6 +8,7 @@
 //! - [`UnaryExpression`] for unary operations on [`PrimitiveArray`], like `bitwise_not`.
 //! - [`BinaryExpression`] for binary operations on [`PrimitiveArray`], like `bitwise_and`.
 //! - [`CompareExpression`] for comparisons on [`PrimitiveArray`], like `eq`.
+//! - [`IsDistinctFromExpression`] for `is[_not]_distinct_from` on [`PrimitiveArray`].
 //!
 //! Note that to enable vectorization, operations must be applied to every element in the array,
 //! without any branching. So it is only suitable for infallible operations.
@@ -379,5 +380,95 @@ where
         };
         let output_datum = output_scalar.map(|s| s.to_scalar_value());
         Ok(output_datum)
+    }
+}
+
+pub struct IsDistinctFromExpression<F, A, B> {
+    left: BoxedExpression,
+    right: BoxedExpression,
+    ne: F,
+    not: bool,
+    _marker: PhantomData<(A, B)>,
+}
+
+impl<F, A, B> fmt::Debug for IsDistinctFromExpression<F, A, B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IsDistinctFromExpression")
+            .field("left", &self.left)
+            .field("right", &self.right)
+            .finish()
+    }
+}
+
+impl<F, A, B> IsDistinctFromExpression<F, A, B>
+where
+    F: Fn(A, B) -> bool + Send + Sync,
+    A: PrimitiveArrayItemType,
+    B: PrimitiveArrayItemType,
+    for<'a> &'a PrimitiveArray<A>: From<&'a ArrayImpl>,
+    for<'a> &'a PrimitiveArray<B>: From<&'a ArrayImpl>,
+{
+    pub fn new(left: BoxedExpression, right: BoxedExpression, ne: F, not: bool) -> Self {
+        IsDistinctFromExpression {
+            left,
+            right,
+            ne,
+            not,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<F, A, B> Expression for IsDistinctFromExpression<F, A, B>
+where
+    F: Fn(A, B) -> bool + Send + Sync,
+    A: PrimitiveArrayItemType,
+    B: PrimitiveArrayItemType,
+    for<'a> &'a PrimitiveArray<A>: From<&'a ArrayImpl>,
+    for<'a> &'a PrimitiveArray<B>: From<&'a ArrayImpl>,
+{
+    fn return_type(&self) -> DataType {
+        DataType::Boolean
+    }
+
+    fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
+        let left = self.left.eval_checked(data_chunk)?;
+        let right = self.right.eval_checked(data_chunk)?;
+        assert_eq!(left.len(), right.len());
+
+        let a: &PrimitiveArray<A> = (&*left).into();
+        let b: &PrimitiveArray<B> = (&*right).into();
+
+        let mut data: Bitmap = a
+            .raw_iter()
+            .zip(b.raw_iter())
+            .map(|(a, b)| (self.ne)(a, b))
+            .collect();
+        data &= left.null_bitmap();
+        data &= right.null_bitmap();
+        data |= left.null_bitmap() ^ right.null_bitmap();
+        if self.not {
+            data = !data;
+        }
+        let c = BoolArray::new(data, Bitmap::ones(a.len()));
+        Ok(Arc::new(c.into()))
+    }
+
+    fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
+        let datum1 = self.left.eval_row(row)?;
+        let datum2 = self.right.eval_row(row)?;
+        let scalar1 = datum1
+            .as_ref()
+            .map(|s| s.as_scalar_ref_impl().try_into().unwrap());
+        let scalar2 = datum2
+            .as_ref()
+            .map(|s| s.as_scalar_ref_impl().try_into().unwrap());
+
+        let output_scalar = match (scalar1, scalar2) {
+            (Some(l), Some(r)) => (self.ne)(l, r),
+            (Some(_), None) | (None, Some(_)) => true,
+            (None, None) => false,
+        } ^ self.not;
+        Ok(Some(output_scalar.to_scalar_value()))
     }
 }
