@@ -627,14 +627,11 @@ pub fn new_binary_expr(
         }
         Type::Extract => build_extract_expr(ret, l, r)?,
         Type::AtTimeZone => build_at_time_zone_expr(ret, l, r)?,
-        Type::RoundDigit => Box::new(
-            BinaryExpression::<DecimalArray, I32Array, DecimalArray, _>::new(
-                l,
-                r,
-                ret,
-                round_digits,
-            ),
-        ),
+        Type::RoundDigit => Box::new(template_fast::BinaryExpression::new(
+            l,
+            r,
+            round_digits::<i32>,
+        )),
         Type::Position => Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _>::new(
             l, r, ret, position,
         )),

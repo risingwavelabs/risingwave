@@ -69,13 +69,10 @@ macro_rules! gen_unary_impl {
 }
 
 macro_rules! gen_unary_impl_fast {
-    ([$expr_name: literal, $child:expr, $ret:expr], $( { $input:ident, $rt: ident, $func:ident },)*) => {
+    ([$expr_name: literal, $child:expr, $ret:expr], $( { $input:ident, $rt: ident, $func:expr },)*) => {
         match ($child.return_type()) {
             $(
-                $input! { type_match_pattern } => template_fast::UnaryExpression::new(
-                    $child,
-                    $func::<<$input! { type_array } as Array>::OwnedItem>
-                ).boxed(),
+                $input! { type_match_pattern } => template_fast::UnaryExpression::new($child, $func).boxed(),
             )*
             _ => {
                 return Err(ExprError::UnsupportedFunction(format!("{}({:?}) -> {:?}", $expr_name, $child.return_type(), $ret)));
@@ -116,7 +113,7 @@ macro_rules! gen_round_expr {
         $float64_round_func:ident,
         $decimal_round_func:ident
     ) => {
-        gen_unary_impl! {
+        gen_unary_impl_fast! {
             [$expr_name, $child, $ret],
             { float64, float64, $float64_round_func },
             { decimal, decimal, $decimal_round_func },
@@ -271,10 +268,9 @@ pub fn new_unary_expr(
         (ProstType::BitwiseNot, _, _) => {
             gen_unary_impl_fast! {
                 [ "BitwiseNot", child_expr, return_type],
-                { int16, int16, general_bitnot },
-                { int32, int32, general_bitnot },
-                { int64, int64, general_bitnot },
-
+                { int16, int16, general_bitnot::<i16> },
+                { int32, int32, general_bitnot::<i32> },
+                { int64, int64, general_bitnot::<i64> },
             }
         }
         (ProstType::Ceil, _, _) => {
