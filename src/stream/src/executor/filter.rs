@@ -146,7 +146,7 @@ impl SimpleFilterExecutor {
 
         let new_visibility = new_visibility.finish();
 
-        Ok(if new_visibility.num_high_bits() > 0 {
+        Ok(if new_visibility.count_ones() > 0 {
             let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
             Some(new_chunk)
         } else {
