@@ -1,4 +1,6 @@
 #!/bin/bash
+
+# Exits as soon as any line fails.
 set -euo pipefail
 
 if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
