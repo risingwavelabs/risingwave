@@ -64,13 +64,11 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
         dst.push_str(CHRONO_PATTERNS[mat.pattern()]);
         true
     });
-    let pattern = ChronoPatternBuilder {
+    ChronoPatternBuilder {
         tmpl: chrono_tmpl,
         items_builder: |tmpl| StrftimeItems::new(tmpl).into_iter().collect::<Vec<_>>(),
     }
-    .build();
-
-    pattern
+    .build()
 }
 
 #[inline(always)]
