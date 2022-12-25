@@ -865,6 +865,8 @@ pub enum Statement {
         columns: Vec<Ident>,
         /// A SQL query that specifies what to insert
         source: Box<Query>,
+        /// Define output of this insert statement
+        returning: Vec<Ident>,
     },
     Copy {
         /// TABLE

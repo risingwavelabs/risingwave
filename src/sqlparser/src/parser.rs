@@ -2473,6 +2473,16 @@ impl Parser {
         }
     }
 
+    pub fn parse_returning(&mut self, optional: IsOptional) -> Result<Vec<Ident>, ParserError> {
+        if self.parse_keyword(Keyword::RETURNING) {
+            // Todo: some logic
+        } else if optional == Optional {
+            Ok(vec![])
+        } else {
+            self.expected("a list of columns or * after returning", self.peek_token())
+        }
+    }
+
     pub fn parse_row_expr(&mut self) -> Result<Expr, ParserError> {
         Ok(Expr::Row(self.parse_token_wrapped_exprs(
             &Token::LParen,
@@ -3363,11 +3373,13 @@ impl Parser {
         let columns = self.parse_parenthesized_column_list(Optional)?;
 
         let source = Box::new(self.parse_query()?);
+        let returning = self.parse_returning(Optional)?;
 
         Ok(Statement::Insert {
             table_name,
             columns,
             source,
+            returning
         })
     }
 
