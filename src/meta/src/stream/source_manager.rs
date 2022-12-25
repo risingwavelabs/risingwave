@@ -20,13 +20,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_connector::source::{
     ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::Source;
+use risingwave_pb::connector_service::table_schema::Column;
+use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
@@ -71,12 +72,8 @@ impl ConnectorSourceWorker {
         let mut properties = ConnectorProperties::extract(source.properties.clone())?;
         // init cdc properties
         if let Some(endpoint) = connector_rpc_endpoint {
-            let pk_column_names = Self::extract_pk_col_names(source);
-            properties.init_properties_for_cdc(
-                source.id,
-                endpoint.to_string(),
-                Some(pk_column_names),
-            );
+            let table_schema = Self::extract_source_schema(source);
+            properties.init_properties_for_cdc(source.id, endpoint.to_string(), Some(table_schema));
         }
         let enumerator = SplitEnumeratorImpl::create(properties).await?;
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
@@ -123,20 +120,19 @@ impl ConnectorSourceWorker {
         Ok(())
     }
 
-    fn extract_pk_col_names(source: &Source) -> Vec<String> {
-        let pk_column_names = source
-            .pk_column_ids
-            .iter()
-            .map(|&id| {
-                let name = source
-                    .columns
-                    .get(id as usize)
-                    .map(|col| col.get_column_desc().unwrap().get_name().clone());
-
-                name.unwrap()
-            })
-            .collect_vec();
-        pk_column_names
+    fn extract_source_schema(source: &Source) -> TableSchema {
+        TableSchema {
+            columns: source
+                .columns
+                .iter()
+                .flat_map(|col| &col.column_desc)
+                .map(|col| Column {
+                    name: col.name.clone(),
+                    data_type: col.column_type.as_ref().unwrap().type_name,
+                })
+                .collect(),
+            pk_indices: source.pk_column_ids.iter().map(|i| *i as u32).collect(),
+        }
     }
 }
 

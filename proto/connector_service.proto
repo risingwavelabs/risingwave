@@ -7,15 +7,16 @@ import "data.proto";
 option java_outer_classname = "ConnectorServiceProto";
 option java_package = "com.risingwave.proto";
 
-message SinkConfig {
-  message TableSchema {
-    message Column {
-      string name = 1;
-      data.DataType.TypeName data_type = 2;
-    }
-    repeated Column columns = 1;
-    repeated uint32 pk_indices = 2;
+message TableSchema {
+  message Column {
+    string name = 1;
+    data.DataType.TypeName data_type = 2;
   }
+  repeated Column columns = 1;
+  repeated uint32 pk_indices = 2;
+}
+
+message SinkConfig {
   string sink_type = 1;
   map<string, string> properties = 2;
   TableSchema table_schema = 3;
@@ -100,7 +101,7 @@ message GetEventStreamRequest {
     uint64 source_id = 1;
     SourceType source_type = 2;
     map<string, string> properties = 3;
-    repeated string pk_col_names = 4;
+    TableSchema table_schema = 4;
   }
 
   message StartSource {

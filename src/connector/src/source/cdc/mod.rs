@@ -20,7 +20,7 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 pub use enumerator::*;
-use risingwave_pb::connector_service::SourceType;
+use risingwave_pb::connector_service::{SourceType, TableSchema};
 use serde::Deserialize;
 pub use source::*;
 pub use split::*;
@@ -38,8 +38,9 @@ pub struct CdcProperties {
     pub source_type: String,
     /// Properties specified in the WITH clause by user
     pub props: HashMap<String, String>,
-    /// Primary key column names
-    pub pk_column_names: Vec<String>,
+
+    /// Schema of the source specified by users
+    pub table_schema: Option<TableSchema>,
 }
 
 impl CdcProperties {
