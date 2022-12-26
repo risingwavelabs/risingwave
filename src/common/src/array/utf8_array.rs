@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Display, Write};
+
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
 use super::bytes_array::{BytesWriter, PartialBytesWriter, WrittenGuard};
-use super::iterator::ArrayRawIter;
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, BytesArray, BytesArrayBuilder};
+use super::{Array, ArrayBuilder, ArrayMeta, BytesArray, BytesArrayBuilder};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::Bitmap;
 
@@ -28,9 +29,7 @@ pub struct Utf8Array {
 
 impl Array for Utf8Array {
     type Builder = Utf8ArrayBuilder;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = Box<str>;
-    type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = &'a str;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
@@ -38,30 +37,9 @@ impl Array for Utf8Array {
         std::str::from_utf8_unchecked(bytes)
     }
 
-    fn value_at(&self, idx: usize) -> Option<&str> {
-        self.bytes
-            .value_at(idx)
-            .map(|bytes| unsafe { std::str::from_utf8_unchecked(bytes) })
-    }
-
-    #[inline]
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<&str> {
-        self.bytes
-            .value_at_unchecked(idx)
-            .map(|bytes| unsafe { std::str::from_utf8_unchecked(bytes) })
-    }
-
     #[inline]
     fn len(&self) -> usize {
         self.bytes.len()
-    }
-
-    fn iter(&self) -> ArrayIterator<'_, Self> {
-        ArrayIterator::new(self)
-    }
-
-    fn raw_iter(&self) -> Self::RawIter<'_> {
-        ArrayRawIter::new(self)
     }
 
     #[inline]
@@ -119,6 +97,25 @@ impl Utf8Array {
         self.bytes
             .into_single_value()
             .map(|bytes| unsafe { std::str::from_boxed_utf8_unchecked(bytes) })
+    }
+
+    pub fn into_bytes_array(self) -> BytesArray {
+        self.bytes
+    }
+
+    pub fn from_iter_display(iter: impl IntoIterator<Item = Option<impl Display>>) -> Self {
+        let iter = iter.into_iter();
+        let mut builder = Utf8ArrayBuilder::new(iter.size_hint().0);
+        for e in iter {
+            if let Some(s) = e {
+                let mut writer = builder.writer().begin();
+                write!(writer, "{}", s).unwrap();
+                writer.finish();
+            } else {
+                builder.append_null();
+            }
+        }
+        builder.finish()
     }
 }
 
@@ -184,9 +181,7 @@ impl<'a> StringWriter<'a> {
     pub fn write_from_char_iter(self, iter: impl Iterator<Item = char>) -> WrittenGuard {
         let mut writer = self.begin();
         for c in iter {
-            let mut buf = [0; 4];
-            let result = c.encode_utf8(&mut buf);
-            writer.write_ref(result);
+            writer.write_char(c).unwrap();
         }
         writer.finish()
     }
@@ -219,6 +214,13 @@ impl<'a> PartialStringWriter<'a> {
     /// Exactly one new record was appended and the `builder` can be safely used.
     pub fn finish(self) -> WrittenGuard {
         self.bytes.finish()
+    }
+}
+
+impl Write for PartialStringWriter<'_> {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.write_ref(s);
+        Ok(())
     }
 }
 

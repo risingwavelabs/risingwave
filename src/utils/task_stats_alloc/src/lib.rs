@@ -195,18 +195,23 @@ where
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         let (wrapped_layout, offset) = wrap_layout(layout);
+        // SAFETY: the caller must ensure that the `new_size` does not overflow.
+        let (new_wrapped_layout, new_offset) =
+            wrap_layout(Layout::from_size_align_unchecked(new_size, layout.align()));
+        let new_wrapped_size = new_wrapped_layout.size();
+
         let ptr = ptr.wrapping_sub(offset);
 
         let bytes: TaskLocalBytesAllocated = *ptr.cast();
-        bytes.add(new_size);
         bytes.sub(layout.size());
+        bytes.add(new_size);
 
-        let ptr = self.0.realloc(ptr, wrapped_layout, new_size + offset);
+        let ptr = self.0.realloc(ptr, wrapped_layout, new_wrapped_size);
         if ptr.is_null() {
             ptr
         } else {
             *ptr.cast() = bytes;
-            ptr.wrapping_add(offset)
+            ptr.wrapping_add(new_offset)
         }
     }
 }
