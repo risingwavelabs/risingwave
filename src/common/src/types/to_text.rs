@@ -176,7 +176,8 @@ impl ToText for i64 {
                 let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
                 // PostgreSQL uses a space rather than `T` to separate the date and time.
                 // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-OUTPUT
-                write!(f, "{}", instant.format("%Y-%m-%d %H:%M:%S%.f%:z"))
+                // same as `instant.format("%Y-%m-%d %H:%M:%S%.f%:z")` but faster
+                write!(f, "{}+00:00", instant.naive_local())
             }
             _ => unreachable!(),
         }
