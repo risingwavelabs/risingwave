@@ -250,8 +250,7 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
 }
 
 pub fn timestampz_to_utc_string(elem: i64, writer: &mut dyn Write) -> Result<()> {
-    // TODO: avoid String
-    write!(writer, "{}", elem.to_text_with_type(&DataType::Timestampz)).unwrap();
+    elem.write_with_type(&DataType::Timestampz, writer).unwrap();
     Ok(())
 }
 
@@ -379,7 +378,7 @@ pub fn int32_to_bool(input: i32) -> Result<bool> {
 // For most of the types, cast them to varchar is similar to return their text format.
 // So we use this function to cast type to varchar.
 pub fn general_to_text(elem: impl ToText, writer: &mut dyn Write) -> Result<()> {
-    elem.fmt(writer).unwrap();
+    elem.write(writer).unwrap();
     Ok(())
 }
 

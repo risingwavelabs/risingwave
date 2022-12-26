@@ -487,7 +487,7 @@ impl Debug for ListRef<'_> {
 impl ToText for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     // Refer to PostgreSQL `array_out` or `appendPGArray`.
-    fn fmt(&self, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+    fn write(&self, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
         iter_elems_ref!(self, it, {
             write!(
                 f,
@@ -522,9 +522,9 @@ impl ToText for ListRef<'_> {
         })
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type(&self, ty: &DataType, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
         match ty {
-            DataType::List { .. } => self.to_text(),
+            DataType::List { .. } => self.write(f),
             _ => unreachable!(),
         }
     }

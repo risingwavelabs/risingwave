@@ -414,7 +414,7 @@ impl Debug for StructRef<'_> {
 }
 
 impl ToText for StructRef<'_> {
-    fn fmt(&self, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+    fn write(&self, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
         iter_fields_ref!(self, it, {
             write!(f, "(")?;
             let mut is_first = true;
@@ -424,15 +424,15 @@ impl ToText for StructRef<'_> {
                 } else {
                     write!(f, ",")?;
                 }
-                ToText::fmt(&x, f)?;
+                ToText::write(&x, f)?;
             }
             write!(f, ")")
         })
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type(&self, ty: &DataType, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
         match ty {
-            DataType::Struct(_) => self.to_text(),
+            DataType::Struct(_) => self.write(f),
             _ => unreachable!(),
         }
     }
