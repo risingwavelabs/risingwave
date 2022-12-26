@@ -1,0 +1,56 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use chrono::format::Parsed;
+use risingwave_common::types::NaiveDateTimeWrapper;
+
+use super::to_char::{compile_pattern_to_chrono, ChronoPattern};
+use crate::Result;
+
+#[inline(always)]
+pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<NaiveDateTimeWrapper> {
+    let mut parsed = Parsed::new();
+    chrono::format::parse(&mut parsed, s, tmpl.borrow_items().iter())?;
+    if parsed.year.is_none()
+        && parsed.year_div_100.is_none()
+        && parsed.year_mod_100.is_none()
+        && parsed.isoyear.is_none()
+        && parsed.isoyear_div_100.is_none()
+        && parsed.isoyear_mod_100.is_none()
+    {
+        parsed.set_year(-1).unwrap();
+    }
+    if parsed.month.is_none()
+        && parsed.week_from_mon.is_none()
+        && parsed.week_from_sun.is_none()
+        && parsed.isoweek.is_none()
+    {
+        parsed.set_month(1).unwrap();
+    }
+    if parsed.day.is_none() && parsed.ordinal.is_none() {
+        parsed.set_day(1).unwrap();
+    }
+    parsed.hour_div_12.get_or_insert(0);
+    parsed.hour_mod_12.get_or_insert(0);
+    parsed.minute.get_or_insert(0);
+    Ok(NaiveDateTimeWrapper(
+        parsed.to_naive_datetime_with_offset(0)?,
+    ))
+}
+
+#[inline(always)]
+pub fn to_timestamp(s: &str, tmpl: &str) -> Result<NaiveDateTimeWrapper> {
+    let pattern = compile_pattern_to_chrono(tmpl);
+    to_timestamp_const_tmpl(s, &pattern)
+}
