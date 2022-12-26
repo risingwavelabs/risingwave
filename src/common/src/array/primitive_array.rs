@@ -167,7 +167,7 @@ impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
 }
 
 impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
-    /// Build a PrimitiveArray from iterator and bitmap.
+    /// Build a [`PrimitiveArray`] from iterator and bitmap.
     ///
     /// NOTE: The length of `bitmap` must be equal to the length of `iter`.
     pub fn from_iter_bitmap(iter: impl IntoIterator<Item = T>, bitmap: Bitmap) -> Self {
@@ -187,7 +187,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         *self.data.get_unchecked(idx)
     }
 
-    fn raw_iter<'a>(&'a self) -> impl DoubleEndedIterator<Item = Self::RefItem<'a>> {
+    fn raw_iter(&self) -> impl DoubleEndedIterator<Item = Self::RefItem<'_>> {
         self.data.iter().cloned()
     }
 

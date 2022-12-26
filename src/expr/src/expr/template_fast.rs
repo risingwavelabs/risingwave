@@ -27,6 +27,9 @@
 //! Note that to enable vectorization, operations must be applied to every element in the array,
 //! without any branching. So it is only suitable for infallible operations.
 
+// allow using `zip` for performance reasons
+#![allow(clippy::disallowed_methods)]
+
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -210,10 +213,7 @@ where
             .as_ref()
             .map(|s| s.as_scalar_ref_impl().try_into().unwrap());
 
-        let output_scalar = match scalar {
-            Some(l) => Some((self.func)(l)),
-            _ => None,
-        };
+        let output_scalar = scalar.map(&self.func);
         let output_datum = output_scalar.map(|s| s.to_scalar_value());
         Ok(output_datum)
     }

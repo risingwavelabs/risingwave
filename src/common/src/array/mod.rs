@@ -202,7 +202,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     fn len(&self) -> usize;
 
     /// Get iterator of current array.
-    fn iter<'a>(&'a self) -> ArrayIterator<'a, Self> {
+    fn iter(&self) -> ArrayIterator<'_, Self> {
         ArrayIterator::new(self)
     }
 
@@ -210,7 +210,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     ///
     /// The raw iterator simply iterates values without checking the null bitmap.
     /// The returned value for NULL values is undefined.
-    fn raw_iter<'a>(&'a self) -> impl DoubleEndedIterator<Item = Self::RefItem<'a>> {
+    fn raw_iter(&self) -> impl DoubleEndedIterator<Item = Self::RefItem<'_>> {
         (0..self.len()).map(|i| unsafe { self.raw_value_at_unchecked(i) })
     }
 
