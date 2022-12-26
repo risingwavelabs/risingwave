@@ -131,9 +131,11 @@ impl KafkaSplitReader {
             for msg in msgs {
                 let msg = msg?;
                 let cur_offset = msg.offset();
-                bytes_current_second += msg.payload_len();
-                let source_message = SourceMessage::from(msg);
-                res.push(source_message);
+                bytes_current_second += match &msg.payload() {
+                    None => 0,
+                    Some(payload) => payload.len(),
+                };
+                res.push(SourceMessage::from(msg));
                 if let Some(stop_offset) = self.stop_offset {
                     if cur_offset == stop_offset - 1 {
                         tracing::debug!(
