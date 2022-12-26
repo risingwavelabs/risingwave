@@ -34,6 +34,7 @@ use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
 use crate::vector_op::timestampz::{timestamp_at_time_zone, timestampz_at_time_zone};
+use crate::vector_op::to_timestamp::to_timestamp;
 use crate::vector_op::tumble::{
     tumble_start_date, tumble_start_date_time, tumble_start_timestampz,
 };
@@ -702,6 +703,20 @@ pub fn new_like_default(
         return_type,
         like_default,
     ))
+}
+
+pub fn new_to_timestamp(
+    expr_ia1: BoxedExpression,
+    expr_ia2: BoxedExpression,
+    return_type: DataType,
+) -> BoxedExpression {
+    BinaryExpression::<Utf8Array, Utf8Array, NaiveDateTimeArray, _>::new(
+        expr_ia1,
+        expr_ia2,
+        return_type,
+        to_timestamp,
+    )
+    .boxed()
 }
 
 fn boolean_eq(l: &BoolArray, r: &BoolArray) -> BoolArray {
