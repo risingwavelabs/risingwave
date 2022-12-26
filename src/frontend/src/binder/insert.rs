@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
+use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
 use crate::binder::Binder;
@@ -49,6 +49,8 @@ pub struct BoundInsert {
     /// Used as part of an extra `Project` when the column types of `source` query does not match
     /// `table_source`. This does not include a simple `VALUE`. See comments in code for details.
     pub cast_exprs: Vec<ExprImpl>,
+
+    pub returning_list: (Vec<ExprImpl>, Vec<Option<String>>),
 }
 
 impl Binder {
@@ -57,8 +59,12 @@ impl Binder {
         name: ObjectName,
         columns: Vec<Ident>,
         source: Query,
+        returning_items: Vec<SelectItem>,
     ) -> Result<BoundInsert> {
-        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        let (schema_name, table_name) =
+            Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        let table_source = self.bind_table_source(schema_name.as_deref(), &table_name)?;
+        self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, true)?;
         let table_id = table_catalog.id;
@@ -75,6 +81,7 @@ impl Binder {
             .iter()
             .map(|c| c.data_type().clone())
             .collect();
+
 
         // When the column types of `source` query do not match `expected_types`, casting is
         // needed.
@@ -155,6 +162,11 @@ impl Binder {
             ))));
         }
 
+        let returning_list = self.bind_select_list(returning_items)?;
+        if returning_list.0.iter().any(|expr| expr.has_agg_call() || expr.has_window_function()) {
+            return Err(RwError::from(ErrorCode::BindError("INSERT should not have agg/window".to_string())));
+        }
+
         // validate that query has a value for each target column, if target columns are used
         // create table t1 (v1 int, v2 int);
         // insert into t1 (v1, v2, v2) values (5, 6); // ...more target columns than values
@@ -187,6 +199,7 @@ impl Binder {
             column_indices: target_table_col_indices,
             source,
             cast_exprs,
+            returning_list,
         };
 
         Ok(insert)

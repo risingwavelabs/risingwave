@@ -866,7 +866,7 @@ pub enum Statement {
         /// A SQL query that specifies what to insert
         source: Box<Query>,
         /// Define output of this insert statement
-        returning: Vec<Ident>,
+        returning: Vec<SelectItem>,
     },
     Copy {
         /// TABLE
@@ -1111,6 +1111,7 @@ impl fmt::Display for Statement {
                 table_name,
                 columns,
                 source,
+                returning,
             } => {
                 write!(f, "INSERT INTO {table_name} ", table_name = table_name,)?;
                 if !columns.is_empty() {
