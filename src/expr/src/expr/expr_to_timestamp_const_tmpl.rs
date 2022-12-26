@@ -51,7 +51,7 @@ impl Expression for ExprToTimestampConstTmpl {
                 output.append_null();
             } else if let Some(data) = data {
                 let res = to_timestamp_const_tmpl(data, &self.ctx.chrono_pattern)?;
-                output.append(Some(res).into());
+                output.append(Some(res));
             } else {
                 output.append_null();
             }
