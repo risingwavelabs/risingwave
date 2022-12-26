@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::{StorageError, StorageResult};
+use crate::mem_table::{KeyOp, MemTable};
 use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
@@ -246,28 +248,194 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
-pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
+pub trait LocalStateStore: StaticSendSync {
+    type IterStream<'a>: StateStoreIterItemStream + 'a;
+
+    type GetFuture<'a>: GetFutureTrait<'a>;
+    type IterFuture<'a>: Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+
+    /// Point gets a value from the state store.
+    /// The result is based on a snapshot corresponding to the given `epoch`.
+    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_>;
+
+    /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
+    /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
+    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
+    /// in `key_range`) The returned iterator will iterate data based on a snapshot
+    /// corresponding to the given `epoch`.
+    fn iter(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::IterFuture<'_>;
+
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
-    fn insert(&self, _key: Bytes, _val: Bytes) -> StorageResult<()> {
-        unimplemented!()
-    }
+    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()>;
 
     /// Deletes a key-value entry from the state store. Only the key-value entry with epoch smaller
     /// than the given `epoch` will be deleted.
-    fn delete(&self, _key: Bytes) -> StorageResult<()> {
-        unimplemented!()
-    }
+    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
 
-    /// Triggers a flush to persistent storage for the in-memory states.
-    fn flush(&self) -> StorageResult<usize> {
-        unimplemented!()
-    }
+    fn init(&mut self, epoch: u64);
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
-    fn advance_write_epoch(&mut self, _new_epoch: u64) -> StorageResult<()> {
-        unimplemented!()
+    fn advance_epoch(&mut self, new_epoch: u64);
+}
+
+pub struct BatchWriteLocalStateStore<S: StateStoreWrite + StateStoreRead> {
+    mem_table: MemTable,
+    inner: S,
+    epoch: u64,
+    table_id: TableId,
+}
+
+#[try_stream(ok = StateStoreIterItem, error = StorageError)]
+async fn merge_stream<'a>(
+    mem_table_iter: impl Iterator<Item = (&'a Bytes, &'a KeyOp)> + 'a,
+    inner_stream: impl StateStoreReadIterStream,
+    table_id: TableId,
+    epoch: u64,
+) {
+    let inner_stream = inner_stream.peekable();
+    pin_mut!(inner_stream);
+
+    let mut mem_table_iter = mem_table_iter.fuse().peekable();
+
+    loop {
+        match (inner_stream.as_mut().peek().await, mem_table_iter.peek()) {
+            (None, None) => break,
+            // The mem table side has come to an end, return data from the shared storage.
+            (Some(_), None) => {
+                let (key, value) = inner_stream.next().await.unwrap()?;
+                yield (key, value)
+            }
+            // The stream side has come to an end, return data from the mem table.
+            (None, Some(_)) => {
+                let (key, key_op) = mem_table_iter.next().unwrap();
+                match key_op {
+                    KeyOp::Insert(value) | KeyOp::Update((_, value)) => {
+                        yield (
+                            FullKey::new(table_id, TableKey(key.clone()), epoch),
+                            value.clone(),
+                        )
+                    }
+                    _ => {}
+                }
+            }
+            (Some(Ok((inner_key, _))), Some((mem_table_key, _))) => {
+                debug_assert_eq!(inner_key.user_key.table_id, table_id);
+                match inner_key.user_key.table_key.0.cmp(mem_table_key) {
+                    Ordering::Less => {
+                        // yield data from storage
+                        let (key, value) = inner_stream.next().await.unwrap()?;
+                        yield (key, value);
+                    }
+                    Ordering::Equal => {
+                        // both memtable and storage contain the key, so we advance both
+                        // iterators and return the data in memory.
+
+                        let (_, key_op) = mem_table_iter.next().unwrap();
+                        let (key, old_value_in_inner) = inner_stream.next().await.unwrap()?;
+                        match key_op {
+                            KeyOp::Insert(value) => {
+                                yield (key.clone(), value.clone());
+                            }
+                            KeyOp::Delete(_) => {}
+                            KeyOp::Update((old_value, new_value)) => {
+                                debug_assert!(old_value == &old_value_in_inner);
+
+                                yield (key, new_value.clone());
+                            }
+                        }
+                    }
+                    Ordering::Greater => {
+                        // yield data from mem table
+                        let (key, key_op) = mem_table_iter.next().unwrap();
+
+                        match key_op {
+                            KeyOp::Insert(value) => {
+                                yield (
+                                    FullKey::new(table_id, TableKey(key.clone()), epoch),
+                                    value.clone(),
+                                );
+                            }
+                            KeyOp::Delete(_) => {}
+                            KeyOp::Update(_) => unreachable!(
+                                "memtable update should always be paired with a storage key"
+                            ),
+                        }
+                    }
+                }
+            }
+            (Some(Err(_)), Some(_)) => {
+                // Throw the error.
+                return Err(inner_stream.next().await.unwrap().unwrap_err());
+            }
+        }
+    }
+}
+
+impl<S: StateStoreWrite + StateStoreRead> BatchWriteLocalStateStore<S> {
+    pub fn new(inner: S, table_id: TableId) -> Self {
+        Self {
+            inner,
+            mem_table: MemTable::new(),
+            epoch: INVALID_EPOCH,
+            table_id,
+        }
+    }
+}
+
+impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for BatchWriteLocalStateStore<S> {
+    type GetFuture<'a> = impl GetFutureTrait<'a>;
+    type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+    type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+
+    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+        async move { self.inner.get(key, self.epoch, read_options).await }
+    }
+
+    fn iter(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::IterFuture<'_> {
+        async move {
+            let stream = self
+                .inner
+                .iter(key_range.clone(), self.epoch, read_options)
+                .await?;
+            let (l, r) = key_range;
+            let key_range = (l.map(Bytes::from), r.map(Bytes::from));
+            Ok(merge_stream(
+                self.mem_table.iter(key_range),
+                stream,
+                self.table_id,
+                self.epoch,
+            ))
+            // Ok(self.merge_stream(stream))
+        }
+    }
+
+    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
+        Ok(match old_val {
+            None => self.mem_table.insert(key, new_val)?,
+            Some(old_val) => self.mem_table.update(key, new_val, old_val)?,
+        })
+    }
+
+    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+        Ok(self.mem_table.delete(key, old_val)?)
+    }
+
+    fn init(&mut self, epoch: u64) {
+        self.epoch = epoch;
+    }
+
+    fn advance_epoch(&mut self, new_epoch: u64) {
+        self.epoch = new_epoch;
     }
 }
 

@@ -606,10 +606,8 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
     }
 }
 
-impl<R: RangeKv> LocalStateStore for RangeKvStateStore<R> {}
-
 impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
-    type Local = Self;
+    type Local = BatchWriteLocalStateStore<Self>;
 
     type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
@@ -638,8 +636,8 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
         async move { Ok(()) }
     }
 
-    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async { self.clone() }
+    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
+        async move { BatchWriteLocalStateStore::new(self.clone(), table_id) }
     }
 }
 

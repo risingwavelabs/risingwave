@@ -229,8 +229,6 @@ impl StateStoreWrite for LocalHummockStorage {
     }
 }
 
-impl LocalStateStore for LocalHummockStorage {}
-
 impl LocalHummockStorage {
     pub fn new(
         instance_guard: LocalInstanceGuard,

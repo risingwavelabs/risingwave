@@ -245,7 +245,7 @@ pub mod verify {
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
-    use crate::error::StorageError;
+    use crate::error::{StorageError, StorageResult};
     use crate::storage_value::StorageValue;
     use crate::store::*;
     use crate::store_impl::{AsHummockTrait, HummockTrait};
@@ -326,8 +326,8 @@ pub mod verify {
 
     #[try_stream(ok = StateStoreIterItem, error = StorageError)]
     async fn verify_stream(
-        actual: impl StateStoreReadIterStream,
-        expected: Option<impl StateStoreReadIterStream>,
+        actual: impl StateStoreIterItemStream,
+        expected: Option<impl StateStoreIterItemStream>,
     ) {
         pin_mut!(actual);
         pin_mut!(expected);
@@ -385,7 +385,78 @@ pub mod verify {
         }
     }
 
-    impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {}
+    impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {
+        type GetFuture<'a> = impl GetFutureTrait<'a>;
+        type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+        type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+
+        fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+            async move {
+                let actual = self.actual.get(key, read_options.clone()).await;
+                if let Some(expected) = &self.expected {
+                    let expected = expected.get(key, read_options).await;
+                    assert_result_eq(&actual, &expected);
+                }
+                actual
+            }
+        }
+
+        fn iter(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            read_options: ReadOptions,
+        ) -> Self::IterFuture<'_> {
+            async move {
+                let actual = self
+                    .actual
+                    .iter(key_range.clone(), read_options.clone())
+                    .await?;
+                let expected = if let Some(expected) = &self.expected {
+                    Some(expected.iter(key_range, read_options).await?)
+                } else {
+                    None
+                };
+
+                Ok(verify_stream(actual, expected))
+            }
+        }
+
+        fn insert(
+            &mut self,
+            key: Bytes,
+            new_val: Bytes,
+            old_val: Option<Bytes>,
+        ) -> StorageResult<()> {
+            self.actual
+                .insert(key.clone(), new_val.clone(), old_val.clone())?;
+            if let Some(expected) = &mut self.expected {
+                expected.insert(key, new_val, old_val)?;
+            }
+            Ok(())
+        }
+
+        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+            self.actual.delete(key.clone(), old_val.clone())?;
+            if let Some(expected) = &mut self.expected {
+                expected.delete(key, old_val)?;
+            }
+            Ok(())
+        }
+
+        fn init(&mut self, epoch: u64) {
+            self.actual.init(epoch);
+            if let Some(expected) = &mut self.expected {
+                expected.init(epoch);
+            }
+        }
+
+        fn advance_epoch(&mut self, new_epoch: u64) {
+            self.actual.advance_epoch(new_epoch);
+            if let Some(expected) = &mut self.expected {
+                expected.advance_epoch(new_epoch);
+            }
+        }
+    }
 
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
         type Local = VerifyStateStore<A::Local, E::Local>;
@@ -640,15 +711,15 @@ impl AsHummockTrait for SledStateStore {
 #[cfg(debug_assertions)]
 pub mod boxed_state_store {
     use std::future::Future;
-    use std::ops::{Bound, Deref};
+    use std::ops::{Bound, Deref, DerefMut};
 
     use bytes::Bytes;
     use futures::stream::BoxStream;
+    use futures::StreamExt;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
-    use crate::storage_value::StorageValue;
     use crate::store::*;
     use crate::store_impl::{AsHummockTrait, HummockTrait};
     use crate::StateStore;
@@ -691,100 +762,121 @@ pub mod boxed_state_store {
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIterStream> {
-            use futures::StreamExt;
             Ok(self.iter(key_range, epoch, read_options).await?.boxed())
         }
     }
 
-    macro_rules! impl_state_store_read_for_box {
-        ($box_type_name:ident) => {
-            impl StateStoreRead for $box_type_name {
-                type IterStream = BoxStateStoreReadIterStream;
-
-                define_state_store_read_associated_type!();
-
-                fn get<'a>(
-                    &'a self,
-                    key: &'a [u8],
-                    epoch: u64,
-                    read_options: ReadOptions,
-                ) -> Self::GetFuture<'_> {
-                    self.deref().get(key, epoch, read_options)
-                }
-
-                fn iter(
-                    &self,
-                    key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-                    epoch: u64,
-                    read_options: ReadOptions,
-                ) -> Self::IterFuture<'_> {
-                    self.deref().iter(key_range, epoch, read_options)
-                }
-            }
-        };
-    }
-
-    // For StateStoreWrite
-
-    #[async_trait::async_trait]
-    pub trait DynamicDispatchedStateStoreWrite: StaticSendSync {
-        async fn ingest_batch(
-            &self,
-            kv_pairs: Vec<(Bytes, StorageValue)>,
-            delete_ranges: Vec<(Bytes, Bytes)>,
-            write_options: WriteOptions,
-        ) -> StorageResult<usize>;
-    }
-
-    #[async_trait::async_trait]
-    impl<S: StateStoreWrite> DynamicDispatchedStateStoreWrite for S {
-        async fn ingest_batch(
-            &self,
-            kv_pairs: Vec<(Bytes, StorageValue)>,
-            delete_ranges: Vec<(Bytes, Bytes)>,
-            write_options: WriteOptions,
-        ) -> StorageResult<usize> {
-            self.ingest_batch(kv_pairs, delete_ranges, write_options)
-                .await
-        }
-    }
-
-    macro_rules! impl_state_store_write_for_box {
-        ($box_type_name:ident) => {
-            impl StateStoreWrite for $box_type_name {
-                define_state_store_write_associated_type!();
-
-                fn ingest_batch(
-                    &self,
-                    kv_pairs: Vec<(Bytes, StorageValue)>,
-                    delete_ranges: Vec<(Bytes, Bytes)>,
-                    write_options: WriteOptions,
-                ) -> Self::IngestBatchFuture<'_> {
-                    self.deref()
-                        .ingest_batch(kv_pairs, delete_ranges, write_options)
-                }
-            }
-        };
-    }
-
     // For LocalStateStore
+    pub type BoxLocalStateStoreIterStream<'a> = BoxStream<'a, StorageResult<StateStoreIterItem>>;
+    #[async_trait::async_trait]
+    pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
+        async fn get<'a>(
+            &'a self,
+            key: &'a [u8],
+            read_options: ReadOptions,
+        ) -> StorageResult<Option<Bytes>>;
 
-    pub trait DynamicDispatchedLocalStateStore:
-        DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreWrite
-    {
+        async fn iter(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            read_options: ReadOptions,
+        ) -> StorageResult<BoxLocalStateStoreIterStream<'_>>;
+
+        fn insert(
+            &mut self,
+            key: Bytes,
+            new_val: Bytes,
+            old_val: Option<Bytes>,
+        ) -> StorageResult<()>;
+
+        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
+
+        fn init(&mut self, epoch: u64);
+
+        fn advance_epoch(&mut self, new_epoch: u64);
     }
 
-    impl<S: DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreWrite>
-        DynamicDispatchedLocalStateStore for S
-    {
+    #[async_trait::async_trait]
+    impl<S: LocalStateStore> DynamicDispatchedLocalStateStore for S {
+        async fn get<'a>(
+            &'a self,
+            key: &'a [u8],
+            read_options: ReadOptions,
+        ) -> StorageResult<Option<Bytes>> {
+            self.get(key, read_options).await
+        }
+
+        async fn iter(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            read_options: ReadOptions,
+        ) -> StorageResult<BoxLocalStateStoreIterStream<'_>> {
+            Ok(self.iter(key_range, read_options).await?.boxed())
+        }
+
+        fn insert(
+            &mut self,
+            key: Bytes,
+            new_val: Bytes,
+            old_val: Option<Bytes>,
+        ) -> StorageResult<()> {
+            self.insert(key, new_val, old_val)
+        }
+
+        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+            self.delete(key, old_val)
+        }
+
+        fn init(&mut self, epoch: u64) {
+            self.init(epoch)
+        }
+
+        fn advance_epoch(&mut self, new_epoch: u64) {
+            self.advance_epoch(new_epoch)
+        }
     }
 
     pub type BoxDynamicDispatchedLocalStateStore = Box<dyn DynamicDispatchedLocalStateStore>;
 
-    impl_state_store_read_for_box!(BoxDynamicDispatchedLocalStateStore);
-    impl_state_store_write_for_box!(BoxDynamicDispatchedLocalStateStore);
+    impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {
+        type IterStream<'a> = BoxLocalStateStoreIterStream<'a>;
 
-    impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {}
+        type GetFuture<'a> = impl GetFutureTrait<'a>;
+        type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+
+        fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+            self.deref().get(key, read_options)
+        }
+
+        fn iter(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            read_options: ReadOptions,
+        ) -> Self::IterFuture<'_> {
+            self.deref().iter(key_range, read_options)
+        }
+
+        fn insert(
+            &mut self,
+            key: Bytes,
+            new_val: Bytes,
+            old_val: Option<Bytes>,
+        ) -> StorageResult<()> {
+            self.deref_mut().insert(key, new_val, old_val)
+        }
+
+        fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+            self.deref_mut().delete(key, old_val)
+        }
+
+        fn init(&mut self, epoch: u64) {
+            self.deref_mut().init(epoch)
+        }
+
+        fn advance_epoch(&mut self, new_epoch: u64) {
+            self.deref_mut().advance_epoch(new_epoch)
+        }
+    }
 
     // For global StateStore
 
@@ -826,6 +918,30 @@ pub mod boxed_state_store {
 
     pub type BoxDynamicDispatchedStateStore = Box<dyn DynamicDispatchedStateStore>;
 
+    impl StateStoreRead for BoxDynamicDispatchedStateStore {
+        type IterStream = BoxStateStoreReadIterStream;
+
+        define_state_store_read_associated_type!();
+
+        fn get<'a>(
+            &'a self,
+            key: &'a [u8],
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> Self::GetFuture<'_> {
+            self.deref().get(key, epoch, read_options)
+        }
+
+        fn iter(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            epoch: u64,
+            read_options: ReadOptions,
+        ) -> Self::IterFuture<'_> {
+            self.deref().iter(key_range, epoch, read_options)
+        }
+    }
+
     // With this trait, we can implement `Clone` for BoxDynamicDispatchedStateStore
     pub trait DynamicDispatchedStateStoreCloneBox {
         fn clone_box(&self) -> BoxDynamicDispatchedStateStore;
@@ -865,8 +981,6 @@ pub mod boxed_state_store {
             self.deref().clone_box()
         }
     }
-
-    impl_state_store_read_for_box!(BoxDynamicDispatchedStateStore);
 
     impl StateStore for BoxDynamicDispatchedStateStore {
         type Local = BoxDynamicDispatchedLocalStateStore;

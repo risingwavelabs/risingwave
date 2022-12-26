@@ -146,7 +146,7 @@ impl StateStoreRead for HummockStorage {
 }
 
 impl StateStore for HummockStorage {
-    type Local = LocalHummockStorage;
+    type Local = BatchWriteLocalStateStore<LocalHummockStorage>;
 
     type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
@@ -264,7 +264,7 @@ impl StateStore for HummockStorage {
     }
 
     fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async move { self.new_local_inner(table_id).await }
+        async move { BatchWriteLocalStateStore::new(self.new_local_inner(table_id).await, table_id) }
     }
 }
 

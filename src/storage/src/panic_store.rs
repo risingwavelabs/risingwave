@@ -14,11 +14,15 @@
 
 use std::future::Future;
 use std::ops::Bound;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use bytes::Bytes;
+use futures::Stream;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
+use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
@@ -32,7 +36,7 @@ use crate::{
 pub struct PanicStateStore;
 
 impl StateStoreRead for PanicStateStore {
-    type IterStream = StreamTypeOfIter<PanicStateStoreIter>;
+    type IterStream = PanicStateStoreStream;
 
     define_state_store_read_associated_type!();
 
@@ -74,7 +78,49 @@ impl StateStoreWrite for PanicStateStore {
     }
 }
 
-impl LocalStateStore for PanicStateStore {}
+impl LocalStateStore for PanicStateStore {
+    type IterStream<'a> = PanicStateStoreStream;
+
+    type GetFuture<'a> = impl GetFutureTrait<'a>;
+    type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+
+    fn get<'a>(&'a self, _key: &'a [u8], _read_options: ReadOptions) -> Self::GetFuture<'_> {
+        async move {
+            panic!("should not operate on the panic state store!");
+        }
+    }
+
+    fn iter(
+        &self,
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _read_options: ReadOptions,
+    ) -> Self::IterFuture<'_> {
+        async move {
+            panic!("should not operate on the panic state store!");
+        }
+    }
+
+    fn insert(
+        &mut self,
+        _key: Bytes,
+        _new_val: Bytes,
+        _old_val: Option<Bytes>,
+    ) -> StorageResult<()> {
+        panic!("should not operate on the panic state store!");
+    }
+
+    fn delete(&mut self, _key: Bytes, _old_val: Bytes) -> StorageResult<()> {
+        panic!("should not operate on the panic state store!");
+    }
+
+    fn init(&mut self, _epoch: u64) {
+        panic!("should not operate on the panic state store!");
+    }
+
+    fn advance_epoch(&mut self, _new_epoch: u64) {
+        panic!("should not operate on the panic state store!");
+    }
+}
 
 impl StateStore for PanicStateStore {
     type Local = Self;
@@ -112,14 +158,12 @@ impl StateStore for PanicStateStore {
     }
 }
 
-pub struct PanicStateStoreIter {}
+pub struct PanicStateStoreStream {}
 
-impl StateStoreIter for PanicStateStoreIter {
-    type Item = StateStoreIterItem;
+impl Stream for PanicStateStoreStream {
+    type Item = StorageResult<StateStoreIterItem>;
 
-    type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
-
-    fn next(&'_ mut self) -> Self::NextFuture<'_> {
-        async move { unreachable!() }
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        panic!("should not call next on panic state store stream")
     }
 }

@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
 use bytes::Bytes;
-use futures::{Future, TryStreamExt};
+use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -51,12 +51,23 @@ impl<S> MonitoredStateStore<S> {
     }
 }
 
-pub type MonitoredStateStoreIterStream<S: StateStoreRead> = impl StateStoreReadIterStream;
-impl<S: StateStoreRead> MonitoredStateStore<S> {
-    async fn monitored_iter(
-        &self,
-        iter_stream_future: impl Future<Output = StorageResult<S::IterStream>>,
-    ) -> StorageResult<MonitoredStateStoreIterStream<S>> {
+/// A util function to break the type connection between two opaque return types defined by `impl`.
+fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreIterItemStream {
+    input
+}
+
+pub type MonitoredStateStoreIterStream<'s, S: StateStoreIterItemStream + 's> =
+    impl StateStoreIterItemStream + 's;
+
+// Note: it is important to define the `MonitoredStateStoreIterStream` type alias, as it marks that
+// the return type of `monitored_iter` only captures the lifetime `'s` and has nothing to do with
+// `'a`. If we simply use `impl StateStoreIterItemStream + 's`, the rust compiler will also capture
+// the lifetime `'a` in the scope defined in the scope.
+impl<S> MonitoredStateStore<S> {
+    async fn monitored_iter<'a, 's, St: StateStoreIterItemStream + 's>(
+        &'a self,
+        iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
+    ) -> StorageResult<MonitoredStateStoreIterStream<'s, St>> {
         // start time takes iterator build time into account
         let start_time = minstant::Instant::now();
 
@@ -93,7 +104,7 @@ impl<S: StateStoreRead> MonitoredStateStore<S> {
 }
 
 impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
-    type IterStream = MonitoredStateStoreIterStream<S>;
+    type IterStream = impl StateStoreReadIterStream;
 
     define_state_store_read_associated_type!();
 
@@ -129,6 +140,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
         self.monitored_iter(self.inner.iter(key_range, epoch, read_options))
+            .map_ok(identity)
     }
 }
 
@@ -160,7 +172,45 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
     }
 }
 
-impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {}
+impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
+    type GetFuture<'a> = impl GetFutureTrait<'a>;
+    type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+    type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+
+    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+        // TODO: collect metrics
+        self.inner.get(key, read_options)
+    }
+
+    fn iter(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::IterFuture<'_> {
+        self.monitored_iter(self.inner.iter(key_range, read_options))
+            .map_ok(identity)
+    }
+
+    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
+        // TODO: collect metrics
+        self.inner.insert(key, new_val, old_val)
+    }
+
+    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+        // TODO: collect metrics
+        self.inner.delete(key, old_val)
+    }
+
+    fn init(&mut self, epoch: u64) {
+        // TODO: may collect metrics
+        self.inner.init(epoch)
+    }
+
+    fn advance_epoch(&mut self, new_epoch: u64) {
+        // TODO: may collect metrics
+        self.inner.advance_epoch(new_epoch)
+    }
+}
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     type Local = MonitoredStateStore<S::Local>;
