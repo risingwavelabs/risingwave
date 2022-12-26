@@ -313,6 +313,6 @@ pub async fn count_stream<T>(s: impl Stream<Item = StorageResult<T>> + Send) -> 
     c
 }
 
-pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableId, Box<Sstable>>> {
+pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableId, Arc<Sstable>>> {
     Arc::new(LruCache::new(1, 4))
 }

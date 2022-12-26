@@ -294,30 +294,11 @@ impl HummockVersionExt for HummockVersion {
                 );
             }
         }
-        for (z, level) in parent_levels.levels.iter_mut().enumerate() {
-            let level_idx = level.get_level_idx();
-            for table_info in &mut level.table_infos {
-                if table_info
-                    .get_table_ids()
-                    .iter()
-                    .any(|table_id| member_table_ids.contains(table_id))
-                {
-                    table_info.divide_version += 1;
-                    split_id_vers.push((
-                        table_info.get_id(),
-                        table_info.get_divide_version(),
-                        level_idx,
-                    ));
-                    let mut branch_table_info = table_info.clone();
-                    branch_table_info.table_ids = table_info
-                        .table_ids
-                        .drain_filter(|table_id| member_table_ids.contains(table_id))
-                        .collect_vec();
-                    cur_levels.levels[z].total_file_size += branch_table_info.file_size;
-                    cur_levels.levels[z].table_infos.push(branch_table_info);
-                }
-            }
-        }
+        split_id_vers.extend(split_base_levels(
+            member_table_ids,
+            &mut parent_levels.levels,
+            &mut cur_levels.levels,
+        ));
         split_id_vers
     }
 
@@ -554,6 +535,39 @@ impl HummockLevelsExt for Levels {
     }
 }
 
+pub fn split_base_levels(
+    member_table_ids: &HashSet<StateTableId>,
+    parent_levels: &mut Vec<Level>,
+    cur_levels: &mut Vec<Level>,
+) -> Vec<(HummockSstableId, u64, u32)> {
+    let mut split_id_vers = vec![];
+    for (z, level) in parent_levels.iter_mut().enumerate() {
+        let level_idx = level.get_level_idx();
+        for table_info in &mut level.table_infos {
+            if table_info
+                .get_table_ids()
+                .iter()
+                .any(|table_id| member_table_ids.contains(table_id))
+            {
+                table_info.divide_version += 1;
+                split_id_vers.push((
+                    table_info.get_id(),
+                    table_info.get_divide_version(),
+                    level_idx,
+                ));
+                let mut branch_table_info = table_info.clone();
+                branch_table_info.table_ids = table_info
+                    .table_ids
+                    .drain_filter(|table_id| member_table_ids.contains(table_id))
+                    .collect_vec();
+                cur_levels[z].total_file_size += branch_table_info.file_size;
+                cur_levels[z].table_infos.push(branch_table_info);
+            }
+        }
+    }
+    split_id_vers
+}
+
 pub fn new_sub_level(
     sub_level_id: u64,
     level_type: LevelType,
@@ -604,7 +618,7 @@ pub fn add_new_sub_level(
 /// Delete sstables if the table id is in the id set.
 ///
 /// Return `true` if some sst is deleted, and `false` is the deletion is trivial
-fn level_delete_ssts(operand: &mut Level, delete_sst_ids_superset: &HashSet<u64>) -> bool {
+pub fn level_delete_ssts(operand: &mut Level, delete_sst_ids_superset: &HashSet<u64>) -> bool {
     let original_len = operand.table_infos.len();
     operand
         .table_infos
@@ -617,7 +631,7 @@ fn level_delete_ssts(operand: &mut Level, delete_sst_ids_superset: &HashSet<u64>
     original_len != operand.table_infos.len()
 }
 
-fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) {
+pub fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) {
     operand.total_file_size += insert_table_infos
         .iter()
         .map(|sst| sst.file_size)

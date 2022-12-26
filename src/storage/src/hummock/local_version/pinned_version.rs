@@ -18,13 +18,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
-use risingwave_pb::hummock::{HummockVersion, Level};
+use risingwave_pb::hummock::Level;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_retry::strategy::jitter;
+
+use crate::hummock::local_version::LocalHummockVersion;
 
 #[derive(Debug, Clone)]
 pub enum PinVersionAction {
@@ -71,14 +72,14 @@ impl Drop for PinnedVersionGuard {
 
 #[derive(Clone)]
 pub struct PinnedVersion {
-    version: Arc<HummockVersion>,
+    version: Arc<LocalHummockVersion>,
     compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
     guard: Arc<PinnedVersionGuard>,
 }
 
 impl PinnedVersion {
     pub fn new(
-        version: HummockVersion,
+        version: LocalHummockVersion,
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
         let version_id = version.id;
@@ -98,7 +99,7 @@ impl PinnedVersion {
         self.compaction_group_index.clone()
     }
 
-    pub(crate) fn new_pin_version(&self, version: HummockVersion) -> Self {
+    pub(crate) fn new_pin_version(&self, version: LocalHummockVersion) -> Self {
         assert!(
             version.id >= self.version.id,
             "pinning a older version {}. Current is {}",
@@ -117,19 +118,6 @@ impl PinnedVersion {
         }
     }
 
-    pub(crate) fn new_local_related_pin_version(&self, version: HummockVersion) -> Self {
-        assert_eq!(
-            self.version.id, version.id,
-            "local related version {} to pin not equal to current version id {}",
-            version.id, self.version.id
-        );
-        PinnedVersion {
-            version: Arc::new(version),
-            compaction_group_index: self.compaction_group_index.clone(),
-            guard: self.guard.clone(),
-        }
-    }
-
     pub fn id(&self) -> HummockVersionId {
         self.version.id
     }
@@ -143,17 +131,13 @@ impl PinnedVersion {
         compaction_group_id: CompactionGroupId,
     ) -> Vec<&Level> {
         let mut ret = vec![];
-        let levels = self.version.levels.get(&compaction_group_id).unwrap();
-        ret.extend(levels.l0.as_ref().unwrap().sub_levels.iter().rev());
+        let levels = self.version.groups.get(&compaction_group_id).unwrap();
+        ret.extend(levels.l0.sub_levels.iter().rev());
         ret.extend(levels.levels.iter());
         ret
     }
 
     pub fn levels(&self, table_id: TableId) -> Vec<&Level> {
-        #[cfg(any(test, feature = "test"))]
-        if table_id.table_id() == 0 {
-            return self.version.get_combined_levels();
-        }
         match self.compaction_group_index.get(&table_id) {
             Some(compaction_group_id) => self.levels_by_compaction_groups_id(*compaction_group_id),
             None => vec![],
@@ -169,7 +153,7 @@ impl PinnedVersion {
     }
 
     /// ret value can't be used as `HummockVersion`. it must be modified with delta
-    pub fn version(&self) -> HummockVersion {
+    pub fn version(&self) -> LocalHummockVersion {
         self.version.deref().clone()
     }
 }

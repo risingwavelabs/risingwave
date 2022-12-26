@@ -19,7 +19,6 @@ use std::sync::Arc;
 use bytes::Bytes;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::pin_version_response;
@@ -30,7 +29,9 @@ use tracing::{error, info};
 use crate::hummock::compactor::Context;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::local_version::{LocalVersion, ReadVersion, SyncUncommittedDataStage};
+use crate::hummock::local_version::{
+    LocalHummockVersion, LocalVersion, ReadVersion, SyncUncommittedDataStage,
+};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::shared_buffer_uploader::{
     SharedBufferUploader, UploadTaskPayload,
@@ -95,16 +96,16 @@ impl LocalVersionManager {
             return None;
         }
 
-        let (newly_pinned_version, version_deltas) = match pin_resp_payload {
+        let newly_pinned_version = match pin_resp_payload {
             Payload::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = old_version.pinned_version().version();
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     version_to_apply.apply_version_delta(version_delta);
                 }
-                (version_to_apply, Some(version_deltas.version_deltas))
+                version_to_apply
             }
-            Payload::PinnedVersion(version) => (version, None),
+            Payload::PinnedVersion(version) => LocalHummockVersion::from(version),
         };
 
         validate_table_key_range(&newly_pinned_version);
@@ -118,7 +119,7 @@ impl LocalVersionManager {
 
         self.sstable_id_manager
             .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
-        new_version.set_pinned_version(newly_pinned_version, version_deltas);
+        new_version.set_pinned_version(newly_pinned_version);
         let result = new_version.pinned_version().clone();
         RwLockWriteGuard::unlock_fair(new_version);
 

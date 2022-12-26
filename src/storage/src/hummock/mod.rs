@@ -93,6 +93,7 @@ use crate::hummock::iterator::{
     ForwardUserIteratorType, HummockIteratorDirection,
 };
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
+use crate::hummock::local_version::LocalHummockVersion;
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
@@ -171,7 +172,9 @@ impl HummockStorage {
         };
 
         let (pin_version_tx, pin_version_rx) = unbounded_channel();
-        let pinned_version = PinnedVersion::new(hummock_version, pin_version_tx);
+        let local_version = LocalHummockVersion::from(hummock_version);
+        let pinned_version = PinnedVersion::new(local_version, pin_version_tx);
+
         tokio::spawn(start_pinned_version_worker(
             pin_version_rx,
             hummock_meta_client.clone(),
@@ -507,7 +510,8 @@ impl HummockStorageV1 {
         };
 
         let (pin_version_tx, pin_version_rx) = unbounded_channel();
-        let pinned_version = PinnedVersion::new(hummock_version, pin_version_tx);
+        let local_version = LocalHummockVersion::from(hummock_version);
+        let pinned_version = PinnedVersion::new(local_version, pin_version_tx);
         tokio::spawn(start_pinned_version_worker(
             pin_version_rx,
             hummock_meta_client.clone(),
@@ -539,7 +543,9 @@ impl HummockStorageV1 {
                         break;
                     }
                     HummockEvent::VersionUpdate(version_update) => {
-                        local_version_manager_clone.try_update_pinned_version(version_update);
+                        local_version_manager_clone
+                            .try_update_pinned_version(version_update)
+                            .unwrap();
                         // TODO: this is
                         epoch_update_tx.send_replace(
                             local_version_manager_clone

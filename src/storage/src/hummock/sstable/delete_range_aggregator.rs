@@ -21,7 +21,6 @@ use risingwave_hummock_sdk::HummockEpoch;
 
 use super::DeleteRangeTombstone;
 use crate::hummock::iterator::DeleteRangeIterator;
-use crate::hummock::sstable_store::TableHolder;
 use crate::hummock::Sstable;
 
 pub struct SortedBoundary {
@@ -301,12 +300,12 @@ impl<I: DeleteRangeIterator> DeleteRangeAggregator<I> {
 }
 
 pub struct SstableDeleteRangeIterator {
-    table: TableHolder,
+    table: Arc<Sstable>,
     current_idx: usize,
 }
 
 impl SstableDeleteRangeIterator {
-    pub fn new(table: TableHolder) -> Self {
+    pub fn new(table: Arc<Sstable>) -> Self {
         Self {
             table,
             current_idx: 0,
@@ -316,19 +315,19 @@ impl SstableDeleteRangeIterator {
 
 impl DeleteRangeIterator for SstableDeleteRangeIterator {
     fn start_user_key(&self) -> UserKey<&[u8]> {
-        self.table.value().meta.range_tombstone_list[self.current_idx]
+        self.table.meta.range_tombstone_list[self.current_idx]
             .start_user_key
             .as_ref()
     }
 
     fn end_user_key(&self) -> UserKey<&[u8]> {
-        self.table.value().meta.range_tombstone_list[self.current_idx]
+        self.table.meta.range_tombstone_list[self.current_idx]
             .end_user_key
             .as_ref()
     }
 
     fn current_epoch(&self) -> HummockEpoch {
-        self.table.value().meta.range_tombstone_list[self.current_idx].sequence
+        self.table.meta.range_tombstone_list[self.current_idx].sequence
     }
 
     fn next(&mut self) {
@@ -342,14 +341,13 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
     fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) {
         self.current_idx = self
             .table
-            .value()
             .meta
             .range_tombstone_list
             .partition_point(|tombstone| tombstone.end_user_key.as_ref().le(&target_user_key));
     }
 
     fn is_valid(&self) -> bool {
-        self.current_idx < self.table.value().meta.range_tombstone_list.len()
+        self.current_idx < self.table.meta.range_tombstone_list.len()
     }
 }
 

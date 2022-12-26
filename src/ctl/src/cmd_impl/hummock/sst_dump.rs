@@ -19,10 +19,10 @@ use itertools::Itertools;
 use risingwave_common::row::{Row2, RowDeserializer};
 use risingwave_common::types::to_text::ToText;
 use risingwave_frontend::TableCatalog;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::BlockLocation;
+use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
@@ -42,37 +42,52 @@ pub async fn sst_dump() -> anyhow::Result<()> {
 
     let table_data = load_table_schemas(&meta_client).await?;
     let sstable_store = &*hummock.sstable_store();
-    for level in version.get_combined_levels() {
-        for sstable_info in &level.table_infos {
-            let id = sstable_info.id;
+    async fn print_sstable(
+        sstable_info: &SstableInfo,
+        sstable_store: &SstableStore,
+        table_data: &TableData,
+    ) -> anyhow::Result<()> {
+        let id = sstable_info.id;
 
-            let sstable_cache = sstable_store
-                .sstable(sstable_info, &mut StoreLocalStatistic::default())
-                .await?;
-            let sstable = sstable_cache.value().as_ref();
-            let sstable_meta = &sstable.meta;
+        let sstable_cache = sstable_store
+            .sstable(sstable_info, &mut StoreLocalStatistic::default())
+            .await?;
+        let sstable = sstable_cache.value().as_ref();
+        let sstable_meta = &sstable.meta;
 
-            println!("SST id: {}", id);
-            println!("-------------------------------------");
+        println!("SST id: {}", id);
+        println!("-------------------------------------");
+        println!("File Size: {}", sstable_info.file_size);
+
+        if let Some(key_range) = sstable_info.key_range.as_ref() {
+            println!("Key Range:");
+            println!(
+                "\tleft:\t{:?}\n\tright:\t{:?}\n\t",
+                key_range.left, key_range.right,
+            );
+        } else {
+            println!("Key Range: None");
+        }
+
+        println!("Estimated Table Size: {}", sstable_meta.estimated_size);
+        println!("Bloom Filter Size: {}", sstable_meta.bloom_filter.len());
+        println!("Key Count: {}", sstable_meta.key_count);
+        println!("Version: {}", sstable_meta.version);
+
+        print_blocks(id, table_data, sstable_store, sstable_meta).await
+    }
+    for group in version.get_compaction_levels() {
+        for level in &group.l0.sub_levels {
             println!("Level: {}", level.level_type);
-            println!("File Size: {}", sstable_info.file_size);
-
-            if let Some(key_range) = sstable_info.key_range.as_ref() {
-                println!("Key Range:");
-                println!(
-                    "\tleft:\t{:?}\n\tright:\t{:?}\n\t",
-                    key_range.left, key_range.right,
-                );
-            } else {
-                println!("Key Range: None");
+            for sst in &level.table_infos {
+                print_sstable(sst, sstable_store, &table_data).await?;
             }
-
-            println!("Estimated Table Size: {}", sstable_meta.estimated_size);
-            println!("Bloom Filter Size: {}", sstable_meta.bloom_filter.len());
-            println!("Key Count: {}", sstable_meta.key_count);
-            println!("Version: {}", sstable_meta.version);
-
-            print_blocks(id, &table_data, sstable_store, sstable_meta).await?;
+        }
+        for level in &group.levels {
+            println!("Level: {}", level.level_type);
+            for sstable_info in &level.table_infos {
+                print_sstable(sstable_info, sstable_store, &table_data).await?;
+            }
         }
     }
     hummock_opts.shutdown().await;

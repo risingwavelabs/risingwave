@@ -559,8 +559,9 @@ impl HummockVersionReader {
                 if !table_holder.value().meta.range_tombstone_list.is_empty()
                     && !read_options.ignore_range_tombstone
                 {
-                    delete_range_iter
-                        .add_sst_iter(SstableDeleteRangeIterator::new(table_holder.clone()));
+                    delete_range_iter.add_sst_iter(SstableDeleteRangeIterator::new(
+                        table_holder.value().clone(),
+                    ));
                 }
             }
             staging_sst_iter_count += 1;
@@ -623,7 +624,7 @@ impl HummockVersionReader {
                         .await?;
                     if let Some(bloom_filter_key) = read_options.dist_key_hint.as_deref() {
                         if !hit_sstable_bloom_filter(
-                            sstable.value(),
+                            sstable.value().as_ref(),
                             bloom_filter_key,
                             &mut local_stats,
                         ) {
@@ -634,7 +635,7 @@ impl HummockVersionReader {
                         && !read_options.ignore_range_tombstone
                     {
                         delete_range_iter
-                            .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
+                            .add_sst_iter(SstableDeleteRangeIterator::new(sstable.value().clone()));
                     }
                     sstables.push((*sstable_info).clone());
                 }
@@ -674,7 +675,7 @@ impl HummockVersionReader {
                         && !read_options.ignore_range_tombstone
                     {
                         delete_range_iter
-                            .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
+                            .add_sst_iter(SstableDeleteRangeIterator::new(sstable.value().clone()));
                     }
                     iters.push(SstableIterator::new(
                         sstable,

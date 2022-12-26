@@ -43,6 +43,7 @@
 #![feature(let_chains)]
 #![expect(clippy::result_large_err, reason = "FIXME: HummockError is large")]
 #![feature(associated_type_bounds)]
+#![feature(map_many_mut)]
 
 pub mod hummock;
 pub mod memory;

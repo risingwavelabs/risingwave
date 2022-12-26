@@ -21,10 +21,11 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{bound_table_key_range, user_key, TableKey, UserKey};
-use risingwave_pb::hummock::{HummockVersion, SstableInfo};
+use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::Notify;
 
 use super::{HummockError, HummockResult};
+use crate::hummock::local_version::LocalHummockVersion;
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -63,24 +64,27 @@ pub fn validate_epoch(safe_epoch: u64, epoch: u64) -> HummockResult<()> {
     Ok(())
 }
 
-pub fn validate_table_key_range(version: &HummockVersion) {
-    for l in version.levels.values().flat_map(|levels| {
-        levels
-            .l0
-            .as_ref()
-            .unwrap()
-            .sub_levels
-            .iter()
-            .chain(levels.levels.iter())
-    }) {
-        for t in &l.table_infos {
-            assert!(
-                t.key_range.is_some(),
-                "key_range in table [{}] is none",
-                t.id
-            );
-        }
-    }
+pub fn validate_table_key_range(version: &LocalHummockVersion) {
+    version.groups.values().for_each(|levels| {
+        levels.l0.sub_levels.iter().for_each(|level| {
+            for t in &level.table_infos {
+                assert!(
+                    t.key_range.is_some(),
+                    "key_range in table [{}] is none",
+                    t.id
+                );
+            }
+        });
+        levels.levels.iter().for_each(|level| {
+            for t in &level.table_infos {
+                assert!(
+                    t.key_range.is_some(),
+                    "key_range in table [{}] is none",
+                    t.id
+                );
+            }
+        });
+    });
 }
 
 pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, table_key_range: &R) -> bool

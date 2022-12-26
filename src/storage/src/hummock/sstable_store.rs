@@ -43,7 +43,7 @@ const MAX_META_CACHE_SHARD_BITS: usize = 2;
 const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
 
-pub type TableHolder = CacheableEntry<HummockSstableId, Box<Sstable>>;
+pub type TableHolder = CacheableEntry<HummockSstableId, Arc<Sstable>>;
 
 // BEGIN section for tiered cache
 
@@ -113,7 +113,7 @@ pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
     block_cache: BlockCache,
-    meta_cache: Arc<LruCache<HummockSstableId, Box<Sstable>>>,
+    meta_cache: Arc<LruCache<HummockSstableId, Arc<Sstable>>>,
     tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
 }
 
@@ -304,7 +304,7 @@ impl SstableStore {
         self.store.clone()
     }
 
-    pub fn get_meta_cache(&self) -> Arc<LruCache<HummockSstableId, Box<Sstable>>> {
+    pub fn get_meta_cache(&self) -> Arc<LruCache<HummockSstableId, Arc<Sstable>>> {
         self.meta_cache.clone()
     }
 
@@ -320,6 +320,24 @@ impl SstableStore {
     #[cfg(any(test, feature = "test"))]
     pub fn clear_meta_cache(&self) {
         self.meta_cache.clear();
+    }
+
+    pub async fn sstable_no_cache(&self, sst: &SstableInfo) -> HummockResult<Arc<Sstable>> {
+        let sst_id = sst.id;
+        let meta_path = self.get_sst_data_path(sst_id);
+        let loc = BlockLocation {
+            offset: sst.meta_offset as usize,
+            size: (sst.file_size - sst.meta_offset) as usize,
+        };
+        let buf = self
+            .store
+            .read(&meta_path, Some(loc))
+            .await
+            .map_err(HummockError::object_io_error)?;
+        let meta = SstableMeta::decode(&mut &buf[..])?;
+        // TODO: calculate in cache
+        let sst = Arc::new(Sstable::new(sst_id, meta));
+        Ok(sst)
     }
 
     pub async fn sstable(
@@ -350,7 +368,7 @@ impl SstableStore {
                     let charge = sst.meta.encoded_size();
                     let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                     stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
-                    Ok((Box::new(sst), charge))
+                    Ok((Arc::new(sst), charge))
                 }
             })
             .verbose_stack_trace("meta_cache_lookup")
@@ -376,7 +394,7 @@ impl SstableStore {
         let sst = Sstable::new(sst_id, meta);
         let charge = sst.estimate_size();
         self.meta_cache
-            .insert(sst_id, sst_id, charge, Box::new(sst));
+            .insert(sst_id, sst_id, charge, Arc::new(sst));
     }
 
     pub fn get_meta_memory_usage(&self) -> u64 {

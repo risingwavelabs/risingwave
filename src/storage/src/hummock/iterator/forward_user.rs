@@ -877,25 +877,25 @@ mod tests {
     async fn test_delete_range() {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
-        let table = generate_test_data(
-            sstable_store.clone(),
-            vec![(0, 2, 300), (1, 4, 150), (3, 6, 50), (5, 8, 150)],
-        )
-        .await;
+        let table = Arc::new(
+            generate_test_data(
+                sstable_store.clone(),
+                vec![(0, 2, 300), (1, 4, 150), (3, 6, 50), (5, 8, 150)],
+            )
+            .await,
+        );
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let table_id = table.id;
         let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table)),
+            table.clone(),
             sstable_store.clone(),
             read_options.clone(),
         ))];
         let mi = UnorderedMergeIteratorInner::new(iters);
 
         let mut del_iter = ForwardMergeRangeIterator::default();
-        del_iter.add_sst_iter(SstableDeleteRangeIterator::new(
-            cache.lookup(table_id, &table_id).unwrap(),
-        ));
+        del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table.clone()));
         let del_agg = DeleteRangeAggregator::new(del_iter, 150);
         let mut ui: UserIterator<ForwardUserIteratorType> =
             UserIterator::new(mi, (Unbounded, Unbounded), 150, 0, None, del_agg);
@@ -923,9 +923,7 @@ mod tests {
             read_options,
         ))];
         let mut del_iter = ForwardMergeRangeIterator::default();
-        del_iter.add_sst_iter(SstableDeleteRangeIterator::new(
-            cache.lookup(table_id, &table_id).unwrap(),
-        ));
+        del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table.clone()));
         let del_agg = DeleteRangeAggregator::new(del_iter, 300);
         let mi = UnorderedMergeIteratorInner::new(iters);
         let mut ui: UserIterator<ForwardUserIteratorType> =

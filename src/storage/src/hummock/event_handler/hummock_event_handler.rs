@@ -22,7 +22,6 @@ use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::pin_version_response::Payload;
 use tokio::spawn;
@@ -37,6 +36,7 @@ use crate::hummock::event_handler::uploader::{
 };
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::local_version::LocalHummockVersion;
 use crate::hummock::shared_buffer::UncommittedData;
 use crate::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
@@ -374,7 +374,7 @@ impl HummockEventHandler {
                 }
                 version_to_apply
             }
-            Payload::PinnedVersion(version) => version,
+            Payload::PinnedVersion(version) => LocalHummockVersion::from(version),
         };
 
         validate_table_key_range(&newly_pinned_version);

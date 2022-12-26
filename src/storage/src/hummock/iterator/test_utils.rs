@@ -187,7 +187,7 @@ pub async fn gen_merge_iterator_interleave_test_sstable_iters(
             key_count,
         )
         .await;
-        let handle = cache.insert(table.id, table.id, 1, Box::new(table));
+        let handle = cache.insert(table.id, table.id, 1, Arc::new(table));
         result.push(SstableIterator::create(
             handle,
             sstable_store.clone(),
