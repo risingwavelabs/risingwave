@@ -236,7 +236,7 @@ pub fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 
         Ok(ExprToCharConstTmpl {
             ctx: ExprToCharConstTmplContext {
-                chrono_tmpl: pattern,
+                chrono_pattern: pattern,
             },
             child: data_expr,
         }.boxed())
