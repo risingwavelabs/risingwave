@@ -181,7 +181,10 @@ async fn test_table_materialize() -> StreamResult<()> {
          1.14
          5.14",
     );
-    let insert_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
+    let insert_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(
+        chunk,
+        get_schema(&[ColumnId::from(1)]),
+    ));
     let insert = Box::new(InsertExecutor::new(
         source_table_id,
         source_manager.clone(),
