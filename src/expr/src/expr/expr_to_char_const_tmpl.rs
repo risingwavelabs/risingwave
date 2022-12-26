@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Write;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -49,11 +50,12 @@ impl Expression for ExprToCharConstTmpl {
             if !vis {
                 output.append_null();
             } else if let Some(data) = data {
-                let res = data
+                let mut writer = output.writer().begin();
+                let fmt = data
                     .0
-                    .format_with_items(self.ctx.chrono_pattern.borrow_items().iter())
-                    .to_string();
-                output.append(Some(res.as_str()));
+                    .format_with_items(self.ctx.chrono_pattern.borrow_items().iter());
+                write!(writer, "{fmt}").unwrap();
+                writer.finish();
             } else {
                 output.append_null();
             }
