@@ -250,10 +250,9 @@ impl FusedIterator for AppendDataChunk<'_> {}
 
 impl Drop for AppendDataChunk<'_> {
     fn drop(&mut self) {
-        debug_assert!(
-            self.remaining.is_none(),
-            "dropping `AppendDataChunk` without exhausting it"
-        );
+        if self.remaining.is_some() {
+            tracing::warn!("dropping `AppendDataChunk` without exhausting it");
+        }
     }
 }
 

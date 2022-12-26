@@ -19,6 +19,7 @@ use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilde
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::TableSourceManagerRef;
 
@@ -36,6 +37,7 @@ pub struct DeleteExecutor {
     table_id: TableId,
     source_manager: TableSourceManagerRef,
     child: BoxedExecutor,
+    chunk_size: usize,
     schema: Schema,
     identity: String,
 }
@@ -45,12 +47,14 @@ impl DeleteExecutor {
         table_id: TableId,
         source_manager: TableSourceManagerRef,
         child: BoxedExecutor,
+        chunk_size: usize,
         identity: String,
     ) -> Self {
         Self {
             table_id,
             source_manager,
             child,
+            chunk_size,
             // TODO: support `RETURNING`
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
@@ -80,17 +84,32 @@ impl DeleteExecutor {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
         let source = source_desc.source.as_table().expect("not table source");
 
+        let data_types = self.child.schema().data_types();
+        let mut builder = DataChunkBuilder::new(data_types, 1024);
+
         let mut notifiers = Vec::new();
+
+        // Transform the data chunk to a stream chunk, then write to the source.
+        let mut write_chunk = |chunk: DataChunk| -> Result<()> {
+            let cap = chunk.capacity();
+            let stream_chunk = StreamChunk::from_parts(vec![Op::Delete; cap], chunk);
+
+            let notifier = source.write_chunk(stream_chunk)?;
+            notifiers.push(notifier);
+
+            Ok(())
+        };
 
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
-            let cap = data_chunk.capacity();
+            for chunk in builder.append_chunk(data_chunk) {
+                write_chunk(chunk)?;
+            }
+        }
 
-            let chunk = StreamChunk::from_parts(vec![Op::Delete; cap], data_chunk);
-
-            let notifier = source.write_chunk(chunk)?;
-            notifiers.push(notifier);
+        if let Some(chunk) = builder.consume_all() {
+            write_chunk(chunk)?;
         }
 
         // Wait for all chunks to be taken / written.
@@ -131,6 +150,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             table_id,
             source.context().source_manager(),
             child,
+            source.context.get_config().developer.batch_chunk_size,
             source.plan_node().get_identity().clone(),
         )))
     }
@@ -192,6 +212,7 @@ mod tests {
             table_id,
             source_manager.clone(),
             Box::new(mock_executor),
+            1024,
             "DeleteExecutor".to_string(),
         ));
 

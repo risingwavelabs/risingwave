@@ -186,6 +186,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         source_table_id,
         source_manager.clone(),
         insert_inner,
+        1024,
         "InsertExecutor".to_string(),
         vec![], // ignore insertion order
     ));
@@ -313,6 +314,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         source_table_id,
         source_manager.clone(),
         delete_inner,
+        1024,
         "DeleteExecutor".to_string(),
     ));
 
