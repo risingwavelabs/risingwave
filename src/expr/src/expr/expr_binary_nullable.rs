@@ -83,8 +83,22 @@ impl Expression for BinaryShortCircuitExpression {
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let left = self.expr_ia1.eval_checked(input)?;
-        let right = self.expr_ia2.eval_checked(input)?;
         let left = left.as_bool();
+
+        let res_vis: Vis = match self.expr_type {
+            // For `Or` operator, if res of left part is not null and is true, we do not want to
+            // calculate right part because the result must be true.
+            Type::Or => (!left.to_bitmap()).into(),
+            // For `And` operator, If res of left part is not null and is false, we do not want
+            // to calculate right part because the result must be false.
+            Type::And => (left.data() | !left.null_bitmap()).into(),
+            _ => unimplemented!(),
+        };
+        let new_vis = input.vis() & res_vis;
+        let mut input1 = input.clone();
+        input1.set_vis(new_vis);
+
+        let right = self.expr_ia2.eval_checked(&input1)?;
         let right = right.as_bool();
         assert_eq!(left.len(), right.len());
 
