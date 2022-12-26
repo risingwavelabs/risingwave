@@ -125,7 +125,7 @@ impl KafkaSplitReader {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         interval.tick().await;
         let mut bytes_current_second = 0;
-        let mut res = Vec::with_capacity(1024);
+        let mut res = Vec::with_capacity(MAX_CHUNK_SIZE);
         #[for_await]
         'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(MAX_CHUNK_SIZE) {
             for msg in msgs {
