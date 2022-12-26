@@ -6,10 +6,10 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-CREATE TABLE integers AS SELECT i FROM range(0, 10, 1) tbl(i);
+CREATE VIEW integers AS SELECT i FROM range(0, 10, 1) tbl(i);
 
 statement ok
-CREATE TABLE integers2 AS SELECT i FROM range(0, 10, 1) tbl(i);
+CREATE VIEW integers2 AS SELECT i FROM range(0, 10, 1) tbl(i);
 
 statement ok
 CREATE VIEW integers_empty AS SELECT * FROM integers WHERE i>100;
@@ -139,7 +139,7 @@ statement ok
 DROP VIEW integers_empty;
 
 statement ok
-DROP TABLE integers2;
+DROP VIEW integers2;
 
 statement ok
-DROP TABLE integers;
+DROP VIEW integers;
