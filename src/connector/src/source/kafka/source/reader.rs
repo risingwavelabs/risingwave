@@ -147,9 +147,10 @@ impl KafkaSplitReader {
                         break 'for_outer_loop;
                     }
                 }
+                // This judgement has to be put in the inner loop as `msgs` can be multiple ones.
                 if bytes_current_second > self.bytes_per_second {
                     // swap to make compiler happy
-                    let mut cur = Vec::with_capacity(1024);
+                    let mut cur = Vec::with_capacity(res.capacity());
                     swap(&mut cur, &mut res);
                     yield cur;
                     interval.tick().await;
@@ -157,6 +158,10 @@ impl KafkaSplitReader {
                     res.clear();
                 }
             }
+            let mut cur = Vec::with_capacity(res.capacity());
+            swap(&mut cur, &mut res);
+            yield cur;
+            // don't clear `bytes_current_second` here as it is only related to `.tick()`.
         }
     }
 }
