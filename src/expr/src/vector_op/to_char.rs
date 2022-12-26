@@ -12,17 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Debug;
 use std::sync::LazyLock;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
+use chrono::format::StrftimeItems;
+use ouroboros::self_referencing;
 use risingwave_common::array::{StringWriter, WrittenGuard};
 use risingwave_common::types::NaiveDateTimeWrapper;
 
 use crate::Result;
 
+#[self_referencing]
+pub struct ChronoPattern {
+    pub(crate) tmpl: String,
+    #[borrows(tmpl)]
+    #[covariant]
+    pub(crate) items: Vec<chrono::format::Item<'this>>,
+}
+
+impl Debug for ChronoPattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChronoPattern")
+            .field("tmpl", self.borrow_tmpl())
+            .finish()
+    }
+}
+
 /// Compile the pg pattern to chrono pattern.
 // TODO: Chrono can not fully support the pg format, so consider using other implementations later.
-pub fn compile_pattern_to_chrono(tmpl: &str) -> String {
+pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
     // https://www.postgresql.org/docs/current/functions-formatting.html
     static PG_PATTERNS: &[&str] = &[
         "HH24", "hh24", "HH12", "hh12", "HH", "hh", "MI", "mi", "SS", "ss", "YYYY", "yyyy", "YY",
@@ -45,15 +64,23 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> String {
         dst.push_str(CHRONO_PATTERNS[mat.pattern()]);
         true
     });
-    chrono_tmpl
+    ChronoPatternBuilder {
+        tmpl: chrono_tmpl,
+        items_builder: |tmpl| StrftimeItems::new(tmpl).into_iter().collect::<Vec<_>>(),
+    }
+    .build()
 }
 
+#[inline(always)]
 pub fn to_char_timestamp(
     data: NaiveDateTimeWrapper,
     tmpl: &str,
     writer: StringWriter<'_>,
 ) -> Result<WrittenGuard> {
-    let chrono_tmpl = compile_pattern_to_chrono(tmpl);
-    let res = data.0.format(&chrono_tmpl).to_string();
+    let pattern = compile_pattern_to_chrono(tmpl);
+    let res = data
+        .0
+        .format_with_items(pattern.borrow_items().iter())
+        .to_string();
     Ok(writer.write_ref(&res))
 }
