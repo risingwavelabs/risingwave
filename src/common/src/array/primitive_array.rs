@@ -27,8 +27,7 @@ use crate::for_all_native_types;
 use crate::types::decimal::Decimal;
 use crate::types::interval::IntervalUnit;
 use crate::types::{
-    DataType, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar,
-    ScalarRef,
+    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar, ScalarRef,
 };
 
 /// Physical type of array items which have fixed size.
@@ -49,8 +48,6 @@ where
     fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>>;
     /// Returns array type of the primitive array
     fn array_type() -> ArrayType;
-    /// Returns the data type.
-    fn data_type() -> DataType;
     /// Creates an `ArrayBuilder` for this primitive type
     fn create_array_builder(capacity: usize) -> ArrayBuilderImpl;
 
@@ -80,10 +77,6 @@ macro_rules! impl_array_methods {
 
         fn array_type() -> ArrayType {
             ArrayType::$array_type_pb
-        }
-
-        fn data_type() -> DataType {
-            DataType::$array_type_pb
         }
 
         fn create_array_builder(capacity: usize) -> ArrayBuilderImpl {
@@ -171,10 +164,9 @@ impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
     ///
     /// NOTE: The length of `bitmap` must be equal to the length of `iter`.
     pub fn from_iter_bitmap(iter: impl IntoIterator<Item = T>, bitmap: Bitmap) -> Self {
-        PrimitiveArray {
-            bitmap,
-            data: iter.into_iter().collect(),
-        }
+        let data: Vec<T> = iter.into_iter().collect();
+        assert_eq!(data.len(), bitmap.len());
+        PrimitiveArray { bitmap, data }
     }
 }
 

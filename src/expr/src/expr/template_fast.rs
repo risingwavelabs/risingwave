@@ -156,6 +156,7 @@ where
 
 pub struct UnaryExpression<F, A, T> {
     child: BoxedExpression,
+    return_type: DataType,
     func: F,
     _marker: PhantomData<(A, T)>,
 }
@@ -175,9 +176,10 @@ where
     T: PrimitiveArrayItemType,
     for<'a> &'a PrimitiveArray<A>: From<&'a ArrayImpl>,
 {
-    pub fn new(child: BoxedExpression, func: F) -> Self {
+    pub fn new(child: BoxedExpression, return_type: DataType, func: F) -> Self {
         UnaryExpression {
             child,
+            return_type,
             func,
             _marker: PhantomData,
         }
@@ -192,7 +194,7 @@ where
     for<'a> &'a PrimitiveArray<A>: From<&'a ArrayImpl>,
 {
     fn return_type(&self) -> DataType {
-        T::data_type()
+        self.return_type.clone()
     }
 
     fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
@@ -222,6 +224,7 @@ where
 pub struct BinaryExpression<F, A, B, T> {
     left: BoxedExpression,
     right: BoxedExpression,
+    return_type: DataType,
     func: F,
     _marker: PhantomData<(A, B, T)>,
 }
@@ -244,10 +247,16 @@ where
     for<'a> &'a PrimitiveArray<A>: From<&'a ArrayImpl>,
     for<'a> &'a PrimitiveArray<B>: From<&'a ArrayImpl>,
 {
-    pub fn new(left: BoxedExpression, right: BoxedExpression, func: F) -> Self {
+    pub fn new(
+        left: BoxedExpression,
+        right: BoxedExpression,
+        return_type: DataType,
+        func: F,
+    ) -> Self {
         BinaryExpression {
             left,
             right,
+            return_type,
             func,
             _marker: PhantomData,
         }
@@ -264,7 +273,7 @@ where
     for<'a> &'a PrimitiveArray<B>: From<&'a ArrayImpl>,
 {
     fn return_type(&self) -> DataType {
-        T::data_type()
+        self.return_type.clone()
     }
 
     fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {

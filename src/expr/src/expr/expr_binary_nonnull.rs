@@ -87,7 +87,7 @@ macro_rules! gen_atm_impl_fast {
             $(
                 ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
                     template_fast::BinaryExpression::new(
-                        $l, $r,
+                        $l, $r, $ret,
                         $func::<
                             <$i1! { type_array } as Array>::OwnedItem,
                             <$i2! { type_array } as Array>::OwnedItem,
@@ -630,6 +630,7 @@ pub fn new_binary_expr(
         Type::RoundDigit => Box::new(template_fast::BinaryExpression::new(
             l,
             r,
+            ret,
             round_digits::<i32>,
         )),
         Type::Position => Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _>::new(

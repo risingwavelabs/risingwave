@@ -72,7 +72,7 @@ macro_rules! gen_unary_impl_fast {
     ([$expr_name: literal, $child:expr, $ret:expr], $( { $input:ident, $rt: ident, $func:expr },)*) => {
         match ($child.return_type()) {
             $(
-                $input! { type_match_pattern } => template_fast::UnaryExpression::new($child, $func).boxed(),
+                $input! { type_match_pattern } => template_fast::UnaryExpression::new($child, $ret, $func).boxed(),
             )*
             _ => {
                 return Err(ExprError::UnsupportedFunction(format!("{}({:?}) -> {:?}", $expr_name, $child.return_type(), $ret)));
