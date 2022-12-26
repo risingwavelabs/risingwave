@@ -22,6 +22,11 @@ use crate::Result;
 pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<NaiveDateTimeWrapper> {
     let mut parsed = Parsed::new();
     chrono::format::parse(&mut parsed, s, tmpl.borrow_items().iter())?;
+
+    // chrono will only assign the default value for seconds/nanoseconds fields, and raise an error
+    // for other ones. We should specify the default value manually.
+
+    // If year is omitted, the default value should be 0001 BC.
     if parsed.year.is_none()
         && parsed.year_div_100.is_none()
         && parsed.year_mod_100.is_none()
@@ -31,6 +36,8 @@ pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<NaiveDat
     {
         parsed.set_year(-1).unwrap();
     }
+
+    // If the month is omitted, the default value should be 1 (January).
     if parsed.month.is_none()
         && parsed.week_from_mon.is_none()
         && parsed.week_from_sun.is_none()
@@ -38,12 +45,21 @@ pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<NaiveDat
     {
         parsed.set_month(1).unwrap();
     }
+
+    // If the day is ommited, the default value should be 1.
     if parsed.day.is_none() && parsed.ordinal.is_none() {
         parsed.set_day(1).unwrap();
     }
+
+    // The default value should be AM.
     parsed.hour_div_12.get_or_insert(0);
+
+    // The default time should be 00:00.
     parsed.hour_mod_12.get_or_insert(0);
     parsed.minute.get_or_insert(0);
+
+    // Seconds and nanoseconds can be omitted, so we don't need to assign default value for them.
+
     Ok(NaiveDateTimeWrapper(
         parsed.to_naive_datetime_with_offset(0)?,
     ))
