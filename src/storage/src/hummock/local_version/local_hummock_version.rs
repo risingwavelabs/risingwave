@@ -13,7 +13,7 @@ use risingwave_pb::hummock::{
     HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel, SstableInfo,
 };
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LocalGroup {
     pub levels: Vec<Level>,
     pub l0: OverlappingLevel,
@@ -116,7 +116,7 @@ impl LocalGroup {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LocalHummockVersion {
     pub id: u64,
     pub groups: HashMap<u64, LocalGroup>,

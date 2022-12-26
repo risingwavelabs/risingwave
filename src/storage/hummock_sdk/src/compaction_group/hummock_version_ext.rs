@@ -537,8 +537,8 @@ impl HummockLevelsExt for Levels {
 
 pub fn split_base_levels(
     member_table_ids: &HashSet<StateTableId>,
-    parent_levels: &mut Vec<Level>,
-    cur_levels: &mut Vec<Level>,
+    parent_levels: &mut [Level],
+    cur_levels: &mut [Level],
 ) -> Vec<(HummockSstableId, u64, u32)> {
     let mut split_id_vers = vec![];
     for (z, level) in parent_levels.iter_mut().enumerate() {

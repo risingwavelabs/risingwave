@@ -33,6 +33,7 @@ use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::local_version_manager::{
     LocalVersionManager, LocalVersionManagerRef,
 };
+use risingwave_storage::hummock::local_version::LocalHummockVersion;
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::shared_buffer::UncommittedData;
 use risingwave_storage::hummock::test_utils::{
@@ -399,6 +400,7 @@ async fn test_update_uncommitted_ssts() {
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());
     // Check pinned version
+    let version = LocalHummockVersion::from(version);
     assert_eq!(local_version.pinned_version().version(), version);
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
 
@@ -413,7 +415,10 @@ async fn test_update_uncommitted_ssts() {
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());
     // Check pinned version
-    assert_eq!(local_version.pinned_version().version(), version);
+    assert_eq!(
+        local_version.pinned_version().version(),
+        LocalHummockVersion::from(version)
+    );
     // Check uncommitted ssts
     assert!(local_version.get_shared_buffer(epochs[0]).is_none());
     assert!(local_version.get_shared_buffer(epochs[1]).is_none());

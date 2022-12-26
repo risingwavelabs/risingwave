@@ -14,6 +14,7 @@
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
 
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
@@ -53,15 +54,15 @@ mod test {
         let cache = create_small_table_cache();
         let iters = vec![
             BackwardSstableIterator::new(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+                cache.insert(table0.id, table0.id, 1, Arc::new(table0)),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+                cache.insert(table1.id, table1.id, 1, Arc::new(table1)),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table2.id, table2.id, 1, Box::new(table2)),
+                cache.insert(table2.id, table2.id, 1, Arc::new(table2)),
                 sstable_store,
             ),
         ];
@@ -116,15 +117,15 @@ mod test {
         let cache = create_small_table_cache();
         let iters = vec![
             BackwardSstableIterator::new(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+                cache.insert(table0.id, table0.id, 1, Arc::new(table0)),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+                cache.insert(table1.id, table1.id, 1, Arc::new(table1)),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table2.id, table2.id, 1, Box::new(table2)),
+                cache.insert(table2.id, table2.id, 1, Arc::new(table2)),
                 sstable_store,
             ),
         ];
@@ -193,11 +194,11 @@ mod test {
         let cache = create_small_table_cache();
         let iters = vec![
             BackwardSstableIterator::new(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+                cache.insert(table1.id, table1.id, 1, Arc::new(table1)),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+                cache.insert(table0.id, table0.id, 1, Arc::new(table0)),
                 sstable_store,
             ),
         ];

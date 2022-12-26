@@ -38,6 +38,7 @@ use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::event_handler::HummockEvent;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
+use risingwave_storage::hummock::local_version::LocalHummockVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::test_utils::default_config_for_test;
@@ -154,7 +155,10 @@ pub async fn prepare_first_valid_version(
     };
 
     (
-        PinnedVersion::new(hummock_version, unbounded_channel().0),
+        PinnedVersion::new(
+            LocalHummockVersion::from(hummock_version),
+            unbounded_channel().0,
+        ),
         tx,
         rx,
     )

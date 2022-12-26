@@ -237,7 +237,7 @@ mod tests {
         assert!(sstable.meta.block_metas.len() > 10);
 
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
+        let handle = cache.insert(0, 0, 1, Arc::new(sstable));
         inner_test_forward_iterator(sstable_store.clone(), handle).await;
     }
 
@@ -251,7 +251,7 @@ mod tests {
         // path.
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
+        let handle = cache.insert(0, 0, 1, Arc::new(sstable));
 
         let mut sstable_iter = SstableIterator::create(
             handle,

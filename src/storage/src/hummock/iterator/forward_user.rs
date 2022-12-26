@@ -341,17 +341,17 @@ mod tests {
         let cache = create_small_table_cache();
         let iters = vec![
             HummockIteratorUnion::Fourth(SstableIterator::create(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+                cache.insert(table0.id, table0.id, 1, Arc::new(table0)),
                 sstable_store.clone(),
                 read_options.clone(),
             )),
             HummockIteratorUnion::Fourth(SstableIterator::create(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+                cache.insert(table1.id, table1.id, 1, Arc::new(table1)),
                 sstable_store.clone(),
                 read_options.clone(),
             )),
             HummockIteratorUnion::Fourth(SstableIterator::create(
-                cache.insert(table2.id, table2.id, 1, Box::new(table2)),
+                cache.insert(table2.id, table2.id, 1, Arc::new(table2)),
                 sstable_store,
                 read_options.clone(),
             )),
@@ -408,17 +408,17 @@ mod tests {
         let cache = create_small_table_cache();
         let iters = vec![
             HummockIteratorUnion::Fourth(SstableIterator::create(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+                cache.insert(table0.id, table0.id, 1, Arc::new(table0)),
                 sstable_store.clone(),
                 read_options.clone(),
             )),
             HummockIteratorUnion::Fourth(SstableIterator::create(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+                cache.insert(table1.id, table1.id, 1, Arc::new(table1)),
                 sstable_store.clone(),
                 read_options.clone(),
             )),
             HummockIteratorUnion::Fourth(SstableIterator::create(
-                cache.insert(table2.id, table2.id, 1, Box::new(table2)),
+                cache.insert(table2.id, table2.id, 1, Arc::new(table2)),
                 sstable_store,
                 read_options,
             )),
@@ -485,12 +485,12 @@ mod tests {
         let cache = create_small_table_cache();
         let iters = vec![
             HummockIteratorUnion::Fourth(SstableIterator::create(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+                cache.insert(table0.id, table0.id, 1, Arc::new(table0)),
                 sstable_store.clone(),
                 read_options.clone(),
             )),
             HummockIteratorUnion::Fourth(SstableIterator::create(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+                cache.insert(table1.id, table1.id, 1, Arc::new(table1)),
                 sstable_store.clone(),
                 read_options,
             )),
@@ -549,7 +549,7 @@ mod tests {
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table)),
+            cache.insert(table.id, table.id, 1, Arc::new(table)),
             sstable_store,
             read_options,
         ))];
@@ -632,7 +632,7 @@ mod tests {
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table)),
+            cache.insert(table.id, table.id, 1, Arc::new(table)),
             sstable_store,
             read_options,
         ))];
@@ -700,7 +700,7 @@ mod tests {
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table)),
+            cache.insert(table.id, table.id, 1, Arc::new(table)),
             sstable_store,
             read_options,
         ))];
@@ -769,7 +769,7 @@ mod tests {
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table)),
+            cache.insert(table.id, table.id, 1, Arc::new(table)),
             sstable_store,
             read_options,
         ))];
@@ -848,7 +848,7 @@ mod tests {
         .await;
         let cache = create_small_table_cache();
         let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
-            cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+            cache.insert(table0.id, table0.id, 1, Arc::new(table0)),
             sstable_store.clone(),
             read_options.clone(),
         ))];
@@ -888,7 +888,7 @@ mod tests {
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let table_id = table.id;
         let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
-            table.clone(),
+            cache.insert(table.id, table.id, 1, table.clone()),
             sstable_store.clone(),
             read_options.clone(),
         ))];

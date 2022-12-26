@@ -144,7 +144,7 @@ mod test {
     async fn test_merge_invalidate_reset() {
         let sstable_store = mock_sstable_store();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let table0 = Box::new(
+        let table0 = Arc::new(
             gen_iterator_test_sstable_base(
                 0,
                 default_builder_opt_for_test(),
@@ -154,7 +154,7 @@ mod test {
             )
             .await,
         );
-        let table1 = Box::new(
+        let table1 = Arc::new(
             gen_iterator_test_sstable_base(
                 1,
                 default_builder_opt_for_test(),
@@ -227,7 +227,7 @@ mod test {
         let sstable_store = mock_sstable_store();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
 
-        let non_overlapped_sstable = Box::new(
+        let non_overlapped_sstable = Arc::new(
             gen_test_sstable(
                 default_builder_opt_for_test(),
                 0,
@@ -242,7 +242,7 @@ mod test {
             .await,
         );
 
-        let overlapped_old_sstable = Box::new(
+        let overlapped_old_sstable = Arc::new(
             gen_test_sstable(
                 default_builder_opt_for_test(),
                 1,
@@ -257,7 +257,7 @@ mod test {
             .await,
         );
 
-        let overlapped_new_sstable = Box::new(
+        let overlapped_new_sstable = Arc::new(
             gen_test_sstable(
                 default_builder_opt_for_test(),
                 2,

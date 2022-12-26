@@ -711,7 +711,7 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
-    use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
+    use risingwave_pb::hummock::{KeyRange, SstableInfo};
     use spin::Mutex;
     use tokio::spawn;
     use tokio::sync::mpsc::unbounded_channel;
@@ -724,6 +724,7 @@ mod tests {
         UploaderEvent, UploadingTask,
     };
     use crate::hummock::local_version::pinned_version::PinnedVersion;
+    use crate::hummock::local_version::LocalHummockVersion;
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
     use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
     use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
@@ -737,10 +738,10 @@ mod tests {
     pub trait UploadFn<Fut: UploadOutputFuture> =
         Fn(UploadTaskPayload, UploadTaskInfo) -> Fut + Send + Sync + 'static;
 
-    fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
-        HummockVersion {
+    fn test_hummock_version(epoch: HummockEpoch) -> LocalHummockVersion {
+        LocalHummockVersion {
             id: epoch,
-            levels: Default::default(),
+            groups: Default::default(),
             max_committed_epoch: epoch,
             safe_epoch: 0,
         }
