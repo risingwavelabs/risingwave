@@ -328,6 +328,10 @@ impl Executor for RearrangedChainExecutor {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> ExecutorInfo {
+        self.info.clone()
+    }
 }
 
 // TODO: add new unit tests for rearranged chain

@@ -146,7 +146,7 @@ mod tests {
         ]);
         let pk_indices = vec![0];
         let row_id_index = 0;
-        let row_id_generator = Bitmap::all_high_bits(VirtualNode::COUNT);
+        let row_id_generator = Bitmap::ones(VirtualNode::COUNT);
         let (mut tx, upstream) = MockSource::channel(schema.clone(), pk_indices.clone());
         let row_id_gen_executor = Box::new(RowIdGenExecutor::new(
             Box::new(upstream),

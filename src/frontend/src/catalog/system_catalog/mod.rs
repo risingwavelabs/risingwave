@@ -14,6 +14,7 @@
 
 pub mod information_schema;
 pub mod pg_catalog;
+pub mod rw_catalog;
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
@@ -22,16 +23,17 @@ use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{
     ColumnDesc, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
-    INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
+    INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::system_catalog::information_schema::*;
 use crate::catalog::system_catalog::pg_catalog::*;
+use crate::catalog::system_catalog::rw_catalog::*;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::session::AuthContext;
@@ -160,7 +162,7 @@ macro_rules! prepare_sys_catalog {
 
         #[async_trait]
         impl SysCatalogReader for SysCatalogReaderImpl {
-            async fn read_table(&self, table_id: &TableId) -> Result<Vec<Row>> {
+            async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>> {
                 match table_id.table_id - 1 {
                     $(
                         ${index()} => {
@@ -191,6 +193,15 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_OPERATOR, vec![0], read_operator_info },
     { PG_CATALOG, PG_VIEWS, vec![], read_views_info },
     { PG_CATALOG, PG_ATTRIBUTE, vec![0, 4], read_pg_attribute },
+    { PG_CATALOG, PG_DATABASE, vec![0], read_database_info },
+    { PG_CATALOG, PG_DESCRIPTION, vec![0], read_description_info },
+    { PG_CATALOG, PG_SETTINGS, vec![0], read_settings_info },
+    { PG_CATALOG, PG_KEYWORDS, vec![0], read_keywords_info },
+    { PG_CATALOG, PG_ATTRDEF, vec![0], read_attrdef_info },
+    { PG_CATALOG, PG_ROLES, vec![0], read_roles_info },
+    { PG_CATALOG, PG_SHDESCRIPTION, vec![0], read_shdescription_info },
+    { PG_CATALOG, PG_TABLESPACE, vec![0], read_tablespace_info },
     { INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
     { INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
+    { RW_CATALOG, RW_META_SNAPSHOT, vec![], read_meta_snapshot await },
 }

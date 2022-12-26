@@ -374,6 +374,24 @@ class Panels:
             legendCalcs=legendCols,
         )
 
+    def timeseries_bytesps(self,
+                          title,
+                          description,
+                          targets,
+                          legendCols=["max"]):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(
+            title=title,
+            description=description,
+            targets=targets,
+            gridPos=gridPos,
+            unit="MB/s",
+            fillOpacity=10,
+            legendDisplayMode="table",
+            legendPlacement="right",
+            legendCalcs=legendCols,
+        )
+
     def timeseries_actor_rowsps(self, title, description, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
@@ -532,6 +550,16 @@ def section_compaction(outer_panels):
                         panels.target(
                             f"sum({metric('storage_level_compact_frequency')}) by (compactor, group, result)",
                             "{{result}} - group-{{group}} @ {{compactor}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Compaction Skip Count",
+                    "num of compaction task which does not trigger",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('storage_skip_compact_frequency')}[$__rate_interval])) by (level, type)",
+                            "{{level}}-{{type}}",
                         ),
                     ],
                 ),
@@ -855,7 +883,7 @@ def section_streaming(panels):
     return [
         panels.row("Streaming"),
         panels.timeseries_rowsps(
-            "Source Throughput",
+            "Source Throughput(rows)",
             "",
             [
                 panels.target(
@@ -865,11 +893,31 @@ def section_streaming(panels):
             ],
         ),
         panels.timeseries_rowsps(
-            "Source Throughput Per Partition",
+            "Source Throughput(rows) Per Partition",
             "",
             [
                 panels.target(
                     f"rate({metric('partition_input_count')}[$__rate_interval])",
+                    "actor={{actor_id}} source={{source_id}} partition={{partition}}",
+                )
+            ],
+        ),
+        panels.timeseries_bytesps(
+            "Source Throughput(bytes)",
+            "",
+            [
+                panels.target(
+                    f"(sum by (source_id)(rate({metric('partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
+                    "source={{source_id}}",
+                )
+            ],
+        ),
+        panels.timeseries_bytesps(
+            "Source Throughput(bytes) Per Partition",
+            "",
+            [
+                panels.target(
+                    f"(rate({metric('partition_input_bytes')}[$__rate_interval]))/(1000*1000)",
                     "actor={{actor_id}} source={{source_id}} partition={{partition}}",
                 )
             ],
@@ -988,6 +1036,16 @@ def section_streaming_actors(outer_panels):
                     [
                         panels.target(
                             f"rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval]) / 1000000000",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Actor Memory Usage",
+                    "",
+                    [
+                        panels.target(
+                            "rate(actor_memory_usage[$__rate_interval])",
                             "{{actor_id}}",
                         ),
                     ],
@@ -1630,9 +1688,9 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_merge_sstable_counts_bucket')}[$__rate_interval])) by (le, job, instance))",
+                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_iter_merge_sstable_counts_bucket')}[$__rate_interval])) by (le, job, type))",
                         f"# merged ssts p{legend}" +
-                        " - {{job}} @ {{instance}}",
+                        " - {{job}} @ {{type}}",
                     ),
                     [90, 99, "max"],
                 ),
@@ -1848,7 +1906,6 @@ def section_hummock_tiered_cache(outer_panels):
         )
     ]
 
-
 def section_hummock_manager(outer_panels):
     panels = outer_panels.sub_panel()
     total_key_size_filter = "metric='total_key_size'"
@@ -1904,6 +1961,8 @@ def section_hummock_manager(outer_panels):
                                       "checkpoint version id"),
                         panels.target(f"{metric('storage_min_pinned_version_id')}",
                                       "min pinned version id"),
+                        panels.target(f"{metric('storage_min_safepoint_version_id')}",
+                                      "min safepoint version id"),
                     ],
                 ),
                 panels.timeseries_id(
@@ -1919,7 +1978,7 @@ def section_hummock_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_kilobytes(
-                    "table KV size",
+                    "Table KV Size",
                     "",
                     [
                         panels.target(f"{metric('storage_version_stats', total_key_size_filter)}/1024",
@@ -1929,7 +1988,7 @@ def section_hummock_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "table KV count",
+                    "Table KV Count",
                     "",
                     [
                         panels.target(f"{metric('storage_version_stats', total_key_count_filter)}",
@@ -1940,6 +1999,39 @@ def section_hummock_manager(outer_panels):
         )
     ]
 
+def section_backup_manager(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Backup Manager",
+            [
+                panels.timeseries_count(
+                    "Job Count",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('backup_job_count')}",
+                            "job count",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Job Process Time",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('backup_job_latency_bucket')}[$__rate_interval])) by (le, state))",
+                                f"Job Process Time p{legend}" +
+                                " - {{state}}",
+                                ),
+                            [50, 99, 999, "max"],
+                        ),
+                    ],
+                ),
+            ],
+        )
+    ]
 
 def grpc_metrics_target(panels, name, filter):
     return panels.timeseries_latency_small(
@@ -2284,6 +2376,7 @@ dashboard = Dashboard(
         *section_object_storage(panels),
         *section_hummock_tiered_cache(panels),
         *section_hummock_manager(panels),
+        *section_backup_manager(panels),
         *section_grpc_meta_catalog_service(panels),
         *section_grpc_meta_cluster_service(panels),
         *section_grpc_meta_stream_manager(panels),

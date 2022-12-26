@@ -21,6 +21,8 @@ message RowSeqScanNode {
   //
   // Will be filled by the scheduler.
   common.Buffer vnode_bitmap = 4;
+  // Whether the order on output columns should be preserved.
+  bool ordered = 5;
 }
 
 message SysRowSeqScanNode {
@@ -191,7 +193,7 @@ message TaskOutputId {
 
 message LocalExecutePlan {
   batch_plan.PlanFragment plan = 1;
-  uint64 epoch = 2;
+  common.BatchQueryEpoch epoch = 2;
 }
 
 // ExchangeSource describes where to read results from children operators

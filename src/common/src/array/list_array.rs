@@ -23,14 +23,13 @@ use itertools::Itertools;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
 use serde::{Deserializer, Serializer};
 
-use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult, RowRef,
-};
+use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult, RowRef};
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::row::Row;
 use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, hash_datum, serialize_datum_into, DataType, Datum, DatumRef, Scalar,
-    ScalarRefImpl, ToDatumRef,
+    hash_datum, memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum,
+    DatumRef, Scalar, ScalarRefImpl, ToDatumRef,
 };
 
 /// This is a naive implementation of list array.
@@ -77,24 +76,28 @@ impl ArrayBuilder for ListArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<ListRef<'_>>) {
+    fn append_n(&mut self, n: usize, value: Option<ListRef<'_>>) {
         match value {
             None => {
-                self.bitmap.append(false);
+                self.bitmap.append_n(n, false);
                 let last = *self.offsets.last().unwrap();
-                self.offsets.push(last);
+                for _ in 0..n {
+                    self.offsets.push(last);
+                }
             }
             Some(v) => {
-                self.bitmap.append(true);
-                let last = *self.offsets.last().unwrap();
-                let values_ref = v.values_ref();
-                self.offsets.push(last + values_ref.len());
-                for f in values_ref {
-                    self.value.append_datum(f);
+                self.bitmap.append_n(n, true);
+                for _ in 0..n {
+                    let last = *self.offsets.last().unwrap();
+                    let values_ref = v.values_ref();
+                    self.offsets.push(last + values_ref.len());
+                    for f in values_ref {
+                        self.value.append_datum(f);
+                    }
                 }
             }
         }
-        self.len += 1;
+        self.len += n;
     }
 
     fn append_array(&mut self, other: &ListArray) {
@@ -135,9 +138,9 @@ impl ListArrayBuilder {
     pub fn append_row_ref(&mut self, row: RowRef<'_>) {
         self.bitmap.append(true);
         let last = *self.offsets.last().unwrap();
-        self.offsets.push(last + row.size());
+        self.offsets.push(last + row.len());
         self.len += 1;
-        for v in row.values() {
+        for v in row.iter() {
             self.value.append_datum(v);
         }
     }
@@ -156,32 +159,15 @@ pub struct ListArray {
 
 impl Array for ListArray {
     type Builder = ListArrayBuilder;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = ListValue;
     type RefItem<'a> = ListRef<'a>;
 
-    fn value_at(&self, idx: usize) -> Option<ListRef<'_>> {
-        if !self.is_null(idx) {
-            Some(ListRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
-    }
-
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<ListRef<'_>> {
-        if !self.is_null_unchecked(idx) {
-            Some(ListRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
+        ListRef::Indexed { arr: self, idx }
     }
 
     fn len(&self) -> usize {
         self.len
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        ArrayIterator::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -334,7 +320,7 @@ impl ListValue {
         &self.values
     }
 
-    pub fn deserialize(
+    pub fn memcmp_deserialize(
         datatype: &DataType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
@@ -360,7 +346,10 @@ impl ListValue {
         let mut inner_deserializer = memcomparable::Deserializer::new(bytes.as_slice());
         let mut values = Vec::new();
         while inner_deserializer.has_remaining() {
-            values.push(deserialize_datum_from(datatype, &mut inner_deserializer)?)
+            values.push(memcmp_deserialize_datum_from(
+                datatype,
+                &mut inner_deserializer,
+            )?)
         }
         Ok(Self::new(values))
     }
@@ -425,14 +414,14 @@ impl<'a> ListRef<'a> {
         }
     }
 
-    pub fn serialize(
+    pub fn memcmp_serialize(
         &self,
         serializer: &mut memcomparable::Serializer<impl BufMut>,
     ) -> memcomparable::Result<()> {
         let mut inner_serializer = memcomparable::Serializer::new(vec![]);
         iter_elems_ref!(self, it, {
             for datum_ref in it {
-                serialize_datum_into(datum_ref, &mut inner_serializer)?
+                memcmp_serialize_datum_into(datum_ref, &mut inner_serializer)?
             }
         });
         serializer.serialize_bytes(&inner_serializer.into_inner())
@@ -856,12 +845,12 @@ mod tests {
         let list_ref = ListRef::ValueRef { val: &value };
         let mut serializer = memcomparable::Serializer::new(vec![]);
         serializer.set_reverse(true);
-        list_ref.serialize(&mut serializer).unwrap();
+        list_ref.memcmp_serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         deserializer.set_reverse(true);
         assert_eq!(
-            ListValue::deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
+            ListValue::memcmp_deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
             value
         );
 
@@ -875,11 +864,11 @@ mod tests {
         let array = builder.finish();
         let list_ref = array.value_at(0).unwrap();
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        list_ref.serialize(&mut serializer).unwrap();
+        list_ref.memcmp_serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         assert_eq!(
-            ListValue::deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
+            ListValue::memcmp_deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
             value
         );
     }
@@ -930,14 +919,14 @@ mod tests {
             let lhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 ListRef::ValueRef { val: &lhs }
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
             let rhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 ListRef::ValueRef { val: &rhs }
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -957,7 +946,7 @@ mod tests {
                 array
                     .value_at(0)
                     .unwrap()
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -966,7 +955,7 @@ mod tests {
                 array
                     .value_at(1)
                     .unwrap()
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };

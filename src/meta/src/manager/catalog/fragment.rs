@@ -28,7 +28,7 @@ use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, State};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    Dispatcher, DispatcherType, FragmentType, StreamActor, StreamNode,
+    Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
 };
 use tokio::sync::{RwLock, RwLockReadGuard};
 
@@ -79,8 +79,8 @@ pub struct ActorInfos {
     /// node_id => actor_ids
     pub actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 
-    /// all reachable source actors
-    pub source_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
+    /// all reachable barrier inject actors
+    pub barrier_inject_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 }
 
 pub struct FragmentVNodeInfo {
@@ -128,6 +128,10 @@ where
         let map = &self.core.read().await.table_fragments;
 
         Ok(map.values().cloned().collect())
+    }
+
+    pub async fn has_any_table_fragments(&self) -> bool {
+        !self.core.read().await.table_fragments.is_empty()
     }
 
     pub async fn batch_update_table_fragments(
@@ -309,7 +313,7 @@ where
                 dependent_table
                     .fragments
                     .values_mut()
-                    .filter(|f| f.fragment_type() == FragmentType::Mview)
+                    .filter(|f| (f.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0)
                     .flat_map(|f| &mut f.actors)
                     .for_each(|a| {
                         a.dispatcher.retain_mut(|d| {
@@ -339,7 +343,7 @@ where
         check_state: impl Fn(ActorState, TableId, ActorId) -> bool,
     ) -> ActorInfos {
         let mut actor_maps = HashMap::new();
-        let mut source_actor_maps = HashMap::new();
+        let mut barrier_inject_actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
@@ -354,11 +358,11 @@ where
                 }
             }
 
-            let source_actors = fragments.worker_source_actor_states();
-            for (worker_id, actor_states) in source_actors {
+            let barrier_inject_actors = fragments.worker_barrier_inject_actor_states();
+            for (worker_id, actor_states) in barrier_inject_actors {
                 for (actor_id, actor_state) in actor_states {
                     if check_state(actor_state, fragments.table_id(), actor_id) {
-                        source_actor_maps
+                        barrier_inject_actor_maps
                             .entry(worker_id)
                             .or_insert_with(Vec::new)
                             .push(actor_id);
@@ -369,7 +373,7 @@ where
 
         ActorInfos {
             actor_maps,
-            source_actor_maps,
+            barrier_inject_actor_maps,
         }
     }
 
@@ -635,7 +639,7 @@ where
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
-                    downstream_fragment_id,
+                    downstream_fragment_ids,
                     actor_splits,
                 } = reschedule;
 
@@ -738,7 +742,7 @@ where
                 }
 
                 // Update the merge executor of the downstream fragment.
-                if let Some(downstream_fragment_id) = downstream_fragment_id {
+                for &downstream_fragment_id in &downstream_fragment_ids {
                     let downstream_fragment = table_fragment
                         .fragments
                         .get_mut(&downstream_fragment_id)

@@ -34,6 +34,7 @@ use serde::ser::SerializeStruct;
 use serde::Serialize;
 use uuid::Uuid;
 
+use super::SchedulerError;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
@@ -190,6 +191,13 @@ impl Query {
             })
             .collect()
     }
+
+    pub fn has_lookup_join_stage(&self) -> bool {
+        self.stage_graph
+            .stages
+            .iter()
+            .any(|(_stage_id, stage_query)| stage_query.has_lookup_join())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -271,6 +279,7 @@ pub struct QueryStage {
     /// Indicates whether this stage contains a table scan node and the table's information if so.
     pub table_scan_info: Option<TableScanInfo>,
     pub source_info: Option<SourceScanInfo>,
+    pub has_lookup_join: bool,
 }
 
 impl QueryStage {
@@ -279,6 +288,12 @@ impl QueryStage {
     /// the executor building process on the batch execution engine.
     pub fn has_table_scan(&self) -> bool {
         self.table_scan_info.is_some()
+    }
+
+    /// If true, this stage contains lookup join executor.
+    /// We need to delay epoch unpin util the end of the query.
+    pub fn has_lookup_join(&self) -> bool {
+        self.has_lookup_join
     }
 }
 
@@ -319,6 +334,7 @@ struct QueryStageBuilder {
     /// See also [`QueryStage::table_scan_info`].
     table_scan_info: Option<TableScanInfo>,
     source_info: Option<SourceScanInfo>,
+    has_lookup_join: bool,
 }
 
 impl QueryStageBuilder {
@@ -329,6 +345,7 @@ impl QueryStageBuilder {
         exchange_info: ExchangeInfo,
         table_scan_info: Option<TableScanInfo>,
         source_info: Option<SourceScanInfo>,
+        has_lookup_join: bool,
     ) -> Self {
         Self {
             query_id,
@@ -339,6 +356,7 @@ impl QueryStageBuilder {
             children_stages: vec![],
             table_scan_info,
             source_info,
+            has_lookup_join,
         }
     }
 
@@ -351,6 +369,7 @@ impl QueryStageBuilder {
             parallelism: self.parallelism,
             table_scan_info: self.table_scan_info,
             source_info: self.source_info,
+            has_lookup_join: self.has_lookup_join,
         });
 
         stage_graph_builder.add_node(stage.clone());
@@ -474,6 +493,7 @@ impl BatchPlanFragmenter {
         } else {
             None
         };
+        let mut has_lookup_join = false;
         let parallelism = match root.distribution() {
             Distribution::Single => {
                 if let Some(info) = &mut table_scan_info {
@@ -492,7 +512,7 @@ impl BatchPlanFragmenter {
                                 .take(1)
                                 .update(|(_, info)| {
                                     info.vnode_bitmap =
-                                        Bitmap::all_high_bits(VirtualNode::COUNT).to_protobuf();
+                                        Bitmap::ones(VirtualNode::COUNT).to_protobuf();
                                 })
                                 .collect();
                         }
@@ -514,6 +534,7 @@ impl BatchPlanFragmenter {
                 } else if let Some(lookup_join_parallelism) =
                     self.collect_stage_lookup_join_parallelism(root.clone())?
                 {
+                    has_lookup_join = true;
                     lookup_join_parallelism
                 } else if let Some(source_info) = &source_info {
                     source_info.split_info().len()
@@ -530,6 +551,7 @@ impl BatchPlanFragmenter {
             exchange_info,
             table_scan_info,
             source_info,
+            has_lookup_join,
         );
 
         self.visit_node(root, &mut builder, None)?;
@@ -600,7 +622,19 @@ impl BatchPlanFragmenter {
                 source_node.logical().source_catalog().properties.clone(),
             )?;
             let mut enumerator = block_on(SplitEnumeratorImpl::create(property))?;
-            let split_info = block_on(enumerator.list_splits())?;
+            let kafka_enumerator = match enumerator {
+                SplitEnumeratorImpl::Kafka(ref mut kafka_enumerator) => kafka_enumerator,
+                _ => {
+                    return Err(SchedulerError::Internal(anyhow!(
+                        "Unsupported to query directly from this source"
+                    )))
+                }
+            };
+            let split_info = block_on(kafka_enumerator.list_splits_batch(None, None))?
+                .into_iter()
+                .map(SplitImpl::Kafka)
+                .collect_vec();
+
             Ok(Some(SourceScanInfo::new(split_info)))
         } else {
             node.inputs()

@@ -1,0 +1,23 @@
+# Run CH-benCHmark queries
+include ./q1.slt.part
+include ./q2.slt.part
+include ./q3.slt.part
+include ./q4.slt.part
+include ./q5.slt.part
+include ./q6.slt.part
+include ./q7.slt.part
+include ./q8.slt.part
+include ./q9.slt.part
+include ./q10.slt.part
+include ./q11.slt.part
+include ./q12.slt.part
+include ./q13.slt.part
+include ./q14.slt.part
+include ./q15.slt.part
+include ./q16.slt.part
+include ./q17.slt.part
+include ./q18.slt.part
+include ./q19.slt.part
+include ./q20.slt.part
+include ./q21.slt.part
+include ./q22.slt.part

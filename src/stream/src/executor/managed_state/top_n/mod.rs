@@ -14,4 +14,8 @@
 
 mod top_n_state;
 
+use risingwave_common::row::{self, Row};
 pub use top_n_state::{ManagedTopNState, TopNStateRow};
+
+pub trait GroupKey = Row + Send + Sync;
+pub(crate) const NO_GROUP_KEY: Option<row::Empty> = None;

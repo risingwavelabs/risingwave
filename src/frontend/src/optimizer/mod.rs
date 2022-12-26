@@ -43,6 +43,7 @@ use self::plan_visitor::{
 };
 use self::property::RequiredDist;
 use self::rule::*;
+use crate::catalog::table_catalog::TableType;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
 use crate::optimizer::plan_visitor::has_batch_source;
@@ -204,6 +205,13 @@ impl PlanRoot {
             .into());
         }
 
+        plan = self.optimize_by_rules(
+            plan,
+            "Union Merge".to_string(),
+            vec![UnionMergeRule::create()],
+            ApplyOrder::BottomUp,
+        );
+
         // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
         plan = plan.predicate_pushdown(Condition::true_cond());
@@ -321,7 +329,7 @@ impl PlanRoot {
                 ProjectEliminateRule::create(),
                 // project-join merge should be applied after merge
                 // and eliminate
-                ProjectJoinRule::create(),
+                ProjectJoinMergeRule::create(),
                 AggProjectMergeRule::create(),
             ],
             ApplyOrder::BottomUp,
@@ -494,6 +502,7 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a create materialize view plan.
+    #[allow(clippy::too_many_arguments)]
     pub fn gen_materialize_plan(
         &mut self,
         mv_name: String,
@@ -502,6 +511,7 @@ impl PlanRoot {
         handle_pk_conflict: bool,
         enable_dml: bool,
         row_id_index: Option<usize>,
+        table_type: TableType,
     ) -> Result<StreamMaterialize> {
         let out_names = if let Some(col_names) = col_names {
             col_names
@@ -538,6 +548,8 @@ impl PlanRoot {
             false,
             definition,
             handle_pk_conflict,
+            row_id_index,
+            table_type,
         )
     }
 
@@ -554,6 +566,8 @@ impl PlanRoot {
             true,
             "".into(),
             false,
+            None,
+            TableType::Index,
         )
     }
 
@@ -576,6 +590,10 @@ impl PlanRoot {
             false,
             definition,
             false,
+            None,
+            // NOTE(Yuanxin): We set the table type as default here because this is irrelevant to
+            // sink's plan generating.
+            TableType::default(),
         )
         .map(|plan| plan.rewrite_into_sink(properties))
     }

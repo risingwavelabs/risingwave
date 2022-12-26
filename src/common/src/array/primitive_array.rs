@@ -20,7 +20,7 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayResult};
+use super::{Array, ArrayBuilder, ArrayResult};
 use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::for_all_native_types;
@@ -132,48 +132,59 @@ pub struct PrimitiveArray<T: PrimitiveArrayItemType> {
     data: Vec<T>,
 }
 
-impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
-    pub fn from_slice(data: &[Option<T>]) -> Self {
-        let mut builder = <Self as Array>::Builder::new(data.len());
-        for i in data {
-            builder.append(*i);
+impl<T: PrimitiveArrayItemType> FromIterator<Option<T>> for PrimitiveArray<T> {
+    fn from_iter<I: IntoIterator<Item = Option<T>>>(iter: I) -> Self {
+        let iter = iter.into_iter();
+        let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
+        for i in iter {
+            builder.append(i);
         }
         builder.finish()
     }
 }
 
+impl<'a, T: PrimitiveArrayItemType> FromIterator<&'a Option<T>> for PrimitiveArray<T> {
+    fn from_iter<I: IntoIterator<Item = &'a Option<T>>>(iter: I) -> Self {
+        iter.into_iter().cloned().collect()
+    }
+}
+
+impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let data: Vec<T> = iter.into_iter().collect();
+        PrimitiveArray {
+            bitmap: Bitmap::ones(data.len()),
+            data,
+        }
+    }
+}
+
+impl<T: PrimitiveArrayItemType> PrimitiveArray<T> {
+    /// Build a [`PrimitiveArray`] from iterator and bitmap.
+    ///
+    /// NOTE: The length of `bitmap` must be equal to the length of `iter`.
+    pub fn from_iter_bitmap(iter: impl IntoIterator<Item = T>, bitmap: Bitmap) -> Self {
+        let data: Vec<T> = iter.into_iter().collect();
+        assert_eq!(data.len(), bitmap.len());
+        PrimitiveArray { bitmap, data }
+    }
+}
+
 impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
     type Builder = PrimitiveArrayBuilder<T>;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = T;
     type RefItem<'a> = T;
 
-    fn value_at(&self, idx: usize) -> Option<T> {
-        if self.is_null(idx) {
-            None
-        } else {
-            Some(self.data[idx])
-        }
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
+        *self.data.get_unchecked(idx)
     }
 
-    /// # Safety
-    ///
-    /// This function is unsafe because it does not check whether the index is within the bounds of
-    /// the array.
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<T> {
-        if self.is_null_unchecked(idx) {
-            None
-        } else {
-            Some(*self.data.get_unchecked(idx))
-        }
+    fn raw_iter(&self) -> impl DoubleEndedIterator<Item = Self::RefItem<'_>> {
+        self.data.iter().cloned()
     }
 
     fn len(&self) -> usize {
         self.data.len()
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        ArrayIterator::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -231,15 +242,15 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         }
     }
 
-    fn append(&mut self, value: Option<T>) {
+    fn append_n(&mut self, n: usize, value: Option<T>) {
         match value {
             Some(x) => {
-                self.bitmap.append(true);
-                self.data.push(x);
+                self.bitmap.append_n(n, true);
+                self.data.extend(std::iter::repeat(x).take(n));
             }
             None => {
-                self.bitmap.append(false);
-                self.data.push(T::default());
+                self.bitmap.append_n(n, false);
+                self.data.extend(std::iter::repeat(T::default()).take(n));
             }
         }
     }

@@ -1,0 +1,40 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation
+
+# name: test/sql/select/test_select_qualified_view.test
+# description: Test selecting a view through a qualified reference
+# group: [select]
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE SCHEMA s;
+
+# (original DDL)
+# statement ok
+# CREATE TABLE s.a as select 'hello' as col1;
+
+statement ok
+CREATE TABLE s.a(col1 VARCHAR);
+
+statement ok
+INSERT INTO s.a VALUES ('hello');
+
+statement ok
+create view s.b as select * from s.a;
+
+statement ok
+select s.b.col1 from s.b;
+
+statement ok
+select b.col1 from s.b;
+
+statement ok
+drop view s.b;
+
+statement ok
+drop table s.a;
+
+statement ok
+drop schema s;

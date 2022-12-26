@@ -133,54 +133,60 @@ export function dispatcherTypeToJSON(object: DispatcherType): string {
   }
 }
 
-export const FragmentType = {
+export const FragmentTypeFlag = {
   FRAGMENT_UNSPECIFIED: "FRAGMENT_UNSPECIFIED",
-  OTHERS: "OTHERS",
   SOURCE: "SOURCE",
   MVIEW: "MVIEW",
   SINK: "SINK",
+  NOW: "NOW",
+  CHAIN_NODE: "CHAIN_NODE",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
-export type FragmentType = typeof FragmentType[keyof typeof FragmentType];
+export type FragmentTypeFlag = typeof FragmentTypeFlag[keyof typeof FragmentTypeFlag];
 
-export function fragmentTypeFromJSON(object: any): FragmentType {
+export function fragmentTypeFlagFromJSON(object: any): FragmentTypeFlag {
   switch (object) {
     case 0:
     case "FRAGMENT_UNSPECIFIED":
-      return FragmentType.FRAGMENT_UNSPECIFIED;
+      return FragmentTypeFlag.FRAGMENT_UNSPECIFIED;
     case 1:
-    case "OTHERS":
-      return FragmentType.OTHERS;
-    case 2:
     case "SOURCE":
-      return FragmentType.SOURCE;
-    case 3:
+      return FragmentTypeFlag.SOURCE;
+    case 2:
     case "MVIEW":
-      return FragmentType.MVIEW;
+      return FragmentTypeFlag.MVIEW;
     case 4:
     case "SINK":
-      return FragmentType.SINK;
+      return FragmentTypeFlag.SINK;
+    case 8:
+    case "NOW":
+      return FragmentTypeFlag.NOW;
+    case 16:
+    case "CHAIN_NODE":
+      return FragmentTypeFlag.CHAIN_NODE;
     case -1:
     case "UNRECOGNIZED":
     default:
-      return FragmentType.UNRECOGNIZED;
+      return FragmentTypeFlag.UNRECOGNIZED;
   }
 }
 
-export function fragmentTypeToJSON(object: FragmentType): string {
+export function fragmentTypeFlagToJSON(object: FragmentTypeFlag): string {
   switch (object) {
-    case FragmentType.FRAGMENT_UNSPECIFIED:
+    case FragmentTypeFlag.FRAGMENT_UNSPECIFIED:
       return "FRAGMENT_UNSPECIFIED";
-    case FragmentType.OTHERS:
-      return "OTHERS";
-    case FragmentType.SOURCE:
+    case FragmentTypeFlag.SOURCE:
       return "SOURCE";
-    case FragmentType.MVIEW:
+    case FragmentTypeFlag.MVIEW:
       return "MVIEW";
-    case FragmentType.SINK:
+    case FragmentTypeFlag.SINK:
       return "SINK";
-    case FragmentType.UNRECOGNIZED:
+    case FragmentTypeFlag.NOW:
+      return "NOW";
+    case FragmentTypeFlag.CHAIN_NODE:
+      return "CHAIN_NODE";
+    case FragmentTypeFlag.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
   }
@@ -339,8 +345,9 @@ export interface SourceNode_PropertiesEntry {
 
 export interface SinkNode {
   tableId: number;
-  columnIds: number[];
   properties: { [key: string]: string };
+  fields: Field[];
+  sinkPk: number[];
 }
 
 export interface SinkNode_PropertiesEntry {
@@ -437,7 +444,7 @@ export interface TopNNode {
   limit: number;
   offset: number;
   table: Table | undefined;
-  orderByLen: number;
+  orderBy: ColumnOrder[];
   withTies: boolean;
 }
 
@@ -447,7 +454,7 @@ export interface GroupTopNNode {
   offset: number;
   groupKey: number[];
   table: Table | undefined;
-  orderByLen: number;
+  orderBy: ColumnOrder[];
   withTies: boolean;
 }
 
@@ -778,7 +785,9 @@ export interface Dispatcher {
     | undefined;
   /**
    * Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-   * - For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+   * - For dispatchers within actors, the id is the same as its downstream fragment id.
+   *   We can't use the exchange operator id directly as the dispatch id, because an exchange
+   *   could belong to more than one downstream in DAG.
    * - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
    */
   dispatcherId: number;
@@ -825,8 +834,11 @@ export interface StreamFragmentGraph_StreamFragment {
   /** 0-based on frontend, and will be rewritten to global id on meta. */
   fragmentId: number;
   /** root stream node in this fragment. */
-  node: StreamNode | undefined;
-  fragmentType: FragmentType;
+  node:
+    | StreamNode
+    | undefined;
+  /** Bitwise-OR of FragmentTypeFlags */
+  fragmentTypeMask: number;
   /** mark whether this fragment should only have one actor. */
   isSingleton: boolean;
   /** Number of table ids (stateful states) for this fragment. */
@@ -1738,36 +1750,46 @@ export const SourceNode_PropertiesEntry = {
 };
 
 function createBaseSinkNode(): SinkNode {
-  return { tableId: 0, columnIds: [], properties: {} };
+  return { tableId: 0, properties: {}, fields: [], sinkPk: [] };
 }
 
 export const SinkNode = {
   fromJSON(object: any): SinkNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
-      columnIds: Array.isArray(object?.columnIds) ? object.columnIds.map((e: any) => Number(e)) : [],
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
           return acc;
         }, {})
         : {},
+      fields: Array.isArray(object?.fields)
+        ? object.fields.map((e: any) => Field.fromJSON(e))
+        : [],
+      sinkPk: Array.isArray(object?.sinkPk)
+        ? object.sinkPk.map((e: any) => Number(e))
+        : [],
     };
   },
 
   toJSON(message: SinkNode): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
-    if (message.columnIds) {
-      obj.columnIds = message.columnIds.map((e) => Math.round(e));
-    } else {
-      obj.columnIds = [];
-    }
     obj.properties = {};
     if (message.properties) {
       Object.entries(message.properties).forEach(([k, v]) => {
         obj.properties[k] = v;
       });
+    }
+    if (message.fields) {
+      obj.fields = message.fields.map((e) => e ? Field.toJSON(e) : undefined);
+    } else {
+      obj.fields = [];
+    }
+    if (message.sinkPk) {
+      obj.sinkPk = message.sinkPk.map((e) => Math.round(e));
+    } else {
+      obj.sinkPk = [];
     }
     return obj;
   },
@@ -1775,7 +1797,6 @@ export const SinkNode = {
   fromPartial<I extends Exact<DeepPartial<SinkNode>, I>>(object: I): SinkNode {
     const message = createBaseSinkNode();
     message.tableId = object.tableId ?? 0;
-    message.columnIds = object.columnIds?.map((e) => e) || [];
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
         if (value !== undefined) {
@@ -1785,6 +1806,8 @@ export const SinkNode = {
       },
       {},
     );
+    message.fields = object.fields?.map((e) => Field.fromPartial(e)) || [];
+    message.sinkPk = object.sinkPk?.map((e) => e) || [];
     return message;
   },
 };
@@ -2169,7 +2192,7 @@ export const HashAggNode = {
 };
 
 function createBaseTopNNode(): TopNNode {
-  return { limit: 0, offset: 0, table: undefined, orderByLen: 0, withTies: false };
+  return { limit: 0, offset: 0, table: undefined, orderBy: [], withTies: false };
 }
 
 export const TopNNode = {
@@ -2178,7 +2201,7 @@ export const TopNNode = {
       limit: isSet(object.limit) ? Number(object.limit) : 0,
       offset: isSet(object.offset) ? Number(object.offset) : 0,
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      orderByLen: isSet(object.orderByLen) ? Number(object.orderByLen) : 0,
+      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       withTies: isSet(object.withTies) ? Boolean(object.withTies) : false,
     };
   },
@@ -2188,7 +2211,11 @@ export const TopNNode = {
     message.limit !== undefined && (obj.limit = Math.round(message.limit));
     message.offset !== undefined && (obj.offset = Math.round(message.offset));
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.orderByLen !== undefined && (obj.orderByLen = Math.round(message.orderByLen));
+    if (message.orderBy) {
+      obj.orderBy = message.orderBy.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    } else {
+      obj.orderBy = [];
+    }
     message.withTies !== undefined && (obj.withTies = message.withTies);
     return obj;
   },
@@ -2198,14 +2225,14 @@ export const TopNNode = {
     message.limit = object.limit ?? 0;
     message.offset = object.offset ?? 0;
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.orderByLen = object.orderByLen ?? 0;
+    message.orderBy = object.orderBy?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.withTies = object.withTies ?? false;
     return message;
   },
 };
 
 function createBaseGroupTopNNode(): GroupTopNNode {
-  return { limit: 0, offset: 0, groupKey: [], table: undefined, orderByLen: 0, withTies: false };
+  return { limit: 0, offset: 0, groupKey: [], table: undefined, orderBy: [], withTies: false };
 }
 
 export const GroupTopNNode = {
@@ -2215,7 +2242,7 @@ export const GroupTopNNode = {
       offset: isSet(object.offset) ? Number(object.offset) : 0,
       groupKey: Array.isArray(object?.groupKey) ? object.groupKey.map((e: any) => Number(e)) : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      orderByLen: isSet(object.orderByLen) ? Number(object.orderByLen) : 0,
+      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       withTies: isSet(object.withTies) ? Boolean(object.withTies) : false,
     };
   },
@@ -2230,7 +2257,11 @@ export const GroupTopNNode = {
       obj.groupKey = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.orderByLen !== undefined && (obj.orderByLen = Math.round(message.orderByLen));
+    if (message.orderBy) {
+      obj.orderBy = message.orderBy.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    } else {
+      obj.orderBy = [];
+    }
     message.withTies !== undefined && (obj.withTies = message.withTies);
     return obj;
   },
@@ -2241,7 +2272,7 @@ export const GroupTopNNode = {
     message.offset = object.offset ?? 0;
     message.groupKey = object.groupKey?.map((e) => e) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.orderByLen = object.orderByLen ?? 0;
+    message.orderBy = object.orderBy?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.withTies = object.withTies ?? false;
     return message;
   },
@@ -3725,7 +3756,7 @@ function createBaseStreamFragmentGraph_StreamFragment(): StreamFragmentGraph_Str
   return {
     fragmentId: 0,
     node: undefined,
-    fragmentType: FragmentType.FRAGMENT_UNSPECIFIED,
+    fragmentTypeMask: 0,
     isSingleton: false,
     tableIdsCnt: 0,
     upstreamTableIds: [],
@@ -3737,9 +3768,7 @@ export const StreamFragmentGraph_StreamFragment = {
     return {
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
       node: isSet(object.node) ? StreamNode.fromJSON(object.node) : undefined,
-      fragmentType: isSet(object.fragmentType)
-        ? fragmentTypeFromJSON(object.fragmentType)
-        : FragmentType.FRAGMENT_UNSPECIFIED,
+      fragmentTypeMask: isSet(object.fragmentTypeMask) ? Number(object.fragmentTypeMask) : 0,
       isSingleton: isSet(object.isSingleton) ? Boolean(object.isSingleton) : false,
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
       upstreamTableIds: Array.isArray(object?.upstreamTableIds)
@@ -3752,7 +3781,7 @@ export const StreamFragmentGraph_StreamFragment = {
     const obj: any = {};
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
     message.node !== undefined && (obj.node = message.node ? StreamNode.toJSON(message.node) : undefined);
-    message.fragmentType !== undefined && (obj.fragmentType = fragmentTypeToJSON(message.fragmentType));
+    message.fragmentTypeMask !== undefined && (obj.fragmentTypeMask = Math.round(message.fragmentTypeMask));
     message.isSingleton !== undefined && (obj.isSingleton = message.isSingleton);
     message.tableIdsCnt !== undefined && (obj.tableIdsCnt = Math.round(message.tableIdsCnt));
     if (message.upstreamTableIds) {
@@ -3771,7 +3800,7 @@ export const StreamFragmentGraph_StreamFragment = {
     message.node = (object.node !== undefined && object.node !== null)
       ? StreamNode.fromPartial(object.node)
       : undefined;
-    message.fragmentType = object.fragmentType ?? FragmentType.FRAGMENT_UNSPECIFIED;
+    message.fragmentTypeMask = object.fragmentTypeMask ?? 0;
     message.isSingleton = object.isSingleton ?? false;
     message.tableIdsCnt = object.tableIdsCnt ?? 0;
     message.upstreamTableIds = object.upstreamTableIds?.map((e) => e) || [];

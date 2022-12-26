@@ -12,11 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![expect(clippy::iter_kv_map, reason = "FIXME: fix later")]
-#![expect(
-    clippy::or_fun_call,
-    reason = "https://github.com/rust-lang/rust-clippy/issues/8574"
-)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
@@ -34,10 +29,11 @@
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
+#![feature(assert_matches)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 
-mod backup_restore;
+pub mod backup_restore;
 mod barrier;
 #[cfg(not(madsim))] // no need in simulation test
 mod dashboard;
@@ -58,7 +54,7 @@ use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
 #[derive(Copy, Clone, Debug, ArgEnum)]
-enum Backend {
+pub enum Backend {
     Mem,
     Etcd,
 }
@@ -105,7 +101,7 @@ pub struct MetaNodeOpts {
     #[clap(long)]
     prometheus_endpoint: Option<String>,
 
-    /// Te path of `risingwave.toml` configuration file.
+    /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
     ///
@@ -191,6 +187,5 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         .await
         .unwrap();
         join_handle.await.unwrap();
-        tracing::info!("Meta server is stopped");
     })
 }

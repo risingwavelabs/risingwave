@@ -23,9 +23,10 @@ use futures::{pin_mut, stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{AllVirtualNodeIter, VirtualNode};
-use risingwave_common::row::{CompactedRow, Row, Row2};
+use risingwave_common::row::{self, CompactedRow, Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_storage::row_serde::row_serde_util::serialize_pk;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{prefix_range_to_memcomparable, StateTable};
@@ -73,11 +74,11 @@ impl<S: StateStore> RangeCache<S> {
 
     /// Insert a row and corresponding scalar value key into cache (if within range) and
     /// `StateTable`.
-    pub fn insert(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
+    pub fn insert(&mut self, k: &ScalarImpl, v: impl Row) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
             let vnode_entry = self.cache.entry(vnode).or_insert_with(BTreeMap::new);
-            let pk = v.extract_memcomparable_by_indices(self.state_table.pk_serde(), self.state_table.pk_indices());
+            let pk = (&v).project(self.state_table.pk_indices()).memcmp_serialize(self.state_table.pk_serde());
             vnode_entry.insert(pk, (&v).into());
         }
         self.state_table.insert(v);
@@ -87,10 +88,10 @@ impl<S: StateStore> RangeCache<S> {
     /// Delete a row and corresponding scalar value key from cache (if within range) and
     /// `StateTable`.
     // FIXME: panic instead of returning Err
-    pub fn delete(&mut self, k: &ScalarImpl, v: Row) -> StreamExecutorResult<()> {
+    pub fn delete(&mut self, k: &ScalarImpl, v: impl Row) -> StreamExecutorResult<()> {
         if let Some(r) = &self.range && r.contains(k) {
             let vnode = self.state_table.compute_vnode(&v);
-            let pk = v.extract_memcomparable_by_indices(self.state_table.pk_serde(), self.state_table.pk_indices());
+            let pk = (&v).project(self.state_table.pk_indices()).memcmp_serialize(self.state_table.pk_serde());
 
             self.cache.get_mut(&vnode)
                 .ok_or_else(|| StreamExecutorError::from(anyhow!("Deleting non-existent element")))?
@@ -101,12 +102,8 @@ impl<S: StateStore> RangeCache<S> {
         Ok(())
     }
 
-    fn to_row_bound(bound: Bound<ScalarImpl>) -> Bound<Row> {
-        match bound {
-            Unbounded => Unbounded,
-            Included(s) => Included(Row::new(vec![Some(s)])),
-            Excluded(s) => Excluded(Row::new(vec![Some(s)])),
-        }
+    fn to_row_bound(bound: Bound<ScalarImpl>) -> Bound<impl Row> {
+        bound.map(|s| row::once(Some(s)))
     }
 
     /// Return an iterator over sets of rows that satisfy the given range. Evicts entries if
@@ -156,7 +153,7 @@ impl<S: StateStore> RangeCache<S> {
         for pk_range in missing_ranges {
             let init_maps = self
                 .vnodes
-                .ones()
+                .iter_ones()
                 .map(|vnode| {
                     self.cache
                         .get_mut(&VirtualNode::from_index(vnode))
@@ -166,7 +163,7 @@ impl<S: StateStore> RangeCache<S> {
                 .collect_vec();
             let futures =
                 self.vnodes
-                    .ones()
+                    .iter_ones()
                     .zip_eq(init_maps.into_iter())
                     .map(|(vnode, init_map)| {
                         self.fetch_vnode_range(VirtualNode::from_index(vnode), &pk_range, init_map)
@@ -191,7 +188,7 @@ impl<S: StateStore> RangeCache<S> {
     async fn fetch_vnode_range(
         &self,
         vnode: VirtualNode,
-        pk_range: &(Bound<impl Row2>, Bound<impl Row2>),
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
         initial_map: BTreeMap<Vec<u8>, CompactedRow>,
     ) -> StreamExecutorResult<(VirtualNode, BTreeMap<Vec<u8>, CompactedRow>)> {
         let row_stream = self
@@ -234,7 +231,7 @@ impl<S: StateStore> RangeCache<S> {
             );
             let newly_owned_vnodes = Bitmap::bit_saturate_subtract(&new_vnodes, &old_vnodes);
 
-            let futures = newly_owned_vnodes.ones().map(|vnode| {
+            let futures = newly_owned_vnodes.iter_ones().map(|vnode| {
                 self.fetch_vnode_range(
                     VirtualNode::from_index(vnode),
                     &current_range,
@@ -249,6 +246,37 @@ impl<S: StateStore> RangeCache<S> {
         }
         self.vnodes = new_vnodes;
         Ok(old_vnodes)
+    }
+
+    pub fn shrink(&mut self, watermark: ScalarImpl) {
+        if let Some((range_lower, range_upper)) = self.range.as_mut() {
+            let delete_old = match range_upper.as_ref() {
+                Bound::Excluded(x) => *x <= watermark,
+                Bound::Included(x) => *x < watermark,
+                Bound::Unbounded => false,
+            };
+            if delete_old {
+                self.cache = HashMap::new();
+                self.range = None;
+            } else {
+                let need_cut = match range_lower.as_ref() {
+                    Bound::Excluded(x) | Bound::Included(x) => *x < watermark,
+                    Bound::Unbounded => true,
+                };
+                if need_cut {
+                    let watermark_pk = serialize_pk(
+                        [Some(watermark.as_scalar_ref_impl())],
+                        self.state_table.pk_serde().prefix(1).as_ref(),
+                    );
+                    for cache in self.cache.values_mut() {
+                        *cache = cache.split_off(&watermark_pk);
+                    }
+                    *range_lower = Bound::Included(watermark.clone());
+                }
+            }
+        }
+
+        self.state_table.update_watermark(watermark);
     }
 
     /// Flush writes to the `StateTable` from the in-memory buffer.
@@ -429,9 +457,88 @@ fn range_contains_lower_upper(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::table::Distribution;
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_shrink() {
+        let fallback = Distribution::fallback();
+        let mem_state = MemoryStateStore::new();
+        let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
+        let state_table = StateTable::new_without_distribution(
+            mem_state.clone(),
+            TableId::new(0),
+            vec![column_descs.clone()],
+            vec![OrderType::Ascending],
+            vec![0],
+        )
+        .await;
+        let mut range_cache = RangeCache::new(state_table, usize::MAX, fallback.vnodes);
+        range_cache.init(EpochPair::new_test_epoch(1));
+        range_cache
+            .range(
+                (Bound::Unbounded, Bound::Excluded(ScalarImpl::Int64(7))),
+                false,
+            )
+            .await
+            .unwrap();
+        range_cache.shrink(ScalarImpl::Int64(7));
+        assert_eq!(range_cache.range, None);
+        range_cache
+            .range(
+                (Bound::Unbounded, Bound::Included(ScalarImpl::Int64(7))),
+                false,
+            )
+            .await
+            .unwrap();
+        range_cache.shrink(ScalarImpl::Int64(5));
+        assert_eq!(
+            range_cache.range,
+            Some((
+                Bound::Included(ScalarImpl::Int64(5)),
+                Bound::Included(ScalarImpl::Int64(7))
+            ))
+        );
+        range_cache.shrink(ScalarImpl::Int64(7));
+        assert_eq!(
+            range_cache.range,
+            Some((
+                Bound::Included(ScalarImpl::Int64(7)),
+                Bound::Included(ScalarImpl::Int64(7))
+            ))
+        );
+        range_cache.shrink(ScalarImpl::Int64(8));
+        assert_eq!(range_cache.range, None);
+        range_cache
+            .range((Bound::Unbounded, Bound::Unbounded), false)
+            .await
+            .unwrap();
+        assert_eq!(
+            range_cache.range,
+            Some((Bound::Unbounded, Bound::Unbounded))
+        );
+        range_cache.shrink(ScalarImpl::Int64(5));
+        assert_eq!(
+            range_cache.range,
+            Some((Bound::Included(ScalarImpl::Int64(5)), Bound::Unbounded))
+        );
+        range_cache.shrink(ScalarImpl::Int64(4));
+        assert_eq!(
+            range_cache.range,
+            Some((Bound::Included(ScalarImpl::Int64(5)), Bound::Unbounded))
+        );
+        range_cache.shrink(ScalarImpl::Int64(6));
+        assert_eq!(
+            range_cache.range,
+            Some((Bound::Included(ScalarImpl::Int64(6)), Bound::Unbounded))
+        );
+    }
 
     #[test]
     fn test_get_missing_range() {
@@ -569,7 +676,7 @@ mod tests {
             })
             .collect::<HashMap<_, _>>();
         let range = (Unbounded, Unbounded);
-        let vnodes = Bitmap::all_high_bits(VirtualNode::COUNT).into(); // set all the bits
+        let vnodes = Bitmap::ones(VirtualNode::COUNT).into(); // set all the bits
         let mut iter = UnorderedRangeCacheIter::new(&cache, range, vnodes);
         for i in VirtualNode::all() {
             assert_eq!(

@@ -100,10 +100,6 @@ where
         user_key_range.start_bound().map(UserKey::encode),
         user_key_range.end_bound().map(UserKey::encode),
     );
-    #[cfg(any(test, feature = "test"))]
-    if table_id.table_id() == 0 {
-        return range_overlap(&encoded_user_key_range, table_start, table_end);
-    }
     range_overlap(&encoded_user_key_range, table_start, table_end)
         && info
             .get_table_ids()

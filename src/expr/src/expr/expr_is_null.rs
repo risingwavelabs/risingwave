@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::{ArrayImpl, ArrayRef, BoolArray, DataChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar};
 
 use crate::expr::{BoxedExpression, Expression};
@@ -25,49 +25,38 @@ use crate::Result;
 #[derive(Debug)]
 pub struct IsNullExpression {
     child: BoxedExpression,
-    return_type: DataType,
 }
 
 #[derive(Debug)]
 pub struct IsNotNullExpression {
     child: BoxedExpression,
-    return_type: DataType,
 }
 
 impl IsNullExpression {
     pub(crate) fn new(child: BoxedExpression) -> Self {
-        Self {
-            child,
-            return_type: DataType::Boolean,
-        }
+        Self { child }
     }
 }
 
 impl IsNotNullExpression {
     pub(crate) fn new(child: BoxedExpression) -> Self {
-        Self {
-            child,
-            return_type: DataType::Boolean,
-        }
+        Self { child }
     }
 }
 
 impl Expression for IsNullExpression {
     fn return_type(&self) -> DataType {
-        self.return_type.clone()
+        DataType::Boolean
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let child_arr = self.child.eval_checked(input)?;
-        let arr = BoolArray::new(
-            Bitmap::all_high_bits(input.capacity()),
-            !child_arr.null_bitmap(),
-        );
+        let arr = BoolArray::new(!child_arr.null_bitmap(), Bitmap::ones(input.capacity()));
 
         Ok(Arc::new(ArrayImpl::Bool(arr)))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let result = self.child.eval_row(input)?;
         let is_null = result.is_none();
         Ok(Some(is_null.to_scalar_value()))
@@ -76,7 +65,7 @@ impl Expression for IsNullExpression {
 
 impl Expression for IsNotNullExpression {
     fn return_type(&self) -> DataType {
-        self.return_type.clone()
+        DataType::Boolean
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
@@ -85,12 +74,12 @@ impl Expression for IsNotNullExpression {
             Ok(child_arr) => child_arr.into_null_bitmap(),
             Err(child_arr) => child_arr.null_bitmap().clone(),
         };
-        let arr = BoolArray::new(Bitmap::all_high_bits(input.capacity()), null_bitmap);
+        let arr = BoolArray::new(null_bitmap, Bitmap::ones(input.capacity()));
 
         Ok(Arc::new(ArrayImpl::Bool(arr)))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let result = self.child.eval_row(input)?;
         let is_not_null = result.is_some();
         Ok(Some(is_not_null.to_scalar_value()))
@@ -102,7 +91,7 @@ mod tests {
     use std::str::FromStr;
 
     use risingwave_common::array::{ArrayBuilder, DataChunk, DecimalArrayBuilder};
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, Decimal};
 
     use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
@@ -133,8 +122,8 @@ mod tests {
         }
 
         let rows = vec![
-            Row::new(vec![Some(1.into()), Some(2.into())]),
-            Row::new(vec![None, Some(2.into())]),
+            OwnedRow::new(vec![Some(1.into()), Some(2.into())]),
+            OwnedRow::new(vec![None, Some(2.into())]),
         ];
 
         for (i, row) in rows.iter().enumerate() {

@@ -1,0 +1,255 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation
+
+# name: test/sql/select/test_multi_column_reference.test
+# description: Test multi column reference
+# group: [select]
+
+# **(NOTE): the description might be wrong.** it is copied from duckdb.
+# Duckdb has different syntax and grammer with postgresql, so some adaption has been applied on the cases.
+
+# column names can have an arbitrary amount of dots
+# here is how the resolution works:
+# no dots (i.e. "part1")
+# -> part1 refers to a column
+# one dot (i.e. "part1.part2")
+# EITHER:
+# -> part1 is a table, part2 is a column
+# -> part1 is a column, part2 is a property of that column (i.e. struct_extract)
+# two or more dots (i.e. "part1.part2.part3.part4...")
+# -> part1 is a schema, part2 is a table, part3 is a column name, part4 and beyond are struct fields
+# -> part1 is a table, part2 is a column name, part3 and beyond are struct fields
+# -> part1 is a column, part2 and beyond are struct fields
+
+# we always prefer the most top-level view
+# i.e. in case of multiple resolution options, we resolve in order:
+# -> 1. resolve "part1" as a schema
+# -> 2. resolve "part1" as a table
+# -> 3. resolve "part1" as a column
+
+# schema -> table -> column reference
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE SCHEMA s
+
+statement ok
+CREATE TABLE s.tbl(col INTEGER);
+
+statement ok
+INSERT INTO s.tbl VALUES (1), (2), (3);
+
+query I rowsort
+SELECT s.tbl.col FROM s.tbl;
+----
+1
+2
+3
+
+# (TODO)schema name with alias does not work
+# https://github.com/risingwavelabs/risingwave/issues/6744
+# statement error
+# SELECT s.t.col FROM s.tbl t;
+
+statement error
+SELECT s.tbl.col FROM s.tbl t;
+
+statement ok
+DROP TABLE s.tbl
+
+statement ok
+DROP SCHEMA s
+
+# check how ties are resolved
+# we create a table called "t" in a schema called "t" with a column called "t" that has a field called "t"
+statement ok
+CREATE SCHEMA t
+
+#(syntax) CREATE TABLE t.t(t ROW(t INTEGER));
+statement ok
+CREATE TABLE t.t(t STRUCT<t INTEGER>);
+
+#(syntax) INSERT INTO t.t VALUES ({'t': 42});
+statement ok
+INSERT INTO t.t VALUES (ROW(42));
+
+#(original result): {'t': 42}
+# "t" selects the column
+query I
+SELECT t FROM t.t;
+----
+(42)
+
+#(original result): {'t': 42}
+# "t.t" also selects the column
+query I
+SELECT t.t FROM t.t;
+----
+(42)
+
+#(original result): {'t': 42}
+# t.t.t also selects the column
+query I
+SELECT t.t.t FROM t.t;
+----
+(42)
+
+# t.t.t.t selects the field
+# (original query)SELECT t.t.t.t FROM t.t;
+# (syntax)the behavior is different with PG https://www.postgresql.org/docs/current/rowtypes.html#ROWTYPES-ACCESSING.
+
+query I
+SELECT (t.t.t).t FROM t.t;
+----
+42
+
+# (original DDL)
+# TODO: drop schema cascade https://github.com/risingwavelabs/risingwave/issues/6773
+# statement ok
+# DROP SCHEMA t CASCADE;
+
+statement ok
+DROP TABLE t.t;
+
+statement ok
+DROP SCHEMA t;
+
+# test long nested struct
+statement ok
+CREATE SCHEMA t
+
+statement ok
+CREATE TABLE t.t(t STRUCT<t STRUCT<t STRUCT<t INTEGER>>>);
+
+statement ok
+INSERT INTO t.t VALUES (ROW(ROW(ROW(42))));
+
+query I
+SELECT (t.t.t).t FROM t.t;
+----
+((42))
+
+query I
+SELECT (t.t.t).t.t FROM t.t;
+----
+(42)
+
+query I
+SELECT (t.t.t).t.t.t FROM t.t;
+----
+42
+
+statement ok
+DROP TABLE t.t;
+
+statement ok
+DROP SCHEMA t;
+
+# (original test's syntax is different) https://www.postgresql.org/docs/current/rowtypes.html#ROWTYPES-ACCESSING.
+# **ORIGINAL TEST BEGIN**
+# statement ok
+# CREATE SCHEMA t
+
+# statement ok
+# CREATE TABLE t.t AS SELECT {'t': {'t': {'t': {'t': {'t': 42}}}}} t
+
+# query I
+# SELECT t.t.t.t.t.t.t.t FROM t.t;
+# ----
+# 42
+
+# query I
+# SELECT t.t.t.t.t.t.t FROM t.t;
+# ----
+# {'t': 42}
+
+# query I
+# SELECT t.t.t.t.t.t FROM t.t;
+# ----
+# {'t': {'t': 42}}
+
+# query I
+# SELECT t.t.t.t.t FROM t.t;
+# ----
+# {'t': {'t': {'t': 42}}}
+
+# query I
+# SELECT t.t.t.t FROM t.t;
+# ----
+# {'t': {'t': {'t': {'t': 42}}}}
+
+# query I
+# SELECT t.t.t FROM t.t;
+# ----
+# {'t': {'t': {'t': {'t': {'t': 42}}}}}
+
+# query I
+# SELECT t.t FROM t.t;
+# ----
+# {'t': {'t': {'t': {'t': {'t': 42}}}}}
+
+# query I
+# SELECT t FROM t.t;
+# ----
+# {'t': {'t': {'t': {'t': {'t': 42}}}}}
+
+# statement ok
+# DROP SCHEMA t CASCADE
+# **ORIGINAL TEST END**
+
+# test multiple tables with the same name but a different schema
+# we don't allow this (duplicate alias in query)
+statement ok
+CREATE SCHEMA s1
+
+statement ok
+CREATE SCHEMA s2
+
+# (original DDL)
+# statement ok
+# CREATE TABLE s1.t1 AS SELECT 42 t
+
+statement ok
+CREATE TABLE s1.t1(t INT);
+
+statement ok
+INSERT INTO s1.t1 VALUES (42);
+
+# (original DDL)
+# statement ok
+# CREATE TABLE s2.t1 AS SELECT 84 t
+
+statement ok
+CREATE TABLE s2.t1(t INT);
+
+statement ok
+INSERT INTO s2.t1 VALUES (42);
+
+statement error
+SELECT s1.t1.t FROM s1.t1, s2.t1
+
+# test various failures
+
+# TODO: https://github.com/risingwavelabs/risingwave/issues/6774
+# statement error
+# SELECT testX.tbl.col FROM test.tbl;
+
+statement error
+SELECT test.tblX.col FROM test.tbl;
+
+statement error
+SELECT test.tbl.colX FROM test.tbl;
+
+statement ok
+DROP TABLE s1.t1;
+
+statement ok
+DROP TABLE s2.t1;
+
+statement ok
+DROP SCHEMA s1
+
+statement ok
+DROP SCHEMA s2

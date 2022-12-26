@@ -1,3 +1,18 @@
+shared:
+  - commit_message_template: &commit_message_template |
+      {{title}} (#{{number}})
+      
+      {{body | get_section("## What's changed and what's your intention?")}}
+      {% for user in approved_reviews_by %}
+      Approved-By: {{user}}
+      {%- endfor %}
+      {%- set commit_authors = commits | rejectattr("author", "eq", "mergify[bot]") | unique(false, "email_author")| list -%}
+      {% if commit_authors | length > 1 %}
+      {% for commit in commit_authors %}
+      Co-Authored-By: {{ commit.author }} <{{ commit.email_author }}>
+      {%- endfor %}
+      {%- endif %}
+
 queue_rules:
   - name: default
     conditions:
@@ -22,6 +37,7 @@ pull_request_rules:
         name: default
         method: squash
         priority: high
+        commit_message_template: *commit_message_template
 
   - name: Automatic merge on approval
     conditions:
@@ -37,6 +53,7 @@ pull_request_rules:
         name: default
         method: squash
         priority: medium
+        commit_message_template: *commit_message_template
 
   - name: Notify author on queue failure
     conditions:

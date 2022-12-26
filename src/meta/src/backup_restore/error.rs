@@ -12,46 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::BoxedError;
-use thiserror::Error;
+use risingwave_backup::error::BackupError;
 
 use crate::model::MetadataModelError;
 use crate::storage::MetaStoreError;
 use crate::MetaError;
-
-pub type BackupResult<T> = Result<T, BackupError>;
-
-#[derive(Error, Debug)]
-pub enum BackupError {
-    #[error("BackupStorage error: {0}")]
-    BackupStorage(
-        #[backtrace]
-        #[source]
-        BoxedError,
-    ),
-    #[error("MetaStorage error: {0}")]
-    MetaStorage(
-        #[backtrace]
-        #[source]
-        BoxedError,
-    ),
-    #[error("Encoding error: {0}")]
-    Encoding(
-        #[backtrace]
-        #[source]
-        BoxedError,
-    ),
-    #[error("Decoding error: {0}")]
-    Decoding(
-        #[backtrace]
-        #[source]
-        BoxedError,
-    ),
-    #[error("Checksum mismatch: expected {expected}, found: {found}.")]
-    ChecksumMismatch { expected: u64, found: u64 },
-    #[error(transparent)]
-    Other(#[from] anyhow::Error),
-}
 
 impl From<BackupError> for MetaError {
     fn from(e: BackupError) -> Self {

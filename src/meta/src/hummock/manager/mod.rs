@@ -52,7 +52,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{Notify, RwLockReadGuard, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
-use crate::hummock::compaction::{CompactStatus, ManualCompactionOption};
+use crate::hummock::compaction::{CompactStatus, LocalSelectorStatistic, ManualCompactionOption};
 use crate::hummock::compaction_group::CompactionGroup;
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
@@ -503,6 +503,7 @@ where
                 return Err(Error::InvalidContext(context_id));
             }
         }
+
         trx.check_equal(
             META_CF_NAME.to_owned(),
             META_LEADER_KEY.as_bytes().to_vec(),
@@ -788,13 +789,16 @@ where
             return Ok(None);
         }
         let can_trivial_move = manual_compaction_option.is_none();
+        let mut stats = LocalSelectorStatistic::default();
         let compact_task = compact_status.get_compact_task(
             current_version.get_compaction_group_levels(compaction_group_id),
             task_id as HummockCompactionTaskId,
             compaction_group_id,
             manual_compaction_option,
             group_config.compaction_config(),
+            &mut stats,
         );
+        stats.report_to_metrics(compaction_group_id, self.metrics.as_ref());
         let mut compact_task = match compact_task {
             None => {
                 return Ok(None);
@@ -1064,7 +1068,6 @@ where
                 compact_statuses.remove(group_id);
             }
         }
-
         let assigned_task_num = compaction.compact_task_assignment.len();
         let mut compact_task_assignment =
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
@@ -1154,7 +1157,6 @@ where
                     version_stats
                 )?;
                 branched_ssts.commit_memory();
-
                 current_version.apply_version_delta(&version_delta);
 
                 trigger_version_stat(&self.metrics, current_version, &versioning.version_stats);
@@ -1491,7 +1493,6 @@ where
         if versioning_guard.disable_commit_epochs {
             return Ok(());
         }
-
         let (raw_compaction_groups, compaction_group_index) =
             self.compaction_groups_and_index().await;
         let compaction_groups: HashMap<_, _> = raw_compaction_groups
@@ -1994,10 +1995,10 @@ where
     pub fn init_compaction_scheduler(
         &self,
         sched_channel: CompactionRequestChannelRef,
-        notifier: Arc<Notify>,
+        notifier: Option<Arc<Notify>>,
     ) {
         *self.compaction_request_channel.write() = Some(sched_channel);
-        *self.compaction_resume_notifier.write() = Some(notifier);
+        *self.compaction_resume_notifier.write() = notifier;
     }
 
     /// Cancels pending compaction tasks which are not yet assigned to any compactor.

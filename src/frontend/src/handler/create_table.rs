@@ -33,6 +33,7 @@ use super::create_source::make_prost_source;
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
@@ -61,6 +62,9 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Opt
                 collation,
                 options,
             } = column;
+            let data_type = data_type.ok_or(ErrorCode::InvalidInputSyntax(
+                "data type is not specified".into(),
+            ))?;
             if let Some(collation) = collation {
                 return Err(ErrorCode::NotImplemented(
                     format!("collation \"{}\"", collation),
@@ -204,6 +208,24 @@ pub(crate) fn gen_create_table_plan(
     constraints: Vec<TableConstraint>,
 ) -> Result<(PlanRef, ProstSource, ProstTable)> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
+    gen_create_table_plan_without_bind(
+        session,
+        context,
+        table_name,
+        column_descs,
+        pk_column_id_from_columns,
+        constraints,
+    )
+}
+
+pub(crate) fn gen_create_table_plan_without_bind(
+    session: &SessionImpl,
+    context: OptimizerContextRef,
+    table_name: ObjectName,
+    column_descs: Vec<ColumnDesc>,
+    pk_column_id_from_columns: Option<ColumnId>,
+    constraints: Vec<TableConstraint>,
+) -> Result<(PlanRef, ProstSource, ProstTable)> {
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
@@ -260,6 +282,7 @@ pub(crate) fn gen_materialize_plan(
             handle_pk_conflict,
             false, // TODO(Yuanxin): true
             None,  // TODO(Yuanxin): row_id_index
+            TableType::Table,
         )?
     };
     let mut table = materialize

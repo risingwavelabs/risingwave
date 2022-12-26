@@ -32,6 +32,8 @@ export interface StreamSourceInfo {
   rowSchemaLocation: string;
   useSchemaRegistry: boolean;
   protoMessageName: string;
+  csvDelimiter: number;
+  csvHasHeader: boolean;
 }
 
 export interface TableSourceInfo {
@@ -81,7 +83,7 @@ export interface Sink {
   distributionKey: number[];
   /** pk_indices of the corresponding materialize operator's output. */
   streamKey: number[];
-  appendonly: boolean;
+  appendOnly: boolean;
   owner: number;
   properties: { [key: string]: string };
   definition: string;
@@ -118,11 +120,11 @@ export interface Table {
   pk: ColumnOrder[];
   dependentRelations: number[];
   optionalAssociatedSourceId?: { $case: "associatedSourceId"; associatedSourceId: number };
-  isIndex: boolean;
+  tableType: Table_TableType;
   distributionKey: number[];
   /** pk_indices of the corresponding materialize operator's output. */
   streamKey: number[];
-  appendonly: boolean;
+  appendOnly: boolean;
   owner: number;
   properties: { [key: string]: string };
   fragmentId: number;
@@ -130,7 +132,14 @@ export interface Table {
    * an optional column index which is the vnode of each row computed by the
    * table's consistent hash distribution
    */
-  vnodeColIdx:
+  vnodeColIndex:
+    | ColumnIndex
+    | undefined;
+  /**
+   * An optional column index of row id. If the primary key is specified by users,
+   * this will be `None`.
+   */
+  rowIdIndex:
     | ColumnIndex
     | undefined;
   /**
@@ -141,6 +150,60 @@ export interface Table {
   valueIndices: number[];
   definition: string;
   handlePkConflict: boolean;
+  readPrefixLenHint: number;
+}
+
+export const Table_TableType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  TABLE: "TABLE",
+  MATERIALIZED_VIEW: "MATERIALIZED_VIEW",
+  INDEX: "INDEX",
+  INTERNAL: "INTERNAL",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type Table_TableType = typeof Table_TableType[keyof typeof Table_TableType];
+
+export function table_TableTypeFromJSON(object: any): Table_TableType {
+  switch (object) {
+    case 0:
+    case "UNSPECIFIED":
+      return Table_TableType.UNSPECIFIED;
+    case 1:
+    case "TABLE":
+      return Table_TableType.TABLE;
+    case 2:
+    case "MATERIALIZED_VIEW":
+      return Table_TableType.MATERIALIZED_VIEW;
+    case 3:
+    case "INDEX":
+      return Table_TableType.INDEX;
+    case 4:
+    case "INTERNAL":
+      return Table_TableType.INTERNAL;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return Table_TableType.UNRECOGNIZED;
+  }
+}
+
+export function table_TableTypeToJSON(object: Table_TableType): string {
+  switch (object) {
+    case Table_TableType.UNSPECIFIED:
+      return "UNSPECIFIED";
+    case Table_TableType.TABLE:
+      return "TABLE";
+    case Table_TableType.MATERIALIZED_VIEW:
+      return "MATERIALIZED_VIEW";
+    case Table_TableType.INDEX:
+      return "INDEX";
+    case Table_TableType.INTERNAL:
+      return "INTERNAL";
+    case Table_TableType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
 }
 
 export interface Table_PropertiesEntry {
@@ -259,6 +322,8 @@ function createBaseStreamSourceInfo(): StreamSourceInfo {
     rowSchemaLocation: "",
     useSchemaRegistry: false,
     protoMessageName: "",
+    csvDelimiter: 0,
+    csvHasHeader: false,
   };
 }
 
@@ -269,6 +334,8 @@ export const StreamSourceInfo = {
       rowSchemaLocation: isSet(object.rowSchemaLocation) ? String(object.rowSchemaLocation) : "",
       useSchemaRegistry: isSet(object.useSchemaRegistry) ? Boolean(object.useSchemaRegistry) : false,
       protoMessageName: isSet(object.protoMessageName) ? String(object.protoMessageName) : "",
+      csvDelimiter: isSet(object.csvDelimiter) ? Number(object.csvDelimiter) : 0,
+      csvHasHeader: isSet(object.csvHasHeader) ? Boolean(object.csvHasHeader) : false,
     };
   },
 
@@ -278,6 +345,8 @@ export const StreamSourceInfo = {
     message.rowSchemaLocation !== undefined && (obj.rowSchemaLocation = message.rowSchemaLocation);
     message.useSchemaRegistry !== undefined && (obj.useSchemaRegistry = message.useSchemaRegistry);
     message.protoMessageName !== undefined && (obj.protoMessageName = message.protoMessageName);
+    message.csvDelimiter !== undefined && (obj.csvDelimiter = Math.round(message.csvDelimiter));
+    message.csvHasHeader !== undefined && (obj.csvHasHeader = message.csvHasHeader);
     return obj;
   },
 
@@ -287,6 +356,8 @@ export const StreamSourceInfo = {
     message.rowSchemaLocation = object.rowSchemaLocation ?? "";
     message.useSchemaRegistry = object.useSchemaRegistry ?? false;
     message.protoMessageName = object.protoMessageName ?? "";
+    message.csvDelimiter = object.csvDelimiter ?? 0;
+    message.csvHasHeader = object.csvHasHeader ?? false;
     return message;
   },
 };
@@ -457,7 +528,7 @@ function createBaseSink(): Sink {
     dependentRelations: [],
     distributionKey: [],
     streamKey: [],
-    appendonly: false,
+    appendOnly: false,
     owner: 0,
     properties: {},
     definition: "",
@@ -480,7 +551,7 @@ export const Sink = {
         ? object.distributionKey.map((e: any) => Number(e))
         : [],
       streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
-      appendonly: isSet(object.appendonly) ? Boolean(object.appendonly) : false,
+      appendOnly: isSet(object.appendOnly) ? Boolean(object.appendOnly) : false,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
@@ -523,7 +594,7 @@ export const Sink = {
     } else {
       obj.streamKey = [];
     }
-    message.appendonly !== undefined && (obj.appendonly = message.appendonly);
+    message.appendOnly !== undefined && (obj.appendOnly = message.appendOnly);
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     obj.properties = {};
     if (message.properties) {
@@ -546,7 +617,7 @@ export const Sink = {
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
-    message.appendonly = object.appendonly ?? false;
+    message.appendOnly = object.appendOnly ?? false;
     message.owner = object.owner ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
@@ -664,17 +735,19 @@ function createBaseTable(): Table {
     pk: [],
     dependentRelations: [],
     optionalAssociatedSourceId: undefined,
-    isIndex: false,
+    tableType: Table_TableType.UNSPECIFIED,
     distributionKey: [],
     streamKey: [],
-    appendonly: false,
+    appendOnly: false,
     owner: 0,
     properties: {},
     fragmentId: 0,
-    vnodeColIdx: undefined,
+    vnodeColIndex: undefined,
+    rowIdIndex: undefined,
     valueIndices: [],
     definition: "",
     handlePkConflict: false,
+    readPrefixLenHint: 0,
   };
 }
 
@@ -693,14 +766,12 @@ export const Table = {
       optionalAssociatedSourceId: isSet(object.associatedSourceId)
         ? { $case: "associatedSourceId", associatedSourceId: Number(object.associatedSourceId) }
         : undefined,
-      isIndex: isSet(object.isIndex) ? Boolean(object.isIndex) : false,
+      tableType: isSet(object.tableType) ? table_TableTypeFromJSON(object.tableType) : Table_TableType.UNSPECIFIED,
       distributionKey: Array.isArray(object?.distributionKey)
         ? object.distributionKey.map((e: any) => Number(e))
         : [],
-      streamKey: Array.isArray(object?.streamKey)
-        ? object.streamKey.map((e: any) => Number(e))
-        : [],
-      appendonly: isSet(object.appendonly) ? Boolean(object.appendonly) : false,
+      streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
+      appendOnly: isSet(object.appendOnly) ? Boolean(object.appendOnly) : false,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
@@ -709,12 +780,14 @@ export const Table = {
         }, {})
         : {},
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
-      vnodeColIdx: isSet(object.vnodeColIdx) ? ColumnIndex.fromJSON(object.vnodeColIdx) : undefined,
+      vnodeColIndex: isSet(object.vnodeColIndex) ? ColumnIndex.fromJSON(object.vnodeColIndex) : undefined,
+      rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
       valueIndices: Array.isArray(object?.valueIndices)
         ? object.valueIndices.map((e: any) => Number(e))
         : [],
       definition: isSet(object.definition) ? String(object.definition) : "",
       handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
     };
   },
 
@@ -741,7 +814,7 @@ export const Table = {
     }
     message.optionalAssociatedSourceId?.$case === "associatedSourceId" &&
       (obj.associatedSourceId = Math.round(message.optionalAssociatedSourceId?.associatedSourceId));
-    message.isIndex !== undefined && (obj.isIndex = message.isIndex);
+    message.tableType !== undefined && (obj.tableType = table_TableTypeToJSON(message.tableType));
     if (message.distributionKey) {
       obj.distributionKey = message.distributionKey.map((e) => Math.round(e));
     } else {
@@ -752,7 +825,7 @@ export const Table = {
     } else {
       obj.streamKey = [];
     }
-    message.appendonly !== undefined && (obj.appendonly = message.appendonly);
+    message.appendOnly !== undefined && (obj.appendOnly = message.appendOnly);
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
     obj.properties = {};
     if (message.properties) {
@@ -761,8 +834,10 @@ export const Table = {
       });
     }
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
-    message.vnodeColIdx !== undefined &&
-      (obj.vnodeColIdx = message.vnodeColIdx ? ColumnIndex.toJSON(message.vnodeColIdx) : undefined);
+    message.vnodeColIndex !== undefined &&
+      (obj.vnodeColIndex = message.vnodeColIndex ? ColumnIndex.toJSON(message.vnodeColIndex) : undefined);
+    message.rowIdIndex !== undefined &&
+      (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
     if (message.valueIndices) {
       obj.valueIndices = message.valueIndices.map((e) => Math.round(e));
     } else {
@@ -770,6 +845,7 @@ export const Table = {
     }
     message.definition !== undefined && (obj.definition = message.definition);
     message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
     return obj;
   },
 
@@ -792,10 +868,10 @@ export const Table = {
         associatedSourceId: object.optionalAssociatedSourceId.associatedSourceId,
       };
     }
-    message.isIndex = object.isIndex ?? false;
+    message.tableType = object.tableType ?? Table_TableType.UNSPECIFIED;
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
-    message.appendonly = object.appendonly ?? false;
+    message.appendOnly = object.appendOnly ?? false;
     message.owner = object.owner ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
@@ -807,12 +883,16 @@ export const Table = {
       {},
     );
     message.fragmentId = object.fragmentId ?? 0;
-    message.vnodeColIdx = (object.vnodeColIdx !== undefined && object.vnodeColIdx !== null)
-      ? ColumnIndex.fromPartial(object.vnodeColIdx)
+    message.vnodeColIndex = (object.vnodeColIndex !== undefined && object.vnodeColIndex !== null)
+      ? ColumnIndex.fromPartial(object.vnodeColIndex)
+      : undefined;
+    message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
+      ? ColumnIndex.fromPartial(object.rowIdIndex)
       : undefined;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
     message.handlePkConflict = object.handlePkConflict ?? false;
+    message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
     return message;
   },
 };

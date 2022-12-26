@@ -141,6 +141,17 @@ impl InnerConnectorSourceReader {
                 .partition_input_count
                 .with_label_values(&[&actor_id, &source_id, &id])
                 .inc_by(msgs.len() as u64);
+            let sum_bytes = msgs
+                .iter()
+                .map(|msg| match &msg.payload {
+                    None => 0,
+                    Some(payload) => payload.len() as u64,
+                })
+                .sum();
+            self.metrics
+                .partition_input_bytes
+                .with_label_values(&[&actor_id, &source_id, &id])
+                .inc_by(sum_bytes);
             yield msgs;
         }
     }
@@ -197,13 +208,13 @@ impl ConnectorSource {
         connector_node_addr: Option<String>,
         connector_message_buffer_size: usize,
     ) -> Result<Self> {
-        // Store the connector node address to properties for later use.
-        let mut source_props: HashMap<String, String> =
-            HashMap::from_iter(properties.clone().into_iter());
-        connector_node_addr
-            .map(|addr| source_props.insert("connector_node_addr".to_string(), addr));
-        let config =
-            ConnectorProperties::extract(source_props).map_err(|e| ConnectorError(e.into()))?;
+        let mut config = ConnectorProperties::extract(properties.clone())
+            .map_err(|e| ConnectorError(e.into()))?;
+        if let Some(addr) = connector_node_addr {
+            config.set_connector_node_addr(addr);
+            // fixme: require source_id
+            // config.set_source_id_for_cdc(source_id);
+        }
         let parser = SourceParserImpl::create(
             &format,
             &properties,
@@ -333,6 +344,7 @@ impl SourceDescBuilderV2 {
             ProstRowFormatType::Avro => SourceFormat::Avro,
             ProstRowFormatType::Maxwell => SourceFormat::Maxwell,
             ProstRowFormatType::CanalJson => SourceFormat::CanalJson,
+            ProstRowFormatType::Csv => SourceFormat::Csv,
             ProstRowFormatType::RowUnspecified => unreachable!(),
         };
 

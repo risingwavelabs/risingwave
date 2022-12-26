@@ -1,0 +1,7 @@
+query TT
+SELECT * FROM pg_catalog.pg_settings;
+----
+
+query TT
+SELECT * FROM pg_catalog.pg_settings where name='dummy';
+----

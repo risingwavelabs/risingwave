@@ -40,7 +40,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 pub use bool_array::{BoolArray, BoolArrayBuilder};
-pub use bytes_array::{BytesArray, BytesArrayBuilder};
+pub use bytes_array::*;
 pub use chrono_array::{
     NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
     NaiveTimeArray, NaiveTimeArrayBuilder,
@@ -50,7 +50,7 @@ pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
-pub use iterator::{ArrayImplIterator, ArrayIterator};
+pub use iterator::ArrayIterator;
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
@@ -62,7 +62,6 @@ pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
 use crate::buffer::Bitmap;
-pub use crate::row::{Row, RowDeserializer};
 use crate::types::*;
 pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
 
@@ -105,8 +104,15 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     /// Panics if `meta`'s type mismatches with the array type.
     fn with_meta(capacity: usize, meta: ArrayMeta) -> Self;
 
+    /// Append a value multiple times.
+    ///
+    /// This should be more efficient than calling `append` multiple times.
+    fn append_n(&mut self, n: usize, value: Option<<Self::ArrayType as Array>::RefItem<'_>>);
+
     /// Append a value to builder.
-    fn append(&mut self, value: Option<<<Self as ArrayBuilder>::ArrayType as Array>::RefItem<'_>>);
+    fn append(&mut self, value: Option<<Self::ArrayType as Array>::RefItem<'_>>) {
+        self.append_n(1, value);
+    }
 
     fn append_null(&mut self) {
         self.append(None)
@@ -159,24 +165,54 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     /// Corresponding builder of this array, which is reciprocal to `Array`.
     type Builder: ArrayBuilder<ArrayType = Self>;
 
-    /// Iterator type of this array.
-    type Iter<'a>: Iterator<Item = Option<Self::RefItem<'a>>>
-    where
-        Self: 'a;
+    /// Retrieve a reference to value regardless of whether it is null
+    /// without checking the index boundary.
+    ///
+    /// The returned value for NULL values is the default value.
+    ///
+    /// # Safety
+    ///
+    /// Index must be within the bounds.
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_>;
 
     /// Retrieve a reference to value.
-    fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>>;
+    #[inline]
+    fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>> {
+        if !self.is_null(idx) {
+            // Safety: the above `is_null` check ensures that the index is valid.
+            Some(unsafe { self.raw_value_at_unchecked(idx) })
+        } else {
+            None
+        }
+    }
 
     /// # Safety
     ///
     /// Retrieve a reference to value without checking the index boundary.
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>>;
+    #[inline]
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>> {
+        if !self.is_null_unchecked(idx) {
+            Some(self.raw_value_at_unchecked(idx))
+        } else {
+            None
+        }
+    }
 
     /// Number of items of array.
     fn len(&self) -> usize;
 
     /// Get iterator of current array.
-    fn iter(&self) -> Self::Iter<'_>;
+    fn iter(&self) -> ArrayIterator<'_, Self> {
+        ArrayIterator::new(self)
+    }
+
+    /// Get raw iterator of current array.
+    ///
+    /// The raw iterator simply iterates values without checking the null bitmap.
+    /// The returned value for NULL values is undefined.
+    fn raw_iter(&self) -> impl DoubleEndedIterator<Item = Self::RefItem<'_>> {
+        (0..self.len()).map(|i| unsafe { self.raw_value_at_unchecked(i) })
+    }
 
     /// Serialize to protobuf
     fn to_protobuf(&self) -> ProstArray;
@@ -441,12 +477,14 @@ macro_rules! impl_array_builder {
                 }
             }
 
-            /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
-            pub fn append_datum(&mut self, datum: impl ToDatumRef) {
+            /// Append a [`Datum`] or [`DatumRef`] multiple times, return error while type not match.
+            pub fn append_datum_n(&mut self, n: usize, datum: impl ToDatumRef) {
                 match datum.to_datum_ref() {
-                    None => self.append_null(),
+                    None => match self {
+                        $( Self::$variant_name(inner) => inner.append_n(n, None), )*
+                    }
                     Some(scalar_ref) => match (self, scalar_ref) {
-                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
+                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append_n(n, Some(v)), )*
                         (this_builder, this_scalar_ref) => panic!(
                             "Failed to append datum, array builder type: {}, scalar type: {}",
                             this_builder.get_ident(),
@@ -454,6 +492,11 @@ macro_rules! impl_array_builder {
                         ),
                     },
                 }
+            }
+
+            /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
+            pub fn append_datum(&mut self, datum: impl ToDatumRef) {
+                self.append_datum_n(1, datum);
             }
 
             pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {
@@ -596,8 +639,8 @@ macro_rules! impl_array {
 for_all_variants! { impl_array }
 
 impl ArrayImpl {
-    pub fn iter(&self) -> ArrayImplIterator<'_> {
-        ArrayImplIterator::new(self)
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> {
+        (0..self.len()).map(|i| self.value_at(i))
     }
 
     pub fn from_protobuf(array: &ProstArray, cardinality: usize) -> ArrayResult<Self> {

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -21,21 +20,20 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::sink::{Sink, SinkConfig, SinkImpl};
 use risingwave_connector::ConnectorParams;
-use risingwave_storage::StateStore;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::PkIndices;
 
-pub struct SinkExecutor<S: StateStore> {
+pub struct SinkExecutor {
     input: BoxedExecutor,
-    _store: S,
     metrics: Arc<StreamingMetrics>,
-    properties: HashMap<String, String>,
+    config: SinkConfig,
     identity: String,
     connector_params: ConnectorParams,
-    pk_indices: PkIndices,
+    schema: Schema,
+    pk_indices: Vec<usize>,
 }
 
 async fn build_sink(
@@ -49,26 +47,23 @@ async fn build_sink(
     ))
 }
 
-impl<S: StateStore> SinkExecutor<S> {
+impl SinkExecutor {
     pub fn new(
         materialize_executor: BoxedExecutor,
-        _store: S,
         metrics: Arc<StreamingMetrics>,
-        mut properties: HashMap<String, String>,
+        config: SinkConfig,
         executor_id: u64,
         connector_params: ConnectorParams,
+        schema: Schema,
+        pk_indices: Vec<usize>,
     ) -> Self {
-        // This field can be used to distinguish a specific actor in parallelism to prevent
-        // transaction execution errors
-        properties.insert("identifier".to_string(), format!("sink-{:?}", executor_id));
-        let pk_indices = materialize_executor.pk_indices().to_vec();
         Self {
             input: materialize_executor,
-            _store,
             metrics,
-            properties,
+            config,
             identity: format!("SinkExecutor_{:?}", executor_id),
             pk_indices,
+            schema,
             connector_params,
         }
     }
@@ -81,20 +76,13 @@ impl<S: StateStore> SinkExecutor<S> {
         let mut in_transaction = false;
         let mut epoch = 0;
 
-        let schema = self.schema().clone();
-        let sink_config = SinkConfig::from_hashmap(self.properties.clone())?;
         let mut sink = build_sink(
-            sink_config.clone(),
-            schema,
+            self.config.clone(),
+            self.schema,
             self.pk_indices,
             self.connector_params,
         )
         .await?;
-
-        // prepare the external sink before writing if needed.
-        if sink.needs_preparation() {
-            sink.prepare().await?;
-        }
 
         let input = self.input.execute();
 
@@ -134,7 +122,7 @@ impl<S: StateStore> SinkExecutor<S> {
                                 .sink_commit_duration
                                 .with_label_values(&[
                                     self.identity.as_str(),
-                                    sink_config.get_connector(),
+                                    self.config.get_connector(),
                                 ])
                                 .observe(start_time.elapsed().as_millis() as f64);
                         }
@@ -149,7 +137,7 @@ impl<S: StateStore> SinkExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for SinkExecutor<S> {
+impl Executor for SinkExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -179,7 +167,6 @@ mod test {
         use risingwave_common::array::StreamChunkTestExt;
         use risingwave_common::catalog::Field;
         use risingwave_common::types::DataType;
-        use risingwave_storage::memory::MemoryStateStore;
 
         use crate::executor::Barrier;
 
@@ -190,15 +177,17 @@ mod test {
         "table".into() => "t".into(),
         "user".into() => "root".into()
         };
+        let schema = Schema::new(vec![
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+            Field::with_name(DataType::Int32, "v3"),
+        ]);
+        let pk = vec![];
 
         // Mock `child`
         let mock = MockSource::with_messages(
-            Schema::new(vec![
-                Field::with_name(DataType::Int32, "v1"),
-                Field::with_name(DataType::Int32, "v2"),
-                Field::with_name(DataType::Int32, "v3"),
-            ]),
-            PkIndices::new(),
+            schema.clone(),
+            pk.clone(),
             vec![
                 Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                     " I I I
@@ -212,13 +201,15 @@ mod test {
             ],
         );
 
+        let config = SinkConfig::from_hashmap(properties).unwrap();
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
-            MemoryStateStore::new(),
             Arc::new(StreamingMetrics::unused()),
-            properties,
+            config,
             0,
             Default::default(),
+            schema.clone(),
+            pk.clone(),
         );
 
         let mut executor = SinkExecutor::execute(Box::new(sink_executor));

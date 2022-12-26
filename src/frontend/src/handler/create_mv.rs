@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 use super::privilege::{check_privileges, resolve_relation_privileges};
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::catalog::table_catalog::TableType;
 use crate::handler::HandlerArgs;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::planner::Planner;
@@ -109,8 +110,15 @@ pub fn gen_create_mv_plan(
     if let Some(col_names) = &col_names {
         check_column_names(col_names, &plan_root)?
     }
-    let materialize =
-        plan_root.gen_materialize_plan(table_name, definition, col_names, false, false, None)?;
+    let materialize = plan_root.gen_materialize_plan(
+        table_name,
+        definition,
+        col_names,
+        false,
+        false,
+        None,
+        TableType::MaterializedView,
+    )?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(
@@ -139,6 +147,8 @@ pub async fn handle_create_mv(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
+    let has_order_by = !query.order_by.is_empty();
+
     session.check_relation_name_duplicated(name.clone())?;
 
     let (table, graph) = {
@@ -154,15 +164,26 @@ pub async fn handle_create_mv(
         .create_materialized_view(table, graph)
         .await?;
 
-    Ok(PgResponse::empty_result(
-        StatementType::CREATE_MATERIALIZED_VIEW,
-    ))
+    if has_order_by {
+        let notice = r#"
+The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
+It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view."#;
+        Ok(PgResponse::empty_result_with_notice(
+            StatementType::CREATE_MATERIALIZED_VIEW,
+            notice.to_string(),
+        ))
+    } else {
+        Ok(PgResponse::empty_result(
+            StatementType::CREATE_MATERIALIZED_VIEW,
+        ))
+    }
 }
 
 #[cfg(test)]
 pub mod tests {
     use std::collections::HashMap;
 
+    use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
@@ -252,6 +273,33 @@ pub mod tests {
         assert_eq!(
             err.to_string(),
             "Bind error: An alias must be specified for an expression"
+        );
+    }
+
+    /// Creating MV with order by returns a special notice
+    #[tokio::test]
+    async fn test_create_mv_with_order_by() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        let sql = "create table t(x varchar)";
+        frontend.run_sql(sql).await.unwrap();
+
+        // Without order by
+        let sql = "create materialized view mv1 as select * from t";
+        let response = frontend.run_sql(sql).await.unwrap();
+        assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
+        assert_eq!(response.get_notice(), None);
+
+        // With order by
+        let sql = "create materialized view mv2 as select * from t order by x";
+        let response = frontend.run_sql(sql).await.unwrap();
+        assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
+        assert_eq!(
+            response.get_notice().unwrap(),
+r#"
+The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
+It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view."#
+                .to_string()
         );
     }
 }

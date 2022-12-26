@@ -24,6 +24,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
 };
+use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
 use tokio::runtime::Runtime;
@@ -216,7 +217,7 @@ pub struct BatchTaskExecution<C> {
     /// This is a hack, cuz there is no easy way to get out the receiver.
     state_rx: Mutex<Option<tokio::sync::mpsc::Receiver<TaskInfoResponseResult>>>,
 
-    epoch: u64,
+    epoch: BatchQueryEpoch,
 
     /// Runtime for the batch tasks.
     runtime: &'static Runtime,
@@ -227,7 +228,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         prost_tid: &ProstTaskId,
         plan: PlanFragment,
         context: C,
-        epoch: u64,
+        epoch: BatchQueryEpoch,
         runtime: &'static Runtime,
     ) -> Result<Self> {
         let task_id = TaskId::from(prost_tid);
@@ -266,7 +267,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             self.plan.root.as_ref().unwrap(),
             &self.task_id,
             self.context.clone(),
-            self.epoch,
+            self.epoch.clone(),
         )
         .build()
         .await?;

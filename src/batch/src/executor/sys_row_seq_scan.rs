@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, SysCatalogReaderRef, TableId};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::row::{Row, Row2};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -116,11 +116,13 @@ impl SysRowSeqScanExecutor {
                     .iter()
                     .map(|column_id| row.datum_at(column_id.get_id() as usize).to_owned_datum())
                     .collect_vec();
-                Row::new(datums)
+                OwnedRow::new(datums)
             })
             .collect_vec();
 
-        let chunk = DataChunk::from_rows(&filtered_rows, &self.schema.data_types());
-        yield chunk
+        if !filtered_rows.is_empty() {
+            let chunk = DataChunk::from_rows(&filtered_rows, &self.schema.data_types());
+            yield chunk
+        }
     }
 }

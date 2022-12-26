@@ -81,7 +81,7 @@ SELECT * FROM generate_series('10'::INT,'2'::INT,'-2'::INT);
 4
 2
 
-statement error 
+statement error
 SELECT * FROM generate_series('2'::INT,'10'::INT,'0'::INT);
 
 query I
