@@ -89,16 +89,6 @@ impl<'a> FromIterator<&'a str> for Utf8Array {
 }
 
 impl Utf8Array {
-    /// Retrieve the ownership of the single string value.
-    ///
-    /// Panics if there're multiple or no values.
-    #[inline]
-    pub fn into_single_value(self) -> Option<Box<str>> {
-        self.bytes
-            .into_single_value()
-            .map(|bytes| unsafe { std::str::from_boxed_utf8_unchecked(bytes) })
-    }
-
     pub fn into_bytes_array(self) -> BytesArray {
         self.bytes
     }
@@ -173,17 +163,6 @@ impl<'a> StringWriter<'a> {
     #[inline]
     pub fn write_ref(self, value: &str) -> WrittenGuard {
         self.bytes.write_ref(value.as_bytes())
-    }
-
-    /// `write_from_char_iter` will consume `StringWriter` and write the characters from the `iter`.
-    ///
-    /// Prefer [`StringWriter::begin`] for writing multiple string pieces.
-    pub fn write_from_char_iter(self, iter: impl Iterator<Item = char>) -> WrittenGuard {
-        let mut writer = self.begin();
-        for c in iter {
-            writer.write_char(c).unwrap();
-        }
-        writer.finish()
     }
 
     /// `begin` will create a `PartialStringWriter`, which allow multiple appendings to create a new

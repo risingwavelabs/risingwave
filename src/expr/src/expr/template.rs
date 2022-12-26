@@ -19,10 +19,7 @@ use std::sync::Arc;
 
 use itertools::{multizip, Itertools};
 use paste::paste;
-use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, StringWriter, Utf8Array, Utf8ArrayBuilder,
-    WrittenGuard,
-};
+use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Utf8Array};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar};
 
@@ -167,8 +164,9 @@ macro_rules! eval_bytes {
     ($self:ident, $output_array:ident, $($arg:ident,)*) => {
         if let ($(Some($arg), )*) = ($($arg, )*) {
             {
-                let writer = $output_array.writer();
-                let _guard = ($self.func)($($arg, )* writer)?;
+                let mut writer = $output_array.writer().begin();
+                let _guard = ($self.func)($($arg, )* &mut writer)?;
+                writer.finish();
             }
         } else {
             $output_array.append(None);
@@ -178,11 +176,9 @@ macro_rules! eval_bytes {
 macro_rules! eval_bytes_row {
     ($self:ident, $($arg:ident,)*) => {
         if let ($(Some($arg), )*) = ($($arg, )*) {
-            let mut builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let _guard = ($self.func)($($arg, )* writer)?;
-            let array = builder.finish();
-            array.into_single_value() // take the single value from the array
+            let mut writer = String::new();
+            let _guard = ($self.func)($($arg, )* &mut writer)?;
+            Some(Box::<str>::from(writer))
         } else {
             None
         }
@@ -194,7 +190,7 @@ macro_rules! gen_expr_bytes {
         paste! {
             pub struct $ty_name<
                 $($arg: Array, )*
-                F: Fn($($arg::RefItem<'_>, )* StringWriter<'_>) -> $crate::Result<WrittenGuard>,
+                F: Fn($($arg::RefItem<'_>, )* &mut dyn std::fmt::Write) -> $crate::Result<()>,
             > {
                 $([<expr_ $arg:lower>]: BoxedExpression,)*
                 return_type: DataType,
@@ -203,7 +199,7 @@ macro_rules! gen_expr_bytes {
             }
 
             impl<$($arg: Array, )*
-                F: Fn($($arg::RefItem<'_>, )* StringWriter<'_>) -> $crate::Result<WrittenGuard> + Sync + Send,
+                F: Fn($($arg::RefItem<'_>, )* &mut dyn std::fmt::Write) -> $crate::Result<()> + Sync + Send,
             > fmt::Debug for $ty_name<$($arg, )* F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($ty_name))
@@ -215,7 +211,7 @@ macro_rules! gen_expr_bytes {
             }
 
             impl<$($arg: Array, )*
-                F: Fn($($arg::RefItem<'_>, )* StringWriter<'_>) -> $crate::Result<WrittenGuard> + Sync + Send,
+                F: Fn($($arg::RefItem<'_>, )* &mut dyn std::fmt::Write) -> $crate::Result<()> + Sync + Send,
             > Expression for $ty_name<$($arg, )* F>
             where
                 $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
@@ -228,7 +224,7 @@ macro_rules! gen_expr_bytes {
             }
 
             impl<$($arg: Array, )*
-                F: Fn($($arg::RefItem<'_>, )* StringWriter<'_>) -> $crate::Result<WrittenGuard> + Sync + Send,
+                F: Fn($($arg::RefItem<'_>, )* &mut dyn std::fmt::Write) -> $crate::Result<()> + Sync + Send,
             > $ty_name<$($arg, )* F> {
                 pub fn new(
                     $([<expr_ $arg:lower>]: BoxedExpression, )*

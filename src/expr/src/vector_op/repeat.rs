@@ -12,23 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{StringWriter, WrittenGuard};
+use std::fmt::Write;
 
 use crate::Result;
 
 #[inline(always)]
-pub fn repeat(s: &str, count: i32, writer: StringWriter<'_>) -> Result<WrittenGuard> {
-    let mut writer = writer.begin();
+pub fn repeat(s: &str, count: i32, writer: &mut dyn Write) -> Result<()> {
     for _ in 0..count {
-        writer.write_ref(s);
+        writer.write_str(s).unwrap();
     }
-    Ok(writer.finish())
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-
     use super::*;
 
     #[test]
@@ -41,12 +38,9 @@ mod tests {
         ];
 
         for (s, count, expected) in cases {
-            let mut builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let _guard = repeat(s, count, writer).unwrap();
-            let array = builder.finish();
-            let v = array.value_at(0).unwrap();
-            assert_eq!(v, expected);
+            let mut writer = String::new();
+            repeat(s, count, &mut writer)?;
+            assert_eq!(writer, expected);
         }
         Ok(())
     }

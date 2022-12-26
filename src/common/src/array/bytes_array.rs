@@ -110,18 +110,6 @@ impl Array for BytesArray {
 }
 
 impl BytesArray {
-    /// Retrieve the ownership of the single bytes value.
-    ///
-    /// Panics if there're multiple or no values.
-    pub fn into_single_value(self) -> Option<Box<[u8]>> {
-        assert_eq!(self.len(), 1);
-        if !self.is_null(0) {
-            Some(self.data.into_boxed_slice())
-        } else {
-            None
-        }
-    }
-
     #[cfg(test)]
     pub(super) fn data(&self) -> &[u8] {
         &self.data
