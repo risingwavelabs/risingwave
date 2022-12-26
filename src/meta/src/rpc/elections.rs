@@ -347,10 +347,9 @@ pub async fn run_elections<S: MetaStore>(
         let (leader_tx, leader_rx) = tokio::sync::watch::channel((leader_addr, is_initial_leader));
         let handle = tokio::spawn(async move {
             // runs all followup elections
-            let mut ticker = tokio::time::interval(
-                Duration::from_secs(lease_time_sec / 2)
-                    + Duration::from_millis(rng.gen_range(0..500)),
-            );
+            let mut ticker = tokio::time::interval(Duration::from_millis(
+                lease_time_sec * 500 + rng.gen_range(1..500),
+            ));
             ticker.reset();
 
             let mut is_leader = is_initial_leader;
