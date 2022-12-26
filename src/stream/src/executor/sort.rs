@@ -259,7 +259,7 @@ impl<S: StateStore> SortExecutor<S> {
             curr_vnode_bitmap.to_owned()
         };
         let mut values_per_vnode = Vec::new();
-        for owned_vnode in newly_owned_vnodes.ones() {
+        for owned_vnode in newly_owned_vnodes.iter_ones() {
             let value_iter = self
                 .state_table
                 .iter_with_pk_range(

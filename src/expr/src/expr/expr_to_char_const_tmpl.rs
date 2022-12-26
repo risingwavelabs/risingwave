@@ -20,10 +20,11 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 
 use super::Expression;
+use crate::vector_op::to_char::ChronoPattern;
 
 #[derive(Debug)]
 pub(crate) struct ExprToCharConstTmplContext {
-    pub(crate) chrono_tmpl: String,
+    pub(crate) chrono_pattern: ChronoPattern,
 }
 
 #[derive(Debug)]
@@ -48,7 +49,10 @@ impl Expression for ExprToCharConstTmpl {
             if !vis {
                 output.append_null();
             } else if let Some(data) = data {
-                let res = data.0.format(&self.ctx.chrono_tmpl).to_string();
+                let res = data
+                    .0
+                    .format_with_items(self.ctx.chrono_pattern.borrow_items().iter())
+                    .to_string();
                 output.append(Some(res.as_str()));
             } else {
                 output.append_null();
@@ -61,7 +65,12 @@ impl Expression for ExprToCharConstTmpl {
     fn eval_row(&self, input: &OwnedRow) -> crate::Result<Datum> {
         let data = self.child.eval_row(input)?;
         Ok(if let Some(ScalarImpl::NaiveDateTime(data)) = data {
-            Some(data.0.format(&self.ctx.chrono_tmpl).to_string().into())
+            Some(
+                data.0
+                    .format_with_items(self.ctx.chrono_pattern.borrow_items().iter())
+                    .to_string()
+                    .into(),
+            )
         } else {
             None
         })
