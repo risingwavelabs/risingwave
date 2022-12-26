@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::FusedIterator;
 use std::mem::swap;
 
-use futures_async_stream::stream;
 use itertools::Itertools;
 
 use crate::array::column::Column;
@@ -71,7 +71,7 @@ impl DataChunkBuilder {
     /// If number of `batch_size` rows reached, it's returned as the second value of tuple.
     /// Otherwise it's `None`.
     #[must_use]
-    pub fn append_chunk(
+    fn append_chunk_inner(
         &mut self,
         input_chunk: SlicedDataChunk,
     ) -> (Option<SlicedDataChunk>, Option<DataChunk>) {
@@ -120,6 +120,16 @@ impl DataChunkBuilder {
         };
 
         (returned_input_chunk, output_chunk)
+    }
+
+    /// Returns an iterator that yields data chunks during appending the whole input data chunk. The
+    /// iterator must be fully consumed to ensure all data is appended.
+    #[must_use]
+    pub fn append_chunk(&mut self, data_chunk: DataChunk) -> AppendDataChunk<'_> {
+        AppendDataChunk {
+            builder: self,
+            remaining: Some(SlicedDataChunk::new_checked(data_chunk)),
+        }
     }
 
     /// Returns all data in current buffer.
@@ -218,29 +228,32 @@ impl DataChunkBuilder {
     pub fn data_types(&self) -> Vec<DataType> {
         self.data_types.clone()
     }
+}
 
-    #[stream(boxed, item = DataChunk)]
-    pub async fn trunc_data_chunk(&mut self, data_chunk: DataChunk) {
-        let mut sliced_data_chunk = SlicedDataChunk::new_checked(data_chunk);
-        loop {
-            let (left_data, output) = self.append_chunk(sliced_data_chunk);
-            match (left_data, output) {
-                (Some(left_data), Some(output)) => {
-                    sliced_data_chunk = left_data;
-                    yield output;
-                }
-                (None, Some(output)) => {
-                    yield output;
-                    break;
-                }
-                (None, None) => {
-                    break;
-                }
-                _ => {
-                    unreachable!();
-                }
-            }
-        }
+/// The iterator that yields data chunks during appending a data chunk to a [`DataChunkBuilder`].
+pub struct AppendDataChunk<'a> {
+    builder: &'a mut DataChunkBuilder,
+    remaining: Option<SlicedDataChunk>,
+}
+
+impl Iterator for AppendDataChunk<'_> {
+    type Item = DataChunk;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (remaining, output) = self.builder.append_chunk_inner(self.remaining.take()?);
+        self.remaining = remaining;
+        output
+    }
+}
+
+impl FusedIterator for AppendDataChunk<'_> {}
+
+impl Drop for AppendDataChunk<'_> {
+    fn drop(&mut self) {
+        debug_assert!(
+            self.remaining.is_none(),
+            "dropping `AppendDataChunk` without exhausting it"
+        );
     }
 }
 
@@ -277,7 +290,7 @@ mod tests {
              . 7",
         ));
 
-        let (returned_input, output) = builder.append_chunk(input);
+        let (returned_input, output) = builder.append_chunk_inner(input);
         assert!(returned_input.is_none());
         assert!(output.is_none());
 
@@ -289,14 +302,14 @@ mod tests {
              4 8
              . 9",
         ));
-        let (returned_input, output) = builder.append_chunk(input);
+        let (returned_input, output) = builder.append_chunk_inner(input);
         assert_eq!(Some(1), returned_input.as_ref().map(|c| c.offset));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::cardinality));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::capacity));
         assert!(output.unwrap().visibility().is_none());
 
         // Append last input
-        let (returned_input, output) = builder.append_chunk(returned_input.unwrap());
+        let (returned_input, output) = builder.append_chunk_inner(returned_input.unwrap());
         assert!(returned_input.is_none());
         assert_eq!(Some(3), output.as_ref().map(DataChunk::cardinality));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::capacity));
@@ -314,7 +327,7 @@ mod tests {
              . 7 D",
         ));
 
-        let (returned_input, output) = builder.append_chunk(input);
+        let (returned_input, output) = builder.append_chunk_inner(input);
         assert!(returned_input.is_none());
         assert!(output.is_none());
         assert_eq!(1, builder.buffered_count());
@@ -327,7 +340,7 @@ mod tests {
              4 8
              . 9 D",
         ));
-        let (returned_input, output) = builder.append_chunk(input);
+        let (returned_input, output) = builder.append_chunk_inner(input);
         assert_eq!(Some(3), returned_input.as_ref().map(|c| c.offset));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::cardinality));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::capacity));
@@ -335,7 +348,7 @@ mod tests {
         assert_eq!(0, builder.buffered_count());
 
         // Append last input
-        let (returned_input, output) = builder.append_chunk(returned_input.unwrap());
+        let (returned_input, output) = builder.append_chunk_inner(returned_input.unwrap());
         assert!(returned_input.is_none());
         assert!(output.is_none());
         assert_eq!(0, builder.buffered_count());
@@ -355,7 +368,7 @@ mod tests {
              . 7",
         ));
 
-        let (returned_input, output) = builder.append_chunk(input);
+        let (returned_input, output) = builder.append_chunk_inner(input);
         assert!(returned_input.is_none());
         assert!(output.is_none());
 

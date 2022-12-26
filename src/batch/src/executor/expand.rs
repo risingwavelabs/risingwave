@@ -68,9 +68,8 @@ impl ExpandExecutor {
             for new_columns in
                 Column::expand_columns(cardinality, columns, self.column_subsets.to_owned())
             {
-                #[for_await]
                 for data_chunk in
-                    data_chunk_builder.trunc_data_chunk(DataChunk::new(new_columns?, vis.clone()))
+                    data_chunk_builder.append_chunk(DataChunk::new(new_columns?, vis.clone()))
                 {
                     yield data_chunk;
                 }

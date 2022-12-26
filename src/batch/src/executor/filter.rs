@@ -61,10 +61,9 @@ impl FilterExecutor {
             let vis_array = self.expr.eval(&data_chunk)?;
 
             if let Bool(vis) = vis_array.as_ref() {
-                // TODO: yield masked data chunk directly
-                #[for_await]
+                // TODO: should we yield masked data chunk directly?
                 for data_chunk in
-                    data_chunk_builder.trunc_data_chunk(data_chunk.with_visibility(vis.to_bitmap()))
+                    data_chunk_builder.append_chunk(data_chunk.with_visibility(vis.to_bitmap()))
                 {
                     yield data_chunk;
                 }
