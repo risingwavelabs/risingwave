@@ -273,6 +273,8 @@ impl SlicedDataChunk {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+
     use crate::array::DataChunk;
     use crate::test_prelude::DataChunkTestExt;
     use crate::types::{DataType, ScalarImpl};
@@ -351,6 +353,42 @@ mod tests {
         assert!(returned_input.is_none());
         assert!(output.is_none());
         assert_eq!(0, builder.buffered_count());
+    }
+
+    #[test]
+    fn test_append_chunk_iter() {
+        let mut builder = DataChunkBuilder::new(vec![DataType::Int32, DataType::Int64], 3);
+
+        // Append a chunk with 2 rows
+        let input = DataChunk::from_pretty(
+            "i I
+             3 .
+             . 7",
+        );
+
+        let outputs = builder.append_chunk(input).collect_vec();
+        assert!(outputs.is_empty());
+
+        // Append a chunk with 4 rows
+        let input = DataChunk::from_pretty(
+            "i I
+             3 .
+             . 7
+             4 8
+             . 9",
+        );
+
+        let [output_1, output_2]: [_; 2] = builder
+            .append_chunk(input)
+            .collect_vec()
+            .try_into()
+            .unwrap();
+
+        for output in &[output_1, output_2] {
+            assert_eq!(3, output.cardinality());
+            assert_eq!(3, output.capacity());
+            assert!(output.visibility().is_none());
+        }
     }
 
     #[test]
