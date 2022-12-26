@@ -35,6 +35,7 @@ mod expr_to_char_const_tmpl;
 pub mod expr_unary;
 mod expr_vnode;
 mod template;
+mod template_fast;
 
 use std::convert::TryFrom;
 use std::sync::Arc;
