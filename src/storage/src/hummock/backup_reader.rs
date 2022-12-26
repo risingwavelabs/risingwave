@@ -32,6 +32,7 @@ use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::local_version::pinned_version::{PinVersionAction, PinnedVersion};
+use crate::hummock::local_version::LocalHummockVersion;
 use crate::hummock::HummockError;
 
 pub type BackupReaderRef = Arc<BackupReader>;
@@ -190,7 +191,10 @@ impl BackupReader {
 
 fn build_version_holder(s: MetaSnapshot) -> VersionHolder {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    (PinnedVersion::new(s.metadata.hummock_version, tx), rx)
+    (
+        PinnedVersion::new(LocalHummockVersion::from(s.metadata.hummock_version), tx),
+        rx,
+    )
 }
 
 impl From<BackupError> for StorageError {

@@ -232,8 +232,7 @@ async fn compaction_test(
         "version-{}, remote version-{}",
         version.id, remote_version.id
     );
-    for (group, levels) in &version.levels {
-        let l0 = levels.l0.as_ref().unwrap();
+    for (group, levels) in &version.groups {
         let sz = levels
             .levels
             .iter()
@@ -249,8 +248,10 @@ async fn compaction_test(
             group,
             sz,
             count,
-            l0.total_file_size,
-            l0.sub_levels
+            levels.l0.total_file_size,
+            levels
+                .l0
+                .sub_levels
                 .iter()
                 .map(|level| level.table_infos.len())
                 .sum::<usize>()
