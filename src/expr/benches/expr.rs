@@ -32,7 +32,7 @@ use risingwave_expr::sig::cast::cast_sigs;
 use risingwave_expr::sig::func::func_sigs;
 use risingwave_expr::vector_op::agg::create_agg_state_unary;
 use risingwave_expr::ExprError;
-use risingwave_pb::expr::expr_node::Type as ExprType;
+use risingwave_pb::expr::expr_node::{RexNode, Type as ExprType};
 
 criterion_group!(benches, bench_expr, bench_raw);
 criterion_main!(benches);
@@ -153,15 +153,6 @@ fn bench_expr(c: &mut Criterion) {
                     .take(CHUNK_SIZE),
             )
             .into(),
-            // 25: timestamp format
-            Utf8Array::from_iter_display(
-                ["HH12:MI:SS"]
-                    .into_iter()
-                    .cycle()
-                    .take(CHUNK_SIZE)
-                    .map(Some),
-            )
-            .into(),
         ],
         CHUNK_SIZE,
     );
@@ -200,7 +191,6 @@ fn bench_expr(c: &mut Criterion) {
     const TIMESTAMP_STRING: i32 = 22;
     const TIMESTAMPZ_STRING: i32 = 23;
     const INTERVAL_STRING: i32 = 24;
-    const TIMESTAMP_FORMAT: i32 = 25;
 
     c.bench_function("inputref", |bencher| {
         let inputref = inputrefs[0].clone().boxed();
@@ -224,7 +214,7 @@ fn bench_expr(c: &mut Criterion) {
             continue;
         }
 
-        let prost = make_expression(
+        let mut prost = make_expression(
             sig.func,
             &sig.inputs_type
                 .iter()
@@ -234,7 +224,6 @@ fn bench_expr(c: &mut Criterion) {
                 .iter()
                 .enumerate()
                 .map(|(idx, t)| match (sig.func, idx) {
-                    (ExprType::ToChar, 1) => TIMESTAMP_FORMAT,
                     (ExprType::AtTimeZone, 1) => TIMEZONE,
                     (ExprType::DateTrunc, 0) => TIME_FIELD,
                     (ExprType::DateTrunc, 2) => TIMEZONE,
@@ -249,6 +238,10 @@ fn bench_expr(c: &mut Criterion) {
                 })
                 .collect_vec(),
         );
+        if sig.func == ExprType::ToChar {
+            let RexNode::FuncCall(f) = prost.rex_node.as_mut().unwrap() else { unreachable!() };
+            f.children[1] = make_string_literal("YYYY/MM/DD HH:MM:SS");
+        }
         let expr = match build_from_prost(&prost) {
             Ok(expr) => expr,
             Err(e) => {
