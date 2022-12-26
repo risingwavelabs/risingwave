@@ -46,7 +46,7 @@ pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<NaiveDat
         parsed.set_month(1).unwrap();
     }
 
-    // If the day is ommited, the default value should be 1.
+    // If the day is omitted, the default value should be 1.
     if parsed.day.is_none() && parsed.ordinal.is_none() {
         parsed.set_day(1).unwrap();
     }
