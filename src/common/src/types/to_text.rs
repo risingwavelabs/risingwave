@@ -16,7 +16,6 @@ use std::fmt::{Result, Write};
 use std::num::FpCategory;
 
 use chrono::{TimeZone, Utc};
-use num_traits::ToPrimitive;
 
 use super::{DataType, DatumRef, ScalarRefImpl};
 
@@ -104,7 +103,7 @@ implement_using_itoa! {
 }
 
 macro_rules! implement_using_ryu {
-    ($({ $scalar_type:ty, $to_std_type:ident, $data_type:ident } ),*) => {
+    ($({ $scalar_type:ty, $data_type:ident } ),*) => {
             $(
             impl ToText for $scalar_type {
                 fn fmt(&self, f: &mut dyn Write) -> Result {
@@ -113,34 +112,29 @@ macro_rules! implement_using_ryu {
                         FpCategory::Infinite => write!(f, "Infinity"),
                         FpCategory::Zero if self.is_sign_negative() => write!(f, "-0"),
                         FpCategory::Nan => write!(f, "NaN"),
-                        _ => match self.$to_std_type() {
-                            Some(v) => {
-                                let mut buf = ryu::Buffer::new();
-                                let mut s = buf.format_finite(v);
-                                if let Some(trimmed) = s.strip_suffix(".0") {
-                                    s = trimmed;
-                                }
-                                let mut s_chars = s.chars().peekable();
-                                let mut s_owned = s.to_owned();
-                                let mut index = 0;
-                                while let Some(c) = s_chars.next() {
-                                    index += 1;
-                                    if c == 'e' {
-                                        if s_chars.peek() != Some(&'-') {
-                                            s_owned.insert(index, '+');
-                                        } else {
-                                            index += 1;
-                                        }
-
-                                        if index + 1 == s.len() {
-                                            s_owned.insert(index,'0');
-                                        }
-                                        break;
-                                    }
-                                }
-                                write!(f, "{s_owned}")
+                        _ => {
+                            let mut buf = ryu::Buffer::new();
+                            let mut s = buf.format_finite(self.0);
+                            if let Some(trimmed) = s.strip_suffix(".0") {
+                                s = trimmed;
                             }
-                            None => write!(f, "NaN"),
+                            if let Some(mut idx) = s.as_bytes().iter().position(|x| *x == b'e') {
+                                write!(f, "{}", &s[..=idx])?;
+                                if s.as_bytes().get(idx + 1) != Some(&b'-') {
+                                    write!(f, "+")?;
+                                } else {
+                                    idx += 1;
+                                    // idx at '-'
+                                }
+                                if idx + 1 == s.len() {
+                                    write!(f, "0")?;
+                                } else {
+                                    write!(f, "{}", &s[idx + 1..])?;
+                                }
+                            } else {
+                                write!(f, "{}", s)?;
+                            }
+                            Ok(())
                         }
                     }
                 }
@@ -156,8 +150,8 @@ macro_rules! implement_using_ryu {
 }
 
 implement_using_ryu! {
-    { crate::types::OrderedF32, to_f32,Float32 },
-    { crate::types::OrderedF64, to_f64,Float64 }
+    { crate::types::OrderedF32, Float32 },
+    { crate::types::OrderedF64, Float64 }
 }
 
 impl ToText for i64 {
