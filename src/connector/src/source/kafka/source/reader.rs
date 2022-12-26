@@ -162,6 +162,8 @@ impl KafkaSplitReader {
             swap(&mut cur, &mut res);
             yield cur;
             // don't clear `bytes_current_second` here as it is only related to `.tick()`.
+            // yield in the outer loop so that we can always gurantee that some messages are read
+            // every `MAX_CHUNK_SIZE`.
         }
     }
 }
