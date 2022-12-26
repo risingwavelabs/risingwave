@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 
 use super::BlockMeta;
 use crate::hummock::{HummockResult, SstableBuilderOptions, SstableMeta};
@@ -34,13 +34,13 @@ pub trait SstableWriter: Send + Sync {
 
 /// Append SST data to a buffer. Used for tests and benchmarks.
 pub struct InMemWriter {
-    buf: Vec<u8>,
+    buf: BytesMut,
 }
 
 impl InMemWriter {
     pub fn new(capacity: usize) -> Self {
         Self {
-            buf: Vec::with_capacity(capacity),
+            buf: BytesMut::with_capacity(capacity),
         }
     }
 }
@@ -62,7 +62,7 @@ impl SstableWriter for InMemWriter {
 
     async fn finish(mut self, meta: SstableMeta) -> HummockResult<Self::Output> {
         meta.encode_to(&mut self.buf);
-        Ok((Bytes::from(self.buf), meta))
+        Ok((self.buf.freeze(), meta))
     }
 
     fn data_len(&self) -> usize {

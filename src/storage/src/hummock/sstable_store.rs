@@ -16,7 +16,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::cache::LruCacheEventListener;
@@ -463,7 +463,7 @@ pub struct BatchUploadWriter {
     sst_id: HummockSstableId,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
-    buf: Vec<u8>,
+    buf: BytesMut,
     block_info: Vec<Block>,
     tracker: Option<MemoryTracker>,
 }
@@ -478,7 +478,7 @@ impl BatchUploadWriter {
             sst_id,
             sstable_store,
             policy: options.policy,
-            buf: Vec::with_capacity(options.capacity_hint.unwrap_or(0)),
+            buf: BytesMut::with_capacity(options.capacity_hint.unwrap_or(0)),
             block_info: Vec::new(),
             tracker: options.tracker,
         }
@@ -490,7 +490,7 @@ impl SstableWriter for BatchUploadWriter {
     type Output = JoinHandle<HummockResult<()>>;
 
     async fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()> {
-        self.buf.extend_from_slice(block);
+        self.buf.put_slice(block);
         if let CachePolicy::Fill = self.policy {
             self.block_info.push(Block::decode(
                 Bytes::from(block.to_vec()),
@@ -504,7 +504,7 @@ impl SstableWriter for BatchUploadWriter {
         fail_point!("data_upload_err");
         let join_handle = tokio::spawn(async move {
             meta.encode_to(&mut self.buf);
-            let data = Bytes::from(self.buf);
+            let data = self.buf.freeze();
             let _tracker = self.tracker.map(|mut t| {
                 if !t.try_increase_memory(data.capacity() as u64) {
                     tracing::debug!("failed to allocate increase memory for data file, sst id: {}, file size: {}",
@@ -514,10 +514,7 @@ impl SstableWriter for BatchUploadWriter {
             });
 
             // Upload data to object store.
-            self.sstable_store
-                .clone()
-                .put_sst_data(self.sst_id, data.clone())
-                .await?;
+            self.sstable_store.put_sst_data(self.sst_id, data).await?;
             self.sstable_store.insert_meta_cache(self.sst_id, meta);
 
             // Add block cache.
@@ -591,7 +588,7 @@ impl SstableWriter for StreamingUploadWriter {
     }
 
     async fn finish(mut self, meta: SstableMeta) -> HummockResult<UploadJoinHandle> {
-        let meta_data = Bytes::from(meta.encode_to_bytes());
+        let meta_data = meta.encode_to_bytes();
 
         self.object_uploader
             .write_bytes(meta_data)

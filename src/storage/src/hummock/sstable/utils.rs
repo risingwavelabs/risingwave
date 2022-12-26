@@ -68,9 +68,9 @@ pub fn xxhash64_verify(data: &[u8], checksum: u64) -> HummockResult<()> {
     Ok(())
 }
 
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, BytesMut};
 
-pub fn put_length_prefixed_slice(buf: &mut Vec<u8>, slice: &[u8]) {
+pub fn put_length_prefixed_slice(buf: &mut BytesMut, slice: &[u8]) {
     let len = slice.len() as u32;
     buf.put_u32_le(len);
     buf.put_slice(slice);

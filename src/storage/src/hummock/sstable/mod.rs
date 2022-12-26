@@ -31,7 +31,7 @@ use risingwave_common::catalog::TableId;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
-use bytes::{Buf, BufMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
@@ -97,7 +97,7 @@ impl DeleteRangeTombstone {
         }
     }
 
-    pub fn encode(&self, buf: &mut Vec<u8>) {
+    pub fn encode(&self, buf: &mut BytesMut) {
         self.start_user_key.encode_length_prefixed(buf);
         self.end_user_key.encode_length_prefixed(buf);
         buf.put_u64_le(self.sequence);
@@ -206,7 +206,7 @@ impl BlockMeta {
     /// ```plain
     /// | offset (4B) | len (4B) | smallest key len (4B) | smallest key |
     /// ```
-    pub fn encode(&self, buf: &mut Vec<u8>) {
+    pub fn encode(&self, buf: &mut BytesMut) {
         buf.put_u32_le(self.offset);
         buf.put_u32_le(self.len);
         buf.put_u32_le(self.uncompressed_size);
@@ -259,13 +259,13 @@ impl SstableMeta {
     /// | range-tombstone 0 | ... | range-tombstone M-1 |
     /// | checksum (8B) | version (4B) | magic (4B) |
     /// ```
-    pub fn encode_to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(DEFAULT_META_BUFFER_CAPACITY);
+    pub fn encode_to_bytes(&self) -> Bytes {
+        let mut buf = BytesMut::with_capacity(DEFAULT_META_BUFFER_CAPACITY);
         self.encode_to(&mut buf);
-        buf
+        buf.freeze()
     }
 
-    pub fn encode_to(&self, buf: &mut Vec<u8>) {
+    pub fn encode_to(&self, buf: &mut BytesMut) {
         let start_offset = buf.len();
         buf.put_u32_le(self.block_metas.len() as u32);
         for block_meta in &self.block_metas {
