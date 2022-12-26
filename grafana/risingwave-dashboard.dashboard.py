@@ -374,6 +374,24 @@ class Panels:
             legendCalcs=legendCols,
         )
 
+    def timeseries_bytesps(self,
+                          title,
+                          description,
+                          targets,
+                          legendCols=["max"]):
+        gridPos = self.layout.next_half_width_graph()
+        return TimeSeries(
+            title=title,
+            description=description,
+            targets=targets,
+            gridPos=gridPos,
+            unit="MB/s",
+            fillOpacity=10,
+            legendDisplayMode="table",
+            legendPlacement="right",
+            legendCalcs=legendCols,
+        )
+
     def timeseries_actor_rowsps(self, title, description, targets):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
@@ -865,7 +883,7 @@ def section_streaming(panels):
     return [
         panels.row("Streaming"),
         panels.timeseries_rowsps(
-            "Source Throughput",
+            "Source Throughput(rows)",
             "",
             [
                 panels.target(
@@ -875,11 +893,31 @@ def section_streaming(panels):
             ],
         ),
         panels.timeseries_rowsps(
-            "Source Throughput Per Partition",
+            "Source Throughput(rows) Per Partition",
             "",
             [
                 panels.target(
                     f"rate({metric('partition_input_count')}[$__rate_interval])",
+                    "actor={{actor_id}} source={{source_id}} partition={{partition}}",
+                )
+            ],
+        ),
+        panels.timeseries_bytesps(
+            "Source Throughput(bytes)",
+            "",
+            [
+                panels.target(
+                    f"(sum by (source_id)(rate({metric('partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
+                    "source={{source_id}}",
+                )
+            ],
+        ),
+        panels.timeseries_bytesps(
+            "Source Throughput(bytes) Per Partition",
+            "",
+            [
+                panels.target(
+                    f"(rate({metric('partition_input_bytes')}[$__rate_interval]))/(1000*1000)",
                     "actor={{actor_id}} source={{source_id}} partition={{partition}}",
                 )
             ],

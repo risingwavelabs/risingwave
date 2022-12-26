@@ -37,7 +37,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::iter::{self, TrustedLen};
-use std::ops::{BitAnd, BitOr, Not, RangeInclusive};
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, RangeInclusive};
 
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer as ProstBuffer;
@@ -237,6 +237,26 @@ impl Bitmap {
         Self::from_vec_with_len(bits, num_bits)
     }
 
+    /// Creates a new bitmap from a slice of `bool`.
+    pub fn from_bool_slice(bools: &[bool]) -> Self {
+        // use SIMD to speed up
+        use std::simd::ToBitMask;
+        let mut iter = bools.array_chunks::<BITS>();
+        let mut bits = Vec::with_capacity(Self::vec_len(bools.len()));
+        for chunk in iter.by_ref() {
+            let bitmask = std::simd::Mask::<i8, BITS>::from_array(*chunk).to_bitmask() as usize;
+            bits.push(bitmask);
+        }
+        if !iter.remainder().is_empty() {
+            let mut bitmask = 0;
+            for (i, b) in iter.remainder().iter().enumerate() {
+                bitmask |= (*b as usize) << i;
+            }
+            bits.push(bitmask);
+        }
+        Self::from_vec_with_len(bits, bools.len())
+    }
+
     /// Return the next set bit index on or after `bit_idx`.
     pub fn next_set_bit(&self, bit_idx: usize) -> Option<usize> {
         (bit_idx..self.len()).find(|&idx| unsafe { self.is_set_unchecked(idx) })
@@ -382,6 +402,18 @@ impl BitAnd for Bitmap {
     }
 }
 
+impl BitAndAssign<&Bitmap> for Bitmap {
+    fn bitand_assign(&mut self, rhs: &Bitmap) {
+        assert_eq!(self.num_bits, rhs.num_bits);
+        let mut count_ones = 0;
+        for (a, &b) in self.bits.iter_mut().zip(rhs.bits.iter()) {
+            *a &= b;
+            count_ones += a.count_ones();
+        }
+        self.count_ones = count_ones as usize;
+    }
+}
+
 impl<'a, 'b> BitOr<&'b Bitmap> for &'a Bitmap {
     type Output = Bitmap;
 
@@ -411,11 +443,42 @@ impl<'b> BitOr<&'b Bitmap> for Bitmap {
     }
 }
 
+impl BitOrAssign<&Bitmap> for Bitmap {
+    fn bitor_assign(&mut self, rhs: &Bitmap) {
+        assert_eq!(self.num_bits, rhs.num_bits);
+        let mut count_ones = 0;
+        for (a, &b) in self.bits.iter_mut().zip(rhs.bits.iter()) {
+            *a |= b;
+            count_ones += a.count_ones();
+        }
+        self.count_ones = count_ones as usize;
+    }
+}
+
+impl BitOrAssign<Bitmap> for Bitmap {
+    fn bitor_assign(&mut self, rhs: Bitmap) {
+        *self |= &rhs;
+    }
+}
+
 impl BitOr for Bitmap {
     type Output = Bitmap;
 
     fn bitor(self, rhs: Bitmap) -> Self::Output {
         (&self).bitor(&rhs)
+    }
+}
+
+impl BitXor for &Bitmap {
+    type Output = Bitmap;
+
+    fn bitxor(self, rhs: &Bitmap) -> Self::Output {
+        assert_eq!(self.num_bits, rhs.num_bits);
+        let bits = (self.bits.iter())
+            .zip(rhs.bits.iter())
+            .map(|(&a, &b)| a ^ b)
+            .collect();
+        Bitmap::from_vec_with_len(bits, self.num_bits)
     }
 }
 
@@ -438,30 +501,26 @@ impl<'a> Not for &'a Bitmap {
 impl Not for Bitmap {
     type Output = Bitmap;
 
-    fn not(self) -> Self::Output {
-        (&self).not()
+    fn not(mut self) -> Self::Output {
+        self.bits.iter_mut().for_each(|x| *x = !*x);
+        if self.num_bits % BITS != 0 {
+            self.bits[self.num_bits / BITS] &= (1 << (self.num_bits % BITS)) - 1;
+        }
+        self.count_ones = self.num_bits - self.count_ones;
+        self
     }
 }
 
 impl FromIterator<bool> for Bitmap {
     fn from_iter<T: IntoIterator<Item = bool>>(iter: T) -> Self {
-        let iter = iter.into_iter();
-        let mut builder = BitmapBuilder::with_capacity(iter.size_hint().0);
-        for b in iter {
-            builder.append(b);
-        }
-        builder.finish()
+        let vec = iter.into_iter().collect::<Vec<_>>();
+        Self::from_bool_slice(&vec)
     }
 }
 
 impl FromIterator<Option<bool>> for Bitmap {
     fn from_iter<T: IntoIterator<Item = Option<bool>>>(iter: T) -> Self {
-        let iter = iter.into_iter();
-        let mut builder = BitmapBuilder::with_capacity(iter.size_hint().0);
-        for b in iter {
-            builder.append(b.unwrap_or(false));
-        }
-        builder.finish()
+        iter.into_iter().map(|b| b.unwrap_or(false)).collect()
     }
 }
 
