@@ -343,6 +343,11 @@ impl ParseTo for CreateSinkStatement {
         };
 
         impl_parse_to!(with_properties: WithProperties, p);
+        if with_properties.0.is_empty() {
+            return Err(ParserError::ParserError(
+                "sink properties not provided".to_string(),
+            ));
+        }
 
         Ok(Self {
             if_not_exists,

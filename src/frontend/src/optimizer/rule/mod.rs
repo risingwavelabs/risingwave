@@ -29,50 +29,50 @@ pub trait Description {
 
 pub(super) type BoxedRule = Box<dyn Rule>;
 
-mod project_join;
-pub use project_join::*;
-mod project_elim;
-pub use project_elim::*;
-mod project_merge;
-pub use project_merge::*;
-mod pull_up_correlated_predicate;
-pub use pull_up_correlated_predicate::*;
-mod index_delta_join;
-pub use index_delta_join::*;
-mod reorder_multijoin;
-pub use reorder_multijoin::*;
-mod apply_agg;
-pub use apply_agg::*;
-mod apply_filter;
-pub use apply_filter::*;
-mod apply_proj;
-pub use apply_proj::*;
-mod apply_scan;
-pub use apply_scan::*;
-mod translate_apply;
-pub use translate_apply::*;
-mod merge_multijoin;
-pub use merge_multijoin::*;
-mod max_one_row_elim;
-pub use max_one_row_elim::*;
-mod apply_join;
-pub use apply_join::*;
-mod apply_to_join;
-pub use apply_to_join::*;
-mod distinct_agg;
-pub use distinct_agg::*;
-mod index_selection;
-pub use index_selection::*;
-mod push_calculation_of_join;
-pub use push_calculation_of_join::*;
-mod join_commute;
-mod over_agg_to_topn;
-pub use join_commute::*;
-pub use over_agg_to_topn::*;
-mod union_to_distinct;
-pub use union_to_distinct::*;
-mod agg_project_merge;
-pub use agg_project_merge::*;
+mod project_join_merge_rule;
+pub use project_join_merge_rule::*;
+mod project_eliminate_rule;
+pub use project_eliminate_rule::*;
+mod project_merge_rule;
+pub use project_merge_rule::*;
+mod pull_up_correlated_predicate_rule;
+pub use pull_up_correlated_predicate_rule::*;
+mod index_delta_join_rule;
+pub use index_delta_join_rule::*;
+mod reorder_multijoin_rule;
+pub use reorder_multijoin_rule::*;
+mod apply_agg_transpose_rule;
+pub use apply_agg_transpose_rule::*;
+mod apply_filter_transpose_rule;
+pub use apply_filter_transpose_rule::*;
+mod apply_project_transpose_rule;
+pub use apply_project_transpose_rule::*;
+mod apply_scan_rule;
+pub use apply_scan_rule::*;
+mod translate_apply_rule;
+pub use translate_apply_rule::*;
+mod merge_multijoin_rule;
+pub use merge_multijoin_rule::*;
+mod max_one_row_eliminate_rule;
+pub use max_one_row_eliminate_rule::*;
+mod apply_join_transpose_rule;
+pub use apply_join_transpose_rule::*;
+mod apply_to_join_rule;
+pub use apply_to_join_rule::*;
+mod distinct_agg_rule;
+pub use distinct_agg_rule::*;
+mod index_selection_rule;
+pub use index_selection_rule::*;
+mod push_calculation_of_join_rule;
+pub use push_calculation_of_join_rule::*;
+mod join_commute_rule;
+mod over_agg_to_topn_rule;
+pub use join_commute_rule::*;
+pub use over_agg_to_topn_rule::*;
+mod union_to_distinct_rule;
+pub use union_to_distinct_rule::*;
+mod agg_project_merge_rule;
+pub use agg_project_merge_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -89,7 +89,7 @@ macro_rules! for_all_rules {
             ,{IndexDeltaJoinRule}
             ,{MergeMultiJoinRule}
             ,{ProjectEliminateRule}
-            ,{ProjectJoinRule}
+            ,{ProjectJoinMergeRule}
             ,{ProjectMergeRule}
             ,{PullUpCorrelatedPredicateRule}
             ,{ReorderMultiJoinRule}
