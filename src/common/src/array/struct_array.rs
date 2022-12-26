@@ -414,12 +414,19 @@ impl Debug for StructRef<'_> {
 }
 
 impl ToText for StructRef<'_> {
-    fn to_text(&self) -> String {
+    fn fmt(&self, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
         iter_fields_ref!(self, it, {
-            format!(
-                "({})",
-                it.map(|x| x.to_text()).collect::<Vec<String>>().join(",")
-            )
+            write!(f, "(")?;
+            let mut is_first = true;
+            for x in it {
+                if is_first {
+                    is_first = false;
+                } else {
+                    write!(f, ",")?;
+                }
+                ToText::fmt(&x, f)?;
+            }
+            write!(f, ")")
         })
     }
 

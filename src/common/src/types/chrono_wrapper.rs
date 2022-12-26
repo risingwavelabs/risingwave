@@ -72,8 +72,8 @@ impl Default for NaiveDateTimeWrapper {
 }
 
 impl ToText for NaiveDateWrapper {
-    fn to_text(&self) -> String {
-        self.0.to_string()
+    fn fmt(&self, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 
     fn to_text_with_type(&self, ty: &DataType) -> String {
@@ -85,8 +85,8 @@ impl ToText for NaiveDateWrapper {
 }
 
 impl ToText for NaiveTimeWrapper {
-    fn to_text(&self) -> String {
-        self.0.to_string()
+    fn fmt(&self, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 
     fn to_text_with_type(&self, ty: &DataType) -> String {
@@ -98,8 +98,8 @@ impl ToText for NaiveTimeWrapper {
 }
 
 impl ToText for NaiveDateTimeWrapper {
-    fn to_text(&self) -> String {
-        self.0.to_string()
+    fn fmt(&self, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 
     fn to_text_with_type(&self, ty: &DataType) -> String {

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
+use std::fmt::{Result, Write};
 use std::num::FpCategory;
 
 use chrono::{TimeZone, Utc};
@@ -22,7 +22,11 @@ use super::{DataType, DatumRef, ScalarRefImpl};
 
 // Used to convert ScalarRef to text format
 pub trait ToText {
+    /// Write the text to the writer.
+    fn fmt(&self, f: &mut dyn Write) -> Result;
+
     fn to_text_with_type(&self, ty: &DataType) -> String;
+
     /// `to_text` is a special version of `to_text_with_type`, it convert the scalar to default type
     /// text. E.g. for Int64, it will convert to text as a Int64 type.
     /// We should prefer to use `to_text_with_type` because it's more clear and readable.
@@ -46,15 +50,19 @@ pub trait ToText {
     ///
     /// Exception:
     /// The scalar of `DataType::Timestampz` is the `ScalarRefImpl::Int64`.
-    fn to_text(&self) -> String;
+    fn to_text(&self) -> String {
+        let mut s = String::new();
+        self.fmt(&mut s).unwrap();
+        s
+    }
 }
 
 macro_rules! implement_using_to_string {
     ($({ $scalar_type:ty , $data_type:ident} ),*) => {
         $(
             impl ToText for $scalar_type {
-                fn to_text(&self) -> String {
-                    self.to_string()
+                fn fmt(&self, f: &mut dyn Write) -> Result {
+                    write!(f, "{self}")
                 }
                 fn to_text_with_type(&self, ty: &DataType) -> String {
                     match ty {
@@ -71,8 +79,8 @@ macro_rules! implement_using_itoa {
     ($({ $scalar_type:ty , $data_type:ident} ),*) => {
         $(
             impl ToText for $scalar_type {
-                fn to_text(&self) -> String {
-                    itoa::Buffer::new().format(*self).to_owned()
+                fn fmt(&self, f: &mut dyn Write) -> Result {
+                    write!(f, "{}", itoa::Buffer::new().format(*self))
                 }
                 fn to_text_with_type(&self, ty:&DataType) -> String {
                     match ty {
@@ -99,12 +107,12 @@ macro_rules! implement_using_ryu {
     ($({ $scalar_type:ty, $to_std_type:ident, $data_type:ident } ),*) => {
             $(
             impl ToText for $scalar_type {
-                fn to_text(&self) -> String {
+                fn fmt(&self, f: &mut dyn Write) -> Result {
                     match self.classify() {
-                        FpCategory::Infinite if self.is_sign_negative() => "-Infinity".to_owned(),
-                        FpCategory::Infinite => "Infinity".to_owned(),
-                        FpCategory::Zero if self.is_sign_negative() => "-0".to_owned(),
-                        FpCategory::Nan => "NaN".to_owned(),
+                        FpCategory::Infinite if self.is_sign_negative() => write!(f, "-Infinity"),
+                        FpCategory::Infinite => write!(f, "Infinity"),
+                        FpCategory::Zero if self.is_sign_negative() => write!(f, "-0"),
+                        FpCategory::Nan => write!(f, "NaN"),
                         _ => match self.$to_std_type() {
                             Some(v) => {
                                 let mut buf = ryu::Buffer::new();
@@ -130,10 +138,10 @@ macro_rules! implement_using_ryu {
                                         break;
                                     }
                                 }
-                                s_owned
+                                write!(f, "{s_owned}")
                             }
-                            None => "NaN".to_owned(),
-                        },
+                            None => write!(f, "NaN"),
+                        }
                     }
                 }
                 fn to_text_with_type(&self, ty: &DataType) -> String {
@@ -153,8 +161,8 @@ implement_using_ryu! {
 }
 
 impl ToText for i64 {
-    fn to_text(&self) -> String {
-        self.to_string()
+    fn fmt(&self, f: &mut dyn Write) -> Result {
+        write!(f, "{self}")
     }
 
     fn to_text_with_type(&self, ty: &DataType) -> String {
@@ -176,11 +184,11 @@ impl ToText for i64 {
 }
 
 impl ToText for bool {
-    fn to_text(&self) -> String {
+    fn fmt(&self, f: &mut dyn Write) -> Result {
         if *self {
-            "t".to_string()
+            write!(f, "t")
         } else {
-            "f".to_string()
+            write!(f, "f")
         }
     }
 
@@ -193,10 +201,8 @@ impl ToText for bool {
 }
 
 impl ToText for &[u8] {
-    fn to_text(&self) -> String {
-        let mut s = String::with_capacity(2 + 2 * self.len());
-        write!(s, "\\x{}", hex::encode(self)).unwrap();
-        s
+    fn fmt(&self, f: &mut dyn Write) -> Result {
+        write!(f, "\\x{}", hex::encode(self))
     }
 
     fn to_text_with_type(&self, ty: &DataType) -> String {
@@ -208,23 +214,23 @@ impl ToText for &[u8] {
 }
 
 impl ToText for ScalarRefImpl<'_> {
-    fn to_text(&self) -> String {
+    fn fmt(&self, f: &mut dyn Write) -> Result {
         match self {
-            ScalarRefImpl::Bool(b) => b.to_text(),
-            ScalarRefImpl::Int16(i) => i.to_text(),
-            ScalarRefImpl::Int32(i) => i.to_text(),
-            ScalarRefImpl::Int64(i) => i.to_text(),
-            ScalarRefImpl::Float32(f) => f.to_text(),
-            ScalarRefImpl::Float64(f) => f.to_text(),
-            ScalarRefImpl::Decimal(d) => d.to_text(),
-            ScalarRefImpl::Interval(i) => i.to_text(),
-            ScalarRefImpl::NaiveDate(d) => d.to_text(),
-            ScalarRefImpl::NaiveTime(t) => t.to_text(),
-            ScalarRefImpl::NaiveDateTime(dt) => dt.to_text(),
-            ScalarRefImpl::List(l) => l.to_text(),
-            ScalarRefImpl::Struct(s) => s.to_text(),
-            ScalarRefImpl::Utf8(v) => v.to_text(),
-            ScalarRefImpl::Bytea(v) => v.to_text(),
+            ScalarRefImpl::Bool(v) => v.fmt(f),
+            ScalarRefImpl::Int16(v) => v.fmt(f),
+            ScalarRefImpl::Int32(v) => v.fmt(f),
+            ScalarRefImpl::Int64(v) => v.fmt(f),
+            ScalarRefImpl::Float32(v) => v.fmt(f),
+            ScalarRefImpl::Float64(v) => v.fmt(f),
+            ScalarRefImpl::Decimal(v) => v.fmt(f),
+            ScalarRefImpl::Interval(v) => v.fmt(f),
+            ScalarRefImpl::NaiveDate(v) => v.fmt(f),
+            ScalarRefImpl::NaiveTime(v) => v.fmt(f),
+            ScalarRefImpl::NaiveDateTime(v) => v.fmt(f),
+            ScalarRefImpl::List(v) => v.fmt(f),
+            ScalarRefImpl::Struct(v) => v.fmt(f),
+            ScalarRefImpl::Utf8(v) => v.fmt(f),
+            ScalarRefImpl::Bytea(v) => v.fmt(f),
         }
     }
 
@@ -250,10 +256,10 @@ impl ToText for ScalarRefImpl<'_> {
 }
 
 impl ToText for DatumRef<'_> {
-    fn to_text(&self) -> String {
+    fn fmt(&self, f: &mut dyn Write) -> Result {
         match self {
-            Some(data) => data.to_text(),
-            None => "NULL".to_string(),
+            Some(data) => data.fmt(f),
+            None => write!(f, "NULL"),
         }
     }
 

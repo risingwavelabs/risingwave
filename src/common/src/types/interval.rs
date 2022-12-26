@@ -645,8 +645,8 @@ impl Neg for IntervalUnit {
 }
 
 impl ToText for crate::types::IntervalUnit {
-    fn to_text(&self) -> String {
-        self.to_string()
+    fn fmt(&self, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+        write!(f, "{self}")
     }
 
     fn to_text_with_type(&self, ty: &DataType) -> String {
