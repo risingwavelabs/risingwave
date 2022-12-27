@@ -299,19 +299,10 @@ delete from idx;
 statement error cannot change materialized source
 insert into msrc values (1);
 
-<<<<<<< HEAD
 statement error cannot change materialized source
 update msrc set v = 2;
 
 statement error cannot change materialized source
-=======
-# FIXME: what's this?
-statement error
-update msrc set v = 2;
-
-# FIXME: what's this?
-statement error
->>>>>>> main
 delete from msrc;
 
 # 6.5 non-materialized source
