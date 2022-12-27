@@ -170,8 +170,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .expect("Leader sender dropped");
 
         // run follower services until node becomes leader
-        // FIXME: Add service discovery for follower
-        // https://github.com/risingwavelabs/risingwave/issues/6755
         let svc_shutdown_rx_clone = svc_shutdown_rx.clone();
         let (follower_shutdown_tx, follower_shutdown_rx) = OneChannel::<()>();
         let follower_handle: Option<JoinHandle<()>> = if !node_is_leader(&leader_rx) {
@@ -459,17 +457,7 @@ mod tests {
         reported_leader_addr.first().unwrap().clone()
     }
 
-    // TODO: Write service discovery tests
-    // All nodes should always agree on the leader
-    // even though you delete the leader
-    // delete a follower
-    // delete leader and lease info
-    // delete lease info
-    // delete lease
-    // add one more node node
-    // Validate if the node that is supposed to be the leader also is the leader
-    // Delete all leaders as reported by the leader infos
-    // FIXME: Delete lease and/or leader info after PR is merged
+    // FIXME: Leader svc test: Delete lease and/or leader info after PR is merged
     // https://github.com/risingwavelabs/risingwave/pull/7022
 
     /// Adding nodes should not cause leader failover
@@ -485,7 +473,7 @@ mod tests {
         let new_leader = get_agreed_leader(number_of_nodes, meta_port).await;
         assert_eq!(
             original_leader, new_leader,
-            "Adding nodes should not change who leader is"
+            "1: Leader should stay the same if nodes are added"
         );
 
         let node_controllers_3 =
@@ -493,11 +481,11 @@ mod tests {
         let new_leader = get_agreed_leader(number_of_nodes, meta_port).await;
         assert_eq!(
             original_leader, new_leader,
-            "Adding nodes should not change who leader is"
+            "2: Leader should stay the same if nodes are added"
         );
 
-        for v in [node_controllers_1, node_controllers_2, node_controllers_3] {
-            for (join_handle, shutdown_tx) in v {
+        for c in [node_controllers_1, node_controllers_2, node_controllers_3] {
+            for (join_handle, shutdown_tx) in c {
                 if shutdown_tx.send(()).is_ok() {
                     join_handle.await.unwrap();
                 }
@@ -571,8 +559,9 @@ mod tests {
         // skipping first meta_port, since that node was former leader and got killed
         let leaders = number_of_leaders(number_of_nodes - 1, meta_port + 1, compute_port).await;
         for (join_handle, shutdown_tx) in node_controllers {
-            let _ = shutdown_tx.send(());
-            join_handle.await.unwrap();
+            if shutdown_tx.send(()).is_ok() {
+                join_handle.await.unwrap();
+            }
         }
         leaders
     }
