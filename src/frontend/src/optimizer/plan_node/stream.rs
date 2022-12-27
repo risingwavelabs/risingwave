@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use generic::PlanAggCall;
+use itertools::Itertools;
 use pb::stream_node as pb_node;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
@@ -243,7 +244,6 @@ impl HashJoin {
         let mut pk_indices = join_key_indices;
         // TODO(yuhao): dedup the dist key and pk.
         pk_indices.extend(input.logical_pk());
-
         // Build internal table
         let mut internal_table_catalog_builder =
             TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
@@ -252,9 +252,12 @@ impl HashJoin {
         internal_columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
         });
-
-        pk_indices.iter().for_each(|idx| {
-            internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
+        pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
+            if order_idx < join_key_len {
+                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending, false)
+            } else {
+                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending, true)
+            }
         });
 
         // Build degree table.
@@ -263,17 +266,25 @@ impl HashJoin {
 
         let degree_column_field = Field::with_name(DataType::Int64, "_degree");
 
-        pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
-            degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
-            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending)
-        });
+        pk_indices
+            .iter()
+            .unique()
+            .enumerate()
+            .for_each(|(order_idx, idx)| {
+                degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
+                degree_table_catalog_builder.add_order_column(
+                    order_idx,
+                    OrderType::Ascending,
+                    false,
+                );
+            });
         degree_table_catalog_builder.add_column(&degree_column_field);
         degree_table_catalog_builder
             .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
 
         internal_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
         degree_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
-
+        println!("---build join table---");
         (
             internal_table_catalog_builder.build(internal_table_dist_keys),
             degree_table_catalog_builder.build(degree_table_dist_keys),
