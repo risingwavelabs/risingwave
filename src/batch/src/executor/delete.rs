@@ -81,15 +81,9 @@ impl Executor for DeleteExecutor {
 impl DeleteExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-<<<<<<< HEAD
-=======
-        let source_desc = self.source_manager.get_source(&self.table_id)?;
-        let source = source_desc.source.as_table().expect("not table source");
-
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, 1024);
 
->>>>>>> main
         let mut notifiers = Vec::new();
 
         // Transform the data chunk to a stream chunk, then write to the source.
@@ -97,7 +91,7 @@ impl DeleteExecutor {
             let cap = chunk.capacity();
             let stream_chunk = StreamChunk::from_parts(vec![Op::Delete; cap], chunk);
 
-            let notifier = source.write_chunk(stream_chunk)?;
+            let notifier = self.dml_manager.write_chunk(&self.table_id, chunk)?;
             notifiers.push(notifier);
 
             Ok(())
@@ -111,15 +105,8 @@ impl DeleteExecutor {
             }
         }
 
-<<<<<<< HEAD
-            let chunk = StreamChunk::from_parts(vec![Op::Delete; len], data_chunk);
-
-            let notifier = self.dml_manager.write_chunk(&self.table_id, chunk)?;
-            notifiers.push(notifier);
-=======
         if let Some(chunk) = builder.consume_all() {
             write_chunk(chunk)?;
->>>>>>> main
         }
 
         // Wait for all chunks to be taken / written.

@@ -95,16 +95,9 @@ impl Executor for UpdateExecutor {
 impl UpdateExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
-<<<<<<< HEAD
-        let schema = self.child.schema().clone();
-=======
-        let source_desc = self.source_manager.get_source(&self.table_id)?;
-        let source = source_desc.source.as_table().expect("not table source");
-
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
->>>>>>> main
         let mut notifiers = Vec::new();
 
         // Transform the data chunk to a stream chunk, then write to the source.
@@ -117,7 +110,7 @@ impl UpdateExecutor {
                 .collect_vec();
             let stream_chunk = StreamChunk::from_parts(ops, chunk);
 
-            let notifier = source.write_chunk(stream_chunk)?;
+            let notifier = self.dml_manager.write_chunk(&self.table_id, stream_chunk)?;
             notifiers.push(notifier);
 
             Ok(())
@@ -147,21 +140,8 @@ impl UpdateExecutor {
             }
         }
 
-<<<<<<< HEAD
-            let ops = [Op::UpdateDelete, Op::UpdateInsert]
-                .into_iter()
-                .cycle()
-                .take(len * 2)
-                .collect();
-
-            let stream_chunk = StreamChunk::new(ops, columns, None);
-
-            let notifier = self.dml_manager.write_chunk(&self.table_id, stream_chunk)?;
-            notifiers.push(notifier);
-=======
         if let Some(chunk) = builder.consume_all() {
             write_chunk(chunk)?;
->>>>>>> main
         }
 
         // Wait for all chunks to be taken / written.
@@ -304,14 +284,10 @@ mod tests {
         });
 
         // Read
-<<<<<<< HEAD
-        let chunk = reader.next().await.unwrap()?;
-=======
         // As we set the chunk size to 5, we'll get 2 chunks. Note that the update records for one
         // row cannot be cut into two chunks, so the first chunk will actually have 6 rows.
         for updated_rows in [1..=3, 4..=5] {
             let chunk = reader.next().await.unwrap()?.chunk;
->>>>>>> main
 
             assert_eq!(
                 chunk.ops().chunks(2).collect_vec(),

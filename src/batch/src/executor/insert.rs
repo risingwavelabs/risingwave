@@ -90,16 +90,9 @@ impl Executor for InsertExecutor {
 impl InsertExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-<<<<<<< HEAD
-=======
-        let source_desc = self.source_manager.get_source(&self.table_id)?;
-        let source = source_desc.source.as_table().expect("not table source");
-        let row_id_index = source_desc.row_id_index;
-
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, 1024);
 
->>>>>>> main
         let mut notifiers = Vec::new();
 
         // Transform the data chunk to a stream chunk, then write to the source.
@@ -107,45 +100,26 @@ impl InsertExecutor {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
 
-<<<<<<< HEAD
             // No need to check for duplicate columns. This is already validated in binder.
             if !&self.column_indices.is_sorted() {
-                let mut ordered_cols: Vec<Column> = columns.clone();
-                for (i, idx) in self.column_indices.iter().enumerate() {
-=======
-            // No need to check for duplicate columns. This is already validated in binder
-            if !&self.column_idxs.is_sorted() {
                 let mut ordered_cols = columns.clone();
-                for (i, idx) in self.column_idxs.iter().enumerate() {
->>>>>>> main
+                for (i, idx) in self.column_indices.iter().enumerate() {
                     ordered_cols[*idx] = columns[i].clone()
                 }
                 columns = ordered_cols
             }
 
-<<<<<<< HEAD
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
             if let Some(row_id_index) = self.row_id_index {
                 let row_id_col = I64Array::from_iter(repeat(None).take(len));
                 columns.insert(row_id_index, row_id_col.into())
-=======
-            // If user did not specify the primary key, then we need to add a column for placeholder
-            // of generating row IDs.
-            if let Some(row_id_index) = row_id_index {
-                let array: I64Array = repeat(None).take(cap).collect();
-                columns.insert(row_id_index, Column::from(array));
->>>>>>> main
             }
 
             let stream_chunk =
                 StreamChunk::new(vec![Op::Insert; cap], columns, vis.into_visibility());
 
-<<<<<<< HEAD
             let notifier = self.dml_manager.write_chunk(&self.table_id, chunk)?;
-=======
-            let notifier = source.write_chunk(stream_chunk)?;
->>>>>>> main
             notifiers.push(notifier);
 
             Ok(())
