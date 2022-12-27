@@ -213,8 +213,6 @@ pub async fn compute_node_serve(
         config.streaming.clone(),
         async_stack_trace_config,
     ));
-<<<<<<< HEAD
-=======
 
     // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
     let batch_mgr_clone = batch_mgr.clone();
@@ -240,11 +238,6 @@ pub async fn compute_node_serve(
     // of lru manager.
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
 
-    let source_mgr = Arc::new(TableSourceManager::new(
-        source_metrics,
-        stream_config.developer.stream_connector_message_buffer_size,
-    ));
->>>>>>> main
     let grpc_stack_trace_mgr = async_stack_trace_config
         .map(|config| GrpcStackTraceManagerRef::new(StackTraceManager::new(config).into()));
     let dml_mgr = Arc::new(DmlManager::default());
