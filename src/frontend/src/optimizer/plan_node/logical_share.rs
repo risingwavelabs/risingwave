@@ -241,12 +241,11 @@ mod tests {
         // ├─LogicalFilter { predicate: (v1 = 100:Int32) }
         // | └─LogicalShare { id = 2 }
         // |   └─LogicalFilter { predicate: ((v1 = 100:Int32) OR (v2 = 200:Int32)) }
-        // |     └─LogicalValues { rows: [], schema: Schema { fields: [v1:Int32, v2:Int32, v3:Int32]
-        // } } └─LogicalFilter { predicate: (v2 = 200:Int32) }
+        // |     └─LogicalValues { schema: Schema { fields: [v1:Int32, v2:Int32, v3:Int32] } }
+        // └─LogicalFilter { predicate: (v2 = 200:Int32) }
         //   └─LogicalShare { id = 2 }
         //     └─LogicalFilter { predicate: ((v1 = 100:Int32) OR (v2 = 200:Int32)) }
-        //       └─LogicalValues { rows: [], schema: Schema { fields: [v1:Int32, v2:Int32, v3:Int32]
-        // } }
+        //       └─LogicalValues { schema: Schema { fields: [v1:Int32, v2:Int32, v3:Int32] } }
 
         let logical_join: &LogicalJoin = result.as_logical_join().unwrap();
         let left = logical_join.left();
