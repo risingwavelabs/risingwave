@@ -34,10 +34,7 @@ type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueTy
 /// join key will be presented in the cache.
 pub struct JoinEntryState {
     /// The full copy of the state. If evicted, it will be `None`.
-    cached: BTreeMap<PkType, StateValueType, SharedStatsAlloc<Global>>,
-
-    /// Allocator for counting the memory usage of the `cached` map itself.
-    allocator: SharedStatsAlloc<Global>,
+    cached: BTreeMap<PkType, StateValueType>,
 
     /// Estimated heap size of the keys and values in the `cached` map.
     estimated_content_heap_size: usize,
@@ -46,10 +43,8 @@ pub struct JoinEntryState {
 impl Default for JoinEntryState {
     fn default() -> Self {
         // TODO: may use static rc here.
-        let allocator = StatsAlloc::new(Global).shared();
         Self {
-            cached: BTreeMap::new_in(allocator.clone()),
-            allocator,
+            cached: BTreeMap::new(),
             estimated_content_heap_size: 0,
         }
     }
@@ -100,13 +95,6 @@ impl JoinEntryState {
     #[expect(dead_code)]
     pub fn len(&self) -> usize {
         self.cached.len()
-    }
-}
-
-impl EstimateSize for JoinEntryState {
-    fn estimated_heap_size(&self) -> usize {
-        self.estimated_content_heap_size // heap size of keys and values
-         + self.allocator.bytes_in_use() // heap size of the btree-map itself
     }
 }
 
