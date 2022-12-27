@@ -15,13 +15,15 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{TableCatalogVersion, TableDesc, TableId};
+use risingwave_common::catalog::{TableDesc, TableId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
-use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType as ProstTableType};
+use risingwave_pb::catalog::table::{
+    OptionalAssociatedSourceId, TableType as ProstTableType, TableVersion as ProstTableVersion,
+};
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
 use super::column_catalog::ColumnCatalog;
-use super::{DatabaseId, FragmentId, SchemaId};
+use super::{ColumnId, DatabaseId, FragmentId, SchemaId};
 use crate::optimizer::property::FieldOrder;
 use crate::WithOptions;
 
@@ -113,8 +115,8 @@ pub struct TableCatalog {
 
     pub read_prefix_len_hint: usize,
 
-    /// Per-table catalog version, used by schema change.
-    pub version: TableCatalogVersion,
+    /// Per-table catalog version, used by schema change. `None` for internal tables and tests.
+    pub version: Option<TableVersion>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -152,6 +154,35 @@ impl TableType {
             Self::MaterializedView => ProstTableType::MaterializedView,
             Self::Index => ProstTableType::Index,
             Self::Internal => ProstTableType::Internal,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableVersion {
+    pub version: u64,
+    pub next_column_id: ColumnId,
+}
+
+impl TableVersion {
+    pub fn initial(max_column_id: ColumnId) -> Self {
+        Self {
+            version: 0,
+            next_column_id: max_column_id.next(),
+        }
+    }
+
+    pub fn from_prost(prost: ProstTableVersion) -> Self {
+        Self {
+            version: prost.version,
+            next_column_id: ColumnId::from(prost.next_column_id),
+        }
+    }
+
+    pub fn to_prost(&self) -> ProstTableVersion {
+        ProstTableVersion {
+            version: self.version,
+            next_column_id: self.next_column_id.into(),
         }
     }
 }
@@ -274,7 +305,7 @@ impl TableCatalog {
             definition: self.definition.clone(),
             handle_pk_conflict: self.handle_pk_conflict,
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
-            version: self.version,
+            version: self.version.as_ref().map(TableVersion::to_prost),
         }
     }
 }
@@ -325,7 +356,7 @@ impl From<ProstTable> for TableCatalog {
             definition: tb.definition,
             handle_pk_conflict: tb.handle_pk_conflict,
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
-            version: tb.version,
+            version: tb.version.map(TableVersion::from_prost),
         }
     }
 }
@@ -340,18 +371,16 @@ impl From<&ProstTable> for TableCatalog {
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{
-        ColumnDesc, ColumnId, TableId, DEFAULT_TABLE_CATALOG_VERSION,
-    };
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
-    use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType as ProstTableType};
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan_common::{
         ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
     };
 
+    use super::*;
     use crate::catalog::column_catalog::ColumnCatalog;
     use crate::catalog::row_id_column_desc;
     use crate::catalog::table_catalog::{TableCatalog, TableType};
@@ -415,7 +444,10 @@ mod tests {
             read_prefix_len_hint: 0,
             vnode_col_index: None,
             row_id_index: None,
-            version: DEFAULT_TABLE_CATALOG_VERSION,
+            version: Some(ProstTableVersion {
+                version: 0,
+                next_column_id: 2,
+            }),
         }
         .into();
 
@@ -476,7 +508,7 @@ mod tests {
                 definition: "".into(),
                 handle_pk_conflict: false,
                 read_prefix_len_hint: 0,
-                version: DEFAULT_TABLE_CATALOG_VERSION,
+                version: Some(TableVersion::initial(ColumnId::new(1))),
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

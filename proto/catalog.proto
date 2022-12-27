@@ -95,6 +95,15 @@ message Table {
     INDEX = 3;
     INTERNAL = 4;
   }
+  message TableVersion {
+    // The version number, which will be 0 by default and be increased by 1 for
+    // each schema change in the frontend.
+    uint64 version = 1;
+    // The ID of the next column to be added, which is used to make all columns
+    // in the table have unique IDs, even if some columns has been dropped.
+    int32 next_column_id = 2;
+  }
+
   uint32 id = 1;
   uint32 schema_id = 2;
   uint32 database_id = 3;
@@ -127,11 +136,9 @@ message Table {
   bool handle_pk_conflict = 22;
   uint32 read_prefix_len_hint = 23;
 
-  // Per-table catalog version, used by schema change.
-  // The value will be 0 by default, and will be increased by 1 for each schema change
-  // in the frontend.
+  // Per-table catalog version, used by schema change. `None` for internal tables and tests.
   // Not to be confused with the global catalog version for notification service.
-  uint64 version = 100;
+  TableVersion version = 100;
 }
 
 message View {

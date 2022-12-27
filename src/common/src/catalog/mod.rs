@@ -34,8 +34,6 @@ use crate::row::OwnedRow;
 
 /// The global version of the catalog.
 pub type CatalogVersion = u64;
-/// The per-table version of the catalog.
-pub type TableCatalogVersion = u64;
 
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
@@ -48,7 +46,6 @@ pub const DEFAULT_SUPER_USER_ID: u32 = 1;
 // This is for compatibility with customized utils for PostgreSQL.
 pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";
 pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
-pub const DEFAULT_TABLE_CATALOG_VERSION: TableCatalogVersion = 0;
 
 pub const NON_RESERVED_USER_ID: i32 = 11;
 pub const NON_RESERVED_PG_CATALOG_TABLE_ID: i32 = 1001;

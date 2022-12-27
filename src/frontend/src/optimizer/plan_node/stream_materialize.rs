@@ -18,14 +18,14 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, TableId, DEFAULT_TABLE_CATALOG_VERSION};
+use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
 use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::table_catalog::{TableCatalog, TableType};
+use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
@@ -151,6 +151,9 @@ impl StreamMaterialize {
             in_order.insert(idx);
         }
 
+        let max_column_id = columns.iter().map(|c| c.column_id()).max().unwrap();
+        let version = TableVersion::initial(max_column_id);
+
         let ctx = input.ctx();
         let distribution_key = base.dist.dist_column_indices().to_vec();
         let properties = ctx.with_options().internal_table_subset();
@@ -175,7 +178,7 @@ impl StreamMaterialize {
             definition,
             handle_pk_conflict,
             read_prefix_len_hint,
-            version: DEFAULT_TABLE_CATALOG_VERSION,
+            version: Some(version),
         };
 
         Ok(Self { base, input, table })
