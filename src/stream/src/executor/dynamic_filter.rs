@@ -385,7 +385,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));
 
                         // TODO: prefetching for append-only case.
-                        for vnode in self.left_table.vnodes().ones() {
+                        for vnode in self.left_table.vnodes().iter_ones() {
                             let row_stream = self
                                 .left_table
                                 .iter_with_pk_range(&range, VirtualNode::from_index(vnode))
