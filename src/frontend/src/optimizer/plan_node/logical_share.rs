@@ -15,6 +15,7 @@
 use std::cell::RefCell;
 use std::fmt;
 
+use risingwave_common::error::ErrorCode::NotImplemented;
 use risingwave_common::error::Result;
 
 use super::generic::{self, GenericPlanNode};
@@ -114,7 +115,11 @@ impl PredicatePushdown for LogicalShare {
 
 impl ToBatch for LogicalShare {
     fn to_batch(&self) -> Result<PlanRef> {
-        unimplemented!()
+        Err(NotImplemented(
+            "batch query doesn't support share operator for now".into(),
+            None.into(),
+        )
+        .into())
     }
 }
 

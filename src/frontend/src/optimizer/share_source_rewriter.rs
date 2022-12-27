@@ -26,18 +26,18 @@ use crate::PlanRef;
 
 #[derive(Debug, Clone, Default)]
 pub struct ShareSourceRewriter {
-    // Source id need to be shared.
+    /// Source id need to be shared.
     share_ids: HashSet<SourceId>,
-    // Source id to share node.
+    /// Source id to share node.
     share_source: HashMap<SourceId, PlanRef>,
-    // Original share node plan id to new share node.
-    // Rewriter will rewrite all nodes, but we need to keep the shape of the DAG.
+    /// Original share node plan id to new share node.
+    /// Rewriter will rewrite all nodes, but we need to keep the shape of the DAG.
     share_map: HashMap<PlanNodeId, PlanRef>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct SourceCounter {
-    // Source id to count.
+    /// Source id to count.
     source_counter: HashMap<SourceId, usize>,
 }
 

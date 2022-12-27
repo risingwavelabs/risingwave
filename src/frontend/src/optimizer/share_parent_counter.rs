@@ -19,7 +19,7 @@ use crate::optimizer::plan_visitor::PlanVisitor;
 
 #[derive(Debug, Clone, Default)]
 pub struct ShareParentCounter {
-    // Plan node id to parent number mapping.
+    /// Plan node id to parent number mapping.
     parent_counter: HashMap<PlanNodeId, usize>,
 }
 
