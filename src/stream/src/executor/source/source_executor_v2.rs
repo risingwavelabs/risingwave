@@ -254,7 +254,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
                 StreamExecutorError::from(anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
                     self.ctx.id,
-                    self.identity
+                    self.stream_source_core.as_ref().unwrap().table_id
                 ))
             })?;
 
@@ -438,7 +438,12 @@ impl<S: StateStore> SourceExecutorV2<S> {
             .recv()
             .stack_trace("source_recv_first_barrier")
             .await
-            .unwrap();
+            .ok_or_else(|| {
+                StreamExecutorError::from(anyhow!(
+                    "failed to receive the first barrier, actor_id: {:?} with no stream source",
+                    self.ctx.id
+                ))
+            })?;
         yield Message::Barrier(barrier);
 
         while let Some(barrier) = barrier_receiver.recv().await {
