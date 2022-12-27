@@ -16,7 +16,7 @@ use std::fmt::{Display, Write};
 
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::bytes_array::{BytesWriter, PartialBytesWriter, WrittenGuard};
+use super::bytes_array::{BytesWriter, PartialBytesWriter};
 use super::{Array, ArrayBuilder, ArrayMeta, BytesArray, BytesArrayBuilder};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::Bitmap;
@@ -177,7 +177,7 @@ pub struct PartialStringWriter<'a> {
 impl<'a> PartialStringWriter<'a> {
     /// `finish` will be called while the entire record is written.
     /// Exactly one new record was appended and the `builder` can be safely used.
-    pub fn finish(self) -> WrittenGuard {
+    pub fn finish(self) {
         self.bytes.finish()
     }
 }
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn test_utf8_partial_writer() {
         let mut builder = Utf8ArrayBuilder::new(0);
-        let _guard: WrittenGuard = {
+        {
             let writer = builder.writer();
             let mut partial_writer = writer.begin();
             for _ in 0..2 {
@@ -232,7 +232,7 @@ mod tests {
     fn test_utf8_partial_writer_failed() {
         let mut builder = Utf8ArrayBuilder::new(0);
         // Write a record.
-        let _guard: WrittenGuard = {
+        {
             let writer = builder.writer();
             let mut partial_writer = writer.begin();
             partial_writer.write_str("Dia").unwrap();
@@ -241,18 +241,16 @@ mod tests {
         };
 
         // Write a record failed.
-        let _maybe_guard: Option<WrittenGuard> = {
+        {
             let writer = builder.writer();
             let mut partial_writer = writer.begin();
             partial_writer.write_str("Ca").unwrap();
             partial_writer.write_str("rol").unwrap();
-
             // We don't finish here.
-            None
         };
 
         // Write a record.
-        let _guard: WrittenGuard = {
+        {
             let writer = builder.writer();
             let mut partial_writer = writer.begin();
             partial_writer.write_str("Ki").unwrap();

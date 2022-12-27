@@ -165,7 +165,7 @@ macro_rules! eval_bytes {
         if let ($(Some($arg), )*) = ($($arg, )*) {
             {
                 let mut writer = $output_array.writer().begin();
-                let _guard = ($self.func)($($arg, )* &mut writer)?;
+                ($self.func)($($arg, )* &mut writer)?;
                 writer.finish();
             }
         } else {
@@ -177,7 +177,7 @@ macro_rules! eval_bytes_row {
     ($self:ident, $($arg:ident,)*) => {
         if let ($(Some($arg), )*) = ($($arg, )*) {
             let mut writer = String::new();
-            let _guard = ($self.func)($($arg, )* &mut writer)?;
+            ($self.func)($($arg, )* &mut writer)?;
             Some(Box::<str>::from(writer))
         } else {
             None

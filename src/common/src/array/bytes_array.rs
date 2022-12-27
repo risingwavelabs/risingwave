@@ -245,13 +245,10 @@ pub struct BytesWriter<'a> {
     builder: &'a mut BytesArrayBuilder,
 }
 
-pub struct WrittenGuard(());
-
 impl<'a> BytesWriter<'a> {
     /// `write_ref` will consume `BytesWriter` and pass the ownership of `builder` to `BytesGuard`.
-    pub fn write_ref(self, value: &[u8]) -> WrittenGuard {
+    pub fn write_ref(self, value: &[u8]) {
         self.builder.append(Some(value));
-        WrittenGuard(())
     }
 
     /// `begin` will create a `PartialBytesWriter`, which allow multiple appendings to create a new
@@ -278,10 +275,8 @@ impl<'a> PartialBytesWriter<'a> {
 
     /// `finish` will be called while the entire record is written.
     /// Exactly one new record was appended and the `builder` can be safely used.
-    pub fn finish(self) -> WrittenGuard {
+    pub fn finish(self) {
         self.builder.finish_partial();
-
-        WrittenGuard(())
     }
 }
 
