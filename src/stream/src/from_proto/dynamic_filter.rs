@@ -54,12 +54,9 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             );
         }
 
-        let state_table_l = StateTable::from_table_catalog(
-            node.get_left_table()?,
-            store.clone(),
-            Some(vnodes.clone()),
-        )
-        .await;
+        let state_table_l =
+            StateTable::from_table_catalog(node.get_left_table()?, store.clone(), Some(vnodes))
+                .await;
 
         let state_table_r =
             StateTable::from_table_catalog(node.get_right_table()?, store, None).await;
@@ -76,7 +73,6 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             state_table_r,
             params.executor_stats,
             params.env.config().developer.stream_chunk_size,
-            vnodes,
         )))
     }
 }
