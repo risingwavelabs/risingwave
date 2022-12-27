@@ -181,13 +181,13 @@ async fn renew_lease<S: MetaStore>(
     meta_store: &Arc<S>,
 ) -> MetaResult<bool> {
     let now = since_epoch();
-    let mut txn = Transaction::default();
     let lease_info = MetaLeaseInfo {
         leader: Some(leader_info.clone()),
         lease_register_time: now.as_secs(),
         lease_expire_time: now.as_secs() + lease_time_sec,
     };
 
+    let mut txn = Transaction::default();
     txn.check_equal(
         META_CF_NAME.to_string(),
         META_LEADER_KEY.as_bytes().to_vec(),
@@ -698,6 +698,29 @@ mod tests {
         // Follower: If new leader was, start election cycle
         assert!(
             !manage_term(false, &other_leader_info, lease_timeout, &mock_meta_store)
+                .await
+                .unwrap(),
+            "Follower: If new leader was elected, follower should enter election cycle"
+        );
+    }
+
+    // Nobody can renew leader info does not exist
+    #[tokio::test]
+    async fn not_renew_lease_2() {
+        let mock_meta_store = Arc::new(MemStore::new());
+
+        let other_leader_info = MetaLeaderInfo {
+            node_address: "other:1234".into(),
+            lease_id: 456,
+        };
+        assert!(
+            !manage_term(true, &other_leader_info, 123, &mock_meta_store)
+                .await
+                .unwrap(),
+            "Leader: If new leader was elected old leader should NOT renew lease"
+        );
+        assert!(
+            !manage_term(false, &other_leader_info, 123, &mock_meta_store)
                 .await
                 .unwrap(),
             "Follower: If new leader was elected, follower should enter election cycle"
