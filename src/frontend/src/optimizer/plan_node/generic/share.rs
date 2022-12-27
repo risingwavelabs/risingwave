@@ -12,25 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
+use std::cell::RefCell;
 
-use crate::Result;
+use risingwave_common::catalog::Schema;
 
-#[inline(always)]
-pub fn concat_op(left: &str, right: &str, writer: &mut dyn Write) -> Result<()> {
-    writer.write_str(left).unwrap();
-    writer.write_str(right).unwrap();
-    Ok(())
+use super::{GenericPlanNode, GenericPlanRef};
+use crate::OptimizerContextRef;
+
+#[derive(Debug, Clone)]
+pub struct Share<PlanRef> {
+    pub input: RefCell<PlanRef>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl<PlanRef: GenericPlanRef> GenericPlanNode for Share<PlanRef> {
+    fn schema(&self) -> Schema {
+        self.input.borrow().schema().clone()
+    }
 
-    #[test]
-    fn test_concat_op() {
-        let mut s = String::new();
-        concat_op("114", "514", &mut s).unwrap();
-        assert_eq!(s, "114514")
+    fn logical_pk(&self) -> Option<Vec<usize>> {
+        Some(self.input.borrow().logical_pk().to_vec())
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.input.borrow().ctx()
     }
 }

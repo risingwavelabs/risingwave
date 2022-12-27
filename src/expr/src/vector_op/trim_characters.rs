@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{StringWriter, WrittenGuard};
+use std::fmt::Write;
 
 use crate::Result;
 
 macro_rules! gen_trim {
     ($( { $func_name:ident, $method:ident }),*) => {
         $(#[inline(always)]
-        pub fn $func_name(s: &str, characters: &str, writer: StringWriter<'_>) -> Result<WrittenGuard> {
+        pub fn $func_name(s: &str, characters: &str, writer: &mut dyn Write) -> Result<()> {
             let pattern = |c| characters.chars().any(|ch| ch == c);
             // We remark that feeding a &str and a slice of chars into trim_left/right_matches
             // means different, one is matching with the entire string and the other one is matching
             // with any char in the slice.
-            Ok(writer.write_ref(s.$method(pattern)))
+            Ok(writer.write_str(s.$method(pattern)).unwrap())
         })*
     }
 }
@@ -37,12 +37,10 @@ gen_trim! {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-
     use super::*;
 
     #[test]
-    fn test_trim_characters() {
+    fn test_trim_characters() -> Result<()> {
         let cases = [
             ("Hello world", "Hdl", "ello wor"),
             ("abcde", "aae", "bcd"),
@@ -50,17 +48,15 @@ mod tests {
         ];
 
         for (s, characters, expected) in cases {
-            let mut builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let _guard = trim_characters(s, characters, writer).unwrap();
-            let array = builder.finish();
-            let v = array.value_at(0).unwrap();
-            assert_eq!(v, expected);
+            let mut writer = String::new();
+            trim_characters(s, characters, &mut writer)?;
+            assert_eq!(writer, expected);
         }
+        Ok(())
     }
 
     #[test]
-    fn test_ltrim_characters() {
+    fn test_ltrim_characters() -> Result<()> {
         let cases = [
             ("Hello world", "Hdl", "ello world"),
             ("abcde", "aae", "bcde"),
@@ -68,17 +64,15 @@ mod tests {
         ];
 
         for (s, characters, expected) in cases {
-            let mut builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let _guard = ltrim_characters(s, characters, writer).unwrap();
-            let array = builder.finish();
-            let v = array.value_at(0).unwrap();
-            assert_eq!(v, expected);
+            let mut writer = String::new();
+            ltrim_characters(s, characters, &mut writer)?;
+            assert_eq!(writer, expected);
         }
+        Ok(())
     }
 
     #[test]
-    fn test_rtrim_characters() {
+    fn test_rtrim_characters() -> Result<()> {
         let cases = [
             ("Hello world", "Hdl", "Hello wor"),
             ("abcde", "aae", "abcd"),
@@ -86,12 +80,10 @@ mod tests {
         ];
 
         for (s, characters, expected) in cases {
-            let mut builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let _guard = rtrim_characters(s, characters, writer).unwrap();
-            let array = builder.finish();
-            let v = array.value_at(0).unwrap();
-            assert_eq!(v, expected);
+            let mut writer = String::new();
+            rtrim_characters(s, characters, &mut writer)?;
+            assert_eq!(writer, expected);
         }
+        Ok(())
     }
 }
