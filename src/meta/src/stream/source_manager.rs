@@ -389,19 +389,13 @@ where
             let sources = catalog_manager.list_sources().await;
 
             for source in sources {
-<<<<<<< HEAD
-                Self::create_source_worker(&source, &mut managed_sources, false).await?
-=======
-                if let Some(StreamSource(_)) = source.info {
-                    Self::create_source_worker(
-                        &connector_rpc_endpoint,
-                        &source,
-                        &mut managed_sources,
-                        false,
-                    )
-                    .await?
-                }
->>>>>>> main
+                Self::create_source_worker(
+                    &connector_rpc_endpoint,
+                    &source,
+                    &mut managed_sources,
+                    false,
+                )
+                .await?
             }
         }
 
@@ -552,11 +546,6 @@ where
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
             tracing::warn!("source {} already registered", source.get_id());
-<<<<<<< HEAD
-        } else {
-            Self::create_source_worker(source, &mut core.managed_sources, true).await?;
-=======
-        } else if let Some(StreamSource(_)) = source.info {
             Self::create_source_worker(
                 &self.connector_rpc_endpoint,
                 source,
@@ -564,7 +553,6 @@ where
                 true,
             )
             .await?;
->>>>>>> main
         }
         Ok(())
     }
