@@ -18,17 +18,12 @@ use std::sync::Arc;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
-use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
 use risingwave_connector::source::filesystem::FsSplit;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_source::connector_source::{SourceContext, SourceDescBuilderV2};
 use risingwave_source::fs_connector_source::FsConnectorSource;
 use risingwave_source::monitor::SourceMetrics;
-use risingwave_source::row_id::RowIdGenerator;
 use risingwave_source::*;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -322,11 +317,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             }
                             Mutation::Pause => stream.pause_source(),
                             Mutation::Resume => stream.resume_source(),
-                            Mutation::Update {
-                                vnode_bitmaps,
-                                actor_splits,
-                                ..
-                            } => {
+                            Mutation::Update { actor_splits, .. } => {
                                 self.apply_split_change(
                                     &fs_source,
                                     source_metrics.clone(),
@@ -344,7 +335,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                 }
 
                 Either::Right(FsStreamChunkWithState {
-                    mut chunk,
+                    chunk,
                     split_offset_mapping,
                 }) => {
                     if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
