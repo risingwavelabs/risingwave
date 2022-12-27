@@ -57,8 +57,9 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 } else {
                     (false, false, false)
                 };
-            // we won't kill during insert/update/delete/flush since the atomicity is not guaranteed
-            if is_write {
+            // we won't kill during create/insert/update/delete/flush since the atomicity is not
+            // guaranteed. Notice that `create table as` is also not atomic in our system.
+            if is_write || is_create {
                 if !kill {
                     if let Err(e) = tester.run_async(record).await {
                         panic!("{}", e);
@@ -82,7 +83,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 }
                 continue;
             }
-            if !kill || is_write {
+            if !kill || is_write || is_create {
                 match tester.run_async(record).await {
                     Ok(_) => continue,
                     Err(e) => panic!("{}", e),
