@@ -313,7 +313,7 @@ mod tests {
                 serde.serialize(&row, &mut row_bytes);
                 let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
                 let encoding_data_size =
-                    ScalarImpl::encoding_data_size(&DataType::Timestampz, &mut deserializer)
+                    ScalarImpl::encoding_data_size(&DataType::Timestamptz, &mut deserializer)
                         .unwrap();
                 let data_size = size_of::<i64>();
                 assert_eq!(8, data_size);

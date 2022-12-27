@@ -45,7 +45,7 @@ pub trait ToText {
     /// - `ScalarRefImpl::Struct` -> `DataType::Struct`
     ///
     /// Exception:
-    /// The scalar of `DataType::Timestampz` is the `ScalarRefImpl::Int64`.
+    /// The scalar of `DataType::Timestamptz` is the `ScalarRefImpl::Int64`.
     fn to_text(&self) -> String;
 }
 
@@ -160,7 +160,7 @@ impl ToText for i64 {
     fn to_text_with_type(&self, ty: &DataType) -> String {
         match ty {
             DataType::Int64 => self.to_text(),
-            DataType::Timestampz => {
+            DataType::Timestamptz => {
                 // Just a meaningful representation as placeholder. The real implementation depends
                 // on TimeZone from session. See #3552.
                 let secs = self.div_euclid(1_000_000);

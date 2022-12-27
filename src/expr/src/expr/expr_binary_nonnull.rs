@@ -28,15 +28,15 @@ use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cmp::*;
 use crate::vector_op::date_trunc::{date_trunc_interval, date_trunc_timestamp};
 use crate::vector_op::extract::{
-    extract_from_date, extract_from_timestamp, extract_from_timestampz,
+    extract_from_date, extract_from_timestamp, extract_from_timestamptz,
 };
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
-use crate::vector_op::timestamptz::{timestamp_at_time_zone, timestampz_at_time_zone};
+use crate::vector_op::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
 use crate::vector_op::to_timestamp::to_timestamp;
 use crate::vector_op::tumble::{
-    tumble_start_date, tumble_start_date_time, tumble_start_timestampz,
+    tumble_start_date, tumble_start_date_time, tumble_start_timestamptz,
 };
 use crate::{for_all_cmp_variants, ExprError, Result};
 
@@ -369,12 +369,12 @@ fn build_extract_expr(
                 DecimalArray,
                 _,
             >::new(l, r, ret, extract_from_timestamp)),
-            DataType::Timestampz => Box::new(BinaryExpression::<
+            DataType::Timestamptz => Box::new(BinaryExpression::<
                 Utf8Array,
                 I64Array,
                 DecimalArray,
                 _,
-            >::new(l, r, ret, extract_from_timestampz)),
+            >::new(l, r, ret, extract_from_timestamptz)),
             _ => {
                 return Err(ExprError::UnsupportedFunction(format!(
                     "Extract ( {:?} ) is not supported yet!",
@@ -397,12 +397,12 @@ fn build_at_time_zone_expr(
             I64Array,
             _,
         >::new(l, r, ret, timestamp_at_time_zone)),
-        DataType::Timestampz => Box::new(BinaryExpression::<
+        DataType::Timestamptz => Box::new(BinaryExpression::<
             I64Array,
             Utf8Array,
             NaiveDateTimeArray,
             _,
-        >::new(l, r, ret, timestampz_at_time_zone)),
+        >::new(l, r, ret, timestamptz_at_time_zone)),
         _ => {
             return Err(ExprError::UnsupportedFunction(format!(
                 "{:?} AT TIME ZONE is not supported yet!",
@@ -426,7 +426,7 @@ pub fn new_date_trunc_expr(
             NaiveDateTimeArray,
             _,
         >::new(field, source, ret, date_trunc_timestamp).boxed(),
-        DataType::Timestampz => {
+        DataType::Timestamptz => {
             // timestamptz AT TIME ZONE zone -> timestamp
             // truncate(field, timestamp) -> timestamp
             // timestamp AT TIME ZONE zone -> timestamptz
@@ -436,7 +436,7 @@ pub fn new_date_trunc_expr(
                 source,
                 timezone1,
                 DataType::Timestamp,
-                timestampz_at_time_zone,
+                timestamptz_at_time_zone,
             ).boxed();
             let truncated = BinaryExpression::<
                 Utf8Array,
@@ -452,7 +452,7 @@ pub fn new_date_trunc_expr(
             BinaryExpression::<NaiveDateTimeArray, Utf8Array, I64Array, _>::new(
                 truncated,
                 timezone2,
-                DataType::Timestampz,
+                DataType::Timestamptz,
                 timestamp_at_time_zone,
             ).boxed()
         }
@@ -498,8 +498,8 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_add,
                 {
-                    { timestamptz, interval, timestamptz, timestampz_interval_add },
-                    { interval, timestamptz, timestamptz, interval_timestampz_add },
+                    { timestamptz, interval, timestamptz, timestamptz_interval_add },
+                    { interval, timestamptz, timestamptz, interval_timestamptz_add },
                     { timestamp, interval, timestamp, timestamp_interval_add },
                     { interval, timestamp, timestamp, interval_timestamp_add },
                     { interval, date, timestamp, interval_date_add },
@@ -520,7 +520,7 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_sub,
                 {
-                    { timestamptz, interval, timestamptz, timestampz_interval_sub },
+                    { timestamptz, interval, timestamptz, timestamptz_interval_sub },
                     { timestamp, timestamp, interval, timestamp_timestamp_sub },
                     { timestamp, interval, timestamp, timestamp_interval_sub },
                     { date, date, int32, date_date_sub },
@@ -674,12 +674,12 @@ fn new_tumble_start(
         >::new(
             expr_ia1, expr_ia2, return_type, tumble_start_date_time
         )),
-        DataType::Timestampz => Box::new(
+        DataType::Timestamptz => Box::new(
             BinaryExpression::<I64Array, IntervalArray, I64Array, _>::new(
                 expr_ia1,
                 expr_ia2,
                 return_type,
-                tumble_start_timestampz,
+                tumble_start_timestamptz,
             ),
         ),
         _ => {

@@ -696,7 +696,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Date => size_of::<NaiveDateWrapper>(),
             DataType::Time => size_of::<NaiveTimeWrapper>(),
             DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
-            DataType::Timestampz => size_of::<i64>(),
+            DataType::Timestamptz => size_of::<i64>(),
             DataType::Interval => size_of::<IntervalUnit>(),
             DataType::Varchar => 20,
             DataType::Bytea => 20,

@@ -207,7 +207,7 @@ pub(crate) use timestamp;
 macro_rules! timestamptz {
     ($macro:ident) => {
         $macro! {
-            risingwave_common::types::DataType::Timestampz,
+            risingwave_common::types::DataType::Timestamptz,
             risingwave_common::array::I64Array
         }
     };
