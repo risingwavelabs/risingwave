@@ -119,7 +119,7 @@ impl InsertExecutor {
             let stream_chunk =
                 StreamChunk::new(vec![Op::Insert; cap], columns, vis.into_visibility());
 
-            let notifier = self.dml_manager.write_chunk(&self.table_id, chunk)?;
+            let notifier = self.dml_manager.write_chunk(&self.table_id, stream_chunk)?;
             notifiers.push(notifier);
 
             Ok(())

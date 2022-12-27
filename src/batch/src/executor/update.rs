@@ -287,7 +287,7 @@ mod tests {
         // As we set the chunk size to 5, we'll get 2 chunks. Note that the update records for one
         // row cannot be cut into two chunks, so the first chunk will actually have 6 rows.
         for updated_rows in [1..=3, 4..=5] {
-            let chunk = reader.next().await.unwrap()?.chunk;
+            let chunk = reader.next().await.unwrap()?;
 
             assert_eq!(
                 chunk.ops().chunks(2).collect_vec(),

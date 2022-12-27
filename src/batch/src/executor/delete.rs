@@ -91,7 +91,7 @@ impl DeleteExecutor {
             let cap = chunk.capacity();
             let stream_chunk = StreamChunk::from_parts(vec![Op::Delete; cap], chunk);
 
-            let notifier = self.dml_manager.write_chunk(&self.table_id, chunk)?;
+            let notifier = self.dml_manager.write_chunk(&self.table_id, stream_chunk)?;
             notifiers.push(notifier);
 
             Ok(())
