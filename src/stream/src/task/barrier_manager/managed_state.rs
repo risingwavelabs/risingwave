@@ -153,6 +153,7 @@ impl ManagedBarrierState {
 
     /// Clear and reset all states.
     pub(crate) fn clear_all_states(&mut self) {
+        tracing::debug!("clear all states in local barrier manager");
         self.epoch_barrier_state_map.clear();
         self.create_mview_progress.clear();
         self.failure_actors.clear();
