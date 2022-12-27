@@ -158,3 +158,114 @@ impl ToStream for LogicalShare {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_pb::plan_common::JoinType;
+
+    use super::*;
+    use crate::expr::{ExprImpl, FunctionCall, InputRef, Literal};
+    use crate::optimizer::optimizer_context::OptimizerContext;
+    use crate::optimizer::plan_node::{
+        LogicalFilter, LogicalJoin, LogicalValues, PlanTreeNodeBinary,
+    };
+
+    #[tokio::test]
+    async fn test_share_predicate_pushdown() {
+        let ty = DataType::Int32;
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = vec![
+            Field::with_name(ty.clone(), "v1"),
+            Field::with_name(ty.clone(), "v2"),
+            Field::with_name(ty.clone(), "v3"),
+        ];
+        let values1 = LogicalValues::new(vec![], Schema { fields }, ctx);
+
+        let share: PlanRef = LogicalShare::create(values1.into());
+
+        let on: ExprImpl = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                Type::Equal,
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef::new(1, ty.clone()))),
+                    ExprImpl::InputRef(Box::new(InputRef::new(3, ty.clone()))),
+                ],
+            )
+            .unwrap(),
+        ));
+
+        let predicate1: ExprImpl = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                Type::Equal,
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef::new(0, DataType::Int32))),
+                    ExprImpl::Literal(Box::new(Literal::new(
+                        Some(ScalarImpl::from(100)),
+                        DataType::Int32,
+                    ))),
+                ],
+            )
+            .unwrap(),
+        ));
+
+        let predicate2: ExprImpl = ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                Type::Equal,
+                vec![
+                    ExprImpl::InputRef(Box::new(InputRef::new(4, DataType::Int32))),
+                    ExprImpl::Literal(Box::new(Literal::new(
+                        Some(ScalarImpl::from(200)),
+                        DataType::Int32,
+                    ))),
+                ],
+            )
+            .unwrap(),
+        ));
+
+        let join: PlanRef = LogicalJoin::create(share.clone(), share, JoinType::Inner, on);
+
+        let filter1: PlanRef = LogicalFilter::create_with_expr(join, predicate1);
+
+        let filter2: PlanRef = LogicalFilter::create_with_expr(filter1, predicate2);
+
+        let result = filter2.predicate_pushdown(
+            Condition::true_cond(),
+            &mut PredicatePushdownContext::new(filter2.clone()),
+        );
+
+        // LogicalJoin { type: Inner, on: (v2 = v1) }
+        // ├─LogicalFilter { predicate: (v1 = 100:Int32) }
+        // | └─LogicalShare { id = 2 }
+        // |   └─LogicalFilter { predicate: ((v1 = 100:Int32) OR (v2 = 200:Int32)) }
+        // |     └─LogicalValues { rows: [], schema: Schema { fields: [v1:Int32, v2:Int32, v3:Int32]
+        // } } └─LogicalFilter { predicate: (v2 = 200:Int32) }
+        //   └─LogicalShare { id = 2 }
+        //     └─LogicalFilter { predicate: ((v1 = 100:Int32) OR (v2 = 200:Int32)) }
+        //       └─LogicalValues { rows: [], schema: Schema { fields: [v1:Int32, v2:Int32, v3:Int32]
+        // } }
+
+        let logical_join: &LogicalJoin = result.as_logical_join().unwrap();
+        let left = logical_join.left();
+        let left_filter: &LogicalFilter = left.as_logical_filter().unwrap();
+        let left_filter_input = left_filter.input();
+        let logical_share: &LogicalShare = left_filter_input.as_logical_share().unwrap();
+        let share_input = logical_share.input();
+        let share_input_filter: &LogicalFilter = share_input.as_logical_filter().unwrap();
+        let disjunctions = share_input_filter.predicate().conjunctions[0]
+            .as_or_disjunctions()
+            .unwrap();
+        assert_eq!(disjunctions.len(), 2);
+        let (input_ref1, _const1) = disjunctions[0].as_eq_const().unwrap();
+        let (input_ref2, _const2) = disjunctions[1].as_eq_const().unwrap();
+        if input_ref1.index() == 0 {
+            assert_eq!(input_ref2.index(), 1);
+        } else {
+            assert_eq!(input_ref1.index(), 1);
+            assert_eq!(input_ref2.index(), 0);
+        }
+    }
+}
