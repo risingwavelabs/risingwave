@@ -7,6 +7,7 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::binder::Relation;
 use crate::Binder;
 
+#[expect(clippy::unused_async)]
 pub async fn handle_add_column(
     handler_args: HandlerArgs,
     table_name: ObjectName,
@@ -17,7 +18,7 @@ pub async fn handle_add_column(
     let catalog = {
         let relation = Binder::new(&session).bind_relation_by_name(table_name.clone(), None)?;
         match relation {
-            Relation::BaseTable(table) => table.table_catalog,
+            Relation::BaseTable(table) if table.table_catalog.is_table() => table.table_catalog,
             _ => Err(ErrorCode::InvalidInputSyntax(format!(
                 "\"{table_name}\" is not a table or cannot be altered"
             )))?,
@@ -28,11 +29,11 @@ pub async fn handle_add_column(
     if catalog
         .columns()
         .iter()
-        .find(|c| c.name() == &new_column_name)
-        .is_some()
+        .any(|c| c.name() == new_column_name)
     {
         Err(ErrorCode::InvalidInputSyntax(format!(
-            "column \"\" of table \"\" already exists"
+            "column \"{}\" of table \"{}\" already exists",
+            new_column_name, table_name
         )))?
     }
 
@@ -41,8 +42,8 @@ pub async fn handle_add_column(
         let (columns, pk_id) = bind_sql_columns_with_offset(vec![new_column], column_id_offset)?;
         if pk_id.is_some() {
             Err(ErrorCode::NotImplemented(
-                format!("cannot add a primary key column"),
-                None.into(),
+                "add a primary key column".to_owned(),
+                6903.into(),
             ))?
         }
         columns.into_iter().exactly_one().unwrap()

@@ -1,0 +1,20 @@
+statement ok
+create table t (v int);
+
+statement ok
+create materialized view mv as select * from t;
+
+statement error column .* already exists
+alter table t add column v int;
+
+statement error add a primary key column
+alter table t add column v1 int primary key;
+
+statement error is not a table or cannot be altered
+alter table mv add column v1 int;
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;
