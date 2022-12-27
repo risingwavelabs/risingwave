@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::repeat;
+
 use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{
-    ArrayBuilder, DataChunk, I64ArrayBuilder, Op, PrimitiveArrayBuilder, StreamChunk,
+    ArrayBuilder, DataChunk, I64Array, Op, PrimitiveArrayBuilder, StreamChunk,
 };
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::TableSourceManagerRef;
 
@@ -29,6 +32,7 @@ use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
 use crate::task::BatchTaskContext;
+
 /// [`InsertExecutor`] implements table insertion with values from its child executor.
 pub struct InsertExecutor {
     /// Target table id.
@@ -36,6 +40,7 @@ pub struct InsertExecutor {
     source_manager: TableSourceManagerRef,
 
     child: BoxedExecutor,
+    chunk_size: usize,
     schema: Schema,
     identity: String,
     column_idxs: Vec<usize>,
@@ -46,6 +51,7 @@ impl InsertExecutor {
         table_id: TableId,
         source_manager: TableSourceManagerRef,
         child: BoxedExecutor,
+        chunk_size: usize,
         identity: String,
         column_idxs: Vec<usize>,
     ) -> Self {
@@ -53,6 +59,7 @@ impl InsertExecutor {
             table_id,
             source_manager,
             child,
+            chunk_size,
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
             },
@@ -80,42 +87,54 @@ impl InsertExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
         let source_desc = self.source_manager.get_source(&self.table_id)?;
-
         let source = source_desc.source.as_table().expect("not table source");
         let row_id_index = source_desc.row_id_index;
 
+        let data_types = self.child.schema().data_types();
+        let mut builder = DataChunkBuilder::new(data_types, 1024);
+
         let mut notifiers = Vec::new();
 
-        #[for_await]
-        for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?;
-            let len = data_chunk.cardinality();
-            assert!(data_chunk.visibility().is_none());
-
-            let (mut columns, _) = data_chunk.into_parts();
+        // Transform the data chunk to a stream chunk, then write to the source.
+        let mut write_chunk = |chunk: DataChunk| -> Result<()> {
+            let cap = chunk.capacity();
+            let (mut columns, vis) = chunk.into_parts();
 
             // No need to check for duplicate columns. This is already validated in binder
             if !&self.column_idxs.is_sorted() {
-                let mut ordered_cols: Vec<Column> = columns.clone();
+                let mut ordered_cols = columns.clone();
                 for (i, idx) in self.column_idxs.iter().enumerate() {
                     ordered_cols[*idx] = columns[i].clone()
                 }
                 columns = ordered_cols
             }
 
-            // if user did not specify primary ID then we need to add a col it
+            // If user did not specify the primary key, then we need to add a column for placeholder
+            // of generating row IDs.
             if let Some(row_id_index) = row_id_index {
-                let mut builder = I64ArrayBuilder::new(len);
-                for _ in 0..len {
-                    builder.append_null();
-                }
-                columns.insert(row_id_index, Column::from(builder.finish()))
+                let array: I64Array = repeat(None).take(cap).collect();
+                columns.insert(row_id_index, Column::from(array));
             }
 
-            let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
+            let stream_chunk =
+                StreamChunk::new(vec![Op::Insert; cap], columns, vis.into_visibility());
 
-            let notifier = source.write_chunk(chunk)?;
+            let notifier = source.write_chunk(stream_chunk)?;
             notifiers.push(notifier);
+
+            Ok(())
+        };
+
+        #[for_await]
+        for data_chunk in self.child.execute() {
+            let data_chunk = data_chunk?;
+            for chunk in builder.append_chunk(data_chunk) {
+                write_chunk(chunk)?;
+            }
+        }
+
+        if let Some(chunk) = builder.consume_all() {
+            write_chunk(chunk)?;
         }
 
         // Wait for all chunks to be taken / written.
@@ -162,6 +181,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             table_id,
             source.context().source_manager(),
             child,
+            source.context.get_config().developer.batch_chunk_size,
             source.plan_node().get_identity().clone(),
             column_idxs,
         )))
@@ -246,6 +266,7 @@ mod tests {
             table_id,
             source_manager.clone(),
             Box::new(mock_executor),
+            1024,
             "InsertExecutor".to_string(),
             vec![], // Ignoring insertion order
         ));
@@ -312,6 +333,7 @@ mod tests {
                     ignore_range_tombstone: false,
                     table_id: Default::default(),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await?;

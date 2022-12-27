@@ -74,7 +74,7 @@ impl Expression for CaseExpression {
             input.set_vis(calc_then_vis.clone());
             let then_res = then.eval_checked(&input)?;
             calc_then_vis
-                .ones()
+                .iter_ones()
                 .for_each(|pos| selection[pos] = Some(when_idx));
             input.set_vis(&input_vis & (!&calc_then_vis));
             result_array.push(then_res);
@@ -83,7 +83,7 @@ impl Expression for CaseExpression {
             let else_res = else_expr.eval_checked(&input)?;
             input
                 .vis()
-                .ones()
+                .iter_ones()
                 .for_each(|pos| selection[pos] = Some(when_len));
             result_array.push(else_res);
         }

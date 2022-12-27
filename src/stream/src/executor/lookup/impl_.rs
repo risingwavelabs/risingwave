@@ -23,7 +23,6 @@ use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
-use crate::cache::LruManagerRef;
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
@@ -31,6 +30,7 @@ use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::{Barrier, Executor, Message, PkIndices};
+use crate::task::AtomicU64RefOpt;
 
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
@@ -104,7 +104,7 @@ pub struct LookupExecutorParams<S: StateStore> {
 
     pub state_table: StateTable<S>,
 
-    pub lru_manager: Option<LruManagerRef>,
+    pub watermark_epoch: AtomicU64RefOpt,
 
     pub cache_size: usize,
 
@@ -125,7 +125,7 @@ impl<S: StateStore> LookupExecutor<S> {
             schema: output_schema,
             column_mapping,
             state_table,
-            lru_manager,
+            watermark_epoch,
             cache_size,
             chunk_size,
         } = params;
@@ -223,7 +223,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(lru_manager, cache_size),
+            lookup_cache: LookupCache::new(watermark_epoch, cache_size),
             chunk_size,
         }
     }
@@ -415,7 +415,7 @@ impl<S: StateStore> LookupExecutor<S> {
             pin_mut!(all_data_iter);
             while let Some(inner) = all_data_iter.next().await {
                 // Only need value (include storage pk).
-                let row = inner.unwrap().into_owned();
+                let row = inner.unwrap();
                 all_rows.push(row);
             }
         }

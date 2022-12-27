@@ -42,13 +42,13 @@ pub enum Decimal {
 }
 
 impl ToText for Decimal {
-    fn to_text(&self) -> String {
-        self.to_string()
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        write!(f, "{self}")
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            DataType::Decimal => self.to_text(),
+            DataType::Decimal => self.write(f),
             _ => unreachable!(),
         }
     }
@@ -185,12 +185,10 @@ macro_rules! impl_try_from_decimal {
 }
 
 macro_rules! impl_try_from_float {
-    ($from_ty:ty, $to_ty:ty, $convert:path, $err:expr) => {
-        impl core::convert::TryFrom<$from_ty> for $to_ty {
-            type Error = Error;
-
-            fn try_from(value: $from_ty) -> Result<Self, Self::Error> {
-                $convert(value).ok_or_else(|| Error::from($err))
+    ($from_ty:ty, $to_ty:ty, $convert:path) => {
+        impl core::convert::From<$from_ty> for $to_ty {
+            fn from(value: $from_ty) -> Self {
+                $convert(value).expect("f32/f64 to decimal should not fail")
             }
         }
     };
@@ -213,18 +211,8 @@ macro_rules! checked_proxy {
 
 impl_try_from_decimal!(Decimal, f32, Decimal::to_f32, "Failed to convert to f32");
 impl_try_from_decimal!(Decimal, f64, Decimal::to_f64, "Failed to convert to f64");
-impl_try_from_float!(
-    f32,
-    Decimal,
-    Decimal::from_f32,
-    "Failed to convert to Decimal"
-);
-impl_try_from_float!(
-    f64,
-    Decimal,
-    Decimal::from_f64,
-    "Failed to convert to Decimal"
-);
+impl_try_from_float!(f32, Decimal, Decimal::from_f32);
+impl_try_from_float!(f64, Decimal, Decimal::from_f64);
 
 impl FromPrimitive for Decimal {
     impl_from_integer!([
@@ -554,18 +542,18 @@ impl Decimal {
         }
     }
 
-    pub fn abs(&self) -> Option<Self> {
+    pub fn abs(&self) -> Self {
         match self {
             Self::Normalized(d) => {
                 if d.is_sign_negative() {
-                    Some(Self::Normalized(-d))
+                    Self::Normalized(-d)
                 } else {
-                    Some(Self::Normalized(*d))
+                    Self::Normalized(*d)
                 }
             }
-            Self::NaN => Some(Self::NaN),
-            Self::PositiveInf => Some(Self::PositiveInf),
-            Self::NegativeInf => Some(Self::PositiveInf),
+            Self::NaN => Self::NaN,
+            Self::PositiveInf => Self::PositiveInf,
+            Self::NegativeInf => Self::PositiveInf,
         }
     }
 }

@@ -52,7 +52,7 @@ where
     async fn execute_inner(self, epoch: u64) {
         let iter = self
             .table
-            .batch_iter(HummockReadEpoch::Committed(epoch))
+            .batch_iter(HummockReadEpoch::Committed(epoch), false)
             .await?;
         pin_mut!(iter);
 

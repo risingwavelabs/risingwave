@@ -259,7 +259,7 @@ impl<S: StateStore> SortExecutor<S> {
             curr_vnode_bitmap.to_owned()
         };
         let mut values_per_vnode = Vec::new();
-        for owned_vnode in newly_owned_vnodes.ones() {
+        for owned_vnode in newly_owned_vnodes.iter_ones() {
             let value_iter = self
                 .state_table
                 .iter_with_pk_range(
@@ -277,7 +277,7 @@ impl<S: StateStore> SortExecutor<S> {
             let mut stream = select_all(values_per_vnode);
             while let Some(storage_result) = stream.next().await {
                 // Insert the data into buffer.
-                let row: OwnedRow = storage_result?.into_owned();
+                let row: OwnedRow = storage_result?;
                 let timestamp_datum = row
                     .datum_at(self.sort_column_index)
                     .to_owned_datum()

@@ -66,3 +66,11 @@ message ParallelUnitMapping {
   repeated uint64 original_indices = 2;
   repeated uint32 data = 3;
 }
+
+message BatchQueryEpoch {
+  oneof epoch {
+    uint64 committed = 1;
+    uint64 current = 2;
+    uint64 backup = 3;
+  }
+}

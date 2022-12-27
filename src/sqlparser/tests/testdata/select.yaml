@@ -8,39 +8,39 @@
   formatted_sql: SELECT INT '1'
 
 - input: SELECT (foo).v1.v2 FROM foo
-  formatted_sql: SELECT foo.v1.v2 FROM foo
+  formatted_sql: SELECT (foo).v1.v2 FROM foo
 
 - input: SELECT ((((foo).v1)).v2) FROM foo
-  formatted_sql: SELECT (foo.v1.v2) FROM foo
+  formatted_sql: SELECT ((foo).v1.v2) FROM foo
   formatted_ast: |
     Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Nested(FieldIdentifier(Identifier(Ident { value: "foo", quote_style: None }), [Ident { value: "v1", quote_style: None }, Ident { value: "v2", quote_style: None }])))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "foo", quote_style: None }]), alias: None }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
 
 - input: SELECT (foo.v1).v2 FROM foo
-  formatted_sql: SELECT foo.v1.v2 FROM foo
+  formatted_sql: SELECT (foo.v1).v2 FROM foo
 
 - input: SELECT (v1).v2 FROM foo
-  formatted_sql: SELECT v1.v2 FROM foo
+  formatted_sql: SELECT (v1).v2 FROM foo
 
 - input: SELECT ((1,2,3)::foo).v1
-  formatted_sql: SELECT CAST(ROW(1, 2, 3) AS foo).v1
+  formatted_sql: SELECT (CAST(ROW(1, 2, 3) AS foo)).v1
 
 - input: SELECT ((1,2,3)::foo).v1.v2
-  formatted_sql: SELECT CAST(ROW(1, 2, 3) AS foo).v1.v2
+  formatted_sql: SELECT (CAST(ROW(1, 2, 3) AS foo)).v1.v2
 
 - input: SELECT (((1,2,3)::foo).v1).v2
-  formatted_sql: SELECT CAST(ROW(1, 2, 3) AS foo).v1.v2
+  formatted_sql: SELECT (CAST(ROW(1, 2, 3) AS foo)).v1.v2
 
 - input: SELECT (foo).* FROM foo
-  formatted_sql: SELECT foo..* FROM foo
+  formatted_sql: SELECT (foo).* FROM foo
 
 - input: SELECT ((foo.v1).v2).* FROM foo
-  formatted_sql: SELECT foo.v1.v2.* FROM foo
+  formatted_sql: SELECT (foo.v1).v2.* FROM foo
 
 - input: SELECT ((1,2,3)::foo).v1.*
-  formatted_sql: SELECT CAST(ROW(1, 2, 3) AS foo).v1.*
+  formatted_sql: SELECT (CAST(ROW(1, 2, 3) AS foo)).v1.*
 
 - input: SELECT (((((1,2,3)::foo).v1))).*
-  formatted_sql: SELECT CAST(ROW(1, 2, 3) AS foo).v1.*
+  formatted_sql: SELECT (CAST(ROW(1, 2, 3) AS foo)).v1.*
 
 - input: SELECT * FROM generate_series('2'::INT,'10'::INT,'2'::INT)
   formatted_sql: SELECT * FROM generate_series(CAST('2' AS INT), CAST('10' AS INT), CAST('2' AS INT))

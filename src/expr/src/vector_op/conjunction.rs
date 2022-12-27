@@ -39,8 +39,8 @@ pub fn or(l: Option<bool>, r: Option<bool>) -> Result<Option<bool>> {
 }
 
 #[inline(always)]
-pub fn not(l: Option<bool>) -> Result<Option<bool>> {
-    Ok(l.map(|v| !v))
+pub fn not(l: Option<bool>) -> Option<bool> {
+    l.map(|v| !v)
 }
 
 #[cfg(test)]

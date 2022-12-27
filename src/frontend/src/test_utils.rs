@@ -27,6 +27,7 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
+use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
@@ -650,6 +651,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn unpin_snapshot_before(&self, _epoch: u64) -> RpcResult<()> {
         Ok(())
+    }
+
+    async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
+        Ok(vec![])
     }
 }
 

@@ -15,7 +15,6 @@
 mod join_entry_state;
 
 use std::alloc::Global;
-use std::borrow::Cow;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
@@ -36,11 +35,11 @@ use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::StateStore;
 
-use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::cache::{cache_may_stale, new_with_hasher_in, EvictableHashMap, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::ActorId;
+use crate::task::{ActorId, AtomicU64RefOpt};
 
 type DegreeType = u64;
 
@@ -230,7 +229,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        lru_manager: Option<LruManagerRef>,
+        watermark_epoch: AtomicU64RefOpt,
         cache_size: usize,
         join_key_data_types: Vec<DataType>,
         state_all_data_types: Vec<DataType>,
@@ -270,10 +269,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             table: degree_table,
         };
 
-        let cache = if let Some(lru_manager) = lru_manager {
-            ExecutorCache::Managed(
-                lru_manager.create_cache_with_hasher_in(PrecomputedBuildHasher, alloc),
-            )
+        let cache = if let Some(lru_manager) = watermark_epoch {
+            ExecutorCache::Managed(new_with_hasher_in(
+                lru_manager,
+                PrecomputedBuildHasher,
+                alloc,
+            ))
         } else {
             ExecutorCache::Local(EvictableHashMap::with_hasher_in(
                 cache_size,
@@ -378,7 +379,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
             #[for_await]
             for row in table_iter {
-                let row: Cow<'_, OwnedRow> = row?;
+                let row: OwnedRow = row?;
                 let pk = row
                     .as_ref()
                     .project(&self.state.pk_indices)

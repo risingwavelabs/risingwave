@@ -43,6 +43,7 @@ show schemas;
 information_schema
 pg_catalog
 public
+rw_catalog
 
 query T
 show tables;

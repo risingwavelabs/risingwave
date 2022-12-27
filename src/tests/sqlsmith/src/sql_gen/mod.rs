@@ -63,7 +63,9 @@ impl From<ColumnDef> for Column {
     fn from(c: ColumnDef) -> Self {
         Self {
             name: c.name.real_value(),
-            data_type: bind_data_type(&c.data_type).unwrap().into(),
+            data_type: bind_data_type(&c.data_type.expect("data type should not be none"))
+                .unwrap()
+                .into(),
         }
     }
 }
@@ -77,6 +79,7 @@ pub(crate) struct SqlGeneratorContext {
     inside_explicit_cast: bool,
 }
 
+#[allow(dead_code)]
 impl SqlGeneratorContext {
     pub fn new() -> Self {
         SqlGeneratorContext {

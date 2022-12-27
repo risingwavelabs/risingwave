@@ -13,6 +13,11 @@ export interface ExprNode {
   };
 }
 
+/**
+ * a "pure function" will be defined as having `1 < expr_node as i32 <= 600`.
+ * Please modify this definition if adding a pure function that does not belong
+ * to this range.
+ */
 export const ExprNode_Type = {
   UNSPECIFIED: "UNSPECIFIED",
   INPUT_REF: "INPUT_REF",
@@ -45,9 +50,18 @@ export const ExprNode_Type = {
   /** EXTRACT - date functions */
   EXTRACT: "EXTRACT",
   TUMBLE_START: "TUMBLE_START",
+  /**
+   * TO_TIMESTAMP - From f64 to timestamp.
+   * e.g. `select to_timestamp(1672044740.0)`
+   */
   TO_TIMESTAMP: "TO_TIMESTAMP",
   AT_TIME_ZONE: "AT_TIME_ZONE",
   DATE_TRUNC: "DATE_TRUNC",
+  /**
+   * TO_TIMESTAMP1 - Parse text to timestamp by format string.
+   * e.g. `select to_timestamp('2022 08 21', 'YYYY MM DD')`
+   */
+  TO_TIMESTAMP1: "TO_TIMESTAMP1",
   /** CAST - other functions */
   CAST: "CAST",
   SUBSTR: "SUBSTR",
@@ -209,6 +223,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 106:
     case "DATE_TRUNC":
       return ExprNode_Type.DATE_TRUNC;
+    case 107:
+    case "TO_TIMESTAMP1":
+      return ExprNode_Type.TO_TIMESTAMP1;
     case 201:
     case "CAST":
       return ExprNode_Type.CAST;
@@ -432,6 +449,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "AT_TIME_ZONE";
     case ExprNode_Type.DATE_TRUNC:
       return "DATE_TRUNC";
+    case ExprNode_Type.TO_TIMESTAMP1:
+      return "TO_TIMESTAMP1";
     case ExprNode_Type.CAST:
       return "CAST";
     case ExprNode_Type.SUBSTR:

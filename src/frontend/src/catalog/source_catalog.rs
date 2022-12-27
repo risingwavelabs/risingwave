@@ -22,8 +22,6 @@ use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, SourceId};
 use crate::WithOptions;
 
-pub const KAFKA_CONNECTOR: &str = "kafka";
-
 /// This struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
 ///
@@ -79,7 +77,10 @@ impl From<&ProstSource> for SourceCatalog {
             .clone()
             .map(|row_id_index| row_id_index.index as _);
 
-        let append_only = with_options.append_only();
+        let append_only = match &info {
+            SourceInfo::StreamSource(_) => row_id_index.is_some(),
+            SourceInfo::TableSource(_) => with_options.append_only(),
+        };
         let owner = prost.owner;
 
         Self {

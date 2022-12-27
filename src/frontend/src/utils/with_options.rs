@@ -22,13 +22,10 @@ use risingwave_sqlparser::ast::{
     CreateSinkStatement, CreateSourceStatement, SqlOption, Statement, Value,
 };
 
-use crate::catalog::source_catalog::KAFKA_CONNECTOR;
-
 mod options {
     use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 
     pub const APPEND_ONLY: &str = "appendonly";
-    pub const CONNECTOR: &str = "connector";
     pub const RETENTION_SECONDS: &str = PROPERTIES_RETENTION_SECOND_KEY;
 }
 
@@ -73,12 +70,6 @@ impl WithOptions {
     pub fn append_only(&self) -> bool {
         if let Some(val) = self.inner.get(options::APPEND_ONLY) {
             if val.eq_ignore_ascii_case("true") {
-                return true;
-            }
-        }
-        if let Some(val) = self.inner.get(options::CONNECTOR) {
-            // Kafka source is append-only
-            if val.eq_ignore_ascii_case(KAFKA_CONNECTOR) {
                 return true;
             }
         }

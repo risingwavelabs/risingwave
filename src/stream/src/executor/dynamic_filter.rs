@@ -238,7 +238,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         pin_mut!(rhs_stream);
 
         if let Some(res) = rhs_stream.next().await {
-            let value = res?.into_owned();
+            let value = res?;
             assert!(rhs_stream.next().await.is_none());
             Ok(Some(value))
         } else {
@@ -322,7 +322,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     let (columns, _) = data_chunk.into_parts();
 
-                    if new_visibility.num_high_bits() > 0 {
+                    if new_visibility.count_ones() > 0 {
                         let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
                         yield Message::Chunk(new_chunk)
                     }

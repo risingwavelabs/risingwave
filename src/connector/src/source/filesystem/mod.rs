@@ -11,5 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+pub use s3::{S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR};
+
 mod file_common;
-pub mod s3;
+pub use file_common::{FsSplit, FsSplitReader};
+mod s3;

@@ -450,6 +450,9 @@ pub struct ReadOptions {
 
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,
+    /// Read from historical hummock version of meta snapshot backup.
+    /// It should only be used by `StorageTable` for batch query.
+    pub read_version_from_backup: bool,
 }
 
 pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {

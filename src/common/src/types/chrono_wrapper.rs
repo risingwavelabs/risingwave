@@ -72,39 +72,39 @@ impl Default for NaiveDateTimeWrapper {
 }
 
 impl ToText for NaiveDateWrapper {
-    fn to_text(&self) -> String {
-        self.0.to_string()
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            super::DataType::Date => self.to_text(),
+            super::DataType::Date => self.write(f),
             _ => unreachable!(),
         }
     }
 }
 
 impl ToText for NaiveTimeWrapper {
-    fn to_text(&self) -> String {
-        self.0.to_string()
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            super::DataType::Time => self.to_text(),
+            super::DataType::Time => self.write(f),
             _ => unreachable!(),
         }
     }
 }
 
 impl ToText for NaiveDateTimeWrapper {
-    fn to_text(&self) -> String {
-        self.0.to_string()
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            super::DataType::Timestamp => self.to_text(),
+            super::DataType::Timestamp => self.write(f),
             _ => unreachable!(),
         }
     }

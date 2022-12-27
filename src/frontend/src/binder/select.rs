@@ -180,7 +180,7 @@ impl Binder {
         for item in select_items {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
-                    let (select_expr, alias) = match &expr.clone() {
+                    let (select_expr, alias) = match expr.clone() {
                         Expr::Identifier(ident) => {
                             (self.bind_expr(expr)?, Some(ident.real_value()))
                         }
@@ -189,7 +189,7 @@ impl Binder {
                             idents.last().map(|ident| ident.real_value()),
                         ),
                         Expr::FieldIdentifier(field_expr, idents) => (
-                            self.bind_single_field_column(*field_expr.clone(), idents)?,
+                            self.bind_single_field_column(*field_expr.clone(), &idents)?,
                             idents.last().map(|ident| ident.real_value()),
                         ),
                         _ => (self.bind_expr(expr)?, None),
@@ -217,8 +217,8 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
-                SelectItem::ExprQualifiedWildcard(expr, idents) => {
-                    let (exprs, names) = self.bind_wildcard_field_column(expr, &idents.0)?;
+                SelectItem::ExprQualifiedWildcard(expr, prefix) => {
+                    let (exprs, names) = self.bind_wildcard_field_column(expr, prefix)?;
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }

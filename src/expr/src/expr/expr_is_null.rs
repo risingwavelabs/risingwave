@@ -25,44 +25,33 @@ use crate::Result;
 #[derive(Debug)]
 pub struct IsNullExpression {
     child: BoxedExpression,
-    return_type: DataType,
 }
 
 #[derive(Debug)]
 pub struct IsNotNullExpression {
     child: BoxedExpression,
-    return_type: DataType,
 }
 
 impl IsNullExpression {
     pub(crate) fn new(child: BoxedExpression) -> Self {
-        Self {
-            child,
-            return_type: DataType::Boolean,
-        }
+        Self { child }
     }
 }
 
 impl IsNotNullExpression {
     pub(crate) fn new(child: BoxedExpression) -> Self {
-        Self {
-            child,
-            return_type: DataType::Boolean,
-        }
+        Self { child }
     }
 }
 
 impl Expression for IsNullExpression {
     fn return_type(&self) -> DataType {
-        self.return_type.clone()
+        DataType::Boolean
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let child_arr = self.child.eval_checked(input)?;
-        let arr = BoolArray::new(
-            Bitmap::all_high_bits(input.capacity()),
-            !child_arr.null_bitmap(),
-        );
+        let arr = BoolArray::new(!child_arr.null_bitmap(), Bitmap::ones(input.capacity()));
 
         Ok(Arc::new(ArrayImpl::Bool(arr)))
     }
@@ -76,7 +65,7 @@ impl Expression for IsNullExpression {
 
 impl Expression for IsNotNullExpression {
     fn return_type(&self) -> DataType {
-        self.return_type.clone()
+        DataType::Boolean
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
@@ -85,7 +74,7 @@ impl Expression for IsNotNullExpression {
             Ok(child_arr) => child_arr.into_null_bitmap(),
             Err(child_arr) => child_arr.null_bitmap().clone(),
         };
-        let arr = BoolArray::new(Bitmap::all_high_bits(input.capacity()), null_bitmap);
+        let arr = BoolArray::new(null_bitmap, Bitmap::ones(input.capacity()));
 
         Ok(Arc::new(ArrayImpl::Bool(arr)))
     }

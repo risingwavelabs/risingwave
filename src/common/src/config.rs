@@ -360,6 +360,16 @@ pub struct DeveloperConfig {
     /// The maximum size of the chunk produced by executor at a time.
     #[serde(default = "default::developer::stream_chunk_size")]
     pub stream_chunk_size: usize,
+
+    /// The initial permits that a channel holds, i.e., the maximum row count can be buffered in
+    /// the channel.
+    #[serde(default = "default::developer::stream_exchange_initial_permits")]
+    pub stream_exchange_initial_permits: usize,
+
+    /// The permits that are batched to add back, for reducing the backward `AddPermits` messages
+    /// in remote exchange.
+    #[serde(default = "default::developer::stream_exchange_batched_permits")]
+    pub stream_exchange_batched_permits: usize,
 }
 
 impl Default for DeveloperConfig {
@@ -588,6 +598,14 @@ mod default {
         }
 
         pub fn stream_chunk_size() -> usize {
+            1024
+        }
+
+        pub fn stream_exchange_initial_permits() -> usize {
+            8192
+        }
+
+        pub fn stream_exchange_batched_permits() -> usize {
             1024
         }
     }

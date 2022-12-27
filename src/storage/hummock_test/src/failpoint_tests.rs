@@ -27,7 +27,8 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
 
-use crate::test_utils::{get_test_notification_client, HummockV2MixedStateStore};
+use crate::get_test_notification_client;
+use crate::test_utils::HummockV2MixedStateStore;
 
 #[tokio::test]
 #[ignore]
@@ -91,6 +92,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -136,6 +138,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await;
@@ -150,6 +153,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await;
@@ -165,6 +169,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -199,6 +204,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -215,6 +221,7 @@ async fn test_failpoints_state_store_read_upload() {
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await

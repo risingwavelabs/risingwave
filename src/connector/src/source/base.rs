@@ -24,11 +24,15 @@ use futures::{pin_mut, Stream, StreamExt};
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::ErrorCode;
+use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
+use super::filesystem::{
+    FsSplit, FsSplitReader, S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR,
+};
 use crate::source::cdc::{
     CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, MYSQL_CDC_CONNECTOR,
     POSTGRES_CDC_CONNECTOR,
@@ -37,7 +41,6 @@ use crate::source::datagen::{
     DatagenProperties, DatagenSplit, DatagenSplitEnumerator, DatagenSplitReader, DATAGEN_CONNECTOR,
 };
 use crate::source::dummy_connector::DummySplitReader;
-use crate::source::filesystem::s3::{S3Properties, S3_CONNECTOR};
 use crate::source::google_pubsub::{
     PubsubProperties, PubsubSplit, PubsubSplitEnumerator, PubsubSplitReader,
     GOOGLE_PUBSUB_CONNECTOR,
@@ -88,6 +91,7 @@ pub trait SplitReader: Sized {
 }
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
+pub type BoxFsSourceStream = BoxStream<'static, Result<Vec<FsSourceMessage>>>;
 
 /// The max size of a chunk yielded by source stream.
 pub const MAX_CHUNK_SIZE: usize = 1024;
@@ -126,19 +130,17 @@ impl ConnectorProperties {
         }
     }
 
-    pub fn set_source_id_for_cdc(&mut self, source_id: u32) {
+    pub fn init_properties_for_cdc(
+        &mut self,
+        source_id: u32,
+        rpc_addr: String,
+        table_schema: Option<TableSchema>,
+    ) {
         match self {
             ConnectorProperties::MySqlCdc(c) | ConnectorProperties::PostgresCdc(c) => {
                 c.source_id = source_id;
-            }
-            _ => {}
-        }
-    }
-
-    pub fn set_connector_node_addr(&mut self, addr: String) {
-        match self {
-            ConnectorProperties::MySqlCdc(c) | ConnectorProperties::PostgresCdc(c) => {
-                c.connector_node_addr = addr;
+                c.connector_node_addr = rpc_addr;
+                c.table_schema = table_schema;
             }
             _ => {}
         }
@@ -155,6 +157,18 @@ pub enum SplitImpl {
     GooglePubsub(PubsubSplit),
     MySqlCdc(CdcSplit),
     PostgresCdc(CdcSplit),
+    S3(FsSplit),
+}
+
+// for the `FsSourceExecutor`
+impl SplitImpl {
+    #[allow(clippy::result_unit_err)]
+    pub fn into_fs(self) -> Result<FsSplit, ()> {
+        match self {
+            Self::S3(split) => Ok(split),
+            _ => Err(()),
+        }
+    }
 }
 
 pub enum SplitReaderImpl {
@@ -169,6 +183,32 @@ pub enum SplitReaderImpl {
     GooglePubsub(Box<PubsubSplitReader>),
 }
 
+pub enum FsSplitReaderImpl {
+    S3(Box<S3FileReader>),
+}
+
+impl FsSplitReaderImpl {
+    pub fn into_stream(self) -> BoxFsSourceStream {
+        match self {
+            Self::S3(s3_reader) => s3_reader.into_stream(),
+        }
+    }
+
+    pub async fn create(
+        config: ConnectorProperties,
+        state: Vec<FsSplit>,
+        _columns: Option<Vec<Column>>,
+    ) -> Result<Self> {
+        let reader = match config {
+            ConnectorProperties::S3(s3_props) => {
+                Self::S3(Box::new(S3FileReader::new(*s3_props, state).await?))
+            }
+            _ => todo!(),
+        };
+        Ok(reader)
+    }
+}
+
 pub enum SplitEnumeratorImpl {
     Kafka(KafkaSplitEnumerator),
     Pulsar(PulsarSplitEnumerator),
@@ -178,6 +218,7 @@ pub enum SplitEnumeratorImpl {
     MySqlCdc(DebeziumSplitEnumerator),
     PostgresCdc(DebeziumSplitEnumerator),
     GooglePubsub(PubsubSplitEnumerator),
+    S3(S3SplitEnumerator),
 }
 
 impl_connector_properties! {
@@ -200,7 +241,8 @@ impl_split_enumerator! {
     { Datagen, DatagenSplitEnumerator },
     { MySqlCdc, DebeziumSplitEnumerator },
     { PostgresCdc, DebeziumSplitEnumerator },
-    { GooglePubsub, PubsubSplitEnumerator}
+    { GooglePubsub, PubsubSplitEnumerator},
+    { S3, S3SplitEnumerator }
 }
 
 impl_split! {
@@ -211,7 +253,8 @@ impl_split! {
     { Datagen, DATAGEN_CONNECTOR, DatagenSplit },
     { GooglePubsub, GOOGLE_PUBSUB_CONNECTOR, PubsubSplit },
     { MySqlCdc, MYSQL_CDC_CONNECTOR, CdcSplit },
-    { PostgresCdc, POSTGRES_CDC_CONNECTOR, CdcSplit }
+    { PostgresCdc, POSTGRES_CDC_CONNECTOR, CdcSplit },
+    { S3, S3_CONNECTOR, FsSplit }
 }
 
 impl_split_reader! {
@@ -243,6 +286,16 @@ pub type SplitId = Arc<str>;
 pub struct SourceMessage {
     pub payload: Option<Bytes>,
     pub offset: String,
+    pub split_id: SplitId,
+}
+
+/// The message pumped from the external source service.
+/// The third-party message structs will eventually be transformed into this struct.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct FsSourceMessage {
+    pub payload: Option<Bytes>,
+    pub offset: usize,
+    pub split_size: usize,
     pub split_id: SplitId,
 }
 

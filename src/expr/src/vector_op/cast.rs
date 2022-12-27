@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::any::type_name;
+use std::fmt::Write;
 use std::str::FromStr;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
@@ -78,8 +79,8 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
         )
         .0)
     } else {
-        let res =
-            SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))?;
+        let res = SpeedDate::parse_str(s)
+            .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP.into()))?;
         Ok(
             NaiveDateWrapper::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
                 .and_hms_micro_uncheck(0, 0, 0, 0)
@@ -133,13 +134,15 @@ pub fn i64_to_timestamp(t: i64) -> Result<NaiveDateTimeWrapper> {
 
 #[inline]
 fn parse_naive_date(s: &str) -> Result<NaiveDate> {
-    let res = SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_DATE))?;
+    let res =
+        SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_DATE.into()))?;
     Ok(NaiveDateWrapper::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32).0)
 }
 
 #[inline]
 fn parse_naive_time(s: &str) -> Result<NaiveTime> {
-    let res = SpeedTime::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIME))?;
+    let res =
+        SpeedTime::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIME.into()))?;
     Ok(NaiveTimeWrapper::from_hms_micro_uncheck(
         res.hour as u32,
         res.minute as u32,
@@ -153,7 +156,7 @@ fn parse_naive_time(s: &str) -> Result<NaiveTime> {
 pub fn str_to_timestampz(elem: &str) -> Result<i64> {
     elem.parse::<DateTime<Utc>>()
         .map(|ret| ret.timestamp_micros())
-        .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ))
+        .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ.into()))
 }
 
 /// Converts UNIX epoch time to timestamp in microseconds.
@@ -176,7 +179,7 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
         E11..E14 => Ok(t * 1_000),   // ms
         E14..E17 => Ok(t),           // us
         E17.. => Ok(t / 1_000),      // ns
-        _ => Err(ExprError::Parse(ERROR_INT_TO_TIMESTAMP)),
+        _ => Err(ExprError::Parse(ERROR_INT_TO_TIMESTAMP.into())),
     }
 }
 
@@ -184,7 +187,7 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
 pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
     // Padded with whitespace str is not allowed.
     if elem.starts_with(' ') && elem.trim().starts_with("\\x") {
-        Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA))
+        Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into()))
     } else if let Some(remainder) = elem.strip_prefix(r"\x") {
         Ok(parse_bytes_hex(remainder)?.into())
     } else {
@@ -201,7 +204,7 @@ pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
         b'a'..=b'f' => Ok(b - b'a' + 10),
         b'A'..=b'F' => Ok(b - b'A' + 10),
         b'0'..=b'9' => Ok(b - b'0'),
-        _ => Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+        _ => Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
     };
 
     let mut buf = vec![];
@@ -212,7 +215,7 @@ pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
         }
         let n = decode_nibble(n)?;
         let n2 = match nibbles.next() {
-            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
             Some(n2) => decode_nibble(n2)?,
         };
         buf.push((n << 4) | n2);
@@ -233,22 +236,23 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
             continue;
         }
         match bytes.next() {
-            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
             Some(b'\\') => out.push(b'\\'),
             b => match (b, bytes.next(), bytes.next()) {
                 (Some(d2 @ b'0'..=b'3'), Some(d1 @ b'0'..=b'7'), Some(d0 @ b'0'..=b'7')) => {
                     out.push(((d2 - b'0') << 6) + ((d1 - b'0') << 3) + (d0 - b'0'));
                 }
-                _ => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+                _ => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
             },
         }
     }
     Ok(out)
 }
 
-pub fn timestampz_to_utc_string(elem: i64) -> Box<str> {
-    elem.to_text_with_type(&DataType::Timestampz)
-        .into_boxed_str()
+pub fn timestampz_to_utc_string(elem: i64, mut writer: &mut dyn Write) -> Result<()> {
+    elem.write_with_type(&DataType::Timestampz, &mut writer)
+        .unwrap();
+    Ok(())
 }
 
 #[inline(always)]
@@ -259,7 +263,7 @@ where
 {
     elem.trim()
         .parse()
-        .map_err(|_| ExprError::Parse(type_name::<T>()))
+        .map_err(|_| ExprError::Parse(type_name::<T>().into()))
 }
 
 /// Define the cast function to primitive types.
@@ -364,7 +368,7 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
     {
         Ok(false)
     } else {
-        Err(ExprError::Parse("Invalid bool"))
+        Err(ExprError::Parse("Invalid bool".into()))
     }
 }
 
@@ -374,18 +378,23 @@ pub fn int32_to_bool(input: i32) -> Result<bool> {
 
 // For most of the types, cast them to varchar is similar to return their text format.
 // So we use this function to cast type to varchar.
-pub fn general_to_text<T: ToText>(elem: T) -> Result<Box<str>> {
-    Ok(elem.to_text().into_boxed_str())
+pub fn general_to_text(elem: impl ToText, mut writer: &mut dyn Write) -> Result<()> {
+    elem.write(&mut writer).unwrap();
+    Ok(())
 }
 
-pub fn bool_to_varchar(input: bool) -> Result<Box<str>> {
-    Ok(if input { "true" } else { "false" }.into())
+pub fn bool_to_varchar(input: bool, writer: &mut dyn Write) -> Result<()> {
+    writer
+        .write_str(if input { "true" } else { "false" })
+        .unwrap();
+    Ok(())
 }
 
 /// `bool_out` is different from `general_to_string<bool>` to produce a single char. `PostgreSQL`
 /// uses different variants of bool-to-string in different situations.
-pub fn bool_out(input: bool) -> Result<Box<str>> {
-    Ok(if input { "t" } else { "f" }.into())
+pub fn bool_out(input: bool, writer: &mut dyn Write) -> Result<()> {
+    writer.write_str(if input { "t" } else { "f" }).unwrap();
+    Ok(())
 }
 
 /// It accepts a macro whose input is `{ $input:ident, $cast:ident, $func:expr }` tuples
@@ -424,8 +433,8 @@ macro_rules! for_all_cast_variants {
             { interval, varchar, general_to_text },
             { date, varchar, general_to_text },
             { timestamp, varchar, general_to_text },
-            { timestampz, varchar, |x| Ok(timestampz_to_utc_string(x)) },
-            { list, varchar, |x| general_to_text(x) },
+            { timestampz, varchar, timestampz_to_utc_string },
+            { list, varchar, |x, w| general_to_text(x, w) },
 
             { boolean, int32, general_cast },
             { int32, boolean, int32_to_bool },
@@ -480,7 +489,7 @@ fn unnest(input: &str) -> Result<Vec<String>> {
 
     let mut chars = trimmed.chars();
     if chars.next() != Some('{') || chars.next_back() != Some('}') {
-        return Err(ExprError::Parse("Input must be braced"));
+        return Err(ExprError::Parse("Input must be braced".into()));
     }
 
     let mut items = Vec::new();
@@ -500,14 +509,20 @@ fn unnest(input: &str) -> Result<Vec<String>> {
                             c
                         }
                         None => {
-                            return Err(ExprError::Parse("Missing closing brace '}}' character"))
+                            return Err(ExprError::Parse(
+                                "Missing closing brace '}}' character".into(),
+                            ))
                         }
                     };
                     string.push(c);
                 }
                 items.push(string);
             }
-            '}' => return Err(ExprError::Parse("Unexpected closing brace '}}' character")),
+            '}' => {
+                return Err(ExprError::Parse(
+                    "Unexpected closing brace '}}' character".into(),
+                ))
+            }
             ',' => {}
             c if c.is_whitespace() => {}
             c => items.push(format!(
@@ -620,15 +635,26 @@ fn scalar_cast(
                 ($( { $input:ident, $cast:ident, $func:expr } ),*) => {
                     match (source_type, target_type) {
                         $(
-                            ($input! { type_match_pattern }, $cast! { type_match_pattern }) => {
-                                let source: <$input! { type_array } as Array>::RefItem<'_> = source.try_into()?;
-                                let target: Result<<$cast! { type_array } as Array>::OwnedItem> = $func(source);
-                                target.map(Scalar::to_scalar_value)
-                            }
+                            ($input! { type_match_pattern }, $cast! { type_match_pattern }) => gen_cast_impl!(arm: $input, $cast, $func),
                         )*
                         _ => {
                             return Err(ExprError::UnsupportedCast(source_type.clone(), target_type.clone()));
                         }
+                    }
+                };
+                (arm: $input:ident, varchar, $func:expr) => {
+                    {
+                        let source: <$input! { type_array } as Array>::RefItem<'_> = source.try_into()?;
+                        let mut writer = String::new();
+                        let target: Result<()> = $func(source, &mut writer);
+                        target.map(|_| Scalar::to_scalar_value(writer.into_boxed_str()))
+                    }
+                };
+                (arm: $input:ident, $cast:ident, $func:expr) => {
+                    {
+                        let source: <$input! { type_array } as Array>::RefItem<'_> = source.try_into()?;
+                        let target: Result<<$cast! { type_array } as Array>::OwnedItem> = $func(source);
+                        target.map(Scalar::to_scalar_value)
                     }
                 };
             }
@@ -664,13 +690,13 @@ mod tests {
             str_to_timestampz("1999-01-08 04:05:06")
                 .unwrap_err()
                 .to_string(),
-            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ).to_string()
+            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ.into()).to_string()
         );
         assert_eq!(
             str_to_timestamp("1999-01-08 04:05:06AA")
                 .unwrap_err()
                 .to_string(),
-            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP).to_string()
+            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP.into()).to_string()
         );
         assert_eq!(
             str_to_date("1999-01-08AA").unwrap_err().to_string(),
@@ -678,7 +704,7 @@ mod tests {
         );
         assert_eq!(
             str_to_time("AA04:05:06").unwrap_err().to_string(),
-            ExprError::Parse(PARSE_ERROR_STR_TO_TIME).to_string()
+            ExprError::Parse(PARSE_ERROR_STR_TO_TIME.into()).to_string()
         );
     }
 
@@ -695,8 +721,10 @@ mod tests {
         use super::*;
 
         macro_rules! test {
-            ($expr:expr, $right:literal) => {
-                assert_eq!($expr.unwrap().as_ref(), $right);
+            ($fn:ident($value:expr), $right:literal) => {
+                let mut writer = String::new();
+                $fn($value, &mut writer).unwrap();
+                assert_eq!(writer, $right);
             };
         }
 
@@ -962,14 +990,19 @@ mod tests {
     #[test]
     fn test_timestampz() {
         let str1 = "0001-11-15 15:35:40.999999+08:00";
-        let str1_utc0 = "0001-11-15 07:35:40.999999+00:00";
         let timestampz1 = str_to_timestampz(str1).unwrap();
         assert_eq!(timestampz1, -62108094259000001);
-        assert_eq!(timestampz_to_utc_string(timestampz1).as_ref(), str1_utc0);
+
+        let mut writer = String::new();
+        timestampz_to_utc_string(timestampz1, &mut writer).unwrap();
+        assert_eq!(writer, "0001-11-15 07:35:40.999999+00:00");
 
         let str2 = "1969-12-31 23:59:59.999999+00:00";
         let timestampz2 = str_to_timestampz(str2).unwrap();
         assert_eq!(timestampz2, -1);
-        assert_eq!(timestampz_to_utc_string(timestampz2).as_ref(), str2);
+
+        let mut writer = String::new();
+        timestampz_to_utc_string(timestampz2, &mut writer).unwrap();
+        assert_eq!(writer, str2);
     }
 }
