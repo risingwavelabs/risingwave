@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use paste::paste;
 
 use super::*;
@@ -37,15 +39,65 @@ pub trait ToStream {
     /// Now it is used to:
     /// 1. ensure every plan node's output having pk column
     /// 2. add `row_count`() in every Agg
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)>;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)>;
 
     /// `to_stream` is equivalent to `to_stream_with_dist_required(RequiredDist::Any)`
-    fn to_stream(&self) -> Result<PlanRef>;
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef>;
 
     /// convert the plan to streaming physical plan and satisfy the required distribution
-    fn to_stream_with_dist_required(&self, required_dist: &RequiredDist) -> Result<PlanRef> {
-        let ret = self.to_stream()?;
+    fn to_stream_with_dist_required(
+        &self,
+        required_dist: &RequiredDist,
+        ctx: &mut ToStreamContext,
+    ) -> Result<PlanRef> {
+        let ret = self.to_stream(ctx)?;
         required_dist.enforce_if_not_satisfies(ret, &Order::any())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RewriteStreamContext {
+    share_rewrite_map: HashMap<PlanNodeId, (PlanRef, ColIndexMapping)>,
+}
+
+impl RewriteStreamContext {
+    pub fn add_rewrite_result(
+        &mut self,
+        plan_node_id: PlanNodeId,
+        plan_ref: PlanRef,
+        col_change: ColIndexMapping,
+    ) {
+        let prev = self
+            .share_rewrite_map
+            .insert(plan_node_id, (plan_ref, col_change));
+        assert!(prev.is_none());
+    }
+
+    pub fn get_rewrite_result(
+        &self,
+        plan_node_id: PlanNodeId,
+    ) -> Option<&(PlanRef, ColIndexMapping)> {
+        self.share_rewrite_map.get(&plan_node_id)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ToStreamContext {
+    share_to_stream_map: HashMap<PlanNodeId, PlanRef>,
+}
+
+impl ToStreamContext {
+    pub fn add_to_stream_result(&mut self, plan_node_id: PlanNodeId, plan_ref: PlanRef) {
+        self.share_to_stream_map
+            .try_insert(plan_node_id, plan_ref)
+            .unwrap();
+    }
+
+    pub fn get_to_stream_result(&self, plan_node_id: PlanNodeId) -> Option<&PlanRef> {
+        self.share_to_stream_map.get(&plan_node_id)
     }
 }
 
@@ -129,10 +181,10 @@ macro_rules! ban_to_stream {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl ToStream for [<$convention $name>] {
-                fn to_stream(&self) -> Result<PlanRef>{
+                fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef>{
                     panic!("converting to stream is only allowed on logical plan")
                 }
-                fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)>{
+                fn logical_rewrite_for_stream(&self, _ctx: &mut RewriteStreamContext) -> Result<(PlanRef, ColIndexMapping)>{
                     panic!("logical rewrite is only allowed on logical plan")
                 }
             })*
