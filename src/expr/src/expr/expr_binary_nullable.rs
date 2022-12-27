@@ -102,7 +102,7 @@ impl Expression for BinaryShortCircuitExpression {
         let right = right.as_bool();
         assert_eq!(left.len(), right.len());
 
-        let mut bitmap = match input.get_visibility_ref() {
+        let mut bitmap = match input.visibility() {
             Some(vis) => vis.clone(),
             None => Bitmap::ones(input.capacity()),
         };
