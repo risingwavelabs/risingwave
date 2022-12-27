@@ -12,31 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{StringWriter, WrittenGuard};
+use std::fmt::Write;
 
 use crate::Result;
 
 #[inline(always)]
-pub fn concat_op(left: &str, right: &str, writer: StringWriter<'_>) -> Result<WrittenGuard> {
-    let mut writer = writer.begin();
-    writer.write_ref(left);
-    writer.write_ref(right);
-    Ok(writer.finish())
+pub fn concat_op(left: &str, right: &str, writer: &mut dyn Write) -> Result<()> {
+    writer.write_str(left).unwrap();
+    writer.write_str(right).unwrap();
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-
     use super::*;
 
     #[test]
     fn test_concat_op() {
-        let mut builder = Utf8ArrayBuilder::new(1);
-        let writer = builder.writer();
-        let _guard = concat_op("114", "514", writer).unwrap();
-        let array = builder.finish();
-
-        assert_eq!(array.value_at(0).unwrap(), "114514".to_owned())
+        let mut s = String::new();
+        concat_op("114", "514", &mut s).unwrap();
+        assert_eq!(s, "114514")
     }
 }
