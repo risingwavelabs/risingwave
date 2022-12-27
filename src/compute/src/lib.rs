@@ -24,6 +24,7 @@
 #[macro_use]
 extern crate tracing;
 
+pub mod memory_management;
 pub mod rpc;
 pub mod server;
 
