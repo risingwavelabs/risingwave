@@ -41,10 +41,7 @@ use std::sync::Arc;
 
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use bytes_array::*;
-pub use chrono_array::{
-    NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
-    NaiveTimeArray, NaiveTimeArrayBuilder,
-};
+pub use chrono_array::*;
 pub use column_proto_readers::*;
 pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;
@@ -334,8 +331,9 @@ macro_rules! for_all_variants {
             { Decimal, decimal, DecimalArray, DecimalArrayBuilder },
             { Interval, interval, IntervalArray, IntervalArrayBuilder },
             { NaiveDate, naivedate, NaiveDateArray, NaiveDateArrayBuilder },
-            { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
             { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
+            { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
+            { Timestampz, timestampz, TimestampzArray, TimestampzArrayBuilder },
             { Struct, struct, StructArray, StructArrayBuilder },
             { List, list, ListArray, ListArrayBuilder },
             { Bytea, bytea, BytesArray, BytesArrayBuilder}
@@ -666,6 +664,7 @@ impl ArrayImpl {
             ProstArrayType::Date => read_naive_date_array(array, cardinality)?,
             ProstArrayType::Time => read_naive_time_array(array, cardinality)?,
             ProstArrayType::Timestamp => read_naive_date_time_array(array, cardinality)?,
+            ProstArrayType::Timestampz => read_timestampz_array(array, cardinality)?,
             ProstArrayType::Interval => read_interval_unit_array(array, cardinality)?,
             ProstArrayType::Struct => StructArray::from_protobuf(array)?,
             ProstArrayType::List => ListArray::from_protobuf(array)?,

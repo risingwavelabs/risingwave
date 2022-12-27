@@ -429,13 +429,6 @@ impl ToText for StructRef<'_> {
             write!(f, ")")
         })
     }
-
-    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
-        match ty {
-            DataType::Struct(_) => self.write(f),
-            _ => unreachable!(),
-        }
-    }
 }
 
 impl Eq for StructRef<'_> {}

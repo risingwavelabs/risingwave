@@ -72,8 +72,7 @@ where
             Poll::Ready(chunk) => match chunk {
                 Some(chunk_result) => match chunk_result {
                     Ok(chunk) => Poll::Ready(Some(
-                        to_pg_rows(this.column_types, chunk, *this.format)
-                            .map_err(|err| err.into()),
+                        to_pg_rows(chunk, *this.format).map_err(|err| err.into()),
                     )),
                     Err(err) => Poll::Ready(Some(Err(err))),
                 },
@@ -84,25 +83,24 @@ where
 }
 
 /// Format scalars according to postgres convention.
-fn pg_value_format(data_type: &DataType, d: ScalarRefImpl<'_>, format: bool) -> RwResult<Bytes> {
+fn pg_value_format(d: ScalarRefImpl<'_>, format: bool) -> RwResult<Bytes> {
     // format == false means TEXT format
     // format == true means BINARY format
     if !format {
-        Ok(d.text_format(data_type).into())
+        Ok(d.text_format().into())
     } else {
-        d.binary_format(data_type)
+        d.binary_format()
     }
 }
 
-fn to_pg_rows(column_types: &[DataType], chunk: DataChunk, format: bool) -> RwResult<Vec<Row>> {
+fn to_pg_rows(chunk: DataChunk, format: bool) -> RwResult<Vec<Row>> {
     chunk
         .rows()
         .map(|r| {
             let row = r
                 .iter()
-                .zip_eq(column_types)
-                .map(|(data, t)| match data {
-                    Some(data) => Some(pg_value_format(t, data, format)).transpose(),
+                .map(|data| match data {
+                    Some(data) => Some(pg_value_format(data, format)).transpose(),
                     None => Ok(None),
                 })
                 .try_collect()?;
@@ -163,16 +161,7 @@ mod tests {
              3 7 7.01 vvv
              4 . .    .  ",
         );
-        let rows = to_pg_rows(
-            &[
-                DataType::Int32,
-                DataType::Int64,
-                DataType::Float32,
-                DataType::Varchar,
-            ],
-            chunk,
-            false,
-        );
+        let rows = to_pg_rows(chunk, false);
         let expected: Vec<Vec<Option<Bytes>>> = vec![
             vec![
                 Some("1".into()),
@@ -200,29 +189,17 @@ mod tests {
 
     #[test]
     fn test_value_format() {
-        use {DataType as T, ScalarRefImpl as S};
+        use ScalarRefImpl as S;
 
-        let f = |t, d, f| pg_value_format(t, d, f).unwrap();
-        assert_eq!(&f(&T::Float32, S::Float32(1_f32.into()), false), "1");
-        assert_eq!(&f(&T::Float32, S::Float32(f32::NAN.into()), false), "NaN");
-        assert_eq!(&f(&T::Float64, S::Float64(f64::NAN.into()), false), "NaN");
-        assert_eq!(
-            &f(&T::Float32, S::Float32(f32::INFINITY.into()), false),
-            "Infinity"
-        );
-        assert_eq!(
-            &f(&T::Float32, S::Float32(f32::NEG_INFINITY.into()), false),
-            "-Infinity"
-        );
-        assert_eq!(
-            &f(&T::Float64, S::Float64(f64::INFINITY.into()), false),
-            "Infinity"
-        );
-        assert_eq!(
-            &f(&T::Float64, S::Float64(f64::NEG_INFINITY.into()), false),
-            "-Infinity"
-        );
-        assert_eq!(&f(&T::Boolean, S::Bool(true), false), "t");
-        assert_eq!(&f(&T::Boolean, S::Bool(false), false), "f");
+        let f = |d, f| pg_value_format(d, f).unwrap();
+        assert_eq!(&f(S::Float32(1_f32.into()), false), "1");
+        assert_eq!(&f(S::Float32(f32::NAN.into()), false), "NaN");
+        assert_eq!(&f(S::Float64(f64::NAN.into()), false), "NaN");
+        assert_eq!(&f(S::Float32(f32::INFINITY.into()), false), "Infinity");
+        assert_eq!(&f(S::Float32(f32::NEG_INFINITY.into()), false), "-Infinity");
+        assert_eq!(&f(S::Float64(f64::INFINITY.into()), false), "Infinity");
+        assert_eq!(&f(S::Float64(f64::NEG_INFINITY.into()), false), "-Infinity");
+        assert_eq!(&f(S::Bool(true), false), "t");
+        assert_eq!(&f(S::Bool(false), false), "f");
     }
 }

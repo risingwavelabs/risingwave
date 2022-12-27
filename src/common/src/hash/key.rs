@@ -40,7 +40,7 @@ use crate::hash::vnode::VirtualNode;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    OrderedF32, OrderedF64, ScalarRef,
+    OrderedF32, OrderedF64, ScalarRef, Timestampz,
 };
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
@@ -460,6 +460,18 @@ impl HashKeySerDe<'_> for NaiveTimeWrapper {
         let secs = u32::from_ne_bytes(value[0..4].try_into().unwrap());
         let nano = u32::from_ne_bytes(value[4..8].try_into().unwrap());
         NaiveTimeWrapper::with_secs_nano(secs, nano).unwrap()
+    }
+}
+
+impl HashKeySerDe<'_> for Timestampz {
+    type S = [u8; 8];
+
+    fn serialize(self) -> Self::S {
+        self.0.serialize()
+    }
+
+    fn deserialize<R: Read>(source: &mut R) -> Self {
+        Timestampz(i64::deserialize(source))
     }
 }
 

@@ -55,6 +55,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+    Timestampz,
 };
 use risingwave_pb::plan_common::JoinType;
 
@@ -707,7 +708,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Date => size_of::<NaiveDateWrapper>(),
             DataType::Time => size_of::<NaiveTimeWrapper>(),
             DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
-            DataType::Timestampz => size_of::<i64>(),
+            DataType::Timestampz => size_of::<Timestampz>(),
             DataType::Interval => size_of::<IntervalUnit>(),
             DataType::Varchar => 20,
             DataType::Bytea => 20,

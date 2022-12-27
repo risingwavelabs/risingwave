@@ -208,7 +208,7 @@ macro_rules! timestampz {
     ($macro:ident) => {
         $macro! {
             risingwave_common::types::DataType::Timestampz,
-            risingwave_common::array::I64Array
+            risingwave_common::array::TimestampzArray
         }
     };
 }

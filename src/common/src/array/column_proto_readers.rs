@@ -23,11 +23,11 @@ use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayMeta, ArrayResult, BoolArray, IntervalArrayBuilder,
     NaiveDateArrayBuilder, NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
-    PrimitiveArrayItemType,
+    PrimitiveArrayItemType, TimestampzArrayBuilder,
 };
 use crate::buffer::Bitmap;
 use crate::types::interval::IntervalUnit;
-use crate::types::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
+use crate::types::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, Timestampz};
 
 // TODO: Use techniques like apache arrow flight RPC to eliminate deserialization.
 // https://arrow.apache.org/docs/format/Flight.html
@@ -94,6 +94,13 @@ fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateTime
     }
 }
 
+fn read_timestampz(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Timestampz> {
+    match cursor.read_i64::<BigEndian>() {
+        Ok(t) => Timestampz::from_protobuf(t),
+        Err(e) => bail!("Failed to read i64 from NaiveDateTime buffer: {}", e),
+    }
+}
+
 pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUnit> {
     let mut read = || {
         let months = cursor.read_i32::<BigEndian>()?;
@@ -143,7 +150,8 @@ read_one_value_array! {
     { IntervalUnit, IntervalArrayBuilder },
     { NaiveDate, NaiveDateArrayBuilder },
     { NaiveTime, NaiveTimeArrayBuilder },
-    { NaiveDateTime, NaiveDateTimeArrayBuilder }
+    { NaiveDateTime, NaiveDateTimeArrayBuilder },
+    { Timestampz, TimestampzArrayBuilder }
 }
 
 fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> ArrayResult<i64> {

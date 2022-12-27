@@ -24,7 +24,7 @@ use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    OrderedF32, OrderedF64, Scalar, ScalarImpl, ScalarRefImpl,
+    OrderedF32, OrderedF64, Scalar, ScalarImpl, ScalarRefImpl, Timestampz,
 };
 use speedate::{Date as SpeedDate, DateTime as SpeedDateTime, Time as SpeedTime};
 
@@ -125,10 +125,10 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
 /// ```
 #[inline]
 pub fn i64_to_timestamp(t: i64) -> Result<NaiveDateTimeWrapper> {
-    let us = i64_to_timestampz(t)?;
+    let tz = i64_to_timestampz(t)?;
     Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
-        us / 1_000_000,
-        (us % 1_000_000) as u32 * 1000,
+        tz.0 / 1_000_000,
+        (tz.0 % 1_000_000) as u32 * 1000,
     ))
 }
 
@@ -153,9 +153,9 @@ fn parse_naive_time(s: &str) -> Result<NaiveTime> {
 }
 
 #[inline(always)]
-pub fn str_to_timestampz(elem: &str) -> Result<i64> {
+pub fn str_to_timestampz(elem: &str) -> Result<Timestampz> {
     elem.parse::<DateTime<Utc>>()
-        .map(|ret| ret.timestamp_micros())
+        .map(|ret| Timestampz(ret.timestamp_micros()))
         .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ.into()))
 }
 
@@ -170,15 +170,15 @@ pub fn str_to_timestampz(elem: &str) -> Result<i64> {
 ///
 /// This would cause no problem for timestamp in [1973-03-03 09:46:40, 5138-11-16 09:46:40).
 #[inline]
-pub fn i64_to_timestampz(t: i64) -> Result<i64> {
+pub fn i64_to_timestampz(t: i64) -> Result<Timestampz> {
     const E11: i64 = 100_000_000_000;
     const E14: i64 = 100_000_000_000_000;
     const E17: i64 = 100_000_000_000_000_000;
     match t {
-        0..E11 => Ok(t * 1_000_000), // s
-        E11..E14 => Ok(t * 1_000),   // ms
-        E14..E17 => Ok(t),           // us
-        E17.. => Ok(t / 1_000),      // ns
+        0..E11 => Ok(Timestampz(t * 1_000_000)), // s
+        E11..E14 => Ok(Timestampz(t * 1_000)),   // ms
+        E14..E17 => Ok(Timestampz(t)),           // us
+        E17.. => Ok(Timestampz(t / 1_000)),      // ns
         _ => Err(ExprError::Parse(ERROR_INT_TO_TIMESTAMP.into())),
     }
 }
@@ -247,12 +247,6 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
         }
     }
     Ok(out)
-}
-
-pub fn timestampz_to_utc_string(elem: i64, mut writer: &mut dyn Write) -> Result<()> {
-    elem.write_with_type(&DataType::Timestampz, &mut writer)
-        .unwrap();
-    Ok(())
 }
 
 #[inline(always)]
@@ -440,7 +434,7 @@ macro_rules! for_all_cast_variants {
             { interval, varchar, general_to_text, false },
             { date, varchar, general_to_text, false },
             { timestamp, varchar, general_to_text, false },
-            { timestampz, varchar, timestampz_to_utc_string, false },
+            { timestampz, varchar, general_to_text, false },
             { list, varchar, |x, w| general_to_text(x, w), false },
 
             { boolean, int32, try_cast, false },
@@ -1005,18 +999,18 @@ mod tests {
     fn test_timestampz() {
         let str1 = "0001-11-15 15:35:40.999999+08:00";
         let timestampz1 = str_to_timestampz(str1).unwrap();
-        assert_eq!(timestampz1, -62108094259000001);
+        assert_eq!(timestampz1.0, -62108094259000001);
 
         let mut writer = String::new();
-        timestampz_to_utc_string(timestampz1, &mut writer).unwrap();
+        general_to_text(timestampz1, &mut writer).unwrap();
         assert_eq!(writer, "0001-11-15 07:35:40.999999+00:00");
 
         let str2 = "1969-12-31 23:59:59.999999+00:00";
         let timestampz2 = str_to_timestampz(str2).unwrap();
-        assert_eq!(timestampz2, -1);
+        assert_eq!(timestampz2.0, -1);
 
         let mut writer = String::new();
-        timestampz_to_utc_string(timestampz2, &mut writer).unwrap();
+        general_to_text(timestampz2, &mut writer).unwrap();
         assert_eq!(writer, str2);
     }
 }

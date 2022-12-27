@@ -294,7 +294,7 @@ pub fn new_unary_expr(
             gen_round_expr! {"Ceil", child_expr, return_type, round_f64, round_decimal}
         }
         (ProstType::ToTimestamp, DataType::Timestampz, DataType::Float64) => {
-            Box::new(UnaryExpression::<F64Array, I64Array, _>::new(
+            Box::new(UnaryExpression::<F64Array, TimestampzArray, _>::new(
                 child_expr,
                 return_type,
                 f64_sec_to_timestampz,

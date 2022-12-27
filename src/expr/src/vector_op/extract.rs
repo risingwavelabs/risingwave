@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use chrono::{Datelike, Timelike};
-use risingwave_common::types::{Decimal, NaiveDateTimeWrapper, NaiveDateWrapper};
+use risingwave_common::types::{Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, Timestampz};
 
 use crate::{bail, Result};
 
@@ -57,9 +57,9 @@ pub fn extract_from_timestamp(time_unit: &str, timestamp: NaiveDateTimeWrapper) 
     res
 }
 
-pub fn extract_from_timestampz(time_unit: &str, usecs: i64) -> Result<Decimal> {
+pub fn extract_from_timestampz(time_unit: &str, tz: Timestampz) -> Result<Decimal> {
     match time_unit {
-        "EPOCH" => Ok(Decimal::from(usecs) / 1_000_000.into()),
+        "EPOCH" => Ok(Decimal::from(tz.0) / 1_000_000.into()),
         // TODO(#5826): all other units depend on implicit session TimeZone
         _ => bail!(
             "Unsupported timestamp with time zone unit {} in extract function",

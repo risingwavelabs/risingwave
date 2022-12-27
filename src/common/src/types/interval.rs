@@ -643,19 +643,6 @@ impl Neg for IntervalUnit {
     }
 }
 
-impl ToText for crate::types::IntervalUnit {
-    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        write!(f, "{self}")
-    }
-
-    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
-        match ty {
-            DataType::Interval => self.write(f),
-            _ => unreachable!(),
-        }
-    }
-}
-
 impl Display for IntervalUnit {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let years = self.months / 12;
@@ -744,15 +731,10 @@ impl<'a> FromSql<'a> for IntervalUnit {
 }
 
 impl ToBinary for IntervalUnit {
-    fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
-        match ty {
-            DataType::Interval => {
-                let mut output = BytesMut::new();
-                self.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            _ => unreachable!(),
-        }
+    fn to_binary(&self) -> Result<Option<Bytes>> {
+        let mut output = BytesMut::new();
+        self.to_sql(&Type::ANY, &mut output).unwrap();
+        Ok(Some(output.freeze()))
     }
 }
 

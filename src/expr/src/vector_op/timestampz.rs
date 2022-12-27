@@ -15,7 +15,7 @@
 use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
 use num_traits::ToPrimitive;
-use risingwave_common::types::{NaiveDateTimeWrapper, OrderedF64};
+use risingwave_common::types::{NaiveDateTimeWrapper, OrderedF64, Timestampz};
 
 use crate::{ExprError, Result};
 
@@ -29,16 +29,17 @@ fn lookup_time_zone(time_zone: &str) -> Result<Tz> {
 }
 
 #[inline(always)]
-pub fn f64_sec_to_timestampz(elem: OrderedF64) -> Result<i64> {
+pub fn f64_sec_to_timestampz(elem: OrderedF64) -> Result<Timestampz> {
     // TODO(#4515): handle +/- infinity
     (elem * 1e6)
         .round() // TODO(#5576): should round to even
         .to_i64()
         .ok_or(ExprError::NumericOutOfRange)
+        .map(Timestampz)
 }
 
 #[inline(always)]
-pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> Result<i64> {
+pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> Result<Timestampz> {
     let time_zone = lookup_time_zone(time_zone)?;
     // https://www.postgresql.org/docs/current/datetime-invalid-input.html
     // Special cases:
@@ -59,15 +60,13 @@ pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> R
             ),
         })?;
     let usec = instant_local.timestamp_micros();
-    Ok(usec)
+    Ok(Timestampz(usec))
 }
 
 #[inline(always)]
-pub fn timestampz_at_time_zone(input: i64, time_zone: &str) -> Result<NaiveDateTimeWrapper> {
+pub fn timestampz_at_time_zone(input: Timestampz, time_zone: &str) -> Result<NaiveDateTimeWrapper> {
     let time_zone = lookup_time_zone(time_zone)?;
-    let secs = input.div_euclid(1_000_000);
-    let nsecs = input.rem_euclid(1_000_000) * 1000;
-    let instant_utc = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
+    let instant_utc = Utc.timestamp_nanos(input.0 * 1000);
     let instant_local = instant_utc.with_timezone(&time_zone);
     let naive = instant_local.naive_local();
     Ok(NaiveDateTimeWrapper(naive))

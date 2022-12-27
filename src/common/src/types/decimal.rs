@@ -23,8 +23,6 @@ pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
 use super::to_binary::ToBinary;
-use super::to_text::ToText;
-use super::DataType;
 use crate::array::ArrayResult;
 use crate::error::Result as RwResult;
 use crate::types::ordered_float::OrderedFloat;
@@ -40,19 +38,6 @@ pub enum Decimal {
     PositiveInf,
     #[display("-Infinity")]
     NegativeInf,
-}
-
-impl ToText for Decimal {
-    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        write!(f, "{self}")
-    }
-
-    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
-        match ty {
-            DataType::Decimal => self.write(f),
-            _ => unreachable!(),
-        }
-    }
 }
 
 impl Decimal {
@@ -77,41 +62,36 @@ impl Decimal {
 }
 
 impl ToBinary for Decimal {
-    fn to_binary_with_type(&self, ty: &DataType) -> RwResult<Option<Bytes>> {
-        match ty {
-            DataType::Decimal => {
-                let mut output = BytesMut::new();
-                match self {
-                    Decimal::Normalized(d) => {
-                        d.to_sql(&Type::ANY, &mut output).unwrap();
-                        return Ok(Some(output.freeze()));
-                    }
-                    Decimal::NaN => {
-                        output.reserve(8);
-                        output.put_u16(0);
-                        output.put_i16(0);
-                        output.put_u16(0xC000);
-                        output.put_i16(0);
-                    }
-                    Decimal::PositiveInf => {
-                        output.reserve(8);
-                        output.put_u16(0);
-                        output.put_i16(0);
-                        output.put_u16(0xD000);
-                        output.put_i16(0);
-                    }
-                    Decimal::NegativeInf => {
-                        output.reserve(8);
-                        output.put_u16(0);
-                        output.put_i16(0);
-                        output.put_u16(0xF000);
-                        output.put_i16(0);
-                    }
-                };
-                Ok(Some(output.freeze()))
+    fn to_binary(&self) -> RwResult<Option<Bytes>> {
+        let mut output = BytesMut::new();
+        match self {
+            Decimal::Normalized(d) => {
+                d.to_sql(&Type::ANY, &mut output).unwrap();
+                return Ok(Some(output.freeze()));
             }
-            _ => unreachable!(),
-        }
+            Decimal::NaN => {
+                output.reserve(8);
+                output.put_u16(0);
+                output.put_i16(0);
+                output.put_u16(0xC000);
+                output.put_i16(0);
+            }
+            Decimal::PositiveInf => {
+                output.reserve(8);
+                output.put_u16(0);
+                output.put_i16(0);
+                output.put_u16(0xD000);
+                output.put_i16(0);
+            }
+            Decimal::NegativeInf => {
+                output.reserve(8);
+                output.put_u16(0);
+                output.put_i16(0);
+                output.put_u16(0xF000);
+                output.put_i16(0);
+            }
+        };
+        Ok(Some(output.freeze()))
     }
 }
 

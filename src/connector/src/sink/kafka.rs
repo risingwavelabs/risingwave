@@ -347,15 +347,15 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             json!(v.to_text())
         }
         (
-            dt @ DataType::Date
-            | dt @ DataType::Time
-            | dt @ DataType::Timestamp
-            | dt @ DataType::Timestampz
-            | dt @ DataType::Interval
-            | dt @ DataType::Bytea,
+            DataType::Date
+            | DataType::Time
+            | DataType::Timestamp
+            | DataType::Timestampz
+            | DataType::Interval
+            | DataType::Bytea,
             scalar,
         ) => {
-            json!(scalar.to_text_with_type(&dt))
+            json!(scalar.to_text())
         }
         (DataType::List { .. }, ScalarRefImpl::List(list_ref)) => {
             let mut vec = Vec::with_capacity(field.sub_fields.len());

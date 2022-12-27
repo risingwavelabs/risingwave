@@ -13,61 +13,56 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
+use std::fmt::Debug;
 use std::hash::Hash;
+use std::io::Cursor;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
+use itertools::Itertools;
 use num_traits::Float;
 use parse_display::{Display, FromStr};
-use risingwave_pb::data::DataType as ProstDataType;
-use serde::{Deserialize, Serialize};
-
-use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
-use crate::error::BoxedError;
-
-mod native_type;
-mod ops;
-mod scalar_impl;
-
-use std::fmt::Debug;
-use std::io::Cursor;
-use std::str::FromStr;
-
-pub use native_type::*;
+use paste::paste;
+use postgres_types::{IsNull, ToSql, Type};
 use risingwave_pb::data::data_type::IntervalType::*;
 use risingwave_pb::data::data_type::{IntervalType, TypeName};
-pub use scalar_impl::*;
+use risingwave_pb::data::DataType as ProstDataType;
+use serde::{Deserialize, Serialize};
+use strum_macros::EnumDiscriminants;
+
 pub mod chrono_wrapper;
 pub mod decimal;
 pub mod interval;
+mod native_type;
+mod ops;
+mod ordered_float;
 mod postgres_type;
+mod scalar_impl;
 pub mod struct_type;
+mod timestampz;
 pub mod to_binary;
 pub mod to_text;
 
-mod ordered_float;
-
-use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
-pub use chrono_wrapper::{
+pub use self::chrono_wrapper::{
     NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, UNIX_EPOCH_DAYS,
 };
-pub use decimal::Decimal;
-pub use interval::*;
-use itertools::Itertools;
-pub use ops::{CheckedAdd, IsNegative};
-pub use ordered_float::IntoOrdered;
-use paste::paste;
-use postgres_types::{IsNull, ToSql, Type};
-use strum_macros::EnumDiscriminants;
-
+pub use self::decimal::Decimal;
+pub use self::interval::*;
+pub use self::native_type::*;
+pub use self::ops::{CheckedAdd, IsNegative};
+pub use self::ordered_float::IntoOrdered;
+pub use self::scalar_impl::*;
 use self::struct_type::StructType;
+pub use self::timestampz::Timestampz;
 use self::to_binary::ToBinary;
 use self::to_text::ToText;
 use crate::array::{
-    read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
-    StructValue,
+    read_interval_unit, ArrayBuilderImpl, ArrayError, ArrayResult, ListRef, ListValue,
+    PrimitiveArrayItemType, StructRef, StructValue, NULL_VAL_FOR_HASH,
 };
-use crate::error::Result as RwResult;
+use crate::error::{BoxedError, Result as RwResult};
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
@@ -255,7 +250,7 @@ impl DataType {
             DataType::Varchar => Utf8ArrayBuilder::new(capacity).into(),
             DataType::Time => NaiveTimeArrayBuilder::new(capacity).into(),
             DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity).into(),
-            DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
+            DataType::Timestampz => PrimitiveArrayBuilder::<Timestampz>::new(capacity).into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
             DataType::Struct(t) => {
                 StructArrayBuilder::with_meta(capacity, t.to_array_meta()).into()
@@ -379,8 +374,7 @@ impl DataType {
             DataType::Timestamp => {
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::MIN))
             }
-            // FIXME(yuhao): Add a timestampz scalar.
-            DataType::Timestampz => ScalarImpl::Int64(i64::MIN),
+            DataType::Timestampz => ScalarImpl::Timestampz(Timestampz::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
             DataType::Interval => ScalarImpl::Interval(IntervalUnit::MIN),
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
@@ -476,8 +470,9 @@ macro_rules! for_all_scalar_variants {
             { Decimal, decimal, Decimal, Decimal  },
             { Interval, interval, IntervalUnit, IntervalUnit },
             { NaiveDate, naivedate, NaiveDateWrapper, NaiveDateWrapper },
-            { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
             { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
+            { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
+            { Timestampz, timestampz, Timestampz, Timestampz },
             { Struct, struct, StructValue, StructRef<'scalar> },
             { List, list, ListValue, ListRef<'scalar> },
             { Bytea, bytea, Box<[u8]>, &'scalar [u8] }
@@ -831,12 +826,12 @@ pub fn hash_datum(datum: impl ToDatumRef, state: &mut impl std::hash::Hasher) {
 impl ScalarRefImpl<'_> {
     /// Encode the scalar to postgresql binary format.
     /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
-    pub fn binary_format(&self, data_type: &DataType) -> RwResult<Bytes> {
-        self.to_binary_with_type(data_type).transpose().unwrap()
+    pub fn binary_format(&self) -> RwResult<Bytes> {
+        self.to_binary().transpose().unwrap()
     }
 
-    pub fn text_format(&self, data_type: &DataType) -> String {
-        self.to_text_with_type(data_type)
+    pub fn text_format(&self) -> String {
+        self.to_text()
     }
 
     /// Serialize the scalar.
@@ -864,6 +859,7 @@ impl ScalarRefImpl<'_> {
                 v.0.num_seconds_from_midnight().serialize(&mut *ser)?;
                 v.0.nanosecond().serialize(ser)?;
             }
+            Self::Timestampz(v) => v.0.serialize(ser)?,
             Self::Struct(v) => v.memcmp_serialize(ser)?,
             Self::List(v) => v.memcmp_serialize(ser)?,
         };
@@ -907,7 +903,7 @@ impl ScalarImpl {
                 let nsecs = u32::deserialize(de)?;
                 NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)?
             }),
-            Ty::Timestampz => Self::Int64(i64::deserialize(de)?),
+            Ty::Timestampz => Self::Timestampz(Timestampz(i64::deserialize(de)?)),
             Ty::Date => Self::NaiveDate({
                 let days = i32::deserialize(de)?;
                 NaiveDateWrapper::with_days(days)?
@@ -941,7 +937,7 @@ impl ScalarImpl {
                     DataType::Date => size_of::<NaiveDateWrapper>(),
                     DataType::Time => size_of::<NaiveTimeWrapper>(),
                     DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
-                    DataType::Timestampz => size_of::<i64>(),
+                    DataType::Timestampz => size_of::<Timestampz>(),
                     DataType::Boolean => size_of::<u8>(),
                     // IntervalUnit is serialized as (i32, i32, i64)
                     DataType::Interval => size_of::<(i32, i32, i64)>(),
@@ -990,7 +986,7 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
                     | (DataType::Date, ScalarImpl::NaiveDate(_))
                     | (DataType::Time, ScalarImpl::NaiveTime(_))
                     | (DataType::Timestamp, ScalarImpl::NaiveDateTime(_))
-                    | (DataType::Timestampz, ScalarImpl::Int64(_))
+                    | (DataType::Timestampz, ScalarImpl::Timestampz(_))
                     | (DataType::Decimal, ScalarImpl::Decimal(_))
                     | (DataType::Interval, ScalarImpl::Interval(_))
                     | (DataType::Struct { .. }, ScalarImpl::Struct(_))
@@ -1189,7 +1185,10 @@ mod tests {
                     )),
                     DataType::Timestamp,
                 ),
-                DataTypeName::Timestampz => (ScalarImpl::Int64(233333333), DataType::Timestampz),
+                DataTypeName::Timestampz => (
+                    ScalarImpl::Timestampz(Timestampz(233333333)),
+                    DataType::Timestampz,
+                ),
                 DataTypeName::Interval => (
                     ScalarImpl::Interval(IntervalUnit::new(2, 3, 3333)),
                     DataType::Interval,

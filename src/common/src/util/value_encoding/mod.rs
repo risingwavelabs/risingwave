@@ -23,7 +23,7 @@ use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::types::struct_type::StructType;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
-    NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl, ToDatumRef,
+    NaiveTimeWrapper, OrderedF32, OrderedF64, ScalarImpl, ScalarRefImpl, Timestampz, ToDatumRef,
 };
 
 pub mod error;
@@ -83,6 +83,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::NaiveTime(v) => {
             serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
         }
+        ScalarRefImpl::Timestampz(v) => buf.put_i64_le(v.0),
         ScalarRefImpl::Struct(s) => serialize_struct(s, buf),
         ScalarRefImpl::List(v) => serialize_list(v, buf),
     }
@@ -152,7 +153,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Interval => ScalarImpl::Interval(deserialize_interval(data)?),
         DataType::Time => ScalarImpl::NaiveTime(deserialize_naivetime(data)?),
         DataType::Timestamp => ScalarImpl::NaiveDateTime(deserialize_naivedatetime(data)?),
-        DataType::Timestampz => ScalarImpl::Int64(data.get_i64_le()),
+        DataType::Timestampz => ScalarImpl::Timestampz(deserialize_timestampz(data)?),
         DataType::Date => ScalarImpl::NaiveDate(deserialize_naivedate(data)?),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
@@ -233,4 +234,9 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
     let mut bytes = [0; 16];
     data.copy_to_slice(&mut bytes);
     Ok(Decimal::unordered_deserialize(bytes))
+}
+
+fn deserialize_timestampz(data: &mut impl Buf) -> Result<Timestampz> {
+    let usecs = data.get_i64_le();
+    Ok(Timestampz(usecs))
 }

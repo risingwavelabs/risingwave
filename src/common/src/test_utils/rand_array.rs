@@ -28,7 +28,7 @@ use rand::{Rng, SeedableRng};
 use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, StructValue};
 use crate::types::{
     Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType,
-    Scalar,
+    Scalar, Timestampz,
 };
 
 pub trait RandValue {
@@ -108,6 +108,12 @@ impl RandValue for NaiveDateTimeWrapper {
                 .0
                 .and_time(NaiveTimeWrapper::rand_value(rand).0),
         )
+    }
+}
+
+impl RandValue for Timestampz {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        Timestampz(i64::rand_value(rand))
     }
 }
 

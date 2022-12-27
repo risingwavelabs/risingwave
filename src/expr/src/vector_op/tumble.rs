@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
+use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, Timestampz};
 
 use crate::{ExprError, Result};
 
@@ -30,15 +30,15 @@ pub fn tumble_start_date_time(
     window: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
     let diff = time.0.timestamp_micros();
-    let window_start = tm_diff_bin(diff, window)?;
+    let window_start = tm_diff_bin(Timestampz(diff), window)?;
     Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
-        window_start / 1_000_000,
-        (window_start % 1_000_000 * 1000) as u32,
+        window_start.0 / 1_000_000,
+        (window_start.0 % 1_000_000 * 1000) as u32,
     ))
 }
 
 #[inline(always)]
-pub fn tumble_start_timestampz(time: i64, window: IntervalUnit) -> Result<i64> {
+pub fn tumble_start_timestampz(time: Timestampz, window: IntervalUnit) -> Result<Timestampz> {
     // Actually directly calls into the helper `tm_diff_bin`. But we keep the shared utility and
     // enduser function separate.
     let diff = time;
@@ -48,7 +48,7 @@ pub fn tumble_start_timestampz(time: i64, window: IntervalUnit) -> Result<i64> {
 
 /// The common part of PostgreSQL function `timestamp_bin` and `timestamptz_bin`.
 #[inline(always)]
-fn tm_diff_bin(diff_usecs: i64, window: IntervalUnit) -> Result<i64> {
+fn tm_diff_bin(diff: Timestampz, window: IntervalUnit) -> Result<Timestampz> {
     if window.get_months() != 0 {
         return Err(ExprError::InvalidParam {
             name: "window",
@@ -64,8 +64,8 @@ fn tm_diff_bin(diff_usecs: i64, window: IntervalUnit) -> Result<i64> {
         });
     }
 
-    let delta_usecs = diff_usecs - diff_usecs % window_usecs;
-    Ok(delta_usecs)
+    let delta_usecs = diff.0 - diff.0 % window_usecs;
+    Ok(Timestampz(delta_usecs))
 }
 
 #[cfg(test)]

@@ -521,13 +521,6 @@ impl ToText for ListRef<'_> {
             )
         })
     }
-
-    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
-        match ty {
-            DataType::List { .. } => self.write(f),
-            _ => unreachable!(),
-        }
-    }
 }
 
 impl Eq for ListRef<'_> {}

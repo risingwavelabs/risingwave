@@ -177,8 +177,9 @@ pub fn compare_rows(lhs: &OwnedRow, rhs: &OwnedRow, order_pairs: &[OrderPair]) -
                 Decimal,
                 Interval,
                 NaiveDate,
-                NaiveDateTime,
                 NaiveTime,
+                NaiveDateTime,
+                Timestampz,
                 Struct,
                 List,
                 Bytea

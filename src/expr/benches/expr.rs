@@ -23,7 +23,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
 use risingwave_common::types::{
     DataType, DataTypeName, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
-    NaiveTimeWrapper, OrderedF32, OrderedF64,
+    NaiveTimeWrapper, OrderedF32, OrderedF64, Timestampz,
 };
 use risingwave_expr::expr::expr_unary::new_unary_expr;
 use risingwave_expr::expr::*;
@@ -57,7 +57,7 @@ fn bench_expr(c: &mut Criterion) {
                 (1..=CHUNK_SIZE).map(|_| NaiveDateTimeWrapper::default()),
             )
             .into(),
-            I64Array::from_iter(1..=CHUNK_SIZE as i64).into(),
+            TimestampzArray::from_iter((1..=CHUNK_SIZE).map(|i| Timestampz(i as i64))).into(),
             IntervalArray::from_iter((1..=CHUNK_SIZE).map(|i| IntervalUnit::from_days(i as _)))
                 .into(),
             Utf8Array::from_iter_display((1..=CHUNK_SIZE).map(Some)).into(),

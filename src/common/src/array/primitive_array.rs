@@ -28,6 +28,7 @@ use crate::types::decimal::Decimal;
 use crate::types::interval::IntervalUnit;
 use crate::types::{
     NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar, ScalarRef,
+    Timestampz,
 };
 
 /// Physical type of array items which have fixed size.
@@ -109,6 +110,7 @@ macro_rules! impl_primitive_for_others {
             impl PrimitiveArrayItemType for $scalar_type {
                 impl_array_methods!($scalar_type, $array_type_pb, $array_impl_variant);
 
+                #[deny(unconditional_recursion)]
                 fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
                     <$scalar_type>::to_protobuf(self, output)
                 }
@@ -122,7 +124,8 @@ impl_primitive_for_others! {
     { IntervalUnit, Interval, Interval },
     { NaiveDateWrapper, Date, NaiveDate },
     { NaiveTimeWrapper, Time, NaiveTime },
-    { NaiveDateTimeWrapper, Timestamp, NaiveDateTime }
+    { NaiveDateTimeWrapper, Timestamp, NaiveDateTime },
+    { Timestampz, Timestampz, Timestampz }
 }
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.

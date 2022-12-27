@@ -94,6 +94,7 @@ enum ArrayType {
   STRUCT = 13;
   LIST = 14;
   BYTEA = 15;
+  TIMESTAMPZ = 16;
 }
 
 message Array {
