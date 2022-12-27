@@ -71,7 +71,7 @@ impl TableCatalogBuilder {
     pub fn add_order_column(&mut self, index: usize, order_type: OrderType, dedup: bool) {
         match dedup {
             true => {
-                let pk_indices = self.pk.iter().map(|f| f.index).collect_vec();
+                let pk_indices = self.pk.iter().map(|pk| pk.index).collect_vec();
                 if !pk_indices.contains(&index) {
                     self.pk.push(FieldOrder {
                         index,

@@ -284,7 +284,6 @@ impl HashJoin {
 
         internal_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
         degree_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
-        println!("---build join table---");
         (
             internal_table_catalog_builder.build(internal_table_dist_keys),
             degree_table_catalog_builder.build(degree_table_dist_keys),
