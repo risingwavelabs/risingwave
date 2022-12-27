@@ -162,33 +162,44 @@ pub fn new_unary_expr(
         )),
         (ProstType::Cast, _, _) => {
             macro_rules! gen_cast_impl {
-                ($( { $input:ident, $cast:ident, $func:expr } ),*) => {
+                ($( { $input:ident, $cast:ident, $func:expr, $infallible:ident } ),*) => {
                     match (child_expr.return_type(), return_type.clone()) {
                         $(
-                            ($input! { type_match_pattern }, $cast! { type_match_pattern }) => Box::new(
-                                UnaryExpression::< $input! { type_array }, $cast! { type_array }, _>::new(
-                                    child_expr,
-                                    return_type.clone(),
-                                    $func
-                                )
-                            ),
+                            ($input! { type_match_pattern }, $cast! { type_match_pattern }) => gen_cast_impl!(arm: $input, $cast, $func, $infallible),
                         )*
                         _ => {
                             return Err(ExprError::UnsupportedCast(child_expr.return_type(), return_type));
                         }
                     }
                 };
+                (arm: $input:ident, varchar, $func:expr, false) => {
+                    UnaryBytesExpression::< $input! { type_array }, _>::new(
+                        child_expr,
+                        return_type.clone(),
+                        $func
+                    ).boxed()
+                };
+                (arm: $input:ident, $cast:ident, $func:expr, false) => {
+                    UnaryExpression::< $input! { type_array }, $cast! { type_array }, _>::new(
+                        child_expr,
+                        return_type.clone(),
+                        $func
+                    ).boxed()
+                };
+                (arm: $input:ident, $cast:ident, $func:expr, true) => {
+                    template_fast::UnaryExpression::new(
+                        child_expr,
+                        return_type.clone(),
+                        $func
+                    ).boxed()
+                };
             }
 
             for_all_cast_variants! { gen_cast_impl }
         }
-        (ProstType::BoolOut, _, DataType::Boolean) => {
-            Box::new(UnaryExpression::<BoolArray, Utf8Array, _>::new(
-                child_expr,
-                return_type,
-                bool_out,
-            ))
-        }
+        (ProstType::BoolOut, _, DataType::Boolean) => Box::new(
+            UnaryBytesExpression::<BoolArray, _>::new(child_expr, return_type, bool_out),
+        ),
         (ProstType::Not, _, _) => Box::new(BooleanUnaryExpression::new(
             child_expr,
             |a| BoolArray::new(!a.data() & a.null_bitmap(), a.null_bitmap().clone()),
@@ -344,12 +355,12 @@ mod tests {
 
     use super::super::*;
     use crate::expr::test_utils::{make_expression, make_input_ref};
-    use crate::vector_op::cast::{general_cast, str_parse};
+    use crate::vector_op::cast::{str_parse, try_cast};
 
     #[test]
     fn test_unary() {
         test_unary_bool::<BoolArray, _>(|x| !x, Type::Not);
-        test_unary_date::<NaiveDateTimeArray, _>(|x| general_cast(x).unwrap(), Type::Cast);
+        test_unary_date::<NaiveDateTimeArray, _>(|x| try_cast(x).unwrap(), Type::Cast);
         test_str_to_int16::<I16Array, _>(|x| str_parse(x).unwrap());
     }
 

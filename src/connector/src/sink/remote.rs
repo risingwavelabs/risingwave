@@ -27,14 +27,13 @@ use risingwave_common::row::Row;
 use risingwave_common::types::DataType;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
-use risingwave_pb::connector_service::sink_config::table_schema::Column;
-use risingwave_pb::connector_service::sink_config::TableSchema;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::{JsonPayload, Payload};
 use risingwave_pb::connector_service::sink_stream_request::{
     Request as SinkRequest, StartEpoch, StartSink, SyncBatch, WriteBatch,
 };
-use risingwave_pb::connector_service::{SinkConfig, SinkResponse, SinkStreamRequest};
+use risingwave_pb::connector_service::table_schema::Column;
+use risingwave_pb::connector_service::{SinkConfig, SinkResponse, SinkStreamRequest, TableSchema};
 use serde_json::Value;
 use serde_json::Value::Number;
 use tokio::sync::mpsc;

@@ -22,6 +22,17 @@ use sqllogictest::ParallelTestError;
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
 
+fn is_create_table_as(sql: &str) -> bool {
+    let parts: Vec<String> = sql
+        .trim_start()
+        .split_whitespace()
+        .map(|s| s.to_lowercase())
+        .collect();
+
+    println!("{:?}", parts);
+    parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
+}
+
 /// Run the sqllogictest files in `glob`.
 pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
     let host = cluster.rand_frontend_ip();
@@ -45,20 +56,23 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             if let sqllogictest::Record::Halt { .. } = record {
                 break;
             }
-            let (is_create, is_drop, is_write) =
+            let (is_create_table_as, is_create, is_drop, is_write) =
                 if let sqllogictest::Record::Statement { sql, .. } = &record {
+                    let is_create_table_as = is_create_table_as(sql);
                     let sql =
                         (sql.trim_start().split_once(' ').unwrap_or_default().0).to_lowercase();
                     (
-                        sql == "create",
+                        is_create_table_as,
+                        !is_create_table_as && sql == "create",
                         sql == "drop",
                         sql == "insert" || sql == "update" || sql == "delete" || sql == "flush",
                     )
                 } else {
-                    (false, false, false)
+                    (false, false, false, false)
                 };
-            // we won't kill during insert/update/delete/flush since the atomicity is not guaranteed
-            if is_write {
+            // we won't kill during create/insert/update/delete/flush since the atomicity is not
+            // guaranteed. Notice that `create table as` is also not atomic in our system.
+            if is_write || is_create_table_as {
                 if !kill {
                     if let Err(e) = tester.run_async(record).await {
                         panic!("{}", e);
@@ -82,7 +96,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 }
                 continue;
             }
-            if !kill || is_write {
+            if !kill || is_write || is_create_table_as {
                 match tester.run_async(record).await {
                     Ok(_) => continue,
                     Err(e) => panic!("{}", e),
@@ -178,4 +192,17 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
     std::fs::write(file.path(), content).expect("failed to write file");
     println!("created a temp file for kafka test: {:?}", file.path());
     file
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn test_is_create_table_as() {
+        assert!(is_create_table_as("     create     table xx  as select 1;"));
+        assert!(!is_create_table_as(
+            "     create table xx not  as select 1;"
+        ));
+        assert!(!is_create_table_as("     create view xx as select 1;"));
+    }
 }

@@ -41,7 +41,6 @@
 //! Wrappers for total order on Floats.  See the [`OrderedFloat`] docs for details.
 
 use core::cmp::Ordering;
-use core::convert::TryFrom;
 use core::fmt;
 use core::hash::{Hash, Hasher};
 use core::iter::{Product, Sum};
@@ -1062,24 +1061,6 @@ mod impl_as_primitive {
 
 mod impl_from {
     use super::*;
-
-    macro_rules! impl_try_from_for {
-        ($ty:ty) => {
-            impl<F> TryFrom<OrderedFloat<F>> for $ty
-            where
-                F: 'static + Float,
-                Self: TryFrom<F>,
-            {
-                type Error = <Self as TryFrom<F>>::Error;
-
-                fn try_from(value: OrderedFloat<F>) -> Result<Self, Self::Error> {
-                    TryFrom::try_from(value.0)
-                }
-            }
-        };
-    }
-
-    impl_try_from_for!(crate::types::Decimal);
 
     macro_rules! impl_from_for {
         ($ty:ty) => {

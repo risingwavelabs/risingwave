@@ -224,7 +224,7 @@ mod tests {
         for (i, input_ref) in input_refs.into_iter().enumerate() {
             let search_expr =
                 InExpression::new(input_ref, data[i].clone().into_iter(), DataType::Boolean);
-            let vis = data_chunks[i].get_visibility_ref();
+            let vis = data_chunks[i].visibility();
             let res = search_expr
                 .eval(&data_chunks[i])
                 .unwrap()
