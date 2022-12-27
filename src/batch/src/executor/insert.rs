@@ -112,7 +112,7 @@ impl InsertExecutor {
             // If the user does not specify the primary key, then we need to add a column as the
             // primary key.
             if let Some(row_id_index) = self.row_id_index {
-                let row_id_col = I64Array::from_iter(repeat(None).take(len));
+                let row_id_col = I64Array::from_iter(repeat(None).take(cap));
                 columns.insert(row_id_index, row_id_col.into())
             }
 
