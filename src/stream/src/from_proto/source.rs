@@ -22,6 +22,10 @@ use tokio::sync::mpsc::unbounded_channel;
 use super::*;
 use crate::executor::source_executor_v2::{SourceExecutorV2, StreamSourceCore};
 use crate::executor::state_table_handler::SourceStateTableHandler;
+<<<<<<< HEAD
+=======
+use crate::executor::{FsSourceExecutor, SourceExecutor};
+>>>>>>> main
 
 pub struct SourceExecutorBuilder;
 
@@ -91,6 +95,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 state_table_handler,
             );
 
+<<<<<<< HEAD
             Ok(Box::new(SourceExecutorV2::new(
                 params.actor_context,
                 schema,
@@ -114,6 +119,51 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 stream.config.barrier_interval_ms as u64,
                 params.executor_id,
             )))
+=======
+        // so ugly here, need some graceful method
+        let is_s3 = node
+            .properties
+            .get("connector")
+            .map(|s| s.to_lowercase())
+            .unwrap_or_default()
+            .eq("s3");
+        if is_s3 {
+            Ok(Box::new(FsSourceExecutor::new(
+                params.actor_context,
+                source_builder,
+                source_id,
+                source_name,
+                vnodes,
+                state_table_handler,
+                column_ids,
+                schema,
+                params.pk_indices,
+                barrier_receiver,
+                params.executor_id,
+                params.operator_id,
+                params.op_info,
+                params.executor_stats,
+                stream.config.barrier_interval_ms as u64,
+            )?))
+        } else {
+            Ok(Box::new(SourceExecutor::new(
+                params.actor_context,
+                source_builder,
+                source_id,
+                source_name,
+                vnodes,
+                state_table_handler,
+                column_ids,
+                schema,
+                params.pk_indices,
+                barrier_receiver,
+                params.executor_id,
+                params.operator_id,
+                params.op_info,
+                params.executor_stats,
+                stream.config.barrier_interval_ms as u64,
+            )?))
+>>>>>>> main
         }
     }
 }

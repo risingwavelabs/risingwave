@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
 use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::StateStore;
 
@@ -42,7 +39,7 @@ impl<S: StateStore> TopNExecutor<S, false> {
         ctx: ActorContextRef,
         storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
-        order_by_len: usize,
+        order_by: Vec<OrderPair>,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
@@ -55,7 +52,7 @@ impl<S: StateStore> TopNExecutor<S, false> {
                 info,
                 storage_key,
                 offset_and_limit,
-                order_by_len,
+                order_by,
                 executor_id,
                 state_table,
             )?,
@@ -70,7 +67,7 @@ impl<S: StateStore> TopNExecutor<S, true> {
         ctx: ActorContextRef,
         storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
-        order_by_len: usize,
+        order_by: Vec<OrderPair>,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
@@ -83,7 +80,7 @@ impl<S: StateStore> TopNExecutor<S, true> {
                 info,
                 storage_key,
                 offset_and_limit,
-                order_by_len,
+                order_by,
                 executor_id,
                 state_table,
             )?,
@@ -99,7 +96,7 @@ impl<S: StateStore> TopNExecutor<S, true> {
         ctx: ActorContextRef,
         storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
-        order_by_len: usize,
+        order_by: Vec<OrderPair>,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
@@ -109,7 +106,7 @@ impl<S: StateStore> TopNExecutor<S, true> {
             info,
             storage_key,
             offset_and_limit,
-            order_by_len,
+            order_by,
             executor_id,
             state_table,
         )?;
@@ -123,19 +120,16 @@ impl<S: StateStore> TopNExecutor<S, true> {
 pub struct InnerTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
     info: ExecutorInfo,
 
-    /// The internal key indices of the `TopNExecutor`
-    internal_key_indices: PkIndices,
+    /// The storage key indices of the `TopNExecutor`
+    storage_key_indices: PkIndices,
 
-    /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNState<S>,
 
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
     cache: TopNCache<WITH_TIES>,
 
-    order_by_len: usize,
-
     /// Used for serializing pk into CacheKey.
-    cache_key_serde: (OrderedRowSerde, OrderedRowSerde),
+    cache_key_serde: CacheKeySerde,
 }
 
 impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
@@ -151,42 +145,20 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
         input_info: ExecutorInfo,
         storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
-        order_by_len: usize,
+        order_by: Vec<OrderPair>,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
             pk_indices, schema, ..
         } = input_info;
-        // storage_key is superset of pk
-        assert!(storage_key
-            .iter()
-            .map(|x| x.column_idx)
-            .collect::<HashSet<_>>()
-            .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
-        let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&storage_key, &schema);
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
-        let managed_state = ManagedTopNState::<S>::new(
-            state_table,
-            &internal_key_data_types,
-            &internal_key_order_types,
-            order_by_len,
-        );
-        let (first_key_data_types, second_key_data_types) =
-            internal_key_data_types.split_at(order_by_len);
-        let (first_key_order_types, second_key_order_types) =
-            internal_key_order_types.split_at(order_by_len);
-        let first_key_serde = OrderedRowSerde::new(
-            first_key_data_types.to_vec(),
-            first_key_order_types.to_vec(),
-        );
-        let second_key_serde = OrderedRowSerde::new(
-            second_key_data_types.to_vec(),
-            second_key_order_types.to_vec(),
-        );
-        let cache_key_serde = (first_key_serde, second_key_serde);
+
+        let cache_key_serde =
+            create_cache_key_serde(&storage_key, &pk_indices, &schema, &order_by, &[]);
+        let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
+
         Ok(Self {
             info: ExecutorInfo {
                 schema,
@@ -194,9 +166,8 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
                 identity: format!("TopNExecutorNew {:X}", executor_id),
             },
             managed_state,
-            internal_key_indices,
-            cache: TopNCache::new(num_offset, num_limit, order_by_len),
-            order_by_len,
+            storage_key_indices: storage_key.into_iter().map(|op| op.column_idx).collect(),
+            cache: TopNCache::new(num_offset, num_limit),
             cache_key_serde,
         })
     }
@@ -213,9 +184,8 @@ where
 
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
-            let pk_row = row_ref.project(&self.internal_key_indices);
-            let cache_key =
-                serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
+            let pk_row = row_ref.project(&self.storage_key_indices);
+            let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     // First insert input row to state store
@@ -254,7 +224,7 @@ where
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
-            .init_topn_cache(NO_GROUP_KEY, &mut self.cache, self.order_by_len)
+            .init_topn_cache(NO_GROUP_KEY, &mut self.cache)
             .await
     }
 }
@@ -320,11 +290,18 @@ mod tests {
             }
         }
 
-        fn create_storage_key() -> Vec<OrderPair> {
-            vec![
-                OrderPair::new(0, OrderType::Ascending),
-                OrderPair::new(1, OrderType::Ascending),
-            ]
+        fn storage_key() -> Vec<OrderPair> {
+            let mut v = order_by();
+            v.extend([OrderPair::new(1, OrderType::Ascending)]);
+            v
+        }
+
+        fn order_by() -> Vec<OrderPair> {
+            vec![OrderPair::new(0, OrderType::Ascending)]
+        }
+
+        fn pk_indices() -> PkIndices {
+            vec![0, 1]
         }
 
         fn create_source() -> Box<MockSource> {
@@ -332,7 +309,7 @@ mod tests {
             let schema = create_schema();
             Box::new(MockSource::with_messages(
                 schema,
-                PkIndices::new(),
+                pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(1)),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
@@ -349,21 +326,20 @@ mod tests {
 
         #[tokio::test]
         async fn test_top_n_executor_with_offset() {
-            let order_types = create_storage_key();
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
-                &[0, 1],
+                &pk_indices(),
             )
             .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
-                    order_types,
+                    storage_key(),
                     (3, 1000),
-                    2,
+                    order_by(),
                     1,
                     state_table,
                 )
@@ -446,21 +422,20 @@ mod tests {
 
         #[tokio::test]
         async fn test_top_n_executor_with_limit() {
-            let order_types = create_storage_key();
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
-                &[0, 1],
+                &pk_indices(),
             )
             .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
-                    order_types,
+                    storage_key(),
                     (0, 4),
-                    2,
+                    order_by(),
                     1,
                     state_table,
                 )
@@ -555,21 +530,20 @@ mod tests {
         // Should have the same result as above, since there are no duplicate sort keys.
         #[tokio::test]
         async fn test_top_n_executor_with_limit_with_ties() {
-            let order_types = create_storage_key();
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
-                &[0, 1],
+                &pk_indices(),
             )
             .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
-                    order_types,
+                    storage_key(),
                     (0, 4),
-                    2,
+                    order_by(),
                     1,
                     state_table,
                 )
@@ -663,21 +637,20 @@ mod tests {
 
         #[tokio::test]
         async fn test_top_n_executor_with_offset_and_limit() {
-            let order_types = create_storage_key();
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
-                &[0, 1],
+                &pk_indices(),
             )
             .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
-                    order_types,
+                    storage_key(),
                     (3, 4),
-                    2,
+                    order_by(),
                     1,
                     state_table,
                 )
@@ -789,7 +762,7 @@ mod tests {
             };
             Box::new(MockSource::with_messages(
                 schema,
-                PkIndices::new(),
+                pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(1)),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
@@ -822,7 +795,7 @@ mod tests {
             };
             Box::new(MockSource::with_messages(
                 schema,
-                PkIndices::new(),
+                pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(1)),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
@@ -855,7 +828,7 @@ mod tests {
             };
             Box::new(MockSource::with_messages(
                 schema,
-                PkIndices::new(),
+                pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(3)),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
@@ -865,13 +838,23 @@ mod tests {
             ))
         }
 
-        #[tokio::test]
-        async fn test_top_n_executor_with_offset_and_limit_new() {
-            let order_types = vec![
+        fn storage_key() -> Vec<OrderPair> {
+            order_by()
+        }
+
+        fn order_by() -> Vec<OrderPair> {
+            vec![
                 OrderPair::new(0, OrderType::Ascending),
                 OrderPair::new(3, OrderType::Ascending),
-            ];
+            ]
+        }
 
+        fn pk_indices() -> PkIndices {
+            vec![0, 3]
+        }
+
+        #[tokio::test]
+        async fn test_top_n_executor_with_offset_and_limit_new() {
             let source = create_source_new();
             let state_table = create_in_memory_state_table(
                 &[
@@ -881,16 +864,16 @@ mod tests {
                     DataType::Int64,
                 ],
                 &[OrderType::Ascending, OrderType::Ascending],
-                &[0, 3],
+                &pk_indices(),
             )
             .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
-                    order_types,
+                    storage_key(),
                     (1, 3),
-                    2,
+                    order_by(),
                     1,
                     state_table,
                 )
@@ -949,10 +932,6 @@ mod tests {
 
         #[tokio::test]
         async fn test_top_n_executor_with_offset_and_limit_new_after_recovery() {
-            let order_types = vec![
-                OrderPair::new(0, OrderType::Ascending),
-                OrderPair::new(3, OrderType::Ascending),
-            ];
             let state_table = create_in_memory_state_table(
                 &[
                     DataType::Int64,
@@ -961,16 +940,16 @@ mod tests {
                     DataType::Int64,
                 ],
                 &[OrderType::Ascending, OrderType::Ascending],
-                &[0, 3],
+                &pk_indices(),
             )
             .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_without_ties(
                     create_source_new_before_recovery() as Box<dyn Executor>,
                     ActorContext::create(0),
-                    order_types.clone(),
+                    storage_key(),
                     (1, 3),
-                    2,
+                    order_by(),
                     1,
                     state_table.clone(),
                 )
@@ -1009,9 +988,9 @@ mod tests {
                 TopNExecutor::new_without_ties(
                     create_source_new_after_recovery() as Box<dyn Executor>,
                     ActorContext::create(0),
-                    order_types.clone(),
+                    storage_key(),
                     (1, 3),
-                    2,
+                    order_by(),
                     1,
                     state_table,
                 )
@@ -1094,7 +1073,7 @@ mod tests {
             };
             Box::new(MockSource::with_messages(
                 schema,
-                PkIndices::new(),
+                pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(1)),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
@@ -1106,27 +1085,36 @@ mod tests {
             ))
         }
 
+        fn storage_key() -> Vec<OrderPair> {
+            let mut v = order_by();
+            v.push(OrderPair::new(1, OrderType::Ascending));
+            v
+        }
+
+        fn order_by() -> Vec<OrderPair> {
+            vec![OrderPair::new(0, OrderType::Ascending)]
+        }
+
+        fn pk_indices() -> PkIndices {
+            vec![0, 1]
+        }
+
         #[tokio::test]
         async fn test_with_ties() {
-            let order_types = vec![
-                OrderPair::new(0, OrderType::Ascending),
-                OrderPair::new(1, OrderType::Ascending),
-            ];
-
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
-                &[0, 1],
+                &pk_indices(),
             )
             .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     source as Box<dyn Executor>,
                     ActorContext::create(0),
-                    order_types,
+                    storage_key(),
                     (0, 3),
-                    1,
+                    order_by(),
                     1,
                     state_table,
                 )
@@ -1217,7 +1205,7 @@ mod tests {
             };
             Box::new(MockSource::with_messages(
                 schema,
-                PkIndices::new(),
+                pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(1)),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
@@ -1246,7 +1234,7 @@ mod tests {
             };
             Box::new(MockSource::with_messages(
                 schema,
-                PkIndices::new(),
+                pk_indices(),
                 vec![
                     Message::Barrier(Barrier::new_test_barrier(3)),
                     Message::Chunk(std::mem::take(&mut chunks[0])),
@@ -1258,24 +1246,19 @@ mod tests {
 
         #[tokio::test]
         async fn test_with_ties_recovery() {
-            let order_types = vec![
-                OrderPair::new(0, OrderType::Ascending),
-                OrderPair::new(1, OrderType::Ascending),
-            ];
-
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
                 &[OrderType::Ascending, OrderType::Ascending],
-                &[0, 1],
+                &pk_indices(),
             )
             .await;
             let top_n_executor = Box::new(
                 TopNExecutor::new_with_ties_for_test(
                     create_source_before_recovery() as Box<dyn Executor>,
                     ActorContext::create(0),
-                    order_types.clone(),
+                    storage_key(),
                     (0, 3),
-                    1,
+                    order_by(),
                     1,
                     state_table.clone(),
                 )
@@ -1320,9 +1303,9 @@ mod tests {
                 TopNExecutor::new_with_ties_for_test(
                     create_source_after_recovery() as Box<dyn Executor>,
                     ActorContext::create(0),
-                    order_types.clone(),
+                    storage_key(),
                     (0, 3),
-                    1,
+                    order_by(),
                     1,
                     state_table,
                 )

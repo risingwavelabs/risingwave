@@ -182,7 +182,7 @@
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (pg_namespace.nspname <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(pg_namespace.nspname, '^pg_toast':Varchar)) AND (pg_namespace.nspname <> 'information_schema':Varchar) }
       | └─LogicalJoin { type: LeftOuter, on: (pg_namespace.oid = pg_class.relnamespace), output: all }
-      |   ├─LogicalScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind] }
+      |   ├─LogicalScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind, pg_class.relam, pg_class.reltablespace] }
       |   └─LogicalScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl] }
       └─LogicalProject { exprs: [pg_user.name] }
         └─LogicalFilter { predicate: (CorrelatedInputRef { index: 3, correlated_id: 1 } = pg_user.usesysid) }

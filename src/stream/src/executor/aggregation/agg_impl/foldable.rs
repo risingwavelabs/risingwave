@@ -414,6 +414,7 @@ impl_fold_agg! { F32Array, Float32, F32Array }
 impl_fold_agg! { F64Array, Float64, F64Array }
 impl_fold_agg! { DecimalArray, Decimal, DecimalArray }
 impl_fold_agg! { Utf8Array, Utf8, Utf8Array }
+impl_fold_agg! { BytesArray, Bytea, BytesArray }
 impl_fold_agg! { StructArray, Struct, StructArray }
 impl_fold_agg! { IntervalArray, Interval, IntervalArray }
 impl_fold_agg! { NaiveTimeArray, NaiveTime, NaiveTimeArray }

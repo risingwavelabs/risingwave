@@ -51,6 +51,7 @@ use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::memory_management::memory_manager::GlobalMemoryManager;
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
@@ -211,8 +212,39 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
         config.streaming.clone(),
         async_stack_trace_config,
-        opts.total_memory_bytes,
     ));
+<<<<<<< HEAD
+=======
+
+    // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
+    let batch_mgr_clone = batch_mgr.clone();
+    let stream_mgr_clone = stream_mgr.clone();
+    let create_lru_manager = move || {
+        let mgr = GlobalMemoryManager::new(
+            opts.total_memory_bytes,
+            config.streaming.barrier_interval_ms,
+            streaming_metrics.clone(),
+        );
+        // Run a background memory monitor
+        tokio::spawn(mgr.clone().run(batch_mgr_clone, stream_mgr_clone));
+        mgr
+    };
+
+    let watermark_epoch = config
+        .streaming
+        .developer
+        .stream_enable_managed_cache
+        .then(create_lru_manager)
+        .map(|mgr| mgr.get_watermark_epoch());
+    // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead
+    // of lru manager.
+    stream_mgr.set_watermark_epoch(watermark_epoch).await;
+
+    let source_mgr = Arc::new(TableSourceManager::new(
+        source_metrics,
+        stream_config.developer.stream_connector_message_buffer_size,
+    ));
+>>>>>>> main
     let grpc_stack_trace_mgr = async_stack_trace_config
         .map(|config| GrpcStackTraceManagerRef::new(StackTraceManager::new(config).into()));
     let dml_mgr = Arc::new(DmlManager::default());

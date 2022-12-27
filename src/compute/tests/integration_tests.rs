@@ -17,7 +17,6 @@
 
 use std::sync::Arc;
 
-use bytes::Bytes;
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -157,10 +156,20 @@ async fn test_table_materialize() -> StreamResult<()> {
         })
         .collect_vec();
     let (barrier_tx, barrier_rx) = unbounded_channel();
+<<<<<<< HEAD
     let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
 
     // Create a `SourceExecutor` to read the changes.
     let source_executor = SourceExecutorV2::<PanicStateStore>::new(
+=======
+    let vnodes = Bitmap::from_bytes(&[0b11111111]);
+    let state_table = SourceStateTableHandler::from_table_catalog(
+        &default_source_internal_table(0x2333),
+        MemoryStateStore::new(),
+    )
+    .await;
+    let stream_source = SourceExecutor::new(
+>>>>>>> main
         ActorContext::create(0x3f3f3f),
         all_schema.clone(),
         pk_indices.clone(),
@@ -217,11 +226,15 @@ async fn test_table_materialize() -> StreamResult<()> {
          1.14
          5.14",
     );
-    let insert_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
+    let insert_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(
+        chunk,
+        get_schema(&[ColumnId::from(1)]),
+    ));
     let insert = Box::new(InsertExecutor::new(
         table_id,
         dml_manager.clone(),
         insert_inner,
+        1024,
         "InsertExecutor".to_string(),
         vec![], // ignore insertion order
         Some(row_id_index),
@@ -338,6 +351,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         table_id,
         dml_manager.clone(),
         delete_inner,
+        1024,
         "DeleteExecutor".to_string(),
     ));
 

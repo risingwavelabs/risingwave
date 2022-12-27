@@ -539,18 +539,6 @@ mod default {
         pub fn checkpoint_frequency() -> usize {
             10
         }
-
-        #[cfg(madsim)]
-        pub fn total_memory_available_bytes() -> usize {
-            16 * 1024 * 1024 * 1024
-        }
-
-        #[allow(dead_code)]
-        #[cfg(not(madsim))]
-        pub fn total_memory_available_bytes() -> usize {
-            use crate::util::resource_util;
-            resource_util::memory::total_memory_used_bytes()
-        }
     }
 
     pub mod file_cache {

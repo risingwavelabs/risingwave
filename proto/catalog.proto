@@ -19,6 +19,8 @@ message StreamSourceInfo {
   string row_schema_location = 2;
   bool use_schema_registry = 3;
   string proto_message_name = 4;
+  int32 csv_delimiter = 5;
+  bool csv_has_header = 6;
 }
 
 message Source {

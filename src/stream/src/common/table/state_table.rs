@@ -733,7 +733,7 @@ impl<S: StateStore> StateTable<S> {
             } else {
                 vec![]
             };
-            for vnode in self.vnodes.ones() {
+            for vnode in self.vnodes.iter_ones() {
                 let mut range_begin = vnode.to_be_bytes().to_vec();
                 let mut range_end = range_begin.clone();
                 range_begin.extend(&range_begin_suffix);

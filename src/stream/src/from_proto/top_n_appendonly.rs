@@ -39,6 +39,8 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
         let storage_key = table.get_pk().iter().map(OrderPair::from_prost).collect();
+        let order_by = node.order_by.iter().map(OrderPair::from_prost).collect();
+
         assert_eq!(&params.pk_indices, input.pk_indices());
         if node.with_ties {
             Ok(AppendOnlyTopNExecutor::new_with_ties(
@@ -46,7 +48,7 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
                 params.actor_context,
                 storage_key,
                 (node.offset as usize, node.limit as usize),
-                node.order_by_len as usize,
+                order_by,
                 params.executor_id,
                 state_table,
             )?
@@ -57,7 +59,7 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
                 params.actor_context,
                 storage_key,
                 (node.offset as usize, node.limit as usize),
-                node.order_by_len as usize,
+                order_by,
                 params.executor_id,
                 state_table,
             )?

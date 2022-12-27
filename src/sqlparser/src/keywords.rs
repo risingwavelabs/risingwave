@@ -180,6 +180,7 @@ define_keywords!(
     DEFAULT,
     DEFERRABLE,
     DELETE,
+    DELIMITED,
     DENSE_RANK,
     DEREF,
     DESC,

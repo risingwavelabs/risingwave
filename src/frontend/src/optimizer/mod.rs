@@ -202,6 +202,13 @@ impl PlanRoot {
             .into());
         }
 
+        plan = self.optimize_by_rules(
+            plan,
+            "Union Merge".to_string(),
+            vec![UnionMergeRule::create()],
+            ApplyOrder::BottomUp,
+        );
+
         // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
         plan = plan.predicate_pushdown(Condition::true_cond());
@@ -319,7 +326,7 @@ impl PlanRoot {
                 ProjectEliminateRule::create(),
                 // project-join merge should be applied after merge
                 // and eliminate
-                ProjectJoinRule::create(),
+                ProjectJoinMergeRule::create(),
                 AggProjectMergeRule::create(),
             ],
             ApplyOrder::BottomUp,

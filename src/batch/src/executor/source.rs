@@ -72,7 +72,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
             RowFormatType::Avro => SourceFormat::Avro,
             RowFormatType::Maxwell => SourceFormat::Maxwell,
             RowFormatType::CanalJson => SourceFormat::CanalJson,
-            RowFormatType::RowUnspecified => unreachable!(),
+            _ => unreachable!(),
         };
         if format == SourceFormat::Protobuf && info.row_schema_location.is_empty() {
             return Err(RwError::from(ProtocolError(

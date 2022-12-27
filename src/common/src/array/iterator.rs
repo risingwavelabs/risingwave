@@ -15,8 +15,6 @@
 use std::iter::TrustedLen;
 
 use super::Array;
-use crate::array::ArrayImpl;
-use crate::types::DatumRef;
 
 pub struct ArrayIterator<'a, A: Array> {
     data: &'a A,
@@ -50,87 +48,12 @@ impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
     }
 }
 
-pub struct ArrayRawIter<'a, A: Array> {
-    data: &'a A,
-    pos: usize,
-}
-
-impl<'a, A: Array> ArrayRawIter<'a, A> {
-    pub fn new(data: &'a A) -> Self {
-        Self { data, pos: 0 }
-    }
-}
-
-unsafe impl<'a, A: Array> TrustedLen for ArrayRawIter<'a, A> {}
-
-impl<'a, A: Array> Iterator for ArrayRawIter<'a, A> {
-    type Item = A::RefItem<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.data.len() {
-            None
-        } else {
-            // SAFETY: we have checked that pos < len
-            let item = unsafe { self.data.raw_value_at_unchecked(self.pos) };
-            self.pos += 1;
-            Some(item)
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let size = self.data.len() - self.pos;
-        (size, Some(size))
-    }
-}
-
-pub struct ArrayImplIterator<'a> {
-    data: &'a ArrayImpl,
-    pos: usize,
-}
-
-impl<'a> ArrayImplIterator<'a> {
-    pub fn new(data: &'a ArrayImpl) -> Self {
-        Self { data, pos: 0 }
-    }
-}
-
-unsafe impl<'a> TrustedLen for ArrayImplIterator<'a> {}
-
-impl<'a> Iterator for ArrayImplIterator<'a> {
-    type Item = DatumRef<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.data.len() {
-            None
-        } else {
-            let item = self.data.value_at(self.pos);
-            self.pos += 1;
-            Some(item)
-        }
-    }
-
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
-        if self.pos + n >= self.data.len() {
-            None
-        } else {
-            let item = self.data.value_at(self.pos + n);
-            self.pos += n + 1;
-            Some(item)
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let size = self.data.len() - self.pos;
-        (size, Some(size))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use paste::paste;
 
     use super::*;
-    use crate::array::ArrayBuilder;
+    use crate::array::{ArrayBuilder, ArrayImpl};
     use crate::for_all_variants;
 
     macro_rules! test_trusted_len {

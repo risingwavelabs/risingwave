@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -22,19 +21,19 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashKey;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::StateStore;
 
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::TopNCache;
-use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::cache::{cache_may_stale, new_unbounded, EvictableHashMap, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
+use crate::task::AtomicU64RefOpt;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerGroupTopNExecutorNew<K, S, WITH_TIES>>;
@@ -46,11 +45,11 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
         ctx: ActorContextRef,
         storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
-        order_by_len: usize,
+        order_by: Vec<OrderPair>,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-        lru_manager: Option<LruManagerRef>,
+        watermark_epoch: AtomicU64RefOpt,
         cache_size: usize,
     ) -> StreamResult<Self> {
         let info = input.info();
@@ -61,11 +60,11 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
                 info,
                 storage_key,
                 offset_and_limit,
-                order_by_len,
+                order_by,
                 executor_id,
                 group_by,
                 state_table,
-                lru_manager,
+                watermark_epoch,
                 cache_size,
             )?,
         })
@@ -81,10 +80,9 @@ pub struct InnerGroupTopNExecutorNew<K: HashKey, S: StateStore, const WITH_TIES:
     /// `OFFSET XXX`. `0` means no offset.
     offset: usize,
 
-    /// The internal key indices of the `GroupTopNExecutor`
-    internal_key_indices: PkIndices,
+    /// The storage key indices of the `GroupTopNExecutor`
+    storage_key_indices: PkIndices,
 
-    /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNState<S>,
 
     /// which column we used to group the data.
@@ -93,11 +91,8 @@ pub struct InnerGroupTopNExecutorNew<K: HashKey, S: StateStore, const WITH_TIES:
     /// group key -> cache for this group
     caches: GroupTopNCache<K, WITH_TIES>,
 
-    /// The number of fields of the ORDER BY clause, and will be used to split key into `CacheKey`.
-    order_by_len: usize,
-
     /// Used for serializing pk into CacheKey.
-    cache_key_serde: (OrderedRowSerde, OrderedRowSerde),
+    cache_key_serde: CacheKeySerde,
 }
 
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<K, S, WITH_TIES> {
@@ -106,45 +101,21 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
         input_info: ExecutorInfo,
         storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
-        order_by_len: usize,
+        order_by: Vec<OrderPair>,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-        lru_manager: Option<LruManagerRef>,
+        lru_manager: AtomicU64RefOpt,
         cache_size: usize,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
             pk_indices, schema, ..
         } = input_info;
-        // storage_key is superset of pk
-        assert!(storage_key
-            .iter()
-            .map(|x| x.column_idx)
-            .collect::<HashSet<_>>()
-            .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
-        let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&storage_key, &schema);
 
-        let managed_state = ManagedTopNState::<S>::new(
-            state_table,
-            &internal_key_data_types[group_by.len()..],
-            &internal_key_order_types[group_by.len()..],
-            order_by_len,
-        );
-        let (first_key_data_types, second_key_data_types) =
-            internal_key_data_types[group_by.len()..].split_at(order_by_len);
-        let (first_key_order_types, second_key_order_types) =
-            internal_key_order_types[group_by.len()..].split_at(order_by_len);
-        let first_key_serde = OrderedRowSerde::new(
-            first_key_data_types.to_vec(),
-            first_key_order_types.to_vec(),
-        );
-        let second_key_serde = OrderedRowSerde::new(
-            second_key_data_types.to_vec(),
-            second_key_order_types.to_vec(),
-        );
+        let cache_key_serde =
+            create_cache_key_serde(&storage_key, &pk_indices, &schema, &order_by, &group_by);
+        let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
-        let cache_key_serde = (first_key_serde, second_key_serde);
         Ok(Self {
             info: ExecutorInfo {
                 schema,
@@ -154,10 +125,9 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_state,
-            internal_key_indices,
+            storage_key_indices: storage_key.into_iter().map(|op| op.column_idx).collect(),
             group_by,
             caches: GroupTopNCache::new(lru_manager, cache_size),
-            order_by_len,
             cache_key_serde,
         })
     }
@@ -168,9 +138,9 @@ pub struct GroupTopNCache<K: HashKey, const WITH_TIES: bool> {
 }
 
 impl<K: HashKey, const WITH_TIES: bool> GroupTopNCache<K, WITH_TIES> {
-    pub fn new(lru_manager: Option<LruManagerRef>, cache_size: usize) -> Self {
+    pub fn new(lru_manager: AtomicU64RefOpt, cache_size: usize) -> Self {
         let cache = if let Some(lru_manager) = lru_manager {
-            ExecutorCache::Managed(lru_manager.create_cache())
+            ExecutorCache::Managed(new_unbounded(lru_manager))
         } else {
             ExecutorCache::Local(EvictableHashMap::new(cache_size))
         };
@@ -211,18 +181,17 @@ where
 
         for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq(keys.iter()) {
             // The pk without group by
-            let pk_row = row_ref.project(&self.internal_key_indices[self.group_by.len()..]);
-            let cache_key =
-                serialize_pk_to_cache_key(pk_row, self.order_by_len, &self.cache_key_serde);
+            let pk_row = row_ref.project(&self.storage_key_indices[self.group_by.len()..]);
+            let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
 
             let group_key = row_ref.project(&self.group_by);
 
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
-                let mut topn_cache = TopNCache::new(self.offset, self.limit, self.order_by_len);
+                let mut topn_cache = TopNCache::new(self.offset, self.limit);
                 self.managed_state
-                    .init_topn_cache(Some(group_key), &mut topn_cache, self.order_by_len)
+                    .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
                 self.caches.insert(group_cache_key.clone(), topn_cache);
             }
@@ -309,12 +278,26 @@ mod tests {
         }
     }
 
-    fn create_storage_key() -> Vec<OrderPair> {
+    fn storage_key() -> Vec<OrderPair> {
         vec![
             OrderPair::new(1, OrderType::Ascending),
             OrderPair::new(2, OrderType::Ascending),
             OrderPair::new(0, OrderType::Ascending),
         ]
+    }
+
+    /// group by 1, order by 2
+    fn order_by_1() -> Vec<OrderPair> {
+        vec![OrderPair::new(2, OrderType::Ascending)]
+    }
+
+    /// group by 1,2, order by 0
+    fn order_by_2() -> Vec<OrderPair> {
+        vec![OrderPair::new(0, OrderType::Ascending)]
+    }
+
+    fn pk_indices() -> PkIndices {
+        vec![1, 2, 0]
     }
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
@@ -354,7 +337,7 @@ mod tests {
         let schema = create_schema();
         Box::new(MockSource::with_messages(
             schema,
-            PkIndices::new(),
+            pk_indices(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
@@ -371,7 +354,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_without_offset_and_with_limits() {
-        let order_types = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
@@ -380,15 +362,15 @@ mod tests {
                 OrderType::Ascending,
                 OrderType::Ascending,
             ],
-            &[1, 2, 0],
+            &pk_indices(),
         )
         .await;
         let a = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
             source as Box<dyn Executor>,
             ActorContext::create(0),
-            order_types,
+            storage_key(),
             (0, 2),
-            1,
+            order_by_1(),
             1,
             vec![1],
             state_table,
@@ -469,7 +451,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_with_offset_and_with_limits() {
-        let order_types = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
@@ -478,16 +459,16 @@ mod tests {
                 OrderType::Ascending,
                 OrderType::Ascending,
             ],
-            &[1, 2, 0],
+            &pk_indices(),
         )
         .await;
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
-                order_types,
+                storage_key(),
                 (1, 2),
-                1,
+                order_by_1(),
                 1,
                 vec![1],
                 state_table,
@@ -560,7 +541,6 @@ mod tests {
     }
     #[tokio::test]
     async fn test_multi_group_key() {
-        let order_types = create_storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
@@ -569,19 +549,19 @@ mod tests {
                 OrderType::Ascending,
                 OrderType::Ascending,
             ],
-            &[1, 2, 0],
+            &pk_indices(),
         )
         .await;
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
-                order_types,
+                storage_key(),
                 (0, 2),
-                1,
+                order_by_2(),
                 1,
                 vec![1, 2],
-                state_table,
+                state_table.clone(),
                 None,
                 0,
             )

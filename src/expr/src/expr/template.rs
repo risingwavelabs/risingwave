@@ -37,7 +37,7 @@ macro_rules! gen_eval {
                     let [<arr_ $arg:lower>]: &$arg = [<ret_ $arg:lower>].as_ref().into();
                 )*
 
-                let bitmap = data_chunk.get_visibility_ref();
+                let bitmap = data_chunk.visibility();
                 let mut output_array = <$OA as Array>::Builder::with_meta(data_chunk.capacity(), (&self.return_type).into());
                 Ok(Arc::new(match bitmap {
                     Some(bitmap) => {
@@ -335,7 +335,6 @@ gen_expr_bytes!(BinaryBytesExpression, { IA1, IA2 }, { 'ia1, 'ia2 });
 gen_expr_bytes!(TernaryBytesExpression, { IA1, IA2, IA3 }, { 'ia1, 'ia2, 'ia3 });
 gen_expr_bytes!(QuaternaryBytesExpression, { IA1, IA2, IA3, IA4 }, { 'ia1, 'ia2, 'ia3, 'ia4 });
 
-gen_expr_nullable!(UnaryNullableExpression, { IA1 }, { 'ia1 });
 gen_expr_nullable!(BinaryNullableExpression, { IA1, IA2 }, { 'ia1, 'ia2 });
 
 /// `for_all_cmp_types` helps in matching and casting types when building comparison expressions
@@ -386,7 +385,6 @@ macro_rules! for_all_cmp_variants {
             { interval, interval, interval, $general_f },
             { time, time, time, $general_f },
             { date, date, date, $general_f },
-            { boolean, boolean, boolean, $general_f },
             { timestamp, date, timestamp, $general_f },
             { date, timestamp, timestamp, $general_f },
             { interval, time, interval, $general_f },

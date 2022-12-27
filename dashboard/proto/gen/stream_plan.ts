@@ -451,7 +451,7 @@ export interface TopNNode {
   limit: number;
   offset: number;
   table: Table | undefined;
-  orderByLen: number;
+  orderBy: ColumnOrder[];
   withTies: boolean;
 }
 
@@ -461,7 +461,7 @@ export interface GroupTopNNode {
   offset: number;
   groupKey: number[];
   table: Table | undefined;
-  orderByLen: number;
+  orderBy: ColumnOrder[];
   withTies: boolean;
 }
 
@@ -792,7 +792,9 @@ export interface Dispatcher {
     | undefined;
   /**
    * Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-   * - For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+   * - For dispatchers within actors, the id is the same as its downstream fragment id.
+   *   We can't use the exchange operator id directly as the dispatch id, because an exchange
+   *   could belong to more than one downstream in DAG.
    * - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
    */
   dispatcherId: number;
@@ -2222,7 +2224,7 @@ export const HashAggNode = {
 };
 
 function createBaseTopNNode(): TopNNode {
-  return { limit: 0, offset: 0, table: undefined, orderByLen: 0, withTies: false };
+  return { limit: 0, offset: 0, table: undefined, orderBy: [], withTies: false };
 }
 
 export const TopNNode = {
@@ -2231,7 +2233,7 @@ export const TopNNode = {
       limit: isSet(object.limit) ? Number(object.limit) : 0,
       offset: isSet(object.offset) ? Number(object.offset) : 0,
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      orderByLen: isSet(object.orderByLen) ? Number(object.orderByLen) : 0,
+      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       withTies: isSet(object.withTies) ? Boolean(object.withTies) : false,
     };
   },
@@ -2241,7 +2243,11 @@ export const TopNNode = {
     message.limit !== undefined && (obj.limit = Math.round(message.limit));
     message.offset !== undefined && (obj.offset = Math.round(message.offset));
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.orderByLen !== undefined && (obj.orderByLen = Math.round(message.orderByLen));
+    if (message.orderBy) {
+      obj.orderBy = message.orderBy.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    } else {
+      obj.orderBy = [];
+    }
     message.withTies !== undefined && (obj.withTies = message.withTies);
     return obj;
   },
@@ -2251,14 +2257,14 @@ export const TopNNode = {
     message.limit = object.limit ?? 0;
     message.offset = object.offset ?? 0;
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.orderByLen = object.orderByLen ?? 0;
+    message.orderBy = object.orderBy?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.withTies = object.withTies ?? false;
     return message;
   },
 };
 
 function createBaseGroupTopNNode(): GroupTopNNode {
-  return { limit: 0, offset: 0, groupKey: [], table: undefined, orderByLen: 0, withTies: false };
+  return { limit: 0, offset: 0, groupKey: [], table: undefined, orderBy: [], withTies: false };
 }
 
 export const GroupTopNNode = {
@@ -2268,7 +2274,7 @@ export const GroupTopNNode = {
       offset: isSet(object.offset) ? Number(object.offset) : 0,
       groupKey: Array.isArray(object?.groupKey) ? object.groupKey.map((e: any) => Number(e)) : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      orderByLen: isSet(object.orderByLen) ? Number(object.orderByLen) : 0,
+      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       withTies: isSet(object.withTies) ? Boolean(object.withTies) : false,
     };
   },
@@ -2283,7 +2289,11 @@ export const GroupTopNNode = {
       obj.groupKey = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.orderByLen !== undefined && (obj.orderByLen = Math.round(message.orderByLen));
+    if (message.orderBy) {
+      obj.orderBy = message.orderBy.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    } else {
+      obj.orderBy = [];
+    }
     message.withTies !== undefined && (obj.withTies = message.withTies);
     return obj;
   },
@@ -2294,7 +2304,7 @@ export const GroupTopNNode = {
     message.offset = object.offset ?? 0;
     message.groupKey = object.groupKey?.map((e) => e) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.orderByLen = object.orderByLen ?? 0;
+    message.orderBy = object.orderBy?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.withTies = object.withTies ?? false;
     return message;
   },
