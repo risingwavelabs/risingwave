@@ -210,7 +210,7 @@ message TopNNode {
   uint64 limit = 1;
   uint64 offset = 2;
   catalog.Table table = 3;
-  uint32 order_by_len = 4;
+  repeated plan_common.ColumnOrder order_by = 4;
   bool with_ties = 5;
 }
 
@@ -220,7 +220,7 @@ message GroupTopNNode {
   uint64 offset = 2;
   repeated uint32 group_key = 3;
   catalog.Table table = 4;
-  uint32 order_by_len = 5;
+  repeated plan_common.ColumnOrder order_by = 5;
   bool with_ties = 6;
 }
 
@@ -526,7 +526,9 @@ message Dispatcher {
   // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-  // - For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+  // - For dispatchers within actors, the id is the same as its downstream fragment id.
+  //   We can't use the exchange operator id directly as the dispatch id, because an exchange
+  //   could belong to more than one downstream in DAG.
   // - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.

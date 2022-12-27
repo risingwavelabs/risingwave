@@ -125,8 +125,10 @@ impl Binder {
             "ceil" => ExprType::Ceil,
             "floor" => ExprType::Floor,
             "abs" => ExprType::Abs,
+            "mod" => ExprType::Modulus,
             // temporal/chrono
-            "to_timestamp" => ExprType::ToTimestamp,
+            "to_timestamp" if inputs.len() == 1 => ExprType::ToTimestamp,
+            "to_timestamp" if inputs.len() == 2 => ExprType::ToTimestamp1,
             "date_trunc" => ExprType::DateTrunc,
             // string
             "substr" => ExprType::Substr,
@@ -254,6 +256,17 @@ impl Binder {
                 } else {
                     Err(ErrorCode::ExprError(
                         "Too many/few arguments for pg_catalog.pg_get_userbyid()".into(),
+                    )
+                    .into())
+                };
+            }
+            "pg_get_expr" => {
+                return if inputs.len() == 2 || inputs.len() == 3 {
+                    // TODO: implement pg_get_expr rather than just return empty as an workaround.
+                    Ok(ExprImpl::literal_varchar("".into()))
+                } else {
+                    Err(ErrorCode::ExprError(
+                        "Too many/few arguments for pg_catalog.pg_get_expr()".into(),
                     )
                     .into())
                 };

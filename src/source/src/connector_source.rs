@@ -141,6 +141,17 @@ impl InnerConnectorSourceReader {
                 .partition_input_count
                 .with_label_values(&[&actor_id, &source_id, &id])
                 .inc_by(msgs.len() as u64);
+            let sum_bytes = msgs
+                .iter()
+                .map(|msg| match &msg.payload {
+                    None => 0,
+                    Some(payload) => payload.len() as u64,
+                })
+                .sum();
+            self.metrics
+                .partition_input_bytes
+                .with_label_values(&[&actor_id, &source_id, &id])
+                .inc_by(sum_bytes);
             yield msgs;
         }
     }
@@ -333,6 +344,7 @@ impl SourceDescBuilderV2 {
             ProstRowFormatType::Avro => SourceFormat::Avro,
             ProstRowFormatType::Maxwell => SourceFormat::Maxwell,
             ProstRowFormatType::CanalJson => SourceFormat::CanalJson,
+            ProstRowFormatType::Csv => SourceFormat::Csv,
             ProstRowFormatType::RowUnspecified => unreachable!(),
         };
 

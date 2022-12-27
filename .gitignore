@@ -50,8 +50,8 @@ log/
 
 # generated files
 risedev-components.user.env
-riselab-components.user.env
 risedev-compose.yml
+risedev-profiles.user.yml
 ft.txt
 # generated output from regress tests
 src/tests/regress/output/*

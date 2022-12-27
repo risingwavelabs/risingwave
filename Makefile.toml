@@ -370,10 +370,36 @@ dependencies = [
   "download-redis",
 ]
 
+[tasks.create-user-profiles-file]
+category = "RiseDev - Prepare"
+description = "Create user profiles file if not exists"
+condition = { files_not_exist = ["${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/risedev-profiles.user.yml"] }
+script = '''
+#!/bin/bash
+
+set -e
+cat <<\EOF > "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/risedev-profiles.user.yml"
+# This file is used to store extra profiles besides the ones defined in `risedev.yml`.
+# It is automatically created by RiseDev.
+#
+# To use this:
+# - add new profiles just like the ones defined under the `profile` section in `risedev.yml`
+# - develop the cluster with the new profiles by `./risedev dev <new-profile-name>`
+
+my-default-example:
+  config-path: src/config/default.toml
+  steps:
+    - use: meta-node
+    - use: compute-node
+    - use: frontend
+EOF
+'''
+
 [tasks.pre-start-dev]
 category = "RiseDev - Prepare"
 description = "Prepare dev cluster by downloading necessary tools and build required components"
 dependencies = [
+  "create-user-profiles-file",
   "download-all",
   "build-risingwave",
   "post-build-risingwave",
@@ -619,6 +645,18 @@ script = """
 set -e
 
 cargo run -p risingwave_simulation "$@"
+"""
+
+[tasks.sslt-build-all]
+category = "RiseDev - Deterministic Simulation End-to-end Test"
+description = "Build deterministic simulation runner and tests"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo build -p risingwave_simulation --tests "$@"
 """
 
 [tasks.sslt-cov]

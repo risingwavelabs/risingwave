@@ -16,6 +16,8 @@ COPY ./ /risingwave
 
 ENV PATH /root/.cargo/bin/:$PATH
 
+ENV IN_CONTAINER=1
+
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
   && rustup set profile minimal \

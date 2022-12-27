@@ -516,7 +516,7 @@ impl SstableWriter for BatchUploadWriter {
             // Upload data to object store.
             self.sstable_store
                 .clone()
-                .put_sst_data(self.sst_id, data.clone())
+                .put_sst_data(self.sst_id, data)
                 .await?;
             self.sstable_store.insert_meta_cache(self.sst_id, meta);
 

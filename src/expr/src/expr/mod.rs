@@ -32,9 +32,11 @@ mod expr_quaternary_bytes;
 mod expr_regexp;
 mod expr_ternary_bytes;
 mod expr_to_char_const_tmpl;
+mod expr_to_timestamp_const_tmpl;
 pub mod expr_unary;
 mod expr_vnode;
 mod template;
+mod template_fast;
 
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -112,6 +114,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             build_nullable_binary_expr_prost(prost)
         }
         ToChar => build_to_char_expr(prost),
+        ToTimestamp1 => build_to_timestamp_expr(prost),
         Length => build_length_expr(prost),
         Replace => build_replace_expr(prost),
         Like => build_like_expr(prost),
