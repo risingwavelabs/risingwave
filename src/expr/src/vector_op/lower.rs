@@ -12,13 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Write;
+
 use risingwave_common::array::{StringWriter, WrittenGuard};
 
 use crate::Result;
 
 #[inline(always)]
 pub fn lower(s: &str, writer: StringWriter<'_>) -> Result<WrittenGuard> {
-    Ok(writer.write_ref(&s.to_lowercase()))
+    let mut writer = writer.begin();
+    for c in s.chars() {
+        writer.write_char(c.to_ascii_lowercase()).unwrap();
+    }
+    Ok(writer.finish())
 }
 
 #[cfg(test)]

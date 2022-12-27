@@ -34,13 +34,14 @@ use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorag
 use super::{
     expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult, Watermark,
 };
-use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::cache::{cache_may_stale, new_with_hasher, EvictableHashMap, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggCall, AggChangesInfo, AggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
+use crate::task::AtomicU64RefOpt;
 
 type AggGroupBox<S> = Box<AggGroup<S>>;
 type AggGroupMapItem<S> = Option<AggGroupBox<S>>;
@@ -99,7 +100,7 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     group_key_indices: Vec<usize>,
 
     /// Lru manager. None if using local eviction.
-    lru_manager: Option<LruManagerRef>,
+    watermark_epoch: AtomicU64RefOpt,
 
     /// How many times have we hit the cache of join executor
     lookup_miss_count: AtomicU64,
@@ -158,7 +159,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         group_key_indices: Vec<usize>,
         group_by_cache_size: usize,
         extreme_cache_size: usize,
-        lru_manager: Option<LruManagerRef>,
+        watermark_epoch: AtomicU64RefOpt,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
     ) -> StreamResult<Self> {
@@ -185,7 +186,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 group_key_indices,
                 group_by_cache_size,
                 extreme_cache_size,
-                lru_manager,
+                watermark_epoch,
                 group_change_set: HashSet::new(),
                 lookup_miss_count: AtomicU64::new(0),
                 total_lookup_count: AtomicU64::new(0),
@@ -522,8 +523,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } = self;
 
         // The cached state managers. `HashKey -> AggStates`.
-        let mut agg_states = if let Some(lru_manager) = extra.lru_manager.clone() {
-            ExecutorCache::Managed(lru_manager.create_cache_with_hasher(PrecomputedBuildHasher))
+        let mut agg_states = if let Some(lru_manager) = extra.watermark_epoch.clone() {
+            ExecutorCache::Managed(new_with_hasher(lru_manager, PrecomputedBuildHasher))
         } else {
             ExecutorCache::Local(EvictableHashMap::with_hasher(
                 extra.group_by_cache_size,

@@ -22,7 +22,7 @@ use risingwave_pb::expr::expr_node::Type;
 use super::Expression;
 use crate::expr::expr_binary_bytes::new_concat_op;
 use crate::expr::template::BinaryExpression;
-use crate::expr::BoxedExpression;
+use crate::expr::{template_fast, BoxedExpression};
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cmp::*;
@@ -34,6 +34,7 @@ use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
 use crate::vector_op::timestampz::{timestamp_at_time_zone, timestampz_at_time_zone};
+use crate::vector_op::to_timestamp::to_timestamp;
 use crate::vector_op::tumble::{
     tumble_start_date, tumble_start_date_time, tumble_start_timestampz,
 };
@@ -81,6 +82,31 @@ macro_rules! gen_atm_impl {
     };
 }
 
+macro_rules! gen_atm_impl_fast {
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $rt:ident, $func:ident },)*) => {
+        match ($l.return_type(), $r.return_type()) {
+            $(
+                ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
+                    template_fast::BinaryExpression::new(
+                        $l, $r, $ret,
+                        $func::<
+                            <$i1! { type_array } as Array>::OwnedItem,
+                            <$i2! { type_array } as Array>::OwnedItem,
+                            <$rt! { type_array } as Array>::OwnedItem
+                        >,
+                    ).boxed()
+                },
+            )*
+            _ => {
+                return Err(ExprError::UnsupportedFunction(format!(
+                    "{:?} atm {:?}",
+                    $l.return_type(), $r.return_type()
+                )));
+            }
+        }
+    };
+}
+
 /// This macro helps create comparison expression. Its output array is a bool array
 /// Similar to `gen_atm_impl`.
 macro_rules! gen_cmp_impl {
@@ -88,23 +114,15 @@ macro_rules! gen_cmp_impl {
         match ($l.return_type(), $r.return_type()) {
             $(
                 ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
-                    Box::new(
-                        BinaryExpression::<
-                            $i1! { type_array },
-                            $i2! { type_array },
-                            BoolArray,
-                            _
-                        >::new(
-                            $l,
-                            $r,
-                            $ret,
-                            $func::<
-                                <$i1! { type_array } as Array>::OwnedItem,
-                                <$i2! { type_array } as Array>::OwnedItem,
-                                <$cast! { type_array } as Array>::OwnedItem
-                            >,
-                        )
-                    ) as BoxedExpression
+                    template_fast::CompareExpression::new(
+                        $l,
+                        $r,
+                        $func::<
+                            <$i1! { type_array } as Array>::OwnedItem,
+                            <$i2! { type_array } as Array>::OwnedItem,
+                            <$cast! { type_array } as Array>::OwnedItem
+                        >,
+                    ).boxed()
                 }
             ),*
             _ => {
@@ -159,10 +177,20 @@ macro_rules! gen_shift_impl {
 /// * `$ret`: returned expression
 /// * `macro`: a macro helps create expression
 /// * `general_f`: generic cmp function (require a common ``TryInto`` type for two input).
+/// * `boolean_f`: boolean cmp function
 /// * `str_f`: cmp function between str
 macro_rules! gen_binary_expr_cmp {
-    ($macro:ident, $general_f:ident, $op:ident, $l:expr, $r:expr, $ret:expr) => {
+    ($macro:ident, $general_f:ident, $boolean_f:ident, $op:ident, $l:expr, $r:expr, $ret:expr) => {
         match ($l.return_type(), $r.return_type()) {
+            (DataType::Boolean, DataType::Boolean) => {
+                template_fast::BooleanBinaryExpression::new($l, $r, $boolean_f, |l, r| {
+                    match (l, r) {
+                        (Some(l), Some(r)) => Some($general_f::<bool, bool, bool>(l, r)),
+                        _ => None,
+                    }
+                })
+                .boxed()
+            }
             (DataType::Varchar, DataType::Varchar) => {
                 Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
                     $l,
@@ -447,22 +475,22 @@ pub fn new_binary_expr(
     use crate::expr::data_types::*;
     let expr = match expr_type {
         Type::Equal => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_eq, EQ, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_eq, boolean_eq, EQ, l, r, ret}
         }
         Type::NotEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_ne, NE, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_ne, boolean_ne, NE, l, r, ret}
         }
         Type::LessThan => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_lt, LT, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_lt, boolean_lt, LT, l, r, ret}
         }
         Type::GreaterThan => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_gt, GT, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_gt, boolean_gt, GT, l, r, ret}
         }
         Type::GreaterThanOrEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_ge, GE, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_ge, boolean_ge, GE, l, r, ret}
         }
         Type::LessThanOrEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_le, LE, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_le, boolean_le, LE, l, r, ret}
         }
         Type::Add => {
             gen_binary_expr_atm! {
@@ -573,7 +601,7 @@ pub fn new_binary_expr(
         }
         Type::BitwiseAnd => {
             gen_binary_expr_bitwise! {
-                gen_atm_impl,
+                gen_atm_impl_fast,
                 l, r, ret,
                 general_bitand,
                 {
@@ -582,7 +610,7 @@ pub fn new_binary_expr(
         }
         Type::BitwiseOr => {
             gen_binary_expr_bitwise! {
-                gen_atm_impl,
+                gen_atm_impl_fast,
                 l, r, ret,
                 general_bitor,
                 {
@@ -591,7 +619,7 @@ pub fn new_binary_expr(
         }
         Type::BitwiseXor => {
             gen_binary_expr_bitwise! {
-                gen_atm_impl,
+                gen_atm_impl_fast,
                 l, r, ret,
                 general_bitxor,
                 {
@@ -600,14 +628,12 @@ pub fn new_binary_expr(
         }
         Type::Extract => build_extract_expr(ret, l, r)?,
         Type::AtTimeZone => build_at_time_zone_expr(ret, l, r)?,
-        Type::RoundDigit => Box::new(
-            BinaryExpression::<DecimalArray, I32Array, DecimalArray, _>::new(
-                l,
-                r,
-                ret,
-                round_digits,
-            ),
-        ),
+        Type::RoundDigit => Box::new(template_fast::BinaryExpression::new(
+            l,
+            r,
+            ret,
+            round_digits::<i32>,
+        )),
         Type::Position => Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _>::new(
             l, r, ret, position,
         )),
@@ -677,6 +703,56 @@ pub fn new_like_default(
         return_type,
         like_default,
     ))
+}
+
+pub fn new_to_timestamp(
+    expr_ia1: BoxedExpression,
+    expr_ia2: BoxedExpression,
+    return_type: DataType,
+) -> BoxedExpression {
+    BinaryExpression::<Utf8Array, Utf8Array, NaiveDateTimeArray, _>::new(
+        expr_ia1,
+        expr_ia2,
+        return_type,
+        to_timestamp,
+    )
+    .boxed()
+}
+
+fn boolean_eq(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = !(l.data() ^ r.data());
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_ne(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = l.data() ^ r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_gt(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = l.data() & !r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_lt(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = !l.data() & r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_ge(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = l.data() | !r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_le(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = !l.data() | r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
 }
 
 #[cfg(test)]

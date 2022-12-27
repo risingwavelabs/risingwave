@@ -20,10 +20,8 @@ use itertools::Itertools;
 use lru::{DefaultHasher, LruCache};
 
 mod evictable;
-mod lru_manager;
 mod managed_lru;
 pub use evictable::*;
-pub use lru_manager::*;
 pub use managed_lru::*;
 use risingwave_common::buffer::Bitmap;
 
@@ -129,16 +127,14 @@ pub(super) fn cache_may_stale(
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-
     use super::*;
 
     #[expect(clippy::bool_assert_comparison)]
     #[test]
     fn test_cache_may_stale() {
-        let p123 = Bitmap::from_bytes(Bytes::from_static(&[0b_0000_0111_u8]));
-        let p1234 = Bitmap::from_bytes(Bytes::from_static(&[0b_0000_1111_u8]));
-        let p1245 = Bitmap::from_bytes(Bytes::from_static(&[0b_0001_1011_u8]));
+        let p123 = Bitmap::from_bytes(&[0b_0000_0111]);
+        let p1234 = Bitmap::from_bytes(&[0b_0000_1111]);
+        let p1245 = Bitmap::from_bytes(&[0b_0001_1011]);
 
         assert_eq!(cache_may_stale(&p123, &p123), false); // unchanged
         assert_eq!(cache_may_stale(&p1234, &p123), false); // scale-out

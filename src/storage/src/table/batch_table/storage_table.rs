@@ -321,7 +321,7 @@ impl<S: StateStore> StorageTable<S> {
                 // If `vnode_hint` is set, we can only access this single vnode.
                 Some(vnode) => Either::Left(std::iter::once(vnode)),
                 // Otherwise, we need to access all vnodes of this table.
-                None => Either::Right(self.vnodes.ones().map(VirtualNode::from_index)),
+                None => Either::Right(self.vnodes.iter_ones().map(VirtualNode::from_index)),
             };
             Either::Right(
                 vnodes.map(|vnode| prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes())),

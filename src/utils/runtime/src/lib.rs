@@ -16,20 +16,29 @@
 
 #![feature(panic_update_hook)]
 
+use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::Future;
 use tracing::Level;
-use tracing_subscriber::filter;
+use tracing_subscriber::filter::{Directive, Targets};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::prelude::*;
+use tracing_subscriber::{filter, EnvFilter};
+
+// ============================================================================
+// BEGIN SECTION: frequently used log configurations for debugging
+// ============================================================================
 
 /// Dump logs of all SQLs, i.e., tracing target `pgwire_query_log` to `.risingwave/log/query.log`.
 ///
 /// Changing the level of `pgwire` to `TRACE` in `configure_risingwave_targets_fmt` can also turn on
 /// the logs, but without a dedicated file.
 const ENABLE_QUERY_LOG_FILE: bool = false;
+/// Use an [excessively pretty, human-readable formatter](tracing_subscriber::fmt::format::Pretty).
+/// Includes line numbers for each log.
+const ENABLE_PRETTY_LOG: bool = false;
 
 /// Configure log targets for all `RisingWave` crates. When new crates are added and TRACE level
 /// logs are needed, add them here.
@@ -57,6 +66,10 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
     //     targets
     // }
 }
+
+/// ===========================================================================
+/// END SECTION
+/// ===========================================================================
 
 pub struct LoggerSettings {
     /// Enable tokio console output.
@@ -94,11 +107,18 @@ pub fn set_panic_hook() {
 
 /// Init logger for RisingWave binaries.
 pub fn init_risingwave_logger(settings: LoggerSettings) {
-    let fmt_layer = {
-        // Configure log output to stdout
+    let mut layers = vec![];
+
+    // fmt layer (formatting and logging to stdout)
+    {
         let fmt_layer = tracing_subscriber::fmt::layer()
             .compact()
             .with_ansi(settings.colorful);
+        let fmt_layer = if ENABLE_PRETTY_LOG {
+            fmt_layer.pretty().boxed()
+        } else {
+            fmt_layer.boxed()
+        };
 
         let filter = filter::Targets::new()
             .with_target("aws_sdk_s3", Level::INFO)
@@ -114,18 +134,14 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("reqwest", Level::WARN)
             .with_target("sled", Level::INFO);
 
-        // Configure RisingWave's own crates to log at TRACE level, uncomment the following line if
-        // needed.
-
         let filter = configure_risingwave_targets_fmt(filter);
 
         // Enable DEBUG level for all other crates
-        // TODO: remove this in release mode
+        #[cfg(debug_assertions)]
         let filter = filter.with_default(Level::DEBUG);
 
-        fmt_layer.with_filter(filter)
+        layers.push(fmt_layer.with_filter(to_env_filter(filter)).boxed());
     };
-    let mut layers = vec![fmt_layer.boxed()];
 
     if ENABLE_QUERY_LOG_FILE {
         let query_log_path = ".risingwave/log/query.log";
@@ -190,6 +206,34 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
     tracing_subscriber::registry().with(layers).init();
 
     // TODO: add file-appender tracing subscriber in the future
+}
+
+/// Returns a `EnvFilter` that
+/// 1. inherits given `filter`'s target-LevelFilter pairs and default-LevelFilter.
+/// 2. parses `RUST_LOG` environment variable and adds these filters.
+///
+/// Filters from step 1 will be overwritten by filters from step 2 that matches.
+fn to_env_filter(filter: Targets) -> EnvFilter {
+    let mut env_filter = EnvFilter::new("");
+    for (target, level) in filter.iter() {
+        let directive = format!("{}={}", target, level).parse().unwrap();
+        env_filter = env_filter.add_directive(directive);
+    }
+    if let Some(g) = filter.default_level() {
+        env_filter = env_filter.add_directive(g.into());
+    }
+    if let Ok(rust_log) = env::var(EnvFilter::DEFAULT_ENV) {
+        if rust_log.is_empty() {
+            return env_filter;
+        }
+        let directives = rust_log
+            .split(',')
+            .map(|s: &str| s.parse::<Directive>().expect("failed to parse RUST_LOG"));
+        for directive in directives {
+            env_filter = env_filter.add_directive(directive);
+        }
+    }
+    env_filter
 }
 
 /// Enable parking lot's deadlock detection.
