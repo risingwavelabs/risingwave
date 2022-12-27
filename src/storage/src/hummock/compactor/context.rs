@@ -86,7 +86,6 @@ impl Context {
         }
     }
 }
-
 #[derive(Clone)]
 pub struct CompactorContext {
     pub context: Arc<Context>,

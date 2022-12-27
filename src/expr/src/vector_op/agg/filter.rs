@@ -14,7 +14,7 @@
 
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::row::Row2;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::aggregator::Aggregator;
@@ -79,7 +79,7 @@ impl Aggregator for Filter {
                 })
                 .try_collect::<Bitmap>()?
         };
-        if bitmap.is_all_set() {
+        if bitmap.all() {
             // if the bitmap is all set, meaning all rows satisfy the filter,
             // call `update_multi` for potential optimization
             self.inner.update_multi(input, start_row_id, end_row_id)

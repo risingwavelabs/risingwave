@@ -196,6 +196,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     sc.clone()
                 };
 
+                // why?
                 self.state_cache
                     .entry(sc.id())
                     .or_insert_with(|| state.clone());
@@ -227,7 +228,7 @@ impl<S: StateStore> SourceExecutor<S> {
         &mut self,
         source_desc: &SourceDescRef,
         state: ConnectorState,
-    ) -> StreamExecutorResult<BoxSourceWithStateStream> {
+    ) -> StreamExecutorResult<BoxSourceWithStateStream<StreamChunkWithState>> {
         let reader = match &source_desc.source {
             SourceImpl::Table(t) => t
                 .stream_reader(self.column_ids.clone())
@@ -244,6 +245,9 @@ impl<S: StateStore> SourceExecutor<S> {
                 .await
                 .map_err(StreamExecutorError::connector_error)?
                 .into_stream(),
+            _ => {
+                unreachable!()
+            }
         };
         Ok(reader)
     }
@@ -335,7 +339,7 @@ impl<S: StateStore> SourceExecutor<S> {
                     }
                     let epoch = barrier.epoch;
 
-                    if let Some(mutation) = barrier.mutation.as_deref() {
+                    if let Some(ref mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             Mutation::SourceChangeSplit(actor_splits) => {
                                 self.apply_split_change(&source_desc, &mut stream, actor_splits)
@@ -414,6 +418,9 @@ impl<S: StateStore> SourceExecutor<S> {
                         SourceImpl::Table(_) => {
                             self.refill_row_id_column(chunk, false, row_id_index).await
                         }
+                        _ => {
+                            unreachable!()
+                        }
                     };
 
                     self.metrics
@@ -438,7 +445,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn apply_split_change(
         &mut self,
         source_desc: &SourceDescRef,
-        stream: &mut SourceReaderStream,
+        stream: &mut SourceReaderStream<StreamChunkWithState>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
@@ -460,7 +467,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn replace_stream_reader_with_target_state(
         &mut self,
         source_desc: &SourceDescRef,
-        stream: &mut SourceReaderStream,
+        stream: &mut SourceReaderStream<StreamChunkWithState>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -514,7 +521,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use bytes::Bytes;
     use futures::StreamExt;
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
@@ -586,7 +592,7 @@ mod tests {
             MemoryStateStore::new(),
         )
         .await;
-        let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+        let vnodes = Bitmap::from_bytes(&[0b11111111]);
 
         let executor = SourceExecutor::new(
             ActorContext::create(0x3f3f3f),
@@ -691,7 +697,7 @@ mod tests {
         )
         .await;
 
-        let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+        let vnodes = Bitmap::from_bytes(&[0b11111111]);
         let executor = SourceExecutor::new(
             ActorContext::create(0x3f3f3f),
             source_builder,
@@ -815,7 +821,7 @@ mod tests {
         let schema = get_schema(&column_ids, &source_desc);
         let pk_indices = vec![0_usize];
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
-        let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+        let vnodes = Bitmap::from_bytes(&[0b11111111]);
         let source_state_handler = SourceStateTableHandler::from_table_catalog(
             &default_source_internal_table(0x2333),
             mem_state_store.clone(),

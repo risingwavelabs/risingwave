@@ -29,8 +29,7 @@ use super::{
 };
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{
-    CollectInputRef, CorrelatedInputRef, CountNow, Expr, ExprImpl, ExprRewriter, ExprVisitor,
-    InputRef,
+    CollectInputRef, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
@@ -449,7 +448,7 @@ impl ColPrunable for LogicalScan {
 }
 
 impl PredicatePushdown for LogicalScan {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(&self, mut predicate: Condition) -> PlanRef {
         // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}
@@ -462,22 +461,26 @@ impl PredicatePushdown for LogicalScan {
                 true
             }
         }
-        let mut has_correlated_visitor = HasCorrelated {};
-        if predicate.visit_expr(&mut has_correlated_visitor)
-            || predicate.visit_expr(&mut CountNow::default()) > 0
-        {
-            return LogicalFilter::create(
-                self.clone_with_predicate(self.predicate().clone()).into(),
-                predicate,
-            );
-        }
+        let non_pushable_predicate: Vec<_> = predicate
+            .conjunctions
+            .drain_filter(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
+            .collect();
 
         let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
         ));
-
-        self.clone_with_predicate(predicate.and(self.predicate().clone()))
-            .into()
+        if non_pushable_predicate.is_empty() {
+            self.clone_with_predicate(predicate.and(self.predicate().clone()))
+                .into()
+        } else {
+            return LogicalFilter::create(
+                self.clone_with_predicate(predicate.and(self.predicate().clone()))
+                    .into(),
+                Condition {
+                    conjunctions: non_pushable_predicate,
+                },
+            );
+        }
     }
 }
 

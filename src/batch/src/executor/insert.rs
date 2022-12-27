@@ -307,11 +307,12 @@ mod tests {
                 epoch,
                 None,
                 ReadOptions {
-                    dist_key_hint: None,
+                    prefix_hint: None,
                     check_bloom_filter: false,
                     ignore_range_tombstone: false,
                     table_id: Default::default(),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await?;

@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::types::ScalarImpl;
-use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
+use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{DataType as ProstDataType, DataType, Datum as ProstDatum};
 use risingwave_pb::expr::expr_node::Type::{Field, InputRef};
@@ -57,7 +57,20 @@ pub fn make_i32_literal(data: i32) -> ExprNode {
             ..Default::default()
         }),
         rex_node: Some(RexNode::Constant(ProstDatum {
-            body: serialize_datum_to_bytes(Some(ScalarImpl::Int32(data)).as_ref()),
+            body: serialize_datum(Some(ScalarImpl::Int32(data)).as_ref()),
+        })),
+    }
+}
+
+pub fn make_string_literal(data: &str) -> ExprNode {
+    ExprNode {
+        expr_type: Type::ConstantValue as i32,
+        return_type: Some(ProstDataType {
+            type_name: TypeName::Varchar as i32,
+            ..Default::default()
+        }),
+        rex_node: Some(RexNode::Constant(ProstDatum {
+            body: serialize_datum(Some(ScalarImpl::Utf8(data.into())).as_ref()),
         })),
     }
 }

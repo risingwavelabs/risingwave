@@ -26,20 +26,10 @@ use risedev::{
     MetaNodeService, ServiceConfig,
 };
 use risingwave_common::config::load_config;
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
 use tokio::signal;
 
-async fn load_risedev_config(profile: &str) -> Result<(Option<String>, Vec<ServiceConfig>)> {
-    let risedev_config = {
-        let mut content = String::new();
-        File::open("risedev.yml")
-            .await?
-            .read_to_string(&mut content)
-            .await?;
-        content
-    };
-    let (config_path, risedev_config) = ConfigExpander::expand(&risedev_config, profile)?;
+fn load_risedev_config(profile: &str) -> Result<(Option<String>, Vec<ServiceConfig>)> {
+    let (config_path, risedev_config) = ConfigExpander::expand(".", profile)?;
     let services = ConfigExpander::deserialize(&risedev_config)?;
 
     Ok((config_path, services))
@@ -68,7 +58,7 @@ pub async fn playground() -> Result<()> {
         }
     };
 
-    let services = match load_risedev_config(&profile).await {
+    let services = match load_risedev_config(&profile) {
         Err(e) => {
             tracing::warn!("Failed to load risedev config. All components will be started using the default command line options.\n{}", e);
             vec![

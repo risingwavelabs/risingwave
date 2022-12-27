@@ -19,7 +19,7 @@ use itertools::Itertools;
 
 use crate::array::column::Column;
 use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk};
-use crate::row::Row2;
+use crate::row::Row;
 use crate::types::{DataType, ToDatumRef};
 
 /// A [`SlicedDataChunk`] is a [`DataChunk`] with offset.
@@ -80,7 +80,7 @@ impl DataChunkBuilder {
         let mut new_return_offset = input_chunk.offset;
         match input_chunk.data_chunk.visibility() {
             Some(vis) => {
-                for vis in vis.iter_from(input_chunk.offset) {
+                for vis in vis.iter().skip(input_chunk.offset) {
                     new_return_offset += 1;
                     if !vis {
                         continue;
@@ -135,7 +135,7 @@ impl DataChunkBuilder {
     }
 
     fn append_one_row_internal(&mut self, data_chunk: &DataChunk, row_idx: usize) {
-        self.do_append_one_row_from_datums(data_chunk.row_at(row_idx).0.values());
+        self.do_append_one_row_from_datums(data_chunk.row_at(row_idx).0.iter());
     }
 
     fn do_append_one_row_from_datums(&mut self, datums: impl Iterator<Item = impl ToDatumRef>) {
@@ -145,10 +145,10 @@ impl DataChunkBuilder {
         self.buffered_count += 1;
     }
 
-    /// Append one row from the given [`Row2`].
+    /// Append one row from the given [`Row`].
     /// Return a data chunk if the buffer is full after append one row. Otherwise `None`.
     #[must_use]
-    pub fn append_one_row(&mut self, row: impl Row2) -> Option<DataChunk> {
+    pub fn append_one_row(&mut self, row: impl Row) -> Option<DataChunk> {
         assert!(self.buffered_count < self.batch_size);
         self.ensure_builders();
 

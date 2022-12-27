@@ -16,7 +16,7 @@ use std::convert::TryFrom;
 use std::ops::Index;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -25,7 +25,7 @@ use crate::expr::Expression;
 use crate::{bail, ensure, ExprError, Result};
 
 /// `InputRefExpression` references to a column in input relation
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InputRefExpression {
     return_type: DataType,
     idx: usize,
@@ -40,7 +40,7 @@ impl Expression for InputRefExpression {
         Ok(input.column_at(self.idx).array())
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let cell = input.index(self.idx).as_ref().cloned();
         Ok(cell)
     }
@@ -80,7 +80,7 @@ impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, Datum};
 
     use crate::expr::{Expression, InputRefExpression};
@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn test_eval_row_input_ref() {
         let datums: Vec<Datum> = vec![Some(1.into()), Some(2.into()), None];
-        let input_row = Row::new(datums.clone());
+        let input_row = OwnedRow::new(datums.clone());
 
         for (i, expected) in datums.iter().enumerate() {
             let expr = InputRefExpression::new(DataType::Int32, i);

@@ -32,6 +32,8 @@ export interface StreamSourceInfo {
   rowSchemaLocation: string;
   useSchemaRegistry: boolean;
   protoMessageName: string;
+  csvDelimiter: number;
+  csvHasHeader: boolean;
 }
 
 export interface TableSourceInfo {
@@ -148,7 +150,7 @@ export interface Table {
   valueIndices: number[];
   definition: string;
   handlePkConflict: boolean;
-  pkPrefixLenHint: number;
+  readPrefixLenHint: number;
 }
 
 export const Table_TableType = {
@@ -320,6 +322,8 @@ function createBaseStreamSourceInfo(): StreamSourceInfo {
     rowSchemaLocation: "",
     useSchemaRegistry: false,
     protoMessageName: "",
+    csvDelimiter: 0,
+    csvHasHeader: false,
   };
 }
 
@@ -330,6 +334,8 @@ export const StreamSourceInfo = {
       rowSchemaLocation: isSet(object.rowSchemaLocation) ? String(object.rowSchemaLocation) : "",
       useSchemaRegistry: isSet(object.useSchemaRegistry) ? Boolean(object.useSchemaRegistry) : false,
       protoMessageName: isSet(object.protoMessageName) ? String(object.protoMessageName) : "",
+      csvDelimiter: isSet(object.csvDelimiter) ? Number(object.csvDelimiter) : 0,
+      csvHasHeader: isSet(object.csvHasHeader) ? Boolean(object.csvHasHeader) : false,
     };
   },
 
@@ -339,6 +345,8 @@ export const StreamSourceInfo = {
     message.rowSchemaLocation !== undefined && (obj.rowSchemaLocation = message.rowSchemaLocation);
     message.useSchemaRegistry !== undefined && (obj.useSchemaRegistry = message.useSchemaRegistry);
     message.protoMessageName !== undefined && (obj.protoMessageName = message.protoMessageName);
+    message.csvDelimiter !== undefined && (obj.csvDelimiter = Math.round(message.csvDelimiter));
+    message.csvHasHeader !== undefined && (obj.csvHasHeader = message.csvHasHeader);
     return obj;
   },
 
@@ -348,6 +356,8 @@ export const StreamSourceInfo = {
     message.rowSchemaLocation = object.rowSchemaLocation ?? "";
     message.useSchemaRegistry = object.useSchemaRegistry ?? false;
     message.protoMessageName = object.protoMessageName ?? "";
+    message.csvDelimiter = object.csvDelimiter ?? 0;
+    message.csvHasHeader = object.csvHasHeader ?? false;
     return message;
   },
 };
@@ -737,7 +747,7 @@ function createBaseTable(): Table {
     valueIndices: [],
     definition: "",
     handlePkConflict: false,
-    pkPrefixLenHint: 0,
+    readPrefixLenHint: 0,
   };
 }
 
@@ -777,7 +787,7 @@ export const Table = {
         : [],
       definition: isSet(object.definition) ? String(object.definition) : "",
       handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
-      pkPrefixLenHint: isSet(object.pkPrefixLenHint) ? Number(object.pkPrefixLenHint) : 0,
+      readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
     };
   },
 
@@ -835,7 +845,7 @@ export const Table = {
     }
     message.definition !== undefined && (obj.definition = message.definition);
     message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
-    message.pkPrefixLenHint !== undefined && (obj.pkPrefixLenHint = Math.round(message.pkPrefixLenHint));
+    message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
     return obj;
   },
 
@@ -882,7 +892,7 @@ export const Table = {
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
     message.handlePkConflict = object.handlePkConflict ?? false;
-    message.pkPrefixLenHint = object.pkPrefixLenHint ?? 0;
+    message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
     return message;
   },
 };

@@ -15,12 +15,11 @@
 //! This type inference is just to infer the return type of function calls, and make sure the
 //! functionCall expressions have same input type requirement and return type definition as backend.
 
-mod agg;
 mod cast;
 mod func;
-pub use agg::{agg_func_sigs, AggFuncSig};
 pub use cast::{
     align_types, cast_map_array, cast_ok, cast_ok_base, cast_sigs, least_restrictive, CastContext,
     CastSig,
 };
 pub use func::{func_sigs, infer_type, FuncSign};
+pub use risingwave_expr::sig::agg::{agg_func_sigs, AggFuncSig};

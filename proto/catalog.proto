@@ -26,6 +26,8 @@ message StreamSourceInfo {
   string row_schema_location = 2;
   bool use_schema_registry = 3;
   string proto_message_name = 4;
+  int32 csv_delimiter = 5;
+  bool csv_has_header = 6;
 }
 
 message TableSourceInfo {}
@@ -123,7 +125,7 @@ message Table {
   repeated int32 value_indices = 20;
   string definition = 21;
   bool handle_pk_conflict = 22;
-  uint32 pk_prefix_len_hint = 23;
+  uint32 read_prefix_len_hint = 23;
 }
 
 message View {

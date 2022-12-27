@@ -20,7 +20,6 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
 pub mod addr;
-pub mod bit_util;
 pub mod chunk_coalesce;
 pub mod compress;
 pub mod encoding_for_comparison;
@@ -30,6 +29,7 @@ mod future_utils;
 pub mod hash_util;
 pub mod ordered;
 pub mod prost;
+pub mod resource_util;
 pub mod scan_range;
 pub mod schema_check;
 pub mod sort_util;

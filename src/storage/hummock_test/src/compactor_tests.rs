@@ -58,9 +58,9 @@ pub(crate) mod tests {
         ReadOptions, StateStoreReadExt, StateStoreWrite, WriteOptions,
     };
 
+    use crate::get_test_notification_client;
     use crate::test_utils::{
-        get_test_notification_client, register_test_tables, HummockV2MixedStateStore,
-        HummockV2MixedStateStore as HummockStorage,
+        register_test_tables, HummockV2MixedStateStore, HummockV2MixedStateStore as HummockStorage,
     };
 
     pub(crate) async fn get_hummock_storage<S: MetaStore>(
@@ -299,9 +299,10 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: false,
-                    dist_key_hint: None,
+                    prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
@@ -317,9 +318,10 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: true,
-                    dist_key_hint: None,
+                    prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await;
@@ -428,9 +430,10 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: false,
-                    dist_key_hint: None,
+                    prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
@@ -780,9 +783,10 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: false,
-                    dist_key_hint: None,
+                    prefix_hint: None,
                     table_id: TableId::from(existing_table_ids),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
@@ -952,9 +956,10 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: false,
-                    dist_key_hint: None,
+                    prefix_hint: None,
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
@@ -1125,9 +1130,10 @@ pub(crate) mod tests {
                 ReadOptions {
                     ignore_range_tombstone: false,
                     check_bloom_filter: true,
-                    dist_key_hint: Some(bloom_filter_key),
+                    prefix_hint: Some(bloom_filter_key),
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
+                    read_version_from_backup: false,
                 },
             )
             .await

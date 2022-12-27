@@ -23,7 +23,7 @@ use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, StringWriter, Utf8Array, Utf8ArrayBuilder,
     WrittenGuard,
 };
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar};
 
 use crate::expr::{BoxedExpression, Expression};
@@ -62,7 +62,7 @@ macro_rules! gen_eval {
 
         /// `eval_row()` first calls `eval_row()` on the inner expressions to get the resulting datums,
         /// then directly calls `$macro_row` to evaluate the current expression.
-        fn eval_row(&self, row: &Row) -> $crate::Result<Datum> {
+        fn eval_row(&self, row: &OwnedRow) -> $crate::Result<Datum> {
             paste! {
                 $(
                     let [<datum_ $arg:lower>] = self.[<expr_ $arg:lower>].eval_row(row)?;
@@ -335,7 +335,6 @@ gen_expr_bytes!(BinaryBytesExpression, { IA1, IA2 }, { 'ia1, 'ia2 });
 gen_expr_bytes!(TernaryBytesExpression, { IA1, IA2, IA3 }, { 'ia1, 'ia2, 'ia3 });
 gen_expr_bytes!(QuaternaryBytesExpression, { IA1, IA2, IA3, IA4 }, { 'ia1, 'ia2, 'ia3, 'ia4 });
 
-gen_expr_nullable!(UnaryNullableExpression, { IA1 }, { 'ia1 });
 gen_expr_nullable!(BinaryNullableExpression, { IA1, IA2 }, { 'ia1, 'ia2 });
 
 /// `for_all_cmp_types` helps in matching and casting types when building comparison expressions
@@ -386,7 +385,6 @@ macro_rules! for_all_cmp_variants {
             { interval, interval, interval, $general_f },
             { time, time, time, $general_f },
             { date, date, date, $general_f },
-            { boolean, boolean, boolean, $general_f },
             { timestamp, date, timestamp, $general_f },
             { date, timestamp, timestamp, $general_f },
             { interval, time, interval, $general_f },

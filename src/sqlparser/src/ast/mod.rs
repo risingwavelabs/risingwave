@@ -203,8 +203,17 @@ pub enum Expr {
     Identifier(Ident),
     /// Multi-part identifier, e.g. `table_alias.column` or `schema.table.col`
     CompoundIdentifier(Vec<Ident>),
-    /// Struct-field identifier, expr is a table or a column struct, ident is field.
+    /// Struct-field identifier.
+    /// Expr is an arbitrary expression, returning either a table or a column.
+    /// Idents are consecutive field accesses.
     /// e.g. `(table.v1).v2` or `(table).v1.v2`
+    ///
+    /// It must contain parentheses to be distinguished from a [`Expr::CompoundIdentifier`].
+    /// See also <https://www.postgresql.org/docs/current/rowtypes.html#ROWTYPES-ACCESSING>
+    ///
+    /// The left parentheses must be put at the beginning of the expression.
+    /// The first parenthesized part is the `expr` part, and the rest are flattened into `idents`.
+    /// e.g., `((v1).v2.v3).v4` is equivalent to `(v1).v2.v3.v4`.
     FieldIdentifier(Box<Expr>, Vec<Ident>),
     /// `IS NULL` operator
     IsNull(Box<Expr>),
@@ -341,7 +350,7 @@ impl fmt::Display for Expr {
         match self {
             Expr::Identifier(s) => write!(f, "{}", s),
             Expr::CompoundIdentifier(s) => write!(f, "{}", display_separated(s, ".")),
-            Expr::FieldIdentifier(ast, s) => write!(f, "{}.{}", ast, display_separated(s, ".")),
+            Expr::FieldIdentifier(ast, s) => write!(f, "({}).{}", ast, display_separated(s, ".")),
             Expr::IsNull(ast) => write!(f, "{} IS NULL", ast),
             Expr::IsNotNull(ast) => write!(f, "{} IS NOT NULL", ast),
             Expr::IsTrue(ast) => write!(f, "{} IS TRUE", ast),
@@ -741,6 +750,30 @@ impl fmt::Display for ShowObject {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ShowCreateType {
+    Table,
+    MaterializedView,
+    View,
+    Index,
+    Source,
+    Sink,
+}
+
+impl fmt::Display for ShowCreateType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ShowCreateType::Table => f.write_str("TABLE"),
+            ShowCreateType::MaterializedView => f.write_str("MATERIALIZED VIEW"),
+            ShowCreateType::View => f.write_str("VIEW"),
+            ShowCreateType::Index => f.write_str("INDEX"),
+            ShowCreateType::Source => f.write_str("SOURCE"),
+            ShowCreateType::Sink => f.write_str("SINK"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CommentObject {
     Column,
     Table,
@@ -920,8 +953,15 @@ pub enum Statement {
         /// Table or Source name
         name: ObjectName,
     },
-    /// SHOW COMMAND
+    /// SHOW OBJECT COMMAND
     ShowObjects(ShowObject),
+    /// SHOW CREATE COMMAND
+    ShowCreateObject {
+        /// Show create object type
+        create_type: ShowCreateType,
+        /// Show create object name
+        name: ObjectName,
+    },
     /// DROP
     Drop(DropStatement),
     /// SET <variable>
@@ -1059,6 +1099,10 @@ impl fmt::Display for Statement {
             }
             Statement::ShowObjects(show_object) => {
                 write!(f, "SHOW {}", show_object)?;
+                Ok(())
+            }
+            Statement::ShowCreateObject{ create_type: show_type, name } => {
+                write!(f, "SHOW CREATE {} {}", show_type, name)?;
                 Ok(())
             }
             Statement::Insert {
@@ -1639,9 +1683,10 @@ impl fmt::Display for Assignment {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionArgExpr {
     Expr(Expr),
-    /// expr is a table or a column struct, object_name is field.
+    /// Expr is an arbitrary expression, returning either a table or a column.
+    /// Idents are the prefix of `*`, which are consecutive field accesses.
     /// e.g. `(table.v1).*` or `(table).v1.*`
-    ExprQualifiedWildcard(Expr, ObjectName),
+    ExprQualifiedWildcard(Expr, Vec<Ident>),
     /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
     QualifiedWildcard(ObjectName),
     /// An unqualified `*`
@@ -1653,7 +1698,14 @@ impl fmt::Display for FunctionArgExpr {
         match self {
             FunctionArgExpr::Expr(expr) => write!(f, "{}", expr),
             FunctionArgExpr::ExprQualifiedWildcard(expr, prefix) => {
-                write!(f, "{}.{}.*", expr, prefix)
+                write!(
+                    f,
+                    "({}){}.*",
+                    expr,
+                    prefix
+                        .iter()
+                        .format_with("", |i, f| f(&format_args!(".{i}")))
+                )
             }
             FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
             FunctionArgExpr::Wildcard => f.write_str("*"),

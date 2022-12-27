@@ -23,6 +23,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstTaskOutputId,
 };
+use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::GetDataResponse;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Sender;
@@ -72,7 +73,7 @@ impl BatchManager {
         &self,
         tid: &ProstTaskId,
         plan: PlanFragment,
-        epoch: u64,
+        epoch: BatchQueryEpoch,
         context: ComputeNodeContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
@@ -201,6 +202,18 @@ impl BatchManager {
     pub fn config(&self) -> &BatchConfig {
         &self.config
     }
+
+    /// Kill batch queries with larges memory consumption per task. Required to maintain task level
+    /// memory usage in the struct. Will be called by global memory manager.
+    pub fn kill_queries(&self) {
+        todo!()
+    }
+
+    /// Called by global memory manager for total usage of batch tasks. This variable should be
+    /// maintained by Batch Manager.
+    pub fn get_all_memory_usage(&self) -> usize {
+        todo!()
+    }
 }
 
 impl Default for BatchManager {
@@ -214,6 +227,7 @@ mod tests {
     use risingwave_common::config::BatchConfig;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::make_i32_literal;
+    use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::batch_plan::{
@@ -279,11 +293,16 @@ mod tests {
             task_id: 0,
         };
         manager
-            .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .fire_task(
+                &task_id,
+                plan.clone(),
+                to_committed_batch_query_epoch(0),
+                context.clone(),
+            )
             .await
             .unwrap();
         let err = manager
-            .fire_task(&task_id, plan, 0, context)
+            .fire_task(&task_id, plan, to_committed_batch_query_epoch(0), context)
             .await
             .unwrap_err();
         assert!(err
@@ -324,7 +343,12 @@ mod tests {
             task_id: 0,
         };
         manager
-            .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .fire_task(
+                &task_id,
+                plan.clone(),
+                to_committed_batch_query_epoch(0),
+                context.clone(),
+            )
             .await
             .unwrap();
         manager.abort_task(&task_id);
