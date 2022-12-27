@@ -472,6 +472,39 @@ mod tests {
     // FIXME: Delete lease and/or leader info after PR is merged
     // https://github.com/risingwavelabs/risingwave/pull/7022
 
+    /// Adding nodes should not cause leader failover
+    #[tokio::test]
+    async fn test_leader_svc_add_nodes() {
+        let number_of_nodes = 2;
+        let meta_port = 1300;
+        let node_controllers_1 = setup_n_nodes(number_of_nodes, meta_port).await;
+        let original_leader = get_agreed_leader(number_of_nodes, meta_port).await;
+
+        let node_controllers_2 =
+            setup_n_nodes(number_of_nodes, meta_port + number_of_nodes + 1).await;
+        let new_leader = get_agreed_leader(number_of_nodes, meta_port).await;
+        assert_eq!(
+            original_leader, new_leader,
+            "Adding nodes should not change who leader is"
+        );
+
+        let node_controllers_3 =
+            setup_n_nodes(number_of_nodes, meta_port + number_of_nodes * 2 + 2).await;
+        let new_leader = get_agreed_leader(number_of_nodes, meta_port).await;
+        assert_eq!(
+            original_leader, new_leader,
+            "Adding nodes should not change who leader is"
+        );
+
+        for v in [node_controllers_1, node_controllers_2, node_controllers_3] {
+            for (join_handle, shutdown_tx) in v {
+                if shutdown_tx.send(()).is_ok() {
+                    join_handle.await.unwrap();
+                }
+            }
+        }
+    }
+
     /// Deletes all leader nodes one after another
     /// Asserts that all nodes agree on who leader is
     /// Gets next leader to delete by using leader service from nodes
