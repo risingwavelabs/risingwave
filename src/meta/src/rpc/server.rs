@@ -147,10 +147,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             // Alternative implementation that panics only if leader is unable to re-acquire lease:
             // if was_leader && !is_leader {
             if was_leader {
-                panic!(
-                    "This node lost its leadership. New host address is {}:{}. Killing node",
-                    leader_addr.host, leader_addr.port
-                )
+                panic!("This node lost its leadership. Killing node")
             }
             was_leader = is_leader;
 

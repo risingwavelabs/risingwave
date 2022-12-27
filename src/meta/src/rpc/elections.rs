@@ -377,7 +377,7 @@ pub async fn run_elections<S: MetaStore>(
                 initial_election = false;
 
                 // signal to observers if there is a change in leadership
-                leader_tx.send((leader_info.clone(), is_leader)).unwrap();
+                leader_tx.send((leader_info.clone(), is_leader)).expect("Leader receiver dropped");
 
                 // election done. Enter the term of the current leader
                 // Leader stays in power until leader crashes
@@ -393,6 +393,15 @@ pub async fn run_elections<S: MetaStore>(
 
                     if let Ok(leader_alive) =
                         manage_term(is_leader, &leader_info, lease_time_sec, &meta_store).await && !leader_alive {
+
+                            // Leader lost leadership. Trigger fencing
+                            if is_leader {
+                                leader_tx.send((MetaLeaderInfo{
+                                    node_address: "".to_owned(), 
+                                    lease_id: 0
+                                }, false)).expect("Leader receiver dropped");
+                            }
+                            
                             // leader failed. Elect new leader
                             continue 'election;
                     }
