@@ -28,6 +28,7 @@
 #![recursion_limit = "256"]
 #![feature(let_chains)]
 #![feature(bound_map)]
+#![feature(int_roundings)]
 
 mod error;
 pub mod exchange_source;
