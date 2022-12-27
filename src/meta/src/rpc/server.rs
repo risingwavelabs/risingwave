@@ -15,6 +15,7 @@
 use std::net::SocketAddr;
 use std::process;
 use std::sync::Arc;
+use std::thread::sleep;
 use std::time::Duration;
 
 use etcd_client::ConnectOptions;
@@ -212,9 +213,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             }
         }
 
-        // TODO: Should we wait right here when starting the leader mode on a former
-        // follower? This way we could make sure that fencing kicked in at the old leader
-        // and we have no split-brain However this would also delay the failover process
+        tracing::info!("Waiting, to give former leaders fencing mechanism time to trigger");
+        sleep(Duration::from_millis(lease_interval_secs * 1000 + 500));
 
         // shut down follower svc if node used to be follower
         if let Some(handle) = follower_handle {
