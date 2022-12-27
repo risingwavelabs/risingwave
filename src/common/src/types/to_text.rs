@@ -125,18 +125,18 @@ macro_rules! implement_using_ryu {
                                 s = trimmed;
                             }
                             if let Some(mut idx) = s.as_bytes().iter().position(|x| *x == b'e') {
-                                write!(f, "{}", &s[..=idx])?;
-                                if s.as_bytes().get(idx + 1) != Some(&b'-') {
-                                    write!(f, "+")?;
-                                } else {
+                                idx += 1;
+                                write!(f, "{}", &s[..idx])?;
+                                if s.as_bytes()[idx] == b'-' {
+                                    write!(f, "-")?;
                                     idx += 1;
-                                    // idx at '-'
+                                } else {
+                                    write!(f, "+")?;
                                 }
                                 if idx + 1 == s.len() {
                                     write!(f, "0")?;
-                                } else {
-                                    write!(f, "{}", &s[idx + 1..])?;
                                 }
+                                write!(f, "{}", &s[idx..])?;
                             } else {
                                 write!(f, "{}", s)?;
                             }
