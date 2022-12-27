@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use md5 as lib_md5;
+use std::fmt::Write;
+
 use risingwave_common::array::{StringWriter, WrittenGuard};
 
 use crate::Result;
 
 #[inline(always)]
 pub fn md5(s: &str, writer: StringWriter<'_>) -> Result<WrittenGuard> {
-    Ok(writer.write_ref(&format!("{:x}", lib_md5::compute(s))))
+    let mut writer = writer.begin();
+    write!(writer, "{:x}", ::md5::compute(s)).unwrap();
+    Ok(writer.finish())
 }
 
 #[cfg(test)]

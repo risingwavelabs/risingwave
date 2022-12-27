@@ -290,9 +290,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
             #[for_await]
             for chunk in stream {
-                #[for_await]
-                for output_chunk in output_chunk_builder
-                    .trunc_data_chunk(chunk?.reorder_columns(&self.output_indices))
+                for output_chunk in
+                    output_chunk_builder.append_chunk(chunk?.reorder_columns(&self.output_indices))
                 {
                     yield output_chunk
                 }
