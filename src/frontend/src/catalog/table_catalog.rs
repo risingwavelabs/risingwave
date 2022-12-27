@@ -158,6 +158,7 @@ impl TableType {
     }
 }
 
+/// The version of a table, used by schema change. See [`ProstTableVersion`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableVersion {
     pub version: u64,
@@ -165,6 +166,7 @@ pub struct TableVersion {
 }
 
 impl TableVersion {
+    /// Create an initial version for a table, with the given max column id.
     pub fn initial(max_column_id: ColumnId) -> Self {
         Self {
             version: 0,

@@ -151,6 +151,7 @@ impl StreamMaterialize {
             in_order.insert(idx);
         }
 
+        // Always use the initial version for now.
         let max_column_id = columns.iter().map(|c| c.column_id()).max().unwrap();
         let initial_version = TableVersion::initial(max_column_id);
 
