@@ -249,8 +249,8 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-pub fn timestampz_to_utc_string(elem: i64, writer: &mut dyn Write) -> Result<()> {
-    elem.write_with_type(&DataType::Timestampz, &mut DynWriter(writer))
+pub fn timestampz_to_utc_string(elem: i64, mut writer: &mut dyn Write) -> Result<()> {
+    elem.write_with_type(&DataType::Timestampz, &mut writer)
         .unwrap();
     Ok(())
 }
@@ -378,18 +378,9 @@ pub fn int32_to_bool(input: i32) -> Result<bool> {
 
 // For most of the types, cast them to varchar is similar to return their text format.
 // So we use this function to cast type to varchar.
-pub fn general_to_text(elem: impl ToText, writer: &mut dyn Write) -> Result<()> {
-    elem.write(&mut DynWriter(writer)).unwrap();
+pub fn general_to_text(elem: impl ToText, mut writer: &mut dyn Write) -> Result<()> {
+    elem.write(&mut writer).unwrap();
     Ok(())
-}
-
-/// Allow `&mut dyn Write` as `&mut impl Write`.
-struct DynWriter<'a>(&'a mut dyn Write);
-
-impl Write for DynWriter<'_> {
-    fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        self.0.write_str(s)
-    }
 }
 
 pub fn bool_to_varchar(input: bool, writer: &mut dyn Write) -> Result<()> {
