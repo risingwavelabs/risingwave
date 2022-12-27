@@ -17,7 +17,6 @@ use std::iter::repeat;
 use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
-
 use risingwave_common::array::{
     ArrayBuilder, DataChunk, I64Array, Op, PrimitiveArrayBuilder, StreamChunk,
 };

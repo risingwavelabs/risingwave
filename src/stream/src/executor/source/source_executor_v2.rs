@@ -278,7 +278,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
                 StreamExecutorError::from(anyhow!(
                     "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
                     self.ctx.id,
-                    self.stream_source_core.as_ref().unwrap().table_id
+                    self.stream_source_core.as_ref().unwrap().source_id
                 ))
             })?;
 
