@@ -1526,6 +1526,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-skiplist"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af28cff91e276c27eb739e14b0dda13dfd4cbab8364ebdb8d517a4c5454a227a"
+dependencies = [
+ "cfg-if",
+ "crossbeam-epoch",
+ "crossbeam-utils",
+ "scopeguard",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6019,6 +6031,7 @@ dependencies = [
  "crc32fast",
  "criterion",
  "crossbeam",
+ "crossbeam-skiplist",
  "dashmap",
  "dyn-clone",
  "either",

@@ -22,6 +22,7 @@ chrono = { version = "0.4", default-features = false, features = [
 ] }
 crc32fast = "1"
 crossbeam = "0.8.1"
+crossbeam-skiplist = "0.1.0"
 dashmap = { version = "5", default-features = false }
 dyn-clone = "1.0.4"
 either = "1"

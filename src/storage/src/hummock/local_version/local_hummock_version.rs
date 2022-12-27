@@ -13,7 +13,11 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
+use bytes::Bytes;
+use crossbeam_skiplist::SkipMap;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
@@ -21,16 +25,43 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     GroupDeltasSummary,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
+use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
     HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel, SstableInfo,
 };
 
+use crate::hummock::iterator::HummockIterator;
+use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::value::HummockValue;
+use crate::hummock::{HummockResult, SstableIterator};
+use crate::monitor::StoreLocalStatistic;
+
+#[derive(Debug, Clone)]
+pub struct LevelZeroCache {
+    pub cache: Arc<SkipMap<FullKey<Vec<u8>>, HummockValue<Bytes>>>,
+    pub level: Level,
+}
+
+impl PartialEq for LevelZeroCache {
+    fn eq(&self, other: &Self) -> bool {
+        self.level.eq(&other.level)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LevelZeroData {
+    pub caches: Vec<LevelZeroCache>,
+    pub sub_levels: Vec<Level>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct LocalGroup {
     pub levels: Vec<Level>,
-    pub l0: OverlappingLevel,
+    pub l0: LevelZeroData,
 }
 
 impl LocalGroup {
@@ -47,14 +78,14 @@ impl LocalGroup {
         }
         Self {
             levels,
-            l0: OverlappingLevel {
+            l0: LevelZeroData {
+                caches: vec![],
                 sub_levels: vec![],
-                total_file_size: 0,
             },
         }
     }
 
-    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary, local_related_only: bool) {
+    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary) {
         let GroupDeltasSummary {
             delete_sst_levels,
             delete_sst_ids_set,
@@ -66,6 +97,9 @@ impl LocalGroup {
         let mut deleted = false;
         for level_idx in &delete_sst_levels {
             if *level_idx == 0 {
+                for level in &mut self.l0.caches {
+                    deleted = level_delete_ssts(&mut level.level, &delete_sst_ids_set) || deleted;
+                }
                 for level in &mut self.l0.sub_levels {
                     deleted = level_delete_ssts(level, &delete_sst_ids_set) || deleted;
                 }
@@ -74,43 +108,18 @@ impl LocalGroup {
                 deleted = level_delete_ssts(&mut self.levels[idx], &delete_sst_ids_set) || deleted;
             }
         }
-        if local_related_only && !delete_sst_ids_set.is_empty() && !deleted {
-            // If no sst is deleted, the current delta will not be related to the local version.
-            // Therefore, if we only care local related data, we can return without inserting the
-            // ssts.
-            return;
-        }
         if !insert_table_infos.is_empty() {
             if insert_sst_level_id == 0 {
                 let index = self
                     .l0
                     .sub_levels
                     .partition_point(|level| level.sub_level_id < insert_sub_level_id);
-                if local_related_only {
-                    // Some sub level in the full hummock version may be empty in the local related
-                    // pruned version, so it's possible the level to be inserted is not found
-                    if index == self.l0.sub_levels.len()
-                        || self.l0.sub_levels[index].sub_level_id > insert_sub_level_id
-                    {
-                        // level not found, insert a new level
-                        let new_level = new_sub_level(
-                            insert_sub_level_id,
-                            LevelType::Nonoverlapping,
-                            insert_table_infos,
-                        );
-                        self.l0.sub_levels.insert(index, new_level);
-                    } else {
-                        // level found, add to the level.
-                        level_insert_ssts(&mut self.l0.sub_levels[index], insert_table_infos);
-                    }
-                } else {
-                    assert!(
-                        index < self.l0.sub_levels.len() && self.l0.sub_levels[index].sub_level_id == insert_sub_level_id,
-                        "should find the level to insert into when applying compaction generated delta. sub level idx: {}",
-                        insert_sub_level_id
-                    );
-                    level_insert_ssts(&mut self.l0.sub_levels[index], insert_table_infos);
-                }
+                assert!(
+                    index < self.l0.sub_levels.len() && self.l0.sub_levels[index].sub_level_id == insert_sub_level_id,
+                    "should find the level to insert into when applying compaction generated delta. sub level idx: {}",
+                    insert_sub_level_id
+                );
+                level_insert_ssts(&mut self.l0.sub_levels[index], insert_table_infos);
             } else {
                 let idx = insert_sst_level_id as usize - 1;
                 level_insert_ssts(&mut self.levels[idx], insert_table_infos);
@@ -118,14 +127,11 @@ impl LocalGroup {
         }
         if delete_sst_levels.iter().any(|level_id| *level_id == 0) {
             self.l0
+                .caches
+                .retain(|cache| !cache.level.table_infos.is_empty());
+            self.l0
                 .sub_levels
                 .retain(|level| !level.table_infos.is_empty());
-            self.l0.total_file_size = self
-                .l0
-                .sub_levels
-                .iter()
-                .map(|level| level.total_file_size)
-                .sum::<u64>();
         }
     }
 }
@@ -257,6 +263,73 @@ impl LocalHummockVersion {
         ret
     }
 
+    pub async fn fill_cache(
+        &self,
+        version_delta: &HummockVersionDelta,
+        sstable_store: &SstableStoreRef,
+    ) -> HummockResult<()> {
+        for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
+            let summary = summarize_group_deltas(group_deltas);
+            if let Some(group_construct) = &summary.group_construct {
+                // todo: check split result
+            }
+            let has_destroy = summary.group_destroy.is_some();
+            if self.max_committed_epoch < version_delta.max_committed_epoch {
+                // `max_committed_epoch` increases. It must be a `commit_epoch`
+                let GroupDeltasSummary {
+                    delete_sst_levels,
+                    delete_sst_ids_set,
+                    insert_sst_level_id,
+                    insert_sub_level_id,
+                    insert_table_infos,
+                    ..
+                } = summary;
+                assert!(
+                    insert_sst_level_id == 0 || insert_table_infos.is_empty(),
+                    "we should only add to L0 when we commit an epoch. Inserting into {} {:?}",
+                    insert_sst_level_id,
+                    insert_table_infos
+                );
+                let group = self
+                    .groups
+                    .get(compaction_group_id)
+                    .expect("compaction group should exist");
+                assert!(
+                    delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty() || has_destroy,
+                    "no sst should be deleted when committing an epoch"
+                );
+                // TODO: do not pre-load data to cache if the size of this delta is enough large.
+                let mut stats = StoreLocalStatistic::default();
+                for sstable_info in insert_table_infos {
+                    if let Some(cache) = group.l0.caches.last() {
+                        if cache
+                            .level
+                            .table_infos
+                            .iter()
+                            .any(|sst| sst.id == sstable_info.id)
+                        {
+                            // TODO: read data from shared-buffer-batch directly to speed up.
+                            let data = sstable_store.sstable(&sstable_info, &mut stats).await?;
+                            let mut iter = SstableIterator::new(
+                                data,
+                                sstable_store.clone(),
+                                Arc::new(SstableIteratorReadOptions::default()),
+                            );
+                            iter.rewind().await?;
+                            while iter.is_valid() {
+                                let key = iter.key().to_vec();
+                                let value = iter.value().to_bytes();
+                                cache.cache.insert(key, value);
+                                iter.next().await?;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) {
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
@@ -314,7 +387,7 @@ impl LocalHummockVersion {
                 );
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
-                levels.apply_compact_ssts(summary, false);
+                levels.apply_compact_ssts(summary);
             }
             if has_destroy {
                 self.groups.remove(compaction_group_id);
@@ -334,7 +407,10 @@ impl From<HummockVersion> for LocalHummockVersion {
                 group_id,
                 LocalGroup {
                     levels: levels.levels,
-                    l0: levels.l0.unwrap(),
+                    l0: LevelZeroData {
+                        caches: vec![],
+                        sub_levels: levels.l0.unwrap().sub_levels,
+                    },
                 },
             );
         }
@@ -351,11 +427,21 @@ impl From<&LocalHummockVersion> for HummockVersion {
     fn from(version: &LocalHummockVersion) -> Self {
         let mut levels = HashMap::default();
         for (group_id, group) in &version.groups {
+            let mut sub_levels = vec![];
+            for sub_level in &group.l0.caches {
+                sub_levels.push(sub_level.level.clone());
+            }
+            for sub_level in &group.l0.sub_levels {
+                sub_levels.push(sub_level.clone());
+            }
             levels.insert(
                 *group_id,
                 Levels {
                     levels: group.levels.clone(),
-                    l0: Some(group.l0.clone()),
+                    l0: Some(OverlappingLevel {
+                        sub_levels,
+                        total_file_size: 0,
+                    }),
                 },
             );
         }
@@ -370,7 +456,7 @@ impl From<&LocalHummockVersion> for HummockVersion {
 }
 
 pub fn add_new_sub_level(
-    l0: &mut OverlappingLevel,
+    l0: &mut LevelZeroData,
     insert_sub_level_id: u64,
     level_type: LevelType,
     insert_table_infos: Vec<SstableInfo>,
@@ -378,20 +464,19 @@ pub fn add_new_sub_level(
     if insert_sub_level_id == u64::MAX {
         return;
     }
-    if let Some(newest_level) = l0.sub_levels.last() {
-        assert!(
-            newest_level.sub_level_id < insert_sub_level_id,
-            "inserted new level is not the newest: prev newest: {}, insert: {}. L0: {:?}",
-            newest_level.sub_level_id,
-            insert_sub_level_id,
-            l0,
-        );
+    if let Some(newest_level) = l0.caches.last_mut() {
+        if newest_level.level.sub_level_id == insert_sub_level_id {
+            newest_level.level.table_infos.extend(insert_table_infos);
+            return;
+        }
     }
     // All files will be committed in one new Overlapping sub-level and become
     // Nonoverlapping  after at least one compaction.
     let level = new_sub_level(insert_sub_level_id, level_type, insert_table_infos);
-    l0.total_file_size += level.total_file_size;
-    l0.sub_levels.push(level);
+    l0.caches.push(LevelZeroCache {
+        cache: Arc::new(SkipMap::default()),
+        level,
+    });
 }
 
 fn new_sub_level(sub_level_id: u64, level_type: LevelType, table_infos: Vec<SstableInfo>) -> Level {

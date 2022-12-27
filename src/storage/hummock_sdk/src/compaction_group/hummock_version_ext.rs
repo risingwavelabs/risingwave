@@ -599,14 +599,11 @@ pub fn add_new_sub_level(
     if insert_sub_level_id == u64::MAX {
         return;
     }
-    if let Some(newest_level) = l0.sub_levels.last() {
-        assert!(
-            newest_level.sub_level_id < insert_sub_level_id,
-            "inserted new level is not the newest: prev newest: {}, insert: {}. L0: {:?}",
-            newest_level.sub_level_id,
-            insert_sub_level_id,
-            l0,
-        );
+    if let Some(newest_level) = l0.sub_levels.last_mut() {
+        if newest_level.sub_level_id == insert_sub_level_id {
+            newest_level.table_infos.extend(insert_table_infos);
+            return;
+        }
     }
     // All files will be committed in one new Overlapping sub-level and become
     // Nonoverlapping  after at least one compaction.

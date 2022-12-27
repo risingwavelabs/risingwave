@@ -1621,15 +1621,34 @@ where
                 .l0
                 .as_mut()
                 .expect("Expect level 0 is not empty");
-            let l0_sub_level_id = epoch;
-            let group_delta = GroupDelta {
+            let mut l0_sub_level_id = epoch;
+            let mut switch_new_level = false;
+            if let Some(group) = compaction_groups.get(&compaction_group_id) {
+                if version_l0
+                    .sub_levels
+                    .last()
+                    .map(|level| {
+                        level.total_file_size
+                            > group.compaction_config.sub_level_max_compaction_bytes
+                    })
+                    .unwrap_or(true)
+                {
+                    switch_new_level = true;
+                } else {
+                    l0_sub_level_id = version_l0.sub_levels.last().unwrap().sub_level_id;
+                }
+            }
+
+            let mut group_delta = GroupDelta {
                 delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
                     level_idx: 0,
                     inserted_table_infos: group_sstables.clone(),
                     l0_sub_level_id,
+                    switch_new_level,
                     ..Default::default()
                 })),
             };
+
             group_deltas.push(group_delta);
 
             add_new_sub_level(
