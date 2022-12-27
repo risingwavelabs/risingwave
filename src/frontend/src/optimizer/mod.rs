@@ -47,7 +47,7 @@ use self::plan_visitor::{
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::TableType;
-use crate::handler::create_table::DMLFlag;
+use crate::handler::create_table::DmlFlag;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{
     BatchExchange, ColumnPruningContext, PlanNodeType, PredicatePushdownContext,
@@ -539,6 +539,7 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a create materialize view plan.
+    #[allow(clippy::too_many_arguments)]
     pub fn gen_materialize_plan(
         &mut self,
         mv_name: String,
@@ -546,7 +547,7 @@ impl PlanRoot {
         col_names: Option<Vec<String>>,
         handle_pk_conflict: bool,
         row_id_index: Option<usize>,
-        dml_flag: DMLFlag,
+        dml_flag: DmlFlag,
         table_type: TableType,
     ) -> Result<StreamMaterialize> {
         let out_names = if let Some(col_names) = col_names {
@@ -569,7 +570,7 @@ impl PlanRoot {
             table_type,
         )?;
 
-        if dml_flag == DMLFlag::Disable {
+        if dml_flag == DmlFlag::Disable {
             return Ok(materialize);
         }
 
@@ -580,8 +581,8 @@ impl PlanRoot {
         // table.append_only,
         let stream_plan = StreamDml::new(
             stream_plan,
-            dml_flag == DMLFlag::AppendOnly,
-            table.table_desc().columns.clone(),
+            dml_flag == DmlFlag::AppendOnly,
+            table.table_desc().columns,
         )
         .into();
 

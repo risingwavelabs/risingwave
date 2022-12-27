@@ -19,7 +19,7 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
-use super::create_table::DMLFlag;
+use super::create_table::DmlFlag;
 use super::privilege::{check_privileges, resolve_relation_privileges};
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
@@ -117,7 +117,7 @@ pub fn gen_create_mv_plan(
         col_names,
         false,
         None, // We will never alter a materialized view, so it is safe to pass `None` here.
-        DMLFlag::Disable,
+        DmlFlag::Disable,
         TableType::MaterializedView,
     )?;
     let mut table = materialize.table().to_prost(schema_id, database_id);

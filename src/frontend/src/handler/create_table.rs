@@ -43,7 +43,7 @@ use crate::stream_fragmenter::build_graph;
 use crate::Binder;
 
 #[derive(PartialEq, Clone, Debug)]
-pub enum DMLFlag {
+pub enum DmlFlag {
     /// used for `create materialized view / sink / index`
     Disable,
     /// used for `create table`
@@ -242,8 +242,8 @@ pub(crate) fn gen_create_table_plan_without_bind(
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect_vec();
     let properties = context.with_options().inner().clone();
     let dml_flag = match context.with_options().append_only() {
-        true => DMLFlag::AppendOnly,
-        false => DMLFlag::All,
+        true => DmlFlag::AppendOnly,
+        false => DmlFlag::All,
     };
 
     let db_name = session.database();
@@ -380,7 +380,7 @@ pub(crate) fn gen_materialize_plan(
             None,
             handle_pk_conflict,
             row_id_index,
-            DMLFlag::Disable,
+            DmlFlag::Disable,
             TableType::Table,
         )?
     };
