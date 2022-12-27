@@ -467,10 +467,7 @@ mod test {
         assert_eq!(values.schema().fields()[1], fields[2]);
 
         let required_cols = (0..plan.schema().len()).collect_vec();
-        let plan2 = plan.prune_col(
-            &required_cols,
-            &mut ColumnPruningContext::new(plan.clone()),
-        );
+        let plan2 = plan.prune_col(&required_cols, &mut ColumnPruningContext::new(plan.clone()));
         assert_eq!(plan2.schema(), plan.schema());
     }
 
