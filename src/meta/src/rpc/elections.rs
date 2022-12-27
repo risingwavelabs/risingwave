@@ -395,7 +395,6 @@ pub async fn run_elections<S: MetaStore>(
 
                     if let Ok(leader_alive) =
                         manage_term(is_leader, &leader_info, lease_time_sec, &meta_store).await && !leader_alive {
-
                             // Leader lost leadership. Trigger fencing
                             if is_leader {
                                 leader_tx.send((MetaLeaderInfo{
@@ -403,7 +402,6 @@ pub async fn run_elections<S: MetaStore>(
                                     lease_id: 0
                                 }, false)).expect("Leader receiver dropped");
                             }
-                            
                             // leader failed. Elect new leader
                             continue 'election;
                     }
