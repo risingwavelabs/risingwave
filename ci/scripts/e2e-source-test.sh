@@ -66,6 +66,12 @@ nohup java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector
 # start risingwave cluster
 cargo make ci-start ci-1cn-1fe-with-recovery
 sleep 2
+
+echo "---- mysql & postgres cdc validate test"
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.mysql.slt'
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.postgres.slt'
+
+echo "---- mysql & postgres load and check"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
 # wait for cdc loading
 sleep 10
