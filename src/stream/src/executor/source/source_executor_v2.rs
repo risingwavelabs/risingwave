@@ -109,7 +109,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
         &self,
         source_desc: &SourceDescV2,
         state: ConnectorState,
-    ) -> StreamExecutorResult<BoxSourceWithStateStream> {
+    ) -> StreamExecutorResult<BoxSourceWithStateStream<StreamChunkWithState>> {
         let column_ids = source_desc
             .columns
             .iter()
@@ -134,7 +134,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
     async fn apply_split_change(
         &mut self,
         source_desc: &SourceDescV2,
-        stream: &mut SourceReaderStream,
+        stream: &mut SourceReaderStream<StreamChunkWithState>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
@@ -191,7 +191,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
     async fn replace_stream_reader_with_target_state(
         &mut self,
         source_desc: &SourceDescV2,
-        stream: &mut SourceReaderStream,
+        stream: &mut SourceReaderStream<StreamChunkWithState>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -334,7 +334,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
                     }
                     let epoch = barrier.epoch;
 
-                    if let Some(mutation) = barrier.mutation.as_deref() {
+                    if let Some(ref mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             Mutation::SourceChangeSplit(actor_splits) => {
                                 self.apply_split_change(&source_desc, &mut stream, actor_splits)

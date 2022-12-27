@@ -1,6 +1,6 @@
 /* eslint-disable */
 import { SourceInfo } from "./catalog";
-import { Buffer, HostAddress, WorkerNode } from "./common";
+import { BatchQueryEpoch, Buffer, HostAddress, WorkerNode } from "./common";
 import { IntervalUnit } from "./data";
 import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem, TableFunction } from "./expr";
 import {
@@ -33,7 +33,11 @@ export interface RowSeqScanNode {
    *
    * Will be filled by the scheduler.
    */
-  vnodeBitmap: Buffer | undefined;
+  vnodeBitmap:
+    | Buffer
+    | undefined;
+  /** Whether the order on output columns should be preserved. */
+  ordered: boolean;
 }
 
 export interface SysRowSeqScanNode {
@@ -221,7 +225,7 @@ export interface TaskOutputId {
 
 export interface LocalExecutePlan {
   plan: PlanFragment | undefined;
-  epoch: number;
+  epoch: BatchQueryEpoch | undefined;
 }
 
 /** ExchangeSource describes where to read results from children operators */
@@ -405,7 +409,7 @@ export interface PlanFragment {
 }
 
 function createBaseRowSeqScanNode(): RowSeqScanNode {
-  return { tableDesc: undefined, columnIds: [], scanRanges: [], vnodeBitmap: undefined };
+  return { tableDesc: undefined, columnIds: [], scanRanges: [], vnodeBitmap: undefined, ordered: false };
 }
 
 export const RowSeqScanNode = {
@@ -415,6 +419,7 @@ export const RowSeqScanNode = {
       columnIds: Array.isArray(object?.columnIds) ? object.columnIds.map((e: any) => Number(e)) : [],
       scanRanges: Array.isArray(object?.scanRanges) ? object.scanRanges.map((e: any) => ScanRange.fromJSON(e)) : [],
       vnodeBitmap: isSet(object.vnodeBitmap) ? Buffer.fromJSON(object.vnodeBitmap) : undefined,
+      ordered: isSet(object.ordered) ? Boolean(object.ordered) : false,
     };
   },
 
@@ -434,6 +439,7 @@ export const RowSeqScanNode = {
     }
     message.vnodeBitmap !== undefined &&
       (obj.vnodeBitmap = message.vnodeBitmap ? Buffer.toJSON(message.vnodeBitmap) : undefined);
+    message.ordered !== undefined && (obj.ordered = message.ordered);
     return obj;
   },
 
@@ -447,6 +453,7 @@ export const RowSeqScanNode = {
     message.vnodeBitmap = (object.vnodeBitmap !== undefined && object.vnodeBitmap !== null)
       ? Buffer.fromPartial(object.vnodeBitmap)
       : undefined;
+    message.ordered = object.ordered ?? false;
     return message;
   },
 };
@@ -1431,21 +1438,21 @@ export const TaskOutputId = {
 };
 
 function createBaseLocalExecutePlan(): LocalExecutePlan {
-  return { plan: undefined, epoch: 0 };
+  return { plan: undefined, epoch: undefined };
 }
 
 export const LocalExecutePlan = {
   fromJSON(object: any): LocalExecutePlan {
     return {
       plan: isSet(object.plan) ? PlanFragment.fromJSON(object.plan) : undefined,
-      epoch: isSet(object.epoch) ? Number(object.epoch) : 0,
+      epoch: isSet(object.epoch) ? BatchQueryEpoch.fromJSON(object.epoch) : undefined,
     };
   },
 
   toJSON(message: LocalExecutePlan): unknown {
     const obj: any = {};
     message.plan !== undefined && (obj.plan = message.plan ? PlanFragment.toJSON(message.plan) : undefined);
-    message.epoch !== undefined && (obj.epoch = Math.round(message.epoch));
+    message.epoch !== undefined && (obj.epoch = message.epoch ? BatchQueryEpoch.toJSON(message.epoch) : undefined);
     return obj;
   },
 
@@ -1454,7 +1461,9 @@ export const LocalExecutePlan = {
     message.plan = (object.plan !== undefined && object.plan !== null)
       ? PlanFragment.fromPartial(object.plan)
       : undefined;
-    message.epoch = object.epoch ?? 0;
+    message.epoch = (object.epoch !== undefined && object.epoch !== null)
+      ? BatchQueryEpoch.fromPartial(object.epoch)
+      : undefined;
     return message;
   },
 };

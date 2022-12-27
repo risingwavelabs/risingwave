@@ -18,11 +18,12 @@ use std::time::Instant;
 use itertools::Itertools;
 use prometheus::Registry;
 use risingwave_backup::error::BackupError;
-use risingwave_backup::storage::BackupStorageRef;
-use risingwave_backup::{MetaBackupJobId, MetaSnapshotId};
+use risingwave_backup::storage::MetaSnapshotStorageRef;
+use risingwave_backup::{MetaBackupJobId, MetaSnapshotId, MetaSnapshotManifest};
 use risingwave_common::bail;
 use risingwave_hummock_sdk::HummockSstableId;
-use risingwave_pb::backup_service::BackupJobStatus;
+use risingwave_pb::backup_service::{BackupJobStatus, MetaBackupManifestId};
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::task::JoinHandle;
 
 use crate::backup_restore::meta_snapshot_builder::MetaSnapshotBuilder;
@@ -40,6 +41,7 @@ pub enum BackupJobResult {
 /// `BackupJobHandle` tracks running job.
 struct BackupJobHandle {
     job_id: u64,
+    #[expect(dead_code)]
     hummock_version_safe_point: HummockVersionSafePoint,
     start_time: Instant,
 }
@@ -60,7 +62,7 @@ pub type BackupManagerRef<S> = Arc<BackupManager<S>>;
 pub struct BackupManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     hummock_manager: HummockManagerRef<S>,
-    backup_store: BackupStorageRef,
+    backup_store: MetaSnapshotStorageRef,
     /// Tracks the running backup job. Concurrent jobs is not supported.
     running_backup_job: tokio::sync::Mutex<Option<BackupJobHandle>>,
     metrics: BackupManagerMetrics,
@@ -70,7 +72,7 @@ impl<S: MetaStore> BackupManager<S> {
     pub fn new(
         env: MetaSrvEnv<S>,
         hummock_manager: HummockManagerRef<S>,
-        backup_store: BackupStorageRef,
+        backup_store: MetaSnapshotStorageRef,
         registry: Registry,
     ) -> Self {
         Self {
@@ -87,7 +89,7 @@ impl<S: MetaStore> BackupManager<S> {
         Self::new(
             env,
             hummock_manager,
-            Arc::new(risingwave_backup::storage::DummyBackupStorage {}),
+            Arc::new(risingwave_backup::storage::DummyMetaSnapshotStorage::default()),
             Registry::new(),
         )
     }
@@ -132,8 +134,8 @@ impl<S: MetaStore> BackupManager<S> {
         }
         if self
             .backup_store
-            .list()
-            .await?
+            .manifest()
+            .snapshot_metadata
             .iter()
             .any(|m| m.id == job_id)
         {
@@ -153,6 +155,14 @@ impl<S: MetaStore> BackupManager<S> {
             BackupJobResult::Succeeded => {
                 self.metrics.job_latency_success.observe(job_latency);
                 tracing::info!("succeeded backup job {}", job_id);
+                self.env
+                    .notification_manager()
+                    .notify_hummock_without_version(
+                        Operation::Update,
+                        Info::MetaBackupManifestId(MetaBackupManifestId {
+                            id: self.backup_store.manifest().manifest_id,
+                        }),
+                    );
             }
             BackupJobResult::Failed(e) => {
                 self.metrics.job_latency_failure.observe(job_latency);
@@ -183,16 +193,18 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     /// List all `SSTables` required by backups.
-    pub async fn list_pinned_ssts(&self) -> MetaResult<Vec<HummockSstableId>> {
-        let r = self
-            .backup_store
-            .list()
-            .await?
-            .into_iter()
-            .flat_map(|s| s.ssts)
+    pub fn list_pinned_ssts(&self) -> Vec<HummockSstableId> {
+        self.backup_store
+            .manifest()
+            .snapshot_metadata
+            .iter()
+            .flat_map(|s| s.ssts.clone())
             .dedup()
-            .collect_vec();
-        Ok(r)
+            .collect_vec()
+    }
+
+    pub fn manifest(&self) -> Arc<MetaSnapshotManifest> {
+        self.backup_store.manifest()
     }
 }
 

@@ -57,8 +57,8 @@ impl Vis {
         self.as_ref().iter()
     }
 
-    pub fn ones(&self) -> impl Iterator<Item = usize> + '_ {
-        self.as_ref().ones()
+    pub fn iter_ones(&self) -> impl Iterator<Item = usize> + '_ {
+        self.as_ref().iter_ones()
     }
 
     #[inline(always)]
@@ -66,6 +66,22 @@ impl Vis {
         match self {
             Vis::Bitmap(b) => VisRef::Bitmap(b),
             Vis::Compact(c) => VisRef::Compact(*c),
+        }
+    }
+
+    /// Consumes this `Vis` and returns the inner `Bitmap` if not compact.
+    pub fn into_visibility(self) -> Option<Bitmap> {
+        match self {
+            Vis::Bitmap(b) => Some(b),
+            Vis::Compact(_) => None,
+        }
+    }
+
+    /// Returns a reference to the inner `Bitmap` if not compact.
+    pub fn as_visibility(&self) -> Option<&Bitmap> {
+        match self {
+            Vis::Bitmap(b) => Some(b),
+            Vis::Compact(_) => None,
         }
     }
 }
@@ -145,9 +161,9 @@ impl<'a> VisRef<'a> {
     }
 
     #[auto_enum(Iterator)]
-    pub fn ones(self) -> impl Iterator<Item = usize> + 'a {
+    pub fn iter_ones(self) -> impl Iterator<Item = usize> + 'a {
         match self {
-            VisRef::Bitmap(b) => b.ones(),
+            VisRef::Bitmap(b) => b.iter_ones(),
             VisRef::Compact(c) => 0..c,
         }
     }

@@ -30,9 +30,10 @@ use risingwave_pb::catalog::ColumnIndex as ProstColumnIndex;
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
 
 use crate::connector_source::DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE;
+use crate::fs_connector_source::FsConnectorSource;
 use crate::monitor::SourceMetrics;
 use crate::table::TableSource;
-use crate::{ConnectorSource, SourceFormat, SourceImpl, SourceParserImpl};
+use crate::{ConnectorSource, ParserConfig, SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceDescRef = Arc<SourceDesc>;
 type WeakSourceDescRef = Weak<SourceDesc>;
@@ -248,6 +249,47 @@ impl SourceDescBuilder {
         )
     }
 
+    pub fn build_fs_stream_source(&self) -> Result<SourceDescRef> {
+        let info = try_match_expand!(&self.info, ProstSourceInfo::StreamSource).unwrap();
+        let format = match info.get_row_format()? {
+            RowFormatType::Csv => SourceFormat::Csv,
+            _ => unreachable!(),
+        };
+
+        let mut columns: Vec<_> = self
+            .columns
+            .iter()
+            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
+            .collect();
+        let row_id_index = self.row_id_index.as_ref().map(|row_id_index| {
+            columns[row_id_index.index as usize].skip_parse = true;
+            row_id_index.index as usize
+        });
+        assert!(
+            !self.pk_column_ids.is_empty(),
+            "source should have at least one pk column"
+        );
+
+        let parser_config = ParserConfig::from((&format, info));
+
+        let source = SourceImpl::FsConnector(FsConnectorSource::new(
+            format.clone(),
+            self.properties.clone(),
+            columns.clone(),
+            self.connector_params.connector_rpc_endpoint.clone(),
+            parser_config,
+        )?);
+
+        Ok(Arc::new(SourceDesc {
+            source,
+            format,
+            columns,
+            row_id_index,
+            pk_column_ids: self.pk_column_ids.clone(),
+            metrics: self.source_manager.metrics(),
+        }))
+    }
+
     async fn build_stream_source(&self) -> Result<SourceDescRef> {
         let info = try_match_expand!(&self.info, ProstSourceInfo::StreamSource).unwrap();
         let format = match info.get_row_format()? {
@@ -257,7 +299,7 @@ impl SourceDescBuilder {
             RowFormatType::Avro => SourceFormat::Avro,
             RowFormatType::Maxwell => SourceFormat::Maxwell,
             RowFormatType::CanalJson => SourceFormat::CanalJson,
-            RowFormatType::RowUnspecified => unreachable!(),
+            _ => unreachable!(),
         };
 
         if format == SourceFormat::Protobuf && info.row_schema_location.is_empty() {
@@ -296,8 +338,7 @@ impl SourceDescBuilder {
         let mut config = ConnectorProperties::extract(self.properties.clone())
             .map_err(|e| ConnectorError(e.into()))?;
         if let Some(addr) = self.connector_params.connector_rpc_endpoint.as_ref() {
-            config.set_connector_node_addr(addr.to_owned());
-            config.set_source_id_for_cdc(self.source_id.table_id());
+            config.init_properties_for_cdc(self.source_id.table_id(), addr.to_owned(), None);
         }
 
         let source = SourceImpl::Connector(ConnectorSource {

@@ -32,6 +32,8 @@ export interface StreamSourceInfo {
   rowSchemaLocation: string;
   useSchemaRegistry: boolean;
   protoMessageName: string;
+  csvDelimiter: number;
+  csvHasHeader: boolean;
 }
 
 export interface TableSourceInfo {
@@ -320,6 +322,8 @@ function createBaseStreamSourceInfo(): StreamSourceInfo {
     rowSchemaLocation: "",
     useSchemaRegistry: false,
     protoMessageName: "",
+    csvDelimiter: 0,
+    csvHasHeader: false,
   };
 }
 
@@ -330,6 +334,8 @@ export const StreamSourceInfo = {
       rowSchemaLocation: isSet(object.rowSchemaLocation) ? String(object.rowSchemaLocation) : "",
       useSchemaRegistry: isSet(object.useSchemaRegistry) ? Boolean(object.useSchemaRegistry) : false,
       protoMessageName: isSet(object.protoMessageName) ? String(object.protoMessageName) : "",
+      csvDelimiter: isSet(object.csvDelimiter) ? Number(object.csvDelimiter) : 0,
+      csvHasHeader: isSet(object.csvHasHeader) ? Boolean(object.csvHasHeader) : false,
     };
   },
 
@@ -339,6 +345,8 @@ export const StreamSourceInfo = {
     message.rowSchemaLocation !== undefined && (obj.rowSchemaLocation = message.rowSchemaLocation);
     message.useSchemaRegistry !== undefined && (obj.useSchemaRegistry = message.useSchemaRegistry);
     message.protoMessageName !== undefined && (obj.protoMessageName = message.protoMessageName);
+    message.csvDelimiter !== undefined && (obj.csvDelimiter = Math.round(message.csvDelimiter));
+    message.csvHasHeader !== undefined && (obj.csvHasHeader = message.csvHasHeader);
     return obj;
   },
 
@@ -348,6 +356,8 @@ export const StreamSourceInfo = {
     message.rowSchemaLocation = object.rowSchemaLocation ?? "";
     message.useSchemaRegistry = object.useSchemaRegistry ?? false;
     message.protoMessageName = object.protoMessageName ?? "";
+    message.csvDelimiter = object.csvDelimiter ?? 0;
+    message.csvHasHeader = object.csvHasHeader ?? false;
     return message;
   },
 };

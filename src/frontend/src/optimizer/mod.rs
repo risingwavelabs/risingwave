@@ -25,6 +25,9 @@ mod plan_visitor;
 pub use plan_visitor::PlanVisitor;
 mod optimizer_context;
 mod rule;
+mod share_parent_counter;
+mod share_source_rewriter;
+
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use optimizer_context::*;
@@ -45,9 +48,12 @@ use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::TableType;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
-use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
+use crate::optimizer::plan_node::{
+    BatchExchange, ColumnPruningContext, PlanNodeType, PredicatePushdownContext,
+};
 use crate::optimizer::plan_visitor::has_batch_source;
 use crate::optimizer::property::Distribution;
+use crate::optimizer::share_source_rewriter::ShareSourceRewriter;
 use crate::utils::Condition;
 use crate::WithOptions;
 
@@ -205,9 +211,19 @@ impl PlanRoot {
             .into());
         }
 
+        plan = self.optimize_by_rules(
+            plan,
+            "Union Merge".to_string(),
+            vec![UnionMergeRule::create()],
+            ApplyOrder::BottomUp,
+        );
+
         // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
-        plan = plan.predicate_pushdown(Condition::true_cond());
+        plan = plan.predicate_pushdown(
+            Condition::true_cond(),
+            &mut PredicatePushdownContext::new(plan.clone()),
+        );
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
@@ -230,6 +246,7 @@ impl PlanRoot {
                 ApplyFilterTransposeRule::create(),
                 ApplyProjectTransposeRule::create(),
                 ApplyJoinTransposeRule::create(),
+                ApplyShareEliminateRule::create(),
                 ApplyScanRule::create(),
             ],
             ApplyOrder::TopDown,
@@ -239,7 +256,10 @@ impl PlanRoot {
         }
 
         // Predicate Push-down
-        plan = plan.predicate_pushdown(Condition::true_cond());
+        plan = plan.predicate_pushdown(
+            Condition::true_cond(),
+            &mut PredicatePushdownContext::new(plan.clone()),
+        );
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
@@ -265,7 +285,10 @@ impl PlanRoot {
 
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
-        plan = plan.predicate_pushdown(Condition::true_cond());
+        plan = plan.predicate_pushdown(
+            Condition::true_cond(),
+            &mut PredicatePushdownContext::new(plan.clone()),
+        );
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
@@ -286,13 +309,16 @@ impl PlanRoot {
         // visibility of these expressions. To avoid these expressions being pruned, we can't use
         // `self.out_fields` as `required_cols` here.
         let required_cols = (0..self.plan.schema().len()).collect_vec();
-        plan = plan.prune_col(&required_cols);
+        plan = plan.prune_col(&required_cols, &mut ColumnPruningContext::new(plan.clone()));
         // Column pruning may introduce additional projects, and filter can be pushed again.
         if explain_trace {
             ctx.trace("Prune Columns:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
-        plan = plan.predicate_pushdown(Condition::true_cond());
+        plan = plan.predicate_pushdown(
+            Condition::true_cond(),
+            &mut PredicatePushdownContext::new(plan.clone()),
+        );
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
@@ -322,7 +348,7 @@ impl PlanRoot {
                 ProjectEliminateRule::create(),
                 // project-join merge should be applied after merge
                 // and eliminate
-                ProjectJoinRule::create(),
+                ProjectJoinMergeRule::create(),
                 AggProjectMergeRule::create(),
             ],
             ApplyOrder::BottomUp,
@@ -353,6 +379,14 @@ impl PlanRoot {
     fn gen_batch_plan(&mut self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan()?;
+
+        // Convert the dag back to the tree, because we don't support physical dag plan for now.
+        plan = self.optimize_by_rules(
+            plan,
+            "DAG To Tree".to_string(),
+            vec![DagToTreeRule::create()],
+            ApplyOrder::TopDown,
+        );
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
@@ -458,7 +492,16 @@ impl PlanRoot {
         let plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan()?;
-                let (plan, out_col_change) = plan.logical_rewrite_for_stream()?;
+
+                // Replace source to share source.
+                let plan = ShareSourceRewriter::share_source(plan);
+                if explain_trace {
+                    ctx.trace("Reuse Source:");
+                    ctx.trace(plan.explain_to_string().unwrap());
+                }
+
+                let (plan, out_col_change) =
+                    plan.logical_rewrite_for_stream(&mut Default::default())?;
 
                 if explain_trace {
                     ctx.trace("Logical Rewrite For Stream:");
@@ -472,7 +515,7 @@ impl PlanRoot {
                     .unwrap();
                 self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
                 self.schema = plan.schema().clone();
-                plan.to_stream_with_dist_required(&self.required_dist)
+                plan.to_stream_with_dist_required(&self.required_dist, &mut Default::default())
             }
             _ => unreachable!(),
         }?;

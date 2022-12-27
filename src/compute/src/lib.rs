@@ -17,16 +17,21 @@
 #![feature(generators)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
+#![feature(result_option_inspect)]
+#![feature(allocator_api)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
 extern crate tracing;
 
+pub mod memory_management;
 pub mod rpc;
 pub mod server;
 
 use clap::clap_derive::ArgEnum;
 use clap::Parser;
+use risingwave_common::util::resource_util::cpu::total_cpu_available;
+use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 
 #[derive(Debug, Clone, ArgEnum)]
 pub enum AsyncStackTraceOption {
@@ -96,6 +101,24 @@ pub struct ComputeNodeOpts {
     pub parallelism: usize,
 }
 
+fn validate_opts(opts: &ComputeNodeOpts) {
+    let total_memory_available_bytes = total_memory_available_bytes();
+    if opts.total_memory_bytes > total_memory_available_bytes {
+        let error_msg = format!("total_memory_bytes {} is larger than the total memory available bytes {} that can be acquired.", opts.total_memory_bytes, total_memory_available_bytes);
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+    let total_cpu_available = total_cpu_available() as usize;
+    if opts.parallelism > total_cpu_available {
+        let error_msg = format!(
+            "parallelism {} is larger than the total cpu available {} that can be acquired.",
+            opts.parallelism, total_cpu_available
+        );
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+}
+
 use std::future::Future;
 use std::pin::Pin;
 
@@ -107,6 +130,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
     // slow compile in release mode.
     Box::pin(async move {
         tracing::info!("Compute node options: {:?}", opts);
+        validate_opts(&opts);
 
         let listen_address = opts.host.parse().unwrap();
         tracing::info!("Server Listening at {}", listen_address);
@@ -132,13 +156,9 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
 }
 
 fn default_total_memory_bytes() -> usize {
-    use sysinfo::{System, SystemExt};
-
-    let mut sys = System::new();
-    sys.refresh_memory();
-    sys.total_memory() as usize
+    total_memory_available_bytes()
 }
 
 fn default_parallelism() -> usize {
-    std::thread::available_parallelism().unwrap().get()
+    total_cpu_available() as usize
 }

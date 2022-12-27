@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -21,7 +22,7 @@ use auto_enums::auto_enum;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, Schema, TableId, TableOption,
@@ -41,7 +42,7 @@ use crate::row_serde::row_serde_util::{
 };
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
-use crate::table::{compute_vnode, Distribution, TableIter};
+use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
 use crate::StateStore;
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
@@ -240,6 +241,7 @@ impl<S: StateStore> StorageTable<S> {
         wait_epoch: HummockReadEpoch,
     ) -> StorageResult<Option<OwnedRow>> {
         let epoch = wait_epoch.get_epoch();
+        let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
         self.store.try_wait_epoch(wait_epoch).await?;
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
@@ -252,6 +254,7 @@ impl<S: StateStore> StorageTable<S> {
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
+            read_version_from_backup: read_backup,
         };
         if let Some(value) = self.store.get(&serialized_pk, epoch, read_options).await? {
             let full_row = self.row_deserializer.deserialize(value)?;
@@ -295,23 +298,41 @@ impl<S: StateStore> StorageTable<S> {
         R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
     {
-        // Vnodes that are set and should be accessed.
-        #[auto_enum(Iterator)]
-        let vnodes = match vnode_hint {
-            // If `vnode_hint` is set, we can only access this single vnode.
-            Some(vnode) => std::iter::once(vnode),
-            // Otherwise, we need to access all vnodes of this table.
-            None => self.vnodes.ones().map(VirtualNode::from_index),
+        let raw_key_ranges = if !ordered
+            && matches!(encoded_key_range.start_bound(), Unbounded)
+            && matches!(encoded_key_range.end_bound(), Unbounded)
+        {
+            // If the range is unbounded and order is not required, we can create a single iterator
+            // for each continuous vnode range.
+
+            // In this case, the `vnode_hint` must be default for singletons and `None` for
+            // distributed tables.
+            assert_eq!(vnode_hint.unwrap_or(DEFAULT_VNODE), DEFAULT_VNODE);
+
+            Either::Left(self.vnodes.high_ranges().map(|r| {
+                let start = Included(VirtualNode::from_index(*r.start()).to_be_bytes().to_vec());
+                let end = end_bound_of_prefix(&VirtualNode::from_index(*r.end()).to_be_bytes());
+                assert_matches!(end, Excluded(_) | Unbounded);
+                (start, end)
+            }))
+        } else {
+            // Vnodes that are set and should be accessed.
+            let vnodes = match vnode_hint {
+                // If `vnode_hint` is set, we can only access this single vnode.
+                Some(vnode) => Either::Left(std::iter::once(vnode)),
+                // Otherwise, we need to access all vnodes of this table.
+                None => Either::Right(self.vnodes.iter_ones().map(VirtualNode::from_index)),
+            };
+            Either::Right(
+                vnodes.map(|vnode| prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes())),
+            )
         };
 
-        // For each vnode, construct an iterator.
-        // TODO: if there're some vnodes continuously in the range and we don't care about order, we
-        // can use a single iterator.
-        let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
-            let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-
+        // For each key range, construct an iterator.
+        let iterators: Vec<_> = try_join_all(raw_key_ranges.map(|raw_key_range| {
             let prefix_hint = prefix_hint.clone();
             let wait_epoch = wait_epoch.clone();
+            let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
             async move {
                 let check_bloom_filter = prefix_hint.is_some();
                 let read_options = ReadOptions {
@@ -320,6 +341,7 @@ impl<S: StateStore> StorageTable<S> {
                     ignore_range_tombstone: false,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
+                    read_version_from_backup: read_backup,
                 };
                 let iter = StorageTableIterInner::<S>::new(
                     &self.store,
@@ -358,6 +380,7 @@ impl<S: StateStore> StorageTable<S> {
         range_bounds: impl RangeBounds<OwnedRow>,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S>> {
+        // TODO: directly use `prefixed_range`.
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerde,
             pk_prefix: impl Row,
@@ -478,14 +501,19 @@ impl<S: StateStore> StorageTable<S> {
         epoch: HummockReadEpoch,
         pk_prefix: impl Row,
         range_bounds: impl RangeBounds<OwnedRow>,
+        ordered: bool,
     ) -> StorageResult<StorageTableIter<S>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, true)
+        self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered)
             .await
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
-    pub async fn batch_iter(&self, epoch: HummockReadEpoch) -> StorageResult<StorageTableIter<S>> {
-        self.batch_iter_with_pk_bounds(epoch, row::empty(), ..)
+    pub async fn batch_iter(
+        &self,
+        epoch: HummockReadEpoch,
+        ordered: bool,
+    ) -> StorageResult<StorageTableIter<S>> {
+        self.batch_iter_with_pk_bounds(epoch, row::empty(), .., ordered)
             .await
     }
 }

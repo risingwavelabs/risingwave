@@ -456,6 +456,7 @@ impl<S: StateStore> StateTable<S> {
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     ignore_range_tombstone: false,
+                    read_version_from_backup: false,
                 };
                 if let Some(storage_row_bytes) = self
                     .local_store
@@ -731,7 +732,7 @@ impl<S: StateStore> StateTable<S> {
             } else {
                 vec![]
             };
-            for vnode in self.vnodes.ones() {
+            for vnode in self.vnodes.iter_ones() {
                 let mut range_begin = vnode.to_be_bytes().to_vec();
                 let mut range_end = range_begin.clone();
                 range_begin.extend(&range_begin_suffix);
@@ -760,6 +761,7 @@ impl<S: StateStore> StateTable<S> {
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             ignore_range_tombstone: false,
+            read_version_from_backup: false,
         };
         let stored_value = self.local_store.get(key, epoch, read_options).await?;
 
@@ -792,6 +794,7 @@ impl<S: StateStore> StateTable<S> {
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             ignore_range_tombstone: false,
+            read_version_from_backup: false,
         };
         let stored_value = self.local_store.get(key, epoch, read_options).await?;
 
@@ -826,6 +829,7 @@ impl<S: StateStore> StateTable<S> {
             check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
+            read_version_from_backup: false,
         };
         let stored_value = self.local_store.get(key, epoch, read_options).await?;
 
@@ -1032,6 +1036,7 @@ impl<S: StateStore> StateTable<S> {
             ignore_range_tombstone: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
+            read_version_from_backup: false,
         };
 
         // Storage iterator.

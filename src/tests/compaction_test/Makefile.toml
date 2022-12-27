@@ -7,3 +7,12 @@ script = """
 set -e
 cargo run --bin compaction-test --profile "${RISINGWAVE_BUILD_PROFILE}" -- "$@"
 """
+
+[tasks.delete-range-test]
+category = "RiseDev - Test"
+description = "Run hummock compaction delete-range for test"
+script = """
+#!/bin/bash
+set -e
+cargo run --bin delete-range-test --profile "${RISINGWAVE_BUILD_PROFILE}" -- "$@"
+"""

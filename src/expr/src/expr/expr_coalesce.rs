@@ -50,7 +50,7 @@ impl Expression for CoalesceExpression {
             orig_vis
                 .as_ref()
                 .bitand(res_bitmap_ref)
-                .ones()
+                .iter_ones()
                 .for_each(|pos| {
                     selection[pos] = Some(child_idx);
                 });

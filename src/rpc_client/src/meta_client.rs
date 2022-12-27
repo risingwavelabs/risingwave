@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures::stream::BoxStream;
 use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
@@ -58,7 +59,7 @@ use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
 
 use crate::error::Result;
-use crate::hummock_meta_client::HummockMetaClient;
+use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
 use crate::{rpc_client_method_impl, ExtraInfoSourceRef};
 
 type DatabaseId = u32;
@@ -668,6 +669,12 @@ impl MetaClient {
         let _resp = self.inner.delete_meta_snapshot(req).await?;
         Ok(())
     }
+
+    pub async fn get_meta_snapshot_manifest(&self) -> Result<MetaSnapshotManifest> {
+        let req = GetMetaSnapshotManifestRequest {};
+        let resp = self.inner.get_meta_snapshot_manifest(req).await?;
+        Ok(resp.manifest.expect("should exist"))
+    }
 }
 
 #[async_trait]
@@ -756,15 +763,20 @@ impl HummockMetaClient for MetaClient {
         panic!("Only meta service can commit_epoch in production.")
     }
 
+    async fn update_current_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
+        panic!("Only meta service can update_current_epoch in production.")
+    }
+
     async fn subscribe_compact_tasks(
         &self,
         max_concurrent_task_number: u64,
-    ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+    ) -> Result<BoxStream<'static, CompactTaskItem>> {
         let req = SubscribeCompactTasksRequest {
             context_id: self.worker_id(),
             max_concurrent_task_number,
         };
-        self.inner.subscribe_compact_tasks(req).await
+        let stream = self.inner.subscribe_compact_tasks(req).await?;
+        Ok(Box::pin(stream))
     }
 
     async fn report_compaction_task_progress(
@@ -986,6 +998,7 @@ macro_rules! for_all_meta_rpc {
             ,{ backup_client, backup_meta, BackupMetaRequest, BackupMetaResponse }
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
+            ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
         }
     };
 }

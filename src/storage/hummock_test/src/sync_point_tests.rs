@@ -43,7 +43,7 @@ use serial_test::serial;
 use super::compactor_tests::tests::{
     flush_and_commit, get_hummock_storage, prepare_compactor_and_filter,
 };
-use crate::test_utils::get_test_notification_client;
+use crate::get_test_notification_client;
 
 #[tokio::test]
 #[cfg(feature = "sync_point")]
@@ -334,6 +334,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         prefix_hint: None,
         table_id: TableId::from(existing_table_id),
         retention_seconds: None,
+        read_version_from_backup: false,
     };
     let get_result = storage
         .get(b"hhh", 120, read_options.clone())

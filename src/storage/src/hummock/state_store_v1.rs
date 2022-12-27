@@ -54,7 +54,7 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::utils::{prune_ssts, search_sst_idx};
 use crate::hummock::{
     DeleteRangeAggregator, ForwardIter, HummockEpoch, HummockError, HummockIteratorType,
-    HummockResult,
+    HummockResult, Sstable,
 };
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
@@ -122,6 +122,7 @@ impl HummockStorageV1 {
             table_counts += table_count;
         }
 
+        let dist_key_hash = Sstable::hash_for_bloom_filter(table_key.dist_key());
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.
         let encoded_user_key = UserKey::new(read_options.table_id, table_key).encode();
@@ -143,6 +144,7 @@ impl HummockStorageV1 {
                             sstable_info,
                             full_key,
                             &read_options,
+                            dist_key_hash,
                             &mut local_stats,
                         )
                         .await?
@@ -178,6 +180,7 @@ impl HummockStorageV1 {
                         &level.table_infos[table_info_idx],
                         full_key,
                         &read_options,
+                        dist_key_hash,
                         &mut local_stats,
                     )
                     .await?
@@ -296,7 +299,10 @@ impl HummockStorageV1 {
         );
         assert!(pinned_version.is_valid());
         // encode once
-        let bloom_filter_key = read_options.prefix_hint.as_ref();
+        let bloom_filter_prefix_hash = read_options
+            .prefix_hint
+            .as_ref()
+            .map(|hint| Sstable::hash_for_bloom_filter(hint));
         for level in pinned_version.levels(table_id) {
             if level.table_infos.is_empty() {
                 continue;
@@ -324,18 +330,15 @@ impl HummockStorageV1 {
 
                 let mut sstables = vec![];
                 for sstable_info in pruned_sstables {
-                    if let Some(bloom_filter_key) = bloom_filter_key.as_ref() {
+                    if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
                         let sstable = self
                             .sstable_store
                             .sstable(sstable_info, &mut local_stats)
                             .in_span(Span::enter_with_local_parent("get_sstable"))
                             .await?;
 
-                        if hit_sstable_bloom_filter(
-                            sstable.value(),
-                            bloom_filter_key.as_slice(),
-                            &mut local_stats,
-                        ) {
+                        if hit_sstable_bloom_filter(sstable.value(), *prefix_hash, &mut local_stats)
+                        {
                             sstables.push((*sstable_info).clone());
                         }
                     } else {
@@ -358,14 +361,14 @@ impl HummockStorageV1 {
                         .sstable(table_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if let Some(bloom_filter_key) = bloom_filter_key.as_ref()
-                        && !hit_sstable_bloom_filter(
+                    if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
+                        if !hit_sstable_bloom_filter(
                             sstable.value(),
-                            bloom_filter_key.as_slice(),
+                            *prefix_hash,
                             &mut local_stats,
-                        )
-                    {
-                        continue;
+                        ) {
+                            continue;
+                        }
                     }
 
                     overlapped_iters.push(HummockIteratorUnion::Fourth(
@@ -502,7 +505,7 @@ impl StateStore for HummockStorageV1 {
                         );
                     return Ok(());
                 }
-                HummockReadEpoch::NoWait(_) => return Ok(()),
+                HummockReadEpoch::NoWait(_) | HummockReadEpoch::Backup(_) => return Ok(()),
             };
             if wait_epoch == HummockEpoch::MAX {
                 panic!("epoch should not be u64::MAX");

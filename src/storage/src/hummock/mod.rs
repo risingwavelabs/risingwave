@@ -22,7 +22,6 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockEpoch, *};
 #[cfg(any(test, feature = "test"))]
@@ -47,7 +46,6 @@ pub use tiered_cache::*;
 pub mod sstable;
 pub use sstable::*;
 
-pub mod compaction_group_client;
 pub mod compactor;
 pub mod conflict_detector;
 mod error;
@@ -62,6 +60,7 @@ pub mod test_utils;
 pub mod utils;
 pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
+pub mod backup_reader;
 pub mod event_handler;
 pub mod local_version;
 pub mod observer_manager;
@@ -85,6 +84,7 @@ use self::iterator::{BackwardUserIterator, HummockIterator, UserIterator};
 pub use self::sstable_store::*;
 use super::monitor::StateStoreMetrics;
 use crate::error::StorageResult;
+use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::Context;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
@@ -137,6 +137,8 @@ pub struct HummockStorage {
     read_version_mapping: Arc<ReadVersionMappingType>,
 
     tracing: Arc<risingwave_tracing::RwTracingService>,
+
+    backup_reader: BackupReaderRef,
 }
 
 impl HummockStorage {
@@ -144,6 +146,7 @@ impl HummockStorage {
     pub async fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
+        backup_reader: BackupReaderRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
@@ -160,7 +163,11 @@ impl HummockStorage {
 
         let observer_manager = ObserverManager::new(
             notification_client,
-            HummockObserverNode::new(filter_key_extractor_manager.clone(), event_tx.clone()),
+            HummockObserverNode::new(
+                filter_key_extractor_manager.clone(),
+                backup_reader.clone(),
+                event_tx.clone(),
+            ),
         )
         .await;
         observer_manager.start().await;
@@ -206,6 +213,7 @@ impl HummockStorage {
             }),
             read_version_mapping: hummock_event_handler.read_version_mapping(),
             tracing,
+            backup_reader,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -301,6 +309,7 @@ impl HummockStorage {
         Self::new(
             options,
             sstable_store,
+            BackupReader::unused(),
             hummock_meta_client,
             notification_client,
             Arc::new(StateStoreMetrics::unused()),
@@ -319,6 +328,7 @@ pub async fn get_from_sstable_info(
     sstable_info: &SstableInfo,
     full_key: FullKey<&[u8]>,
     read_options: &ReadOptions,
+    dist_key_hash: u32,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
@@ -329,10 +339,11 @@ pub async fn get_from_sstable_info(
     } else {
         get_delete_range_epoch_from_sstable(sstable.value().as_ref(), &full_key)
     };
-    // Bloom filter key is the prefix of pk.
-    let pk_prefix = &ukey.table_key[VirtualNode::SIZE..];
+
+    // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
+    // contain `TablePrefix` and `VnodePrefix`.
     if read_options.check_bloom_filter
-        && !hit_sstable_bloom_filter(sstable.value(), pk_prefix, local_stats)
+        && !hit_sstable_bloom_filter(sstable.value(), dist_key_hash, local_stats)
     {
         if delete_epoch.is_some() {
             return Ok(Some(HummockValue::Delete));
@@ -378,11 +389,11 @@ pub async fn get_from_sstable_info(
 
 pub fn hit_sstable_bloom_filter(
     sstable_info_ref: &Sstable,
-    pk_prefix: &[u8],
+    prefix_hash: u32,
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
-    let surely_not_have = sstable_info_ref.surely_not_have_dist_key(pk_prefix);
+    let surely_not_have = sstable_info_ref.surely_not_have_hashvalue(prefix_hash);
 
     if surely_not_have {
         local_stats.bloom_filter_true_negative_count += 1;
@@ -400,6 +411,7 @@ pub async fn get_from_order_sorted_uncommitted_data(
 ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
     let mut table_counts = 0;
     let epoch = full_key.epoch;
+    let dist_key_hash = Sstable::hash_for_bloom_filter(full_key.user_key.table_key.dist_key());
     for data_list in order_sorted_uncommitted_data {
         for data in data_list {
             match data {
@@ -420,6 +432,7 @@ pub async fn get_from_order_sorted_uncommitted_data(
                         &sst_info,
                         full_key,
                         read_options,
+                        dist_key_hash,
                         local_stats,
                     )
                     .await?
@@ -492,10 +505,14 @@ impl HummockStorageV1 {
 
         let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
         let (event_tx, mut event_rx) = unbounded_channel();
-
+        let backup_manager = BackupReader::unused();
         let observer_manager = ObserverManager::new(
             notification_client,
-            HummockObserverNode::new(filter_key_extractor_manager.clone(), event_tx.clone()),
+            HummockObserverNode::new(
+                filter_key_extractor_manager.clone(),
+                backup_manager,
+                event_tx.clone(),
+            ),
         )
         .await;
         observer_manager.start().await;

@@ -36,7 +36,7 @@ use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeNode, ExchangeSource as ProstExchangeSource, LocalExecutePlan,
     PlanFragment, PlanNode, RowSeqScanNode, TaskId as ProstTaskId, TaskOutputId,
 };
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::StorageTableDesc;
 use uuid::Uuid;
@@ -58,7 +58,7 @@ struct InnerSideExecutorBuilder<C> {
     lookup_prefix_len: usize,
     context: C,
     task_id: TaskId,
-    epoch: u64,
+    epoch: BatchQueryEpoch,
     pu_to_worker_mapping: HashMap<ParallelUnitId, WorkerNode>,
     pu_to_scan_range_mapping: HashMap<ParallelUnitId, Vec<(ScanRange, VirtualNode)>>,
     chunk_size: usize,
@@ -112,6 +112,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             table_desc: Some(self.table_desc.clone()),
             column_ids: self.inner_side_column_ids.clone(),
             scan_ranges,
+            ordered: false,
             vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
         });
 
@@ -136,7 +137,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
                     ..Default::default()
                 }),
             }),
-            epoch: self.epoch,
+            epoch: Some(self.epoch.clone()),
         };
 
         let prost_exchange_source = ProstExchangeSource {
@@ -237,8 +238,12 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
         let task_id = self.task_id.clone();
 
-        let executor_builder =
-            ExecutorBuilder::new(&plan_node, &task_id, self.context.clone(), self.epoch);
+        let executor_builder = ExecutorBuilder::new(
+            &plan_node,
+            &task_id,
+            self.context.clone(),
+            self.epoch.clone(),
+        );
 
         executor_builder.build().await
     }

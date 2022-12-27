@@ -56,6 +56,8 @@ enum HummockErrorInner {
     CompactionGroupError(String),
     #[error("SstableUpload error {0}.")]
     SstableUploadError(String),
+    #[error("Read backup error {0}.")]
+    ReadBackupError(String),
     #[error("Other error {0}.")]
     Other(String),
 }
@@ -117,6 +119,10 @@ impl HummockError {
         HummockErrorInner::ExpiredEpoch { safe_epoch, epoch }.into()
     }
 
+    pub fn is_expired_epoch(&self) -> bool {
+        matches!(self.inner, HummockErrorInner::ExpiredEpoch { .. })
+    }
+
     pub fn compaction_executor(error: impl ToString) -> HummockError {
         HummockErrorInner::CompactionExecutor(error.to_string()).into()
     }
@@ -135,6 +141,10 @@ impl HummockError {
 
     pub fn sstable_upload_error(error: impl ToString) -> HummockError {
         HummockErrorInner::SstableUploadError(error.to_string()).into()
+    }
+
+    pub fn read_backup_error(error: impl ToString) -> HummockError {
+        HummockErrorInner::ReadBackupError(error.to_string()).into()
     }
 
     pub fn other(error: impl ToString) -> HummockError {

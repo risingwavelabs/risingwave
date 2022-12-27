@@ -152,7 +152,7 @@ pub async fn handle_create_source(
         SourceSchema::Protobuf(protobuf_schema) => {
             if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
                 return Err(RwError::from(ProtocolError(
-                    "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/latest/sql-create-source/#protobuf for more information.".to_string(),
+                    "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string(),
                 )));
             }
 
@@ -167,13 +167,14 @@ pub async fn handle_create_source(
                     row_schema_location: protobuf_schema.row_schema_location.0.clone(),
                     use_schema_registry: protobuf_schema.use_schema_registry,
                     proto_message_name: protobuf_schema.message_name.0.clone(),
+                    ..Default::default()
                 },
             )
         }
         SourceSchema::Avro(avro_schema) => {
             if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
                 return Err(RwError::from(ProtocolError(
-                    "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/latest/sql-create-source/#avro for more information.".to_string(),
+                    "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string(),
                 )));
             }
             columns.extend(extract_avro_table_schema(avro_schema, with_properties.clone()).await?);
@@ -184,6 +185,7 @@ pub async fn handle_create_source(
                     row_schema_location: avro_schema.row_schema_location.0.clone(),
                     use_schema_registry: avro_schema.use_schema_registry,
                     proto_message_name: "".to_owned(),
+                    ..Default::default()
                 },
             )
         }
@@ -242,6 +244,15 @@ pub async fn handle_create_source(
                 },
             )
         }
+        SourceSchema::CSV(csv_info) => (
+            columns,
+            StreamSourceInfo {
+                row_format: RowFormatType::Csv as i32,
+                csv_delimiter: csv_info.delimiter as i32,
+                csv_has_header: csv_info.has_header,
+                ..Default::default()
+            },
+        ),
     };
 
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });

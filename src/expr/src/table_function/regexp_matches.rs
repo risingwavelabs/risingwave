@@ -85,7 +85,7 @@ impl TableFunction for RegexpMatches {
         let text_arr = self.text.eval_checked(input)?;
         let text_arr: &Utf8Array = text_arr.as_ref().into();
 
-        let bitmap = input.get_visibility_ref();
+        let bitmap = input.visibility();
         let mut output_arrays: Vec<ArrayRef> = vec![];
 
         match bitmap {

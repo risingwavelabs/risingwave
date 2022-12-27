@@ -75,6 +75,9 @@ impl ObserverState for FrontendObserverNode {
             Info::HummockVersionDeltas(_) => {
                 panic!("frontend node should not receive HummockVersionDeltas");
             }
+            Info::MetaBackupManifestId(_) => {
+                panic!("frontend node should not receive MetaBackupManifestId");
+            }
         }
     }
 

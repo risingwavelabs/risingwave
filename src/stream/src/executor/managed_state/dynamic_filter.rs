@@ -153,7 +153,7 @@ impl<S: StateStore> RangeCache<S> {
         for pk_range in missing_ranges {
             let init_maps = self
                 .vnodes
-                .ones()
+                .iter_ones()
                 .map(|vnode| {
                     self.cache
                         .get_mut(&VirtualNode::from_index(vnode))
@@ -163,7 +163,7 @@ impl<S: StateStore> RangeCache<S> {
                 .collect_vec();
             let futures =
                 self.vnodes
-                    .ones()
+                    .iter_ones()
                     .zip_eq(init_maps.into_iter())
                     .map(|(vnode, init_map)| {
                         self.fetch_vnode_range(VirtualNode::from_index(vnode), &pk_range, init_map)
@@ -231,7 +231,7 @@ impl<S: StateStore> RangeCache<S> {
             );
             let newly_owned_vnodes = Bitmap::bit_saturate_subtract(&new_vnodes, &old_vnodes);
 
-            let futures = newly_owned_vnodes.ones().map(|vnode| {
+            let futures = newly_owned_vnodes.iter_ones().map(|vnode| {
                 self.fetch_vnode_range(
                     VirtualNode::from_index(vnode),
                     &current_range,
@@ -676,7 +676,7 @@ mod tests {
             })
             .collect::<HashMap<_, _>>();
         let range = (Unbounded, Unbounded);
-        let vnodes = Bitmap::all_high_bits(VirtualNode::COUNT).into(); // set all the bits
+        let vnodes = Bitmap::ones(VirtualNode::COUNT).into(); // set all the bits
         let mut iter = UnorderedRangeCacheIter::new(&cache, range, vnodes);
         for i in VirtualNode::all() {
             assert_eq!(

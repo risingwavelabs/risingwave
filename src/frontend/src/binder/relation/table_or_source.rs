@@ -16,9 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{
-    ColumnDesc, Field, INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
-};
+use risingwave_common::catalog::{ColumnDesc, Field, SYSTEM_SCHEMAS};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
@@ -78,7 +76,7 @@ impl Binder {
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
         fn is_system_schema(schema_name: &str) -> bool {
-            schema_name == PG_CATALOG_SCHEMA_NAME || schema_name == INFORMATION_SCHEMA_SCHEMA_NAME
+            SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
         }
 
         // define some helper functions converting catalog to bound relation
@@ -232,17 +230,11 @@ impl Binder {
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let ast = Parser::parse_sql(&view_catalog.sql)
             .expect("a view's sql should be parsed successfully");
-        let ast = ast
+        let Statement::Query(query) = ast
             .into_iter()
             .exactly_one()
-            .expect("a view should contain only one statement");
-        let query = match ast {
-            Statement::CreateView {
-                materialized: false,
-                query,
-                ..
-            } => query,
-            _ => unreachable!("a view should contain a query statement, but got {ast:?}"),
+            .expect("a view should contain only one statement") else {
+            unreachable!("a view should contain a query statement");
         };
         let query = self.bind_query(*query).map_err(|e| {
             ErrorCode::BindError(format!(

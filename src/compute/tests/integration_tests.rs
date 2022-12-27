@@ -17,7 +17,6 @@
 
 use std::sync::Arc;
 
-use bytes::Bytes;
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -35,6 +34,7 @@ use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_source::table_test_utils::create_table_source_desc_builder;
 use risingwave_source::{TableSourceManager, TableSourceManagerRef};
 use risingwave_storage::memory::MemoryStateStore;
@@ -130,7 +130,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let all_column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded_channel();
-    let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+    let vnodes = Bitmap::from_bytes(&[0b11111111]);
     let state_table = SourceStateTableHandler::from_table_catalog(
         &default_source_internal_table(0x2333),
         MemoryStateStore::new(),
@@ -181,11 +181,15 @@ async fn test_table_materialize() -> StreamResult<()> {
          1.14
          5.14",
     );
-    let insert_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
+    let insert_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(
+        chunk,
+        get_schema(&[ColumnId::from(1)]),
+    ));
     let insert = Box::new(InsertExecutor::new(
         source_table_id,
         source_manager.clone(),
         insert_inner,
+        1024,
         "InsertExecutor".to_string(),
         vec![], // ignore insertion order
     ));
@@ -220,7 +224,8 @@ async fn test_table_materialize() -> StreamResult<()> {
     let scan = Box::new(RowSeqScanExecutor::new(
         table.clone(),
         vec![ScanRange::full()],
-        u64::MAX,
+        true,
+        to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqExecutor2".to_string(),
         None,
@@ -282,7 +287,8 @@ async fn test_table_materialize() -> StreamResult<()> {
     let scan = Box::new(RowSeqScanExecutor::new(
         table.clone(),
         vec![ScanRange::full()],
-        u64::MAX,
+        true,
+        to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqScanExecutor2".to_string(),
         None,
@@ -311,6 +317,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         source_table_id,
         source_manager.clone(),
         delete_inner,
+        1024,
         "DeleteExecutor".to_string(),
     ));
 
@@ -354,7 +361,8 @@ async fn test_table_materialize() -> StreamResult<()> {
     let scan = Box::new(RowSeqScanExecutor::new(
         table,
         vec![ScanRange::full()],
-        u64::MAX,
+        true,
+        to_committed_batch_query_epoch(u64::MAX),
         1024,
         "RowSeqScanExecutor2".to_string(),
         None,
@@ -421,7 +429,8 @@ async fn test_row_seq_scan() -> Result<()> {
     let executor = Box::new(RowSeqScanExecutor::new(
         table,
         vec![ScanRange::full()],
-        u64::MAX,
+        true,
+        to_committed_batch_query_epoch(u64::MAX),
         1,
         "RowSeqScanExecutor2".to_string(),
         None,
