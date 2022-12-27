@@ -374,7 +374,9 @@ fn build_extract_expr(
                 I64Array,
                 DecimalArray,
                 _,
-            >::new(l, r, ret, extract_from_timestamptz)),
+            >::new(
+                l, r, ret, extract_from_timestamptz
+            )),
             _ => {
                 return Err(ExprError::UnsupportedFunction(format!(
                     "Extract ( {:?} ) is not supported yet!",

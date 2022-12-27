@@ -141,7 +141,11 @@ fn build_type_derive_map() -> FuncSigMap {
     ];
     build_binary_cmp_funcs(&mut map, cmp_exprs, &num_types);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct]);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Date, T::Timestamp, T::Timestamptz]);
+    build_binary_cmp_funcs(
+        &mut map,
+        cmp_exprs,
+        &[T::Date, T::Timestamp, T::Timestamptz],
+    );
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time, T::Interval]);
     for e in cmp_exprs {
         for t in [T::Boolean, T::Varchar] {
@@ -234,8 +238,16 @@ fn build_type_derive_map() -> FuncSigMap {
     );
     map.insert(E::ToTimestamp, vec![T::Float64], T::Timestamptz);
     map.insert(E::ToTimestamp1, vec![T::Varchar, T::Varchar], T::Timestamp);
-    map.insert(E::AtTimeZone, vec![T::Timestamp, T::Varchar], T::Timestamptz);
-    map.insert(E::AtTimeZone, vec![T::Timestamptz, T::Varchar], T::Timestamp);
+    map.insert(
+        E::AtTimeZone,
+        vec![T::Timestamp, T::Varchar],
+        T::Timestamptz,
+    );
+    map.insert(
+        E::AtTimeZone,
+        vec![T::Timestamptz, T::Varchar],
+        T::Timestamp,
+    );
     map.insert(E::DateTrunc, vec![T::Varchar, T::Timestamp], T::Timestamp);
     map.insert(
         E::DateTrunc,

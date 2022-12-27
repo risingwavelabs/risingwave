@@ -956,12 +956,12 @@ mod tests {
             (
                 "`top_matches` ranks by exact count then preferred count",
                 vec![
-                    vec![T::Float64, T::Float64, T::Float64, T::Timestamptz], // 0 exact 3 preferred
-                    vec![T::Float64, T::Int32, T::Float32, T::Timestamp],    // 1 exact 1 preferred
-                    vec![T::Float32, T::Float32, T::Int32, T::Timestamptz],   // 1 exact 0 preferred
-                    vec![T::Int32, T::Float64, T::Float32, T::Timestamptz],   // 1 exact 1 preferred
-                    vec![T::Int32, T::Int16, T::Int32, T::Timestamptz], // 2 exact 1 non-castable
-                    vec![T::Int32, T::Float64, T::Float32, T::Date],   // 1 exact 1 preferred
+                    vec![T::Float64, T::Float64, T::Float64, T::Timestamptz], /* 0 exact 3 preferred */
+                    vec![T::Float64, T::Int32, T::Float32, T::Timestamp], // 1 exact 1 preferred
+                    vec![T::Float32, T::Float32, T::Int32, T::Timestamptz], // 1 exact 0 preferred
+                    vec![T::Int32, T::Float64, T::Float32, T::Timestamptz], // 1 exact 1 preferred
+                    vec![T::Int32, T::Int16, T::Int32, T::Timestamptz],   // 2 exact 1 non-castable
+                    vec![T::Int32, T::Float64, T::Float32, T::Date],      // 1 exact 1 preferred
                 ],
                 &[Some(T::Int32), Some(T::Int32), Some(T::Int32), None] as &[_],
                 Ok(&[T::Int32, T::Float64, T::Float32, T::Timestamptz] as &[_]),
