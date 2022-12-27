@@ -152,7 +152,7 @@ impl StreamMaterialize {
         }
 
         let max_column_id = columns.iter().map(|c| c.column_id()).max().unwrap();
-        let version = TableVersion::initial(max_column_id);
+        let initial_version = TableVersion::initial(max_column_id);
 
         let ctx = input.ctx();
         let distribution_key = base.dist.dist_column_indices().to_vec();
@@ -178,7 +178,7 @@ impl StreamMaterialize {
             definition,
             handle_pk_conflict,
             read_prefix_len_hint,
-            version: Some(version),
+            version: Some(initial_version),
         };
 
         Ok(Self { base, input, table })

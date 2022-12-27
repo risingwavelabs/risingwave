@@ -1,6 +1,8 @@
+use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
+use super::create_table::bind_sql_columns_with_offset;
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::Relation;
 use crate::Binder;
@@ -34,5 +36,20 @@ pub async fn handle_add_column(
         )))?
     }
 
-    todo!()
+    let _new_column = {
+        let column_id_offset = catalog.version.unwrap().next_column_id.get_id();
+        let (columns, pk_id) = bind_sql_columns_with_offset(vec![new_column], column_id_offset)?;
+        if pk_id.is_some() {
+            Err(ErrorCode::NotImplemented(
+                format!("cannot add a primary key column"),
+                None.into(),
+            ))?
+        }
+        columns.into_iter().exactly_one().unwrap()
+    };
+
+    Err(ErrorCode::NotImplemented(
+        "ADD COLUMN".to_owned(),
+        6903.into(),
+    ))?
 }

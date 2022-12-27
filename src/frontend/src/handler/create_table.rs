@@ -52,73 +52,70 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Opt
 /// Bind the columns with an `offset` on the column IDs to allocate. See [`bind_sql_columns`].
 pub fn bind_sql_columns_with_offset(
     columns: Vec<ColumnDef>,
-    id_offset: i32,
+    column_id_offset: i32,
 ) -> Result<(Vec<ColumnDesc>, Option<ColumnId>)> {
     // In `ColumnDef`, pk can contain only one column. So we use `Option` rather than `Vec`.
     let mut pk_column_id = None;
+    let mut column_descs = Vec::with_capacity(columns.len());
 
-    let column_descs = {
-        let mut column_descs = Vec::with_capacity(columns.len());
-        for (i, column) in columns.into_iter().enumerate() {
-            let column_id = ColumnId::new(i as i32 + id_offset);
-            // Destruct to make sure all fields are properly handled rather than ignored.
-            // Do NOT use `..` to ignore fields you do not want to deal with.
-            // Reject them with a clear NotImplemented error.
-            let ColumnDef {
-                name,
-                data_type,
-                collation,
-                options,
-            } = column;
-            let data_type = data_type.ok_or(ErrorCode::InvalidInputSyntax(
-                "data type is not specified".into(),
-            ))?;
-            if let Some(collation) = collation {
-                return Err(ErrorCode::NotImplemented(
-                    format!("collation \"{}\"", collation),
-                    None.into(),
-                )
-                .into());
-            }
-            for option_def in options {
-                match option_def.option {
-                    ColumnOption::Unique { is_primary: true } => {
-                        if pk_column_id.is_some() {
-                            return Err(ErrorCode::BindError(
-                                "multiple primary keys are not allowed".into(),
-                            )
-                            .into());
-                        }
-                        pk_column_id = Some(column_id);
-                    }
-                    _ => {
-                        return Err(ErrorCode::NotImplemented(
-                            format!("column constraints \"{}\"", option_def),
-                            None.into(),
+    for (i, column) in columns.into_iter().enumerate() {
+        let column_id = ColumnId::from(column_id_offset + i as i32);
+        // Destruct to make sure all fields are properly handled rather than ignored.
+        // Do NOT use `..` to ignore fields you do not want to deal with.
+        // Reject them with a clear NotImplemented error.
+        let ColumnDef {
+            name,
+            data_type,
+            collation,
+            options,
+        } = column;
+        let data_type = data_type.ok_or(ErrorCode::InvalidInputSyntax(
+            "data type is not specified".into(),
+        ))?;
+        if let Some(collation) = collation {
+            return Err(ErrorCode::NotImplemented(
+                format!("collation \"{}\"", collation),
+                None.into(),
+            )
+            .into());
+        }
+        for option_def in options {
+            match option_def.option {
+                ColumnOption::Unique { is_primary: true } => {
+                    if pk_column_id.is_some() {
+                        return Err(ErrorCode::BindError(
+                            "multiple primary keys are not allowed".into(),
                         )
-                        .into())
+                        .into());
                     }
+                    pk_column_id = Some(column_id);
+                }
+                _ => {
+                    return Err(ErrorCode::NotImplemented(
+                        format!("column constraints \"{}\"", option_def),
+                        None.into(),
+                    )
+                    .into())
                 }
             }
-            check_valid_column_name(&name.real_value())?;
-            let field_descs = if let AstDataType::Struct(fields) = &data_type {
-                fields
-                    .iter()
-                    .map(bind_struct_field)
-                    .collect::<Result<Vec<_>>>()?
-            } else {
-                vec![]
-            };
-            column_descs.push(ColumnDesc {
-                data_type: bind_data_type(&data_type)?,
-                column_id,
-                name: name.real_value(),
-                field_descs,
-                type_name: "".to_string(),
-            });
         }
-        column_descs
-    };
+        check_valid_column_name(&name.real_value())?;
+        let field_descs = if let AstDataType::Struct(fields) = &data_type {
+            fields
+                .iter()
+                .map(bind_struct_field)
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            vec![]
+        };
+        column_descs.push(ColumnDesc {
+            data_type: bind_data_type(&data_type)?,
+            column_id,
+            name: name.real_value(),
+            field_descs,
+            type_name: "".to_string(),
+        });
+    }
 
     Ok((column_descs, pk_column_id))
 }
