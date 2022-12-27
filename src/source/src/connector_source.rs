@@ -141,6 +141,17 @@ impl InnerConnectorSourceReader {
                 .partition_input_count
                 .with_label_values(&[&actor_id, &source_id, &id])
                 .inc_by(msgs.len() as u64);
+            let sum_bytes = msgs
+                .iter()
+                .map(|msg| match &msg.payload {
+                    None => 0,
+                    Some(payload) => payload.len() as u64,
+                })
+                .sum();
+            self.metrics
+                .partition_input_bytes
+                .with_label_values(&[&actor_id, &source_id, &id])
+                .inc_by(sum_bytes);
             yield msgs;
         }
     }
@@ -200,9 +211,8 @@ impl ConnectorSource {
         let mut config = ConnectorProperties::extract(properties.clone())
             .map_err(|e| ConnectorError(e.into()))?;
         if let Some(addr) = connector_node_addr {
-            config.set_connector_node_addr(addr);
             // fixme: require source_id
-            // config.set_source_id_for_cdc(source_id);
+            config.init_properties_for_cdc(0, addr, None)
         }
         let parser = SourceParserImpl::create(
             &format,

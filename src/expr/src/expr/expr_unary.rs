@@ -15,13 +15,14 @@
 //! For expression that only accept one value as input (e.g. CAST)
 
 use risingwave_common::array::*;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type as ProstType;
 
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
-use crate::expr::template::UnaryNullableExpression;
-use crate::expr::BoxedExpression;
+use crate::expr::template_fast::BooleanUnaryExpression;
+use crate::expr::{template_fast, BoxedExpression, Expression};
 use crate::vector_op::arithmetic_op::{decimal_abs, general_abs, general_neg};
 use crate::vector_op::ascii::ascii;
 use crate::vector_op::bitwise_op::general_bitnot;
@@ -67,6 +68,19 @@ macro_rules! gen_unary_impl {
     };
 }
 
+macro_rules! gen_unary_impl_fast {
+    ([$expr_name: literal, $child:expr, $ret:expr], $( { $input:ident, $rt: ident, $func:expr },)*) => {
+        match ($child.return_type()) {
+            $(
+                $input! { type_match_pattern } => template_fast::UnaryExpression::new($child, $ret, $func).boxed(),
+            )*
+            _ => {
+                return Err(ExprError::UnsupportedFunction(format!("{}({:?}) -> {:?}", $expr_name, $child.return_type(), $ret)));
+            }
+        }
+    };
+}
+
 macro_rules! gen_unary_atm_expr  {
     (
         $expr_name: literal,
@@ -99,7 +113,7 @@ macro_rules! gen_round_expr {
         $float64_round_func:ident,
         $decimal_round_func:ident
     ) => {
-        gen_unary_impl! {
+        gen_unary_impl_fast! {
             [$expr_name, $child, $ret],
             { float64, float64, $float64_round_func },
             { decimal, decimal, $decimal_round_func },
@@ -175,41 +189,31 @@ pub fn new_unary_expr(
                 bool_out,
             ))
         }
-        (ProstType::Not, _, _) => {
-            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
-                child_expr,
-                return_type,
-                conjunction::not,
-            ))
-        }
-        (ProstType::IsTrue, _, _) => {
-            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
-                child_expr,
-                return_type,
-                is_true,
-            ))
-        }
-        (ProstType::IsNotTrue, _, _) => {
-            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
-                child_expr,
-                return_type,
-                is_not_true,
-            ))
-        }
-        (ProstType::IsFalse, _, _) => {
-            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
-                child_expr,
-                return_type,
-                is_false,
-            ))
-        }
-        (ProstType::IsNotFalse, _, _) => {
-            Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
-                child_expr,
-                return_type,
-                is_not_false,
-            ))
-        }
+        (ProstType::Not, _, _) => Box::new(BooleanUnaryExpression::new(
+            child_expr,
+            |a| BoolArray::new(!a.data() & a.null_bitmap(), a.null_bitmap().clone()),
+            conjunction::not,
+        )),
+        (ProstType::IsTrue, _, _) => Box::new(BooleanUnaryExpression::new(
+            child_expr,
+            |a| BoolArray::new(a.to_bitmap(), Bitmap::ones(a.len())),
+            is_true,
+        )),
+        (ProstType::IsNotTrue, _, _) => Box::new(BooleanUnaryExpression::new(
+            child_expr,
+            |a| BoolArray::new(!a.to_bitmap(), Bitmap::ones(a.len())),
+            is_not_true,
+        )),
+        (ProstType::IsFalse, _, _) => Box::new(BooleanUnaryExpression::new(
+            child_expr,
+            |a| BoolArray::new(!a.data() & a.null_bitmap(), Bitmap::ones(a.len())),
+            is_false,
+        )),
+        (ProstType::IsNotFalse, _, _) => Box::new(BooleanUnaryExpression::new(
+            child_expr,
+            |a| BoolArray::new(a.data() | !a.null_bitmap(), Bitmap::ones(a.len())),
+            is_not_false,
+        )),
         (ProstType::IsNull, _, _) => Box::new(IsNullExpression::new(child_expr)),
         (ProstType::IsNotNull, _, _) => Box::new(IsNotNullExpression::new(child_expr)),
         (ProstType::Upper, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
@@ -262,12 +266,11 @@ pub fn new_unary_expr(
             }
         }
         (ProstType::BitwiseNot, _, _) => {
-            gen_unary_impl! {
+            gen_unary_impl_fast! {
                 [ "BitwiseNot", child_expr, return_type],
-                { int16, int16, general_bitnot },
-                { int32, int32, general_bitnot },
-                { int64, int64, general_bitnot },
-
+                { int16, int16, general_bitnot::<i16> },
+                { int32, int32, general_bitnot::<i32> },
+                { int64, int64, general_bitnot::<i64> },
             }
         }
         (ProstType::Ceil, _, _) => {

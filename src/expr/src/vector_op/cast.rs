@@ -78,8 +78,8 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
         )
         .0)
     } else {
-        let res =
-            SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))?;
+        let res = SpeedDate::parse_str(s)
+            .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP.into()))?;
         Ok(
             NaiveDateWrapper::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
                 .and_hms_micro_uncheck(0, 0, 0, 0)
@@ -133,13 +133,15 @@ pub fn i64_to_timestamp(t: i64) -> Result<NaiveDateTimeWrapper> {
 
 #[inline]
 fn parse_naive_date(s: &str) -> Result<NaiveDate> {
-    let res = SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_DATE))?;
+    let res =
+        SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_DATE.into()))?;
     Ok(NaiveDateWrapper::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32).0)
 }
 
 #[inline]
 fn parse_naive_time(s: &str) -> Result<NaiveTime> {
-    let res = SpeedTime::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIME))?;
+    let res =
+        SpeedTime::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIME.into()))?;
     Ok(NaiveTimeWrapper::from_hms_micro_uncheck(
         res.hour as u32,
         res.minute as u32,
@@ -153,7 +155,7 @@ fn parse_naive_time(s: &str) -> Result<NaiveTime> {
 pub fn str_to_timestampz(elem: &str) -> Result<i64> {
     elem.parse::<DateTime<Utc>>()
         .map(|ret| ret.timestamp_micros())
-        .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ))
+        .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ.into()))
 }
 
 /// Converts UNIX epoch time to timestamp in microseconds.
@@ -176,7 +178,7 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
         E11..E14 => Ok(t * 1_000),   // ms
         E14..E17 => Ok(t),           // us
         E17.. => Ok(t / 1_000),      // ns
-        _ => Err(ExprError::Parse(ERROR_INT_TO_TIMESTAMP)),
+        _ => Err(ExprError::Parse(ERROR_INT_TO_TIMESTAMP.into())),
     }
 }
 
@@ -184,7 +186,7 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
 pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
     // Padded with whitespace str is not allowed.
     if elem.starts_with(' ') && elem.trim().starts_with("\\x") {
-        Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA))
+        Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into()))
     } else if let Some(remainder) = elem.strip_prefix(r"\x") {
         Ok(parse_bytes_hex(remainder)?.into())
     } else {
@@ -201,7 +203,7 @@ pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
         b'a'..=b'f' => Ok(b - b'a' + 10),
         b'A'..=b'F' => Ok(b - b'A' + 10),
         b'0'..=b'9' => Ok(b - b'0'),
-        _ => Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+        _ => Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
     };
 
     let mut buf = vec![];
@@ -212,7 +214,7 @@ pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
         }
         let n = decode_nibble(n)?;
         let n2 = match nibbles.next() {
-            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
             Some(n2) => decode_nibble(n2)?,
         };
         buf.push((n << 4) | n2);
@@ -233,13 +235,13 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
             continue;
         }
         match bytes.next() {
-            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
             Some(b'\\') => out.push(b'\\'),
             b => match (b, bytes.next(), bytes.next()) {
                 (Some(d2 @ b'0'..=b'3'), Some(d1 @ b'0'..=b'7'), Some(d0 @ b'0'..=b'7')) => {
                     out.push(((d2 - b'0') << 6) + ((d1 - b'0') << 3) + (d0 - b'0'));
                 }
-                _ => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+                _ => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
             },
         }
     }
@@ -259,7 +261,7 @@ where
 {
     elem.trim()
         .parse()
-        .map_err(|_| ExprError::Parse(type_name::<T>()))
+        .map_err(|_| ExprError::Parse(type_name::<T>().into()))
 }
 
 /// Define the cast function to primitive types.
@@ -364,7 +366,7 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
     {
         Ok(false)
     } else {
-        Err(ExprError::Parse("Invalid bool"))
+        Err(ExprError::Parse("Invalid bool".into()))
     }
 }
 
@@ -480,7 +482,7 @@ fn unnest(input: &str) -> Result<Vec<String>> {
 
     let mut chars = trimmed.chars();
     if chars.next() != Some('{') || chars.next_back() != Some('}') {
-        return Err(ExprError::Parse("Input must be braced"));
+        return Err(ExprError::Parse("Input must be braced".into()));
     }
 
     let mut items = Vec::new();
@@ -500,14 +502,20 @@ fn unnest(input: &str) -> Result<Vec<String>> {
                             c
                         }
                         None => {
-                            return Err(ExprError::Parse("Missing closing brace '}}' character"))
+                            return Err(ExprError::Parse(
+                                "Missing closing brace '}}' character".into(),
+                            ))
                         }
                     };
                     string.push(c);
                 }
                 items.push(string);
             }
-            '}' => return Err(ExprError::Parse("Unexpected closing brace '}}' character")),
+            '}' => {
+                return Err(ExprError::Parse(
+                    "Unexpected closing brace '}}' character".into(),
+                ))
+            }
             ',' => {}
             c if c.is_whitespace() => {}
             c => items.push(format!(
@@ -664,13 +672,13 @@ mod tests {
             str_to_timestampz("1999-01-08 04:05:06")
                 .unwrap_err()
                 .to_string(),
-            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ).to_string()
+            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ.into()).to_string()
         );
         assert_eq!(
             str_to_timestamp("1999-01-08 04:05:06AA")
                 .unwrap_err()
                 .to_string(),
-            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP).to_string()
+            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP.into()).to_string()
         );
         assert_eq!(
             str_to_date("1999-01-08AA").unwrap_err().to_string(),
@@ -678,7 +686,7 @@ mod tests {
         );
         assert_eq!(
             str_to_time("AA04:05:06").unwrap_err().to_string(),
-            ExprError::Parse(PARSE_ERROR_STR_TO_TIME).to_string()
+            ExprError::Parse(PARSE_ERROR_STR_TO_TIME.into()).to_string()
         );
     }
 

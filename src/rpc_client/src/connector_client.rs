@@ -19,6 +19,9 @@ use async_trait::async_trait;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
+use risingwave_pb::connector_service::get_event_stream_request::{
+    Request, StartSource, ValidateProperties,
+};
 use risingwave_pb::connector_service::*;
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
@@ -40,10 +43,10 @@ impl ConnectorClient {
     }
 
     /// Get source event stream
-    pub async fn get_event_stream(
+    pub async fn start_source_stream(
         &self,
         source_id: u64,
-        source_type: String,
+        source_type: SourceType,
         start_offset: Option<String>,
         properties: HashMap<String, String>,
     ) -> Result<Streaming<GetEventStreamResponse>> {
@@ -51,14 +54,50 @@ impl ConnectorClient {
             .0
             .to_owned()
             .get_event_stream(GetEventStreamRequest {
-                source_id,
-                source_type,
-                start_offset: start_offset.unwrap_or_default(),
-                properties,
+                request: Some(Request::Start(StartSource {
+                    source_id,
+                    source_type: source_type as _,
+                    start_offset: start_offset.unwrap_or_default(),
+                    properties,
+                })),
             })
             .await
-            .inspect_err(|_| {
-                tracing::error!("failed to create event stream for CDC source {}", source_id)
+            .inspect_err(|err| {
+                tracing::error!(
+                    "failed to start stream for CDC source {}: {}",
+                    source_id,
+                    err.message()
+                )
+            })?
+            .into_inner())
+    }
+
+    /// Validate source properties
+    pub async fn validate_properties(
+        &self,
+        source_id: u64,
+        source_type: SourceType,
+        properties: HashMap<String, String>,
+        table_schema: Option<TableSchema>,
+    ) -> Result<Streaming<GetEventStreamResponse>> {
+        Ok(self
+            .0
+            .to_owned()
+            .get_event_stream(GetEventStreamRequest {
+                request: Some(Request::Validate(ValidateProperties {
+                    source_id,
+                    source_type: source_type as _,
+                    properties,
+                    table_schema,
+                })),
+            })
+            .await
+            .inspect_err(|err| {
+                tracing::error!(
+                    "failed to validate source {} properties: {}",
+                    source_id,
+                    err.message()
+                )
             })?
             .into_inner())
     }

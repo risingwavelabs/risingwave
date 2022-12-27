@@ -24,6 +24,7 @@ use futures::{pin_mut, Stream, StreamExt};
 use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::ErrorCode;
+use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
@@ -129,19 +130,17 @@ impl ConnectorProperties {
         }
     }
 
-    pub fn set_source_id_for_cdc(&mut self, source_id: u32) {
+    pub fn init_properties_for_cdc(
+        &mut self,
+        source_id: u32,
+        rpc_addr: String,
+        table_schema: Option<TableSchema>,
+    ) {
         match self {
             ConnectorProperties::MySqlCdc(c) | ConnectorProperties::PostgresCdc(c) => {
                 c.source_id = source_id;
-            }
-            _ => {}
-        }
-    }
-
-    pub fn set_connector_node_addr(&mut self, addr: String) {
-        match self {
-            ConnectorProperties::MySqlCdc(c) | ConnectorProperties::PostgresCdc(c) => {
-                c.connector_node_addr = addr;
+                c.connector_node_addr = rpc_addr;
+                c.table_schema = table_schema;
             }
             _ => {}
         }
