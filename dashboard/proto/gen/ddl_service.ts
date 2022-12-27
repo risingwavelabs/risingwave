@@ -174,6 +174,27 @@ export interface DropIndexResponse {
   version: number;
 }
 
+export interface ReplaceTablePlanRequest {
+  /**
+   * The new table catalog, with the correct table ID and a new version.
+   * If the new version does not match the subsequent version in the meta service's
+   * catalog, this request will be rejected.
+   */
+  table:
+    | Table
+    | undefined;
+  /** The new materialization plan, where all schema are updated. */
+  fragmentGraph: StreamFragmentGraph | undefined;
+}
+
+export interface ReplaceTablePlanResponse {
+  status:
+    | Status
+    | undefined;
+  /** The new global catalog version. */
+  version: number;
+}
+
 function createBaseCreateDatabaseRequest(): CreateDatabaseRequest {
   return { db: undefined };
 }
@@ -1127,6 +1148,65 @@ export const DropIndexResponse = {
 
   fromPartial<I extends Exact<DeepPartial<DropIndexResponse>, I>>(object: I): DropIndexResponse {
     const message = createBaseDropIndexResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseReplaceTablePlanRequest(): ReplaceTablePlanRequest {
+  return { table: undefined, fragmentGraph: undefined };
+}
+
+export const ReplaceTablePlanRequest = {
+  fromJSON(object: any): ReplaceTablePlanRequest {
+    return {
+      table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
+      fragmentGraph: isSet(object.fragmentGraph) ? StreamFragmentGraph.fromJSON(object.fragmentGraph) : undefined,
+    };
+  },
+
+  toJSON(message: ReplaceTablePlanRequest): unknown {
+    const obj: any = {};
+    message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
+    message.fragmentGraph !== undefined &&
+      (obj.fragmentGraph = message.fragmentGraph ? StreamFragmentGraph.toJSON(message.fragmentGraph) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ReplaceTablePlanRequest>, I>>(object: I): ReplaceTablePlanRequest {
+    const message = createBaseReplaceTablePlanRequest();
+    message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
+    message.fragmentGraph = (object.fragmentGraph !== undefined && object.fragmentGraph !== null)
+      ? StreamFragmentGraph.fromPartial(object.fragmentGraph)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseReplaceTablePlanResponse(): ReplaceTablePlanResponse {
+  return { status: undefined, version: 0 };
+}
+
+export const ReplaceTablePlanResponse = {
+  fromJSON(object: any): ReplaceTablePlanResponse {
+    return {
+      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
+      version: isSet(object.version) ? Number(object.version) : 0,
+    };
+  },
+
+  toJSON(message: ReplaceTablePlanResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ReplaceTablePlanResponse>, I>>(object: I): ReplaceTablePlanResponse {
+    const message = createBaseReplaceTablePlanResponse();
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;
