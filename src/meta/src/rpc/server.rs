@@ -287,7 +287,7 @@ mod tests {
         node_controllers
     }
 
-    /// Get a Chanel to a meat node without re-trying the connection.
+    /// Get a Channel to a meat node without re-trying the connection.
     ///
     /// ### Returns
     /// Null on error, else the channel
@@ -336,7 +336,7 @@ mod tests {
             // Only leader nodes support adding worker nodes
             let channel = get_meta_channel(meta_addr)
                 .await
-                .expect("Establishing chanel should work");
+                .expect("Establishing channel should work");
             let cluster_client = ClusterServiceClient::new(channel);
 
             // check if node is leader
