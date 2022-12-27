@@ -17,6 +17,7 @@
 #![feature(generators)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
+#![feature(result_option_inspect)]
 #![feature(allocator_api)]
 #![cfg_attr(coverage, feature(no_coverage))]
 

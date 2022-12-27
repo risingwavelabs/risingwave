@@ -160,7 +160,8 @@ impl StreamService for StreamServiceImpl {
             .mgr
             .collect_barrier(req.prev_epoch)
             .stack_trace(format!("collect_barrier (epoch {})", req.prev_epoch))
-            .await?;
+            .await
+            .inspect_err(|err| tracing::error!("failed to collect barrier: {}", err))?;
         // Must finish syncing data written in the epoch before respond back to ensure persistence
         // of the state.
         let synced_sstables = if checkpoint {
