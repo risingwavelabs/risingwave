@@ -17,25 +17,17 @@ use std::sync::Arc;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
-use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct TierCompactionPicker {
     config: Arc<CompactionConfig>,
-    overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
 impl TierCompactionPicker {
-    pub fn new(
-        config: Arc<CompactionConfig>,
-        overlap_strategy: Arc<dyn OverlapStrategy>,
-    ) -> TierCompactionPicker {
-        TierCompactionPicker {
-            config,
-            overlap_strategy,
-        }
+    pub fn new(config: Arc<CompactionConfig>) -> TierCompactionPicker {
+        TierCompactionPicker { config }
     }
 }
 
@@ -60,6 +52,7 @@ impl TierCompactionPicker {
             }
 
             if level_handler.is_level_pending_compact(level) {
+                stats.skip_by_pending_files += 1;
                 continue;
             }
 
@@ -123,7 +116,7 @@ pub mod tests {
                 .level0_tier_compact_file_number(2)
                 .build(),
         );
-        let picker = TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
+        let picker = TierCompactionPicker::new(config);
 
         // Cannot trivial move because there is only 1 sub-level.
         let l0 = generate_l0_overlapping_sublevels(vec![vec![
@@ -207,7 +200,7 @@ pub mod tests {
                 .level0_tier_compact_file_number(2)
                 .build(),
         );
-        let picker = TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
+        let picker = TierCompactionPicker::new(config);
         let mut local_stats = LocalPickerStatistic::default();
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
@@ -257,8 +250,7 @@ pub mod tests {
         let mut local_stats = LocalPickerStatistic::default();
         // sub-level 0 is excluded because it's nonoverlapping and violating
         // sub_level_max_compaction_bytes.
-        let picker =
-            TierCompactionPicker::new(config.clone(), Arc::new(RangeOverlapStrategy::default()));
+        let picker = TierCompactionPicker::new(config.clone());
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -269,7 +261,7 @@ pub mod tests {
         // sub-level 0 is included because it's overlapping even if violating
         // sub_level_max_compaction_bytes.
         levels.l0.as_mut().unwrap().sub_levels[0].level_type = LevelType::Overlapping as i32;
-        let picker = TierCompactionPicker::new(config, Arc::new(RangeOverlapStrategy::default()));
+        let picker = TierCompactionPicker::new(config);
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();

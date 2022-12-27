@@ -25,7 +25,7 @@ use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_retry::strategy::jitter;
 
-use crate::hummock::local_version::LocalHummockVersion;
+use crate::hummock::local_version::{LocalGroup, LocalHummockVersion};
 
 #[derive(Debug, Clone)]
 pub enum PinVersionAction {
@@ -135,6 +135,11 @@ impl PinnedVersion {
         ret.extend(levels.l0.sub_levels.iter().rev());
         ret.extend(levels.levels.iter());
         ret
+    }
+
+    pub fn get_group(&self, table_id: TableId) -> Option<&LocalGroup> {
+        let compaction_group_id = self.compaction_group_index.get(&table_id)?;
+        self.version.groups.get(compaction_group_id)
     }
 
     pub fn levels(&self, table_id: TableId) -> Vec<&Level> {

@@ -50,6 +50,7 @@ message IntraLevelDelta {
   uint64 l0_sub_level_id = 2;
   repeated uint64 removed_table_ids = 3;
   repeated SstableInfo inserted_table_infos = 4;
+  bool switch_new_level = 5;
 }
 
 message GroupConstruct {

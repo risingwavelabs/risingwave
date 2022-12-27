@@ -1639,7 +1639,7 @@ where
                 }
             }
 
-            let mut group_delta = GroupDelta {
+            let group_delta = GroupDelta {
                 delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
                     level_idx: 0,
                     inserted_table_infos: group_sstables.clone(),

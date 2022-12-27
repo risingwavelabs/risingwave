@@ -16,22 +16,13 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{
-    CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel, SstableInfo,
-};
+use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType};
 
-use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
-use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 
-fn cal_file_size(table_infos: &[SstableInfo]) -> u64 {
-    table_infos.iter().map(|table| table.file_size).sum::<u64>()
-}
-
 pub struct LevelCompactionPicker {
     target_level: usize,
-    overlap_strategy: Arc<dyn OverlapStrategy>,
     config: Arc<CompactionConfig>,
 }
 
@@ -136,52 +127,11 @@ impl CompactionPicker for LevelCompactionPicker {
 }
 
 impl LevelCompactionPicker {
-    pub fn new(
-        target_level: usize,
-        config: Arc<CompactionConfig>,
-        overlap_strategy: Arc<dyn OverlapStrategy>,
-    ) -> LevelCompactionPicker {
+    pub fn new(target_level: usize, config: Arc<CompactionConfig>) -> LevelCompactionPicker {
         LevelCompactionPicker {
             target_level,
-            overlap_strategy,
             config,
         }
-    }
-
-    fn pick_min_overlap_tables(
-        &self,
-        l0: &OverlappingLevel,
-        target_level: &Level,
-        level_handlers: &[LevelHandler],
-    ) -> Vec<InputLevel> {
-        let min_overlap_picker = MinOverlappingPicker::new(
-            0,
-            self.target_level,
-            self.config.sub_level_max_compaction_bytes,
-            self.overlap_strategy.clone(),
-        );
-
-        // Do not use `pick_compaction` because it can not select a sub-level.
-        let (select_tables, target_tables) = min_overlap_picker.pick_tables(
-            &l0.sub_levels[0].table_infos,
-            &target_level.table_infos,
-            level_handlers,
-        );
-        if select_tables.is_empty() {
-            return vec![];
-        }
-        vec![
-            InputLevel {
-                level_idx: 0,
-                level_type: l0.sub_levels[0].level_type,
-                table_infos: select_tables,
-            },
-            InputLevel {
-                level_idx: self.target_level as u32,
-                level_type: target_level.level_type,
-                table_infos: target_tables,
-            },
-        ]
     }
 }
 
@@ -205,7 +155,7 @@ pub mod tests {
                 .level0_tier_compact_file_number(2)
                 .build(),
         );
-        LevelCompactionPicker::new(1, config, Arc::new(RangeOverlapStrategy::default()))
+        LevelCompactionPicker::new(1, config)
     }
 
     #[test]
@@ -296,8 +246,7 @@ pub mod tests {
                 .compaction_mode(CompactionMode::Range as i32)
                 .build(),
         );
-        let picker =
-            LevelCompactionPicker::new(1, config, Arc::new(RangeOverlapStrategy::default()));
+        let picker = LevelCompactionPicker::new(1, config);
 
         let levels = vec![Level {
             level_idx: 1,
@@ -388,8 +337,7 @@ pub mod tests {
         ret.add_pending_task(0, &mut levels_handler);
 
         push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(3, 1, 250, 300, 3)]);
-        let picker =
-            TierCompactionPicker::new(picker.config.clone(), picker.overlap_strategy.clone());
+        let picker = TierCompactionPicker::new(picker.config.clone());
         assert!(picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .is_none());
@@ -490,11 +438,7 @@ pub mod tests {
             .level0_tier_compact_file_number(2)
             .max_compaction_bytes(1000)
             .build();
-        let picker = LevelCompactionPicker::new(
-            1,
-            Arc::new(config),
-            Arc::new(RangeOverlapStrategy::default()),
-        );
+        let picker = LevelCompactionPicker::new(1, Arc::new(config));
 
         let mut levels = Levels {
             levels: vec![Level {
@@ -608,8 +552,7 @@ pub mod tests {
         );
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
         // So all sub-levels are included to make write amplification < MAX_WRITE_AMPLIFICATION.
-        let picker =
-            LevelCompactionPicker::new(1, config, Arc::new(RangeOverlapStrategy::default()));
+        let picker = LevelCompactionPicker::new(1, config);
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -633,8 +576,7 @@ pub mod tests {
                 .max_compaction_bytes(50000)
                 .build(),
         );
-        let picker =
-            LevelCompactionPicker::new(1, config, Arc::new(RangeOverlapStrategy::default()));
+        let picker = LevelCompactionPicker::new(1, config);
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
@@ -699,11 +641,7 @@ pub mod tests {
 
         // Only include sub-level 0 results will violate MAX_WRITE_AMPLIFICATION.
         // But stopped by pending sub-level when trying to include more sub-levels.
-        let picker = LevelCompactionPicker::new(
-            1,
-            config.clone(),
-            Arc::new(RangeOverlapStrategy::default()),
-        );
+        let picker = LevelCompactionPicker::new(1, config.clone());
         assert!(picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .is_none());
@@ -714,8 +652,7 @@ pub mod tests {
         }
 
         // No more pending sub-level so we can get a task now.
-        let picker =
-            LevelCompactionPicker::new(1, config, Arc::new(RangeOverlapStrategy::default()));
+        let picker = LevelCompactionPicker::new(1, config);
         picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();

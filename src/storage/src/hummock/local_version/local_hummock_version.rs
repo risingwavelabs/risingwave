@@ -13,10 +13,8 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use bytes::Bytes;
 use crossbeam_skiplist::SkipMap;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -25,38 +23,18 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     GroupDeltasSummary,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
-use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
-use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{
     HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel, SstableInfo,
 };
 
+use super::{LevelZeroCache, LevelZeroData};
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SstableIterator};
 use crate::monitor::StoreLocalStatistic;
-
-#[derive(Debug, Clone)]
-pub struct LevelZeroCache {
-    pub cache: Arc<SkipMap<FullKey<Vec<u8>>, HummockValue<Bytes>>>,
-    pub level: Level,
-}
-
-impl PartialEq for LevelZeroCache {
-    fn eq(&self, other: &Self) -> bool {
-        self.level.eq(&other.level)
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct LevelZeroData {
-    pub caches: Vec<LevelZeroCache>,
-    pub sub_levels: Vec<Level>,
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LocalGroup {
@@ -209,6 +187,33 @@ impl LocalHummockVersion {
             .groups
             .get_many_mut([&parent_group_id, &group_id])
             .unwrap();
+        for sub_level in &mut parent_levels.l0.caches {
+            let mut insert_table_infos = vec![];
+            for table_info in &mut sub_level.level.table_infos {
+                if table_info
+                    .table_ids
+                    .iter()
+                    .any(|table_id| member_table_ids.contains(table_id))
+                {
+                    table_info.divide_version += 1;
+                    split_id_vers.push((table_info.get_id(), table_info.get_divide_version(), 0));
+                    let mut branch_table_info = table_info.clone();
+                    branch_table_info.table_ids = table_info
+                        .table_ids
+                        .drain_filter(|table_id| member_table_ids.contains(table_id))
+                        .collect_vec();
+                    insert_table_infos.push(branch_table_info);
+                }
+            }
+            if !insert_table_infos.is_empty() {
+                add_new_sub_level(
+                    &mut cur_levels.l0,
+                    sub_level.level.sub_level_id,
+                    sub_level.level.level_type(),
+                    insert_table_infos,
+                );
+            }
+        }
         for sub_level in &mut parent_levels.l0.sub_levels {
             let mut insert_table_infos = vec![];
             for table_info in &mut sub_level.table_infos {
@@ -227,12 +232,14 @@ impl LocalHummockVersion {
                     insert_table_infos.push(branch_table_info);
                 }
             }
-            add_new_sub_level(
-                &mut cur_levels.l0,
-                sub_level.sub_level_id,
-                sub_level.level_type(),
-                insert_table_infos,
-            );
+            if !insert_table_infos.is_empty() {
+                let level = new_sub_level(
+                    sub_level.sub_level_id,
+                    sub_level.level_type(),
+                    insert_table_infos,
+                );
+                cur_levels.l0.sub_levels.push(level);
+            }
         }
         split_id_vers.extend(split_base_levels(
             member_table_ids,
@@ -273,31 +280,21 @@ impl LocalHummockVersion {
             if let Some(group_construct) = &summary.group_construct {
                 // todo: check split result
             }
-            let has_destroy = summary.group_destroy.is_some();
-            if self.max_committed_epoch < version_delta.max_committed_epoch {
+            let GroupDeltasSummary {
+                delete_sst_ids_set,
+                insert_sst_level_id,
+                insert_table_infos,
+                ..
+            } = summary;
+            if insert_sst_level_id == 0
+                && !insert_table_infos.is_empty()
+                && delete_sst_ids_set.is_empty()
+            {
                 // `max_committed_epoch` increases. It must be a `commit_epoch`
-                let GroupDeltasSummary {
-                    delete_sst_levels,
-                    delete_sst_ids_set,
-                    insert_sst_level_id,
-                    insert_sub_level_id,
-                    insert_table_infos,
-                    ..
-                } = summary;
-                assert!(
-                    insert_sst_level_id == 0 || insert_table_infos.is_empty(),
-                    "we should only add to L0 when we commit an epoch. Inserting into {} {:?}",
-                    insert_sst_level_id,
-                    insert_table_infos
-                );
                 let group = self
                     .groups
                     .get(compaction_group_id)
                     .expect("compaction group should exist");
-                assert!(
-                    delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty() || has_destroy,
-                    "no sst should be deleted when committing an epoch"
-                );
                 // TODO: do not pre-load data to cache if the size of this delta is enough large.
                 let mut stats = StoreLocalStatistic::default();
                 for sstable_info in insert_table_infos {

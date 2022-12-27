@@ -19,10 +19,13 @@ use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, SharedBuffer};
 
+mod l0_cache;
 pub mod local_hummock_version;
 pub mod local_version_impl;
 pub mod local_version_manager;
 pub mod pinned_version;
+
+pub use l0_cache::{LevelZeroCache, LevelZeroData};
 pub use local_hummock_version::{LocalGroup, LocalHummockVersion};
 
 #[derive(Clone)]

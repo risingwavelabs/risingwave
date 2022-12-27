@@ -21,8 +21,8 @@ use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::Payload;
+use risingwave_pb::hummock::{pin_version_response, HummockVersion, HummockVersionDeltas};
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
@@ -37,6 +37,7 @@ use crate::hummock::shared_buffer::shared_buffer_uploader::{
     SharedBufferUploader, UploadTaskPayload,
 };
 use crate::hummock::shared_buffer::OrderIndex;
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{HummockEpoch, HummockError, HummockResult, SstableIdManagerRef, TrackerId};
 use crate::storage_value::StorageValue;
@@ -53,6 +54,7 @@ pub struct LocalVersionManager {
     buffer_tracker: BufferTracker,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     sstable_id_manager: SstableIdManagerRef,
+    sstable_store: SstableStoreRef,
 }
 
 impl LocalVersionManager {
@@ -66,6 +68,7 @@ impl LocalVersionManager {
 
         Arc::new(LocalVersionManager {
             local_version: RwLock::new(LocalVersion::new(pinned_version)),
+            sstable_store: compactor_context.sstable_store.clone(),
             buffer_tracker,
             shared_buffer_uploader: Arc::new(SharedBufferUploader::new(compactor_context)),
             sstable_id_manager,
@@ -76,54 +79,39 @@ impl LocalVersionManager {
         &self.buffer_tracker
     }
 
+    fn check_local_hummock_version(&self, version: &HummockVersion) -> bool {
+        let old_version = self.local_version.read();
+        old_version.pinned_version().id() < version.id
+    }
+
     /// Updates cached version if the new version is of greater id.
     /// You shouldn't unpin even the method returns false, as it is possible `hummock_version` is
     /// being referenced by some readers.
-    pub fn try_update_pinned_version(
+    pub async fn try_update_pinned_version(
         &self,
         pin_resp_payload: pin_version_response::Payload,
-    ) -> Option<PinnedVersion> {
-        let old_version = self.local_version.read();
-        let new_version_id = match &pin_resp_payload {
-            Payload::VersionDeltas(version_deltas) => match version_deltas.version_deltas.last() {
-                Some(version_delta) => version_delta.id,
-                None => old_version.pinned_version().id(),
-            },
-            Payload::PinnedVersion(version) => version.get_id(),
-        };
-
-        if old_version.pinned_version().id() >= new_version_id {
-            return None;
-        }
-
+    ) -> HummockResult<Option<PinnedVersion>> {
         let newly_pinned_version = match pin_resp_payload {
-            Payload::VersionDeltas(version_deltas) => {
-                let mut version_to_apply = old_version.pinned_version().version();
-                for version_delta in &version_deltas.version_deltas {
-                    assert_eq!(version_to_apply.id, version_delta.prev_id);
-                    version_to_apply.apply_version_delta(version_delta);
+            Payload::VersionDeltas(mut version_deltas) => {
+                let version = match self.try_apply_version_deltas(&mut version_deltas) {
+                    Some(v) => v,
+                    None => return Ok(None),
+                };
+                for delta in version_deltas.version_deltas {
+                    version.fill_cache(&delta, &self.sstable_store).await?;
                 }
-                version_to_apply
+                version
             }
-            Payload::PinnedVersion(version) => LocalHummockVersion::from(version),
+            Payload::PinnedVersion(version) => {
+                if !self.check_local_hummock_version(&version) {
+                    return Ok(None);
+                }
+                let version = LocalHummockVersion::from(version);
+                // TODO: reload data
+                version
+            }
         };
-
-        validate_table_key_range(&newly_pinned_version);
-
-        drop(old_version);
-        let mut new_version = self.local_version.write();
-        // check again to prevent other thread changes new_version.
-        if new_version.pinned_version().id() >= newly_pinned_version.get_id() {
-            return None;
-        }
-
-        self.sstable_id_manager
-            .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
-        new_version.set_pinned_version(newly_pinned_version);
-        let result = new_version.pinned_version().clone();
-        RwLockWriteGuard::unlock_fair(new_version);
-
-        Some(result)
+        Ok(self.try_set_new_version(newly_pinned_version))
     }
 
     pub fn write_shared_buffer_batch(&self, batch: SharedBufferBatch) {
@@ -331,6 +319,46 @@ impl LocalVersionManager {
                 Err(e)
             }
         }
+    }
+
+    fn try_set_new_version(
+        &self,
+        newly_pinned_version: LocalHummockVersion,
+    ) -> Option<PinnedVersion> {
+        validate_table_key_range(&newly_pinned_version);
+        let mut new_version = self.local_version.write();
+        // check again to prevent other thread changes new_version.
+        if new_version.pinned_version().id() >= newly_pinned_version.get_id() {
+            return None;
+        }
+        self.sstable_id_manager
+            .remove_watermark_sst_id(TrackerId::Epoch(newly_pinned_version.max_committed_epoch));
+        new_version.set_pinned_version(newly_pinned_version);
+        let result = new_version.pinned_version().clone();
+        RwLockWriteGuard::unlock_fair(new_version);
+        Some(result)
+    }
+
+    fn try_apply_version_deltas(
+        &self,
+        version_deltas: &mut HummockVersionDeltas,
+    ) -> Option<LocalHummockVersion> {
+        let old_version = self.local_version.read();
+        let new_version_id = match version_deltas.version_deltas.last() {
+            Some(version_delta) => version_delta.id,
+            None => old_version.pinned_version().id(),
+        };
+
+        if old_version.pinned_version().id() >= new_version_id {
+            return None;
+        }
+        let mut version_to_apply = old_version.pinned_version().version();
+        old_version.filter_local_sst(version_deltas);
+        for version_delta in &version_deltas.version_deltas {
+            assert_eq!(version_to_apply.id, version_delta.prev_id);
+            version_to_apply.apply_version_delta(version_delta);
+        }
+        Some(version_to_apply)
     }
 
     pub fn read_filter<R, B>(

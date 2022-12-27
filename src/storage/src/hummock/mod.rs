@@ -561,6 +561,7 @@ impl HummockStorageV1 {
                     HummockEvent::VersionUpdate(version_update) => {
                         local_version_manager_clone
                             .try_update_pinned_version(version_update)
+                            .await
                             .unwrap();
                         // TODO: this is
                         epoch_update_tx.send_replace(

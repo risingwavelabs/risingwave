@@ -6053,6 +6053,7 @@ dependencies = [
  "nix 0.25.0",
  "num-integer",
  "num-traits",
+ "ouroboros",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",

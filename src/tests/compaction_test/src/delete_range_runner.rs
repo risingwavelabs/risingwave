@@ -244,11 +244,10 @@ async fn compaction_test(
             .map(|level| level.table_infos.len())
             .sum::<usize>();
         println!(
-            "group-{}: base: {} {} , l0 sz: {}, count: {}",
+            "group-{}: base: {} {}, count: {}",
             group,
             sz,
             count,
-            levels.l0.total_file_size,
             levels
                 .l0
                 .sub_levels

@@ -111,15 +111,11 @@ impl LevelSelectorCore {
     ) -> Box<dyn CompactionPicker> {
         if select_level == 0 {
             if target_level == 0 {
-                Box::new(TierCompactionPicker::new(
-                    self.config.clone(),
-                    self.overlap_strategy.clone(),
-                ))
+                Box::new(TierCompactionPicker::new(self.config.clone()))
             } else {
                 Box::new(LevelCompactionPicker::new(
                     target_level,
                     self.config.clone(),
-                    self.overlap_strategy.clone(),
                 ))
             }
         } else {

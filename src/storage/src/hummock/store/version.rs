@@ -588,14 +588,13 @@ impl HummockVersionReader {
             user_key_range.1.as_ref().map(UserKey::encode),
         );
         let mut non_overlapping_iters = Vec::new();
-        let mut overlapping_iters = Vec::new();
-        let mut overlapping_iter_count = 0;
-        for level in committed.levels(read_options.table_id) {
-            if level.table_infos.is_empty() {
-                continue;
-            }
-
-            if level.level_type == LevelType::Nonoverlapping as i32 {
+        if let Some(group) = committed.get_group(read_options.table_id) {
+            let levels = group.l0.sub_levels.iter().chain(group.levels.iter());
+            for level in levels {
+                if level.table_infos.is_empty() {
+                    continue;
+                }
+                assert_eq!(level.level_type, LevelType::Nonoverlapping as i32);
                 debug_assert!(can_concat(&level.table_infos));
                 let start_table_idx = match encoded_user_key_range.start_bound() {
                     Included(key) | Excluded(key) => search_sst_idx(&level.table_infos, key),
@@ -644,49 +643,8 @@ impl HummockVersionReader {
                     self.sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
                 ));
-            } else {
-                let table_infos = prune_ssts(
-                    level.table_infos.iter(),
-                    read_options.table_id,
-                    &table_key_range,
-                );
-                if table_infos.is_empty() {
-                    continue;
-                }
-                // Overlapping
-                let mut iters = Vec::new();
-                for table_info in table_infos.into_iter().rev() {
-                    let sstable = self
-                        .sstable_store
-                        .sstable(table_info, &mut local_stats)
-                        .in_span(Span::enter_with_local_parent("get_sstable"))
-                        .await?;
-                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
-                        {
-                            continue;
-                        }
-                    }
-                    if !sstable.value().meta.range_tombstone_list.is_empty()
-                        && !read_options.ignore_range_tombstone
-                    {
-                        delete_range_iter
-                            .add_sst_iter(SstableDeleteRangeIterator::new(sstable.value().clone()));
-                    }
-                    iters.push(SstableIterator::new(
-                        sstable,
-                        self.sstable_store.clone(),
-                        Arc::new(SstableIteratorReadOptions::default()),
-                    ));
-                    overlapping_iter_count += 1;
-                }
-                overlapping_iters.push(OrderedMergeIteratorInner::new(iters));
             }
         }
-        self.stats
-            .iter_merge_sstable_counts
-            .with_label_values(&["committed-overlapping-iter"])
-            .observe(overlapping_iter_count as f64);
         self.stats
             .iter_merge_sstable_counts
             .with_label_values(&["committed-non-overlapping-iter"])
@@ -695,11 +653,6 @@ impl HummockVersionReader {
         // 3. build user_iterator
         let merge_iter = UnorderedMergeIteratorInner::new(
             once(HummockIteratorUnion::First(staging_iter))
-                .chain(
-                    overlapping_iters
-                        .into_iter()
-                        .map(HummockIteratorUnion::Second),
-                )
                 .chain(
                     non_overlapping_iters
                         .into_iter()
