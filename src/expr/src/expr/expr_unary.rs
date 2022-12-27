@@ -35,7 +35,7 @@ use crate::vector_op::ltrim::ltrim;
 use crate::vector_op::md5::md5;
 use crate::vector_op::round::*;
 use crate::vector_op::rtrim::rtrim;
-use crate::vector_op::timestampz::f64_sec_to_timestampz;
+use crate::vector_op::timestamptz::f64_sec_to_timestampz;
 use crate::vector_op::trim::trim;
 use crate::vector_op::upper::upper;
 use crate::{for_all_cast_variants, ExprError, Result};

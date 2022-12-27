@@ -77,7 +77,7 @@ fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
         DataType::Timestampz => match v {
             Value::String(s) => str_to_timestampz(s)?.into(),
             Value::Number(_n) => i64_to_timestampz(ensure_int!(v, i64))?.into(),
-            _ => anyhow::bail!("expect timestampz, but found {v}"),
+            _ => anyhow::bail!("expect timestamptz, but found {v}"),
         },
         DataType::Struct(struct_type_info) => {
             let fields = struct_type_info
@@ -166,7 +166,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
         DataType::Timestampz => match v {
             BorrowedValue::String(s) => str_to_timestampz(s)?.into(),
             BorrowedValue::Static(_) => i64_to_timestampz(ensure_int!(v, i64))?.into(),
-            _ => anyhow::bail!("expect timestampz, but found {v}"),
+            _ => anyhow::bail!("expect timestamptz, but found {v}"),
         },
         DataType::Struct(struct_type_info) => {
             let fields = struct_type_info

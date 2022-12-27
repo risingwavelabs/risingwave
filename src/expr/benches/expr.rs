@@ -108,7 +108,7 @@ fn bench_expr(c: &mut Criterion) {
                     .map(Some),
             )
             .into(),
-            // 18: extract field for timestampz
+            // 18: extract field for timestamptz
             Utf8Array::from_iter_display(["EPOCH"].into_iter().cycle().take(CHUNK_SIZE).map(Some))
                 .into(),
             // 19: boolean string
@@ -137,7 +137,7 @@ fn bench_expr(c: &mut Criterion) {
                     .take(CHUNK_SIZE),
             )
             .into(),
-            // 23: timestampz string
+            // 23: timestamptz string
             Utf8Array::from_iter_display(
                 [Some("2021-04-01 00:00:00+00:00")]
                     .into_iter()

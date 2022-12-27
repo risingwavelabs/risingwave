@@ -33,7 +33,7 @@ use crate::vector_op::extract::{
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
-use crate::vector_op::timestampz::{timestamp_at_time_zone, timestampz_at_time_zone};
+use crate::vector_op::timestamptz::{timestamp_at_time_zone, timestampz_at_time_zone};
 use crate::vector_op::to_timestamp::to_timestamp;
 use crate::vector_op::tumble::{
     tumble_start_date, tumble_start_date_time, tumble_start_timestampz,
@@ -427,9 +427,9 @@ pub fn new_date_trunc_expr(
             _,
         >::new(field, source, ret, date_trunc_timestamp).boxed(),
         DataType::Timestampz => {
-            // timestampz AT TIME ZONE zone -> timestamp
+            // timestamptz AT TIME ZONE zone -> timestamp
             // truncate(field, timestamp) -> timestamp
-            // timestamp AT TIME ZONE zone -> timestampz
+            // timestamp AT TIME ZONE zone -> timestamptz
             let (timezone1, timezone2) = timezone
                 .expect("A time zone must be specified when processing timestamp with time zone");
             let timestamp = BinaryExpression::<I64Array, Utf8Array, NaiveDateTimeArray, _>::new(
@@ -498,8 +498,8 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_add,
                 {
-                    { timestampz, interval, timestampz, timestampz_interval_add },
-                    { interval, timestampz, timestampz, interval_timestampz_add },
+                    { timestamptz, interval, timestamptz, timestampz_interval_add },
+                    { interval, timestamptz, timestamptz, interval_timestampz_add },
                     { timestamp, interval, timestamp, timestamp_interval_add },
                     { interval, timestamp, timestamp, interval_timestamp_add },
                     { interval, date, timestamp, interval_date_add },
@@ -520,7 +520,7 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_sub,
                 {
-                    { timestampz, interval, timestampz, timestampz_interval_sub },
+                    { timestamptz, interval, timestamptz, timestampz_interval_sub },
                     { timestamp, timestamp, interval, timestamp_timestamp_sub },
                     { timestamp, interval, timestamp, timestamp_interval_sub },
                     { date, date, int32, date_date_sub },

@@ -379,7 +379,7 @@ impl DataType {
             DataType::Timestamp => {
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::MIN))
             }
-            // FIXME(yuhao): Add a timestampz scalar.
+            // FIXME(yuhao): Add a timestamptz scalar.
             DataType::Timestampz => ScalarImpl::Int64(i64::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
             DataType::Interval => ScalarImpl::Interval(IntervalUnit::MIN),
