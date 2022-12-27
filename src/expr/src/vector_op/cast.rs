@@ -249,9 +249,6 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-pub fn timestamptz_to_utc_string(elem: i64) -> Box<str> {
-    elem.to_text_with_type(&DataType::Timestamptz)
-        .into_boxed_str()
 pub fn timestamptz_to_utc_string(elem: i64, mut writer: &mut dyn Write) -> Result<()> {
     elem.write_with_type(&DataType::Timestamptz, &mut writer)
         .unwrap();
@@ -417,76 +414,76 @@ pub fn bool_out(input: bool, writer: &mut dyn Write) -> Result<()> {
 macro_rules! for_all_cast_variants {
     ($macro:ident) => {
         $macro! {
-            { varchar, date, str_to_date },
-            { varchar, time, str_to_time },
-            { varchar, interval, str_parse },
-            { varchar, timestamp, str_to_timestamp },
-            { varchar, timestamptz, str_to_timestamptz },
-            { varchar, int16, str_parse },
-            { varchar, int32, str_parse },
-            { varchar, int64, str_parse },
-            { varchar, float32, str_parse },
-            { varchar, float64, str_parse },
-            { varchar, decimal, str_parse },
-            { varchar, boolean, str_to_bool },
-            { varchar, bytea, str_to_bytea },
+            { varchar, date, str_to_date, false },
+            { varchar, time, str_to_time, false },
+            { varchar, interval, str_parse, false },
+            { varchar, timestamp, str_to_timestamp, false },
+            { varchar, timestamptz, str_to_timestamptz, false },
+            { varchar, int16, str_parse, false },
+            { varchar, int32, str_parse, false },
+            { varchar, int64, str_parse, false },
+            { varchar, float32, str_parse, false },
+            { varchar, float64, str_parse, false },
+            { varchar, decimal, str_parse, false },
+            { varchar, boolean, str_to_bool, false },
+            { varchar, bytea, str_to_bytea, false },
             // `str_to_list` requires `target_elem_type` and is handled elsewhere
 
-            { boolean, varchar, bool_to_varchar },
-            { int16, varchar, general_to_text },
-            { int32, varchar, general_to_text },
-            { int64, varchar, general_to_text },
-            { float32, varchar, general_to_text },
-            { float64, varchar, general_to_text },
-            { decimal, varchar, general_to_text },
-            { time, varchar, general_to_text },
-            { interval, varchar, general_to_text },
-            { date, varchar, general_to_text },
-            { timestamp, varchar, general_to_text },
-            { timestamptz, varchar, |x| Ok(timestamptz_to_utc_string(x)) },
-            { list, varchar, |x| general_to_text(x) },
+            { boolean, varchar, bool_to_varchar, false },
+            { int16, varchar, general_to_text, false },
+            { int32, varchar, general_to_text, false },
+            { int64, varchar, general_to_text, false },
+            { float32, varchar, general_to_text, false },
+            { float64, varchar, general_to_text, false },
+            { decimal, varchar, general_to_text, false },
+            { time, varchar, general_to_text, false },
+            { interval, varchar, general_to_text, false },
+            { date, varchar, general_to_text, false },
+            { timestamp, varchar, general_to_text, false },
+            { timestamptz, varchar, timestamptz_to_utc_string, false },
+            { list, varchar, |x, w| general_to_text(x, w), false },
 
-            { boolean, int32, general_cast },
-            { int32, boolean, int32_to_bool },
+            { boolean, int32, try_cast, false },
+            { int32, boolean, int32_to_bool, false },
 
-            { int16, int32, general_cast },
-            { int16, int64, general_cast },
-            { int16, float32, general_cast },
-            { int16, float64, general_cast },
-            { int16, decimal, general_cast },
-            { int32, int16, general_cast },
-            { int32, int64, general_cast },
-            { int32, float32, to_f32 }, // lossy
-            { int32, float64, general_cast },
-            { int32, decimal, general_cast },
-            { int64, int16, general_cast },
-            { int64, int32, general_cast },
-            { int64, float32, to_f32 }, // lossy
-            { int64, float64, to_f64 }, // lossy
-            { int64, decimal, general_cast },
+            { int16, int32, cast::<i16, i32>, true },
+            { int16, int64, cast::<i16, i64>, true },
+            { int16, float32, cast::<i16, OrderedF32>, true },
+            { int16, float64, cast::<i16, OrderedF64>, true },
+            { int16, decimal, cast::<i16, Decimal>, true },
+            { int32, int16, try_cast, false },
+            { int32, int64, cast::<i32, i64>, true },
+            { int32, float32, to_f32, false }, // lossy
+            { int32, float64, cast::<i32, OrderedF64>, true },
+            { int32, decimal, cast::<i32, Decimal>, true },
+            { int64, int16, try_cast, false },
+            { int64, int32, try_cast, false },
+            { int64, float32, to_f32, false }, // lossy
+            { int64, float64, to_f64, false }, // lossy
+            { int64, decimal, cast::<i64, Decimal>, true },
 
-            { float32, float64, general_cast },
-            { float32, decimal, general_cast },
-            { float32, int16, to_i16 },
-            { float32, int32, to_i32 },
-            { float32, int64, to_i64 },
-            { float64, decimal, general_cast },
-            { float64, int16, to_i16 },
-            { float64, int32, to_i32 },
-            { float64, int64, to_i64 },
-            { float64, float32, to_f32 }, // lossy
+            { float32, float64, cast::<OrderedF32, OrderedF64>, true },
+            { float32, decimal, cast::<OrderedF32, Decimal>, true },
+            { float32, int16, to_i16, false },
+            { float32, int32, to_i32, false },
+            { float32, int64, to_i64, false },
+            { float64, decimal, cast::<OrderedF64, Decimal>, true },
+            { float64, int16, to_i16, false },
+            { float64, int32, to_i32, false },
+            { float64, int64, to_i64, false },
+            { float64, float32, to_f32, false }, // lossy
 
-            { decimal, int16, dec_to_i16 },
-            { decimal, int32, dec_to_i32 },
-            { decimal, int64, dec_to_i64 },
-            { decimal, float32, to_f32 },
-            { decimal, float64, to_f64 },
+            { decimal, int16, dec_to_i16, false },
+            { decimal, int32, dec_to_i32, false },
+            { decimal, int64, dec_to_i64, false },
+            { decimal, float32, to_f32, false },
+            { decimal, float64, to_f64, false },
 
-            { date, timestamp, general_cast },
-            { time, interval, general_cast },
-            { timestamp, date, timestamp_to_date },
-            { timestamp, time, timestamp_to_time },
-            { interval, time, interval_to_time }
+            { date, timestamp, cast::<NaiveDateWrapper, NaiveDateTimeWrapper>, true },
+            { time, interval, cast::<NaiveTimeWrapper, IntervalUnit>, true },
+            { timestamp, date, timestamp_to_date, true },
+            { timestamp, time, timestamp_to_time, true },
+            { interval, time, interval_to_time, true }
         }
     };
 }
@@ -1007,7 +1004,6 @@ mod tests {
     #[test]
     fn test_timestamptz() {
         let str1 = "0001-11-15 15:35:40.999999+08:00";
-
         let timestamptz1 = str_to_timestamptz(str1).unwrap();
         assert_eq!(timestamptz1, -62108094259000001);
 

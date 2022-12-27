@@ -55,8 +55,7 @@ pub trait ToText {
     /// - `ScalarRefImpl::Struct` -> `DataType::Struct`
     ///
     /// Exception:
-
-    /// The scalar of `DataType::Timestampz` is the `ScalarRefImpl::Int64`.
+    /// The scalar of `DataType::Timestamptz` is the `ScalarRefImpl::Int64`.
     fn to_text(&self) -> String {
         let mut s = String::new();
         self.write(&mut s).unwrap();
@@ -169,10 +168,8 @@ impl ToText for i64 {
 
     fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
         match ty {
-            DataType::Int64 => self.to_text(),
-            DataType::Timestamptz => {
             DataType::Int64 => self.write(f),
-            DataType::Timestampz => {
+            DataType::Timestamptz => {
                 // Just a meaningful representation as placeholder. The real implementation depends
                 // on TimeZone from session. See #3552.
                 let secs = self.div_euclid(1_000_000);
