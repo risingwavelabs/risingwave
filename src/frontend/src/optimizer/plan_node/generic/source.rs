@@ -36,9 +36,8 @@ pub struct Source {
     pub column_descs: Vec<ColumnDesc>,
     pub pk_col_ids: Vec<ColumnId>,
     pub row_id_index: Option<usize>,
-    /// Whether to allow user to insert, update, and delete data in the materialize executor at the
-    /// end of the plan.
-    pub enable_dml: bool,
+    /// Whether the "SourceNode" should generate the row id column for append only source
+    pub gen_row_id: bool,
 }
 
 impl GenericPlanNode for Source {

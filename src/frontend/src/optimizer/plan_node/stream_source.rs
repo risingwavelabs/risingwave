@@ -38,7 +38,11 @@ impl StreamSource {
             logical.logical_pk().to_vec(),
             logical.functional_dependency().clone(),
             Distribution::SomeShard,
-            logical.base.ctx.with_options().append_only(),
+            logical
+                .core
+                .catalog
+                .as_ref()
+                .map_or(true, |s| s.append_only),
         );
         Self { base, logical }
     }

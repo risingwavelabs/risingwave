@@ -36,7 +36,10 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
-use self::plan_node::{BatchProject, Convention, LogicalProject, StreamMaterialize, StreamSink};
+use self::plan_node::{
+    BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamRowIdGen,
+    StreamSink,
+};
 use self::plan_visitor::{
     has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_logical_apply,
     has_logical_over_agg,
@@ -44,6 +47,7 @@ use self::plan_visitor::{
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::TableType;
+use crate::handler::create_table::DMLFlag;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{
     BatchExchange, ColumnPruningContext, PlanNodeType, PredicatePushdownContext,
@@ -542,6 +546,7 @@ impl PlanRoot {
         col_names: Option<Vec<String>>,
         handle_pk_conflict: bool,
         row_id_index: Option<usize>,
+        dml_flag: DMLFlag,
         table_type: TableType,
     ) -> Result<StreamMaterialize> {
         let out_names = if let Some(col_names) = col_names {
@@ -550,6 +555,40 @@ impl PlanRoot {
             self.out_names.clone()
         };
         let stream_plan = self.gen_stream_plan()?;
+        let materialize = StreamMaterialize::create(
+            stream_plan.clone(),
+            mv_name.clone(),
+            self.required_dist.clone(),
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            out_names.clone(),
+            false,
+            definition.clone(),
+            handle_pk_conflict,
+            row_id_index,
+            table_type,
+        )?;
+
+        if dml_flag == DMLFlag::Disable {
+            return Ok(materialize);
+        }
+
+        let table = materialize.table();
+
+        // NOTE(stonepage): we can not use this the plan's input append-only
+        // property here
+        // table.append_only,
+        let stream_plan = StreamDml::new(
+            stream_plan,
+            dml_flag == DMLFlag::AppendOnly,
+            table.table_desc().columns.clone(),
+        )
+        .into();
+
+        let stream_plan = match row_id_index {
+            Some(row_id_index) => StreamRowIdGen::new(stream_plan, row_id_index).into(),
+            None => stream_plan,
+        };
 
         StreamMaterialize::create(
             stream_plan,

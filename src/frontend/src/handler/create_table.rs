@@ -42,6 +42,16 @@ use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::Binder;
 
+#[derive(PartialEq, Clone, Debug)]
+pub enum DMLFlag {
+    /// used for `create materialized view / sink / index`
+    Disable,
+    /// used for `create table`
+    All,
+    /// used for `create table with (append_only = true)`
+    AppendOnly,
+}
+
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
 /// This primary key is not combined with table constraints yet.
@@ -231,6 +241,10 @@ pub(crate) fn gen_create_table_plan_without_bind(
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect_vec();
     let properties = context.with_options().inner().clone();
+    let dml_flag = match context.with_options().append_only() {
+        true => DMLFlag::AppendOnly,
+        false => DMLFlag::All,
+    };
 
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -273,7 +287,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         column_descs,
         pk_column_ids,
         row_id_index,
-        true,
+        false,
         context,
     )
     .into();
@@ -304,6 +318,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         None,
         handle_pk_conflict,
         row_id_index,
+        dml_flag,
         TableType::Table,
     )?;
 
@@ -335,7 +350,7 @@ pub(crate) fn gen_materialize_plan(
                 .map(|id| ColumnId::new(*id))
                 .collect(),
             row_id_index,
-            false,
+            true,
             context,
         )
         .into();
@@ -365,6 +380,7 @@ pub(crate) fn gen_materialize_plan(
             None,
             handle_pk_conflict,
             row_id_index,
+            DMLFlag::Disable,
             TableType::Table,
         )?
     };
