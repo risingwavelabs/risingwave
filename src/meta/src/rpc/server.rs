@@ -213,8 +213,9 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             }
         }
 
-        tracing::info!("Waiting, to give former leaders fencing mechanism time to trigger");
-        sleep(Duration::from_millis(lease_interval_secs * 1000 + 500));
+        // TODO: Is this sleep causing the CI issue?
+        //  tracing::info!("Waiting, to give former leaders fencing mechanism time to trigger");
+        //  sleep(Duration::from_millis(lease_interval_secs * 1000 + 500));
 
         // shut down follower svc if node used to be follower
         if let Some(handle) = follower_handle {
@@ -504,8 +505,8 @@ mod tests {
         }
         meta_store.txn(txn).await.unwrap();
 
-        // Do not sleep that long. I think this is a bug
-        sleep(WAIT_INTERVAL).await;
+        // TODO: Do I need * 3 here?
+        sleep(WAIT_INTERVAL * 3).await;
 
         // expect that we still have 1 leader
         // skipping first meta_port, since that node was former leader and got killed
