@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::process;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -147,7 +148,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             // Alternative implementation that panics only if leader is unable to re-acquire lease:
             // if was_leader && !is_leader {
             if was_leader {
-                panic!("This node lost its leadership. Killing node")
+                tracing::error!("This node lost its leadership. Exiting node");
+                process::exit(0);
             }
             was_leader = is_leader;
 
@@ -502,6 +504,7 @@ mod tests {
         }
         meta_store.txn(txn).await.unwrap();
 
+        // Do not sleep that long. I think this is a bug
         sleep(WAIT_INTERVAL * 3).await;
 
         // expect that we still have 1 leader
@@ -515,8 +518,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_fencing_1() {
-        for params in vec![(true, true), (true, false), (false, true)] {
-            let (del_leader, del_lease) = params;
+        for params in &[(true, true), (true, false), (false, true)] {
+            let (del_leader, del_lease) = *params;
             let leader_count = test_fencing(1, 1600, 1700, del_leader, del_lease).await;
             assert_eq!(
                 leader_count, 0,
@@ -528,8 +531,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_fencing_3() {
-        for params in vec![(true, true), (true, false), (false, true)] {
-            let (del_leader, del_lease) = params;
+        for params in &[(true, true), (true, false), (false, true)] {
+            let (del_leader, del_lease) = *params;
             let leader_count = test_fencing(3, 1800, 1900, true, true).await;
             assert_eq!(
                 leader_count, 1,
@@ -541,8 +544,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_fencing_5() {
-        for params in vec![(true, true), (true, false), (false, true)] {
-            let (del_leader, del_lease) = params;
+        for params in &[(true, true), (true, false), (false, true)] {
+            let (del_leader, del_lease) = *params;
             let leader_count = test_fencing(5, 2000, 2100, true, true).await;
             assert_eq!(
                 leader_count, 1,
