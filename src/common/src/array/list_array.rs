@@ -477,7 +477,7 @@ impl Debug for ListRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         iter_elems_ref!(self, it, {
             for v in it {
-                v.fmt(f)?;
+                Debug::fmt(&v, f)?;
             }
             Ok(())
         })
@@ -487,9 +487,10 @@ impl Debug for ListRef<'_> {
 impl ToText for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     // Refer to PostgreSQL `array_out` or `appendPGArray`.
-    fn to_text(&self) -> String {
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         iter_elems_ref!(self, it, {
-            format!(
+            write!(
+                f,
                 "{{{}}}",
                 it.format_with(",", |datum_ref, f| {
                     let s = datum_ref.to_text();
@@ -521,9 +522,9 @@ impl ToText for ListRef<'_> {
         })
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            DataType::List { .. } => self.to_text(),
+            DataType::List { .. } => self.write(f),
             _ => unreachable!(),
         }
     }

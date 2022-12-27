@@ -14,6 +14,7 @@
 
 use std::fmt::Formatter;
 
+use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -273,7 +274,13 @@ impl<S: StateStore> SourceExecutorV2<S> {
             .recv()
             .stack_trace("source_recv_first_barrier")
             .await
-            .unwrap();
+            .ok_or_else(|| {
+                StreamExecutorError::from(anyhow!(
+                    "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
+                    self.ctx.id,
+                    self.stream_source_core.as_ref().unwrap().table_id
+                ))
+            })?;
 
         let mut core = self.stream_source_core.unwrap();
 
@@ -451,7 +458,12 @@ impl<S: StateStore> SourceExecutorV2<S> {
             .recv()
             .stack_trace("source_recv_first_barrier")
             .await
-            .unwrap();
+            .ok_or_else(|| {
+                StreamExecutorError::from(anyhow!(
+                    "failed to receive the first barrier, actor_id: {:?} with no stream source",
+                    self.ctx.id
+                ))
+            })?;
         yield Message::Barrier(barrier);
 
         while let Some(barrier) = barrier_receiver.recv().await {

@@ -23,8 +23,11 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalInsert` iterates on input relation and insert the data into specified table.
 ///
@@ -126,16 +129,20 @@ impl fmt::Display for LogicalInsert {
 }
 
 impl ColPrunable for LogicalInsert {
-    fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
-        self.clone_with_input(self.input.prune_col(&required_cols))
+        self.clone_with_input(self.input.prune_col(&required_cols, ctx))
             .into()
     }
 }
 
 impl PredicatePushdown for LogicalInsert {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
 
@@ -148,11 +155,14 @@ impl ToBatch for LogicalInsert {
 }
 
 impl ToStream for LogicalInsert {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         unreachable!("insert should always be converted to batch plan");
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         unreachable!("insert should always be converted to batch plan");
     }
 }

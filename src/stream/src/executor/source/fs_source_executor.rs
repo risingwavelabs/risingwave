@@ -15,6 +15,7 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -214,7 +215,13 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .recv()
             .stack_trace("source_recv_first_barrier")
             .await
-            .unwrap();
+            .ok_or_else(|| {
+                StreamExecutorError::from(anyhow!(
+                    "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
+                    self.ctx.id,
+                    self.source_id
+                ))
+            })?;
 
         let fs_source = self
             .source_desc_builder

@@ -26,6 +26,9 @@ use super::{
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 use crate::TableCatalog;
@@ -105,14 +108,18 @@ impl fmt::Display for LogicalSource {
 }
 
 impl ColPrunable for LogicalSource {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
 impl PredicatePushdown for LogicalSource {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        _ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }
@@ -124,7 +131,7 @@ impl ToBatch for LogicalSource {
 }
 
 impl ToStream for LogicalSource {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let mut plan: PlanRef = StreamSource::new(self.clone()).into();
         if self.core.enable_dml {
             plan = StreamDml::new(plan, self.core.column_descs.clone()).into();
@@ -135,7 +142,10 @@ impl ToStream for LogicalSource {
         Ok(plan)
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         Ok((
             self.clone().into(),
             ColIndexMapping::identity(self.schema().len()),

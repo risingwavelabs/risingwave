@@ -311,10 +311,10 @@ impl LocalStreamManager {
 
     /// Force stop all actors on this worker.
     pub async fn stop_all_actors(&self) -> StreamResult<()> {
+        self.core.lock().await.drop_all_actors();
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
         self.clear_all_senders_and_collect_rx();
-        self.core.lock().await.drop_all_actors();
 
         Ok(())
     }
