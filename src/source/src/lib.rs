@@ -25,11 +25,9 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-<<<<<<< HEAD
-=======
+use connector_source::ConnectorSource;
 use enum_as_inner::EnumAsInner;
 use fs_connector_source::FsConnectorSource;
->>>>>>> main
 use futures::stream::BoxStream;
 pub use manager::*;
 pub use parser::*;
@@ -47,7 +45,7 @@ pub mod dml_manager;
 mod common;
 pub mod connector_source;
 pub use connector_source::test_utils as connector_test_utils;
-mod fs_connector_source;
+pub mod fs_connector_source;
 pub mod monitor;
 pub mod row_id;
 mod table;
@@ -64,18 +62,7 @@ pub enum SourceFormat {
     Csv,
 }
 
-<<<<<<< HEAD
-pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
-=======
-#[derive(Debug, EnumAsInner)]
-pub enum SourceImpl {
-    Table(TableSource),
-    Connector(ConnectorSource),
-    FsConnector(FsConnectorSource),
-}
-
 pub type BoxSourceWithStateStream<T> = BoxStream<'static, Result<T, RwError>>;
->>>>>>> main
 
 /// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
 /// current design, one connector source can have multiple split reader. The keys are unique

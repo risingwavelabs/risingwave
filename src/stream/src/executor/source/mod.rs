@@ -12,14 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-<<<<<<< HEAD
-=======
 mod fs_source_executor;
-pub mod source_executor;
 pub use fs_source_executor::*;
-pub use source_executor::*;
 
->>>>>>> main
 pub mod source_executor_v2;
 
 mod reader;
