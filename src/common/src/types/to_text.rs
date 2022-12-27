@@ -18,6 +18,7 @@ use std::num::FpCategory;
 use chrono::{TimeZone, Utc};
 
 use super::{DataType, DatumRef, ScalarRefImpl};
+use crate::for_all_scalar_variants;
 
 // Used to convert ScalarRef to text format
 pub trait ToText {
@@ -214,47 +215,24 @@ impl ToText for &[u8] {
     }
 }
 
-impl ToText for ScalarRefImpl<'_> {
-    fn write(&self, f: &mut dyn Write) -> Result {
-        match self {
-            ScalarRefImpl::Bool(v) => v.write(f),
-            ScalarRefImpl::Int16(v) => v.write(f),
-            ScalarRefImpl::Int32(v) => v.write(f),
-            ScalarRefImpl::Int64(v) => v.write(f),
-            ScalarRefImpl::Float32(v) => v.write(f),
-            ScalarRefImpl::Float64(v) => v.write(f),
-            ScalarRefImpl::Decimal(v) => v.write(f),
-            ScalarRefImpl::Interval(v) => v.write(f),
-            ScalarRefImpl::NaiveDate(v) => v.write(f),
-            ScalarRefImpl::NaiveTime(v) => v.write(f),
-            ScalarRefImpl::NaiveDateTime(v) => v.write(f),
-            ScalarRefImpl::List(v) => v.write(f),
-            ScalarRefImpl::Struct(v) => v.write(f),
-            ScalarRefImpl::Utf8(v) => v.write(f),
-            ScalarRefImpl::Bytea(v) => v.write(f),
-        }
-    }
+macro_rules! impl_totext_for_scalar {
+    ($({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty }),*) => {
+        impl ToText for ScalarRefImpl<'_> {
+            fn write(&self, f: &mut dyn Write) -> Result {
+                match self {
+                    $(ScalarRefImpl::$variant_name(v) => v.write(f),)*
+                }
+            }
 
-    fn write_with_type(&self, ty: &DataType, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
-        match self {
-            ScalarRefImpl::Bool(v) => v.write_with_type(ty, f),
-            ScalarRefImpl::Int16(v) => v.write_with_type(ty, f),
-            ScalarRefImpl::Int32(v) => v.write_with_type(ty, f),
-            ScalarRefImpl::Int64(v) => v.write_with_type(ty, f),
-            ScalarRefImpl::Float32(v) => v.write_with_type(ty, f),
-            ScalarRefImpl::Float64(v) => v.write_with_type(ty, f),
-            ScalarRefImpl::Decimal(v) => v.write_with_type(ty, f),
-            ScalarRefImpl::Interval(v) => v.write_with_type(ty, f),
-            ScalarRefImpl::NaiveDate(v) => v.write_with_type(ty, f),
-            ScalarRefImpl::NaiveTime(v) => v.write_with_type(ty, f),
-            ScalarRefImpl::NaiveDateTime(v) => v.write_with_type(ty, f),
-            ScalarRefImpl::List(v) => v.write_with_type(ty, f),
-            ScalarRefImpl::Struct(v) => v.write_with_type(ty, f),
-            ScalarRefImpl::Utf8(v) => v.write_with_type(ty, f),
-            ScalarRefImpl::Bytea(v) => v.write_with_type(ty, f),
+            fn write_with_type(&self, ty: &DataType, f: &mut dyn Write) -> Result {
+                match self {
+                    $(ScalarRefImpl::$variant_name(v) => v.write_with_type(ty, f),)*
+                }
+            }
         }
-    }
+    };
 }
+for_all_scalar_variants! { impl_totext_for_scalar }
 
 impl ToText for DatumRef<'_> {
     fn write(&self, f: &mut dyn Write) -> Result {
