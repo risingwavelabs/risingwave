@@ -647,6 +647,18 @@ set -e
 cargo run -p risingwave_simulation "$@"
 """
 
+[tasks.sslt-build-all]
+category = "RiseDev - Deterministic Simulation End-to-end Test"
+description = "Build deterministic simulation runner and tests"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo build -p risingwave_simulation --tests "$@"
+"""
+
 [tasks.sslt-cov]
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Run e2e tests in deterministic simulation mode and report code coverage"

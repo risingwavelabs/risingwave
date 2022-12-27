@@ -14,23 +14,18 @@
 
 use std::fmt::Write;
 
-use risingwave_common::array::{StringWriter, WrittenGuard};
-
 use crate::Result;
 
 #[inline(always)]
-pub fn upper(s: &str, writer: StringWriter<'_>) -> Result<WrittenGuard> {
-    let mut writer = writer.begin();
+pub fn upper(s: &str, writer: &mut dyn Write) -> Result<()> {
     for c in s.chars() {
         writer.write_char(c.to_ascii_uppercase()).unwrap();
     }
-    Ok(writer.finish())
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-
     use super::*;
 
     #[test]
@@ -42,12 +37,9 @@ mod tests {
         ];
 
         for (s, expected) in cases {
-            let mut builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let _guard = upper(s, writer)?;
-            let array = builder.finish();
-            let v = array.value_at(0).unwrap();
-            assert_eq!(v, expected);
+            let mut writer = String::new();
+            upper(s, &mut writer)?;
+            assert_eq!(writer, expected);
         }
         Ok(())
     }
