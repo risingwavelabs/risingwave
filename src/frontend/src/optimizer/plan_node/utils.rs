@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::{fmt, vec};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema, DEFAULT_TABLE_CATALOG_VERSION};
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::catalog::column_catalog::ColumnCatalog;
@@ -135,6 +135,7 @@ impl TableCatalogBuilder {
             definition: "".into(),
             handle_pk_conflict: false,
             read_prefix_len_hint: self.read_prefix_len_hint,
+            version: DEFAULT_TABLE_CATALOG_VERSION,
         }
     }
 

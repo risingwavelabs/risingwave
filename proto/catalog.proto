@@ -126,6 +126,12 @@ message Table {
   string definition = 21;
   bool handle_pk_conflict = 22;
   uint32 read_prefix_len_hint = 23;
+
+  // Per-table catalog version, used by schema change.
+  // The value will be 0 by default, and will be increased by 1 for each schema change
+  // in the frontend.
+  // Not to be confused with the global catalog version for notification service.
+  uint64 version = 100;
 }
 
 message View {

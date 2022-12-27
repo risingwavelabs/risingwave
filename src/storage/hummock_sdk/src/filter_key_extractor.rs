@@ -339,7 +339,7 @@ mod tests {
 
     use bytes::{BufMut, BytesMut};
     use itertools::Itertools;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, DEFAULT_TABLE_CATALOG_VERSION};
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::OwnedRow;
@@ -461,6 +461,7 @@ mod tests {
             definition: "".into(),
             handle_pk_conflict: false,
             read_prefix_len_hint: 1,
+            version: DEFAULT_TABLE_CATALOG_VERSION,
         }
     }
 

@@ -24,7 +24,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, DEFAULT_TABLE_CATALOG_VERSION};
 use risingwave_common::config::{load_config, StorageConfig};
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
@@ -134,6 +134,7 @@ async fn compaction_test(
         table_type: 0,
         append_only: false,
         row_id_index: None,
+        version: DEFAULT_TABLE_CATALOG_VERSION,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;

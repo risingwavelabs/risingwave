@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{TableDesc, TableId};
+use risingwave_common::catalog::{TableCatalogVersion, TableDesc, TableId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType as ProstTableType};
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
@@ -112,6 +112,9 @@ pub struct TableCatalog {
     pub handle_pk_conflict: bool,
 
     pub read_prefix_len_hint: usize,
+
+    /// Per-table catalog version, used by schema change.
+    pub version: TableCatalogVersion,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -271,6 +274,7 @@ impl TableCatalog {
             definition: self.definition.clone(),
             handle_pk_conflict: self.handle_pk_conflict,
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
+            version: self.version,
         }
     }
 }
@@ -318,9 +322,10 @@ impl From<ProstTable> for TableCatalog {
             vnode_col_index: tb.vnode_col_index.map(|x| x.index as usize),
             row_id_index: tb.row_id_index.map(|x| x.index as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
-            definition: tb.definition.clone(),
+            definition: tb.definition,
             handle_pk_conflict: tb.handle_pk_conflict,
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
+            version: tb.version,
         }
     }
 }
@@ -335,7 +340,9 @@ impl From<&ProstTable> for TableCatalog {
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::catalog::{
+        ColumnDesc, ColumnId, TableId, DEFAULT_TABLE_CATALOG_VERSION,
+    };
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
@@ -408,6 +415,7 @@ mod tests {
             read_prefix_len_hint: 0,
             vnode_col_index: None,
             row_id_index: None,
+            version: DEFAULT_TABLE_CATALOG_VERSION,
         }
         .into();
 
@@ -468,6 +476,7 @@ mod tests {
                 definition: "".into(),
                 handle_pk_conflict: false,
                 read_prefix_len_hint: 0,
+                version: DEFAULT_TABLE_CATALOG_VERSION,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

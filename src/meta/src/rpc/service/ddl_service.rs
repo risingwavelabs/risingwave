@@ -421,6 +421,15 @@ where
         let tables = self.catalog_manager.list_tables().await;
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
+
+    async fn replace_table_plan(
+        &self,
+        _request: Request<ReplaceTablePlanRequest>,
+    ) -> Result<Response<ReplaceTablePlanResponse>, Status> {
+        Err(Status::unimplemented(
+            "replace table plan is not implemented yet",
+        ))
+    }
 }
 
 impl<S> DdlServiceImpl<S>

@@ -176,6 +176,21 @@ message DropIndexResponse {
   uint64 version = 2;
 }
 
+message ReplaceTablePlanRequest {
+  // The new table catalog, with the correct table ID and a new version.
+  // If the new version does not match the subsequent version in the meta service's
+  // catalog, this request will be rejected.
+  catalog.Table table = 1;
+  // The new materialization plan, where all schema are updated.
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
+}
+
+message ReplaceTablePlanResponse {
+  common.Status status = 1;
+  // The new global catalog version.
+  uint64 version = 2;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -194,4 +209,5 @@ service DdlService {
   rpc DropView(DropViewRequest) returns (DropViewResponse);
   rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);
   rpc DropIndex(DropIndexRequest) returns (DropIndexResponse);
+  rpc ReplaceTablePlan(ReplaceTablePlanRequest) returns (ReplaceTablePlanResponse);
 }

@@ -18,7 +18,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, TableId};
+use risingwave_common::catalog::{ColumnDesc, TableId, DEFAULT_TABLE_CATALOG_VERSION};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
@@ -175,6 +175,7 @@ impl StreamMaterialize {
             definition,
             handle_pk_conflict,
             read_prefix_len_hint,
+            version: DEFAULT_TABLE_CATALOG_VERSION,
         };
 
         Ok(Self { base, input, table })
