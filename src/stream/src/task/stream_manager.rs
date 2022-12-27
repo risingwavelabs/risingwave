@@ -643,7 +643,7 @@ impl LocalStreamManagerCore {
             let metrics = self.streaming_metrics.clone();
             let actor_id_str = actor_id.to_string();
 
-            debug!("creating Actor {actor_id}, `{}`", mview_definition);
+            trace!("creating Actor {actor_id}, `{}`", mview_definition);
 
             let handle = {
                 let context = self.context.clone();
