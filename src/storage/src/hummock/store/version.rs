@@ -652,12 +652,11 @@ impl HummockVersionReader {
 
         // 3. build user_iterator
         let merge_iter = UnorderedMergeIteratorInner::new(
-            once(HummockIteratorUnion::First(staging_iter))
-                .chain(
-                    non_overlapping_iters
-                        .into_iter()
-                        .map(HummockIteratorUnion::Third),
-                ),
+            once(HummockIteratorUnion::First(staging_iter)).chain(
+                non_overlapping_iters
+                    .into_iter()
+                    .map(HummockIteratorUnion::Third),
+            ),
         );
 
         // the epoch_range left bound for iterator read

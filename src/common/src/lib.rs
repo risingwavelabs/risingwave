@@ -40,6 +40,7 @@ pub mod error;
 pub mod array;
 #[macro_use]
 pub mod util;
+mod arena;
 pub mod buffer;
 pub mod cache;
 pub mod catalog;
@@ -51,6 +52,7 @@ pub mod hash;
 pub mod monitor;
 pub mod row;
 pub mod session_config;
+mod skiplist;
 #[cfg(test)]
 pub mod test_utils;
 pub mod types;
