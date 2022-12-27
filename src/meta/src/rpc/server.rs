@@ -434,6 +434,31 @@ mod tests {
         Some(reported_leader_addr)
     }
 
+    /// ## Returns
+    /// The leader node on which all meta nodes agree
+    /// Panics if not all nodes agree
+    /// Not snapshotted. If there is a leader failover in process, you may get an incorrect result
+    ///
+    /// ## Arguments
+    /// Will query `number_of_nodes` meta nodes, starting at localhost `meta_port`.
+    /// Skips nodes that cannot be reached
+    async fn get_agreed_leader(number_of_nodes: u16, meta_port: u16) -> HostAddress {
+        let mut reported_leader_addr: Vec<HostAddress> = vec![];
+        for i in 0..number_of_nodes {
+            if let Some(leader_addr) = get_leader_addr(meta_port + i).await {
+                reported_leader_addr.push(leader_addr);
+            }
+        }
+        reported_leader_addr.dedup();
+        assert_eq!(
+            1,
+            reported_leader_addr.len(),
+            "Iteration 0: All nodes should agree on who leader is. Instead we got the following leaders {:?}",
+            reported_leader_addr
+        );
+        reported_leader_addr.first().unwrap().clone()
+    }
+
     // TODO: Write service discovery tests
     // All nodes should always agree on the leader
     // even though you delete the leader
@@ -457,24 +482,10 @@ mod tests {
         let node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
 
         // All nodes should agree on who the leader is on beginning
-        // TODO: DNRY
-        let mut reported_leader_addr: Vec<HostAddress> = vec![];
-        for i in 0..number_of_nodes {
-            if let Some(leader_addr) = get_leader_addr(meta_port + i).await {
-                reported_leader_addr.push(leader_addr);
-            }
-        }
-        reported_leader_addr.dedup();
-        assert_eq!(
-            1,
-            reported_leader_addr.len(),
-            "Iteration 0: All nodes should agree on who leader is. Instead we got the following leaders {:?}",
-            reported_leader_addr
-        );
+        let mut current_leader = get_agreed_leader(number_of_nodes, meta_port).await;
 
         // delete all nodes on after another
-        let mut current_leader = reported_leader_addr.first().unwrap().clone();
-        for i in 1..number_of_nodes {
+        for _ in 1..number_of_nodes {
             // Shutdown current reported leader
             let leader_port = current_leader.port as u16;
             let offset = leader_port - meta_port;
@@ -485,22 +496,7 @@ mod tests {
             sleep(WAIT_INTERVAL).await;
 
             // Check if all nodes agree on who leader is
-            // TODO: also write this as a function. DNRY
-            let mut reported_leader_addr: Vec<HostAddress> = vec![];
-            for j in 0..number_of_nodes {
-                if let Some(leader_addr) = get_leader_addr(meta_port + j).await {
-                    reported_leader_addr.push(leader_addr);
-                }
-            }
-            reported_leader_addr.dedup();
-            assert_eq!(
-                1,
-                reported_leader_addr.len(),
-                "Iteration {}: All nodes should agree on who leader is. Instead we got the following leaders {:?}",
-               i, reported_leader_addr
-            );
-            // update leader
-            current_leader = reported_leader_addr.first().unwrap().clone();
+            current_leader = get_agreed_leader(number_of_nodes, meta_port).await;
         }
 
         // send shutdown to all nodes. There should only be one more node left
