@@ -22,7 +22,7 @@ use risingwave_common::types::{
 
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::bitwise_op::*;
-use crate::vector_op::cast::general_cast;
+use crate::vector_op::cast::try_cast;
 use crate::vector_op::cmp::*;
 use crate::vector_op::conjunction::*;
 use crate::ExprError;
@@ -239,7 +239,7 @@ fn test_conjunction() {
 #[test]
 fn test_cast() {
     assert_eq!(
-        general_cast::<_, NaiveDateTimeWrapper>(NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1))
+        try_cast::<_, NaiveDateTimeWrapper>(NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1))
             .unwrap(),
         NaiveDateTimeWrapper::new(
             NaiveDateTime::parse_from_str("1994-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
