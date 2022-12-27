@@ -73,6 +73,8 @@ mod union_to_distinct_rule;
 pub use union_to_distinct_rule::*;
 mod agg_project_merge_rule;
 pub use agg_project_merge_rule::*;
+mod union_merge_rule;
+pub use union_merge_rule::*;
 mod dag_to_tree_rule;
 pub use dag_to_tree_rule::*;
 mod apply_share_eliminate_rule;
@@ -105,6 +107,7 @@ macro_rules! for_all_rules {
             ,{JoinCommuteRule}
             ,{UnionToDistinctRule}
             ,{AggProjectMergeRule}
+            ,{UnionMergeRule}
             ,{DagToTreeRule}
         }
     };

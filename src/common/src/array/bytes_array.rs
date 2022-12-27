@@ -20,8 +20,7 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::iterator::ArrayRawIter;
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta};
+use super::{Array, ArrayBuilder, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
@@ -35,9 +34,7 @@ pub struct BytesArray {
 
 impl Array for BytesArray {
     type Builder = BytesArrayBuilder;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = Box<[u8]>;
-    type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = &'a [u8];
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> &[u8] {
@@ -46,33 +43,8 @@ impl Array for BytesArray {
         self.data.get_unchecked(begin..end)
     }
 
-    fn value_at(&self, idx: usize) -> Option<&[u8]> {
-        if !self.is_null(idx) {
-            // SAFETY: The idx is checked in `is_null` and the offset should always be valid.
-            Some(unsafe { self.raw_value_at_unchecked(idx) })
-        } else {
-            None
-        }
-    }
-
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<&[u8]> {
-        if !self.is_null_unchecked(idx) {
-            Some(self.raw_value_at_unchecked(idx))
-        } else {
-            None
-        }
-    }
-
     fn len(&self) -> usize {
         self.offset.len() - 1
-    }
-
-    fn iter(&self) -> ArrayIterator<'_, Self> {
-        ArrayIterator::new(self)
-    }
-
-    fn raw_iter(&self) -> Self::RawIter<'_> {
-        ArrayRawIter::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {
