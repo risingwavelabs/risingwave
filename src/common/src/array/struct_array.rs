@@ -39,6 +39,7 @@ pub struct StructArrayBuilder {
     bitmap: BitmapBuilder,
     pub(super) children_array: Vec<ArrayBuilderImpl>,
     children_type: Arc<[DataType]>,
+    children_names: Arc<[String]>,
     len: usize,
 }
 
@@ -56,12 +57,17 @@ impl ArrayBuilder for StructArrayBuilder {
             capacity,
             ArrayMeta::Struct {
                 children: Arc::new([]),
+                children_names: Arc::new([]),
             },
         )
     }
 
     fn with_meta(capacity: usize, meta: ArrayMeta) -> Self {
-        if let ArrayMeta::Struct { children } = meta {
+        if let ArrayMeta::Struct {
+            children,
+            children_names,
+        } = meta
+        {
             let children_array = children
                 .iter()
                 .map(|a| a.create_array_builder(capacity))
@@ -70,6 +76,7 @@ impl ArrayBuilder for StructArrayBuilder {
                 bitmap: BitmapBuilder::with_capacity(capacity),
                 children_array,
                 children_type: children,
+                children_names: children_names,
                 len: 0,
             }
         } else {
@@ -128,6 +135,7 @@ impl ArrayBuilder for StructArrayBuilder {
             bitmap: self.bitmap.finish(),
             children,
             children_type: self.children_type,
+            children_names: self.children_names,
             len: self.len,
         }
     }
@@ -138,6 +146,7 @@ pub struct StructArray {
     bitmap: Bitmap,
     children: Vec<ArrayRef>,
     children_type: Arc<[DataType]>,
+    children_names: Arc<[String]>,
     len: usize,
 }
 
@@ -224,6 +233,7 @@ impl Array for StructArray {
             capacity,
             ArrayMeta::Struct {
                 children: self.children_type.clone(),
+                children_names: self.children_names.clone().into(),
             },
         );
         ArrayBuilderImpl::Struct(array_builder)
@@ -232,6 +242,7 @@ impl Array for StructArray {
     fn array_meta(&self) -> ArrayMeta {
         ArrayMeta::Struct {
             children: self.children_type.clone(),
+            children_names: self.children_names.clone(),
         }
     }
 }
@@ -260,6 +271,7 @@ impl StructArray {
             bitmap,
             children,
             children_type,
+            children_names: vec![].into(),
             len: cardinality,
         };
         Ok(arr.into())
@@ -284,6 +296,25 @@ impl StructArray {
         StructArray {
             bitmap,
             children_type: children_type.into(),
+            children_names: vec![].into(),
+            len: cardinality,
+            children,
+        }
+    }
+
+    pub fn from_slices_with_field_names(
+        null_bitmap: &[bool],
+        children: Vec<ArrayImpl>,
+        children_type: Vec<DataType>,
+        children_name: Vec<String>,
+    ) -> StructArray {
+        let cardinality = null_bitmap.len();
+        let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
+        let children = children.into_iter().map(Arc::new).collect_vec();
+        StructArray {
+            bitmap,
+            children_type: children_type.into(),
+            children_names: children_name.into(),
             len: cardinality,
             children,
         }
@@ -522,6 +553,7 @@ mod tests {
             4,
             ArrayMeta::Struct {
                 children: Arc::new([DataType::Int32, DataType::Float32]),
+                children_names: Arc::new([]),
             },
         );
         for v in &struct_values {
@@ -624,6 +656,7 @@ mod tests {
             0,
             ArrayMeta::Struct {
                 children: Arc::new(fields.clone()),
+                children_names: Arc::new([]),
             },
         );
         builder.append(Some(struct_ref));
@@ -722,6 +755,7 @@ mod tests {
                 0,
                 ArrayMeta::Struct {
                     children: Arc::from(fields),
+                    children_names: Arc::new([]),
                 },
             );
             builder.append(Some(StructRef::ValueRef { val: &lhs }));

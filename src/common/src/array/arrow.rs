@@ -85,6 +85,10 @@ impl From<&arrow_schema::DataType> for DataType {
             Interval(_) => Self::Interval, // TODO: check time unit
             Binary => Self::Bytea,
             Utf8 => Self::Varchar,
+            Struct(field) => Self::Struct(Arc::new(struct_type::StructType {
+                fields: field.iter().map(|f| f.data_type().into()).collect(),
+                field_names: field.iter().map(|f| f.name().clone()).collect(),
+            })),
             List(field) => Self::List {
                 datatype: Box::new(field.data_type().into()),
             },
@@ -371,6 +375,31 @@ impl From<&arrow_array::ListArray> for ListArray {
     }
 }
 
+impl From<&arrow_array::StructArray> for StructArray {
+    fn from(array: &arrow_array::StructArray) -> Self {
+        let mut null_bitmap = Vec::new();
+        for i in 0..arrow_array::Array::len(&array) {
+            null_bitmap.push(!arrow_array::Array::is_null(&array, i))
+        }
+        match arrow_array::Array::data_type(&array) {
+            arrow_schema::DataType::Struct(fields) => StructArray::from_slices_with_field_names(
+                &(null_bitmap),
+                array.columns().iter().map(|f| ArrayImpl::from(f)).collect(),
+                fields
+                    .iter()
+                    .map(|f| DataType::from(f.data_type()))
+                    .collect(),
+                array
+                    .column_names()
+                    .into_iter()
+                    .map(|s| String::from(s))
+                    .collect(),
+            ),
+            _ => panic!("nested field types cannot be determined."),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -464,6 +493,8 @@ mod tests {
         let arrow = arrow_array::Decimal128Array::from(&array);
         assert_eq!(DecimalArray::from(&arrow), array);
     }
+    #[test]
+    fn struct_array() {}
 
     #[test]
     fn list() {
