@@ -61,8 +61,8 @@ pub fn split_part(
             }
         }
     };
-
-    Ok(writer.write_str(nth_val).unwrap())
+    writer.write_str(nth_val).unwrap();
+    Ok(())
 }
 
 #[cfg(test)]

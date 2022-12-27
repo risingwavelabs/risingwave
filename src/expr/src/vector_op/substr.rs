@@ -20,13 +20,15 @@ use crate::{bail, Result};
 #[inline(always)]
 pub fn substr_start(s: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
     let start = min(max(start - 1, 0) as usize, s.len());
-    Ok(writer.write_str(&s[start..]).unwrap())
+    writer.write_str(&s[start..]).unwrap();
+    Ok(())
 }
 
 #[inline(always)]
 pub fn substr_for(s: &str, count: i32, writer: &mut dyn Write) -> Result<()> {
     let end = min(count as usize, s.len());
-    Ok(writer.write_str(&s[..end]).unwrap())
+    writer.write_str(&s[..end]).unwrap();
+    Ok(())
 }
 
 #[inline(always)]
@@ -36,7 +38,8 @@ pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut dyn Write)
     }
     let begin = max(start - 1, 0) as usize;
     let end = min(max(start - 1 + count, 0) as usize, s.len());
-    Ok(writer.write_str(&s[begin..end]).unwrap())
+    writer.write_str(&s[begin..end]).unwrap();
+    Ok(())
 }
 
 #[cfg(test)]

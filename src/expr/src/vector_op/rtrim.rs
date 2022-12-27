@@ -21,7 +21,8 @@ use crate::Result;
 /// Since we would like to simplify the implementation, currently we omit this case.
 #[inline(always)]
 pub fn rtrim(s: &str, writer: &mut dyn Write) -> Result<()> {
-    Ok(writer.write_str(s.trim_end()).unwrap())
+    writer.write_str(s.trim_end()).unwrap();
+    Ok(())
 }
 
 #[cfg(test)]

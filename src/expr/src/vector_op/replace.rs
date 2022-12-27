@@ -19,7 +19,8 @@ use crate::Result;
 #[inline(always)]
 pub fn replace(s: &str, from_str: &str, to_str: &str, writer: &mut dyn Write) -> Result<()> {
     if from_str.is_empty() {
-        return Ok(writer.write_str(s).unwrap());
+        writer.write_str(s).unwrap();
+        return Ok(());
     }
     let mut last = 0;
     while let Some(mut start) = s[last..].find(from_str) {

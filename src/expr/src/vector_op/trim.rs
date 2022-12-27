@@ -18,7 +18,8 @@ use crate::Result;
 
 #[inline(always)]
 pub fn trim(s: &str, writer: &mut dyn Write) -> Result<()> {
-    Ok(writer.write_str(s.trim()).unwrap())
+    writer.write_str(s.trim()).unwrap();
+    Ok(())
 }
 
 #[cfg(test)]
