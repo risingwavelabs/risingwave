@@ -12,9 +12,9 @@ CREATE SINK s_postgres FROM mv_remote WITH (
 );
 
 statement ok
-CREATE SINK s_from_mysql WITH (
+CREATE SINK s_from_mysql FROM mv_remote WITH (
     connector='jdbc',
-    url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw',
+    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw',
     table.name='t_remote'
 );
 
