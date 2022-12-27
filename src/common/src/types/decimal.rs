@@ -42,11 +42,11 @@ pub enum Decimal {
 }
 
 impl ToText for Decimal {
-    fn write(&self, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         write!(f, "{self}")
     }
 
-    fn write_with_type(&self, ty: &DataType, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
             DataType::Decimal => self.write(f),
             _ => unreachable!(),
