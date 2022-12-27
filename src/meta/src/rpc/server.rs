@@ -505,7 +505,7 @@ mod tests {
         meta_store.txn(txn).await.unwrap();
 
         // Do not sleep that long. I think this is a bug
-        sleep(WAIT_INTERVAL * 3).await;
+        sleep(WAIT_INTERVAL).await;
 
         // expect that we still have 1 leader
         // skipping first meta_port, since that node was former leader and got killed
