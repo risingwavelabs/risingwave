@@ -377,7 +377,9 @@ pub async fn run_elections<S: MetaStore>(
                 initial_election = false;
 
                 // signal to observers if there is a change in leadership
-                leader_tx.send((leader_info.clone(), is_leader)).expect("Leader receiver dropped");
+                leader_tx
+                    .send((leader_info.clone(), is_leader))
+                    .expect("Leader receiver dropped");
 
                 // election done. Enter the term of the current leader
                 // Leader stays in power until leader crashes
