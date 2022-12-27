@@ -241,10 +241,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 mod tests {
     use core::panic;
 
+    use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
     use risingwave_pb::common::HostAddress;
+    use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
     use risingwave_pb::meta::LeaderRequest;
     use tokio::time::sleep;
-    use tonic::transport::Endpoint;
+    use tonic::transport::{Channel, Endpoint};
 
     use super::*;
 
@@ -285,6 +287,30 @@ mod tests {
         node_controllers
     }
 
+    /// Get a Chanel to a meat node without re-trying the connection.
+    ///
+    /// ### Returns
+    /// Null on error, else the channel
+    async fn get_meta_channel(meta_addr: String) -> Result<Channel, tonic::transport::Error> {
+        let meta_addr_clone = meta_addr.clone();
+        let endpoint = Endpoint::from_shared(meta_addr)
+            .unwrap()
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
+        endpoint
+            .http2_keep_alive_interval(Duration::from_secs(60))
+            .keep_alive_timeout(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(5))
+            .connect()
+            .await
+            .inspect_err(|e| {
+                tracing::warn!(
+                    "Failed to connect to meta server {}, wait for online: {}",
+                    meta_addr_clone,
+                    e
+                );
+            })
+    }
+
     /// Check for `number_of_nodes` meta leader nodes, starting at `meta_port`, `meta_port + 1`, ...
     /// Simulates `number_of_nodes` compute nodes, starting at `meta_port`, `meta_port + 1`, ...
     ///
@@ -292,10 +318,8 @@ mod tests {
     /// Number of nodes which currently are leaders. Number is not snapshoted. If there is a
     /// leader failover in process, you may get an incorrect result
     async fn number_of_leaders(number_of_nodes: u16, meta_port: u16, host_port: u16) -> u16 {
-        use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
         use risingwave_common::util::addr::HostAddr;
-        use risingwave_pb::common::{HostAddress, WorkerType};
-        use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
+        use risingwave_pb::common::WorkerType;
         use risingwave_pb::meta::AddWorkerNodeRequest;
 
         let mut leader_count = 0;
@@ -308,27 +332,15 @@ mod tests {
                 port: host_port + i,
             };
 
-            let endpoint = Endpoint::from_shared(meta_addr.to_string())
-                .unwrap()
-                .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
-            let channel = endpoint
-                .http2_keep_alive_interval(Duration::from_secs(60))
-                .keep_alive_timeout(Duration::from_secs(60))
-                .connect_timeout(Duration::from_secs(5))
-                .connect()
+            // check if node is leader
+            // Only leader nodes support adding worker nodes
+            let channel = get_meta_channel(meta_addr)
                 .await
-                .inspect_err(|e| {
-                    tracing::warn!(
-                        "Failed to connect to meta server {}, wait for online: {}",
-                        meta_addr,
-                        e
-                    );
-                })
-                .unwrap();
+                .expect("Establishing chanel should work");
+            let cluster_client = ClusterServiceClient::new(channel);
 
             // check if node is leader
             // Only leader nodes support adding worker nodes
-            let cluster_client = ClusterServiceClient::new(channel);
             let resp = cluster_client
                 .to_owned()
                 .add_worker_node(AddWorkerNodeRequest {
@@ -401,35 +413,15 @@ mod tests {
     /// None if it can not reach the node at localhost: `meta_port`, else the reported leader
     /// address
     async fn get_leader_addr(meta_port: u16) -> Option<HostAddress> {
-        use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
         use risingwave_pb::meta::leader_service_client::LeaderServiceClient;
 
-        let local = "127.0.0.1".to_owned();
         let port = meta_port;
-        let meta_addr = format!("http://{}:{}", local, port);
+        let meta_addr = format!("http://127.0.0.1:{}", port);
 
-        // TODO: Write this into a function
-        // DNRY. Also used in number_of_leaders
-        let endpoint = Endpoint::from_shared(meta_addr.to_string())
-            .unwrap()
-            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
-        let channel = match endpoint
-            .http2_keep_alive_interval(Duration::from_secs(60))
-            .keep_alive_timeout(Duration::from_secs(60))
-            .connect_timeout(Duration::from_secs(5))
-            .connect()
-            .await
-            .inspect_err(|e| {
-                tracing::warn!(
-                    "Failed to connect to meta server {}, wait for online: {}",
-                    meta_addr,
-                    e
-                );
-            }) {
+        let channel = match get_meta_channel(meta_addr).await {
             Ok(c) => c,
             Err(_) => return None,
         };
-
         let leader_client = LeaderServiceClient::new(channel);
         let reported_leader_addr: HostAddress = leader_client
             .to_owned()
@@ -465,6 +457,7 @@ mod tests {
         let node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
 
         // All nodes should agree on who the leader is on beginning
+        // TODO: DNRY
         let mut reported_leader_addr: Vec<HostAddress> = vec![];
         for i in 0..number_of_nodes {
             if let Some(leader_addr) = get_leader_addr(meta_port + i).await {
@@ -492,9 +485,10 @@ mod tests {
             sleep(WAIT_INTERVAL).await;
 
             // Check if all nodes agree on who leader is
+            // TODO: also write this as a function. DNRY
             let mut reported_leader_addr: Vec<HostAddress> = vec![];
-            for i in 0..number_of_nodes {
-                if let Some(leader_addr) = get_leader_addr(meta_port + i).await {
+            for j in 0..number_of_nodes {
+                if let Some(leader_addr) = get_leader_addr(meta_port + j).await {
                     reported_leader_addr.push(leader_addr);
                 }
             }
