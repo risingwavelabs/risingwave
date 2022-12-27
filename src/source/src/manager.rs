@@ -338,8 +338,7 @@ impl SourceDescBuilder {
         let mut config = ConnectorProperties::extract(self.properties.clone())
             .map_err(|e| ConnectorError(e.into()))?;
         if let Some(addr) = self.connector_params.connector_rpc_endpoint.as_ref() {
-            config.set_connector_node_addr(addr.to_owned());
-            config.set_source_id_for_cdc(self.source_id.table_id());
+            config.init_properties_for_cdc(self.source_id.table_id(), addr.to_owned(), None);
         }
 
         let source = SourceImpl::Connector(ConnectorSource {
