@@ -66,14 +66,14 @@ sleep 1
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/*.slt'
 sleep 1
-sqllogictest -p 4566 -d dev './e2e_test/sink/remote/remote.load.slt'
-sleep 1
 
 # check sink destination postgres
-sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/remote.check.slt'
+sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
+sleep 1
+sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
+sleep 1
 
 # check sink destination mysql using shell
-# sqllogictest not supported: https://github.com/risinglightdb/sqllogictest-rs/issues/120
 if mysql -sN -e "SELECT * FROM test.t_remote ORDER BY id;" | awk '{
 if ($1 == 1 && $2 == "Alex") c1++;
  if ($1 == 3 && $2 == "Carl") c2++;
