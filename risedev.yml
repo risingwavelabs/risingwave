@@ -698,6 +698,9 @@ template:
     # Id of this instance
     id: meta-node-${port}
 
+    # RPC endpoint for connector node colocated with Meta
+    connector-rpc-endpoint: "127.0.0.1:60061"
+
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
