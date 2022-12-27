@@ -123,7 +123,7 @@ impl<S: StateStore> ManagedTopNState<S> {
             )
         };
         while let Some(item) = stream.next().await {
-            rows.push(self.get_topn_row(item?.into_owned(), group_key.len(), order_by_len));
+            rows.push(self.get_topn_row(item?, group_key.len(), order_by_len));
         }
         Ok(rows)
     }
@@ -146,7 +146,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         pin_mut!(state_table_iter);
         while let Some(item) = state_table_iter.next().await {
             // Note(bugen): should first compare with start key before constructing TopNStateRow.
-            let topn_row = self.get_topn_row(item?.into_owned(), group_key.len(), order_by_len);
+            let topn_row = self.get_topn_row(item?, group_key.len(), order_by_len);
             if topn_row.cache_key <= start_key {
                 continue;
             }
@@ -159,7 +159,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         if WITH_TIES && topn_cache.is_high_cache_full() {
             let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0 .0.clone();
             while let Some(item) = state_table_iter.next().await {
-                let topn_row = self.get_topn_row(item?.into_owned(), group_key.len(), order_by_len);
+                let topn_row = self.get_topn_row(item?, group_key.len(), order_by_len);
                 if topn_row.cache_key.0 == high_last_sort_key {
                     topn_cache
                         .high
@@ -187,7 +187,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         pin_mut!(state_table_iter);
         if topn_cache.offset > 0 {
             while let Some(item) = state_table_iter.next().await {
-                let topn_row = self.get_topn_row(item?.into_owned(), group_key.len(), order_by_len);
+                let topn_row = self.get_topn_row(item?, group_key.len(), order_by_len);
                 topn_cache
                     .low
                     .insert(topn_row.cache_key, (&topn_row.row).into());
@@ -199,7 +199,7 @@ impl<S: StateStore> ManagedTopNState<S> {
 
         assert!(topn_cache.limit > 0, "topn cache limit should always > 0");
         while let Some(item) = state_table_iter.next().await {
-            let topn_row = self.get_topn_row(item?.into_owned(), group_key.len(), order_by_len);
+            let topn_row = self.get_topn_row(item?, group_key.len(), order_by_len);
             topn_cache
                 .middle
                 .insert(topn_row.cache_key, (&topn_row.row).into());
@@ -210,7 +210,7 @@ impl<S: StateStore> ManagedTopNState<S> {
         if WITH_TIES && topn_cache.is_middle_cache_full() {
             let middle_last_sort_key = topn_cache.middle.last_key_value().unwrap().0 .0.clone();
             while let Some(item) = state_table_iter.next().await {
-                let topn_row = self.get_topn_row(item?.into_owned(), group_key.len(), order_by_len);
+                let topn_row = self.get_topn_row(item?, group_key.len(), order_by_len);
                 if topn_row.cache_key.0 == middle_last_sort_key {
                     topn_cache
                         .middle
@@ -229,13 +229,13 @@ impl<S: StateStore> ManagedTopNState<S> {
             "topn cache high_capacity should always > 0"
         );
         while !topn_cache.is_high_cache_full() && let Some(item) = state_table_iter.next().await {
-            let topn_row = self.get_topn_row(item?.into_owned(), group_key.len(), order_by_len);
+            let topn_row = self.get_topn_row(item?, group_key.len(), order_by_len);
             topn_cache.high.insert(topn_row.cache_key, (&topn_row.row).into());
         }
         if WITH_TIES && topn_cache.is_high_cache_full() {
             let high_last_sort_key = topn_cache.high.last_key_value().unwrap().0 .0.clone();
             while let Some(item) = state_table_iter.next().await {
-                let topn_row = self.get_topn_row(item?.into_owned(), group_key.len(), order_by_len);
+                let topn_row = self.get_topn_row(item?, group_key.len(), order_by_len);
                 if topn_row.cache_key.0 == high_last_sort_key {
                     topn_cache
                         .high

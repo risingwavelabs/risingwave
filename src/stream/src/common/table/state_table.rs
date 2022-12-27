@@ -1052,9 +1052,9 @@ impl<S: StateStore> StateTable<S> {
     }
 }
 
-pub type RowStream<'a, S: StateStore> = impl Stream<Item = StreamExecutorResult<Cow<'a, OwnedRow>>>;
+pub type RowStream<'a, S: StateStore> = impl Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
 pub type RowStreamWithPk<'a, S: StateStore> =
-    impl Stream<Item = StreamExecutorResult<(Cow<'a, Bytes>, Cow<'a, OwnedRow>)>>;
+    impl Stream<Item = StreamExecutorResult<(Cow<'a, Bytes>, OwnedRow)>> + 'a;
 
 /// `StateTableRowIter` is able to read the just written data (uncommitted data).
 /// It will merge the result of `mem_table_iter` and `state_store_iter`.
@@ -1082,7 +1082,7 @@ where
     /// This function scans kv pairs from the `shared_storage` and
     /// memory(`mem_table`) with optional pk_bounds. If a record exist in both `shared_storage` and
     /// `mem_table`, result `mem_table` is returned according to the operation(RowOp) on it.
-    #[try_stream(ok = (Cow<'a, Bytes>, Cow<'a, OwnedRow>), error = StreamExecutorError)]
+    #[try_stream(ok = (Cow<'a, Bytes>, OwnedRow), error = StreamExecutorError)]
     async fn into_stream(self) {
         let storage_iter = self.storage_iter.peekable();
         pin_mut!(storage_iter);
@@ -1095,7 +1095,7 @@ where
                 // The mem table side has come to an end, return data from the shared storage.
                 (Some(_), None) => {
                     let (pk, row) = storage_iter.next().await.unwrap()?;
-                    yield (Cow::Owned(pk), Cow::Owned(row))
+                    yield (Cow::Owned(pk), row)
                 }
                 // The stream side has come to an end, return data from the mem table.
                 (None, Some(_)) => {
@@ -1104,7 +1104,7 @@ where
                         KeyOp::Insert(row_bytes) | KeyOp::Update((_, row_bytes)) => {
                             let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
-                            yield (Cow::Borrowed(pk), Cow::Owned(row))
+                            yield (Cow::Borrowed(pk), row)
                         }
                         _ => {}
                     }
@@ -1114,7 +1114,7 @@ where
                         Ordering::Less => {
                             // yield data from storage
                             let (pk, row) = storage_iter.next().await.unwrap()?;
-                            yield (Cow::Owned(pk), Cow::Owned(row));
+                            yield (Cow::Owned(pk), row);
                         }
                         Ordering::Equal => {
                             // both memtable and storage contain the key, so we advance both
@@ -1126,7 +1126,7 @@ where
                                 KeyOp::Insert(row_bytes) => {
                                     let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
-                                    yield (Cow::Borrowed(pk), Cow::Owned(row));
+                                    yield (Cow::Borrowed(pk), row);
                                 }
                                 KeyOp::Delete(_) => {}
                                 KeyOp::Update((old_row_bytes, new_row_bytes)) => {
@@ -1137,7 +1137,7 @@ where
 
                                     debug_assert!(old_row == old_row_in_storage);
 
-                                    yield (Cow::Borrowed(pk), Cow::Owned(new_row));
+                                    yield (Cow::Borrowed(pk), new_row);
                                 }
                             }
                         }
@@ -1149,7 +1149,7 @@ where
                                 KeyOp::Insert(row_bytes) => {
                                     let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
-                                    yield (Cow::Borrowed(pk), Cow::Owned(row));
+                                    yield (Cow::Borrowed(pk), row);
                                 }
                                 KeyOp::Delete(_) => {}
                                 KeyOp::Update(_) => unreachable!(

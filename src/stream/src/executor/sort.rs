@@ -277,7 +277,7 @@ impl<S: StateStore> SortExecutor<S> {
             let mut stream = select_all(values_per_vnode);
             while let Some(storage_result) = stream.next().await {
                 // Insert the data into buffer.
-                let row: OwnedRow = storage_result?.into_owned();
+                let row: OwnedRow = storage_result?;
                 let timestamp_datum = row
                     .datum_at(self.sort_column_index)
                     .to_owned_datum()

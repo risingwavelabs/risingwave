@@ -15,7 +15,6 @@
 mod join_entry_state;
 
 use std::alloc::Global;
-use std::borrow::Cow;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
@@ -378,7 +377,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
             #[for_await]
             for row in table_iter {
-                let row: Cow<'_, OwnedRow> = row?;
+                let row: OwnedRow = row?;
                 let pk = row
                     .as_ref()
                     .project(&self.state.pk_indices)
