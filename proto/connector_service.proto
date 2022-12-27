@@ -86,7 +86,7 @@ message SinkResponse {
 
 message CdcMessage {
   string payload = 1;
-  string partition= 2;
+  string partition = 2;
   string offset = 3;
 }
 
