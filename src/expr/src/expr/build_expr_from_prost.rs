@@ -21,7 +21,9 @@ use crate::expr::expr_binary_bytes::{
     new_ltrim_characters, new_repeat, new_rtrim_characters, new_substr_start, new_to_char,
     new_trim_characters,
 };
-use crate::expr::expr_binary_nonnull::{new_binary_expr, new_date_trunc_expr, new_like_default};
+use crate::expr::expr_binary_nonnull::{
+    new_binary_expr, new_date_trunc_expr, new_like_default, new_to_timestamp,
+};
 use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
 use crate::expr::expr_quaternary_bytes::new_overlay_for_exp;
 use crate::expr::expr_ternary_bytes::{
@@ -29,6 +31,9 @@ use crate::expr::expr_ternary_bytes::{
     new_translate_expr,
 };
 use crate::expr::expr_to_char_const_tmpl::{ExprToCharConstTmpl, ExprToCharConstTmplContext};
+use crate::expr::expr_to_timestamp_const_tmpl::{
+    ExprToTimestampConstTmpl, ExprToTimestampConstTmplContext,
+};
 use crate::expr::expr_unary::{
     new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
 };
@@ -243,6 +248,29 @@ pub fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     } else {
         let tmpl_expr = expr_build_from_prost(&children[1])?;
         Ok(new_to_char(data_expr, tmpl_expr, ret_type))
+    }
+}
+
+pub fn build_to_timestamp_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    let (children, ret_type) = get_children_and_return_type(prost)?;
+    ensure!(children.len() == 2);
+    let data_expr = expr_build_from_prost(&children[0])?;
+    let tmpl_node = &children[1];
+    if let RexNode::Constant(tmpl_value) = tmpl_node.get_rex_node().unwrap()
+        && let Ok(Some(tmpl)) = deserialize_datum(tmpl_value.get_body().as_slice(), &DataType::from(tmpl_node.get_return_type().unwrap()))
+    {
+        let tmpl = tmpl.as_utf8();
+        let pattern = compile_pattern_to_chrono(tmpl);
+
+        Ok(ExprToTimestampConstTmpl {
+            ctx: ExprToTimestampConstTmplContext {
+                chrono_pattern: pattern,
+            },
+            child: data_expr,
+        }.boxed())
+    } else {
+        let tmpl_expr = expr_build_from_prost(&children[1])?;
+        Ok(new_to_timestamp(data_expr, tmpl_expr, ret_type))
     }
 }
 

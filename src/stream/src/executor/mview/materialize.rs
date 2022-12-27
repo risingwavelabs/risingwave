@@ -31,13 +31,14 @@ use risingwave_pb::catalog::Table;
 use risingwave_storage::table::streaming_table::mem_table::RowOp;
 use risingwave_storage::StateStore;
 
-use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::cache::{new_unbounded, EvictableHashMap, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
     Executor, ExecutorInfo, Message, PkIndicesRef, StreamExecutorResult,
 };
+use crate::task::AtomicU64RefOpt;
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore> {
@@ -69,7 +70,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
-        lru_manager: Option<LruManagerRef>,
+        watermark_epoch: AtomicU64RefOpt,
         cache_size: usize,
         handle_pk_conflict: bool,
     ) -> Self {
@@ -89,7 +90,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(lru_manager, cache_size),
+            materialize_cache: MaterializeCache::new(watermark_epoch, cache_size),
             handle_pk_conflict,
         }
     }
@@ -103,7 +104,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         keys: Vec<OrderPair>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
-        lru_manager: Option<LruManagerRef>,
+        lru_manager: AtomicU64RefOpt,
         cache_size: usize,
         handle_pk_conflict: bool,
     ) -> Self {
@@ -411,9 +412,9 @@ pub struct MaterializeCache {
 }
 
 impl MaterializeCache {
-    pub fn new(lru_manager: Option<LruManagerRef>, cache_size: usize) -> Self {
+    pub fn new(lru_manager: AtomicU64RefOpt, cache_size: usize) -> Self {
         let cache = if let Some(lru_manager) = lru_manager {
-            ExecutorCache::Managed(lru_manager.create_cache())
+            ExecutorCache::Managed(new_unbounded(lru_manager))
         } else {
             ExecutorCache::Local(EvictableHashMap::new(cache_size))
         };
