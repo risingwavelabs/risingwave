@@ -156,20 +156,10 @@ async fn test_table_materialize() -> StreamResult<()> {
         })
         .collect_vec();
     let (barrier_tx, barrier_rx) = unbounded_channel();
-<<<<<<< HEAD
-    let vnodes = Bitmap::from_bytes(Bytes::from_static(&[0b11111111]));
+    let vnodes = Bitmap::from_bytes(&[0b11111111]);
 
     // Create a `SourceExecutor` to read the changes.
     let source_executor = SourceExecutorV2::<PanicStateStore>::new(
-=======
-    let vnodes = Bitmap::from_bytes(&[0b11111111]);
-    let state_table = SourceStateTableHandler::from_table_catalog(
-        &default_source_internal_table(0x2333),
-        MemoryStateStore::new(),
-    )
-    .await;
-    let stream_source = SourceExecutor::new(
->>>>>>> main
         ActorContext::create(0x3f3f3f),
         all_schema.clone(),
         pk_indices.clone(),
