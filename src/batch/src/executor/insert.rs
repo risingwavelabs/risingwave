@@ -98,7 +98,7 @@ impl InsertExecutor {
         // Transform the data chunk to a stream chunk, then write to the source.
         let mut write_chunk = |chunk: DataChunk| -> Result<()> {
             let cap = chunk.capacity();
-            let (mut columns, visibility) = chunk.into_parts();
+            let (mut columns, vis) = chunk.into_parts();
 
             // No need to check for duplicate columns. This is already validated in binder
             if !&self.column_idxs.is_sorted() {
@@ -117,7 +117,7 @@ impl InsertExecutor {
             }
 
             let stream_chunk =
-                StreamChunk::new(vec![Op::Insert; cap], columns, visibility.into_bitmap());
+                StreamChunk::new(vec![Op::Insert; cap], columns, vis.into_visibility());
 
             let notifier = source.write_chunk(stream_chunk)?;
             notifiers.push(notifier);

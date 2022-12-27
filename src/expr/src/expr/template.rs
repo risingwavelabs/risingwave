@@ -37,7 +37,7 @@ macro_rules! gen_eval {
                     let [<arr_ $arg:lower>]: &$arg = [<ret_ $arg:lower>].as_ref().into();
                 )*
 
-                let bitmap = data_chunk.get_visibility_ref();
+                let bitmap = data_chunk.visibility();
                 let mut output_array = <$OA as Array>::Builder::with_meta(data_chunk.capacity(), (&self.return_type).into());
                 Ok(Arc::new(match bitmap {
                     Some(bitmap) => {

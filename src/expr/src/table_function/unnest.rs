@@ -44,7 +44,7 @@ impl TableFunction for Unnest {
         let ret_list = self.list.eval_checked(input)?;
         let arr_list: &ListArray = ret_list.as_ref().into();
 
-        let bitmap = input.get_visibility_ref();
+        let bitmap = input.visibility();
         let mut output_arrays: Vec<ArrayRef> = vec![];
 
         match bitmap {

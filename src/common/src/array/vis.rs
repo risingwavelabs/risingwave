@@ -70,7 +70,15 @@ impl Vis {
     }
 
     /// Consumes this `Vis` and returns the inner `Bitmap` if not compact.
-    pub fn into_bitmap(self) -> Option<Bitmap> {
+    pub fn into_visibility(self) -> Option<Bitmap> {
+        match self {
+            Vis::Bitmap(b) => Some(b),
+            Vis::Compact(_) => None,
+        }
+    }
+
+    /// Returns a reference to the inner `Bitmap` if not compact.
+    pub fn as_visibility(&self) -> Option<&Bitmap> {
         match self {
             Vis::Bitmap(b) => Some(b),
             Vis::Compact(_) => None,

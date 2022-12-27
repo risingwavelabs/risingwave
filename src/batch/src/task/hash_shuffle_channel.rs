@@ -88,7 +88,7 @@ fn generate_new_data_chunks(
     let mut res = Vec::with_capacity(output_count);
     for (sink_id, vis_map_vec) in vis_maps.into_iter().enumerate() {
         let vis_map: Bitmap = vis_map_vec.into_iter().collect();
-        let vis_map = if let Some(visibility) = chunk.get_visibility_ref() {
+        let vis_map = if let Some(visibility) = chunk.visibility() {
             vis_map.bitand(visibility)
         } else {
             vis_map
