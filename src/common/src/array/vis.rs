@@ -57,8 +57,8 @@ impl Vis {
         self.as_ref().iter()
     }
 
-    pub fn ones(&self) -> impl Iterator<Item = usize> + '_ {
-        self.as_ref().ones()
+    pub fn iter_ones(&self) -> impl Iterator<Item = usize> + '_ {
+        self.as_ref().iter_ones()
     }
 
     #[inline(always)]
@@ -145,9 +145,9 @@ impl<'a> VisRef<'a> {
     }
 
     #[auto_enum(Iterator)]
-    pub fn ones(self) -> impl Iterator<Item = usize> + 'a {
+    pub fn iter_ones(self) -> impl Iterator<Item = usize> + 'a {
         match self {
-            VisRef::Bitmap(b) => b.ones(),
+            VisRef::Bitmap(b) => b.iter_ones(),
             VisRef::Compact(c) => 0..c,
         }
     }

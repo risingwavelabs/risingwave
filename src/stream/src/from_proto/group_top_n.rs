@@ -20,9 +20,9 @@ use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::stream_plan::GroupTopNNode;
 
 use super::*;
-use crate::cache::LruManagerRef;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{ActorContextRef, GroupTopNExecutor};
+use crate::task::AtomicU64RefOpt;
 
 pub struct GroupTopNExecutorBuilder;
 
@@ -59,7 +59,7 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
             executor_id: params.executor_id,
             group_by,
             state_table,
-            lru_manager: stream.context.lru_manager.clone(),
+            watermark_epoch: stream.get_watermark_epoch(),
             cache_size: 1 << 16,
             with_ties: node.with_ties,
             group_key_types,
@@ -77,7 +77,7 @@ struct GroupTopNExecutorDispatcherArgs<S: StateStore> {
     executor_id: u64,
     group_by: Vec<usize>,
     state_table: StateTable<S>,
-    lru_manager: Option<LruManagerRef>,
+    watermark_epoch: AtomicU64RefOpt,
     cache_size: usize,
     with_ties: bool,
     group_key_types: Vec<DataType>,
@@ -97,7 +97,7 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
                 self.executor_id,
                 self.group_by,
                 self.state_table,
-                self.lru_manager,
+                self.watermark_epoch,
                 self.cache_size,
             )?
             .boxed()),
@@ -110,7 +110,7 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
                 self.executor_id,
                 self.group_by,
                 self.state_table,
-                self.lru_manager,
+                self.watermark_epoch,
                 self.cache_size,
             )?
             .boxed()),

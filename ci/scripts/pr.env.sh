@@ -1,4 +1,6 @@
-#!/bin/sh
+#!/bin/bash
+
+# Exits as soon as any line fails.
 set -euo pipefail
 
 set +e

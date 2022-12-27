@@ -125,8 +125,10 @@ impl Binder {
             "ceil" => ExprType::Ceil,
             "floor" => ExprType::Floor,
             "abs" => ExprType::Abs,
+            "mod" => ExprType::Modulus,
             // temporal/chrono
-            "to_timestamp" => ExprType::ToTimestamp,
+            "to_timestamp" if inputs.len() == 1 => ExprType::ToTimestamp,
+            "to_timestamp" if inputs.len() == 2 => ExprType::ToTimestamp1,
             "date_trunc" => ExprType::DateTrunc,
             // string
             "substr" => ExprType::Substr,

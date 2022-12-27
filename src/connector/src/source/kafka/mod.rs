@@ -29,6 +29,13 @@ pub const KAFKA_CONNECTOR: &str = "kafka";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct KafkaProperties {
+    /// This parameter is not intended to be exposed to users.
+    /// Since kafka source has no concept of splits and its parallelism
+    /// is determined by the compute node's parameter, this parameter specifies
+    /// the bytes per second in total across all the parallelism.
+    #[serde(rename = "bytes.per.second", alias = "kafka.bytes.per.second")]
+    pub bytes_per_second: Option<String>,
+
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
 

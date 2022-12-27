@@ -20,6 +20,7 @@ use std::ptr;
 
 use bytes::{Buf, BufMut};
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 
 use crate::HummockEpoch;
@@ -333,6 +334,13 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
 /// identified by a [`TableId`].
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TableKey<T: AsRef<[u8]>>(pub T);
+
+impl<T: AsRef<[u8]>> TableKey<T> {
+    pub fn dist_key(&self) -> &[u8] {
+        &self.0.as_ref()[VirtualNode::SIZE..]
+    }
+}
+
 impl<T: AsRef<[u8]>> Debug for TableKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TableKey")
@@ -343,6 +351,7 @@ impl<T: AsRef<[u8]>> Debug for TableKey<T> {
             .finish()
     }
 }
+
 impl<T: AsRef<[u8]>> Deref for TableKey<T> {
     type Target = T;
 

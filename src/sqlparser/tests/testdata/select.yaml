@@ -34,13 +34,13 @@
   formatted_sql: SELECT (foo).* FROM foo
 
 - input: SELECT ((foo.v1).v2).* FROM foo
-  formatted_sql: SELECT ((foo.v1).v2).* FROM foo
+  formatted_sql: SELECT (foo.v1).v2.* FROM foo
 
 - input: SELECT ((1,2,3)::foo).v1.*
   formatted_sql: SELECT (CAST(ROW(1, 2, 3) AS foo)).v1.*
 
 - input: SELECT (((((1,2,3)::foo).v1))).*
-  formatted_sql: SELECT ((CAST(ROW(1, 2, 3) AS foo)).v1).*
+  formatted_sql: SELECT (CAST(ROW(1, 2, 3) AS foo)).v1.*
 
 - input: SELECT * FROM generate_series('2'::INT,'10'::INT,'2'::INT)
   formatted_sql: SELECT * FROM generate_series(CAST('2' AS INT), CAST('10' AS INT), CAST('2' AS INT))
