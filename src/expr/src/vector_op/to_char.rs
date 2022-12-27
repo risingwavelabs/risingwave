@@ -45,12 +45,12 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
     // https://www.postgresql.org/docs/current/functions-formatting.html
     static PG_PATTERNS: &[&str] = &[
         "HH24", "hh24", "HH12", "hh12", "HH", "hh", "MI", "mi", "SS", "ss", "YYYY", "yyyy", "YY",
-        "yy", "IYYY", "iyyy", "IY", "iy", "MM", "mm", "DD", "dd",
+        "yy", "IYYY", "iyyy", "IY", "iy", "MM", "mm", "Month", "Mon", "DD", "dd",
     ];
     // https://docs.rs/chrono/latest/chrono/format/strftime/index.html
     static CHRONO_PATTERNS: &[&str] = &[
         "%H", "%H", "%I", "%I", "%I", "%I", "%M", "%M", "%S", "%S", "%Y", "%Y", "%y", "%y", "%G",
-        "%G", "%g", "%g", "%m", "%m", "%d", "%d",
+        "%G", "%g", "%g", "%m", "%m", "%B", "%b", "%d", "%d",
     ];
     static AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
         AhoCorasickBuilder::new()

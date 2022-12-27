@@ -27,12 +27,13 @@ use risingwave_storage::StateStore;
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::TopNCache;
-use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::cache::{cache_may_stale, new_unbounded, EvictableHashMap, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
+use crate::task::AtomicU64RefOpt;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerGroupTopNExecutorNew<K, S, WITH_TIES>>;
@@ -48,7 +49,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-        lru_manager: Option<LruManagerRef>,
+        watermark_epoch: AtomicU64RefOpt,
         cache_size: usize,
     ) -> StreamResult<Self> {
         let info = input.info();
@@ -63,7 +64,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
                 executor_id,
                 group_by,
                 state_table,
-                lru_manager,
+                watermark_epoch,
                 cache_size,
             )?,
         })
@@ -104,7 +105,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-        lru_manager: Option<LruManagerRef>,
+        lru_manager: AtomicU64RefOpt,
         cache_size: usize,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
@@ -137,9 +138,9 @@ pub struct GroupTopNCache<K: HashKey, const WITH_TIES: bool> {
 }
 
 impl<K: HashKey, const WITH_TIES: bool> GroupTopNCache<K, WITH_TIES> {
-    pub fn new(lru_manager: Option<LruManagerRef>, cache_size: usize) -> Self {
+    pub fn new(lru_manager: AtomicU64RefOpt, cache_size: usize) -> Self {
         let cache = if let Some(lru_manager) = lru_manager {
-            ExecutorCache::Managed(lru_manager.create_cache())
+            ExecutorCache::Managed(new_unbounded(lru_manager))
         } else {
             ExecutorCache::Local(EvictableHashMap::new(cache_size))
         };
