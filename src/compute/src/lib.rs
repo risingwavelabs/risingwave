@@ -17,11 +17,13 @@
 #![feature(generators)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
+#![feature(allocator_api)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
 extern crate tracing;
 
+pub mod memory_management;
 pub mod rpc;
 pub mod server;
 
