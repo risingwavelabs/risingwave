@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use generic::PlanAggCall;
-use itertools::Itertools;
 use pb::stream_node as pb_node;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
@@ -242,8 +241,14 @@ impl HashJoin {
         // The pk of hash join internal and degree table should be join_key + input_pk.
         let join_key_len = join_key_indices.len();
         let mut pk_indices = join_key_indices;
+
         // TODO(yuhao): dedup the dist key and pk.
-        pk_indices.extend(input.logical_pk());
+        for input_pk_index in input.logical_pk() {
+            if !pk_indices.contains(input_pk_index) {
+                pk_indices.push(*input_pk_index);
+            }
+        }
+
         // Build internal table
         let mut internal_table_catalog_builder =
             TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
@@ -266,18 +271,10 @@ impl HashJoin {
 
         let degree_column_field = Field::with_name(DataType::Int64, "_degree");
 
-        pk_indices
-            .iter()
-            .unique()
-            .enumerate()
-            .for_each(|(order_idx, idx)| {
-                degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
-                degree_table_catalog_builder.add_order_column(
-                    order_idx,
-                    OrderType::Ascending,
-                    false,
-                );
-            });
+        pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
+            degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
+            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending, false);
+        });
         degree_table_catalog_builder.add_column(&degree_column_field);
         degree_table_catalog_builder
             .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
