@@ -20,6 +20,7 @@ use itertools::Itertools;
 use redis::{ConnectionLike, RedisResult, Value};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::Row;
 use risingwave_common::types::to_text::ToText;
 
 use crate::sink::{Result, Sink, SinkError};
@@ -87,7 +88,7 @@ impl RedisSink {
             pipe,
             batch_id: 0,
             epoch: 0,
-            update_cache: Vec::new(),
+            update_cache: Vec::with_capacity(1),
             pk_indices,
         })
     }
@@ -113,7 +114,7 @@ impl RedisSink {
     pub fn make_redis_key(row: RowRef<'_>, pk_indices: &[usize]) -> String {
         pk_indices
             .iter()
-            .map(|i| row.value_at(*i).to_text())
+            .map(|i| row.datum_at(*i).to_text())
             .join(":")
     }
 }
@@ -157,7 +158,7 @@ impl Sink for RedisSink {
                     // current format: key=`pk1[:pk2:pk3:...]` value="[v1,v2,...]"
                     self.pipe.set(
                         key,
-                        format!("[{}]", row.values().map(|v| v.to_text()).join(",")),
+                        format!("[{}]", row.iter().map(|v| v.to_text()).join(",")),
                     );
                 }
                 Op::Delete => {
@@ -171,7 +172,7 @@ impl Sink for RedisSink {
                         self.update_cache
                             .pop()
                             .ok_or_else(|| SinkError::Redis("no update insert".to_string()))?,
-                        format!("[{}]", row.values().map(|v| v.to_text()).join(",")),
+                        format!("[{}]", row.iter().map(|v| v.to_text()).join(",")),
                     );
                 }
             }
@@ -195,22 +196,21 @@ impl Sink for RedisSink {
             }
         }
         self.pipe.clear();
+        self.update_cache.clear();
         Ok(())
     }
 
     async fn abort(&mut self) -> Result<()> {
+        self.update_cache.clear();
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-
     use rdkafka::message::FromBytes;
     use risingwave_common::array;
-    use risingwave_common::array::column::Column;
-    use risingwave_common::array::{ArrayImpl, I32Array, Op, StreamChunk, Utf8Array};
+    use risingwave_common::array::{I32Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
@@ -240,14 +240,8 @@ mod test {
         let chunk_a = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
             vec![
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    I32Array,
-                    [Some(1), Some(2), Some(3)]
-                )))),
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    Utf8Array,
-                    [Some("Alice"), Some("Bob"), Some("Clare")]
-                )))),
+                array! {I32Array, [Some(1), Some(2), Some(3)]}.into(),
+                array! {Utf8Array, [Some("Alice"), Some("Bob"), Some("Clare")]}.into(),
             ],
             None,
         );
@@ -255,14 +249,8 @@ mod test {
         let chunk_b = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
             vec![
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    I32Array,
-                    [Some(4), Some(5), Some(6)]
-                )))),
-                Column::new(Arc::new(ArrayImpl::from(array!(
-                    Utf8Array,
-                    [Some("David"), Some("Eve"), Some("Frank")]
-                )))),
+                array! {I32Array, [Some(4), Some(5), Some(6)]}.into(),
+                array! {Utf8Array, [Some("David"), Some("Eve"), Some("Frank")]}.into(),
             ],
             None,
         );
