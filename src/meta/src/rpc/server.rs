@@ -119,7 +119,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, WatchSender<()>)> {
-    // Initialize managers.
+    // Initialize managers
     let (_, election_handle, election_shutdown, mut leader_rx) = run_elections(
         address_info.listen_addr.clone().to_string(),
         meta_store.clone(),
