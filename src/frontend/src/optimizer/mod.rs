@@ -555,7 +555,6 @@ impl PlanRoot {
                 this.required_order.clone(),
                 this.out_fields.clone(),
                 this.out_names.clone(), // TODO: managed columns
-                false,
                 definition.clone(),
                 handle_pk_conflict,
                 row_id_index,
@@ -567,7 +566,8 @@ impl PlanRoot {
         let materialize = create_materialize(self, stream_plan.clone())?;
 
         // TODO: remove this after we deprecate the materialized source
-        // TODO: we create this `Materialize` only for acquiring the table catalog
+        // TODO: we create this `Materialize` only for acquiring the table catalog, may need to find
+        // a better way to do this.
         if dml_flag == DmlFlag::Disable {
             return Ok(materialize);
         }
@@ -611,7 +611,6 @@ impl PlanRoot {
             self.required_order.clone(),
             self.out_fields.clone(),
             out_names.clone(),
-            false,
             definition.clone(),
             false,
             None,
@@ -629,7 +628,6 @@ impl PlanRoot {
             self.required_order.clone(),
             self.out_fields.clone(),
             self.out_names.clone(),
-            true,
             "".into(),
             false,
             None,
@@ -653,13 +651,11 @@ impl PlanRoot {
             self.required_order.clone(),
             self.out_fields.clone(),
             col_names,
-            false,
             definition,
             false,
             None,
-            // NOTE(Yuanxin): We set the table type as default here because this is irrelevant to
-            // sink's plan generating.
-            TableType::default(),
+            // Note: we first plan it like a materialized view, and then rewrite it into a sink.
+            TableType::MaterializedView,
         )
         .map(|plan| plan.rewrite_into_sink(properties))
     }

@@ -65,7 +65,6 @@ impl StreamMaterialize {
         user_order_by: Order,
         user_cols: FixedBitSet,
         out_names: Vec<String>,
-        is_index: bool,
         definition: String,
         handle_pk_conflict: bool,
         row_id_index: Option<usize>,
@@ -73,19 +72,21 @@ impl StreamMaterialize {
     ) -> Result<Self> {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
-            _ => {
-                if is_index {
+            _ => match table_type {
+                TableType::Table | TableType::MaterializedView => {
+                    assert_matches!(user_distributed_by, RequiredDist::Any);
+                    // ensure the same pk will not shuffle to different node
+                    RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
+                }
+                TableType::Index => {
                     assert_matches!(
                         user_distributed_by,
                         RequiredDist::PhysicalDist(Distribution::HashShard(_))
                     );
                     user_distributed_by
-                } else {
-                    assert_matches!(user_distributed_by, RequiredDist::Any);
-                    // ensure the same pk will not shuffle to different node
-                    RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
                 }
-            }
+                TableType::Internal => unreachable!(),
+            },
         };
 
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;

@@ -126,12 +126,6 @@ pub enum TableType {
     Internal,
 }
 
-impl Default for TableType {
-    fn default() -> Self {
-        Self::Table
-    }
-}
-
 impl TableType {
     fn from_prost(prost: ProstTableType) -> Self {
         match prost {
