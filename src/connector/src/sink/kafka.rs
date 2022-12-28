@@ -357,26 +357,25 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         ) => {
             json!(scalar.to_text_with_type(&dt))
         }
-        (DataType::List { .. }, ScalarRefImpl::List(list_ref)) => {
-            let mut vec = Vec::with_capacity(field.sub_fields.len());
-            for (sub_datum_ref, sub_field) in list_ref
-                .values_ref()
-                .into_iter()
-                .zip_eq(field.sub_fields.iter())
-            {
-                let value = datum_to_json_object(sub_field, sub_datum_ref)?;
+        (DataType::List { datatype }, ScalarRefImpl::List(list_ref)) => {
+            let mut vec = Vec::with_capacity(list_ref.values_ref().len());
+            let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
+            for sub_datum_ref in list_ref.values_ref() {
+                let value = datum_to_json_object(&inner_field, sub_datum_ref)?;
                 vec.push(value);
             }
             json!(vec)
         }
-        (DataType::Struct { .. }, ScalarRefImpl::Struct(struct_ref)) => {
-            let mut map = Map::with_capacity(field.sub_fields.len());
-            for (sub_datum_ref, sub_field) in struct_ref
-                .fields_ref()
-                .into_iter()
-                .zip_eq(field.sub_fields.iter())
-            {
-                let value = datum_to_json_object(sub_field, sub_datum_ref)?;
+        (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
+            tracing::info!("ref: {:?}, field: {:?}", struct_ref, field);
+            let mut map = Map::with_capacity(st.fields.len());
+            for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq(
+                st.fields
+                    .iter()
+                    .zip_eq(st.field_names.iter())
+                    .map(|(dt, name)| Field::with_name(dt.clone(), name)),
+            ) {
+                let value = datum_to_json_object(&sub_field, sub_datum_ref)?;
                 map.insert(sub_field.name.clone(), value);
             }
             json!(map)
