@@ -159,11 +159,9 @@ pub async fn handle_query(
     };
 
     let rows_count: Option<i32> = match stmt_type {
-        StatementType::SELECT => None,
+        StatementType::SELECT | StatementType::INSERT_RETURNING | StatementType::DELETE_RETURNING | StatementType::UPDATE_RETURNING => None,
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            if let Statement::Insert { returning, .. } = stmt.clone() && !returning.is_empty() {
-                None
-            } else {
+            {
                 let first_row_set = row_stream
                     .next()
                     .await
@@ -188,7 +186,7 @@ pub async fn handle_query(
                     )
                 }
             }
-        }
+        },
         _ => unreachable!(),
     };
 
@@ -222,7 +220,13 @@ fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
 
     match stmt {
         Statement::Query(_) => Ok(SELECT),
-        Statement::Insert { .. } => Ok(INSERT),
+        Statement::Insert { returning, .. } => {
+            if returning.is_empty() {
+                Ok(INSERT)
+            } else {
+                Ok(INSERT_RETURNING)
+            }
+        }
         Statement::Delete { .. } => Ok(DELETE),
         Statement::Update { .. } => Ok(UPDATE),
         _ => Err(RwError::from(ErrorCode::InvalidInputSyntax(

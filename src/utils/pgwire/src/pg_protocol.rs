@@ -318,7 +318,7 @@ where
 
         let session = self.session.clone().unwrap();
         // execute query
-        let (mut res, must_be_query) = session
+        let mut res = session
             .run_statement(sql, false)
             .await
             .map_err(|err| PsqlError::QueryError(err))?;
@@ -328,7 +328,7 @@ where
                 .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
         }
 
-        if res.is_query() || must_be_query {
+        if res.is_query() {
             self.stream
                 .write_no_flush(&BeMessage::RowDescription(&res.get_row_desc()))?;
 

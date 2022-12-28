@@ -159,7 +159,7 @@ mod tests {
             .unwrap();
 
         let sql = "describe t";
-        let mut pg_response = frontend.run_sql(sql).await.unwrap().0;
+        let mut pg_response = frontend.run_sql(sql).await.unwrap();
 
         let mut columns = HashMap::new();
         #[for_await]

@@ -654,27 +654,22 @@ impl Session<PgResponseStream> for SessionImpl {
         // false: TEXT
         // true: BINARY
         format: bool,
-    ) -> std::result::Result<(PgResponse<PgResponseStream>, bool), BoxedError> {
+    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
         let mut stmts = Parser::parse_sql(sql)
             .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
         if stmts.is_empty() {
-            return Ok((PgResponse::empty_result(
+            return Ok(PgResponse::empty_result(
                 pgwire::pg_response::StatementType::EMPTY,
-            ), false));
+            ));
         }
         if stmts.len() > 1 {
-            return Ok((PgResponse::empty_result_with_notice(
+            return Ok(PgResponse::empty_result_with_notice(
                 pgwire::pg_response::StatementType::EMPTY,
                 "cannot insert multiple commands into statement".to_string(),
-            ), false));
+            ));
         }
         let stmt = stmts.swap_remove(0);
-        let must_be_query = if let Statement::Insert { returning, .. } = stmt.clone() {
-            !returning.is_empty()
-        } else {
-            false
-        };
         let rsp = {
             let mut handle_fut = Box::pin(handle(self, stmt, sql, format));
             if cfg!(debug_assertions) {
@@ -695,7 +690,7 @@ impl Session<PgResponseStream> for SessionImpl {
             }
         }
         .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
-        Ok((rsp, must_be_query))
+        Ok(rsp)
     }
 
     async fn infer_return_type(

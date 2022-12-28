@@ -48,7 +48,7 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::handler::create_table::DmlFlag;
 use crate::optimizer::plan_node::{
-    BatchExchange, ColumnPruningContext, PlanNodeType, PredicatePushdownContext,
+    BatchExchange, ColumnPruningContext, PredicatePushdownContext,
 };
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
