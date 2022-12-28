@@ -26,6 +26,9 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, WindowFunctionType};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// Rewritten version of [`WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
@@ -255,18 +258,22 @@ impl fmt::Display for LogicalOverAgg {
 }
 
 impl ColPrunable for LogicalOverAgg {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
 impl PredicatePushdown for LogicalOverAgg {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         let mut window_col = FixedBitSet::with_capacity(self.schema().len());
         window_col.insert(self.schema().len() - 1);
         let (window_pred, other_pred) = predicate.split_disjoint(&window_col);
-        gen_filter_and_pushdown(self, window_pred, other_pred)
+        gen_filter_and_pushdown(self, window_pred, other_pred, ctx)
     }
 }
 
@@ -277,11 +284,14 @@ impl ToBatch for LogicalOverAgg {
 }
 
 impl ToStream for LogicalOverAgg {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 4847.into()).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         Err(ErrorCode::NotImplemented("OverAgg to stream".to_string(), 4847.into()).into())
     }
 }

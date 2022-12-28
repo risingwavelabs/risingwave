@@ -41,6 +41,8 @@ mod union;
 pub use union::*;
 mod top_n;
 pub use top_n::*;
+mod share;
+pub use share::*;
 
 pub trait GenericPlanRef {
     fn schema(&self) -> &Schema;

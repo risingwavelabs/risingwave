@@ -769,6 +769,8 @@ where
         checkpoint_control: &mut CheckpointControl<S>,
     ) {
         if let Err(err) = result {
+            // FIXME: If it is a connector source error occurred in the init barrier, we should pass
+            // back to frontend
             fail_point!("inject_barrier_err_success");
             let fail_node = checkpoint_control.barrier_failed();
             tracing::warn!("Failed to complete epoch {}: {:?}", prev_epoch, err);
