@@ -30,17 +30,10 @@ type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueTy
 ///
 /// If a `JoinEntryState` exists for a join key, the all records under this
 /// join key will be presented in the cache.
+#[derive(Default)]
 pub struct JoinEntryState {
     /// The full copy of the state.
     cached: BTreeMap<PkType, StateValueType>,
-}
-
-impl Default for JoinEntryState {
-    fn default() -> Self {
-        Self {
-            cached: BTreeMap::new(),
-        }
-    }
 }
 
 impl JoinEntryState {
