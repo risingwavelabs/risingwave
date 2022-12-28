@@ -241,8 +241,13 @@ impl HashJoin {
         // The pk of hash join internal and degree table should be join_key + input_pk.
         let join_key_len = join_key_indices.len();
         let mut pk_indices = join_key_indices;
+
         // TODO(yuhao): dedup the dist key and pk.
-        pk_indices.extend(input.logical_pk());
+        for input_pk_index in input.logical_pk() {
+            if !pk_indices.contains(input_pk_index) {
+                pk_indices.push(*input_pk_index);
+            }
+        }
 
         // Build internal table
         let mut internal_table_catalog_builder =
@@ -252,9 +257,12 @@ impl HashJoin {
         internal_columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
         });
-
-        pk_indices.iter().for_each(|idx| {
-            internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
+        pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
+            if order_idx < join_key_len {
+                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending, false)
+            } else {
+                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending, true)
+            }
         });
 
         // Build degree table.
@@ -265,7 +273,7 @@ impl HashJoin {
 
         pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
             degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
-            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending)
+            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending, false);
         });
         degree_table_catalog_builder.add_column(&degree_column_field);
         degree_table_catalog_builder
@@ -273,7 +281,6 @@ impl HashJoin {
 
         internal_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
         degree_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
-
         (
             internal_table_catalog_builder.build(internal_table_dist_keys),
             degree_table_catalog_builder.build(degree_table_dist_keys),
