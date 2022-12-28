@@ -188,10 +188,11 @@ pub fn bind_sql_table_constraints(
     let mut columns_catalog = column_descs
         .into_iter()
         .map(|c| {
+            // All columns except `_row_id` or starts with `_rw` should be visible.
+            let is_hidden = c.name.starts_with("_rw");
             ColumnCatalog {
                 column_desc: c,
-                // All columns except `_row_id` should be visible.
-                is_hidden: false,
+                is_hidden,
             }
         })
         .collect_vec();

@@ -13,10 +13,14 @@
 // limitations under the License.
 
 use std::fmt;
+use std::ops::Bound;
+use std::ops::Bound::Unbounded;
 use std::rc::Rc;
+use tonic::IntoRequest;
 
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
+use risingwave_connector::source::DataType;
 
 use super::generic::GenericPlanNode;
 use super::{
@@ -25,6 +29,7 @@ use super::{
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
+use crate::expr::{Expr, ExprImpl, ExprType, input_ref_to_column_indices};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -33,11 +38,20 @@ use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 use crate::TableCatalog;
 
+/// For kafka source, we attach a hidden column [`KAFKA_TIMESTAMP_COLUMN_NAME`] to it, so that we
+/// can limit the timestamp range when querying it directly with batch query. The column type is
+/// [`DataType::Timestamptz`]. For more details, please refer to
+/// [this rfc](https://github.com/risingwavelabs/rfcs/pull/20).
+pub const KAFKA_TIMESTAMP_COLUMN_NAME: &'static str = "_rw_kafka_timestamp";
+
 /// `LogicalSource` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
 pub struct LogicalSource {
     pub base: PlanBase,
     pub core: generic::Source,
+
+    /// Kafka timestamp range, currently we only support kafka, so we just leave it like this.
+    kafka_timestamp_range: (Bound<i64>, Bound<i64>),
 }
 
 impl LogicalSource {
@@ -70,7 +84,12 @@ impl LogicalSource {
 
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
 
-        LogicalSource { base, core }
+        let kafka_timestamp_range = (Bound::Unbounded, Bound::Unbounded);
+        LogicalSource {
+            base,
+            core,
+            kafka_timestamp_range,
+        }
     }
 
     pub(super) fn column_names(&self) -> Vec<String> {
@@ -114,12 +133,51 @@ impl ColPrunable for LogicalSource {
     }
 }
 
+fn expr_to_kafka_timestamp_range(expr: ExprImpl, mut range: (Bound<i64>, Bound<i64>),
+                                 schema: &Schema) -> Option<ExprImpl> {
+    match expr {
+        ExprImpl::FunctionCall(function_call) if function_call.inputs().len() == 2  => {
+
+            let () timestampz_literal: Option<i64> = {
+                match (function_call.inputs()[0], function_call.inputs()[1]) {
+                    (ExprImpl::InputRef(input_ref ), ExprImpl::Literal(literal)) if schema.fields[input_ref.index].name == KAFKA_TIMESTAMP_COLUMN_NAME &&
+                        literal.return_type() == DataType::Timestamptz => {
+                         {
+                            Some(literal.get_data().into())
+                        }
+                    },
+                    (ExprImpl::Literal(literal), ExprImpl::InputRef(input_ref )) if schema
+                        .fields[input_ref.index].name == KAFKA_TIMESTAMP_COLUMN_NAME &&
+                        literal.return_type() == DataType::Timestamptz => {
+                        {
+                            Some(literal.get_data().into())
+                        }
+                    },
+                    _ => None
+                }
+            }
+
+           if let Some(timestampz_literal) = timestampz_literal {
+               match function_call.get_expr_type() {
+                   ExprType::GreaterThan
+               }
+           }
+        }
+    }
+}
+
 impl PredicatePushdown for LogicalSource {
     fn predicate_pushdown(
         &self,
         predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
+        let (mut lower_bound, mut upper_bound) = (Unbounded, Unbounded);
+
+
+        for expr in predicate.conjunctions {
+        }
+
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }
