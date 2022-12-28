@@ -30,6 +30,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
+use risingwave_common::catalog::{Schema};
 
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
@@ -52,6 +53,22 @@ impl LogicalProject {
         let ctx = core.input.ctx();
 
         let schema = core.schema();
+        let pk_indices = core.logical_pk();
+        let functional_dependency = Self::derive_fd(&core, core.input.functional_dependency());
+
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            pk_indices.unwrap_or_default(),
+            functional_dependency,
+        );
+        LogicalProject { base, core }
+    }
+
+    pub fn with_core_and_schema(core: generic::Project<PlanRef>, schema: Schema) -> Self {
+        let ctx = core.input.ctx();
+
+        let schema = schema;
         let pk_indices = core.logical_pk();
         let functional_dependency = Self::derive_fd(&core, core.input.functional_dependency());
 

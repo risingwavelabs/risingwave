@@ -42,10 +42,11 @@ impl Planner {
         if returning {
             let len = insert.returning_list.len();
             plan = LogicalProject::create(plan, insert.returning_list);
-            plan = LogicalProject::with_core(Project::with_out_col_idx(
-                plan,
-                0..len,
-            )).into();
+            plan = LogicalProject::with_core_and_schema(
+                Project::with_out_col_idx(plan, 0..len),
+                insert.schema,
+            )
+            .into();
         }
         // For insert, frontend will only schedule one task so do not need this to be single.
         let dist = RequiredDist::Any;
