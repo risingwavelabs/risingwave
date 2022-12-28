@@ -76,7 +76,7 @@ sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
 sleep 1
 
 # check sink destination mysql using shell
-if mysql -sN -e "SELECT * FROM test.t_remote ORDER BY id;" | awk '{
+if mysql  --host=mysql --port=3306 -u root -p123456 -sN -e "SELECT * FROM test.t_remote ORDER BY id;" | awk '{
 if ($1 == 1 && $2 == "Alex") c1++;
  if ($1 == 3 && $2 == "Carl") c2++;
   if ($1 == 4 && $2 == "Doris") c3++;
