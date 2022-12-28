@@ -58,7 +58,7 @@ where
         self: Arc<Self>,
         sql: &str,
         format: bool,
-    ) -> Result<PgResponse<VS>, BoxedError>;
+    ) -> Result<(PgResponse<VS>, bool), BoxedError>;
     async fn infer_return_type(
         self: Arc<Self>,
         sql: &str,
@@ -196,7 +196,7 @@ mod tests {
             self: Arc<Self>,
             sql: &str,
             _format: bool,
-        ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, Box<dyn Error + Send + Sync>>
+        ) -> Result<(PgResponse<BoxStream<'static, RowSetResult>>, bool), Box<dyn Error + Send + Sync>>
         {
             // split a statement and trim \' around the input param to construct result.
             // Ex:
@@ -215,7 +215,7 @@ mod tests {
                 .collect();
             let len = res.len();
 
-            Ok(PgResponse::new_for_stream(
+            Ok((PgResponse::new_for_stream(
                 StatementType::SELECT,
                 None,
                 futures::stream::iter(vec![Ok(vec![Row::new(res)])]).boxed(),
@@ -225,7 +225,7 @@ mod tests {
                     PgFieldDescriptor::new("".to_string(), 1043, -1);
                     len
                 ],
-            ))
+            ), false))
         }
 
         fn user_authenticator(&self) -> &UserAuthenticator {

@@ -2473,7 +2473,10 @@ impl Parser {
         }
     }
 
-    pub fn parse_returning(&mut self, optional: IsOptional) -> Result<Vec<SelectItem>, ParserError> {
+    pub fn parse_returning(
+        &mut self,
+        optional: IsOptional,
+    ) -> Result<Vec<SelectItem>, ParserError> {
         if self.parse_keyword(Keyword::RETURNING) {
             let cols = self.parse_comma_separated(Parser::parse_select_item)?;
             Ok(cols)
@@ -3380,7 +3383,7 @@ impl Parser {
             table_name,
             columns,
             source,
-            returning
+            returning,
         })
     }
 

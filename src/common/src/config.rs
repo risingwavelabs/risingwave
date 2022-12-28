@@ -391,38 +391,38 @@ mod default {
         }
 
         pub fn collect_gc_watermark_spin_interval_sec() -> u64 {
-            5000
+            5
         }
 
         pub fn periodic_compaction_interval_sec() -> u64 {
-            60000
+            60
         }
 
         pub fn vacuum_interval_sec() -> u64 {
-            30000
+            30
         }
 
         pub fn max_heartbeat_interval_sec() -> u32 {
-            300000
+            300
         }
 
         pub fn meta_leader_lease_secs() -> u64 {
-            10000
+            10
         }
 
         pub fn node_num_monitor_interval_sec() -> u64 {
-            10000
+            10
         }
     }
 
     pub mod server {
 
         pub fn heartbeat_interval_ms() -> u32 {
-            1000000
+            1000
         }
 
         pub fn max_heartbeat_interval_secs() -> u32 {
-            600000
+            600
         }
 
         pub fn connection_pool_size() -> u16 {
@@ -515,7 +515,7 @@ mod default {
 
     pub mod streaming {
         pub fn barrier_interval_ms() -> u32 {
-            1000000
+            1000
         }
 
         pub fn in_flight_barrier_nums() -> usize {

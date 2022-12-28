@@ -41,6 +41,7 @@ pub struct LogicalInsert {
     input: PlanRef,
     column_indices: Vec<usize>, // columns in which to insert
     row_id_index: Option<usize>,
+    returning: bool,
 }
 
 impl LogicalInsert {
@@ -51,9 +52,14 @@ impl LogicalInsert {
         table_id: TableId,
         column_indices: Vec<usize>,
         row_id_index: Option<usize>,
+        returning: bool,
     ) -> Self {
         let ctx = input.ctx();
-        let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
+        let schema = if returning {
+            input.schema().clone()
+        } else {
+            Schema::new(vec![Field::unnamed(DataType::Int64)])
+        };
         let functional_dependency = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
         Self {
@@ -63,6 +69,7 @@ impl LogicalInsert {
             input,
             column_indices,
             row_id_index,
+            returning,
         }
     }
 
@@ -73,6 +80,7 @@ impl LogicalInsert {
         table_id: TableId,
         column_indices: Vec<usize>,
         row_id_index: Option<usize>,
+        returning: bool,
     ) -> Result<Self> {
         Ok(Self::new(
             input,
@@ -80,6 +88,7 @@ impl LogicalInsert {
             table_id,
             column_indices,
             row_id_index,
+            returning,
         ))
     }
 
@@ -102,6 +111,10 @@ impl LogicalInsert {
     pub fn row_id_index(&self) -> Option<usize> {
         self.row_id_index
     }
+
+    pub fn has_returning(&self) -> bool {
+        self.returning
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalInsert {
@@ -116,6 +129,7 @@ impl PlanTreeNodeUnary for LogicalInsert {
             self.table_id,
             self.column_indices.clone(),
             self.row_id_index,
+            self.returning,
         )
     }
 }

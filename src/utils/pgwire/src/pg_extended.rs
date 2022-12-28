@@ -159,7 +159,7 @@ where
                 .run_statement(self.query_string.as_str(), self.result_format)
                 .await
                 .map_err(|err| PsqlError::ExecuteError(err))?;
-            self.result = Some(result);
+            self.result = Some(result.0);
             self.result.as_mut().unwrap()
         };
 

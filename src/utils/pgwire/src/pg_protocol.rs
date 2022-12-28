@@ -37,7 +37,7 @@ use crate::pg_message::{
     FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
     FePasswordMessage, FeStartupMessage,
 };
-use crate::pg_response::RowSetResult;
+use crate::pg_response::{RowSetResult};
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 
 /// The state machine for each psql connection.
@@ -318,7 +318,7 @@ where
 
         let session = self.session.clone().unwrap();
         // execute query
-        let mut res = session
+        let (mut res, must_be_query) = session
             .run_statement(sql, false)
             .await
             .map_err(|err| PsqlError::QueryError(err))?;
@@ -328,7 +328,7 @@ where
                 .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
         }
 
-        if res.is_query() {
+        if res.is_query() || must_be_query {
             self.stream
                 .write_no_flush(&BeMessage::RowDescription(&res.get_row_desc()))?;
 

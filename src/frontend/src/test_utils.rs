@@ -88,7 +88,7 @@ impl LocalFrontend {
     pub async fn run_sql(
         &self,
         sql: impl Into<String>,
-    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<(RwPgResponse, bool), Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_ref().run_statement(sql.as_str(), false).await
     }
@@ -99,7 +99,7 @@ impl LocalFrontend {
         database: String,
         user_name: String,
         user_id: UserId,
-    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> std::result::Result<(RwPgResponse, bool), Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_user_ref(database, user_name, user_id)
             .run_statement(sql.as_str(), false)
@@ -107,7 +107,7 @@ impl LocalFrontend {
     }
 
     pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
-        let mut rsp = self.run_sql(sql).await.unwrap();
+        let mut rsp = self.run_sql(sql).await.unwrap().0;
         let mut res = vec![];
         #[for_await]
         for row_set in rsp.values_stream() {
@@ -119,7 +119,7 @@ impl LocalFrontend {
     }
 
     pub async fn get_explain_output(&self, sql: impl Into<String>) -> String {
-        let mut rsp = self.run_sql(sql).await.unwrap();
+        let mut rsp = self.run_sql(sql).await.unwrap().0;
         assert_eq!(rsp.get_stmt_type(), StatementType::EXPLAIN);
         let mut res = String::new();
         #[for_await]

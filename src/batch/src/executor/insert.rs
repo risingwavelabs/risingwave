@@ -45,6 +45,7 @@ pub struct InsertExecutor {
     column_indices: Vec<usize>,
 
     row_id_index: Option<usize>,
+    returning: bool,
 }
 
 impl InsertExecutor {
@@ -56,18 +57,24 @@ impl InsertExecutor {
         identity: String,
         column_indices: Vec<usize>,
         row_id_index: Option<usize>,
+        returning: bool,
     ) -> Self {
+        let table_schema = child.schema().clone();
         Self {
             table_id,
             dml_manager,
             child,
-            chunk_size,
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int64)],
+            schema: if returning {
+                table_schema
+            } else {
+                Schema {
+                    fields: vec![Field::unnamed(DataType::Int64)],
+                }
             },
             identity,
             column_indices,
             row_id_index,
+            returning,
         }
     }
 }
@@ -93,11 +100,18 @@ impl InsertExecutor {
         let mut builder = DataChunkBuilder::new(data_types, 1024);
 
         let mut notifiers = Vec::new();
+        let mut returning_columns = Vec::new();
 
-        // Transform the data chunk to a stream chunk, then write to the source.
-        let mut write_chunk = |chunk: DataChunk| -> Result<()> {
-            let cap = chunk.capacity();
-            let (mut columns, vis) = chunk.into_parts();
+        #[for_await]
+        for data_chunk in self.child.execute() {
+            let data_chunk = data_chunk?;
+            let len = data_chunk.cardinality();
+            assert!(data_chunk.visibility().is_none());
+
+            let (mut columns, _) = data_chunk.into_parts();
+            if self.returning {
+                returning_columns.extend(columns.clone().into_iter());
+            }
 
             // No need to check for duplicate columns. This is already validated in binder.
             if !&self.column_indices.is_sorted() {
@@ -144,13 +158,16 @@ impl InsertExecutor {
             .sum::<usize>();
 
         // create ret value
-        {
+        if !self.returning {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
             array_builder.append(Some(rows_inserted as i64));
 
             let array = array_builder.finish();
             let ret_chunk = DataChunk::new(vec![array.into()], 1);
 
+            yield ret_chunk
+        } else {
+            let ret_chunk = DataChunk::new(returning_columns, rows_inserted);
             yield ret_chunk
         }
     }
@@ -187,6 +204,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
                 .row_id_index
                 .as_ref()
                 .map(|index| index.index as _),
+            insert_node.returning,
         )))
     }
 }
@@ -274,6 +292,7 @@ mod tests {
             "InsertExecutor".to_string(),
             vec![], // Ignoring insertion order
             row_id_index,
+            false
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();

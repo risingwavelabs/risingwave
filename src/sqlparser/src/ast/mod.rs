@@ -1117,7 +1117,11 @@ impl fmt::Display for Statement {
                 if !columns.is_empty() {
                     write!(f, "({}) ", display_comma_separated(columns))?;
                 }
-                write!(f, "{}", source)
+                write!(f, "{}", source)?;
+                if !returning.is_empty() {
+                    write!(f, " RETURNING {:?}", returning)?;
+                }
+                Ok(())
             }
 
             Statement::Copy {

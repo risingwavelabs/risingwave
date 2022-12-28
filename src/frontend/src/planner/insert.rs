@@ -27,14 +27,20 @@ impl Planner {
         if !insert.cast_exprs.is_empty() {
             input = LogicalProject::create(input, insert.cast_exprs);
         }
-        let plan: PlanRef = LogicalInsert::create(
+        let returning = !insert.returning_list.0.is_empty();
+        let mut plan: PlanRef = LogicalInsert::create(
             input,
             insert.table_name.clone(),
             insert.table_id,
             insert.column_indices,
             insert.row_id_index,
+            returning,
         )?
         .into();
+        // If containing RETURNING, add one logicalproject node
+        if returning {
+            plan = LogicalProject::create(plan, insert.returning_list.0);
+        }
         // For insert, frontend will only schedule one task so do not need this to be single.
         let dist = RequiredDist::Any;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());

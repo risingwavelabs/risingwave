@@ -82,7 +82,6 @@ impl Binder {
             .map(|c| c.data_type().clone())
             .collect();
 
-
         // When the column types of `source` query do not match `expected_types`, casting is
         // needed.
         //
@@ -163,10 +162,15 @@ impl Binder {
         }
 
         let returning_list = self.bind_select_list(returning_items)?;
-        if returning_list.0.iter().any(|expr| expr.has_agg_call() || expr.has_window_function()) {
-            return Err(RwError::from(ErrorCode::BindError("INSERT should not have agg/window".to_string())));
+        if returning_list
+            .0
+            .iter()
+            .any(|expr| expr.has_agg_call() || expr.has_window_function())
+        {
+            return Err(RwError::from(ErrorCode::BindError(
+                "INSERT should not have agg/window".to_string(),
+            )));
         }
-
         // validate that query has a value for each target column, if target columns are used
         // create table t1 (v1 int, v2 int);
         // insert into t1 (v1, v2, v2) values (5, 6); // ...more target columns than values
