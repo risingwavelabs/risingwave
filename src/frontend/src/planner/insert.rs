@@ -16,6 +16,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
 use crate::binder::BoundInsert;
+use crate::optimizer::plan_node::generic::Project;
 use crate::optimizer::plan_node::{LogicalInsert, LogicalProject, PlanRef};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
@@ -27,7 +28,7 @@ impl Planner {
         if !insert.cast_exprs.is_empty() {
             input = LogicalProject::create(input, insert.cast_exprs);
         }
-        let returning = !insert.returning_list.0.is_empty();
+        let returning = !insert.returning_list.is_empty();
         let mut plan: PlanRef = LogicalInsert::create(
             input,
             insert.table_name.clone(),
@@ -39,7 +40,12 @@ impl Planner {
         .into();
         // If containing RETURNING, add one logicalproject node
         if returning {
-            plan = LogicalProject::create(plan, insert.returning_list.0);
+            let len = insert.returning_list.len();
+            plan = LogicalProject::create(plan, insert.returning_list);
+            plan = LogicalProject::with_core(Project::with_out_col_idx(
+                plan,
+                0..len,
+            )).into();
         }
         // For insert, frontend will only schedule one task so do not need this to be single.
         let dist = RequiredDist::Any;

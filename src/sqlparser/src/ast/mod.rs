@@ -1119,7 +1119,7 @@ impl fmt::Display for Statement {
                 }
                 write!(f, "{}", source)?;
                 if !returning.is_empty() {
-                    write!(f, " RETURNING {:?}", returning)?;
+                    write!(f, " RETURNING ({})", display_comma_separated(returning))?;
                 }
                 Ok(())
             }

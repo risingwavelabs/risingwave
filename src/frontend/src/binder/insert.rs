@@ -15,12 +15,14 @@
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem, SetExpr};
+use super::UNNAMED_COLUMN;
 
 use super::{BoundQuery, BoundSetExpr};
-use crate::binder::Binder;
 use crate::catalog::TableId;
-use crate::expr::{ExprImpl, InputRef};
+use crate::binder::{Binder, BoundTableSource};
+use crate::expr::{ExprImpl, InputRef, Expr};
 use crate::user::UserId;
 
 #[derive(Debug)]
@@ -50,7 +52,9 @@ pub struct BoundInsert {
     /// `table_source`. This does not include a simple `VALUE`. See comments in code for details.
     pub cast_exprs: Vec<ExprImpl>,
 
-    pub returning_list: (Vec<ExprImpl>, Vec<Option<String>>),
+    pub returning_list: Vec<ExprImpl>,
+
+    pub schema: Schema,
 }
 
 impl Binder {
@@ -161,9 +165,8 @@ impl Binder {
             ))));
         }
 
-        let returning_list = self.bind_select_list(returning_items)?;
+        let (returning_list, aliases) = self.bind_select_list(returning_items)?;
         if returning_list
-            .0
             .iter()
             .any(|expr| expr.has_agg_call() || expr.has_window_function())
         {
@@ -171,6 +174,15 @@ impl Binder {
                 "INSERT should not have agg/window".to_string(),
             )));
         }
+
+        let fields = returning_list
+            .iter()
+            .zip_eq(aliases.iter())
+            .map(|(s, a)| {
+                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
+                Ok(Field::with_name(s.return_type(), name))
+            })
+            .collect::<Result<Vec<Field>>>()?;
         // validate that query has a value for each target column, if target columns are used
         // create table t1 (v1 int, v2 int);
         // insert into t1 (v1, v2, v2) values (5, 6); // ...more target columns than values
@@ -204,6 +216,7 @@ impl Binder {
             source,
             cast_exprs,
             returning_list,
+            schema: Schema { fields },
         };
 
         Ok(insert)
