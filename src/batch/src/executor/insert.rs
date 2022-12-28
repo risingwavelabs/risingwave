@@ -101,15 +101,12 @@ impl InsertExecutor {
         let mut builder = DataChunkBuilder::new(data_types, 1024);
 
         let mut notifiers = Vec::new();
-        let mut returning_columns = Vec::new();
+        // let mut returning_columns = Vec::new();
 
         // Transform the data chunk to a stream chunk, then write to the source.
         let mut write_chunk = |chunk: DataChunk| -> Result<()> {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
-            if self.returning {
-                returning_columns.extend(columns.clone().into_iter());
-            }
 
             // No need to check for duplicate columns. This is already validated in binder.
             if !&self.column_indices.is_sorted() {
@@ -140,11 +137,17 @@ impl InsertExecutor {
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
             for chunk in builder.append_chunk(data_chunk) {
+                if self.returning {
+                    yield chunk.clone();
+                }
                 write_chunk(chunk)?;
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
+            if self.returning {
+                yield chunk.clone();
+            }
             write_chunk(chunk)?;
         }
 
@@ -164,10 +167,11 @@ impl InsertExecutor {
             let ret_chunk = DataChunk::new(vec![array.into()], 1);
 
             yield ret_chunk
-        } else {
-            let ret_chunk = DataChunk::new(returning_columns, rows_inserted);
-            yield ret_chunk
         }
+        // } else {
+        //     let ret_chunk = DataChunk::new(returning_columns, rows_inserted);
+        //     yield ret_chunk
+        // }
     }
 }
 
