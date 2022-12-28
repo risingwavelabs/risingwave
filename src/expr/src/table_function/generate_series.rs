@@ -114,7 +114,7 @@ where
         let ret_step = self.step.eval_checked(input)?;
         let arr_step: &S = ret_step.as_ref().into();
 
-        let bitmap = input.get_visibility_ref();
+        let bitmap = input.visibility();
         let mut output_arrays: Vec<ArrayRef> = vec![];
 
         match bitmap {

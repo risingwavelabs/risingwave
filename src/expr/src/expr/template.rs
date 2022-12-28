@@ -19,10 +19,7 @@ use std::sync::Arc;
 
 use itertools::{multizip, Itertools};
 use paste::paste;
-use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, StringWriter, Utf8Array, Utf8ArrayBuilder,
-    WrittenGuard,
-};
+use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, Utf8Array};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{option_as_scalar_ref, DataType, Datum, Scalar};
 
@@ -37,7 +34,7 @@ macro_rules! gen_eval {
                     let [<arr_ $arg:lower>]: &$arg = [<ret_ $arg:lower>].as_ref().into();
                 )*
 
-                let bitmap = data_chunk.get_visibility_ref();
+                let bitmap = data_chunk.visibility();
                 let mut output_array = <$OA as Array>::Builder::with_meta(data_chunk.capacity(), (&self.return_type).into());
                 Ok(Arc::new(match bitmap {
                     Some(bitmap) => {
@@ -100,12 +97,12 @@ macro_rules! eval_normal_row {
 }
 
 macro_rules! gen_expr_normal {
-    ($ty_name:ident, { $($arg:ident),* }, { $($lt:lifetime),* }) => {
+    ($ty_name:ident, { $($arg:ident),* }) => {
         paste! {
             pub struct $ty_name<
                 $($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )*) -> $crate::Result<OA::OwnedItem>,
+                F: Fn($($arg::RefItem<'_>, )*) -> $crate::Result<OA::OwnedItem>,
             > {
                 $([<expr_ $arg:lower>]: BoxedExpression,)*
                 return_type: DataType,
@@ -115,7 +112,7 @@ macro_rules! gen_expr_normal {
 
             impl<$($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )*) -> $crate::Result<OA::OwnedItem> + Sized + Sync + Send,
+                F: Fn($($arg::RefItem<'_>, )*) -> $crate::Result<OA::OwnedItem> + Sync + Send,
             > fmt::Debug for $ty_name<$($arg, )* OA, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($ty_name))
@@ -128,7 +125,7 @@ macro_rules! gen_expr_normal {
 
             impl<$($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )*) -> $crate::Result<OA::OwnedItem> + Sized + Sync + Send,
+                F: Fn($($arg::RefItem<'_>, )*) -> $crate::Result<OA::OwnedItem> + Sync + Send,
             > Expression for $ty_name<$($arg, )* OA, F>
             where
                 $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
@@ -143,7 +140,7 @@ macro_rules! gen_expr_normal {
 
             impl<$($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($($arg::RefItem<$lt>, )*) -> $crate::Result<OA::OwnedItem> + Sized + Sync + Send,
+                F: Fn($($arg::RefItem<'_>, )*) -> $crate::Result<OA::OwnedItem> + Sync + Send,
             > $ty_name<$($arg, )* OA, F> {
                 #[allow(dead_code)]
                 pub fn new(
@@ -167,8 +164,9 @@ macro_rules! eval_bytes {
     ($self:ident, $output_array:ident, $($arg:ident,)*) => {
         if let ($(Some($arg), )*) = ($($arg, )*) {
             {
-                let writer = $output_array.writer();
-                let _guard = ($self.func)($($arg, )* writer)?;
+                let mut writer = $output_array.writer().begin();
+                ($self.func)($($arg, )* &mut writer)?;
+                writer.finish();
             }
         } else {
             $output_array.append(None);
@@ -178,11 +176,9 @@ macro_rules! eval_bytes {
 macro_rules! eval_bytes_row {
     ($self:ident, $($arg:ident,)*) => {
         if let ($(Some($arg), )*) = ($($arg, )*) {
-            let mut builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let _guard = ($self.func)($($arg, )* writer)?;
-            let array = builder.finish();
-            array.into_single_value() // take the single value from the array
+            let mut writer = String::new();
+            ($self.func)($($arg, )* &mut writer)?;
+            Some(Box::<str>::from(writer))
         } else {
             None
         }
@@ -190,11 +186,11 @@ macro_rules! eval_bytes_row {
 }
 
 macro_rules! gen_expr_bytes {
-    ($ty_name:ident, { $($arg:ident),* }, { $($lt:lifetime),* }) => {
+    ($ty_name:ident, { $($arg:ident),* }) => {
         paste! {
             pub struct $ty_name<
                 $($arg: Array, )*
-                F: for<$($lt),*, 'writer> Fn($($arg::RefItem<$lt>, )* StringWriter<'writer>) -> $crate::Result<WrittenGuard>,
+                F: Fn($($arg::RefItem<'_>, )* &mut dyn std::fmt::Write) -> $crate::Result<()>,
             > {
                 $([<expr_ $arg:lower>]: BoxedExpression,)*
                 return_type: DataType,
@@ -203,7 +199,7 @@ macro_rules! gen_expr_bytes {
             }
 
             impl<$($arg: Array, )*
-                F: for<$($lt),*, 'writer> Fn($($arg::RefItem<$lt>, )* StringWriter<'writer>) -> $crate::Result<WrittenGuard> + Sized + Sync + Send,
+                F: Fn($($arg::RefItem<'_>, )* &mut dyn std::fmt::Write) -> $crate::Result<()> + Sync + Send,
             > fmt::Debug for $ty_name<$($arg, )* F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($ty_name))
@@ -215,7 +211,7 @@ macro_rules! gen_expr_bytes {
             }
 
             impl<$($arg: Array, )*
-                F: for<$($lt),*, 'writer> Fn($($arg::RefItem<$lt>, )* StringWriter<'writer>) -> $crate::Result<WrittenGuard> + Sized + Sync + Send,
+                F: Fn($($arg::RefItem<'_>, )* &mut dyn std::fmt::Write) -> $crate::Result<()> + Sync + Send,
             > Expression for $ty_name<$($arg, )* F>
             where
                 $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
@@ -228,7 +224,7 @@ macro_rules! gen_expr_bytes {
             }
 
             impl<$($arg: Array, )*
-                F: for<$($lt),*, 'writer> Fn($($arg::RefItem<$lt>, )* StringWriter<'writer>) -> $crate::Result<WrittenGuard> + Sized + Sync + Send,
+                F: Fn($($arg::RefItem<'_>, )* &mut dyn std::fmt::Write) -> $crate::Result<()> + Sync + Send,
             > $ty_name<$($arg, )* F> {
                 pub fn new(
                     $([<expr_ $arg:lower>]: BoxedExpression, )*
@@ -262,12 +258,12 @@ macro_rules! eval_nullable_row {
 }
 
 macro_rules! gen_expr_nullable {
-    ($ty_name:ident, { $($arg:ident),* }, { $($lt:lifetime),* }) => {
+    ($ty_name:ident, { $($arg:ident),* }) => {
         paste! {
             pub struct $ty_name<
                 $($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($(Option<$arg::RefItem<$lt>>, )*) -> $crate::Result<Option<OA::OwnedItem>>,
+                F: Fn($(Option<$arg::RefItem<'_>>, )*) -> $crate::Result<Option<OA::OwnedItem>>,
             > {
                 $([<expr_ $arg:lower>]: BoxedExpression,)*
                 return_type: DataType,
@@ -277,7 +273,7 @@ macro_rules! gen_expr_nullable {
 
             impl<$($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($(Option<$arg::RefItem<$lt>>, )*) -> $crate::Result<Option<OA::OwnedItem>> + Sized + Sync + Send,
+                F: Fn($(Option<$arg::RefItem<'_>>, )*) -> $crate::Result<Option<OA::OwnedItem>> + Sync + Send,
             > fmt::Debug for $ty_name<$($arg, )* OA, F> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     f.debug_struct(stringify!($ty_name))
@@ -290,7 +286,7 @@ macro_rules! gen_expr_nullable {
 
             impl<$($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($(Option<$arg::RefItem<$lt>>, )*) -> $crate::Result<Option<OA::OwnedItem>> + Sized + Sync + Send,
+                F: Fn($(Option<$arg::RefItem<'_>>, )*) -> $crate::Result<Option<OA::OwnedItem>> + Sync + Send,
             > Expression for $ty_name<$($arg, )* OA, F>
             where
                 $(for<'a> &'a $arg: std::convert::From<&'a ArrayImpl>,)*
@@ -305,7 +301,7 @@ macro_rules! gen_expr_nullable {
 
             impl<$($arg: Array, )*
                 OA: Array,
-                F: for<$($lt),*> Fn($(Option<$arg::RefItem<$lt>>, )*) -> $crate::Result<Option<OA::OwnedItem>> + Sized + Sync + Send,
+                F: Fn($(Option<$arg::RefItem<'_>>, )*) -> $crate::Result<Option<OA::OwnedItem>> + Sync + Send,
             > $ty_name<$($arg, )* OA, F> {
                 // Compile failed due to some GAT lifetime issues so make this field private.
                 // Check issues #742.
@@ -326,16 +322,16 @@ macro_rules! gen_expr_nullable {
     }
 }
 
-gen_expr_normal!(UnaryExpression, { IA1 }, { 'ia1 });
-gen_expr_normal!(BinaryExpression, { IA1, IA2 }, { 'ia1, 'ia2 });
-gen_expr_normal!(TernaryExpression, { IA1, IA2, IA3 }, { 'ia1, 'ia2, 'ia3 });
+gen_expr_normal!(UnaryExpression, { IA1 });
+gen_expr_normal!(BinaryExpression, { IA1, IA2 });
+gen_expr_normal!(TernaryExpression, { IA1, IA2, IA3 });
 
-gen_expr_bytes!(UnaryBytesExpression, { IA1 }, { 'ia1 });
-gen_expr_bytes!(BinaryBytesExpression, { IA1, IA2 }, { 'ia1, 'ia2 });
-gen_expr_bytes!(TernaryBytesExpression, { IA1, IA2, IA3 }, { 'ia1, 'ia2, 'ia3 });
-gen_expr_bytes!(QuaternaryBytesExpression, { IA1, IA2, IA3, IA4 }, { 'ia1, 'ia2, 'ia3, 'ia4 });
+gen_expr_bytes!(UnaryBytesExpression, { IA1 });
+gen_expr_bytes!(BinaryBytesExpression, { IA1, IA2 });
+gen_expr_bytes!(TernaryBytesExpression, { IA1, IA2, IA3 });
+gen_expr_bytes!(QuaternaryBytesExpression, { IA1, IA2, IA3, IA4 });
 
-gen_expr_nullable!(BinaryNullableExpression, { IA1, IA2 }, { 'ia1, 'ia2 });
+gen_expr_nullable!(BinaryNullableExpression, { IA1, IA2 });
 
 /// `for_all_cmp_types` helps in matching and casting types when building comparison expressions
 ///  such as <= or IS DISTINCT FROM.

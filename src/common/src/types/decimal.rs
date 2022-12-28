@@ -27,6 +27,7 @@ use super::to_text::ToText;
 use super::DataType;
 use crate::array::ArrayResult;
 use crate::error::Result as RwResult;
+use crate::types::ordered_float::OrderedFloat;
 use crate::types::Decimal::Normalized;
 
 #[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
@@ -42,13 +43,13 @@ pub enum Decimal {
 }
 
 impl ToText for Decimal {
-    fn to_text(&self) -> String {
-        self.to_string()
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        write!(f, "{self}")
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            DataType::Decimal => self.to_text(),
+            DataType::Decimal => self.write(f),
             _ => unreachable!(),
         }
     }
@@ -189,6 +190,11 @@ macro_rules! impl_try_from_float {
         impl core::convert::From<$from_ty> for $to_ty {
             fn from(value: $from_ty) -> Self {
                 $convert(value).expect("f32/f64 to decimal should not fail")
+            }
+        }
+        impl core::convert::From<OrderedFloat<$from_ty>> for $to_ty {
+            fn from(value: OrderedFloat<$from_ty>) -> Self {
+                $convert(value.0).expect("f32/f64 to decimal should not fail")
             }
         }
     };

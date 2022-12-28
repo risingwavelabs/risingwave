@@ -29,16 +29,19 @@
 //!   in the `new()` function.
 
 use std::fmt::{Debug, Display};
+use std::ops::Deref;
 use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
+use itertools::Itertools;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::batch_plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 use serde::Serialize;
+use smallvec::SmallVec;
 
 use self::generic::GenericPlanRef;
 use self::stream::StreamPlanRef;
@@ -70,7 +73,7 @@ pub trait PlanNode:
 impl_downcast!(PlanNode);
 pub type PlanRef = Rc<dyn PlanNode>;
 
-#[derive(Clone, Debug, Copy, Serialize)]
+#[derive(Clone, Debug, Copy, Serialize, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct PlanNodeId(pub i32);
 
 #[derive(Debug, PartialEq)]
@@ -78,6 +81,109 @@ pub enum Convention {
     Logical,
     Batch,
     Stream,
+}
+
+impl ColPrunable for PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        if let Some(logical_share) = self.as_logical_share() {
+            // `LogicalShare` can't clone, so we implement column pruning for `LogicalShare`
+            // here.
+            // Basically, we need to wait for all parents of `LogicalShare` to prune columns before
+            // we merge the required columns and prune.
+            let parent_has_pushed = ctx.add_required_cols(self.id(), required_cols.into());
+            if parent_has_pushed == ctx.get_parent_num(logical_share) {
+                let merge_require_cols = ctx
+                    .take_required_cols(self.id())
+                    .expect("must have required columns")
+                    .into_iter()
+                    .flat_map(|x| x.into_iter())
+                    .sorted()
+                    .dedup()
+                    .collect_vec();
+                let input: PlanRef = logical_share.input();
+                let input = input.prune_col(&merge_require_cols, ctx);
+                let exprs = logical_share
+                    .base
+                    .schema()
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, field)| {
+                        if let Some(pos) = merge_require_cols.iter().position(|x| *x == i) {
+                            ExprImpl::InputRef(Box::new(InputRef::new(
+                                pos,
+                                field.data_type.clone(),
+                            )))
+                        } else {
+                            ExprImpl::Literal(Box::new(Literal::new(None, field.data_type.clone())))
+                        }
+                    })
+                    .collect_vec();
+                let project = LogicalProject::create(input, exprs);
+                logical_share.replace_input(project);
+            }
+            let mapping =
+                ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
+            LogicalProject::with_mapping(self.clone(), mapping).into()
+        } else {
+            // Dispatch to dyn PlanNode instead of PlanRef.
+            let dyn_t = self.deref();
+            dyn_t.prune_col(required_cols, ctx)
+        }
+    }
+}
+
+impl PredicatePushdown for PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        if let Some(logical_share) = self.as_logical_share() {
+            // `LogicalShare` can't clone, so we implement predicate pushdown for `LogicalShare`
+            // here.
+            // Basically, we need to wait for all parents of `LogicalShare` to push down the
+            // predicate before we merge the predicates and pushdown.
+            let parent_has_pushed = ctx.add_predicate(self.id(), predicate.clone());
+            if parent_has_pushed == ctx.get_parent_num(logical_share) {
+                let merge_predicate = ctx
+                    .take_predicate(self.id())
+                    .expect("must have predicate")
+                    .into_iter()
+                    .reduce(|a, b| a.or(b))
+                    .unwrap();
+                let input: PlanRef = logical_share.input();
+                let input = input.predicate_pushdown(merge_predicate, ctx);
+                logical_share.replace_input(input);
+            }
+            LogicalFilter::create(self.clone(), predicate)
+        } else {
+            // Dispatch to dyn PlanNode instead of PlanRef.
+            let dyn_t = self.deref();
+            dyn_t.predicate_pushdown(predicate, ctx)
+        }
+    }
+}
+
+impl PlanTreeNode for PlanRef {
+    fn inputs(&self) -> SmallVec<[PlanRef; 2]> {
+        // Dispatch to dyn PlanNode instead of PlanRef.
+        let dyn_t = self.deref();
+        dyn_t.inputs()
+    }
+
+    fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
+        if let Some(logical_share) = self.clone().as_logical_share() {
+            assert_eq!(inputs.len(), 1);
+            // We can't clone `LogicalShare`, but only can replace input instead.
+            logical_share.replace_input(inputs[0].clone());
+            self.clone()
+        } else {
+            // Dispatch to dyn PlanNode instead of PlanRef.
+            let dyn_t = self.deref();
+            dyn_t.clone_with_inputs(inputs)
+        }
+    }
 }
 
 impl StreamPlanRef for PlanRef {
@@ -193,6 +299,9 @@ impl dyn PlanNode {
         if let Some(stream_index_scan) = self.as_stream_index_scan() {
             return stream_index_scan.adhoc_to_stream_prost();
         }
+        if let Some(stream_share) = self.as_stream_share() {
+            return stream_share.adhoc_to_stream_prost(state);
+        }
 
         let node = Some(self.to_stream_prost_body(state));
         let input = self
@@ -300,6 +409,7 @@ mod logical_over_agg;
 mod logical_project;
 mod logical_project_set;
 mod logical_scan;
+mod logical_share;
 mod logical_source;
 mod logical_table_function;
 mod logical_topn;
@@ -329,6 +439,7 @@ mod stream_source;
 mod stream_table_scan;
 mod stream_topn;
 
+mod stream_share;
 mod stream_union;
 pub mod utils;
 
@@ -370,6 +481,7 @@ pub use logical_over_agg::{LogicalOverAgg, PlanWindowFunction};
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
+pub use logical_share::LogicalShare;
 pub use logical_source::LogicalSource;
 pub use logical_table_function::LogicalTableFunction;
 pub use logical_topn::LogicalTopN;
@@ -394,14 +506,17 @@ pub use stream_now::StreamNow;
 pub use stream_project::StreamProject;
 pub use stream_project_set::StreamProjectSet;
 pub use stream_row_id_gen::StreamRowIdGen;
+pub use stream_share::StreamShare;
 pub use stream_sink::StreamSink;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 
+use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `for_all_plan_nodes` includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like `for_logical_plan_nodes`
@@ -439,6 +554,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, ProjectSet }
             , { Logical, Union }
             , { Logical, OverAgg }
+            , { Logical, Share }
             // , { Logical, Sort } we don't need a LogicalSort, just require the Order
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
@@ -487,6 +603,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, RowIdGen }
             , { Stream, Dml }
             , { Stream, Now }
+            , { Stream, Share }
         }
     };
 }
@@ -516,6 +633,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, ProjectSet }
             , { Logical, Union }
             , { Logical, OverAgg }
+            , { Logical, Share }
             // , { Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we don't support that, we don't need LogicalSort, just require the Order at the top of query
         }
@@ -583,6 +701,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, RowIdGen }
             , { Stream, Dml }
             , { Stream, Now }
+            , { Stream, Share }
         }
     };
 }
