@@ -38,7 +38,7 @@ const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
 const ERROR_INT_TO_TIMESTAMP: &str = "Can't cast negative integer to timestamp";
-const PARSE_ERROR_STR_TO_TIMESTAMPZ: &str = concat!(
+const PARSE_ERROR_STR_TO_TIMESTAMPTZ: &str = concat!(
     "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)"
     , "\nFor example: '2021-04-01 00:00:00+00:00'"
 );
@@ -125,7 +125,7 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
 /// ```
 #[inline]
 pub fn i64_to_timestamp(t: i64) -> Result<NaiveDateTimeWrapper> {
-    let us = i64_to_timestampz(t)?;
+    let us = i64_to_timestamptz(t)?;
     Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
         us / 1_000_000,
         (us % 1_000_000) as u32 * 1000,
@@ -153,10 +153,10 @@ fn parse_naive_time(s: &str) -> Result<NaiveTime> {
 }
 
 #[inline(always)]
-pub fn str_to_timestampz(elem: &str) -> Result<i64> {
+pub fn str_to_timestamptz(elem: &str) -> Result<i64> {
     elem.parse::<DateTime<Utc>>()
         .map(|ret| ret.timestamp_micros())
-        .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ.into()))
+        .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPTZ.into()))
 }
 
 /// Converts UNIX epoch time to timestamp in microseconds.
@@ -170,7 +170,7 @@ pub fn str_to_timestampz(elem: &str) -> Result<i64> {
 ///
 /// This would cause no problem for timestamp in [1973-03-03 09:46:40, 5138-11-16 09:46:40).
 #[inline]
-pub fn i64_to_timestampz(t: i64) -> Result<i64> {
+pub fn i64_to_timestamptz(t: i64) -> Result<i64> {
     const E11: i64 = 100_000_000_000;
     const E14: i64 = 100_000_000_000_000;
     const E17: i64 = 100_000_000_000_000_000;
@@ -249,8 +249,8 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-pub fn timestampz_to_utc_string(elem: i64, mut writer: &mut dyn Write) -> Result<()> {
-    elem.write_with_type(&DataType::Timestampz, &mut writer)
+pub fn timestamptz_to_utc_string(elem: i64, mut writer: &mut dyn Write) -> Result<()> {
+    elem.write_with_type(&DataType::Timestamptz, &mut writer)
         .unwrap();
     Ok(())
 }
@@ -418,7 +418,7 @@ macro_rules! for_all_cast_variants {
             { varchar, time, str_to_time, false },
             { varchar, interval, str_parse, false },
             { varchar, timestamp, str_to_timestamp, false },
-            { varchar, timestampz, str_to_timestampz, false },
+            { varchar, timestamptz, str_to_timestamptz, false },
             { varchar, int16, str_parse, false },
             { varchar, int32, str_parse, false },
             { varchar, int64, str_parse, false },
@@ -440,7 +440,7 @@ macro_rules! for_all_cast_variants {
             { interval, varchar, general_to_text, false },
             { date, varchar, general_to_text, false },
             { timestamp, varchar, general_to_text, false },
-            { timestampz, varchar, timestampz_to_utc_string, false },
+            { timestamptz, varchar, timestamptz_to_utc_string, false },
             { list, varchar, |x, w| general_to_text(x, w), false },
 
             { boolean, int32, try_cast, false },
@@ -687,8 +687,8 @@ mod tests {
     #[test]
     fn parse_str() {
         assert_eq!(
-            str_to_timestampz("2022-08-03 10:34:02Z").unwrap(),
-            str_to_timestampz("2022-08-03 02:34:02-08:00").unwrap()
+            str_to_timestamptz("2022-08-03 10:34:02Z").unwrap(),
+            str_to_timestamptz("2022-08-03 02:34:02-08:00").unwrap()
         );
         str_to_timestamp("1999-01-08 04:02").unwrap();
         str_to_timestamp("1999-01-08 04:05:06").unwrap();
@@ -701,10 +701,10 @@ mod tests {
         str_to_time("04:05:06").unwrap();
 
         assert_eq!(
-            str_to_timestampz("1999-01-08 04:05:06")
+            str_to_timestamptz("1999-01-08 04:05:06")
                 .unwrap_err()
                 .to_string(),
-            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ.into()).to_string()
+            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPTZ.into()).to_string()
         );
         assert_eq!(
             str_to_timestamp("1999-01-08 04:05:06AA")
@@ -1002,21 +1002,21 @@ mod tests {
     }
 
     #[test]
-    fn test_timestampz() {
+    fn test_timestamptz() {
         let str1 = "0001-11-15 15:35:40.999999+08:00";
-        let timestampz1 = str_to_timestampz(str1).unwrap();
-        assert_eq!(timestampz1, -62108094259000001);
+        let timestamptz1 = str_to_timestamptz(str1).unwrap();
+        assert_eq!(timestamptz1, -62108094259000001);
 
         let mut writer = String::new();
-        timestampz_to_utc_string(timestampz1, &mut writer).unwrap();
+        timestamptz_to_utc_string(timestamptz1, &mut writer).unwrap();
         assert_eq!(writer, "0001-11-15 07:35:40.999999+00:00");
 
         let str2 = "1969-12-31 23:59:59.999999+00:00";
-        let timestampz2 = str_to_timestampz(str2).unwrap();
-        assert_eq!(timestampz2, -1);
+        let timestamptz2 = str_to_timestamptz(str2).unwrap();
+        assert_eq!(timestamptz2, -1);
 
         let mut writer = String::new();
-        timestampz_to_utc_string(timestampz2, &mut writer).unwrap();
+        timestamptz_to_utc_string(timestamptz2, &mut writer).unwrap();
         assert_eq!(writer, str2);
     }
 }
