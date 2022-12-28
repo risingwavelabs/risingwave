@@ -21,8 +21,8 @@ use risingwave_pb::plan_common::JoinType;
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalJoin, LogicalProject, LogicalScan, PlanTreeNodeBinary,
-    PlanTreeNodeUnary,
+    LogicalAgg, LogicalApply, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
+    PlanTreeNodeBinary, PlanTreeNodeUnary,
 };
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
@@ -51,7 +51,8 @@ pub struct TranslateApplyRule {}
 impl Rule for TranslateApplyRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
-        let left = apply.left();
+        let mut left: PlanRef = apply.left();
+        let right: PlanRef = apply.right();
         let apply_left_len = left.schema().len();
         let correlated_indices = apply.correlated_indices();
 
@@ -92,10 +93,14 @@ impl Rule for TranslateApplyRule {
         } else {
             // The left side of the apply is not SPJ. We need to use the general way to calculate
             // the domain. Distinct + Project + The Left of Apply
+
+            // Use Share
+            let logical_share = LogicalShare::new(left);
+            left = logical_share.into();
             let distinct = LogicalAgg::new(
                 vec![],
                 correlated_indices.clone().into_iter().collect_vec(),
-                left,
+                left.clone(),
             );
             distinct.into()
         };
@@ -118,7 +123,8 @@ impl Rule for TranslateApplyRule {
             })
             .collect::<Vec<ExprImpl>>();
 
-        let new_node = apply.clone().translate_apply(domain, eq_predicates);
+        let new_apply = apply.clone_with_left_right(left, right);
+        let new_node = new_apply.translate_apply(domain, eq_predicates);
         Some(new_node)
     }
 }

@@ -75,6 +75,10 @@ mod agg_project_merge_rule;
 pub use agg_project_merge_rule::*;
 mod union_merge_rule;
 pub use union_merge_rule::*;
+mod dag_to_tree_rule;
+pub use dag_to_tree_rule::*;
+mod apply_share_eliminate_rule;
+pub use apply_share_eliminate_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -85,6 +89,7 @@ macro_rules! for_all_rules {
             ,{ApplyProjectTransposeRule}
             ,{ApplyScanRule}
             ,{ApplyJoinTransposeRule}
+            ,{ApplyShareEliminateRule}
             ,{ApplyToJoinRule}
             ,{MaxOneRowEliminateRule}
             ,{DistinctAggRule}
@@ -103,6 +108,7 @@ macro_rules! for_all_rules {
             ,{UnionToDistinctRule}
             ,{AggProjectMergeRule}
             ,{UnionMergeRule}
+            ,{DagToTreeRule}
         }
     };
 }

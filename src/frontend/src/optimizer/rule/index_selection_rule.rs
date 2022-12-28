@@ -66,7 +66,8 @@ use crate::expr::{
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
-    LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary, PredicatePushdown,
+    ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary,
+    PredicatePushdown, PredicatePushdownContext,
 };
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
@@ -214,15 +215,19 @@ impl IndexSelectionRule {
             .chain(new_predicate.into_iter())
             .collect_vec();
         let on = Condition { conjunctions };
-        let join = LogicalJoin::new(
+        let join: PlanRef = LogicalJoin::new(
             index_scan.into(),
             primary_table_scan.into(),
             JoinType::Inner,
             on,
-        );
+        )
+        .into();
 
         // 2. push down predicate, so we can calculate the cost of index lookup
-        let join_ref = join.predicate_pushdown(Condition::true_cond());
+        let join_ref = join.predicate_pushdown(
+            Condition::true_cond(),
+            &mut PredicatePushdownContext::new(join.clone()),
+        );
 
         let join_with_predicate_push_down =
             join_ref.as_logical_join().expect("must be a logical join");
@@ -246,6 +251,7 @@ impl IndexSelectionRule {
                 .iter()
                 .map(|&col_idx| col_idx + offset)
                 .collect_vec(),
+            &mut ColumnPruningContext::new(join_ref.clone()),
         );
 
         (lookup_join, lookup_cost)
@@ -304,10 +310,14 @@ impl IndexSelectionRule {
             .collect_vec();
 
         let on = Condition { conjunctions };
-        let join = LogicalJoin::new(index_access, primary_table_scan.into(), JoinType::Inner, on);
+        let join: PlanRef =
+            LogicalJoin::new(index_access, primary_table_scan.into(), JoinType::Inner, on).into();
 
         // 3 push down predicate
-        let join_ref = join.predicate_pushdown(Condition::true_cond());
+        let join_ref = join.predicate_pushdown(
+            Condition::true_cond(),
+            &mut PredicatePushdownContext::new(join.clone()),
+        );
 
         // 4. keep the same schema with original logical_scan
         let scan_output_col_idx = logical_scan.output_col_idx();
@@ -316,6 +326,7 @@ impl IndexSelectionRule {
                 .iter()
                 .map(|&col_idx| col_idx + index_access_len)
                 .collect_vec(),
+            &mut ColumnPruningContext::new(join_ref.clone()),
         );
 
         Some((
@@ -696,7 +707,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Date => size_of::<NaiveDateWrapper>(),
             DataType::Time => size_of::<NaiveTimeWrapper>(),
             DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
-            DataType::Timestampz => size_of::<i64>(),
+            DataType::Timestamptz => size_of::<i64>(),
             DataType::Interval => size_of::<IntervalUnit>(),
             DataType::Varchar => 20,
             DataType::Bytea => 20,

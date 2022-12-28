@@ -12,16 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Expr, ObjectName};
 
-use super::{Binder, BoundBaseTable, BoundTableSource};
+use super::{Binder, BoundBaseTable};
+use crate::catalog::TableId;
 use crate::expr::ExprImpl;
+use crate::user::UserId;
 
 #[derive(Debug)]
 pub struct BoundDelete {
-    /// Used for injecting deletion chunks to the source.
-    pub table_source: BoundTableSource,
+    /// Id of the table to perform deleting.
+    pub table_id: TableId,
+
+    /// Name of the table to perform deleting.
+    pub table_name: String,
+
+    /// Owner of the table to perform deleting.
+    pub owner: UserId,
 
     /// Used for scanning the records to delete with the `selection`.
     pub table: BoundBaseTable,
@@ -32,25 +40,24 @@ pub struct BoundDelete {
 impl Binder {
     pub(super) fn bind_delete(
         &mut self,
-        source_name: ObjectName,
+        name: ObjectName,
         selection: Option<Expr>,
     ) -> Result<BoundDelete> {
-        let (schema_name, table_name) =
-            Self::resolve_schema_qualified_name(&self.db_name, source_name)?;
+        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
         let schema_name = schema_name.as_deref();
-        let table_source = self.bind_table_source(schema_name, &table_name)?;
-        if table_source.append_only {
-            return Err(ErrorCode::BindError(
-                "Append-only table source doesn't support delete".to_string(),
-            )
-            .into());
-        }
+
+        let table_catalog = self.resolve_dml_table(schema_name, &table_name, false)?;
+        let table_id = table_catalog.id;
+        let owner = table_catalog.owner;
+
         let table = self.bind_table(schema_name, &table_name, None)?;
-        let delete = BoundDelete {
-            table_source,
+
+        Ok(BoundDelete {
+            table_id,
+            table_name,
+            owner,
             table,
             selection: selection.map(|expr| self.bind_expr(expr)).transpose()?,
-        };
-        Ok(delete)
+        })
     }
 }

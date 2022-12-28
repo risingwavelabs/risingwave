@@ -231,13 +231,15 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn create_table(
         &self,
-        source: ProstSource,
+        source: Option<ProstSource>,
         mut table: ProstTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
-        let source_id = self.create_source_inner(source)?;
-        table.optional_associated_source_id =
-            Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
+        if let Some(source) = source {
+            let source_id = self.create_source_inner(source)?;
+            table.optional_associated_source_id =
+                Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
+        }
         self.create_materialized_view(table, graph).await?;
         Ok(())
     }
@@ -270,9 +272,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
-        let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
-        self.drop_table_or_source_id(table_id.table_id);
+    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
+        if let Some(source_id) = source_id {
+            self.drop_table_or_source_id(source_id);
+        }
+        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
         let indexes =
             self.catalog
                 .read()
@@ -283,9 +287,11 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog
             .write()
             .drop_table(database_id, schema_id, table_id);
-        self.catalog
-            .write()
-            .drop_source(database_id, schema_id, source_id);
+        if let Some(source_id) = source_id {
+            self.catalog
+                .write()
+                .drop_source(database_id, schema_id, source_id);
+        }
         Ok(())
     }
 

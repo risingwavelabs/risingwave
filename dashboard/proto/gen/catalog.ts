@@ -20,13 +20,6 @@ export interface ColumnIndex {
   index: number;
 }
 
-export interface SourceInfo {
-  sourceInfo?: { $case: "streamSource"; streamSource: StreamSourceInfo } | {
-    $case: "tableSource";
-    tableSource: TableSourceInfo;
-  };
-}
-
 export interface StreamSourceInfo {
   rowFormat: RowFormatType;
   rowSchemaLocation: string;
@@ -34,9 +27,6 @@ export interface StreamSourceInfo {
   protoMessageName: string;
   csvDelimiter: number;
   csvHasHeader: boolean;
-}
-
-export interface TableSourceInfo {
 }
 
 export interface Source {
@@ -60,11 +50,8 @@ export interface Source {
   pkColumnIds: number[];
   /** Properties specified by the user in WITH clause. */
   properties: { [key: string]: string };
-  info?: { $case: "streamSource"; streamSource: StreamSourceInfo } | {
-    $case: "tableSource";
-    tableSource: TableSourceInfo;
-  };
   owner: number;
+  info: StreamSourceInfo | undefined;
 }
 
 export interface Source_PropertiesEntry {
@@ -282,58 +269,6 @@ export const ColumnIndex = {
   },
 };
 
-function createBaseSourceInfo(): SourceInfo {
-  return { sourceInfo: undefined };
-}
-
-export const SourceInfo = {
-  fromJSON(object: any): SourceInfo {
-    return {
-      sourceInfo: isSet(object.streamSource)
-        ? { $case: "streamSource", streamSource: StreamSourceInfo.fromJSON(object.streamSource) }
-        : isSet(object.tableSource)
-        ? { $case: "tableSource", tableSource: TableSourceInfo.fromJSON(object.tableSource) }
-        : undefined,
-    };
-  },
-
-  toJSON(message: SourceInfo): unknown {
-    const obj: any = {};
-    message.sourceInfo?.$case === "streamSource" && (obj.streamSource = message.sourceInfo?.streamSource
-      ? StreamSourceInfo.toJSON(message.sourceInfo?.streamSource)
-      : undefined);
-    message.sourceInfo?.$case === "tableSource" && (obj.tableSource = message.sourceInfo?.tableSource
-      ? TableSourceInfo.toJSON(message.sourceInfo?.tableSource)
-      : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<SourceInfo>, I>>(object: I): SourceInfo {
-    const message = createBaseSourceInfo();
-    if (
-      object.sourceInfo?.$case === "streamSource" &&
-      object.sourceInfo?.streamSource !== undefined &&
-      object.sourceInfo?.streamSource !== null
-    ) {
-      message.sourceInfo = {
-        $case: "streamSource",
-        streamSource: StreamSourceInfo.fromPartial(object.sourceInfo.streamSource),
-      };
-    }
-    if (
-      object.sourceInfo?.$case === "tableSource" &&
-      object.sourceInfo?.tableSource !== undefined &&
-      object.sourceInfo?.tableSource !== null
-    ) {
-      message.sourceInfo = {
-        $case: "tableSource",
-        tableSource: TableSourceInfo.fromPartial(object.sourceInfo.tableSource),
-      };
-    }
-    return message;
-  },
-};
-
 function createBaseStreamSourceInfo(): StreamSourceInfo {
   return {
     rowFormat: RowFormatType.ROW_UNSPECIFIED,
@@ -380,26 +315,6 @@ export const StreamSourceInfo = {
   },
 };
 
-function createBaseTableSourceInfo(): TableSourceInfo {
-  return {};
-}
-
-export const TableSourceInfo = {
-  fromJSON(_: any): TableSourceInfo {
-    return {};
-  },
-
-  toJSON(_: TableSourceInfo): unknown {
-    const obj: any = {};
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<TableSourceInfo>, I>>(_: I): TableSourceInfo {
-    const message = createBaseTableSourceInfo();
-    return message;
-  },
-};
-
 function createBaseSource(): Source {
   return {
     id: 0,
@@ -410,8 +325,8 @@ function createBaseSource(): Source {
     columns: [],
     pkColumnIds: [],
     properties: {},
-    info: undefined,
     owner: 0,
+    info: undefined,
   };
 }
 
@@ -431,12 +346,8 @@ export const Source = {
           return acc;
         }, {})
         : {},
-      info: isSet(object.streamSource)
-        ? { $case: "streamSource", streamSource: StreamSourceInfo.fromJSON(object.streamSource) }
-        : isSet(object.tableSource)
-        ? { $case: "tableSource", tableSource: TableSourceInfo.fromJSON(object.tableSource) }
-        : undefined,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
+      info: isSet(object.info) ? StreamSourceInfo.fromJSON(object.info) : undefined,
     };
   },
 
@@ -464,11 +375,8 @@ export const Source = {
         obj.properties[k] = v;
       });
     }
-    message.info?.$case === "streamSource" &&
-      (obj.streamSource = message.info?.streamSource ? StreamSourceInfo.toJSON(message.info?.streamSource) : undefined);
-    message.info?.$case === "tableSource" &&
-      (obj.tableSource = message.info?.tableSource ? TableSourceInfo.toJSON(message.info?.tableSource) : undefined);
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
+    message.info !== undefined && (obj.info = message.info ? StreamSourceInfo.toJSON(message.info) : undefined);
     return obj;
   },
 
@@ -492,21 +400,10 @@ export const Source = {
       },
       {},
     );
-    if (
-      object.info?.$case === "streamSource" &&
-      object.info?.streamSource !== undefined &&
-      object.info?.streamSource !== null
-    ) {
-      message.info = { $case: "streamSource", streamSource: StreamSourceInfo.fromPartial(object.info.streamSource) };
-    }
-    if (
-      object.info?.$case === "tableSource" &&
-      object.info?.tableSource !== undefined &&
-      object.info?.tableSource !== null
-    ) {
-      message.info = { $case: "tableSource", tableSource: TableSourceInfo.fromPartial(object.info.tableSource) };
-    }
     message.owner = object.owner ?? 0;
+    message.info = (object.info !== undefined && object.info !== null)
+      ? StreamSourceInfo.fromPartial(object.info)
+      : undefined;
     return message;
   },
 };

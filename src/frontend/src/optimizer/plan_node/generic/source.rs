@@ -15,44 +15,43 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 
 use super::super::utils::TableCatalogBuilder;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::ColumnId;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::TableCatalog;
 
 /// [`Source`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
 pub struct Source {
-    pub catalog: Rc<SourceCatalog>,
+    /// If there is an external stream source, `catalog` will be `Some`. Otherwise, it is `None`.
+    pub catalog: Option<Rc<SourceCatalog>>,
+    /// NOTE(Yuanxin): Here we store column descriptions, pk column ids, and row id index for plan
+    /// generating, even if there is no external stream source.
+    pub column_descs: Vec<ColumnDesc>,
+    pub pk_col_ids: Vec<ColumnId>,
+    pub row_id_index: Option<usize>,
+    /// Whether the "SourceNode" should generate the row id column for append only source
+    pub gen_row_id: bool,
 }
 
 impl GenericPlanNode for Source {
     fn schema(&self) -> Schema {
-        let fields = self
-            .catalog
-            .columns
-            .iter()
-            .map(|c| (&c.column_desc).into())
-            .collect();
+        let fields = self.column_descs.iter().map(Into::into).collect();
         Schema { fields }
     }
 
     fn logical_pk(&self) -> Option<Vec<usize>> {
         let mut id_to_idx = HashMap::new();
-        self.catalog
-            .columns
-            .iter()
-            .enumerate()
-            .for_each(|(idx, c)| {
-                id_to_idx.insert(c.column_id(), idx);
-            });
-        self.catalog
-            .pk_col_ids
+        self.column_descs.iter().enumerate().for_each(|(idx, c)| {
+            id_to_idx.insert(c.column_id, idx);
+        });
+        self.pk_col_ids
             .iter()
             .map(|c| id_to_idx.get(c).copied())
             .collect::<Option<Vec<_>>>()

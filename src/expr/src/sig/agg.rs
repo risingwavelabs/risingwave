@@ -76,7 +76,7 @@ static AGG_FUNC_SIG_MAP: LazyLock<AggFuncSigMap> = LazyLock::new(|| {
         T::Varchar,
         T::Date,
         T::Timestamp,
-        T::Timestampz,
+        T::Timestamptz,
         T::Time,
         T::Interval,
     ];

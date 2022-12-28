@@ -19,7 +19,7 @@ use futures::future::ready;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
-use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp, str_to_timestampz};
+use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp, str_to_timestamptz};
 
 use crate::{ByteStreamSourceParser, ParseFuture, SourceStreamChunkRowWriter, WriteGuard};
 
@@ -177,7 +177,7 @@ fn parse_string(dtype: &DataType, v: String) -> Result<Datum> {
         DataType::Date => str_to_date(v.as_str())?.into(),
         DataType::Time => str_to_date(v.as_str())?.into(),
         DataType::Timestamp => str_to_timestamp(v.as_str())?.into(),
-        DataType::Timestampz => str_to_timestampz(v.as_str())?.into(),
+        DataType::Timestamptz => str_to_timestamptz(v.as_str())?.into(),
         _ => {
             return Err(RwError::from(InternalError(format!(
                 "CSV data source not support type {}",

@@ -121,25 +121,28 @@ export interface DropViewResponse {
   version: number;
 }
 
-export interface CreateMaterializedSourceRequest {
+export interface CreateTableRequest {
+  /**
+   * An optional field and will be `Some` for tables with an external connector. If so, the table
+   * will subscribe to the changes of the external connector and materialize the data.
+   */
   source: Source | undefined;
   materializedView: Table | undefined;
   fragmentGraph: StreamFragmentGraph | undefined;
 }
 
-export interface CreateMaterializedSourceResponse {
+export interface CreateTableResponse {
   status: Status | undefined;
-  sourceId: number;
   tableId: number;
   version: number;
 }
 
-export interface DropMaterializedSourceRequest {
-  sourceId: number;
+export interface DropTableRequest {
+  sourceId?: { $case: "id"; id: number };
   tableId: number;
 }
 
-export interface DropMaterializedSourceResponse {
+export interface DropTableResponse {
   status: Status | undefined;
   version: number;
 }
@@ -852,12 +855,12 @@ export const DropViewResponse = {
   },
 };
 
-function createBaseCreateMaterializedSourceRequest(): CreateMaterializedSourceRequest {
+function createBaseCreateTableRequest(): CreateTableRequest {
   return { source: undefined, materializedView: undefined, fragmentGraph: undefined };
 }
 
-export const CreateMaterializedSourceRequest = {
-  fromJSON(object: any): CreateMaterializedSourceRequest {
+export const CreateTableRequest = {
+  fromJSON(object: any): CreateTableRequest {
     return {
       source: isSet(object.source) ? Source.fromJSON(object.source) : undefined,
       materializedView: isSet(object.materializedView) ? Table.fromJSON(object.materializedView) : undefined,
@@ -865,7 +868,7 @@ export const CreateMaterializedSourceRequest = {
     };
   },
 
-  toJSON(message: CreateMaterializedSourceRequest): unknown {
+  toJSON(message: CreateTableRequest): unknown {
     const obj: any = {};
     message.source !== undefined && (obj.source = message.source ? Source.toJSON(message.source) : undefined);
     message.materializedView !== undefined &&
@@ -875,10 +878,8 @@ export const CreateMaterializedSourceRequest = {
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<CreateMaterializedSourceRequest>, I>>(
-    object: I,
-  ): CreateMaterializedSourceRequest {
-    const message = createBaseCreateMaterializedSourceRequest();
+  fromPartial<I extends Exact<DeepPartial<CreateTableRequest>, I>>(object: I): CreateTableRequest {
+    const message = createBaseCreateTableRequest();
     message.source = (object.source !== undefined && object.source !== null)
       ? Source.fromPartial(object.source)
       : undefined;
@@ -892,95 +893,88 @@ export const CreateMaterializedSourceRequest = {
   },
 };
 
-function createBaseCreateMaterializedSourceResponse(): CreateMaterializedSourceResponse {
-  return { status: undefined, sourceId: 0, tableId: 0, version: 0 };
+function createBaseCreateTableResponse(): CreateTableResponse {
+  return { status: undefined, tableId: 0, version: 0 };
 }
 
-export const CreateMaterializedSourceResponse = {
-  fromJSON(object: any): CreateMaterializedSourceResponse {
+export const CreateTableResponse = {
+  fromJSON(object: any): CreateTableResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
-      sourceId: isSet(object.sourceId) ? Number(object.sourceId) : 0,
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
       version: isSet(object.version) ? Number(object.version) : 0,
     };
   },
 
-  toJSON(message: CreateMaterializedSourceResponse): unknown {
+  toJSON(message: CreateTableResponse): unknown {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
-    message.sourceId !== undefined && (obj.sourceId = Math.round(message.sourceId));
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
     message.version !== undefined && (obj.version = Math.round(message.version));
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<CreateMaterializedSourceResponse>, I>>(
-    object: I,
-  ): CreateMaterializedSourceResponse {
-    const message = createBaseCreateMaterializedSourceResponse();
+  fromPartial<I extends Exact<DeepPartial<CreateTableResponse>, I>>(object: I): CreateTableResponse {
+    const message = createBaseCreateTableResponse();
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;
-    message.sourceId = object.sourceId ?? 0;
     message.tableId = object.tableId ?? 0;
     message.version = object.version ?? 0;
     return message;
   },
 };
 
-function createBaseDropMaterializedSourceRequest(): DropMaterializedSourceRequest {
-  return { sourceId: 0, tableId: 0 };
+function createBaseDropTableRequest(): DropTableRequest {
+  return { sourceId: undefined, tableId: 0 };
 }
 
-export const DropMaterializedSourceRequest = {
-  fromJSON(object: any): DropMaterializedSourceRequest {
+export const DropTableRequest = {
+  fromJSON(object: any): DropTableRequest {
     return {
-      sourceId: isSet(object.sourceId) ? Number(object.sourceId) : 0,
+      sourceId: isSet(object.id) ? { $case: "id", id: Number(object.id) } : undefined,
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
     };
   },
 
-  toJSON(message: DropMaterializedSourceRequest): unknown {
+  toJSON(message: DropTableRequest): unknown {
     const obj: any = {};
-    message.sourceId !== undefined && (obj.sourceId = Math.round(message.sourceId));
+    message.sourceId?.$case === "id" && (obj.id = Math.round(message.sourceId?.id));
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<DropMaterializedSourceRequest>, I>>(
-    object: I,
-  ): DropMaterializedSourceRequest {
-    const message = createBaseDropMaterializedSourceRequest();
-    message.sourceId = object.sourceId ?? 0;
+  fromPartial<I extends Exact<DeepPartial<DropTableRequest>, I>>(object: I): DropTableRequest {
+    const message = createBaseDropTableRequest();
+    if (object.sourceId?.$case === "id" && object.sourceId?.id !== undefined && object.sourceId?.id !== null) {
+      message.sourceId = { $case: "id", id: object.sourceId.id };
+    }
     message.tableId = object.tableId ?? 0;
     return message;
   },
 };
 
-function createBaseDropMaterializedSourceResponse(): DropMaterializedSourceResponse {
+function createBaseDropTableResponse(): DropTableResponse {
   return { status: undefined, version: 0 };
 }
 
-export const DropMaterializedSourceResponse = {
-  fromJSON(object: any): DropMaterializedSourceResponse {
+export const DropTableResponse = {
+  fromJSON(object: any): DropTableResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
       version: isSet(object.version) ? Number(object.version) : 0,
     };
   },
 
-  toJSON(message: DropMaterializedSourceResponse): unknown {
+  toJSON(message: DropTableResponse): unknown {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.version !== undefined && (obj.version = Math.round(message.version));
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<DropMaterializedSourceResponse>, I>>(
-    object: I,
-  ): DropMaterializedSourceResponse {
-    const message = createBaseDropMaterializedSourceResponse();
+  fromPartial<I extends Exact<DeepPartial<DropTableResponse>, I>>(object: I): DropTableResponse {
+    const message = createBaseDropTableResponse();
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;

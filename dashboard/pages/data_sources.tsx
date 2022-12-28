@@ -84,7 +84,7 @@ export default function DataSources() {
                   <Td>{source.id}</Td>
                   <Td>{source.name}</Td>
                   <Td>{source.owner}</Td>
-                  <Td>{source.info?.$case}</Td>
+                  <Td>{source.info}</Td>
                   <Td>
                     <Button
                       size="sm"
