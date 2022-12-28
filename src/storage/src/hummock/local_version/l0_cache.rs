@@ -12,50 +12,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Debug;
 use std::future::Future;
 use std::marker::PhantomData;
-use std::ops::Bound;
-use std::sync::Arc;
 
 use bytes::Bytes;
-use crossbeam_skiplist::SkipMap;
-use ouroboros::self_referencing;
-use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey};
+use risingwave_common::skiplist::{IterRef, Skiplist};
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_pb::hummock::Level;
 
-use crate::hummock::iterator::{HummockIterator, HummockIteratorDirection};
+use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SstableIterator};
+use crate::hummock::HummockResult;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LevelZeroCache {
-    pub cache: Arc<SkipMap<FullKey<Vec<u8>>, HummockValue<Bytes>>>,
+    pub cache: Skiplist<FullKey<Vec<u8>>, HummockValue<Bytes>>,
     pub level: Level,
+}
+
+impl Debug for LevelZeroCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LevelZeroCache")
+            .field("level", &self.level)
+            .finish()
+    }
 }
 
 impl LevelZeroCache {
     pub fn iter<D: HummockIteratorDirection>(
         &self,
-        lower: Bound<FullKey<Vec<u8>>>,
-        upper: Bound<FullKey<Vec<u8>>>,
         committed_epoch: u64,
     ) -> LevelZeroCacheIterator<D> {
-        let mut iter = LevelZeroCacheIteratorBuilder {
-            map: self.cache.clone(),
-            iter_builder: |map| map.range((lower, upper)),
+        LevelZeroCacheIterator::<D> {
+            iter: self.cache.iter(),
             borrow_phantom: PhantomData,
             committed_epoch,
-            item: (
-                FullKey::new(TableId::new(0), TableKey(vec![]), 0),
-                HummockValue::Delete,
-            ),
         }
-        .build();
-        let entry =
-            iter.with_iter_mut(|iter| LevelZeroCacheIterator::<D>::entry_to_item(iter.next()));
-        iter.with_mut(|x| *x.item = entry);
-        iter
     }
 }
 
@@ -71,38 +64,10 @@ pub struct LevelZeroData {
     pub sub_levels: Vec<Level>,
 }
 
-type SkipMapRangeIter<'a> = crossbeam_skiplist::map::Range<
-    'a,
-    FullKey<Vec<u8>>,
-    (Bound<FullKey<Vec<u8>>>, Bound<FullKey<Vec<u8>>>),
-    FullKey<Vec<u8>>,
-    HummockValue<Bytes>,
->;
-
-#[self_referencing]
 pub struct LevelZeroCacheIterator<D: HummockIteratorDirection> {
-    map: Arc<SkipMap<FullKey<Vec<u8>>, HummockValue<Bytes>>>,
-    #[borrows(map)]
-    #[not_covariant]
-    iter: SkipMapRangeIter<'this>,
+    iter: IterRef<FullKey<Vec<u8>>, HummockValue<Bytes>>,
     committed_epoch: u64,
-    item: (FullKey<Vec<u8>>, HummockValue<Bytes>),
     borrow_phantom: PhantomData<D>,
-}
-
-impl<D: HummockIteratorDirection> LevelZeroCacheIterator<D> {
-    fn entry_to_item(
-        entry: Option<crossbeam_skiplist::map::Entry<'_, FullKey<Vec<u8>>, HummockValue<Bytes>>>,
-    ) -> (FullKey<Vec<u8>>, HummockValue<Bytes>) {
-        entry
-            .map(|x| (x.key().clone(), x.value().clone()))
-            .unwrap_or_else(|| {
-                (
-                    FullKey::new(TableId::new(0), TableKey(vec![]), 0),
-                    HummockValue::Delete,
-                )
-            })
-    }
 }
 
 impl<D: HummockIteratorDirection> HummockIterator for LevelZeroCacheIterator<D> {
@@ -114,31 +79,63 @@ impl<D: HummockIteratorDirection> HummockIterator for LevelZeroCacheIterator<D> 
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            assert!(self.is_valid());
-            let entry = self.with_iter_mut(|iter| Self::entry_to_item(iter.next()));
-            self.with_mut(|x| *x.item = entry);
+            debug_assert!(self.is_valid());
+            match D::direction() {
+                DirectionEnum::Forward => {
+                    self.iter.next();
+                    while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
+                        self.iter.next();
+                    }
+                }
+                DirectionEnum::Backward => {
+                    self.iter.prev();
+                    while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
+                        self.iter.prev();
+                    }
+                }
+            }
+
             Ok(())
         }
     }
 
     fn key(&self) -> FullKey<&[u8]> {
-        self.borrow_item().0.to_ref()
+        self.iter.key().to_ref()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
-        self.borrow_item().1.as_slice()
+        self.iter.value().as_slice()
     }
 
     fn is_valid(&self) -> bool {
-        !self.borrow_item().0.user_key.is_empty()
+        self.iter.valid()
     }
 
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async move { Ok(()) }
+        async move {
+            self.iter.seek_to_first();
+            Ok(())
+        }
     }
 
     fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async move { Ok(()) }
+        async move {
+            match D::direction() {
+                DirectionEnum::Forward => {
+                    self.iter.seek(&key.to_vec());
+                    while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
+                        self.iter.next();
+                    }
+                }
+                DirectionEnum::Backward => {
+                    self.iter.seek_for_prev(&key.to_vec());
+                    while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
+                        self.iter.prev();
+                    }
+                }
+            }
+            Ok(())
+        }
     }
 
     fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}

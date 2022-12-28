@@ -52,7 +52,7 @@ pub mod hash;
 pub mod monitor;
 pub mod row;
 pub mod session_config;
-mod skiplist;
+pub mod skiplist;
 #[cfg(test)]
 pub mod test_utils;
 pub mod types;

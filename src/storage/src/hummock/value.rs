@@ -30,6 +30,12 @@ pub enum HummockValue<T> {
     Delete,
 }
 
+impl<T> Default for HummockValue<T> {
+    fn default() -> Self {
+        HummockValue::Delete
+    }
+}
+
 impl<T> Copy for HummockValue<T> where T: Copy {}
 
 impl<T: PartialEq> PartialEq for HummockValue<T> {

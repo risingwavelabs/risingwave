@@ -17,7 +17,6 @@ use std::sync::Arc;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
-use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::{CompactionInput, CompactionPicker, LocalPickerStatistic};
 use crate::hummock::level_handler::LevelHandler;
 

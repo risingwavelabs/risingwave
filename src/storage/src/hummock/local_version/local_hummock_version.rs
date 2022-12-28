@@ -15,9 +15,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use crossbeam_skiplist::SkipMap;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::skiplist::Skiplist;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     level_delete_ssts, level_insert_ssts, split_base_levels, summarize_group_deltas,
     GroupDeltasSummary,
@@ -277,9 +277,6 @@ impl LocalHummockVersion {
     ) -> HummockResult<()> {
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
-            if let Some(group_construct) = &summary.group_construct {
-                // todo: check split result
-            }
             let GroupDeltasSummary {
                 delete_sst_ids_set,
                 insert_sst_level_id,
@@ -316,7 +313,7 @@ impl LocalHummockVersion {
                             while iter.is_valid() {
                                 let key = iter.key().to_vec();
                                 let value = iter.value().to_bytes();
-                                cache.cache.insert(key, value);
+                                cache.cache.put(key, value);
                                 iter.next().await?;
                             }
                         }
@@ -471,7 +468,7 @@ pub fn add_new_sub_level(
     // Nonoverlapping  after at least one compaction.
     let level = new_sub_level(insert_sub_level_id, level_type, insert_table_infos);
     l0.caches.push(LevelZeroCache {
-        cache: Arc::new(SkipMap::default()),
+        cache: Skiplist::new(true),
         level,
     });
 }
