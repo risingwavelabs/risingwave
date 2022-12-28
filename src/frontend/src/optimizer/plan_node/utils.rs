@@ -67,7 +67,7 @@ impl TableCatalogBuilder {
     }
 
     /// Check whether need to add a ordered column. Different from value, order desc equal pk in
-    /// semantics and they are encoded as storage key.
+    /// semantics and they are encoded as storage key, dedup is true means ignoring duplicates pk.
     pub fn add_order_column(&mut self, index: usize, order_type: OrderType, dedup: bool) {
         match dedup {
             true => {
