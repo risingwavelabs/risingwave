@@ -390,9 +390,8 @@ pub enum ParserConfig {
     Csv(u8, bool),
 }
 
-impl From<(&SourceFormat, &StreamSourceInfo)> for ParserConfig {
-    fn from(info: (&SourceFormat, &StreamSourceInfo)) -> Self {
-        let (format, info) = info;
+impl ParserConfig {
+    pub fn new(format: &SourceFormat, info: &StreamSourceInfo) -> Self {
         match format {
             SourceFormat::Csv => Self::Csv(info.csv_delimiter as u8, info.csv_has_header),
             _ => unreachable!(),

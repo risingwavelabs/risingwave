@@ -61,7 +61,7 @@ impl ToBinary for i64 {
                 self.to_sql(&Type::ANY, &mut output).unwrap();
                 Ok(Some(output.freeze()))
             }
-            DataType::Timestampz => {
+            DataType::Timestamptz => {
                 let secs = self.div_euclid(1_000_000);
                 let nsecs = self.rem_euclid(1_000_000) * 1000;
                 let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();

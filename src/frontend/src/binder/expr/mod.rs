@@ -476,7 +476,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Date => DataType::Date,
         AstDataType::Time(false) => DataType::Time,
         AstDataType::Timestamp(false) => DataType::Timestamp,
-        AstDataType::Timestamp(true) => DataType::Timestampz,
+        AstDataType::Timestamp(true) => DataType::Timestamptz,
         AstDataType::Interval => DataType::Interval,
         AstDataType::Array(datatype) => DataType::List {
             datatype: Box::new(bind_data_type(datatype)?),
@@ -504,7 +504,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "int8" => DataType::Int64,
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
-                "timestamptz" => DataType::Timestampz,
+                "timestamptz" => DataType::Timestamptz,
                 _ => return Err(new_err().into()),
             }
         }
