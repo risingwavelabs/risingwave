@@ -37,8 +37,8 @@ use super::memtable::{ImmId, ImmutableMemtable};
 use super::state_store::StagingDataIterator;
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
-    ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
-    UnorderedMergeIteratorInner, UserIterator,
+    ConcatIterator, Forward, ForwardMergeRangeIterator, HummockIteratorUnion,
+    OrderedMergeIteratorInner, UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -441,22 +441,65 @@ impl HummockVersionReader {
         // the filter key needs to be encoded as well.
         let encoded_user_key = full_key.user_key.encode();
         assert!(committed_version.is_valid());
-        for level in committed_version.levels(read_options.table_id) {
-            if level.table_infos.is_empty() {
-                continue;
+        if let Some(group) = committed_version.get_group(read_options.table_id) {
+            if let Some(value) = group.get_from_cache(full_key) {
+                return Ok(value.into_user_value());
             }
-            match level.level_type() {
-                LevelType::Overlapping | LevelType::Unspecified => {
-                    let sstable_infos = prune_ssts(
-                        level.table_infos.iter(),
-                        read_options.table_id,
-                        &(table_key..=table_key),
-                    );
-                    for sstable_info in sstable_infos {
+            let levels = group.l0.sub_levels.iter().chain(group.levels.iter());
+            for level in levels {
+                if level.table_infos.is_empty() {
+                    continue;
+                }
+                match level.level_type() {
+                    LevelType::Overlapping | LevelType::Unspecified => {
+                        let sstable_infos = prune_ssts(
+                            level.table_infos.iter(),
+                            read_options.table_id,
+                            &(table_key..=table_key),
+                        );
+                        for sstable_info in sstable_infos {
+                            table_counts += 1;
+                            if let Some(v) = get_from_sstable_info(
+                                self.sstable_store.clone(),
+                                sstable_info,
+                                full_key,
+                                &read_options,
+                                dist_key_hash,
+                                &mut local_stats,
+                            )
+                            .await?
+                            {
+                                // todo add global stat to report
+                                local_stats.report(self.stats.as_ref());
+                                return Ok(v.into_user_value());
+                            }
+                        }
+                    }
+                    LevelType::Nonoverlapping => {
+                        let mut table_info_idx = level.table_infos.partition_point(|table| {
+                            let ord = user_key(&table.key_range.as_ref().unwrap().left)
+                                .cmp(encoded_user_key.as_ref());
+                            ord == Ordering::Less || ord == Ordering::Equal
+                        });
+                        if table_info_idx == 0 {
+                            continue;
+                        }
+                        table_info_idx = table_info_idx.saturating_sub(1);
+                        let ord = level.table_infos[table_info_idx]
+                            .key_range
+                            .as_ref()
+                            .unwrap()
+                            .compare_right_with_user_key(&encoded_user_key);
+                        // the case that the key falls into the gap between two ssts
+                        if ord == Ordering::Less {
+                            sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_FILE");
+                            continue;
+                        }
+
                         table_counts += 1;
                         if let Some(v) = get_from_sstable_info(
                             self.sstable_store.clone(),
-                            sstable_info,
+                            &level.table_infos[table_info_idx],
                             full_key,
                             &read_options,
                             dist_key_hash,
@@ -464,46 +507,9 @@ impl HummockVersionReader {
                         )
                         .await?
                         {
-                            // todo add global stat to report
                             local_stats.report(self.stats.as_ref());
                             return Ok(v.into_user_value());
                         }
-                    }
-                }
-                LevelType::Nonoverlapping => {
-                    let mut table_info_idx = level.table_infos.partition_point(|table| {
-                        let ord = user_key(&table.key_range.as_ref().unwrap().left)
-                            .cmp(encoded_user_key.as_ref());
-                        ord == Ordering::Less || ord == Ordering::Equal
-                    });
-                    if table_info_idx == 0 {
-                        continue;
-                    }
-                    table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = level.table_infos[table_info_idx]
-                        .key_range
-                        .as_ref()
-                        .unwrap()
-                        .compare_right_with_user_key(&encoded_user_key);
-                    // the case that the key falls into the gap between two ssts
-                    if ord == Ordering::Less {
-                        sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_FILE");
-                        continue;
-                    }
-
-                    table_counts += 1;
-                    if let Some(v) = get_from_sstable_info(
-                        self.sstable_store.clone(),
-                        &level.table_infos[table_info_idx],
-                        full_key,
-                        &read_options,
-                        dist_key_hash,
-                        &mut local_stats,
-                    )
-                    .await?
-                    {
-                        local_stats.report(self.stats.as_ref());
-                        return Ok(v.into_user_value());
                     }
                 }
             }
@@ -577,7 +583,7 @@ impl HummockVersionReader {
             .iter_merge_sstable_counts
             .with_label_values(&["staging-sst-iter"])
             .observe(staging_sst_iter_count as f64);
-        let staging_iter: StagingDataIterator = OrderedMergeIteratorInner::new(staging_iters);
+        let mut l0_cache_iter_count = 0;
 
         // 2. build iterator from committed
         // Because SST meta records encoded key range,
@@ -589,6 +595,13 @@ impl HummockVersionReader {
         );
         let mut non_overlapping_iters = Vec::new();
         if let Some(group) = committed.get_group(read_options.table_id) {
+            group.add_iterators::<Forward, _>(
+                |iter| {
+                    l0_cache_iter_count += 1;
+                    staging_iters.push(HummockIteratorUnion::Third(iter));
+                },
+                committed.max_committed_epoch(),
+            );
             let levels = group.l0.sub_levels.iter().chain(group.levels.iter());
             for level in levels {
                 if level.table_infos.is_empty() {
@@ -649,7 +662,12 @@ impl HummockVersionReader {
             .iter_merge_sstable_counts
             .with_label_values(&["committed-non-overlapping-iter"])
             .observe(non_overlapping_iters.len() as f64);
+        self.stats
+            .iter_merge_sstable_counts
+            .with_label_values(&["cache-iter-count"])
+            .observe(l0_cache_iter_count as f64);
 
+        let staging_iter: StagingDataIterator = OrderedMergeIteratorInner::new(staging_iters);
         // 3. build user_iterator
         let merge_iter = UnorderedMergeIteratorInner::new(
             once(HummockIteratorUnion::First(staging_iter)).chain(

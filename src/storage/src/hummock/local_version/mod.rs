@@ -25,7 +25,7 @@ pub mod local_version_impl;
 pub mod local_version_manager;
 pub mod pinned_version;
 
-pub use l0_cache::{LevelZeroCache, LevelZeroData};
+pub use l0_cache::{LevelZeroCache, LevelZeroCacheIterator, LevelZeroData};
 pub use local_hummock_version::{LocalGroup, LocalHummockVersion};
 
 #[derive(Clone)]

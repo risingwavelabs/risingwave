@@ -601,7 +601,13 @@ pub fn add_new_sub_level(
     }
     if let Some(newest_level) = l0.sub_levels.last_mut() {
         if newest_level.sub_level_id == insert_sub_level_id {
+            let total_file_size = insert_table_infos
+                .iter()
+                .map(|table| table.file_size)
+                .sum::<u64>();
             newest_level.table_infos.extend(insert_table_infos);
+            l0.total_file_size += total_file_size;
+            newest_level.total_file_size += total_file_size;
             return;
         }
     }

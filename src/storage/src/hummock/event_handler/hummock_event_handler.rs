@@ -38,6 +38,7 @@ use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::LocalHummockVersion;
 use crate::hummock::shared_buffer::UncommittedData;
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
 };
@@ -108,6 +109,7 @@ pub struct HummockEventHandler {
     last_instance_id: LocalInstanceId,
 
     sstable_id_manager: SstableIdManagerRef,
+    sstable_store: SstableStoreRef,
 }
 
 async fn flush_imms(
@@ -150,6 +152,7 @@ impl HummockEventHandler {
         let buffer_tracker = BufferTracker::from_storage_config(&compactor_context.options);
         let write_conflict_detector = ConflictDetector::new_from_config(&compactor_context.options);
         let sstable_id_manager = compactor_context.sstable_id_manager.clone();
+        let sstable_store = compactor_context.sstable_store.clone();
         let uploader = HummockUploader::new(
             pinned_version.clone(),
             Arc::new(move |payload, task_info| {
@@ -170,6 +173,7 @@ impl HummockEventHandler {
             uploader,
             last_instance_id: 0,
             sstable_id_manager,
+            sstable_store,
         }
     }
 
@@ -361,7 +365,7 @@ impl HummockEventHandler {
         });
     }
 
-    fn handle_version_update(&mut self, version_payload: Payload) {
+    async fn handle_version_update(&mut self, version_payload: Payload) -> HummockResult<()> {
         let pinned_version = self.pinned_version.load();
 
         let prev_max_committed_epoch = pinned_version.max_committed_epoch();
@@ -371,10 +375,18 @@ impl HummockEventHandler {
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
                     version_to_apply.apply_version_delta(version_delta);
+                    // TODO: filter version delta by local sstable files.
+                    version_to_apply
+                        .fill_cache(version_delta, &self.sstable_store)
+                        .await?;
                 }
                 version_to_apply
             }
-            Payload::PinnedVersion(version) => LocalHummockVersion::from(version),
+            Payload::PinnedVersion(version) => {
+                let mut version = LocalHummockVersion::from(version);
+                version.fill_full_cache(&self.sstable_store).await?;
+                version
+            }
         };
 
         validate_table_key_range(&newly_pinned_version);
@@ -411,6 +423,7 @@ impl HummockEventHandler {
             ));
 
         self.uploader.update_pinned_version(new_pinned_version);
+        Ok(())
     }
 }
 
@@ -447,7 +460,9 @@ impl HummockEventHandler {
                         }
 
                         HummockEvent::VersionUpdate(version_payload) => {
-                            self.handle_version_update(version_payload);
+                            if let Err(e) = self.handle_version_update(version_payload).await {
+                                panic!("load data failed, {:?}", e);
+                            }
                         }
 
                         HummockEvent::ImmToUploader(imm) => {

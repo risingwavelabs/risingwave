@@ -40,6 +40,13 @@ impl Debug for LevelZeroCache {
 }
 
 impl LevelZeroCache {
+    pub fn new(level: Level) -> Self {
+        Self {
+            level,
+            cache: Skiplist::new(true),
+        }
+    }
+
     pub fn iter<D: HummockIteratorDirection>(
         &self,
         committed_epoch: u64,
@@ -49,6 +56,21 @@ impl LevelZeroCache {
             borrow_phantom: PhantomData,
             committed_epoch,
         }
+    }
+
+    pub fn get(&self, key: &FullKey<Vec<u8>>) -> Option<HummockValue<Bytes>> {
+        let mut iter = self.cache.iter();
+        iter.seek(key);
+        while iter.valid() && iter.key().epoch > key.epoch {
+            if iter.key().user_key != key.user_key {
+                return None;
+            }
+            iter.next();
+        }
+        if iter.valid() && iter.key().user_key == key.user_key {
+            return Some(iter.value().clone());
+        }
+        None
     }
 }
 
@@ -113,7 +135,21 @@ impl<D: HummockIteratorDirection> HummockIterator for LevelZeroCacheIterator<D> 
 
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async move {
-            self.iter.seek_to_first();
+            match D::direction() {
+                DirectionEnum::Forward => {
+                    self.iter.seek_to_first();
+                    while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
+                        self.iter.next();
+                    }
+                }
+                DirectionEnum::Backward => {
+                    self.iter.seek_to_last();
+                    while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
+                        self.iter.prev();
+                    }
+                }
+            }
+
             Ok(())
         }
     }
