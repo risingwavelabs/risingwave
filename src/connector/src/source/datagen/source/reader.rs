@@ -192,7 +192,7 @@ fn generator_from_data_type(
             let generator = generator_from_data_type(
                 *datatype,
                 fields_option_map,
-                name,
+                &format!("{}._", name),
                 split_index,
                 split_num,
             )?;
