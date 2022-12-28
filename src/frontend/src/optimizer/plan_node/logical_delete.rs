@@ -35,20 +35,14 @@ use crate::utils::{ColIndexMapping, Condition};
 #[derive(Debug, Clone)]
 pub struct LogicalDelete {
     pub base: PlanBase,
-    table_source_name: String, // explain-only
-    source_id: TableId,        // TODO: use SourceId
-    associated_mview_id: TableId,
+    table_name: String, // explain-only
+    table_id: TableId,
     input: PlanRef,
 }
 
 impl LogicalDelete {
     /// Create a [`LogicalDelete`] node. Used internally by optimizer.
-    pub fn new(
-        input: PlanRef,
-        table_source_name: String,
-        source_id: TableId,
-        table_id: TableId,
-    ) -> Self {
+    pub fn new(input: PlanRef, table_name: String, table_id: TableId) -> Self {
         let ctx = input.ctx();
         // TODO: support `RETURNING`.
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
@@ -56,36 +50,24 @@ impl LogicalDelete {
         let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
         Self {
             base,
-            table_source_name,
-            source_id,
-            associated_mview_id: table_id,
+            table_name,
+            table_id,
             input,
         }
     }
 
     /// Create a [`LogicalDelete`] node. Used by planner.
-    pub fn create(
-        input: PlanRef,
-        table_source_name: String,
-        source_id: TableId,
-        table_id: TableId,
-    ) -> Result<Self> {
-        Ok(Self::new(input, table_source_name, source_id, table_id))
+    pub fn create(input: PlanRef, table_name: String, table_id: TableId) -> Result<Self> {
+        Ok(Self::new(input, table_name, table_id))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(f, "{} {{ table: {} }}", name, self.table_source_name)
-    }
-
-    /// Get the logical delete's source id.
-    #[must_use]
-    pub fn source_id(&self) -> TableId {
-        self.source_id
+        write!(f, "{} {{ table: {} }}", name, self.table_name)
     }
 
     #[must_use]
-    pub fn associated_mview_id(&self) -> TableId {
-        self.associated_mview_id
+    pub fn table_id(&self) -> TableId {
+        self.table_id
     }
 }
 
@@ -95,12 +77,7 @@ impl PlanTreeNodeUnary for LogicalDelete {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(
-            input,
-            self.table_source_name.clone(),
-            self.source_id,
-            self.associated_mview_id,
-        )
+        Self::new(input, self.table_name.clone(), self.table_id)
     }
 }
 
