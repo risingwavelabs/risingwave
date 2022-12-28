@@ -71,6 +71,11 @@ impl JoinEntryState {
             (encoded, decoded)
         })
     }
+
+    #[expect(dead_code)]
+    pub fn len(&self) -> usize {
+        self.cached.len()
+    }
 }
 
 #[cfg(test)]
