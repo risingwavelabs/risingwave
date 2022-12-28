@@ -45,6 +45,8 @@ cargo make link-all-in-one-binaries
 # prepare environment mysql sink
 apt-get -y install mysql-client
 mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE DATABASE IF NOT EXISTS test;"
+# grant access to `test` for ci test user
+mysql --host=mysql --port=3306 -u root -p123456 -e "GRANT ALL PRIVILEGES ON test.* TO 'mysqluser'@'%';"
 # create a table named t_remote
 mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE TABLE IF NOT EXISTS test.t_remote (id INT, name VARCHAR(255), PRIMARY KEY (id));"
 
