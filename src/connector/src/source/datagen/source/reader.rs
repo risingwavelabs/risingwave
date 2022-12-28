@@ -186,6 +186,18 @@ fn generator_from_data_type(
                 .collect::<Result<_>>()?;
             FieldGeneratorImpl::with_struct_fields(struct_fields)
         }
+        DataType::List { datatype } => {
+            let length_key = format!("fields.{}.length", name);
+            let length_value = fields_option_map.get(&length_key).map(|s| s.to_string());
+            let generator = generator_from_data_type(
+                *datatype,
+                fields_option_map,
+                name,
+                split_index,
+                split_num,
+            )?;
+            FieldGeneratorImpl::with_list(generator, length_value)
+        }
         _ => {
             let kind_key = format!("fields.{}.kind", name);
             if let Some(kind) = fields_option_map.get(&kind_key) && kind.as_str() == SEQUENCE_FIELD_KIND {
