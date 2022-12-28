@@ -64,6 +64,7 @@ impl InsertExecutor {
             table_id,
             dml_manager,
             child,
+            chunk_size,
             schema: if returning {
                 table_schema
             } else {
@@ -102,13 +103,10 @@ impl InsertExecutor {
         let mut notifiers = Vec::new();
         let mut returning_columns = Vec::new();
 
-        #[for_await]
-        for data_chunk in self.child.execute() {
-            let data_chunk = data_chunk?;
-            let len = data_chunk.cardinality();
-            assert!(data_chunk.visibility().is_none());
-
-            let (mut columns, _) = data_chunk.into_parts();
+        // Transform the data chunk to a stream chunk, then write to the source.
+        let mut write_chunk = |chunk: DataChunk| -> Result<()> {
+            let cap = chunk.capacity();
+            let (mut columns, vis) = chunk.into_parts();
             if self.returning {
                 returning_columns.extend(columns.clone().into_iter());
             }
