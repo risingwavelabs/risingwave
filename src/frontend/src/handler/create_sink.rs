@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::{
     TableWithJoins,
 };
 
-use super::create_mv::{check_column_names, get_column_names};
+use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::handler::HandlerArgs;
@@ -102,22 +102,11 @@ pub fn gen_sink_plan(
     let properties = context.with_options().clone();
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
-    let col_names = if let Some(col_names) = col_names {
-        // Check the col_names match number of columns in the query.
-        check_column_names(&col_names, &plan_root)?;
-        col_names
-    } else {
-        plan_root
-            .schema()
-            .fields()
-            .iter()
-            .cloned()
-            .map(|field| field.name)
-            .collect()
+    if let Some(col_names) = col_names {
+        plan_root.set_out_names(col_names)?;
     };
 
-    let sink_plan =
-        plan_root.gen_create_sink_plan(sink_table_name, definition, col_names, properties)?;
+    let sink_plan = plan_root.gen_create_sink_plan(sink_table_name, definition, properties)?;
 
     let sink_catalog_prost = sink_plan
         .sink_catalog()

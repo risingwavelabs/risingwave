@@ -32,7 +32,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use optimizer_context::*;
 use property::Order;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
@@ -75,7 +75,6 @@ pub struct PlanRoot {
     required_order: Order,
     out_fields: FixedBitSet,
     out_names: Vec<String>,
-    schema: Schema,
 }
 
 impl PlanRoot {
@@ -90,30 +89,44 @@ impl PlanRoot {
         assert_eq!(input_schema.fields().len(), out_fields.len());
         assert_eq!(out_fields.count_ones(..), out_names.len());
 
-        let schema = Schema {
-            fields: out_fields
-                .ones()
-                .zip_eq(&out_names)
-                .map(|(i, name)| {
-                    let mut f = input_schema.fields()[i].clone();
-                    f.name = name.clone();
-                    f
-                })
-                .collect(),
-        };
         Self {
             plan,
             required_dist,
             required_order,
             out_fields,
             out_names,
-            schema,
         }
     }
 
-    /// Get a reference to the plan root's schema.
-    pub fn schema(&self) -> &Schema {
-        &self.schema
+    /// Set customized names of the output fields, used for `CREATE [MATERIALIZED VIEW | SINK] r(a,
+    /// b, ..)`.
+    /// If the number of names does not match the number of output fields, an error is returned.
+    pub fn set_out_names(&mut self, out_names: Vec<String>) -> Result<()> {
+        if out_names.len() != self.out_fields.count_ones(..) {
+            Err(ErrorCode::InvalidInputSyntax(
+                "number of column names does not match number of columns".to_string(),
+            ))?
+        }
+        self.out_names = out_names;
+        Ok(())
+    }
+
+    /// Get the plan root's schema, only including the fields to be output.
+    pub fn schema(&self) -> Schema {
+        // The schema can be derived from the `out_fields` and `out_names`, so we don't maintain it
+        // as a field and always construct one on demand here to keep it in sync.
+        Schema {
+            fields: self
+                .out_fields
+                .ones()
+                .map(|i| self.plan.schema().fields()[i].clone())
+                .zip_eq(&self.out_names)
+                .map(|(field, name)| Field {
+                    name: name.clone(),
+                    ..field
+                })
+                .collect(),
+        }
     }
 
     /// Get out fields of the plan root.
@@ -515,7 +528,6 @@ impl PlanRoot {
                     .rewrite_required_order(&self.required_order)
                     .unwrap();
                 self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
-                self.schema = plan.schema().clone();
                 plan.to_stream_with_dist_required(&self.required_dist, &mut Default::default())
             }
             _ => unreachable!(),
@@ -562,12 +574,12 @@ impl PlanRoot {
             )
         };
 
+        // TODO: we create this `Materialize` only for acquiring the table catalog, may need to find
+        // a better way to do this.
         let stream_plan = self.gen_stream_plan()?;
         let materialize = create_materialize(self, stream_plan.clone())?;
 
         // TODO: remove this after we deprecate the materialized source
-        // TODO: we create this `Materialize` only for acquiring the table catalog, may need to find
-        // a better way to do this.
         if dml_flag == DmlFlag::Disable {
             return Ok(materialize);
         }
@@ -595,13 +607,7 @@ impl PlanRoot {
         &mut self,
         mv_name: String,
         definition: String,
-        col_names: Option<Vec<String>>,
     ) -> Result<StreamMaterialize> {
-        let out_names = if let Some(col_names) = col_names {
-            col_names
-        } else {
-            self.out_names.clone()
-        };
         let stream_plan = self.gen_stream_plan()?;
 
         StreamMaterialize::create(
@@ -610,7 +616,7 @@ impl PlanRoot {
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
-            out_names.clone(),
+            self.out_names.clone(),
             definition.clone(),
             false,
             None,
@@ -621,6 +627,7 @@ impl PlanRoot {
     /// Optimize and generate a create index plan.
     pub fn gen_create_index_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
         let stream_plan = self.gen_stream_plan()?;
+
         StreamMaterialize::create(
             stream_plan,
             mv_name,
@@ -628,7 +635,7 @@ impl PlanRoot {
             self.required_order.clone(),
             self.out_fields.clone(),
             self.out_names.clone(),
-            "".into(),
+            "".into(), // TODO: fill definition here for `SHOW CREATE`
             false,
             None,
             TableType::Index,
@@ -640,17 +647,17 @@ impl PlanRoot {
         &mut self,
         sink_name: String,
         definition: String,
-        col_names: Vec<String>,
         properties: WithOptions,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_stream_plan()?;
+
         StreamMaterialize::create(
             stream_plan,
             sink_name,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
-            col_names,
+            self.out_names.clone(),
             definition,
             false,
             None,
