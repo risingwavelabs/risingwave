@@ -37,7 +37,7 @@ use risingwave_pb::batch_plan::{
     DistributedLookupJoinNode, ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment,
     PlanNode as PlanNodeProst, PlanNode, TaskId as TaskIdProst, TaskOutputId,
 };
-use risingwave_pb::common::{HostAddress, WorkerNode};
+use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
 use risingwave_pb::task_service::{AbortTaskRequest, TaskInfoResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
@@ -106,7 +106,7 @@ struct TaskStatusHolder {
 }
 
 pub struct StageExecution {
-    epoch: u64,
+    epoch: BatchQueryEpoch,
     stage: QueryStageRef,
     worker_node_manager: WorkerNodeManagerRef,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
@@ -124,7 +124,7 @@ pub struct StageExecution {
 }
 
 struct StageRunner {
-    epoch: u64,
+    epoch: BatchQueryEpoch,
     state: Arc<RwLock<StageState>>,
     stage: QueryStageRef,
     worker_node_manager: WorkerNodeManagerRef,
@@ -158,7 +158,7 @@ impl TaskStatusHolder {
 impl StageExecution {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        epoch: u64,
+        epoch: BatchQueryEpoch,
         stage: QueryStageRef,
         worker_node_manager: WorkerNodeManagerRef,
         msg_sender: Sender<QueryMessage>,
@@ -192,7 +192,7 @@ impl StageExecution {
         match cur_state {
             StageState::Pending { msg_sender } => {
                 let runner = StageRunner {
-                    epoch: self.epoch,
+                    epoch: self.epoch.clone(),
                     stage: self.stage.clone(),
                     worker_node_manager: self.worker_node_manager.clone(),
                     tasks: self.tasks.clone(),
@@ -469,7 +469,7 @@ impl StageRunner {
             &plan_node,
             &task_id,
             self.ctx.to_batch_task_context(),
-            self.epoch,
+            self.epoch.clone(),
         );
 
         let executor = executor.build().await?;
@@ -479,17 +479,20 @@ impl StageRunner {
         for chunk in &mut terminated_chunk_stream {
             if let Err(ref e) = chunk {
                 let err_str = e.to_string();
-                result_tx
-                    .send(chunk.map_err(|e| e.into()))
-                    .await
-                    .expect("Receiver should always exist! ");
+
+                // This is possible if The Query Runner drop early before schedule the root
+                // executor. Detail described in https://github.com/risingwavelabs/risingwave/issues/6883#issuecomment-1348102037.
+                // The error format is just channel closed so no care.
+                if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
+                    warn!("Root executor has been dropped before receive any events so the send is failed");
+                }
                 // Different from below, return this function and report error.
                 return Err(SchedulerError::TaskExecutionError(err_str));
             } else {
-                result_tx
-                    .send(chunk.map_err(|e| e.into()))
-                    .await
-                    .expect("Receiver should always exist! ");
+                // Same for below.
+                if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
+                    warn!("Root executor has been dropped before receive any events so the send is failed");
+                }
             }
         }
 
@@ -545,9 +548,9 @@ impl StageRunner {
         let node_body = plan_node.node_body.as_ref().expect("fail to get node body");
 
         let vnode_mapping = match node_body {
-            Insert(insert_node) => self.get_vnode_mapping(&insert_node.associated_mview_id.into()),
-            Update(update_node) => self.get_vnode_mapping(&update_node.associated_mview_id.into()),
-            Delete(delete_node) => self.get_vnode_mapping(&delete_node.associated_mview_id.into()),
+            Insert(insert_node) => self.get_vnode_mapping(&insert_node.table_id.into()),
+            Update(update_node) => self.get_vnode_mapping(&update_node.table_id.into()),
+            Delete(delete_node) => self.get_vnode_mapping(&delete_node.table_id.into()),
             _ => {
                 if let Some(distributed_lookup_join_node) =
                     Self::find_distributed_lookup_join_node(plan_node)
@@ -700,7 +703,7 @@ impl StageRunner {
 
         let t_id = task_id.task_id;
         let stream_status = compute_client
-            .create_task(task_id, plan_fragment, self.epoch)
+            .create_task(task_id, plan_fragment, self.epoch.clone())
             .await
             .map_err(|e| anyhow!(e))?;
 

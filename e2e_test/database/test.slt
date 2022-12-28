@@ -6,6 +6,7 @@ show schemas;
 information_schema
 pg_catalog
 public
+rw_catalog
 
 statement ok
 create table ddl_t (v1 int);

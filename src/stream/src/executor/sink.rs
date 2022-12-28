@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -30,7 +29,7 @@ use crate::executor::PkIndices;
 pub struct SinkExecutor {
     input: BoxedExecutor,
     metrics: Arc<StreamingMetrics>,
-    properties: HashMap<String, String>,
+    config: SinkConfig,
     identity: String,
     connector_params: ConnectorParams,
     schema: Schema,
@@ -52,19 +51,16 @@ impl SinkExecutor {
     pub fn new(
         materialize_executor: BoxedExecutor,
         metrics: Arc<StreamingMetrics>,
-        mut properties: HashMap<String, String>,
+        config: SinkConfig,
         executor_id: u64,
         connector_params: ConnectorParams,
         schema: Schema,
         pk_indices: Vec<usize>,
     ) -> Self {
-        // This field can be used to distinguish a specific actor in parallelism to prevent
-        // transaction execution errors
-        properties.insert("identifier".to_string(), format!("sink-{:?}", executor_id));
         Self {
             input: materialize_executor,
             metrics,
-            properties,
+            config,
             identity: format!("SinkExecutor_{:?}", executor_id),
             pk_indices,
             schema,
@@ -80,19 +76,13 @@ impl SinkExecutor {
         let mut in_transaction = false;
         let mut epoch = 0;
 
-        let sink_config = SinkConfig::from_hashmap(self.properties.clone())?;
         let mut sink = build_sink(
-            sink_config.clone(),
+            self.config.clone(),
             self.schema,
             self.pk_indices,
             self.connector_params,
         )
         .await?;
-
-        // prepare the external sink before writing if needed.
-        if sink.needs_preparation() {
-            sink.prepare().await?;
-        }
 
         let input = self.input.execute();
 
@@ -132,7 +122,7 @@ impl SinkExecutor {
                                 .sink_commit_duration
                                 .with_label_values(&[
                                     self.identity.as_str(),
-                                    sink_config.get_connector(),
+                                    self.config.get_connector(),
                                 ])
                                 .observe(start_time.elapsed().as_millis() as f64);
                         }
@@ -211,10 +201,11 @@ mod test {
             ],
         );
 
+        let config = SinkConfig::from_hashmap(properties).unwrap();
         let sink_executor = SinkExecutor::new(
             Box::new(mock),
             Arc::new(StreamingMetrics::unused()),
-            properties,
+            config,
             0,
             Default::default(),
             schema.clone(),

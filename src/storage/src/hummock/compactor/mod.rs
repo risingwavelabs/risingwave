@@ -442,7 +442,7 @@ impl Compactor {
                             }
                             continue;
                         }
-                        message = stream.message() => {
+                        message = stream.next() => {
                             message
                         },
                         _ = &mut shutdown_rx => {
@@ -451,7 +451,7 @@ impl Compactor {
                         }
                     };
                     match message {
-                        Ok(Some(SubscribeCompactTasksResponse { task })) => {
+                        Some(Ok(SubscribeCompactTasksResponse { task })) => {
                             let task = match task {
                                 Some(task) => task,
                                 None => continue 'consume_stream,
@@ -517,7 +517,7 @@ impl Compactor {
                                 }
                             });
                         }
-                        Err(e) => {
+                        Some(Err(e)) => {
                             tracing::warn!("Failed to consume stream. {}", e.message());
                             continue 'start_stream;
                         }

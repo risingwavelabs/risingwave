@@ -53,7 +53,7 @@ pub enum ScheduleStatus {
 }
 
 impl CompactionRequestChannel {
-    fn new(request_tx: UnboundedSender<CompactionGroupId>) -> Self {
+    pub fn new(request_tx: UnboundedSender<CompactionGroupId>) -> Self {
         Self {
             request_tx,
             scheduled: Default::default(),
@@ -74,7 +74,7 @@ impl CompactionRequestChannel {
         Ok(true)
     }
 
-    fn unschedule(&self, compaction_group: CompactionGroupId) {
+    pub fn unschedule(&self, compaction_group: CompactionGroupId) {
         self.scheduled.lock().remove(&compaction_group);
     }
 }
@@ -118,7 +118,7 @@ where
 
         self.hummock_manager.init_compaction_scheduler(
             sched_channel.clone(),
-            self.compaction_resume_notifier.clone(),
+            Some(self.compaction_resume_notifier.clone()),
         );
 
         tracing::info!("Start compaction scheduler.");

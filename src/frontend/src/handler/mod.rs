@@ -34,7 +34,7 @@ pub mod alter_user;
 mod create_database;
 pub mod create_index;
 pub mod create_mv;
-mod create_schema;
+pub mod create_schema;
 pub mod create_sink;
 pub mod create_source;
 pub mod create_table;
@@ -143,8 +143,14 @@ pub async fn handle(
                 .into());
             }
             if let Some(query) = query {
-                return create_table_as::handle_create_as(handler_args, name, if_not_exists, query)
-                    .await;
+                return create_table_as::handle_create_as(
+                    handler_args,
+                    name,
+                    if_not_exists,
+                    query,
+                    columns,
+                )
+                .await;
             }
             create_table::handle_create_table(
                 handler_args,

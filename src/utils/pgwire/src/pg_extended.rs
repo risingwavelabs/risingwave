@@ -482,7 +482,7 @@ impl PreparedStatement {
                     };
                     format!("'{}'::DECIMAL", tmp)
                 }
-                DataType::Timestampz => {
+                DataType::Timestamptz => {
                     let tmp = if param_format {
                         chrono::DateTime::<chrono::Utc>::from_sql(&place_hodler, raw_param)
                             .unwrap()
@@ -533,7 +533,7 @@ impl PreparedStatement {
                 DataType::Time => params.push("'00:00:00'::TIME".to_string()),
                 DataType::Timestamp => params.push("'2021-01-01 00:00:00'::TIMESTAMP".to_string()),
                 DataType::Decimal => params.push("'0'::DECIMAL".to_string()),
-                DataType::Timestampz => {
+                DataType::Timestamptz => {
                     params.push("'2022-10-01 12:00:00+01:00'::timestamptz".to_string())
                 }
                 DataType::Interval => params.push("'2 months ago'::interval".to_string()),
@@ -934,7 +934,7 @@ mod tests {
             .into_iter()
             .map(|b| b.freeze())
             .collect::<Vec<_>>();
-        let type_description = vec![DataType::Timestampz, DataType::Interval];
+        let type_description = vec![DataType::Timestamptz, DataType::Interval];
         let params = PreparedStatement::parse_params(&type_description, &raw_params, true).unwrap();
         assert_eq!(
             params,

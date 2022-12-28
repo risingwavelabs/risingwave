@@ -62,3 +62,31 @@ impl<K, V, S, A: Clone + Allocator> DerefMut for ManagedLruCache<K, V, S, A> {
         &mut self.inner
     }
 }
+
+pub fn new_unbounded<K: Hash + Eq, V>(watermark_epoch: Arc<AtomicU64>) -> ManagedLruCache<K, V> {
+    ManagedLruCache {
+        inner: LruCache::unbounded(),
+        watermark_epoch,
+    }
+}
+
+pub fn new_with_hasher_in<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator>(
+    watermark_epoch: Arc<AtomicU64>,
+    hasher: S,
+    alloc: A,
+) -> ManagedLruCache<K, V, S, A> {
+    ManagedLruCache {
+        inner: LruCache::unbounded_with_hasher_in(hasher, alloc),
+        watermark_epoch,
+    }
+}
+
+pub fn new_with_hasher<K: Hash + Eq, V, S: BuildHasher>(
+    watermark_epoch: Arc<AtomicU64>,
+    hasher: S,
+) -> ManagedLruCache<K, V, S> {
+    ManagedLruCache {
+        inner: LruCache::unbounded_with_hasher(hasher),
+        watermark_epoch,
+    }
+}

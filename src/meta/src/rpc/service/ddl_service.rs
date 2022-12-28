@@ -20,6 +20,7 @@ use risingwave_pb::catalog::*;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
+use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
@@ -343,41 +344,40 @@ where
         }))
     }
 
-    async fn create_materialized_source(
+    async fn create_table(
         &self,
-        request: Request<CreateMaterializedSourceRequest>,
-    ) -> Result<Response<CreateMaterializedSourceResponse>, Status> {
+        request: Request<CreateTableRequest>,
+    ) -> Result<Response<CreateTableResponse>, Status> {
         let request = request.into_inner();
-        let source = request.source.unwrap();
+        let source = request.source;
         let mview = request.materialized_view.unwrap();
         let fragment_graph = request.fragment_graph.unwrap();
 
-        let (source_id, table_id, version) = self
-            .create_materialized_source_inner(source, mview, fragment_graph)
+        let (table_id, version) = self
+            .create_table_inner(source, mview, fragment_graph)
             .await?;
 
-        Ok(Response::new(CreateMaterializedSourceResponse {
+        Ok(Response::new(CreateTableResponse {
             status: None,
-            source_id,
             table_id,
             version,
         }))
     }
 
-    async fn drop_materialized_source(
+    async fn drop_table(
         &self,
-        request: Request<DropMaterializedSourceRequest>,
-    ) -> Result<Response<DropMaterializedSourceResponse>, Status> {
+        request: Request<DropTableRequest>,
+    ) -> Result<Response<DropTableResponse>, Status> {
         self.check_barrier_manager_status().await?;
         let request = request.into_inner();
         let source_id = request.source_id;
         let table_id = request.table_id;
 
         let version = self
-            .drop_materialized_source_inner(source_id, table_id)
+            .drop_table_inner(source_id.map(|ProstSourceId::Id(id)| id), table_id)
             .await?;
 
-        Ok(Response::new(DropMaterializedSourceResponse {
+        Ok(Response::new(DropTableResponse {
             status: None,
             version,
         }))
@@ -473,10 +473,6 @@ where
 
         // 2. resolve the dependent relations.
         let dependent_relations = get_dependent_relations(&fragment_graph)?;
-        assert!(
-            !dependent_relations.is_empty(),
-            "there should be at lease 1 dependent relation when creating table or sink"
-        );
         stream_job.set_dependent_relations(dependent_relations);
 
         // 3. Mark current relation as "creating" and add reference count to dependent relations.
@@ -528,15 +524,15 @@ where
         match stream_job {
             StreamingJob::MaterializedView(table)
             | StreamingJob::Index(_, table)
-            | StreamingJob::MaterializedSource(_, table) => {
-                table.fragment_id = actor_graph_builder.fill_mview_or_sink_id(
+            | StreamingJob::Table(_, table) => {
+                table.fragment_id = actor_graph_builder.fill_database_object_id(
                     table.database_id,
                     table.schema_id,
                     table.id.into(),
                 );
             }
             StreamingJob::Sink(sink) => {
-                actor_graph_builder.fill_mview_or_sink_id(
+                actor_graph_builder.fill_database_object_id(
                     sink.database_id,
                     sink.schema_id,
                     sink.id.into(),
@@ -555,7 +551,7 @@ where
         match stream_job {
             StreamingJob::MaterializedView(table)
             | StreamingJob::Index(_, table)
-            | StreamingJob::MaterializedSource(_, table) => creating_tables.push(table.clone()),
+            | StreamingJob::Table(_, table) => creating_tables.push(table.clone()),
 
             StreamingJob::Sink(_) => {
                 // No need to mark it as creating. Do nothing.
@@ -589,11 +585,17 @@ where
                     .cancel_create_sink_procedure(sink)
                     .await?;
             }
-            StreamingJob::MaterializedSource(source, table) => {
+            StreamingJob::Table(source, table) => {
                 creating_internal_table_ids.push(table.id);
-                self.catalog_manager
-                    .cancel_create_materialized_source_procedure(source, table)
-                    .await?;
+                if let Some(source) = source {
+                    self.catalog_manager
+                        .cancel_create_table_procedure_with_source(source, table)
+                        .await?;
+                } else {
+                    self.catalog_manager
+                        .cancel_create_table_procedure(table)
+                        .await?;
+                }
             }
             StreamingJob::Index(index, table) => {
                 creating_internal_table_ids.push(table.id);
@@ -630,15 +632,26 @@ where
                     .finish_create_sink_procedure(sink)
                     .await?
             }
-            StreamingJob::MaterializedSource(source, table) => {
+            StreamingJob::Table(source, table) => {
                 creating_internal_table_ids.push(table.id);
-                self.catalog_manager
-                    .finish_create_materialized_source_procedure(
-                        source,
-                        table,
-                        &ctx.internal_tables()[0],
-                    )
-                    .await?
+                if let Some(source) = source {
+                    let internal_tables: [_; 1] = ctx.internal_tables().try_into().unwrap();
+                    self.catalog_manager
+                        .finish_create_table_procedure_with_source(
+                            source,
+                            table,
+                            &internal_tables[0],
+                        )
+                        .await?
+                } else {
+                    let internal_tables = ctx.internal_tables();
+                    assert!(internal_tables.is_empty());
+                    // Though `internal_tables` is empty here, we pass it as a parameter to reuse
+                    // the method.
+                    self.catalog_manager
+                        .finish_create_table_procedure(internal_tables, table)
+                        .await?
+                }
             }
             StreamingJob::Index(index, table) => {
                 creating_internal_table_ids.push(table.id);
@@ -656,56 +669,60 @@ where
         Ok(version)
     }
 
-    // TODO(Yuanxin): Use this function for both `CREATE TABLE` and `CREATE TABLE WITH CONNECTOR`.
-    async fn create_materialized_source_inner(
+    /// If `source` is `None` here, then there is no external streaming source for this table.
+    async fn create_table_inner(
         &self,
-        mut source: Source,
+        mut source: Option<Source>,
         mut mview: Table,
         mut fragment_graph: StreamFragmentGraph,
-    ) -> MetaResult<(SourceId, TableId, CatalogVersion)> {
+    ) -> MetaResult<(TableId, CatalogVersion)> {
         self.check_barrier_manager_status().await?;
 
-        // Generate source id.
-        let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: use source category
-        source.id = source_id;
+        if let Some(source) = &mut source {
+            // Generate source id.
+            let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: Use source category
+            source.id = source_id;
 
-        // Fill in the correct source id for stream node.
-        fn fill_source_id(stream_node: &mut StreamNode, source_id: u32) -> usize {
+            // Fill in the correct source id for stream node.
+            fn fill_source_id(stream_node: &mut StreamNode, source_id: u32) -> usize {
+                let mut source_count = 0;
+                if let NodeBody::Source(source_node) = stream_node.node_body.as_mut().unwrap() {
+                    // TODO: Refactor using source id.
+                    source_node.source_inner.as_mut().unwrap().source_id = source_id;
+                    source_count += 1;
+                }
+                for input in &mut stream_node.input {
+                    source_count += fill_source_id(input, source_id);
+                }
+                source_count
+            }
+
             let mut source_count = 0;
-            if let NodeBody::Source(source_node) = stream_node.node_body.as_mut().unwrap() {
-                // TODO: refactor using source id.
-                source_node.source_id = source_id;
-                source_count += 1;
+            for fragment in fragment_graph.fragments.values_mut() {
+                source_count += fill_source_id(fragment.node.as_mut().unwrap(), source_id);
             }
-            for input in &mut stream_node.input {
-                source_count += fill_source_id(input, source_id);
-            }
-            source_count
+            assert_eq!(
+                source_count, 1,
+                "require exactly 1 external stream source when creating table with a connector"
+            );
+
+            // Fill in the correct source id for mview.
+            mview.optional_associated_source_id =
+                Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
 
-        let mut source_count = 0;
-        for fragment in fragment_graph.fragments.values_mut() {
-            source_count += fill_source_id(fragment.node.as_mut().unwrap(), source_id);
-        }
-        assert_eq!(
-            source_count, 1,
-            "require exactly 1 source node when creating materialized source"
-        );
-
-        // Fill in the correct source id for mview.
-        mview.optional_associated_source_id =
-            Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
-
-        let mut stream_job = StreamingJob::MaterializedSource(source.clone(), mview.clone());
+        let mut stream_job = StreamingJob::Table(source.clone(), mview.clone());
         let (mut ctx, table_fragments) = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
             .await?;
 
-        if let Err(e) = self.source_manager.register_source(&source).await {
-            self.catalog_manager
-                .cancel_create_materialized_source_procedure(&source, &mview)
-                .await?;
-            return Err(e);
+        if let Some(source) = &source {
+            if let Err(e) = self.source_manager.register_source(source).await {
+                self.catalog_manager
+                    .cancel_create_table_procedure_with_source(source, &mview)
+                    .await?;
+                return Err(e);
+            }
         }
 
         match self
@@ -715,7 +732,7 @@ where
         {
             Ok(_) => {
                 let version = self.finish_stream_job(&stream_job, &ctx).await?;
-                Ok((source_id, stream_job.id(), version))
+                Ok((stream_job.id(), version))
             }
             Err(err) => {
                 self.cancel_stream_job(&stream_job, &ctx).await?;
@@ -724,9 +741,9 @@ where
         }
     }
 
-    async fn drop_materialized_source_inner(
+    async fn drop_table_inner(
         &self,
-        source_id: SourceId,
+        source_id: Option<SourceId>,
         table_id: TableId,
     ) -> MetaResult<CatalogVersion> {
         let table_fragment = self
@@ -734,19 +751,28 @@ where
             .select_table_fragments_by_table_id(&table_id.into())
             .await?;
         let internal_table_ids = table_fragment.internal_table_ids();
-        assert_eq!(internal_table_ids.len(), 1);
 
-        // 1. Drop materialized source in catalog, source_id will be checked if it is
-        // associated_source_id in mview. Indexes are also need to be dropped atomically.
-        let (version, delete_jobs) = self
-            .catalog_manager
-            .drop_materialized_source(source_id, table_id, internal_table_ids[0])
-            .await?;
-        // 2. Unregister source connector worker.
-        self.source_manager
-            .unregister_sources(vec![source_id])
-            .await;
-        // 3. Drop streaming jobs.
+        let (version, delete_jobs) = if let Some(source_id) = source_id {
+            // Drop table and source in catalog. Check `source_id` if it is the table's
+            // `associated_source_id`. Indexes also need to be dropped atomically.
+            assert_eq!(internal_table_ids.len(), 1);
+            let (version, delete_jobs) = self
+                .catalog_manager
+                .drop_table_with_source(source_id, table_id, internal_table_ids[0])
+                .await?;
+            // Unregister source connector worker.
+            self.source_manager
+                .unregister_sources(vec![source_id])
+                .await;
+            (version, delete_jobs)
+        } else {
+            assert!(internal_table_ids.is_empty());
+            self.catalog_manager
+                .drop_table(table_id, internal_table_ids)
+                .await?
+        };
+
+        // Drop streaming jobs.
         self.stream_manager.drop_streaming_jobs(delete_jobs).await;
 
         Ok(version)
@@ -766,7 +792,9 @@ fn get_dependent_relations(fragment_graph: &StreamFragmentGraph) -> MetaResult<V
     ) -> MetaResult<()> {
         match stream_node.node_body.as_ref().unwrap() {
             NodeBody::Source(source_node) => {
-                dependent_relations.insert(source_node.get_source_id());
+                if let Some(source) = &source_node.source_inner {
+                    dependent_relations.insert(source.get_source_id());
+                }
             }
             NodeBody::Chain(chain_node) => {
                 dependent_relations.insert(chain_node.get_table_id());

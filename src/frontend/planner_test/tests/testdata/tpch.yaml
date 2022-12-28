@@ -3341,7 +3341,7 @@
           └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(partsupp.ps_partkey, lineitem.l_partkey) AND IsNotDistinctFrom(partsupp.ps_suppkey, lineitem.l_suppkey), output: [partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_quantity] }
             ├─LogicalAgg { group_key: [partsupp.ps_partkey, partsupp.ps_suppkey], aggs: [] }
             | └─LogicalScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey] }
-            └─LogicalScan { table: lineitem, output_columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity], required_columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_shipdate], predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year':Interval)) AND IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) }
+            └─LogicalScan { table: lineitem, output_columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity], required_columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_shipdate], predicate: IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) AND (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year':Interval)) }
   batch_plan: |
     BatchExchange { order: [supplier.s_name ASC], dist: Single }
     └─BatchSort { order: [supplier.s_name ASC] }
@@ -3367,7 +3367,7 @@
                       |   └─BatchScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], distribution: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                       └─BatchExchange { order: [], dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
                         └─BatchProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity] }
-                          └─BatchFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year':Interval)) AND IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) }
+                          └─BatchFilter { predicate: IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) AND (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year':Interval)) }
                             └─BatchScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_shipdate], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [s_name, s_address, supplier.s_suppkey(hidden), nation.n_nationkey(hidden), supplier.s_nationkey(hidden)], pk_columns: [supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey], order_descs: [s_name, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
@@ -3402,7 +3402,7 @@
                     |     └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
                     └─StreamExchange { dist: HashShard(lineitem.l_partkey, lineitem.l_suppkey) }
                       └─StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
-                        └─StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year':Interval)) AND IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) }
+                        └─StreamFilter { predicate: IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) AND (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year':Interval)) }
                           └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
   stream_dist_plan: |
     Fragment 0
@@ -3474,7 +3474,7 @@
 
     Fragment 9
       StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
-        StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year':Interval)) AND IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) }
+        StreamFilter { predicate: IsNotNull(lineitem.l_partkey) AND IsNotNull(lineitem.l_suppkey) AND (lineitem.l_shipdate >= '1994-01-01':Varchar::Date) AND (lineitem.l_shipdate < ('1994-01-01':Varchar::Date + '1 year':Interval)) }
           Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             Upstream
             BatchPlanNode

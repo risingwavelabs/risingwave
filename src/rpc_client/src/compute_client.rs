@@ -20,6 +20,7 @@ use futures::StreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
+use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::compute::config_service_client::ConfigServiceClient;
 use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
@@ -138,7 +139,7 @@ impl ComputeClient {
         &self,
         task_id: TaskId,
         plan: PlanFragment,
-        epoch: u64,
+        epoch: BatchQueryEpoch,
     ) -> Result<Streaming<TaskInfoResponse>> {
         Ok(self
             .task_client
@@ -146,7 +147,7 @@ impl ComputeClient {
             .create_task(CreateTaskRequest {
                 task_id: Some(task_id),
                 plan: Some(plan),
-                epoch,
+                epoch: Some(epoch),
             })
             .await?
             .into_inner())

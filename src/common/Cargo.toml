@@ -51,6 +51,7 @@ spin = "0.9"
 static_assertions = "1"
 strum = "0.24"
 strum_macros = "0.24"
+sysinfo = "0.26"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 tokio-stream = "0.1"
@@ -76,7 +77,12 @@ mach = "0.3.2"
 [dev-dependencies]
 criterion = "0.4"
 rand = "0.8"
+tempfile = "3"
 
 [[bench]]
 name = "bench_encoding"
+harness = false
+
+[[bench]]
+name = "bitmap"
 harness = false

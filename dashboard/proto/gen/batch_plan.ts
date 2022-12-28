@@ -1,6 +1,6 @@
 /* eslint-disable */
-import { SourceInfo } from "./catalog";
-import { Buffer, HostAddress, WorkerNode } from "./common";
+import { ColumnIndex, StreamSourceInfo } from "./catalog";
+import { BatchQueryEpoch, Buffer, HostAddress, WorkerNode } from "./common";
 import { IntervalUnit } from "./data";
 import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem, TableFunction } from "./expr";
 import {
@@ -33,7 +33,11 @@ export interface RowSeqScanNode {
    *
    * Will be filled by the scheduler.
    */
-  vnodeBitmap: Buffer | undefined;
+  vnodeBitmap:
+    | Buffer
+    | undefined;
+  /** Whether the order on output columns should be preserved. */
+  ordered: boolean;
 }
 
 export interface SysRowSeqScanNode {
@@ -71,7 +75,7 @@ export interface SourceNode {
   columns: ColumnCatalog[];
   properties: { [key: string]: string };
   split: Uint8Array;
-  info: SourceInfo | undefined;
+  info: StreamSourceInfo | undefined;
 }
 
 export interface SourceNode_PropertiesEntry {
@@ -88,23 +92,26 @@ export interface FilterNode {
 }
 
 export interface InsertNode {
-  tableSourceId: number;
-  columnIdxs: number[];
-  /** Id of the materialized view which is used to determine which compute node to execute the dml fragment. */
-  associatedMviewId: number;
+  /** Id of the table to perform inserting. */
+  tableId: number;
+  columnIndices: number[];
+  /**
+   * An optional field and will be `None` for tables without user-defined pk.
+   * The `BatchInsertExecutor` should add a column with NULL value which will
+   * be filled in streaming.
+   */
+  rowIdIndex: ColumnIndex | undefined;
 }
 
 export interface DeleteNode {
-  tableSourceId: number;
-  /** Id of the materialized view which is used to determine which compute node to execute the dml fragment. */
-  associatedMviewId: number;
+  /** Id of the table to perform deleting. */
+  tableId: number;
 }
 
 export interface UpdateNode {
-  tableSourceId: number;
+  /** Id of the table to perform updating. */
+  tableId: number;
   exprs: ExprNode[];
-  /** Id of the materialized view which is used to determine which compute node to execute the dml fragment. */
-  associatedMviewId: number;
 }
 
 export interface ValuesNode {
@@ -221,7 +228,7 @@ export interface TaskOutputId {
 
 export interface LocalExecutePlan {
   plan: PlanFragment | undefined;
-  epoch: number;
+  epoch: BatchQueryEpoch | undefined;
 }
 
 /** ExchangeSource describes where to read results from children operators */
@@ -405,7 +412,7 @@ export interface PlanFragment {
 }
 
 function createBaseRowSeqScanNode(): RowSeqScanNode {
-  return { tableDesc: undefined, columnIds: [], scanRanges: [], vnodeBitmap: undefined };
+  return { tableDesc: undefined, columnIds: [], scanRanges: [], vnodeBitmap: undefined, ordered: false };
 }
 
 export const RowSeqScanNode = {
@@ -415,6 +422,7 @@ export const RowSeqScanNode = {
       columnIds: Array.isArray(object?.columnIds) ? object.columnIds.map((e: any) => Number(e)) : [],
       scanRanges: Array.isArray(object?.scanRanges) ? object.scanRanges.map((e: any) => ScanRange.fromJSON(e)) : [],
       vnodeBitmap: isSet(object.vnodeBitmap) ? Buffer.fromJSON(object.vnodeBitmap) : undefined,
+      ordered: isSet(object.ordered) ? Boolean(object.ordered) : false,
     };
   },
 
@@ -434,6 +442,7 @@ export const RowSeqScanNode = {
     }
     message.vnodeBitmap !== undefined &&
       (obj.vnodeBitmap = message.vnodeBitmap ? Buffer.toJSON(message.vnodeBitmap) : undefined);
+    message.ordered !== undefined && (obj.ordered = message.ordered);
     return obj;
   },
 
@@ -447,6 +456,7 @@ export const RowSeqScanNode = {
     message.vnodeBitmap = (object.vnodeBitmap !== undefined && object.vnodeBitmap !== null)
       ? Buffer.fromPartial(object.vnodeBitmap)
       : undefined;
+    message.ordered = object.ordered ?? false;
     return message;
   },
 };
@@ -566,7 +576,7 @@ export const SourceNode = {
         }, {})
         : {},
       split: isSet(object.split) ? bytesFromBase64(object.split) : new Uint8Array(),
-      info: isSet(object.info) ? SourceInfo.fromJSON(object.info) : undefined,
+      info: isSet(object.info) ? StreamSourceInfo.fromJSON(object.info) : undefined,
     };
   },
 
@@ -586,7 +596,7 @@ export const SourceNode = {
     }
     message.split !== undefined &&
       (obj.split = base64FromBytes(message.split !== undefined ? message.split : new Uint8Array()));
-    message.info !== undefined && (obj.info = message.info ? SourceInfo.toJSON(message.info) : undefined);
+    message.info !== undefined && (obj.info = message.info ? StreamSourceInfo.toJSON(message.info) : undefined);
     return obj;
   },
 
@@ -605,7 +615,7 @@ export const SourceNode = {
     );
     message.split = object.split ?? new Uint8Array();
     message.info = (object.info !== undefined && object.info !== null)
-      ? SourceInfo.fromPartial(object.info)
+      ? StreamSourceInfo.fromPartial(object.info)
       : undefined;
     return message;
   },
@@ -689,96 +699,91 @@ export const FilterNode = {
 };
 
 function createBaseInsertNode(): InsertNode {
-  return { tableSourceId: 0, columnIdxs: [], associatedMviewId: 0 };
+  return { tableId: 0, columnIndices: [], rowIdIndex: undefined };
 }
 
 export const InsertNode = {
   fromJSON(object: any): InsertNode {
     return {
-      tableSourceId: isSet(object.tableSourceId) ? Number(object.tableSourceId) : 0,
-      columnIdxs: Array.isArray(object?.columnIdxs) ? object.columnIdxs.map((e: any) => Number(e)) : [],
-      associatedMviewId: isSet(object.associatedMviewId) ? Number(object.associatedMviewId) : 0,
+      tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      columnIndices: Array.isArray(object?.columnIndices) ? object.columnIndices.map((e: any) => Number(e)) : [],
+      rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
     };
   },
 
   toJSON(message: InsertNode): unknown {
     const obj: any = {};
-    message.tableSourceId !== undefined && (obj.tableSourceId = Math.round(message.tableSourceId));
-    if (message.columnIdxs) {
-      obj.columnIdxs = message.columnIdxs.map((e) => Math.round(e));
+    message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    if (message.columnIndices) {
+      obj.columnIndices = message.columnIndices.map((e) => Math.round(e));
     } else {
-      obj.columnIdxs = [];
+      obj.columnIndices = [];
     }
-    message.associatedMviewId !== undefined && (obj.associatedMviewId = Math.round(message.associatedMviewId));
+    message.rowIdIndex !== undefined &&
+      (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<InsertNode>, I>>(object: I): InsertNode {
     const message = createBaseInsertNode();
-    message.tableSourceId = object.tableSourceId ?? 0;
-    message.columnIdxs = object.columnIdxs?.map((e) => e) || [];
-    message.associatedMviewId = object.associatedMviewId ?? 0;
+    message.tableId = object.tableId ?? 0;
+    message.columnIndices = object.columnIndices?.map((e) => e) || [];
+    message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
+      ? ColumnIndex.fromPartial(object.rowIdIndex)
+      : undefined;
     return message;
   },
 };
 
 function createBaseDeleteNode(): DeleteNode {
-  return { tableSourceId: 0, associatedMviewId: 0 };
+  return { tableId: 0 };
 }
 
 export const DeleteNode = {
   fromJSON(object: any): DeleteNode {
-    return {
-      tableSourceId: isSet(object.tableSourceId) ? Number(object.tableSourceId) : 0,
-      associatedMviewId: isSet(object.associatedMviewId) ? Number(object.associatedMviewId) : 0,
-    };
+    return { tableId: isSet(object.tableId) ? Number(object.tableId) : 0 };
   },
 
   toJSON(message: DeleteNode): unknown {
     const obj: any = {};
-    message.tableSourceId !== undefined && (obj.tableSourceId = Math.round(message.tableSourceId));
-    message.associatedMviewId !== undefined && (obj.associatedMviewId = Math.round(message.associatedMviewId));
+    message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<DeleteNode>, I>>(object: I): DeleteNode {
     const message = createBaseDeleteNode();
-    message.tableSourceId = object.tableSourceId ?? 0;
-    message.associatedMviewId = object.associatedMviewId ?? 0;
+    message.tableId = object.tableId ?? 0;
     return message;
   },
 };
 
 function createBaseUpdateNode(): UpdateNode {
-  return { tableSourceId: 0, exprs: [], associatedMviewId: 0 };
+  return { tableId: 0, exprs: [] };
 }
 
 export const UpdateNode = {
   fromJSON(object: any): UpdateNode {
     return {
-      tableSourceId: isSet(object.tableSourceId) ? Number(object.tableSourceId) : 0,
+      tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
       exprs: Array.isArray(object?.exprs) ? object.exprs.map((e: any) => ExprNode.fromJSON(e)) : [],
-      associatedMviewId: isSet(object.associatedMviewId) ? Number(object.associatedMviewId) : 0,
     };
   },
 
   toJSON(message: UpdateNode): unknown {
     const obj: any = {};
-    message.tableSourceId !== undefined && (obj.tableSourceId = Math.round(message.tableSourceId));
+    message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
     if (message.exprs) {
       obj.exprs = message.exprs.map((e) => e ? ExprNode.toJSON(e) : undefined);
     } else {
       obj.exprs = [];
     }
-    message.associatedMviewId !== undefined && (obj.associatedMviewId = Math.round(message.associatedMviewId));
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<UpdateNode>, I>>(object: I): UpdateNode {
     const message = createBaseUpdateNode();
-    message.tableSourceId = object.tableSourceId ?? 0;
+    message.tableId = object.tableId ?? 0;
     message.exprs = object.exprs?.map((e) => ExprNode.fromPartial(e)) || [];
-    message.associatedMviewId = object.associatedMviewId ?? 0;
     return message;
   },
 };
@@ -1431,21 +1436,21 @@ export const TaskOutputId = {
 };
 
 function createBaseLocalExecutePlan(): LocalExecutePlan {
-  return { plan: undefined, epoch: 0 };
+  return { plan: undefined, epoch: undefined };
 }
 
 export const LocalExecutePlan = {
   fromJSON(object: any): LocalExecutePlan {
     return {
       plan: isSet(object.plan) ? PlanFragment.fromJSON(object.plan) : undefined,
-      epoch: isSet(object.epoch) ? Number(object.epoch) : 0,
+      epoch: isSet(object.epoch) ? BatchQueryEpoch.fromJSON(object.epoch) : undefined,
     };
   },
 
   toJSON(message: LocalExecutePlan): unknown {
     const obj: any = {};
     message.plan !== undefined && (obj.plan = message.plan ? PlanFragment.toJSON(message.plan) : undefined);
-    message.epoch !== undefined && (obj.epoch = Math.round(message.epoch));
+    message.epoch !== undefined && (obj.epoch = message.epoch ? BatchQueryEpoch.toJSON(message.epoch) : undefined);
     return obj;
   },
 
@@ -1454,7 +1459,9 @@ export const LocalExecutePlan = {
     message.plan = (object.plan !== undefined && object.plan !== null)
       ? PlanFragment.fromPartial(object.plan)
       : undefined;
-    message.epoch = object.epoch ?? 0;
+    message.epoch = (object.epoch !== undefined && object.epoch !== null)
+      ? BatchQueryEpoch.fromPartial(object.epoch)
+      : undefined;
     return message;
   },
 };

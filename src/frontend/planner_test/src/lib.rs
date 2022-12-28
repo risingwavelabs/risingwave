@@ -26,7 +26,8 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
 use risingwave_frontend::handler::{
-    create_index, create_mv, create_source, create_table, drop_table, variable, HandlerArgs,
+    create_index, create_mv, create_schema, create_source, create_table, drop_table, variable,
+    HandlerArgs,
 };
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
@@ -404,6 +405,13 @@ impl TestCase {
                         check_result(self, &ret)?;
                     }
                     result = Some(ret);
+                }
+                Statement::CreateSchema {
+                    schema_name,
+                    if_not_exists,
+                } => {
+                    create_schema::handle_create_schema(handler_args, schema_name, if_not_exists)
+                        .await?;
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }

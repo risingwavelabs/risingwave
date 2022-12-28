@@ -29,7 +29,10 @@ use super::{
 };
 use crate::expr::{assert_input_ref, ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::plan_node::stream_now::StreamNow;
-use crate::optimizer::plan_node::{BatchFilter, StreamDynamicFilter, StreamFilter, StreamProject};
+use crate::optimizer::plan_node::{
+    BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    StreamDynamicFilter, StreamFilter, StreamProject, ToStreamContext,
+};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to
@@ -135,7 +138,7 @@ impl fmt::Display for LogicalFilter {
 }
 
 impl ColPrunable for LogicalFilter {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let required_cols_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
 
         let mut visitor = CollectInputRef::with_capacity(self.input().schema().len());
@@ -154,7 +157,8 @@ impl ColPrunable for LogicalFilter {
         );
         predicate = predicate.rewrite_expr(&mut mapping);
 
-        let filter = LogicalFilter::new(self.input().prune_col(&input_required_cols), predicate);
+        let filter =
+            LogicalFilter::new(self.input().prune_col(&input_required_cols, ctx), predicate);
         if input_required_cols == required_cols {
             filter.into()
         } else {
@@ -176,9 +180,13 @@ impl ColPrunable for LogicalFilter {
 }
 
 impl PredicatePushdown for LogicalFilter {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         let predicate = predicate.and(self.predicate().clone());
-        self.input().predicate_pushdown(predicate)
+        self.input().predicate_pushdown(predicate, ctx)
     }
 }
 
@@ -203,8 +211,8 @@ fn convert_comparator_to_priority(comparator: Type) -> i32 {
 }
 
 impl ToStream for LogicalFilter {
-    fn to_stream(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_stream()?;
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        let new_input = self.input().to_stream(ctx)?;
 
         let predicate = self.predicate();
         let has_now = predicate
@@ -236,10 +244,15 @@ impl ToStream for LogicalFilter {
                             if try_match_expand!(&now_expr.inputs()[0], ExprImpl::FunctionCall)?
                                 .get_expr_type()
                                 != Type::Now
+                                || !matches!(
+                                    &now_expr.inputs()[1],
+                                    ExprImpl::Literal(_) | ExprImpl::FunctionCall(_)
+                                )
+                                || now_expr.inputs()[1].has_input_ref()
                             {
                                 return Err(ExprError::InvalidParam {
                                     name: "now",
-                                    reason: String::from("now() must appear in the left side of the now delta expression directly"),
+                                    reason: String::from("expressions containing now must be of the form `col [cmp] now() +- [literal]`"),
                                 }
                                 .into());
                             }
@@ -321,8 +334,11 @@ impl ToStream for LogicalFilter {
         }
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((filter.into(), out_col_change))
     }
@@ -384,7 +400,10 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![2];
-        let plan = filter.prune_col(&required_cols);
+        let plan = filter.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(filter.clone()),
+        );
 
         // Check the result
         let project = plan.as_logical_project().unwrap();
@@ -449,7 +468,10 @@ mod tests {
 
         // Perform the prune
         let required_cols = vec![1, 0];
-        let plan = filter.prune_col(&required_cols);
+        let plan = filter.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(filter.clone()),
+        );
 
         // Check the result
         let project = plan.as_logical_project().unwrap();
@@ -510,11 +532,15 @@ mod tests {
             )
             .unwrap(),
         ));
-        let filter = LogicalFilter::new(values.into(), Condition::with_expr(predicate));
+        let filter: PlanRef =
+            LogicalFilter::new(values.into(), Condition::with_expr(predicate)).into();
 
         // Perform the prune
         let required_cols = vec![1, 2];
-        let plan = filter.prune_col(&required_cols);
+        let plan = filter.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(filter.clone()),
+        );
 
         // Check the result
         let filter = plan.as_logical_filter().unwrap();

@@ -256,7 +256,7 @@ async fn test_lookup_this_epoch() {
             vec![1, 0],
         )
         .await,
-        lru_manager: None,
+        watermark_epoch: None,
         cache_size: 1 << 16,
         chunk_size: 1024,
     }));
@@ -325,7 +325,7 @@ async fn test_lookup_last_epoch() {
             vec![1, 0],
         )
         .await,
-        lru_manager: None,
+        watermark_epoch: None,
         cache_size: 1 << 16,
         chunk_size: 1024,
     }));

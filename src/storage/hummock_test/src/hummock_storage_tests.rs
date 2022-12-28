@@ -229,6 +229,7 @@ async fn test_storage_basic() {
                 retention_seconds: None,
                 check_bloom_filter: true,
                 prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -245,6 +246,7 @@ async fn test_storage_basic() {
                 retention_seconds: None,
                 check_bloom_filter: true,
                 prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -263,6 +265,7 @@ async fn test_storage_basic() {
                 retention_seconds: None,
                 check_bloom_filter: true,
                 prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -293,6 +296,7 @@ async fn test_storage_basic() {
                 retention_seconds: None,
                 check_bloom_filter: true,
                 prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -325,6 +329,7 @@ async fn test_storage_basic() {
                 retention_seconds: None,
                 check_bloom_filter: true,
                 prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -342,6 +347,7 @@ async fn test_storage_basic() {
                 retention_seconds: None,
                 check_bloom_filter: true,
                 prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -359,6 +365,7 @@ async fn test_storage_basic() {
                 retention_seconds: None,
                 check_bloom_filter: true,
                 prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -391,6 +398,7 @@ async fn test_storage_basic() {
                 retention_seconds: None,
                 check_bloom_filter: true,
                 prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -409,6 +417,7 @@ async fn test_storage_basic() {
                 retention_seconds: None,
                 check_bloom_filter: true,
                 prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -426,6 +435,7 @@ async fn test_storage_basic() {
                 retention_seconds: None,
                 check_bloom_filter: true,
                 prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -465,6 +475,7 @@ async fn test_storage_basic() {
                 retention_seconds: None,
                 check_bloom_filter: true,
                 prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -631,6 +642,7 @@ async fn test_state_store_sync() {
                         retention_seconds: None,
                         check_bloom_filter: false,
                         prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -674,6 +686,7 @@ async fn test_state_store_sync() {
                         retention_seconds: None,
                         check_bloom_filter: false,
                         prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -695,6 +708,7 @@ async fn test_state_store_sync() {
                     retention_seconds: None,
                     check_bloom_filter: false,
                     prefix_hint: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
@@ -734,6 +748,7 @@ async fn test_state_store_sync() {
                     retention_seconds: None,
                     check_bloom_filter: false,
                     prefix_hint: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
@@ -855,6 +870,7 @@ async fn test_delete_get() {
                 check_bloom_filter: true,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             }
         )
         .await
@@ -965,6 +981,7 @@ async fn test_multiple_epoch_sync() {
                             retention_seconds: None,
                             check_bloom_filter: false,
                             prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                     )
                     .await
@@ -982,6 +999,7 @@ async fn test_multiple_epoch_sync() {
                         retention_seconds: None,
                         check_bloom_filter: false,
                         prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -998,6 +1016,7 @@ async fn test_multiple_epoch_sync() {
                             retention_seconds: None,
                             check_bloom_filter: false,
                             prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                     )
                     .await
@@ -1132,6 +1151,7 @@ async fn test_iter_with_min_epoch() {
                         retention_seconds: None,
                         check_bloom_filter: true,
                         prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -1154,6 +1174,7 @@ async fn test_iter_with_min_epoch() {
                         retention_seconds: None,
                         check_bloom_filter: true,
                         prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -1174,6 +1195,7 @@ async fn test_iter_with_min_epoch() {
                         retention_seconds: Some(1),
                         check_bloom_filter: true,
                         prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -1213,6 +1235,7 @@ async fn test_iter_with_min_epoch() {
                         retention_seconds: None,
                         check_bloom_filter: true,
                         prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -1235,6 +1258,7 @@ async fn test_iter_with_min_epoch() {
                         retention_seconds: None,
                         check_bloom_filter: true,
                         prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -1257,6 +1281,7 @@ async fn test_iter_with_min_epoch() {
                         retention_seconds: Some(1),
                         check_bloom_filter: true,
                         prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -1407,6 +1432,7 @@ async fn test_hummock_version_reader() {
                             retention_seconds: None,
                             check_bloom_filter: true,
                             prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                         read_snapshot,
                     )
@@ -1436,6 +1462,7 @@ async fn test_hummock_version_reader() {
                             retention_seconds: None,
                             check_bloom_filter: true,
                             prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                         read_snapshot,
                     )
@@ -1465,6 +1492,7 @@ async fn test_hummock_version_reader() {
                             retention_seconds: Some(1),
                             check_bloom_filter: true,
                             prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                         read_snapshot,
                     )
@@ -1532,6 +1560,7 @@ async fn test_hummock_version_reader() {
                             retention_seconds: None,
                             check_bloom_filter: true,
                             prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                         read_snapshot,
                     )
@@ -1570,6 +1599,7 @@ async fn test_hummock_version_reader() {
                             retention_seconds: None,
                             check_bloom_filter: true,
                             prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                         read_snapshot,
                     )
@@ -1608,6 +1638,7 @@ async fn test_hummock_version_reader() {
                             retention_seconds: Some(1),
                             check_bloom_filter: true,
                             prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                         read_snapshot,
                     )
@@ -1646,6 +1677,7 @@ async fn test_hummock_version_reader() {
                             retention_seconds: None,
                             check_bloom_filter: true,
                             prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                         read_snapshot,
                     )
@@ -1690,6 +1722,7 @@ async fn test_hummock_version_reader() {
                                 retention_seconds: None,
                                 check_bloom_filter: true,
                                 prefix_hint: None,
+                                read_version_from_backup: false,
                             },
                             read_snapshot,
                         )
@@ -1728,6 +1761,7 @@ async fn test_hummock_version_reader() {
                                 retention_seconds: None,
                                 check_bloom_filter: true,
                                 prefix_hint: None,
+                                read_version_from_backup: false,
                             },
                             read_snapshot,
                         )

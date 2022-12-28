@@ -54,27 +54,36 @@ impl DatagenEventGenerator {
     #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(mut self) {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
+        const MAX_ROWS_PER_YIELD: u64 = 1024;
         loop {
             // generate `partition_rows_per_second` rows per second
             interval.tick().await;
-            let mut msgs = vec![];
-            for _ in 0..self.partition_rows_per_second {
-                let value = Value::Object(
-                    self.fields_map
-                        .iter_mut()
-                        .map(|(name, field_generator)| {
-                            (name.to_string(), field_generator.generate(self.offset))
-                        })
-                        .collect(),
+            let mut rows_generated_this_second = 0;
+            while rows_generated_this_second < self.partition_rows_per_second {
+                let mut msgs = vec![];
+                let num_rows_to_generate = std::cmp::min(
+                    MAX_ROWS_PER_YIELD,
+                    self.partition_rows_per_second - rows_generated_this_second,
                 );
-                msgs.push(SourceMessage {
-                    payload: Some(Bytes::from(value.to_string())),
-                    offset: self.offset.to_string(),
-                    split_id: self.split_id.clone(),
-                });
-                self.offset += 1;
+                for _ in 0..num_rows_to_generate {
+                    let value = Value::Object(
+                        self.fields_map
+                            .iter_mut()
+                            .map(|(name, field_generator)| {
+                                (name.to_string(), field_generator.generate(self.offset))
+                            })
+                            .collect(),
+                    );
+                    msgs.push(SourceMessage {
+                        payload: Some(Bytes::from(value.to_string())),
+                        offset: self.offset.to_string(),
+                        split_id: self.split_id.clone(),
+                    });
+                    self.offset += 1;
+                    rows_generated_this_second += 1;
+                }
+                yield msgs;
             }
-            yield msgs;
         }
     }
 }

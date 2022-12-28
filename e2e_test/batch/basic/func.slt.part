@@ -11,6 +11,16 @@ select nullif(1,2);
 ----
 1
 
+query I
+select mod(5,2);
+----
+1
+
+query I
+select mod(7.7,2.2);
+----
+1.1
+
 query IIIII
 select coalesce(1,2), coalesce(null,2), coalesce(null), coalesce(null,null), coalesce(null,2,3);
 ----

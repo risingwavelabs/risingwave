@@ -35,7 +35,6 @@ use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::dml_manager::DmlManager;
 use risingwave_source::monitor::SourceMetrics;
-use risingwave_source::TableSourceManager;
 use risingwave_storage::hummock::compactor::{
     CompactionExecutor, Compactor, CompactorContext, Context,
 };
@@ -52,6 +51,7 @@ use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::memory_management::memory_manager::GlobalMemoryManager;
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
@@ -116,7 +116,7 @@ pub async fn compute_node_serve(
     let state_store = StateStoreImpl::new(
         &opts.state_store,
         &opts.file_cache_dir,
-        storage_config.clone(),
+        &config,
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
         object_store_metrics,
@@ -212,12 +212,32 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
         config.streaming.clone(),
         async_stack_trace_config,
-        opts.total_memory_bytes,
     ));
-    let source_mgr = Arc::new(TableSourceManager::new(
-        source_metrics,
-        stream_config.developer.stream_connector_message_buffer_size,
-    ));
+
+    // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
+    let batch_mgr_clone = batch_mgr.clone();
+    let stream_mgr_clone = stream_mgr.clone();
+    let create_lru_manager = move || {
+        let mgr = GlobalMemoryManager::new(
+            opts.total_memory_bytes,
+            config.streaming.barrier_interval_ms,
+            streaming_metrics.clone(),
+        );
+        // Run a background memory monitor
+        tokio::spawn(mgr.clone().run(batch_mgr_clone, stream_mgr_clone));
+        mgr
+    };
+
+    let watermark_epoch = config
+        .streaming
+        .developer
+        .stream_enable_managed_cache
+        .then(create_lru_manager)
+        .map(|mgr| mgr.get_watermark_epoch());
+    // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead
+    // of lru manager.
+    stream_mgr.set_watermark_epoch(watermark_epoch).await;
+
     let grpc_stack_trace_mgr = async_stack_trace_config
         .map(|config| GrpcStackTraceManagerRef::new(StackTraceManager::new(config).into()));
     let dml_mgr = Arc::new(DmlManager::default());
@@ -225,7 +245,6 @@ pub async fn compute_node_serve(
     // Initialize batch environment.
     let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
     let batch_env = BatchEnvironment::new(
-        source_mgr.clone(),
         batch_mgr.clone(),
         client_addr.clone(),
         batch_config,
@@ -234,6 +253,7 @@ pub async fn compute_node_serve(
         batch_task_metrics.clone(),
         client_pool,
         dml_mgr.clone(),
+        source_metrics.clone(),
     );
 
     let connector_params = risingwave_connector::ConnectorParams {
@@ -241,13 +261,13 @@ pub async fn compute_node_serve(
     };
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
-        source_mgr,
         client_addr.clone(),
         connector_params,
         stream_config,
         worker_id,
         state_store,
         dml_mgr,
+        source_metrics,
     );
 
     // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if

@@ -3,6 +3,12 @@
 version = 3
 
 [[package]]
+name = "Inflector"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
+
+[[package]]
 name = "addr2line"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -42,6 +48,12 @@ checksum = "b4f55bd91a0978cbfd91c457a164bab8b4001c833b7f323132c0a4e1922dd44e"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "aliasable"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "250f629c0161ad8107cf89319e990051fae62832fd343083bea452d93e2205fd"
 
 [[package]]
 name = "android_system_properties"
@@ -1556,6 +1568,15 @@ checksum = "1bfb12502f3fc46cca1bb51ac28df9d618d813cdc3d2f25b9fe775a34af26bb3"
 dependencies = [
  "generic-array",
  "typenum",
+]
+
+[[package]]
+name = "csv-core"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b2466559f260f48ad25fe6317b3c8dac77b5bdb5763ac7d9d6103530663bc90"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -3943,6 +3964,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7b5bf27447411e9ee3ff51186bf7a08e16c341efdde93f4d823e8844429bed7e"
 
 [[package]]
+name = "ouroboros"
+version = "0.15.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dfbb50b356159620db6ac971c6d5c9ab788c9cc38a6f49619fca2a27acb062ca"
+dependencies = [
+ "aliasable",
+ "ouroboros_macro",
+]
+
+[[package]]
+name = "ouroboros_macro"
+version = "0.15.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a0d9d1a6191c4f391f87219d1ea42b23f09ee84d64763cd05ee6ea88d9f384d"
+dependencies = [
+ "Inflector",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "output_vt100"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5244,6 +5288,8 @@ dependencies = [
  "static_assertions",
  "strum",
  "strum_macros",
+ "sysinfo",
+ "tempfile",
  "thiserror",
  "tokio-stream",
  "toml",
@@ -5276,16 +5322,20 @@ name = "risingwave_compaction_test"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bytes",
  "clap 3.2.23",
  "futures",
  "itertools",
+ "lazy_static",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
+ "rand 0.8.5",
  "risingwave_common",
  "risingwave_compactor",
  "risingwave_hummock_sdk",
+ "risingwave_hummock_test",
  "risingwave_meta",
  "risingwave_object_store",
  "risingwave_pb",
@@ -5345,6 +5395,7 @@ dependencies = [
  "futures-async-stream",
  "hyper",
  "itertools",
+ "lru 0.7.6",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -5374,6 +5425,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror",
+ "tikv-jemalloc-ctl",
  "tokio-stream",
  "tower",
  "tower-http",
@@ -5504,6 +5556,7 @@ dependencies = [
  "madsim-tonic",
  "md5",
  "num-traits",
+ "ouroboros",
  "parse-display",
  "paste",
  "postgres-types",
@@ -5862,6 +5915,7 @@ dependencies = [
  "chrono",
  "crc32fast",
  "criterion",
+ "csv-core",
  "enum-as-inner",
  "farmhash",
  "futures",
@@ -5994,6 +6048,7 @@ dependencies = [
  "prost 0.11.2",
  "rand 0.8.5",
  "regex",
+ "risingwave_backup",
  "risingwave_common",
  "risingwave_common_service",
  "risingwave_hummock_sdk",

@@ -18,7 +18,9 @@ use std::sync::Arc;
 
 pub use avro::*;
 pub use canal::*;
+use csv_parser::CsvParser;
 pub use debezium::*;
+use enum_as_inner::EnumAsInner;
 use futures::Future;
 use itertools::Itertools;
 pub use json_parser::*;
@@ -27,6 +29,7 @@ use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
+use risingwave_pb::catalog::StreamSourceInfo;
 
 use crate::parser::maxwell::MaxwellParser;
 use crate::{SourceColumnDesc, SourceFormat};
@@ -34,6 +37,7 @@ use crate::{SourceColumnDesc, SourceFormat};
 mod avro;
 mod canal;
 mod common;
+mod csv_parser;
 mod debezium;
 mod json_parser;
 mod macros;
@@ -260,6 +264,7 @@ impl SourceStreamChunkRowWriter<'_> {
 
 pub trait ParseFuture<'a, Out> = Future<Output = Out> + Send + 'a;
 
+// TODO: use `async_fn_in_traits` to implement it
 /// `SourceParser` is the message parser, `ChunkReader` will parse the messages in `SourceReader`
 /// one by one through `SourceParser` and assemble them into `DataChunk`
 /// Note that the `skip_parse` parameter in `SourceColumnDesc`, when it is true, should skip the
@@ -346,5 +351,80 @@ impl SourceParserImpl {
             }
         };
         Ok(Arc::new(parser))
+    }
+}
+
+// TODO: use `async_fn_in_traits` to implement it
+/// A parser trait that parse byte stream instead of one byte chunk
+pub trait ByteStreamSourceParser: Send + Debug + 'static {
+    type ParseResult<'a>: ParseFuture<'a, Result<Option<WriteGuard>>>;
+    /// Parse the payload and append the result to the [`StreamChunk`] directly.
+    /// If the payload is not enough to parse one record, the parser will cache
+    /// the payload and wait for more byte to be passed.
+    ///
+    /// # Arguments
+    ///
+    /// - `self`: A needs to be a member method because parser need to cache some payload
+    /// - writer: Write exactly one record during a `parse` call.
+    ///
+    /// # Returns
+    ///
+    /// An [`Option<WriteGuard>`], None if the payload is not enough to parse one record, else Some
+    fn parse<'a, 'b, 'c>(
+        &'a mut self,
+        payload: &'a mut &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a;
+}
+
+#[derive(Debug)]
+pub enum ByteStreamSourceParserImpl {
+    Csv(CsvParser),
+}
+
+#[derive(Debug, Clone, EnumAsInner)]
+pub enum ParserConfig {
+    Csv(u8, bool),
+}
+
+impl ParserConfig {
+    pub fn new(format: &SourceFormat, info: &StreamSourceInfo) -> Self {
+        match format {
+            SourceFormat::Csv => Self::Csv(info.csv_delimiter as u8, info.csv_has_header),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl ByteStreamSourceParserImpl {
+    pub async fn parse(
+        &mut self,
+        payload: &mut &[u8],
+        writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<Option<WriteGuard>> {
+        match self {
+            Self::Csv(csv_parser) => csv_parser.parse(payload, writer).await,
+        }
+    }
+
+    // Keep this `async` in consideration of other parsers in the future.
+    #[allow(clippy::unused_async)]
+    pub async fn create(
+        format: &SourceFormat,
+        _properties: &HashMap<String, String>,
+        parser_config: ParserConfig,
+    ) -> Result<Self> {
+        match format {
+            SourceFormat::Csv => {
+                let (delimiter, has_header) = parser_config.into_csv().unwrap();
+                CsvParser::new(delimiter, has_header).map(Self::Csv)
+            }
+            _ => Err(RwError::from(ProtocolError(
+                "format not support".to_string(),
+            ))),
+        }
     }
 }

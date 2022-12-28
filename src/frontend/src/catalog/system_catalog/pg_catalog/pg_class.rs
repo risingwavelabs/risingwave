@@ -25,4 +25,8 @@ pub const PG_CLASS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "relnamespace"),
     (DataType::Int32, "relowner"),
     (DataType::Varchar, "relkind"),
+    // 0
+    (DataType::Int32, "relam"),
+    // 0
+    (DataType::Int32, "reltablespace"),
 ];
