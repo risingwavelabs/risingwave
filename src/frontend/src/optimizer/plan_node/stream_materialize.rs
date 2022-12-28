@@ -192,7 +192,8 @@ impl StreamMaterialize {
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
-        let pk_indices = input.logical_pk();
+        // Note(congyi): avoid pk duplication
+        let pk_indices = input.logical_pk().iter().copied().unique().collect_vec();
         let schema = input.schema();
         let distribution = input.distribution();
 
@@ -219,7 +220,7 @@ impl StreamMaterialize {
             in_order.insert(idx);
         }
 
-        for &idx in pk_indices {
+        for &idx in &pk_indices {
             if in_order.contains(idx) {
                 continue;
             }
@@ -240,7 +241,7 @@ impl StreamMaterialize {
             name,
             columns,
             pk: pk_list,
-            stream_key: pk_indices.to_vec(),
+            stream_key: pk_indices,
             distribution_key,
             table_type,
             append_only: input.append_only(),
