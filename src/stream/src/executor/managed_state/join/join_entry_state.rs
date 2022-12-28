@@ -14,8 +14,6 @@
 
 use std::collections::{btree_map, BTreeMap};
 
-use risingwave_common::collection::estimate_size::EstimateSize;
-
 use super::*;
 
 #[expect(dead_code)]
@@ -32,53 +30,23 @@ type JoinEntryStateValuesMut<'a> = btree_map::ValuesMut<'a, PkType, StateValueTy
 ///
 /// If a `JoinEntryState` exists for a join key, the all records under this
 /// join key will be presented in the cache.
+#[derive(Default)]
 pub struct JoinEntryState {
-    /// The full copy of the state. If evicted, it will be `None`.
-    cached: BTreeMap<PkType, StateValueType, SharedStatsAlloc<Global>>,
-
-    /// Allocator for counting the memory usage of the `cached` map itself.
-    allocator: SharedStatsAlloc<Global>,
-
-    /// Estimated heap size of the keys and values in the `cached` map.
-    estimated_content_heap_size: usize,
-}
-
-impl Default for JoinEntryState {
-    fn default() -> Self {
-        // TODO: may use static rc here.
-        let allocator = StatsAlloc::new(Global).shared();
-        Self {
-            cached: BTreeMap::new_in(allocator.clone()),
-            allocator,
-            estimated_content_heap_size: 0,
-        }
-    }
+    /// The full copy of the state.
+    cached: BTreeMap<PkType, StateValueType>,
 }
 
 impl JoinEntryState {
     /// Insert into the cache.
     pub fn insert(&mut self, key: PkType, value: StateValueType) {
-        self.estimated_content_heap_size = self
-            .estimated_content_heap_size
-            .saturating_add(key.estimated_heap_size())
-            .saturating_add(value.estimated_heap_size());
-
         self.cached.try_insert(key, value).unwrap();
     }
 
     /// Delete from the cache.
     pub fn remove(&mut self, pk: PkType) {
-        let value = self.cached.remove(&pk).unwrap();
-
-        self.estimated_content_heap_size = self
-            .estimated_content_heap_size
-            .saturating_sub(pk.estimated_heap_size())
-            .saturating_sub(value.estimated_heap_size());
+        self.cached.remove(&pk).unwrap();
     }
 
-    /// Note: To make the estimated size accurate, the caller should ensure that it does not mutate
-    /// the size (or capacity) of the [`StateValueType`].
-    ///
     /// Note: the first item in the tuple is the mutable reference to the value in this entry, while
     /// the second item is the decoded value. To mutate the degree, one **must not** forget to apply
     /// the changes to the first item.
@@ -100,13 +68,6 @@ impl JoinEntryState {
     #[expect(dead_code)]
     pub fn len(&self) -> usize {
         self.cached.len()
-    }
-}
-
-impl EstimateSize for JoinEntryState {
-    fn estimated_heap_size(&self) -> usize {
-        self.estimated_content_heap_size // heap size of keys and values
-         + self.allocator.bytes_in_use() // heap size of the btree-map itself
     }
 }
 
