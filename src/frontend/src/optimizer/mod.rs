@@ -46,6 +46,7 @@ use self::plan_visitor::{
 };
 use self::property::RequiredDist;
 use self::rule::*;
+use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::handler::create_table::DmlFlag;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
@@ -554,29 +555,29 @@ impl PlanRoot {
     pub fn gen_table_plan(
         &mut self,
         table_name: String,
+        columns: Vec<ColumnCatalog>,
         definition: String,
         handle_pk_conflict: bool,
         row_id_index: Option<usize>,
         dml_flag: DmlFlag,
     ) -> Result<StreamMaterialize> {
         let create_materialize = |this: &Self, input: PlanRef| -> Result<StreamMaterialize> {
-            StreamMaterialize::create(
+            StreamMaterialize::create_table(
                 input,
                 table_name.clone(),
                 this.required_dist.clone(),
                 this.required_order.clone(),
-                this.out_fields.clone(),
-                this.out_names.clone(), // TODO: managed columns
+                columns.clone(),
                 definition.clone(),
                 handle_pk_conflict,
                 row_id_index,
-                TableType::Table,
             )
         };
 
+        let stream_plan = self.gen_stream_plan()?;
+
         // TODO: we create this `Materialize` only for acquiring the table catalog, may need to find
         // a better way to do this.
-        let stream_plan = self.gen_stream_plan()?;
         let materialize = create_materialize(self, stream_plan.clone())?;
 
         // TODO: remove this after we deprecate the materialized source
