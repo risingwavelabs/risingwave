@@ -40,6 +40,7 @@ pub struct DeleteExecutor {
     chunk_size: usize,
     schema: Schema,
     identity: String,
+    returning: bool,
 }
 
 impl DeleteExecutor {
@@ -49,17 +50,23 @@ impl DeleteExecutor {
         child: BoxedExecutor,
         chunk_size: usize,
         identity: String,
+        returning: bool,
     ) -> Self {
+        let table_schema = child.schema().clone();
         Self {
             table_id,
             dml_manager,
             child,
             chunk_size,
-            // TODO: support `RETURNING`
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int64)],
+            schema: if returning {
+                table_schema
+            } else {
+                Schema {
+                    fields: vec![Field::unnamed(DataType::Int64)],
+                }
             },
             identity,
+            returning,
         }
     }
 }
@@ -101,11 +108,17 @@ impl DeleteExecutor {
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
             for chunk in builder.append_chunk(data_chunk) {
+                if self.returning {
+                    yield chunk.clone();
+                }
                 write_chunk(chunk)?;
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
+            if self.returning {
+                yield chunk.clone();
+            }
             write_chunk(chunk)?;
         }
 
@@ -117,7 +130,7 @@ impl DeleteExecutor {
             .sum::<usize>();
 
         // create ret value
-        {
+        if !self.returning {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
             array_builder.append(Some(rows_deleted as i64));
 
@@ -149,6 +162,7 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             child,
             source.context.get_config().developer.batch_chunk_size,
             source.plan_node().get_identity().clone(),
+            delete_node.returning,
         )))
     }
 }
@@ -210,6 +224,7 @@ mod tests {
             Box::new(mock_executor),
             1024,
             "DeleteExecutor".to_string(),
+            false,
         ));
 
         let handle = tokio::spawn(async move {

@@ -17,7 +17,8 @@ use risingwave_common::error::Result;
 
 use super::Planner;
 use crate::binder::BoundDelete;
-use crate::optimizer::plan_node::{LogicalDelete, LogicalFilter};
+use crate::optimizer::plan_node::generic::Project;
+use crate::optimizer::plan_node::{LogicalDelete, LogicalFilter, LogicalProject};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{PlanRef, PlanRoot};
 
@@ -29,8 +30,18 @@ impl Planner {
         } else {
             scan
         };
-        let plan: PlanRef =
-            LogicalDelete::create(input, delete.table_name.clone(), delete.table_id)?.into();
+        let returning = !delete.returning_list.is_empty();
+        let mut plan: PlanRef = LogicalDelete::create(input, delete.table_name.clone(), delete.table_id, returning)?.into();
+
+        if returning {
+            let len = delete.returning_list.len();
+            plan = LogicalProject::create(plan, delete.returning_list);
+            plan = LogicalProject::with_core_and_schema(
+                Project::with_out_col_idx(plan, 0..len),
+                delete.schema,
+            )
+            .into();
+        }
 
         // For delete, frontend will only schedule one task so do not need this to be single.
         let dist = RequiredDist::Any;

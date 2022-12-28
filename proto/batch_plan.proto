@@ -81,6 +81,7 @@ message InsertNode {
 message DeleteNode {
   // Id of the table to perform deleting.
   uint32 table_id = 1;
+  bool returning = 2;
 }
 
 message UpdateNode {

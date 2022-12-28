@@ -43,8 +43,9 @@ impl Binder {
             Statement::Delete {
                 table_name,
                 selection,
+                returning,
             } => Ok(BoundStatement::Delete(
-                self.bind_delete(table_name, selection)?.into(),
+                self.bind_delete(table_name, selection, returning)?.into(),
             )),
 
             Statement::Update {

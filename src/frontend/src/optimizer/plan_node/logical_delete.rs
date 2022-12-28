@@ -38,14 +38,19 @@ pub struct LogicalDelete {
     table_name: String, // explain-only
     table_id: TableId,
     input: PlanRef,
+    returning: bool,
 }
 
 impl LogicalDelete {
     /// Create a [`LogicalDelete`] node. Used internally by optimizer.
-    pub fn new(input: PlanRef, table_name: String, table_id: TableId) -> Self {
+    pub fn new(input: PlanRef, table_name: String, table_id: TableId, returning: bool,) -> Self {
         let ctx = input.ctx();
         // TODO: support `RETURNING`.
-        let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
+        let schema = if returning {
+            input.schema().clone()
+        } else {
+            Schema::new(vec![Field::unnamed(DataType::Int64)])
+        };
         let fd_set = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
         Self {
@@ -53,12 +58,13 @@ impl LogicalDelete {
             table_name,
             table_id,
             input,
+            returning,
         }
     }
 
     /// Create a [`LogicalDelete`] node. Used by planner.
-    pub fn create(input: PlanRef, table_name: String, table_id: TableId) -> Result<Self> {
-        Ok(Self::new(input, table_name, table_id))
+    pub fn create(input: PlanRef, table_name: String, table_id: TableId,returning: bool) -> Result<Self> {
+        Ok(Self::new(input, table_name, table_id,returning))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
@@ -69,6 +75,10 @@ impl LogicalDelete {
     pub fn table_id(&self) -> TableId {
         self.table_id
     }
+
+    pub fn has_returning(&self) -> bool {
+        self.returning
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalDelete {
@@ -77,7 +87,7 @@ impl PlanTreeNodeUnary for LogicalDelete {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.table_name.clone(), self.table_id)
+        Self::new(input, self.table_name.clone(), self.table_id, self.returning)
     }
 }
 

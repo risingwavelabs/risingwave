@@ -2549,10 +2549,12 @@ impl Parser {
         } else {
             None
         };
+        let returning = self.parse_returning(Optional)?;
 
         Ok(Statement::Delete {
             table_name,
             selection,
+            returning,
         })
     }
 

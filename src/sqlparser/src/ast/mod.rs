@@ -891,6 +891,8 @@ pub enum Statement {
         table_name: ObjectName,
         /// WHERE
         selection: Option<Expr>,
+        /// RETURNING
+        returning: Vec<SelectItem>,
     },
     /// CREATE VIEW
     CreateView {
@@ -1123,7 +1125,6 @@ impl fmt::Display for Statement {
                 }
                 Ok(())
             }
-
             Statement::Copy {
                 table_name,
                 columns,
@@ -1166,10 +1167,14 @@ impl fmt::Display for Statement {
             Statement::Delete {
                 table_name,
                 selection,
+                returning,
             } => {
                 write!(f, "DELETE FROM {}", table_name)?;
                 if let Some(selection) = selection {
                     write!(f, " WHERE {}", selection)?;
+                }
+                if !returning.is_empty() {
+                    write!(f, " RETURNING {}", display_comma_separated(returning))?;
                 }
                 Ok(())
             }
