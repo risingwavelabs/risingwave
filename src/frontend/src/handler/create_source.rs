@@ -18,51 +18,19 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
 };
 use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
 use risingwave_source::{AvroParser, ProtobufParser};
-use risingwave_sqlparser::ast::{
-    AvroSchema, CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema,
-};
+use risingwave_sqlparser::ast::{AvroSchema, CreateSourceStatement, ProtobufSchema, SourceSchema};
 
 use super::create_table::{bind_sql_columns, bind_sql_table_constraints, gen_materialize_plan};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::handler::HandlerArgs;
 use crate::optimizer::OptimizerContext;
-use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-
-pub(crate) fn make_prost_source(
-    session: &SessionImpl,
-    name: ObjectName,
-    row_id_index: Option<ProstColumnIndex>,
-    columns: Vec<ProstColumnCatalog>,
-    pk_column_ids: Vec<i32>,
-    properties: HashMap<String, String>,
-    source_info: Info,
-) -> Result<ProstSource> {
-    let db_name = session.database();
-    let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, name)?;
-
-    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
-
-    Ok(ProstSource {
-        id: 0,
-        schema_id,
-        database_id,
-        name,
-        row_id_index,
-        columns,
-        pk_column_ids,
-        properties,
-        info: Some(source_info),
-        owner: session.user_id(),
-    })
-}
 
 /// Map an Avro schema to a relational schema.
 async fn extract_avro_table_schema(
@@ -262,18 +230,25 @@ pub async fn handle_create_source(
 
     session.check_relation_name_duplicated(stmt.source_name.clone())?;
 
-    let source = make_prost_source(
-        &session,
-        stmt.source_name,
+    let db_name = session.database();
+    let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+
+    let source = ProstSource {
+        id: 0,
+        schema_id,
+        database_id,
+        name,
         row_id_index,
         columns,
         pk_column_ids,
-        with_properties,
-        Info::StreamSource(source_info),
-    )?;
+        properties: with_properties,
+        info: Some(source_info),
+        owner: session.user_id(),
+    };
     let catalog_writer = session.env().catalog_writer();
 
-    // TODO(Yuanxin): This should be removed after unifying table and materialized source.
+    // TODO(Yuanxin): This should be removed after unsupporting `CREATE MATERIALIZED SOURCE`.
     if is_materialized {
         let (graph, table) = {
             let context = OptimizerContext::new_with_handler_args(handler_args);
@@ -284,7 +259,9 @@ pub async fn handle_create_source(
             (graph, table)
         };
 
-        catalog_writer.create_table(source, table, graph).await?;
+        catalog_writer
+            .create_table(Some(source), table, graph)
+            .await?;
     } else {
         catalog_writer.create_source(source).await?;
     }

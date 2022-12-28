@@ -24,7 +24,6 @@ use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::CatalogError;
-use crate::handler::drop_table::check_source;
 use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_mv(
@@ -80,7 +79,12 @@ pub async fn handle_drop_mv(
         match table.table_type() {
             TableType::MaterializedView => {}
             TableType::Table => {
-                check_source(&reader, db_name, schema_name, &table_name)?;
+                // TODO(Yuanxin): Remove this after unsupporting `CREATE MATERIALIZED SOURCE`.
+                if table.associated_source_id().is_some() {
+                    return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                        "Use `DROP SOURCE` to drop a source.".to_owned(),
+                    )));
+                }
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP TABLE` to drop a table.".to_owned(),
                 )));

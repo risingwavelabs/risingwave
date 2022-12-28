@@ -548,9 +548,9 @@ impl StageRunner {
         let node_body = plan_node.node_body.as_ref().expect("fail to get node body");
 
         let vnode_mapping = match node_body {
-            Insert(insert_node) => self.get_vnode_mapping(&insert_node.associated_mview_id.into()),
-            Update(update_node) => self.get_vnode_mapping(&update_node.associated_mview_id.into()),
-            Delete(delete_node) => self.get_vnode_mapping(&delete_node.associated_mview_id.into()),
+            Insert(insert_node) => self.get_vnode_mapping(&insert_node.table_id.into()),
+            Update(update_node) => self.get_vnode_mapping(&update_node.table_id.into()),
+            Delete(delete_node) => self.get_vnode_mapping(&delete_node.table_id.into()),
             _ => {
                 if let Some(distributed_lookup_join_node) =
                     Self::find_distributed_lookup_join_node(plan_node)

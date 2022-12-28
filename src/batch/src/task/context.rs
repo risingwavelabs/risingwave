@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_rpc_client::ComputeClientPoolRef;
-use risingwave_source::TableSourceManagerRef;
+use risingwave_source::dml_manager::DmlManagerRef;
+use risingwave_source::monitor::SourceMetrics;
 use risingwave_storage::StateStoreImpl;
 
 use super::TaskId;
@@ -39,7 +42,7 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     /// Whether `peer_addr` is in same as current task.
     fn is_local_addr(&self, peer_addr: &HostAddr) -> bool;
 
-    fn source_manager(&self) -> TableSourceManagerRef;
+    fn dml_manager(&self) -> DmlManagerRef;
 
     fn state_store(&self) -> StateStoreImpl;
 
@@ -53,6 +56,8 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 
     /// Get config for batch environment
     fn get_config(&self) -> &BatchConfig;
+
+    fn source_metrics(&self) -> Arc<SourceMetrics>;
 }
 
 /// Batch task context on compute node.
@@ -78,8 +83,8 @@ impl BatchTaskContext for ComputeNodeContext {
         is_local_address(self.env.server_address(), peer_addr)
     }
 
-    fn source_manager(&self) -> TableSourceManagerRef {
-        self.env.source_manager_ref()
+    fn dml_manager(&self) -> DmlManagerRef {
+        self.env.dml_manager_ref()
     }
 
     fn state_store(&self) -> StateStoreImpl {
@@ -96,6 +101,10 @@ impl BatchTaskContext for ComputeNodeContext {
 
     fn get_config(&self) -> &BatchConfig {
         self.env.config()
+    }
+
+    fn source_metrics(&self) -> Arc<SourceMetrics> {
+        self.env.source_metrics()
     }
 }
 
