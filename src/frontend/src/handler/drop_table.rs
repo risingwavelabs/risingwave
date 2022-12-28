@@ -20,32 +20,9 @@ use risingwave_sqlparser::ast::ObjectName;
 use super::privilege::check_super_user;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::source_catalog::SourceKind;
 use crate::catalog::table_catalog::TableType;
 use crate::handler::HandlerArgs;
-
-pub fn check_source(
-    reader: &CatalogReadGuard,
-    db_name: &str,
-    schema_name: &str,
-    table_name: &str,
-) -> Result<()> {
-    if let Ok((s, _)) =
-        reader.get_source_by_name(db_name, SchemaPath::Name(schema_name), table_name)
-    {
-        match s.kind() {
-            SourceKind::Stream => {
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Use `DROP SOURCE` to drop a source.".to_owned(),
-                )))
-            }
-            SourceKind::Table => {}
-        }
-    }
-    Ok(())
-}
 
 pub async fn handle_drop_table(
     handler_args: HandlerArgs,
@@ -89,9 +66,6 @@ pub async fn handle_drop_table(
         }
 
         match table.table_type() {
-            TableType::Table => {
-                check_source(&reader, db_name, schema_name, &table_name)?;
-            }
             TableType::MaterializedView => {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                     "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
@@ -107,14 +81,22 @@ pub async fn handle_drop_table(
                     "Internal tables cannot be dropped.".to_owned(),
                 )));
             }
+            TableType::Table => {
+                // TODO(Yuanxin): Remove this after unsupporting `CREATE MATERIALIZED SOURCE`.
+                if table.associated_source_id().is_some() {
+                    return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                        "Use `DROP SOURCE` to drop a source.".to_owned(),
+                    )));
+                }
+            }
         }
 
-        (table.associated_source_id().unwrap(), table.id())
+        (table.associated_source_id(), table.id())
     };
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .drop_materialized_source(source_id.table_id(), table_id)
+        .drop_table(source_id.map(|id| id.table_id), table_id)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_TABLE))

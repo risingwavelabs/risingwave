@@ -212,17 +212,17 @@ pub fn timestamp_interval_sub<T1, T2, T3>(
 }
 
 #[inline(always)]
-pub fn timestampz_interval_add<T1, T2, T3>(l: i64, r: IntervalUnit) -> Result<i64> {
-    interval_timestampz_add::<T1, T2, T3>(r, l)
+pub fn timestamptz_interval_add<T1, T2, T3>(l: i64, r: IntervalUnit) -> Result<i64> {
+    interval_timestamptz_add::<T1, T2, T3>(r, l)
 }
 
 #[inline(always)]
-pub fn timestampz_interval_sub<T1, T2, T3>(l: i64, r: IntervalUnit) -> Result<i64> {
-    interval_timestampz_add::<T1, T2, T3>(r.negative(), l)
+pub fn timestamptz_interval_sub<T1, T2, T3>(l: i64, r: IntervalUnit) -> Result<i64> {
+    interval_timestamptz_add::<T1, T2, T3>(r.negative(), l)
 }
 
 #[inline(always)]
-pub fn interval_timestampz_add<T1, T2, T3>(l: IntervalUnit, r: i64) -> Result<i64> {
+pub fn interval_timestamptz_add<T1, T2, T3>(l: IntervalUnit, r: i64) -> Result<i64> {
     // Without session TimeZone, we cannot add month/day in local time. See #5826.
     // However, we only reject months but accept days, assuming them are always 24-hour and ignoring
     // Daylight Saving.

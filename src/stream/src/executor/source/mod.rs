@@ -13,9 +13,7 @@
 // limitations under the License.
 
 mod fs_source_executor;
-pub mod source_executor;
 pub use fs_source_executor::*;
-pub use source_executor::*;
 
 pub mod source_executor_v2;
 
