@@ -146,6 +146,7 @@ create materialized source s1 (v1 struct<v2 int> [], c1 varchar []) with (
     fields.v1._.v2.min = '1',
     fields.v1._.v2.max = '2',
     fields.v1._.v2.seed = '1',
+    fields.c1.length = '3',
     fields.c1._.kind = 'random',
     fields.c1._.length = '1',
     fields.c1._.seed = '3',
@@ -164,18 +165,5 @@ select count(*) > 10 from s1;
 ----
 t
 
-
-query I
-select count(*) from s1 where array_length(v1) != 2;
-----
-0
-
-query I
-select count(*) from s1 where s1.v1.v2 < 1 and s1.v1.v2 > 2;
-----
-0
-
-query I
-select count(*) from s1 where length(c1) != 1;
-----
-0
+statement ok
+drop source s1;
