@@ -293,27 +293,31 @@ impl ColPrunable for LogicalHopWindow {
                 WindowStart,
                 WindowEnd,
             }
+            let output2internal = self.output2internal_col_mapping();
             // map the indices from output to input
             let input_required_cols = required_cols
                 .iter()
                 .filter_map(|&idx| {
                     if let Some(idx) = o2i.try_map(idx) {
                         Some(IndexType::Input(idx))
-                    } else if idx == self.window_start_col_idx() {
-                        Some(IndexType::WindowStart)
-                    } else if idx == self.window_end_col_idx() {
-                        Some(IndexType::WindowEnd)
+                    } else if let Some(idx) = output2internal.try_map(idx) {
+                        if idx == self.window_start_col_idx() {
+                            Some(IndexType::WindowStart)
+                        } else if idx == self.window_end_col_idx() {
+                            Some(IndexType::WindowEnd)
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
                 })
                 .collect_vec();
             // this mapping will only keeps required columns
-            let mapping = input_change.composite(&new_hop.i2o_col_mapping());
             input_required_cols
                 .iter()
                 .filter_map(|&idx| match idx {
-                    IndexType::Input(x) => mapping.try_map(x),
+                    IndexType::Input(x) => input_change.try_map(x),
                     IndexType::WindowStart => Some(new_hop.window_start_col_idx()),
                     IndexType::WindowEnd => Some(new_hop.window_end_col_idx()),
                 })
@@ -461,6 +465,10 @@ mod test {
         assert_eq!(values.schema().fields().len(), 2);
         assert_eq!(values.schema().fields()[0], fields[0]);
         assert_eq!(values.schema().fields()[1], fields[2]);
+
+        let required_cols = (0..plan.schema().len()).collect_vec();
+        let plan2 = plan.prune_col(&required_cols, &mut ColumnPruningContext::new(plan.clone()));
+        assert_eq!(plan2.schema(), plan.schema());
     }
 
     #[tokio::test]
