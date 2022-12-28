@@ -214,8 +214,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         }
 
         // TODO: Is this sleep causing the CI issue?
-        //  tracing::info!("Waiting, to give former leaders fencing mechanism time to trigger");
-        //  sleep(Duration::from_millis(lease_interval_secs * 1000 + 500));
+        tracing::info!("Waiting, to give former leaders fencing mechanism time to trigger");
+        sleep(Duration::from_millis(lease_interval_secs * 1000 + 500));
 
         // shut down follower svc if node used to be follower
         if let Some(handle) = follower_handle {
