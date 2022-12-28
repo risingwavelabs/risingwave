@@ -179,19 +179,12 @@ impl StreamChunk {
 
     pub fn from_parts(ops: Vec<Op>, data_chunk: DataChunk) -> Self {
         let (columns, vis) = data_chunk.into_parts();
-        let visibility = match vis {
-            Vis::Bitmap(b) => Some(b),
-            Vis::Compact(_) => None,
-        };
-        Self::new(ops, columns, visibility)
+        Self::new(ops, columns, vis.into_visibility())
     }
 
     pub fn into_inner(self) -> (Vec<Op>, Vec<Column>, Option<Bitmap>) {
         let (columns, vis) = self.data.into_parts();
-        let visibility = match vis {
-            Vis::Bitmap(b) => Some(b),
-            Vis::Compact(_) => None,
-        };
+        let visibility = vis.into_visibility();
         (self.ops, columns, visibility)
     }
 
@@ -276,13 +269,20 @@ impl StreamChunk {
 
 impl fmt::Debug for StreamChunk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamChunk {{ cardinality = {}, capacity = {}, data = \n{} }}",
-            self.cardinality(),
-            self.capacity(),
-            self.to_pretty_string()
-        )
+        if f.alternate() {
+            write!(
+                f,
+                "StreamChunk {{ cardinality: {}, capacity: {}, data: \n{}\n }}",
+                self.cardinality(),
+                self.capacity(),
+                self.to_pretty_string()
+            )
+        } else {
+            f.debug_struct("StreamChunk")
+                .field("cardinality", &self.cardinality())
+                .field("capacity", &self.capacity())
+                .finish_non_exhaustive()
+        }
     }
 }
 

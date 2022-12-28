@@ -36,11 +36,11 @@ use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::StateStore;
 
-use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::cache::{cache_may_stale, new_with_hasher_in, EvictableHashMap, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::ActorId;
+use crate::task::{ActorId, AtomicU64RefOpt};
 
 type DegreeType = u64;
 
@@ -230,7 +230,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        lru_manager: Option<LruManagerRef>,
+        watermark_epoch: AtomicU64RefOpt,
         cache_size: usize,
         join_key_data_types: Vec<DataType>,
         state_all_data_types: Vec<DataType>,
@@ -270,10 +270,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             table: degree_table,
         };
 
-        let cache = if let Some(lru_manager) = lru_manager {
-            ExecutorCache::Managed(
-                lru_manager.create_cache_with_hasher_in(PrecomputedBuildHasher, alloc),
-            )
+        let cache = if let Some(lru_manager) = watermark_epoch {
+            ExecutorCache::Managed(new_with_hasher_in(
+                lru_manager,
+                PrecomputedBuildHasher,
+                alloc,
+            ))
         } else {
             ExecutorCache::Local(EvictableHashMap::with_hasher_in(
                 cache_size,
@@ -519,15 +521,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Cached entry count for this hash table.
     pub fn entry_count(&self) -> usize {
         self.inner.len()
-    }
-
-    /// Estimated memory usage for this hash table.
-    #[expect(dead_code)]
-    pub fn estimated_size(&self) -> usize {
-        self.inner
-            .iter()
-            .map(|(k, v)| k.estimated_size() + v.estimated_size())
-            .sum()
     }
 
     pub fn null_matched(&self) -> &FixedBitSet {

@@ -12,118 +12,97 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::any::type_name;
 use std::fmt::Debug;
 
 use risingwave_common::array::{ListRef, StructRef};
 
-use crate::{ExprError, Result};
+use crate::Result;
 
-fn general_cmp<T1, T2, T3, F>(l: T1, r: T2, cmp: F) -> Result<bool>
+#[inline(always)]
+pub fn general_eq<T1, T2, T3>(l: T1, r: T2) -> bool
 where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
+    T1: Into<T3> + Debug,
+    T2: Into<T3> + Debug,
     T3: Ord,
-    F: FnOnce(T3, T3) -> bool,
 {
-    // TODO: We need to improve the error message
-    let l: T3 = l
-        .try_into()
-        .map_err(|_| ExprError::CastOutOfRange(type_name::<T3>()))?;
-    let r: T3 = r
-        .try_into()
-        .map_err(|_| ExprError::CastOutOfRange(type_name::<T3>()))?;
-    Ok(cmp(l, r))
+    l.into() == r.into()
 }
 
 #[inline(always)]
-pub fn general_eq<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_ne<T1, T2, T3>(l: T1, r: T2) -> bool
 where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
+    T1: Into<T3> + Debug,
+    T2: Into<T3> + Debug,
     T3: Ord,
 {
-    general_cmp(l, r, |a, b| a == b)
+    l.into() != r.into()
 }
 
 #[inline(always)]
-pub fn general_ne<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_ge<T1, T2, T3>(l: T1, r: T2) -> bool
 where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
+    T1: Into<T3> + Debug,
+    T2: Into<T3> + Debug,
     T3: Ord,
 {
-    general_cmp(l, r, |a, b| a != b)
+    l.into() >= r.into()
 }
 
 #[inline(always)]
-pub fn general_ge<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_gt<T1, T2, T3>(l: T1, r: T2) -> bool
 where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
+    T1: Into<T3> + Debug,
+    T2: Into<T3> + Debug,
     T3: Ord,
 {
-    general_cmp(l, r, |a, b| a >= b)
+    l.into() > r.into()
 }
 
 #[inline(always)]
-pub fn general_gt<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_le<T1, T2, T3>(l: T1, r: T2) -> bool
 where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
+    T1: Into<T3> + Debug,
+    T2: Into<T3> + Debug,
     T3: Ord,
 {
-    general_cmp(l, r, |a, b| a > b)
+    l.into() <= r.into()
 }
 
 #[inline(always)]
-pub fn general_le<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_lt<T1, T2, T3>(l: T1, r: T2) -> bool
 where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
+    T1: Into<T3> + Debug,
+    T2: Into<T3> + Debug,
     T3: Ord,
 {
-    general_cmp(l, r, |a, b| a <= b)
+    l.into() < r.into()
 }
 
-#[inline(always)]
-pub fn general_lt<T1, T2, T3>(l: T1, r: T2) -> Result<bool>
+pub fn general_is_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
 where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
-    T3: Ord,
-{
-    general_cmp(l, r, |a, b| a < b)
-}
-
-pub fn general_is_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> Result<Option<bool>>
-where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
+    T1: Into<T3> + Debug,
+    T2: Into<T3> + Debug,
     T3: Ord,
 {
     match (l, r) {
-        (Some(lv), Some(rv)) => Ok(general_ne::<T1, T2, T3>(lv, rv).ok()),
-        (Some(_), None) => Ok(Some(true)),
-        (None, Some(_)) => Ok(Some(true)),
-        (None, None) => Ok(Some(false)),
+        (Some(lv), Some(rv)) => general_ne::<T1, T2, T3>(lv, rv),
+        (Some(_), None) => true,
+        (None, Some(_)) => true,
+        (None, None) => false,
     }
 }
 
-pub fn general_is_not_distinct_from<T1, T2, T3>(
-    l: Option<T1>,
-    r: Option<T2>,
-) -> Result<Option<bool>>
+pub fn general_is_not_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
 where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
+    T1: Into<T3> + Debug,
+    T2: Into<T3> + Debug,
     T3: Ord,
 {
     match (l, r) {
-        (Some(lv), Some(rv)) => Ok(general_eq::<T1, T2, T3>(lv, rv).ok()),
-        (Some(_), None) => Ok(Some(false)),
-        (None, Some(_)) => Ok(Some(false)),
-        (None, None) => Ok(Some(true)),
+        (Some(lv), Some(rv)) => general_eq::<T1, T2, T3>(lv, rv),
+        (Some(_), None) => false,
+        (None, Some(_)) => false,
+        (None, None) => true,
     }
 }
 
@@ -195,33 +174,33 @@ pub fn str_is_not_distinct_from(l: Option<&str>, r: Option<&str>) -> Result<Opti
 }
 
 #[inline(always)]
-pub fn is_true(v: Option<bool>) -> Result<Option<bool>> {
-    Ok(Some(v == Some(true)))
+pub fn is_true(v: Option<bool>) -> Option<bool> {
+    Some(v == Some(true))
 }
 
 #[inline(always)]
-pub fn is_not_true(v: Option<bool>) -> Result<Option<bool>> {
-    Ok(Some(v != Some(true)))
+pub fn is_not_true(v: Option<bool>) -> Option<bool> {
+    Some(v != Some(true))
 }
 
 #[inline(always)]
-pub fn is_false(v: Option<bool>) -> Result<Option<bool>> {
-    Ok(Some(v == Some(false)))
+pub fn is_false(v: Option<bool>) -> Option<bool> {
+    Some(v == Some(false))
 }
 
 #[inline(always)]
-pub fn is_not_false(v: Option<bool>) -> Result<Option<bool>> {
-    Ok(Some(v != Some(false)))
+pub fn is_not_false(v: Option<bool>) -> Option<bool> {
+    Some(v != Some(false))
 }
 
 #[inline(always)]
-pub fn is_unknown(v: Option<bool>) -> Result<Option<bool>> {
-    Ok(Some(v.is_none()))
+pub fn is_unknown(v: Option<bool>) -> Option<bool> {
+    Some(v.is_none())
 }
 
 #[inline(always)]
-pub fn is_not_unknown(v: Option<bool>) -> Result<Option<bool>> {
-    Ok(Some(v.is_some()))
+pub fn is_not_unknown(v: Option<bool>) -> Option<bool> {
+    Some(v.is_some())
 }
 
 #[cfg(test)]
@@ -234,6 +213,9 @@ mod tests {
 
     #[test]
     fn test_deci_f() {
-        assert!(general_eq::<_, _, Decimal>(Decimal::from_str("1.1").unwrap(), 1.1f32).unwrap())
+        assert!(general_eq::<_, _, Decimal>(
+            Decimal::from_str("1.1").unwrap(),
+            1.1f32
+        ))
     }
 }

@@ -147,11 +147,21 @@ impl Sstable {
         };
         if enable_bloom_filter() && self.has_bloom_filter() {
             let hash = xxh32::xxh32(dist_key, 0);
-            let bloom = Bloom::new(&self.meta.bloom_filter);
-            bloom.surely_not_have_hash(hash)
+            self.surely_not_have_hashvalue(hash)
         } else {
             false
         }
+    }
+
+    #[inline(always)]
+    pub fn hash_for_bloom_filter(dist_key: &[u8]) -> u32 {
+        xxh32::xxh32(dist_key, 0)
+    }
+
+    #[inline(always)]
+    pub fn surely_not_have_hashvalue(&self, hash: u32) -> bool {
+        let bloom = Bloom::new(&self.meta.bloom_filter);
+        bloom.surely_not_have_hash(hash)
     }
 
     pub fn block_count(&self) -> usize {

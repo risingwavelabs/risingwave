@@ -90,6 +90,7 @@ pub enum SourceSchema {
     Avro(AvroSchema), // Keyword::AVRO
     Maxwell,          // Keyword::MAXWELL
     CanalJson,        // Keyword::CANAL_JSON
+    CSV(CsvInfo),     // Keyword::CSV
 }
 
 impl ParseTo for SourceSchema {
@@ -108,6 +109,9 @@ impl ParseTo for SourceSchema {
             SourceSchema::Maxwell
         } else if p.parse_keywords(&[Keyword::CANAL_JSON]) {
             SourceSchema::CanalJson
+        } else if p.parse_keywords(&[Keyword::CSV]) {
+            impl_parse_to!(csv_info: CsvInfo, p);
+            SourceSchema::CSV(csv_info)
         } else {
             return Err(ParserError::ParserError(
                 "expected JSON | PROTOBUF | DEBEZIUM_JSON | AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
@@ -126,6 +130,7 @@ impl fmt::Display for SourceSchema {
             SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
             SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
             SourceSchema::CanalJson => write!(f, "CANAL JSON"),
+            SourceSchema::CSV(csv_ingo) => write!(f, "CSV {}", csv_ingo),
         }
     }
 }
@@ -208,6 +213,47 @@ impl fmt::Display for AvroSchema {
         impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
         impl_fmt_display!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], v, self);
         impl_fmt_display!(row_schema_location, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CsvInfo {
+    pub delimiter: u8,
+    pub has_header: bool,
+}
+
+impl ParseTo for CsvInfo {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(without_header => [Keyword::WITHOUT, Keyword::HEADER], p);
+        impl_parse_to!([Keyword::DELIMITED, Keyword::BY], p);
+        impl_parse_to!(delimiter: AstString, p);
+        let mut chars = delimiter.0.chars().collect_vec();
+        if chars.len() != 1 {
+            return Err(ParserError::ParserError(format!(
+                "The delimiter should be a char, but got {:?}",
+                chars
+            )));
+        }
+        let delimiter = chars.remove(0) as u8;
+        Ok(Self {
+            delimiter,
+            has_header: !without_header,
+        })
+    }
+}
+
+impl fmt::Display for CsvInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        if !self.has_header {
+            v.push(format!(
+                "{}",
+                AstVec([Keyword::WITHOUT, Keyword::HEADER].to_vec())
+            ));
+        }
+        impl_fmt_display!(delimiter, v, self);
         v.iter().join(" ").fmt(f)
     }
 }
@@ -297,6 +343,11 @@ impl ParseTo for CreateSinkStatement {
         };
 
         impl_parse_to!(with_properties: WithProperties, p);
+        if with_properties.0.is_empty() {
+            return Err(ParserError::ParserError(
+                "sink properties not provided".to_string(),
+            ));
+        }
 
         Ok(Self {
             if_not_exists,

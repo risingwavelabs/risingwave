@@ -23,7 +23,8 @@ use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
-    generic, BatchHashAgg, BatchUnion, LogicalAgg, LogicalProject, PlanTreeNode,
+    generic, BatchHashAgg, BatchUnion, ColumnPruningContext, LogicalAgg, LogicalProject,
+    PlanTreeNode, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{FunctionalDependencySet, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
@@ -98,22 +99,26 @@ impl fmt::Display for LogicalUnion {
 }
 
 impl ColPrunable for LogicalUnion {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let new_inputs = self
             .inputs()
             .iter()
-            .map(|input| input.prune_col(required_cols))
+            .map(|input| input.prune_col(required_cols, ctx))
             .collect_vec();
         self.clone_with_inputs(&new_inputs)
     }
 }
 
 impl PredicatePushdown for LogicalUnion {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         let new_inputs = self
             .inputs()
             .iter()
-            .map(|input| input.predicate_pushdown(predicate.clone()))
+            .map(|input| input.predicate_pushdown(predicate.clone(), ctx))
             .collect_vec();
         self.clone_with_inputs(&new_inputs)
     }
@@ -142,13 +147,13 @@ impl ToBatch for LogicalUnion {
 }
 
 impl ToStream for LogicalUnion {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         // TODO: use round robin distribution instead of using hash distribution of all inputs.
         let dist = RequiredDist::hash_shard(self.base.logical_pk());
         let new_inputs: Result<Vec<_>> = self
             .inputs()
             .iter()
-            .map(|input| input.to_stream_with_dist_required(&dist))
+            .map(|input| input.to_stream_with_dist_required(&dist, ctx))
             .collect();
         let new_logical = Self::new_with_source_col(true, new_inputs?, self.core.source_col);
         assert!(
@@ -158,12 +163,15 @@ impl ToStream for LogicalUnion {
         Ok(StreamUnion::new(new_logical).into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         let original_schema = self.base.schema.clone();
         let original_schema_len = original_schema.len();
         let mut rewrites = vec![];
         for input in &self.core.inputs {
-            rewrites.push(input.logical_rewrite_for_stream()?);
+            rewrites.push(input.logical_rewrite_for_stream(ctx)?);
         }
 
         let original_schema_contain_all_input_pks =
@@ -311,11 +319,14 @@ mod tests {
 
         let values2 = values1.clone();
 
-        let union = LogicalUnion::new(false, vec![values1.into(), values2.into()]);
+        let union: PlanRef = LogicalUnion::new(false, vec![values1.into(), values2.into()]).into();
 
         // Perform the prune
         let required_cols = vec![1, 2];
-        let plan = union.prune_col(&required_cols);
+        let plan = union.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(union.clone()),
+        );
 
         // Check the result
         let union = plan.as_logical_union().unwrap();

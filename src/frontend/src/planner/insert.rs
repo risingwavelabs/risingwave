@@ -29,10 +29,10 @@ impl Planner {
         }
         let plan: PlanRef = LogicalInsert::create(
             input,
-            insert.table_source.name,
-            insert.table_source.source_id,
-            insert.table_source.associated_mview_id,
-            insert.column_idxs,
+            insert.table_name.clone(),
+            insert.table_id,
+            insert.column_indices,
+            insert.row_id_index,
         )?
         .into();
         // For insert, frontend will only schedule one task so do not need this to be single.

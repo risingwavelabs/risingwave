@@ -203,8 +203,17 @@ pub enum Expr {
     Identifier(Ident),
     /// Multi-part identifier, e.g. `table_alias.column` or `schema.table.col`
     CompoundIdentifier(Vec<Ident>),
-    /// Struct-field identifier, expr is a table or a column struct, ident is field.
+    /// Struct-field identifier.
+    /// Expr is an arbitrary expression, returning either a table or a column.
+    /// Idents are consecutive field accesses.
     /// e.g. `(table.v1).v2` or `(table).v1.v2`
+    ///
+    /// It must contain parentheses to be distinguished from a [`Expr::CompoundIdentifier`].
+    /// See also <https://www.postgresql.org/docs/current/rowtypes.html#ROWTYPES-ACCESSING>
+    ///
+    /// The left parentheses must be put at the beginning of the expression.
+    /// The first parenthesized part is the `expr` part, and the rest are flattened into `idents`.
+    /// e.g., `((v1).v2.v3).v4` is equivalent to `(v1).v2.v3.v4`.
     FieldIdentifier(Box<Expr>, Vec<Ident>),
     /// `IS NULL` operator
     IsNull(Box<Expr>),
@@ -1674,9 +1683,10 @@ impl fmt::Display for Assignment {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionArgExpr {
     Expr(Expr),
-    /// expr is a table or a column struct, object_name is field.
+    /// Expr is an arbitrary expression, returning either a table or a column.
+    /// Idents are the prefix of `*`, which are consecutive field accesses.
     /// e.g. `(table.v1).*` or `(table).v1.*`
-    ExprQualifiedWildcard(Expr, Option<ObjectName>),
+    ExprQualifiedWildcard(Expr, Vec<Ident>),
     /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
     QualifiedWildcard(ObjectName),
     /// An unqualified `*`
@@ -1693,8 +1703,8 @@ impl fmt::Display for FunctionArgExpr {
                     "({}){}.*",
                     expr,
                     prefix
-                        .as_ref()
-                        .map_or_else(|| "".to_string(), |p| format!(".{}", p))
+                        .iter()
+                        .format_with("", |i, f| f(&format_args!(".{i}")))
                 )
             }
             FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),

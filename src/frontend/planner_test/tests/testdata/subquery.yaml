@@ -182,7 +182,7 @@
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (pg_namespace.nspname <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(pg_namespace.nspname, '^pg_toast':Varchar)) AND (pg_namespace.nspname <> 'information_schema':Varchar) }
       | └─LogicalJoin { type: LeftOuter, on: (pg_namespace.oid = pg_class.relnamespace), output: all }
-      |   ├─LogicalScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind] }
+      |   ├─LogicalScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind, pg_class.relam, pg_class.reltablespace] }
       |   └─LogicalScan { table: pg_namespace, columns: [pg_namespace.oid, pg_namespace.nspname, pg_namespace.nspowner, pg_namespace.nspacl] }
       └─LogicalProject { exprs: [pg_user.name] }
         └─LogicalFilter { predicate: (CorrelatedInputRef { index: 3, correlated_id: 1 } = pg_user.usesysid) }
@@ -218,21 +218,27 @@
             └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan: |
     LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(auction.date_time, auction.date_time), output: all }
-    ├─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-    | └─LogicalScan { table: auction, columns: [auction.date_time] }
+    ├─LogicalProject { exprs: [auction.date_time, window_start, window_end] }
+    | └─LogicalShare { id = 33 }
+    |   └─LogicalProject { exprs: [auction.date_time, null:Int64, window_start, window_end] }
+    |     └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+    |       └─LogicalScan { table: auction, columns: [auction.date_time] }
     └─LogicalProject { exprs: [auction.date_time] }
       └─LogicalAgg { group_key: [auction.date_time, auction.date_time], aggs: [] }
         └─LogicalJoin { type: Inner, on: true, output: [auction.date_time, auction.date_time] }
           ├─LogicalAgg { group_key: [auction.date_time], aggs: [] }
-          | └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
-          |   └─LogicalScan { table: auction, columns: [auction.date_time] }
+          | └─LogicalShare { id = 33 }
+          |   └─LogicalProject { exprs: [auction.date_time, null:Int64, window_start, window_end] }
+          |     └─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+          |       └─LogicalScan { table: auction, columns: [auction.date_time] }
           └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: LeftSemi, predicate: auction.date_time IS NOT DISTINCT FROM auction.date_time, output: all }
-      ├─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
-      | └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-      |   └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
+      ├─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+      | └─BatchProject { exprs: [auction.date_time, window_start, window_end] }
+      |   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+      |     └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
       └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
         └─BatchProject { exprs: [auction.date_time] }
           └─BatchHashAgg { group_key: [auction.date_time, auction.date_time], aggs: [] }
@@ -240,9 +246,10 @@
               └─BatchNestedLoopJoin { type: Inner, predicate: true, output: [auction.date_time, auction.date_time] }
                 ├─BatchExchange { order: [], dist: Single }
                 | └─BatchHashAgg { group_key: [auction.date_time], aggs: [] }
-                |   └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time] }
-                |     └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
-                |       └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
+                |   └─BatchExchange { order: [], dist: HashShard(auction.date_time) }
+                |     └─BatchProject { exprs: [auction.date_time, null:Int64, window_start, window_end] }
+                |       └─BatchHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
+                |         └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
                 └─BatchValues { rows: [[]] }
 - sql: |
     CREATE TABLE t (v int);

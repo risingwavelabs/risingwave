@@ -25,6 +25,9 @@ mod plan_visitor;
 pub use plan_visitor::PlanVisitor;
 mod optimizer_context;
 mod rule;
+mod share_parent_counter;
+mod share_source_rewriter;
+
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use optimizer_context::*;
@@ -34,8 +37,8 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{
-    BatchProject, Convention, LogicalProject, LogicalSource, StreamDml, StreamMaterialize,
-    StreamRowIdGen, StreamSink,
+    BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamRowIdGen,
+    StreamSink,
 };
 use self::plan_visitor::{
     has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_logical_apply,
@@ -44,10 +47,14 @@ use self::plan_visitor::{
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::TableType;
+use crate::handler::create_table::DmlFlag;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
-use crate::optimizer::plan_node::{BatchExchange, PlanNodeType};
+use crate::optimizer::plan_node::{
+    BatchExchange, ColumnPruningContext, PlanNodeType, PredicatePushdownContext,
+};
 use crate::optimizer::plan_visitor::has_batch_source;
 use crate::optimizer::property::Distribution;
+use crate::optimizer::share_source_rewriter::ShareSourceRewriter;
 use crate::utils::Condition;
 use crate::WithOptions;
 
@@ -205,9 +212,19 @@ impl PlanRoot {
             .into());
         }
 
+        plan = self.optimize_by_rules(
+            plan,
+            "Union Merge".to_string(),
+            vec![UnionMergeRule::create()],
+            ApplyOrder::BottomUp,
+        );
+
         // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
-        plan = plan.predicate_pushdown(Condition::true_cond());
+        plan = plan.predicate_pushdown(
+            Condition::true_cond(),
+            &mut PredicatePushdownContext::new(plan.clone()),
+        );
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
@@ -230,6 +247,7 @@ impl PlanRoot {
                 ApplyFilterTransposeRule::create(),
                 ApplyProjectTransposeRule::create(),
                 ApplyJoinTransposeRule::create(),
+                ApplyShareEliminateRule::create(),
                 ApplyScanRule::create(),
             ],
             ApplyOrder::TopDown,
@@ -239,7 +257,10 @@ impl PlanRoot {
         }
 
         // Predicate Push-down
-        plan = plan.predicate_pushdown(Condition::true_cond());
+        plan = plan.predicate_pushdown(
+            Condition::true_cond(),
+            &mut PredicatePushdownContext::new(plan.clone()),
+        );
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
@@ -265,7 +286,10 @@ impl PlanRoot {
 
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
-        plan = plan.predicate_pushdown(Condition::true_cond());
+        plan = plan.predicate_pushdown(
+            Condition::true_cond(),
+            &mut PredicatePushdownContext::new(plan.clone()),
+        );
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
@@ -286,13 +310,16 @@ impl PlanRoot {
         // visibility of these expressions. To avoid these expressions being pruned, we can't use
         // `self.out_fields` as `required_cols` here.
         let required_cols = (0..self.plan.schema().len()).collect_vec();
-        plan = plan.prune_col(&required_cols);
+        plan = plan.prune_col(&required_cols, &mut ColumnPruningContext::new(plan.clone()));
         // Column pruning may introduce additional projects, and filter can be pushed again.
         if explain_trace {
             ctx.trace("Prune Columns:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
-        plan = plan.predicate_pushdown(Condition::true_cond());
+        plan = plan.predicate_pushdown(
+            Condition::true_cond(),
+            &mut PredicatePushdownContext::new(plan.clone()),
+        );
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
@@ -322,7 +349,7 @@ impl PlanRoot {
                 ProjectEliminateRule::create(),
                 // project-join merge should be applied after merge
                 // and eliminate
-                ProjectJoinRule::create(),
+                ProjectJoinMergeRule::create(),
                 AggProjectMergeRule::create(),
             ],
             ApplyOrder::BottomUp,
@@ -353,6 +380,14 @@ impl PlanRoot {
     fn gen_batch_plan(&mut self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan()?;
+
+        // Convert the dag back to the tree, because we don't support physical dag plan for now.
+        plan = self.optimize_by_rules(
+            plan,
+            "DAG To Tree".to_string(),
+            vec![DagToTreeRule::create()],
+            ApplyOrder::TopDown,
+        );
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
@@ -458,7 +493,16 @@ impl PlanRoot {
         let plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan()?;
-                let (plan, out_col_change) = plan.logical_rewrite_for_stream()?;
+
+                // Replace source to share source.
+                let plan = ShareSourceRewriter::share_source(plan);
+                if explain_trace {
+                    ctx.trace("Reuse Source:");
+                    ctx.trace(plan.explain_to_string().unwrap());
+                }
+
+                let (plan, out_col_change) =
+                    plan.logical_rewrite_for_stream(&mut Default::default())?;
 
                 if explain_trace {
                     ctx.trace("Logical Rewrite For Stream:");
@@ -472,7 +516,7 @@ impl PlanRoot {
                     .unwrap();
                 self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
                 self.schema = plan.schema().clone();
-                plan.to_stream_with_dist_required(&self.required_dist)
+                plan.to_stream_with_dist_required(&self.required_dist, &mut Default::default())
             }
             _ => unreachable!(),
         }?;
@@ -502,8 +546,8 @@ impl PlanRoot {
         definition: String,
         col_names: Option<Vec<String>>,
         handle_pk_conflict: bool,
-        enable_dml: bool,
         row_id_index: Option<usize>,
+        dml_flag: DmlFlag,
         table_type: TableType,
     ) -> Result<StreamMaterialize> {
         let out_names = if let Some(col_names) = col_names {
@@ -511,25 +555,41 @@ impl PlanRoot {
         } else {
             self.out_names.clone()
         };
-        let mut stream_plan = self.gen_stream_plan()?;
-        if enable_dml {
-            // Insert a dml executor after the previous exector.
-            // FIXME: Store `Field` or `Schema` in `TableSource` to avoid downcasting in the future.
-            // Or do we have a better solution to this?
-            let logical_source = self.plan.downcast_ref::<LogicalSource>().unwrap();
-            let column_descs = logical_source
-                .core
-                .catalog
-                .columns
-                .iter()
-                .map(|column_catalog| column_catalog.column_desc.clone())
-                .collect_vec();
-            stream_plan = StreamDml::new(stream_plan, column_descs).into();
+        let stream_plan = self.gen_stream_plan()?;
+        let materialize = StreamMaterialize::create(
+            stream_plan.clone(),
+            mv_name.clone(),
+            self.required_dist.clone(),
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            out_names.clone(),
+            false,
+            definition.clone(),
+            handle_pk_conflict,
+            row_id_index,
+            table_type,
+        )?;
+
+        if dml_flag == DmlFlag::Disable {
+            return Ok(materialize);
         }
-        if let Some(row_id_index) = row_id_index {
-            // Insert a row id gen eexecutor after the previous executor.
-            stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
-        }
+
+        let table = materialize.table();
+
+        // NOTE(stonepage): we can not use this the plan's input append-only
+        // property here
+        // table.append_only,
+        let stream_plan = StreamDml::new(
+            stream_plan,
+            dml_flag == DmlFlag::AppendOnly,
+            table.table_desc().columns,
+        )
+        .into();
+
+        let stream_plan = match row_id_index {
+            Some(row_id_index) => StreamRowIdGen::new(stream_plan, row_id_index).into(),
+            None => stream_plan,
+        };
 
         StreamMaterialize::create(
             stream_plan,

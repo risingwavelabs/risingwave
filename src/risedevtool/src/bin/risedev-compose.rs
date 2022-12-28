@@ -24,6 +24,7 @@ use itertools::Itertools;
 use risedev::{
     compose_deploy, compute_risectl_env, Compose, ComposeConfig, ComposeDeployConfig, ComposeFile,
     ComposeService, ComposeVolume, ConfigExpander, DockerImageConfig, ServiceConfig,
+    RISEDEV_CONFIG_FILE,
 };
 use serde::Deserialize;
 
@@ -61,12 +62,6 @@ fn load_docker_image_config(
 fn main() -> Result<()> {
     let opts = RiseDevComposeOpts::parse();
 
-    let risedev_config_content = {
-        let mut content = String::new();
-        File::open("risedev.yml")?.read_to_string(&mut content)?;
-        content
-    };
-
     let (risedev_config, compose_deploy_config, rw_config_path) = if opts.deploy {
         let compose_deploy_config = {
             let mut content = String::new();
@@ -87,21 +82,17 @@ fn main() -> Result<()> {
             )
             .collect();
 
-        let (config_path, expanded_config) = ConfigExpander::expand_with_extra_info(
-            &risedev_config_content,
-            &opts.profile,
-            extra_info,
-        )?;
+        let (config_path, expanded_config) =
+            ConfigExpander::expand_with_extra_info(".", &opts.profile, extra_info)?;
         (expanded_config, Some(compose_deploy_config), config_path)
     } else {
-        let (config_path, expanded_config) =
-            ConfigExpander::expand(&risedev_config_content, &opts.profile)?;
+        let (config_path, expanded_config) = ConfigExpander::expand(".", &opts.profile)?;
         (expanded_config, None, config_path)
     };
 
     let compose_config = ComposeConfig {
         image: load_docker_image_config(
-            &risedev_config_content,
+            &std::fs::read_to_string(RISEDEV_CONFIG_FILE)?,
             compose_deploy_config
                 .as_ref()
                 .and_then(|x| x.risingwave_image_override.as_ref()),

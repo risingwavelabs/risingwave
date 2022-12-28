@@ -63,7 +63,9 @@ impl From<ColumnDef> for Column {
     fn from(c: ColumnDef) -> Self {
         Self {
             name: c.name.real_value(),
-            data_type: bind_data_type(&c.data_type).unwrap().into(),
+            data_type: bind_data_type(&c.data_type.expect("data type should not be none"))
+                .unwrap()
+                .into(),
         }
     }
 }

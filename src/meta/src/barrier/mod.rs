@@ -382,6 +382,13 @@ where
         in_flight_not_full && !should_pause
     }
 
+    /// Check whether the target epoch is managed by `CheckpointControl`.
+    pub fn contains_epoch(&self, epoch: u64) -> bool {
+        self.command_ctx_queue
+            .iter()
+            .any(|x| x.command_ctx.prev_epoch.0 == epoch)
+    }
+
     /// After some command is committed, the changes will be applied to the meta store so we can
     /// remove the changes from checkpoint control.
     pub fn remove_changes(&mut self, changes: CommandChanges) {
@@ -533,6 +540,11 @@ where
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
                 .unwrap();
+        } else if self.fragment_manager.has_any_table_fragments().await {
+            panic!(
+                "Some streaming jobs already exist in meta, please start with recovery enabled \
+            or clean up the metadata using `./risedev clean-data`"
+            );
         }
         self.set_status(BarrierManagerStatus::Running).await;
         let mut min_interval = tokio::time::interval(self.interval);
@@ -552,6 +564,13 @@ where
                     checkpoint_control.update_barrier_nums_metrics();
 
                     let (prev_epoch, result) = result.unwrap();
+                    // Received barrier complete responses with an epoch that is not managed by checkpoint control, which
+                    // means a recovery has been triggered. We should ignore it because trying to complete and commit
+                    // the epoch is not necessary and could cause meaningless recovery again.
+                    if !checkpoint_control.contains_epoch(prev_epoch) {
+                        tracing::warn!("received barrier complete response for an unknown epoch: {}", prev_epoch);
+                        continue;
+                    }
                     self.barrier_complete_and_commit(
                         prev_epoch,
                         result,
@@ -739,7 +758,7 @@ where
             .unwrap();
     }
 
-    /// Changes the state is `Complete`, and try commit all epoch that state is `Complete` in
+    /// Changes the state to `Complete`, and try to commit all epoch that state is `Complete` in
     /// order. If commit is err, all nodes will be handled.
     async fn barrier_complete_and_commit(
         &self,
@@ -750,14 +769,16 @@ where
         checkpoint_control: &mut CheckpointControl<S>,
     ) {
         if let Err(err) = result {
+            // FIXME: If it is a connector source error occurred in the init barrier, we should pass
+            // back to frontend
             fail_point!("inject_barrier_err_success");
             let fail_node = checkpoint_control.barrier_failed();
-            tracing::warn!("Failed to commit epoch {}: {:?}", prev_epoch, err);
+            tracing::warn!("Failed to complete epoch {}: {:?}", prev_epoch, err);
             self.do_recovery(err, fail_node, state, tracker, checkpoint_control)
                 .await;
             return;
         }
-        // change the state is Complete
+        // change the state to Complete
         let mut complete_nodes = checkpoint_control.barrier_completed(prev_epoch, result.unwrap());
         // try commit complete nodes
         let (mut index, mut err_msg) = (0, None);

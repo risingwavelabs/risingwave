@@ -22,7 +22,7 @@ use risingwave_pb::catalog::{
     Table as ProstTable, View as ProstView,
 };
 
-use super::source_catalog::{SourceCatalog, SourceKind};
+use super::source_catalog::SourceCatalog;
 use super::ViewId;
 use crate::catalog::index_catalog::IndexCatalog;
 use crate::catalog::sink_catalog::SinkCatalog;
@@ -185,11 +185,7 @@ impl SchemaCatalog {
     pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| {
-                v.is_table()
-                    && v.associated_source_id.is_some()  // TODO(Yuanxin): Remove this.
-                    && self.get_source_by_name(v.name()).unwrap().kind() == SourceKind::Table
-            })
+            .filter(|(_, v)| v.is_table() && v.associated_source_id().is_none())
             .map(|(_, v)| v)
     }
 
@@ -214,19 +210,15 @@ impl SchemaCatalog {
 
     /// Iterate all sources, including the materialized sources.
     pub fn iter_source(&self) -> impl Iterator<Item = &Arc<SourceCatalog>> {
-        self.source_by_name
-            .iter()
-            .filter(|(_, v)| v.kind() == SourceKind::Stream)
-            .map(|(_, v)| v)
+        self.source_by_name.values()
     }
 
     /// Iterate the materialized sources.
+    /// TODO(Yuanxin): Remove this method.
     pub fn iter_materialized_source(&self) -> impl Iterator<Item = &Arc<SourceCatalog>> {
         self.source_by_name
             .iter()
-            .filter(|(name, v)| {
-                v.kind() == SourceKind::Stream && self.table_by_name.get(*name).is_some()
-            })
+            .filter(|(name, _)| self.table_by_name.get(*name).is_some())
             .map(|(_, v)| v)
     }
 

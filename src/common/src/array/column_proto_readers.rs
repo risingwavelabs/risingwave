@@ -67,7 +67,7 @@ pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> ArrayResult<Ar
     let data = (&array.get_values()[0]).into();
     let bitmap: Bitmap = array.get_null_bitmap()?.into();
 
-    let arr = BoolArray::new(bitmap, data);
+    let arr = BoolArray::new(data, bitmap);
     assert_eq!(arr.len(), cardinality);
 
     Ok(arr.into())
