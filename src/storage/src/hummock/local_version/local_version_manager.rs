@@ -97,9 +97,9 @@ impl LocalVersionManager {
                     Some(v) => v,
                     None => return Ok(None),
                 };
-                for delta in version_deltas.version_deltas {
-                    version.fill_cache(&delta, &self.sstable_store).await?;
-                }
+                // for delta in version_deltas.version_deltas {
+                //     version.fill_cache(&delta, &self.sstable_store, ).await?;
+                // }
                 version
             }
             Payload::PinnedVersion(version) => {

@@ -15,15 +15,15 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::skiplist::Skiplist;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     level_delete_ssts, level_insert_ssts, split_base_levels, summarize_group_deltas,
     GroupDeltasSummary,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
+use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockSstableId};
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -32,12 +32,13 @@ use risingwave_pb::hummock::{
 };
 
 use super::{LevelZeroCache, LevelZeroData};
+use crate::hummock::compactor::{CompactionFilter, StateCleanUpCompactionFilter};
 use crate::hummock::iterator::{HummockIterator, HummockIteratorDirection};
 use crate::hummock::local_version::l0_cache::LevelZeroCacheIterator;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SstableIterator};
+use crate::hummock::{HummockResult, Sstable, SstableIterator};
 use crate::monitor::StoreLocalStatistic;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -67,13 +68,17 @@ impl LocalGroup {
         }
     }
 
-    pub fn get_from_cache(&self, key: FullKey<&[u8]>) -> Option<HummockValue<Bytes>> {
+    pub fn get_from_cache(
+        &self,
+        key: FullKey<&[u8]>,
+        dist_key_hash: u32,
+    ) -> Option<HummockValue<Bytes>> {
         if self.l0.caches.is_empty() {
             return None;
         }
         let owned_key = key.to_vec();
         for cache in &self.l0.caches {
-            if let Some(value) = cache.get(&owned_key) {
+            if let Some(value) = cache.get(&owned_key, dist_key_hash) {
                 return Some(value);
             }
         }
@@ -82,10 +87,17 @@ impl LocalGroup {
 
     pub fn add_iterators<D: HummockIteratorDirection, F: FnMut(LevelZeroCacheIterator<D>)>(
         &self,
-        mut f: F,
         epoch: u64,
+        bloom_hash: Option<&u32>,
+        mut f: F,
     ) {
         for cache in &self.l0.caches {
+            if !bloom_hash
+                .map(|hash| cache.bloom_filter.contains(hash))
+                .unwrap_or(true)
+            {
+                continue;
+            }
             f(cache.iter(epoch))
         }
     }
@@ -124,8 +136,10 @@ impl LocalGroup {
                     .l0
                     .sub_levels
                     .partition_point(|level| level.sub_level_id < insert_sub_level_id);
-                // TODO: check
-                if index >= self.l0.sub_levels.len() {
+                // TODO: check order of sub-level
+                if index >= self.l0.sub_levels.len()
+                    || self.l0.sub_levels[index].sub_level_id != insert_sub_level_id
+                {
                     assert!(
                         deleted
                             && delete_sst_levels.iter().all(|level_id| *level_id == 0)
@@ -149,6 +163,13 @@ impl LocalGroup {
             self.l0
                 .sub_levels
                 .retain(|level| !level.table_infos.is_empty());
+            for cache in &self.l0.caches {
+                assert!(self
+                    .l0
+                    .sub_levels
+                    .iter()
+                    .all(|level| cache.level.sub_level_id != level.sub_level_id));
+            }
         }
     }
 }
@@ -309,8 +330,24 @@ impl LocalHummockVersion {
         ret
     }
 
-    pub async fn fill_full_cache(&mut self, sstable_store: &SstableStoreRef) -> HummockResult<()> {
+    pub async fn fill_full_cache(
+        &mut self,
+        sstable_store: &SstableStoreRef,
+        filter_key_extractor_manager: &FilterKeyExtractorManagerRef,
+    ) -> HummockResult<()> {
+        let mut table_ids = HashSet::default();
+        for (_, group) in &mut self.groups {
+            for sub_level in &group.l0.sub_levels {
+                if sub_level.level_type == LevelType::Overlapping as i32 {
+                    for sst in &sub_level.table_infos {
+                        table_ids.extend(sst.table_ids.clone());
+                    }
+                }
+            }
+        }
+        let filter_exactor = filter_key_extractor_manager.acquire(table_ids).await;
         let mut stats = StoreLocalStatistic::default();
+        let mut raw_key = BytesMut::default();
         for (_, group) in &mut self.groups {
             for sub_level in &group.l0.sub_levels {
                 if sub_level.level_type == LevelType::Overlapping as i32 {
@@ -326,6 +363,11 @@ impl LocalHummockVersion {
                         while iter.is_valid() {
                             let key = iter.key().to_vec();
                             let value = iter.value().to_bytes();
+                            key.user_key.encode_into(&mut raw_key);
+                            cache.bloom_filter.insert(Sstable::hash_for_bloom_filter(
+                                filter_exactor.extract(&raw_key),
+                            ));
+                            raw_key.clear();
                             cache.cache.put(key, value);
                             iter.next().await?;
                         }
@@ -345,6 +387,7 @@ impl LocalHummockVersion {
         &self,
         version_delta: &HummockVersionDelta,
         sstable_store: &SstableStoreRef,
+        filter_key_extractor_manager: &FilterKeyExtractorManagerRef,
     ) -> HummockResult<()> {
         for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
             let summary = summarize_group_deltas(group_deltas);
@@ -365,6 +408,15 @@ impl LocalHummockVersion {
                     .expect("compaction group should exist");
                 // TODO: do not pre-load data to cache if the size of this delta is enough large.
                 let mut stats = StoreLocalStatistic::default();
+                let mut table_ids = HashSet::default();
+
+                use tracing::{error, info};
+                for sst in &insert_table_infos {
+                    info!("acquire sst-{} for: {:?}", sst.id, sst.table_ids);
+                    table_ids.extend(sst.table_ids.clone());
+                }
+                let mut filter = StateCleanUpCompactionFilter::new(table_ids.clone());
+                let filter_exactor = filter_key_extractor_manager.acquire(table_ids).await;
                 for sstable_info in insert_table_infos {
                     if let Some(cache) = group.l0.caches.last() {
                         if cache
@@ -375,6 +427,7 @@ impl LocalHummockVersion {
                         {
                             // TODO: read data from shared-buffer-batch directly to speed up.
                             let data = sstable_store.sstable(&sstable_info, &mut stats).await?;
+                            let mut raw_key = BytesMut::default();
                             let mut iter = SstableIterator::new(
                                 data,
                                 sstable_store.clone(),
@@ -382,8 +435,17 @@ impl LocalHummockVersion {
                             );
                             iter.rewind().await?;
                             while iter.is_valid() {
+                                if filter.should_delete(iter.key()) {
+                                    iter.next().await?;
+                                    continue;
+                                }
                                 let key = iter.key().to_vec();
                                 let value = iter.value().to_bytes();
+                                key.user_key.encode_into(&mut raw_key);
+                                cache.bloom_filter.insert(Sstable::hash_for_bloom_filter(
+                                    filter_exactor.extract(&raw_key),
+                                ));
+                                raw_key.clear();
                                 cache.cache.put(key, value);
                                 iter.next().await?;
                             }
@@ -538,10 +600,7 @@ pub fn add_new_sub_level(
     // All files will be committed in one new Overlapping sub-level and become
     // Nonoverlapping  after at least one compaction.
     let level = new_sub_level(insert_sub_level_id, level_type, insert_table_infos);
-    l0.caches.push(LevelZeroCache {
-        cache: Skiplist::new(true),
-        level,
-    });
+    l0.caches.push(LevelZeroCache::new(level));
 }
 
 fn new_sub_level(sub_level_id: u64, level_type: LevelType, table_infos: Vec<SstableInfo>) -> Level {

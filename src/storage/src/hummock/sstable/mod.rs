@@ -60,7 +60,7 @@ const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;
 const VERSION: u32 = 1;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
 // delete keys located in [start_user_key, end_user_key)
 pub struct DeleteRangeTombstone {
     pub start_user_key: UserKey<Vec<u8>>,

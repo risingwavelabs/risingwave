@@ -23,6 +23,7 @@ mod key_cmp;
 
 #[macro_use]
 extern crate num_derive;
+extern crate core;
 
 use std::cmp::Ordering;
 

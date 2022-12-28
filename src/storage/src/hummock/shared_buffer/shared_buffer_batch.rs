@@ -338,6 +338,7 @@ pub struct SharedBufferBatchIterator<D: HummockIteratorDirection> {
     table_id: TableId,
     epoch: HummockEpoch,
     _phantom: PhantomData<D>,
+    next_count: u64,
 }
 
 impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
@@ -351,6 +352,7 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
             current_idx: 0,
             table_id,
             epoch,
+            next_count: 0,
             _phantom: Default::default(),
         }
     }
@@ -375,6 +377,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
             assert!(self.is_valid());
+            self.next_count += 1;
             self.current_idx += 1;
             Ok(())
         }
@@ -406,7 +409,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
             // by table key.
             let partition_point = self
                 .inner
-                .binary_search_by(|probe| probe.0[..].cmp(*key.user_key.table_key));
+                .binary_search_by(|probe| probe.0[..].cmp(&key.user_key.table_key));
             let seek_key_epoch = key.epoch;
             match D::direction() {
                 DirectionEnum::Forward => match partition_point {
@@ -443,8 +446,12 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
         }
     }
 
-    fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
+    fn collect_local_statistic(&self, stats: &mut crate::monitor::StoreLocalStatistic) {
+        stats.total_key_count += self.next_count;
+        stats.total_seek_count += 1;
+    }
 }
+
 pub struct SharedBufferDeleteRangeIterator {
     inner: Arc<SharedBufferBatchInner>,
     current_idx: usize,

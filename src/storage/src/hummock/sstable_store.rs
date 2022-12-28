@@ -39,9 +39,9 @@ use crate::hummock::{
 };
 use crate::monitor::{MemoryCollector, StoreLocalStatistic};
 
-const MAX_META_CACHE_SHARD_BITS: usize = 2;
+const MAX_META_CACHE_SHARD_BITS: usize = 4;
 const MAX_CACHE_SHARD_BITS: usize = 6; // It means that there will be 64 shards lru-cache to avoid lock conflict.
-const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024; // 256MB
+const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024; // 256MB
 
 pub type TableHolder = CacheableEntry<HummockSstableId, Arc<Sstable>>;
 

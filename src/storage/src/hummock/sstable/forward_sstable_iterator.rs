@@ -168,6 +168,7 @@ impl HummockIterator for SstableIterator {
                 // seek to next block
                 self.seek_idx(block_idx + 1, None).await?;
             }
+            self.stats.total_seek_count += 1;
 
             Ok(())
         }

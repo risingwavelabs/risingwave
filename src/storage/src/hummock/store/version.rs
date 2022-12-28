@@ -442,7 +442,7 @@ impl HummockVersionReader {
         let encoded_user_key = full_key.user_key.encode();
         assert!(committed_version.is_valid());
         if let Some(group) = committed_version.get_group(read_options.table_id) {
-            if let Some(value) = group.get_from_cache(full_key) {
+            if let Some(value) = group.get_from_cache(full_key, dist_key_hash) {
                 return Ok(value.into_user_value());
             }
             let levels = group.l0.sub_levels.iter().chain(group.levels.iter());
@@ -583,7 +583,6 @@ impl HummockVersionReader {
             .iter_merge_sstable_counts
             .with_label_values(&["staging-sst-iter"])
             .observe(staging_sst_iter_count as f64);
-        let mut l0_cache_iter_count = 0;
 
         // 2. build iterator from committed
         // Because SST meta records encoded key range,
@@ -594,14 +593,16 @@ impl HummockVersionReader {
             user_key_range.1.as_ref().map(UserKey::encode),
         );
         let mut non_overlapping_iters = Vec::new();
+        let mut cache_iters = vec![];
         if let Some(group) = committed.get_group(read_options.table_id) {
             group.add_iterators::<Forward, _>(
-                |iter| {
-                    l0_cache_iter_count += 1;
-                    staging_iters.push(HummockIteratorUnion::Third(iter));
-                },
                 committed.max_committed_epoch(),
+                bloom_filter_prefix_hash.as_ref(),
+                |iter| {
+                    cache_iters.push(HummockIteratorUnion::Second(iter));
+                },
             );
+            let last_level_id = group.levels.last().unwrap().level_idx;
             let levels = group.l0.sub_levels.iter().chain(group.levels.iter());
             for level in levels {
                 if level.table_infos.is_empty() {
@@ -621,7 +622,14 @@ impl HummockVersionReader {
                     start_table_idx < level.table_infos.len()
                         && end_table_idx < level.table_infos.len()
                 );
-
+                if level.level_idx == last_level_id {
+                    non_overlapping_iters.push(ConcatIterator::new(
+                        level.table_infos[start_table_idx..=end_table_idx].to_vec(),
+                        self.sstable_store.clone(),
+                        Arc::new(SstableIteratorReadOptions::default()),
+                    ));
+                    continue;
+                }
                 let mut sstables = vec![];
                 for sstable_info in &level.table_infos[start_table_idx..=end_table_idx] {
                     if sstable_info
@@ -665,16 +673,18 @@ impl HummockVersionReader {
         self.stats
             .iter_merge_sstable_counts
             .with_label_values(&["cache-iter-count"])
-            .observe(l0_cache_iter_count as f64);
+            .observe(cache_iters.len() as f64);
 
         let staging_iter: StagingDataIterator = OrderedMergeIteratorInner::new(staging_iters);
         // 3. build user_iterator
         let merge_iter = UnorderedMergeIteratorInner::new(
-            once(HummockIteratorUnion::First(staging_iter)).chain(
-                non_overlapping_iters
-                    .into_iter()
-                    .map(HummockIteratorUnion::Third),
-            ),
+            once(HummockIteratorUnion::First(staging_iter))
+                .chain(cache_iters.into_iter())
+                .chain(
+                    non_overlapping_iters
+                        .into_iter()
+                        .map(HummockIteratorUnion::Third),
+                ),
         );
 
         // the epoch_range left bound for iterator read
@@ -687,10 +697,15 @@ impl HummockVersionReader {
             Some(committed),
             DeleteRangeAggregator::new(delete_range_iter, epoch),
         );
+        let start_time = minstant::Instant::now();
         user_iter
             .rewind()
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
+
+        self.stats
+            .iter_duration
+            .observe(start_time.elapsed().as_secs_f64());
         local_stats.report(self.stats.deref());
         Ok(HummockStorageIterator::new(user_iter, self.stats.clone()).into_stream())
     }

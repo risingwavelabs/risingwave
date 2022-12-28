@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::CompactionConfig;
+use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::min_overlap_compaction_picker::MinOverlappingPicker;
@@ -193,32 +193,25 @@ impl LevelSelectorCore {
     fn get_priority_levels(&self, levels: &Levels, handlers: &[LevelHandler]) -> SelectContext {
         let mut ctx = self.calculate_level_base_size(levels);
 
-        let idle_file_count = levels
-            .l0
-            .as_ref()
-            .unwrap()
-            .sub_levels
-            .iter()
-            .map(|level| level.table_infos.len())
-            .sum::<usize>()
-            - handlers[0].get_pending_file_count();
-        let max_l0_score = std::cmp::max(
-            SCORE_BASE * 2,
-            levels.l0.as_ref().unwrap().sub_levels.len() as u64 * SCORE_BASE
-                / self.config.level0_tier_compact_file_number,
-        );
+        let mut idle_file_count = 0;
+        for sub_level in &levels.l0.as_ref().unwrap().sub_levels {
+            if sub_level.level_type == LevelType::Overlapping as i32
+                && !handlers[0].is_level_pending_compact(sub_level)
+            {
+                idle_file_count += 1;
+            }
+        }
 
         let total_size = levels.l0.as_ref().unwrap().total_file_size
             - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
+        // trigger intra-l0 compaction at first when the number of files is too large.
         if idle_file_count > 0 {
-            // trigger intra-l0 compaction at first when the number of files is too large.
-            let l0_score =
-                idle_file_count as u64 * SCORE_BASE / self.config.level0_tier_compact_file_number;
-            ctx.score_levels
-                .push((std::cmp::min(l0_score, max_l0_score), 0, 0));
-            let score = total_size * SCORE_BASE / self.config.max_bytes_for_level_base;
-            ctx.score_levels.push((score, 0, ctx.base_level));
+            let l0_score = (idle_file_count - 1) * SCORE_BASE;
+            ctx.score_levels.push((l0_score, 0, 0));
         }
+
+        let score = total_size * SCORE_BASE / self.config.max_bytes_for_level_base;
+        ctx.score_levels.push((score, 0, ctx.base_level));
 
         // The bottommost level can not be input level.
         for level in &levels.levels {

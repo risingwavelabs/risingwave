@@ -25,7 +25,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table;
 use tokio::sync::Notify;
 
-use crate::key::{get_table_id, TABLE_PREFIX_LEN};
+use crate::key::{get_table_id, FullKey, TableKey, TABLE_PREFIX_LEN};
 
 const ACQUIRE_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -217,10 +217,12 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
         }
 
         let table_id = get_table_id(full_key);
-        self.id_to_filter_key_extractor
-            .get(&table_id)
-            .unwrap()
-            .extract(full_key)
+        match self.id_to_filter_key_extractor.get(&table_id) {
+            Some(extractor) => extractor.extract(full_key),
+            None => {
+                panic!("failed to extract key for table-id: {}", table_id);
+            }
+        }
     }
 }
 

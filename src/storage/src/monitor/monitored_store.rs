@@ -58,7 +58,6 @@ impl<S: StateStoreRead> MonitoredStateStore<S> {
         iter_stream_future: impl Future<Output = StorageResult<S::IterStream>>,
     ) -> StorageResult<MonitoredStateStoreIterStream<S>> {
         // start time takes iterator build time into account
-        let start_time = minstant::Instant::now();
 
         // wait for iterator creation (e.g. seek)
         let iter_stream = iter_stream_future
@@ -75,7 +74,6 @@ impl<S: StateStoreRead> MonitoredStateStore<S> {
             stats: MonitoredStateStoreIterStats {
                 total_items: 0,
                 total_size: 0,
-                start_time,
                 scan_time: minstant::Instant::now(),
                 stats: self.stats.clone(),
             },
@@ -242,7 +240,6 @@ pub struct MonitoredStateStoreIter<S> {
 struct MonitoredStateStoreIterStats {
     total_items: usize,
     total_size: usize,
-    start_time: minstant::Instant,
     scan_time: minstant::Instant,
     stats: Arc<StateStoreMetrics>,
 }
@@ -270,9 +267,6 @@ impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
 
 impl Drop for MonitoredStateStoreIterStats {
     fn drop(&mut self) {
-        self.stats
-            .iter_duration
-            .observe(self.start_time.elapsed().as_secs_f64());
         self.stats
             .iter_scan_duration
             .observe(self.scan_time.elapsed().as_secs_f64());

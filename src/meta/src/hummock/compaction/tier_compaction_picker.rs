@@ -44,9 +44,7 @@ impl TierCompactionPicker {
             if idx + 1 == max_sub_level {
                 break;
             }
-            if level.level_type == non_overlapping_type
-                && level.total_file_size > self.config.sub_level_max_compaction_bytes
-            {
+            if level.level_type == non_overlapping_type {
                 continue;
             }
 

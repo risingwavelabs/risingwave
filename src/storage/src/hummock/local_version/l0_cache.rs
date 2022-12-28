@@ -17,18 +17,23 @@ use std::future::Future;
 use std::marker::PhantomData;
 
 use bytes::Bytes;
+use dashmap::DashSet;
 use risingwave_common::skiplist::{IterRef, Skiplist};
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_pb::hummock::Level;
 
-use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
+use crate::hummock::iterator::{
+    DeleteRangeIterator, DirectionEnum, HummockIterator, HummockIteratorDirection,
+};
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
+const BLOOM_FILTER_HASH_CAPACITY: usize = 256 * 1024;
 
 #[derive(Clone)]
 pub struct LevelZeroCache {
     pub cache: Skiplist<FullKey<Vec<u8>>, HummockValue<Bytes>>,
     pub level: Level,
+    pub bloom_filter: DashSet<u32>,
 }
 
 impl Debug for LevelZeroCache {
@@ -44,6 +49,7 @@ impl LevelZeroCache {
         Self {
             level,
             cache: Skiplist::new(true),
+            bloom_filter: DashSet::with_capacity(BLOOM_FILTER_HASH_CAPACITY),
         }
     }
 
@@ -55,10 +61,15 @@ impl LevelZeroCache {
             iter: self.cache.iter(),
             borrow_phantom: PhantomData,
             committed_epoch,
+            next_count: 0,
+            seek_count: 0,
         }
     }
 
-    pub fn get(&self, key: &FullKey<Vec<u8>>) -> Option<HummockValue<Bytes>> {
+    pub fn get(&self, key: &FullKey<Vec<u8>>, dist_key_hash: u32) -> Option<HummockValue<Bytes>> {
+        if !self.bloom_filter.contains(&dist_key_hash) {
+            return None;
+        }
         let mut iter = self.cache.iter();
         iter.seek(key);
         while iter.valid() && iter.key().epoch > key.epoch {
@@ -90,6 +101,8 @@ pub struct LevelZeroCacheIterator<D: HummockIteratorDirection> {
     iter: IterRef<FullKey<Vec<u8>>, HummockValue<Bytes>>,
     committed_epoch: u64,
     borrow_phantom: PhantomData<D>,
+    next_count: u64,
+    seek_count: u64,
 }
 
 impl<D: HummockIteratorDirection> HummockIterator for LevelZeroCacheIterator<D> {
@@ -102,18 +115,19 @@ impl<D: HummockIteratorDirection> HummockIterator for LevelZeroCacheIterator<D> 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
             debug_assert!(self.is_valid());
+            self.next_count += 1;
             match D::direction() {
                 DirectionEnum::Forward => {
                     self.iter.next();
-                    while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
-                        self.iter.next();
-                    }
+                    // while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
+                    //     self.iter.next();
+                    // }
                 }
                 DirectionEnum::Backward => {
                     self.iter.prev();
-                    while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
-                        self.iter.prev();
-                    }
+                    // while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
+                    //     self.iter.prev();
+                    // }
                 }
             }
 
@@ -135,18 +149,19 @@ impl<D: HummockIteratorDirection> HummockIterator for LevelZeroCacheIterator<D> 
 
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async move {
+            self.seek_count += 1;
             match D::direction() {
                 DirectionEnum::Forward => {
                     self.iter.seek_to_first();
-                    while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
-                        self.iter.next();
-                    }
+                    // while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
+                    //     self.iter.next();
+                    // }
                 }
                 DirectionEnum::Backward => {
                     self.iter.seek_to_last();
-                    while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
-                        self.iter.prev();
-                    }
+                    // while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
+                    //     self.iter.prev();
+                    // }
                 }
             }
 
@@ -156,23 +171,30 @@ impl<D: HummockIteratorDirection> HummockIterator for LevelZeroCacheIterator<D> 
 
     fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
+            self.seek_count += 1;
             match D::direction() {
                 DirectionEnum::Forward => {
                     self.iter.seek(&key.to_vec());
-                    while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
-                        self.iter.next();
-                    }
+                    // while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
+                    //     if self.iter.key().user_key.as_ref() != key.user_key {
+                    //         break;
+                    //     }
+                    //     self.iter.next();
+                    // }
                 }
                 DirectionEnum::Backward => {
                     self.iter.seek_for_prev(&key.to_vec());
-                    while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
-                        self.iter.prev();
-                    }
+                    // while self.iter.valid() && self.iter.key().epoch > self.committed_epoch {
+                    //     self.iter.prev();
+                    // }
                 }
             }
             Ok(())
         }
     }
 
-    fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
+    fn collect_local_statistic(&self, stats: &mut crate::monitor::StoreLocalStatistic) {
+        stats.total_key_count += self.next_count;
+        stats.total_seek_count += self.seek_count;
+    }
 }

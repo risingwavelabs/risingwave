@@ -22,6 +22,9 @@ use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::filter_key_extractor::{
+    FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
+};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::pin_version_response::Payload;
 use tokio::spawn;
@@ -110,6 +113,7 @@ pub struct HummockEventHandler {
 
     sstable_id_manager: SstableIdManagerRef,
     sstable_store: SstableStoreRef,
+    filter_key_extractor_manager: FilterKeyExtractorManagerRef,
 }
 
 async fn flush_imms(
@@ -153,6 +157,7 @@ impl HummockEventHandler {
         let write_conflict_detector = ConflictDetector::new_from_config(&compactor_context.options);
         let sstable_id_manager = compactor_context.sstable_id_manager.clone();
         let sstable_store = compactor_context.sstable_store.clone();
+        let filter_key_extractor_manager = compactor_context.filter_key_extractor_manager.clone();
         let uploader = HummockUploader::new(
             pinned_version.clone(),
             Arc::new(move |payload, task_info| {
@@ -174,6 +179,7 @@ impl HummockEventHandler {
             last_instance_id: 0,
             sstable_id_manager,
             sstable_store,
+            filter_key_extractor_manager,
         }
     }
 
@@ -377,14 +383,20 @@ impl HummockEventHandler {
                     version_to_apply.apply_version_delta(version_delta);
                     // TODO: filter version delta by local sstable files.
                     version_to_apply
-                        .fill_cache(version_delta, &self.sstable_store)
+                        .fill_cache(
+                            version_delta,
+                            &self.sstable_store,
+                            &self.filter_key_extractor_manager,
+                        )
                         .await?;
                 }
                 version_to_apply
             }
             Payload::PinnedVersion(version) => {
                 let mut version = LocalHummockVersion::from(version);
-                version.fill_full_cache(&self.sstable_store).await?;
+                version
+                    .fill_full_cache(&self.sstable_store, &self.filter_key_extractor_manager)
+                    .await?;
                 version
             }
         };
