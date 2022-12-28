@@ -22,7 +22,8 @@ use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{OwnedRow as RowData, Row, RowDeserializer};
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::row::{once, OwnedRow as RowData, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
@@ -32,7 +33,6 @@ use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
 use super::error::StreamExecutorError;
-use super::managed_state::dynamic_filter::RangeCache;
 use super::monitor::StreamingMetrics;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
@@ -49,7 +49,7 @@ pub struct DynamicFilterExecutor<S: StateStore> {
     pk_indices: PkIndices,
     identity: String,
     comparator: ExprNodeType,
-    range_cache: RangeCache<S>,
+    left_table: StateTable<S>,
     right_table: StateTable<S>,
     schema: Schema,
     metrics: Arc<StreamingMetrics>,
@@ -71,7 +71,6 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         mut state_table_r: StateTable<S>,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
-        vnodes: Arc<Bitmap>,
     ) -> Self {
         // TODO: enable sanity check for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
         state_table_l.disable_sanity_check();
@@ -86,7 +85,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             pk_indices,
             identity: format!("DynamicFilterExecutor {:X}", executor_id),
             comparator,
-            range_cache: RangeCache::new(state_table_l, usize::MAX, vnodes),
+            left_table: state_table_l,
             right_table: state_table_r,
             metrics,
             schema,
@@ -168,13 +167,13 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             // Store the rows without a null left key
             // null key in left side of predicate should never be stored
             // (it will never satisfy the filter condition)
-            if let Some(val) = left_val {
+            if left_val.is_some() {
                 match *op {
                     Op::Insert | Op::UpdateInsert => {
-                        self.range_cache.insert(&val, row)?;
+                        self.left_table.insert(row);
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        self.range_cache.delete(&val, row)?;
+                        self.left_table.delete(row);
                     }
                 }
             }
@@ -246,6 +245,10 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         }
     }
 
+    fn to_row_bound(bound: Bound<ScalarImpl>) -> Bound<impl Row> {
+        bound.map(|s| once(Some(s)))
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn into_stream(mut self) {
         let input_l = self.source_l.take().unwrap();
@@ -277,7 +280,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
         self.right_table.init_epoch(barrier.epoch);
-        self.range_cache.init(barrier.epoch);
+        self.left_table.init_epoch(barrier.epoch);
 
         let recovered_row = self.recover_rhs().await?;
         let recovered_value = recovered_row.as_ref().map(|r| r[0].clone());
@@ -322,7 +325,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                     let (columns, _) = data_chunk.into_parts();
 
-                    if new_visibility.num_high_bits() > 0 {
+                    if new_visibility.count_ones() > 0 {
                         let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
                         yield Message::Chunk(new_chunk)
                     }
@@ -377,34 +380,45 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     // no new chunks have arrived since the previous barrier.
                     let curr: Datum = current_epoch_value.clone().flatten();
                     let prev: Datum = prev_epoch_value.flatten();
-                    let row_deserializer = RowDeserializer::new(self.schema.data_types());
                     if prev != curr {
-                        let (range, latest_is_lower, is_insert) = self.get_range(&curr, prev);
-                        for row in self.range_cache.range(range, latest_is_lower).await? {
-                            if let Some(chunk) = stream_chunk_builder.append_row_matched(
-                                // All rows have a single identity at this point
-                                if is_insert { Op::Insert } else { Op::Delete },
-                                &row_deserializer.deserialize(row.row.as_ref())?,
-                            ) {
-                                yield Message::Chunk(chunk);
+                        let (range, _latest_is_lower, is_insert) = self.get_range(&curr, prev);
+                        let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));
+
+                        // TODO: prefetching for append-only case.
+                        for vnode in self.left_table.vnodes().iter_ones() {
+                            let row_stream = self
+                                .left_table
+                                .iter_with_pk_range(&range, VirtualNode::from_index(vnode))
+                                .await?;
+                            pin_mut!(row_stream);
+                            while let Some(res) = row_stream.next().await {
+                                let row = res?;
+                                if let Some(chunk) = stream_chunk_builder.append_row_matched(
+                                    // All rows have a single identity at this point
+                                    if is_insert { Op::Insert } else { Op::Delete },
+                                    row,
+                                ) {
+                                    yield Message::Chunk(chunk);
+                                }
                             }
                         }
+
                         if let Some(chunk) = stream_chunk_builder.take() {
                             yield Message::Chunk(chunk);
                         }
                     }
 
                     if let Some(mut watermark) = unused_clean_hint.take() {
-                        self.range_cache.shrink(watermark.val.clone());
+                        self.left_table.update_watermark(watermark.val.clone());
                         watermark.col_idx = self.key_l;
                         yield Message::Watermark(watermark);
                     };
 
                     // Update the committed value on RHS if it has changed.
                     if last_committed_epoch_row != current_epoch_row {
-                        // Only write the RHS value if this actor is in charge of vnode 0
+                        // Only write the RHS value if this actor is in charge of vnode 0 on LHS
                         // Otherwise, we only actively replicate the changes.
-                        if self.range_cache.state_table.vnode_bitmap().is_set(0) {
+                        if self.left_table.vnode_bitmap().is_set(0) {
                             // If both `None`, then this branch is inactive.
                             // Hence, at least one is `Some`, hence at least one update.
                             if let Some(old_row) = last_committed_epoch_row.take() {
@@ -423,7 +437,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         self.right_table.commit_no_data_expected(barrier.epoch);
                     }
 
-                    self.range_cache.flush(barrier.epoch).await?;
+                    self.left_table.commit(barrier.epoch).await?;
 
                     prev_epoch_value = Some(curr);
 
@@ -432,7 +446,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     // Update the vnode bitmap for the left state table if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         let _previous_vnode_bitmap =
-                            self.range_cache.update_vnodes(vnode_bitmap).await?;
+                            self.left_table.update_vnode_bitmap(vnode_bitmap);
                     }
 
                     yield Message::Barrier(barrier);
@@ -467,7 +481,6 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::Distribution;
 
     use super::*;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
@@ -514,7 +527,6 @@ mod tests {
         let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0]);
         let (tx_r, source_r) = MockSource::channel(schema, vec![]);
 
-        let fallback = Distribution::fallback();
         let executor = DynamicFilterExecutor::<MemoryStateStore>::new(
             ActorContext::create(123),
             Box::new(source_l),
@@ -527,7 +539,6 @@ mod tests {
             mem_state_r,
             Arc::new(StreamingMetrics::unused()),
             1024,
-            fallback.vnodes,
         );
         (tx_l, tx_r, Box::new(executor).execute())
     }

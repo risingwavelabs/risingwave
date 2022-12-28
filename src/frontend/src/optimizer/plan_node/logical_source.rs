@@ -15,15 +15,20 @@
 use std::fmt;
 use std::rc::Rc;
 
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
 
 use super::generic::GenericPlanNode;
 use super::{
     generic, BatchSource, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
-    PredicatePushdown, StreamSource, ToBatch, ToStream,
+    PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::ColumnId;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 use crate::TableCatalog;
@@ -36,9 +41,20 @@ pub struct LogicalSource {
 }
 
 impl LogicalSource {
-    pub fn new(source_catalog: Rc<SourceCatalog>, ctx: OptimizerContextRef) -> Self {
+    pub fn new(
+        source_catalog: Option<Rc<SourceCatalog>>,
+        column_descs: Vec<ColumnDesc>,
+        pk_col_ids: Vec<ColumnId>,
+        row_id_index: Option<usize>,
+        gen_row_id: bool,
+        ctx: OptimizerContextRef,
+    ) -> Self {
         let core = generic::Source {
             catalog: source_catalog,
+            column_descs,
+            pk_col_ids,
+            row_id_index,
+            gen_row_id,
         };
 
         let schema = core.schema();
@@ -65,7 +81,7 @@ impl LogicalSource {
             .collect()
     }
 
-    pub fn source_catalog(&self) -> Rc<SourceCatalog> {
+    pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
         self.core.catalog.clone()
     }
 
@@ -78,24 +94,32 @@ impl_plan_tree_node_for_leaf! {LogicalSource}
 
 impl fmt::Display for LogicalSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "LogicalSource {{ source: {}, columns: [{}] }}",
-            self.source_catalog().name,
-            self.column_names().join(", ")
-        )
+        if let Some(catalog) = self.source_catalog() {
+            write!(
+                f,
+                "LogicalSource {{ source: {}, columns: [{}] }}",
+                catalog.name,
+                self.column_names().join(", ")
+            )
+        } else {
+            write!(f, "LogicalSource")
+        }
     }
 }
 
 impl ColPrunable for LogicalSource {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
 impl PredicatePushdown for LogicalSource {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        _ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }
@@ -107,11 +131,18 @@ impl ToBatch for LogicalSource {
 }
 
 impl ToStream for LogicalSource {
-    fn to_stream(&self) -> Result<PlanRef> {
-        Ok(StreamSource::new(self.clone()).into())
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        let mut plan: PlanRef = StreamSource::new(self.clone()).into();
+        if let Some(row_id_index) = self.core.row_id_index  && self.core.gen_row_id{
+            plan = StreamRowIdGen::new(plan, row_id_index).into();
+        }
+        Ok(plan)
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         Ok((
             self.clone().into(),
             ColIndexMapping::identity(self.schema().len()),

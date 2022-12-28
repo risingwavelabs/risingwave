@@ -179,6 +179,7 @@ async fn compaction_test(
         state_store_type.strip_prefix("hummock+").unwrap(),
         object_store_metrics.clone(),
         false,
+        "Hummock",
     )
     .await;
     let sstable_store = Arc::new(SstableStore::new(

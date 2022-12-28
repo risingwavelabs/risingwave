@@ -318,7 +318,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 
     let data_type = field.data_type();
 
-    tracing::info!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
+    tracing::debug!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
 
     let value = match (data_type, scalar_ref) {
         (DataType::Boolean, ScalarRefImpl::Bool(v)) => {
@@ -350,7 +350,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             dt @ DataType::Date
             | dt @ DataType::Time
             | dt @ DataType::Timestamp
-            | dt @ DataType::Timestampz
+            | dt @ DataType::Timestamptz
             | dt @ DataType::Interval
             | dt @ DataType::Bytea,
             scalar,

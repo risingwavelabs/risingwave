@@ -23,6 +23,7 @@ use console::style;
 use dialoguer::MultiSelect;
 use enum_iterator::{all, Sequence};
 use itertools::Itertools;
+use risedev::RISEDEV_CONFIG_FILE;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -377,7 +378,7 @@ fn main() -> Result<()> {
     println!(
         "If you want to use these components, please {} in {} to start that component.",
         style("modify the cluster config").yellow().bold(),
-        style("risedev.yml").bold(),
+        style(RISEDEV_CONFIG_FILE).bold(),
     );
     println!("See CONTRIBUTING.md or RiseDev's readme for more information.");
 

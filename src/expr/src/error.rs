@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+
 pub use anyhow::anyhow;
 use regex;
 use risingwave_common::array::ArrayError;
@@ -40,7 +42,7 @@ pub enum ExprError {
     DivisionByZero,
 
     #[error("Parse error: {0}")]
-    Parse(&'static str),
+    Parse(Cow<'static, str>),
 
     #[error("Invalid parameter {name}: {reason}")]
     InvalidParam { name: &'static str, reason: String },
@@ -67,6 +69,12 @@ impl From<regex::Error> for ExprError {
             name: "pattern",
             reason: re.to_string(),
         }
+    }
+}
+
+impl From<chrono::ParseError> for ExprError {
+    fn from(e: chrono::ParseError) -> Self {
+        Self::Parse(e.to_string().into())
     }
 }
 

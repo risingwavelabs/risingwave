@@ -50,7 +50,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             params.actor_context,
             params.vnode_bitmap.map(Arc::new),
             table,
-            stream.context.lru_manager.clone(),
+            stream.get_watermark_epoch(),
             1 << 16,
             handle_pk_conflict,
         )
@@ -95,7 +95,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             params.actor_context,
             vnodes,
             table,
-            stream.context.lru_manager.clone(),
+            stream.get_watermark_epoch(),
             1 << 16,
             handle_pk_conflict,
         )

@@ -201,6 +201,10 @@ impl Executor for ReceiverExecutor {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> ExecutorInfo {
+        self.info.clone()
+    }
 }
 
 #[cfg(test)]

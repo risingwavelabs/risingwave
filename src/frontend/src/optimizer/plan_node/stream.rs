@@ -17,7 +17,7 @@ use pb::stream_node as pb_node;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::catalog::{ColumnIndex, SourceInfo};
+use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan as pb;
 use smallvec::SmallVec;
 
@@ -241,8 +241,13 @@ impl HashJoin {
         // The pk of hash join internal and degree table should be join_key + input_pk.
         let join_key_len = join_key_indices.len();
         let mut pk_indices = join_key_indices;
+
         // TODO(yuhao): dedup the dist key and pk.
-        pk_indices.extend(input.logical_pk());
+        for input_pk_index in input.logical_pk() {
+            if !pk_indices.contains(input_pk_index) {
+                pk_indices.push(*input_pk_index);
+            }
+        }
 
         // Build internal table
         let mut internal_table_catalog_builder =
@@ -252,9 +257,12 @@ impl HashJoin {
         internal_columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
         });
-
-        pk_indices.iter().for_each(|idx| {
-            internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
+        pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
+            if order_idx < join_key_len {
+                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending, false)
+            } else {
+                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending, true)
+            }
         });
 
         // Build degree table.
@@ -265,7 +273,7 @@ impl HashJoin {
 
         pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
             degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
-            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending)
+            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending, false);
         });
         degree_table_catalog_builder.add_column(&degree_column_field);
         degree_table_catalog_builder
@@ -273,7 +281,6 @@ impl HashJoin {
 
         internal_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
         degree_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
-
         (
             internal_table_catalog_builder.build(internal_table_dist_keys),
             degree_table_catalog_builder.build(degree_table_dist_keys),
@@ -553,7 +560,7 @@ pub fn to_stream_prost_body(
                 with_ties: me.core.with_ties,
                 group_key: me.core.group_key.iter().map(|idx| *idx as u32).collect(),
                 table: Some(table.to_internal_table_prost()),
-                order_by_len: me.core.order.len() as u32,
+                order_by: me.core.order.to_protobuf(),
             };
 
             ProstNode::GroupTopN(group_topn_node)
@@ -694,7 +701,7 @@ pub fn to_stream_prost_body(
         }),
         Node::Source(me) => {
             let me = &me.core.catalog;
-            ProstNode::Source(SourceNode {
+            let source_inner = me.as_ref().map(|me| StreamSource {
                 source_id: me.id,
                 source_name: me.name.clone(),
                 state_table: Some(
@@ -702,16 +709,15 @@ pub fn to_stream_prost_body(
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
-                info: Some(SourceInfo {
-                    source_info: Some(me.info.clone()),
-                }),
+                info: Some(me.info.clone()),
                 row_id_index: me
                     .row_id_index
                     .map(|index| ColumnIndex { index: index as _ }),
                 columns: me.columns.iter().map(|c| c.to_protobuf()).collect(),
                 pk_column_ids: me.pk_col_ids.iter().map(Into::into).collect(),
                 properties: me.properties.clone(),
-            })
+            });
+            ProstNode::Source(SourceNode { source_inner })
         }
         Node::TopN(me) => {
             let me = &me.core;
@@ -724,7 +730,7 @@ pub fn to_stream_prost_body(
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
-                order_by_len: me.order.len() as u32,
+                order_by: me.order.to_protobuf(),
             };
             // TODO: support with ties for append only TopN
             // <https://github.com/risingwavelabs/risingwave/issues/5642>

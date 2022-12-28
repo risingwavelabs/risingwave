@@ -24,7 +24,6 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::catalog::source_info::SourceInfo as ProstSourceInfo;
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_source::connector_source::{ConnectorSource, SourceContext};
 use risingwave_source::monitor::SourceMetrics;
@@ -65,11 +64,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         let config = ConnectorProperties::extract(source_props)
             .map_err(|e| RwError::from(ConnectorError(e.into())))?;
 
-        let info = try_match_expand!(
-            &source_node.get_info()?.get_source_info()?,
-            ProstSourceInfo::StreamSource
-        )
-        .unwrap();
+        let info = &source_node.get_info().unwrap();
         let format = match info.get_row_format()? {
             RowFormatType::Json => SourceFormat::Json,
             RowFormatType::Protobuf => SourceFormat::Protobuf,
@@ -77,7 +72,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
             RowFormatType::Avro => SourceFormat::Avro,
             RowFormatType::Maxwell => SourceFormat::Maxwell,
             RowFormatType::CanalJson => SourceFormat::CanalJson,
-            RowFormatType::RowUnspecified => unreachable!(),
+            _ => unreachable!(),
         };
         if format == SourceFormat::Protobuf && info.row_schema_location.is_empty() {
             return Err(RwError::from(ProtocolError(
@@ -108,7 +103,11 @@ impl BoxedExecutorBuilder for SourceExecutor {
             config,
             columns,
             parser,
-            connector_message_buffer_size: source.context().source_manager().msg_buf_size(),
+            connector_message_buffer_size: source
+                .context()
+                .get_config()
+                .developer
+                .stream_connector_message_buffer_size,
         };
 
         let column_ids: Vec<_> = source_node
@@ -134,7 +133,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         Ok(Box::new(SourceExecutor {
             connector_source,
             column_ids,
-            metrics: source.context().source_manager().metrics(),
+            metrics: source.context().source_metrics(),
             source_id: TableId::new(source_node.source_id),
             split,
             schema,
