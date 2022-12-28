@@ -546,6 +546,7 @@ where
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
             tracing::warn!("source {} already registered", source.get_id());
+        } else {
             Self::create_source_worker(
                 &self.connector_rpc_endpoint,
                 source,
