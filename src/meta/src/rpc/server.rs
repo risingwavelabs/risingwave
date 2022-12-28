@@ -15,7 +15,6 @@
 use std::net::SocketAddr;
 use std::process;
 use std::sync::Arc;
-use std::thread::sleep;
 use std::time::Duration;
 
 use etcd_client::ConnectOptions;
