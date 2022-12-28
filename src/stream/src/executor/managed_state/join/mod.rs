@@ -521,15 +521,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.inner.len()
     }
 
-    /// Estimated memory usage for this hash table.
-    #[expect(dead_code)]
-    pub fn estimated_size(&self) -> usize {
-        self.inner
-            .iter()
-            .map(|(k, v)| k.estimated_size() + v.estimated_size())
-            .sum()
-    }
-
     pub fn null_matched(&self) -> &FixedBitSet {
         &self.null_matched
     }
