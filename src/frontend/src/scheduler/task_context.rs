@@ -82,7 +82,7 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         self.env.source_metrics()
     }
 
-    fn record_mem_usage(&self, val: usize) {
+    fn record_mem_usage(&self, _val: usize) {
         todo!()
     }
 

@@ -221,12 +221,9 @@ impl BatchManager {
         let mut max_mem = usize::MIN;
         let guard = self.tasks.lock();
         for (k, v) in guard.iter() {
-            if v.is_end() {
-                // println!("End");
-                continue;
-            }
-
-            // println!("No End");
+            // If the task has been stopped, we should not count this.
+            // Alternatively, we can use a bool flag to indicate end of execution.
+            // Now we use only store 0 bytes in Context after execution ends.
             let mem_usage = v.report_mem_usage();
             if mem_usage > max_mem {
                 max_mem = mem_usage;
@@ -235,7 +232,10 @@ impl BatchManager {
             all += mem_usage;
         }
 
-        let guard = self.max_mem_task.lock();
+        // Store the max memory task for future potential kill queries.
+        let mut guard = self.max_mem_task.lock();
+        *guard = max_mem_task_id;
+
         all
     }
 }

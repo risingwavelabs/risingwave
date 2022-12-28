@@ -46,6 +46,46 @@ use crate::task::BatchTaskContext;
 // Now we will only at most have 2 status for each status channel. Running -> Failed or Finished.
 const TASK_STATUS_BUFFER_SIZE: usize = 2;
 
+/// A special version for batch allocation stat, passed in another task context to report task mem
+/// usage 0 bytes at the end.
+pub async fn allocation_stat_for_batch<Fut, T, F, C>(
+    future: Fut,
+    interval: Duration,
+    mut report: F,
+    context: C,
+) -> T
+where
+    Fut: Future<Output = T>,
+    F: FnMut(usize),
+    C: BatchTaskContext,
+{
+    BYTES_ALLOCATED
+        .scope(TaskLocalBytesAllocated::new(), async move {
+            // The guard has the same lifetime as the counter so that the counter will keep positive
+            // in the whole scope. When the scope exits, the guard is released, so the counter can
+            // reach zero eventually and then `drop` itself.
+            let _guard = Box::new(114514);
+            let monitor = async move {
+                let mut interval = tokio::time::interval(interval);
+                loop {
+                    interval.tick().await;
+                    BYTES_ALLOCATED.with(|bytes| report(bytes.val()));
+                }
+            };
+            let output = tokio::select! {
+                biased;
+                _ = monitor => unreachable!(),
+                output = future => {
+                    // Report mem usage as 0 after ends immediately.
+                    context.record_mem_usage(0);
+                    output
+                },
+            };
+            output
+        })
+        .await
+}
+
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Default)]
 pub struct TaskId {
     pub task_id: u32,
@@ -379,11 +419,16 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         // For every fired Batch Task, we will wrap it with allocation stats to report memory
         // estimation to `BatchManager`.
-        let ctx = self.context.clone();
-        let alloc_stat_wrap_fut =
-            task_stats_alloc::allocation_stat(fut, Duration::from_millis(1000), move |bytes| {
-                ctx.record_mem_usage(bytes);
-            });
+        let ctx1 = self.context.clone();
+        let ctx2 = self.context.clone();
+        let alloc_stat_wrap_fut = allocation_stat_for_batch(
+            fut,
+            Duration::from_millis(1000),
+            move |bytes| {
+                ctx1.record_mem_usage(bytes);
+            },
+            ctx2,
+        );
         self.runtime.spawn(alloc_stat_wrap_fut);
         Ok(())
     }
@@ -484,12 +529,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             );
         }
 
-        // self.end = true;
-        let ctx = self.context.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(3000)).await;
-            ctx.set_task_end();
-        });
         Ok(())
     }
 
@@ -503,10 +542,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 info!("Abort task {:?} done", self.task_id);
             }
         };
-    }
-
-    pub fn is_end(&self) -> bool {
-        self.context.is_end()
     }
 
     pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
@@ -559,7 +594,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     }
 
     pub fn report_mem_usage(&self) -> usize {
-        // self
         self.context.get_mem_usage()
     }
 }

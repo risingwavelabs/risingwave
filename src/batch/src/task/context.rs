@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use risingwave_common::catalog::SysCatalogReaderRef;
@@ -130,6 +130,7 @@ impl ComputeNodeContext {
         Self {
             env: BatchEnvironment::for_test(),
             task_metrics: None,
+            mem_usage_value: Arc::new(0.into()),
         }
     }
 
