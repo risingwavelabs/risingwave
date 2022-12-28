@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
@@ -63,10 +63,6 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     fn record_mem_usage(&self, val: usize);
 
     fn get_mem_usage(&self) -> usize;
-
-    fn set_task_end(&self);
-
-    fn is_end(&self) -> bool;
 }
 
 /// Batch task context on compute node.
@@ -76,9 +72,8 @@ pub struct ComputeNodeContext {
     // None: Local mode don't record metrics.
     task_metrics: Option<BatchTaskMetricsWithTaskLabels>,
 
+    // Record how many memory bytes have been used in this task,
     mem_usage_value: Arc<AtomicUsize>,
-
-    end: Arc<AtomicBool>
 }
 
 impl BatchTaskContext for ComputeNodeContext {
@@ -127,14 +122,6 @@ impl BatchTaskContext for ComputeNodeContext {
     fn get_mem_usage(&self) -> usize {
         self.mem_usage_value.load(Ordering::Relaxed)
     }
-
-    fn set_task_end(&self) {
-        self.end.store(true, Ordering::Relaxed);
-    }
-
-    fn is_end(&self) -> bool {
-        self.end.load(Ordering::Relaxed)
-    }
 }
 
 impl ComputeNodeContext {
@@ -152,7 +139,6 @@ impl ComputeNodeContext {
             env,
             task_metrics: Some(task_metrics),
             mem_usage_value: Arc::new(0.into()),
-            end: AtomicBool::new(false).into(),
         }
     }
 
@@ -161,7 +147,6 @@ impl ComputeNodeContext {
             env,
             task_metrics: None,
             mem_usage_value: Arc::new(0.into()),
-            end: AtomicBool::new(false).into(),
         }
     }
 

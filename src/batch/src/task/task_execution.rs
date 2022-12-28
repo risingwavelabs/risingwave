@@ -29,12 +29,11 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
+use task_stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio_metrics::TaskMonitor;
 use tonic::Status;
-use task_stats_alloc::TaskLocalBytesAllocated;
-use task_stats_alloc::BYTES_ALLOCATED;
 
 use crate::error::BatchError::SenderError;
 use crate::error::{BatchError, Result as BatchResult};
@@ -378,7 +377,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             }
         };
 
-        // For every fired Batch Task, we will wrap it with allocation stats to report memory estimation to `BatchManager`.
+        // For every fired Batch Task, we will wrap it with allocation stats to report memory
+        // estimation to `BatchManager`.
         let ctx = self.context.clone();
         let alloc_stat_wrap_fut =
             task_stats_alloc::allocation_stat(fut, Duration::from_millis(1000), move |bytes| {
@@ -508,6 +508,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn is_end(&self) -> bool {
         self.context.is_end()
     }
+
     pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
         let task_id = TaskId::from(output_id.get_task_id()?);
         let receiver = self.receivers.lock()[output_id.get_output_id() as usize]

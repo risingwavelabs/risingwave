@@ -89,12 +89,4 @@ impl BatchTaskContext for FrontendBatchTaskContext {
     fn get_mem_usage(&self) -> usize {
         todo!()
     }
-
-    fn set_task_end(&self) {
-        todo!()
-    }
-
-    fn is_end(&self) -> bool {
-        todo!()
-    }
 }
