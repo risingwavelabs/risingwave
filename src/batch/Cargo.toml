@@ -56,6 +56,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-metrics = "0.1.0"
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
+task_stats_alloc = { path = "../utils/task_stats_alloc" }
 tracing = "0.1"
 tracing-futures = "0.2"
 twox-hash = "1"

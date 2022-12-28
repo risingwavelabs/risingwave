@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::StreamExt;
 use minitrace::prelude::*;
@@ -31,6 +33,8 @@ use tokio::runtime::Runtime;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio_metrics::TaskMonitor;
 use tonic::Status;
+use task_stats_alloc::TaskLocalBytesAllocated;
+use task_stats_alloc::BYTES_ALLOCATED;
 
 use crate::error::BatchError::SenderError;
 use crate::error::{BatchError, Result as BatchResult};
@@ -300,7 +304,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let t_1 = self.clone();
         let t_2 = self.clone();
         // Spawn task for real execution.
-        self.runtime.spawn(async move {
+        let fut = async move {
             trace!("Executing plan [{:?}]", task_id);
             let mut sender = sender;
             let mut state_tx = state_tx;
@@ -372,7 +376,15 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     error!("Batch task {:?} panic!", task_id);
                 }
             }
-        });
+        };
+
+        // For every fired Batch Task, we will wrap it with allocation stats to report memory estimation to `BatchManager`.
+        let ctx = self.context.clone();
+        let alloc_stat_wrap_fut =
+            task_stats_alloc::allocation_stat(fut, Duration::from_millis(1000), move |bytes| {
+                ctx.record_mem_usage(bytes);
+            });
+        self.runtime.spawn(alloc_stat_wrap_fut);
         Ok(())
     }
 
@@ -471,6 +483,13 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 e
             );
         }
+
+        // self.end = true;
+        let ctx = self.context.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(3000)).await;
+            ctx.set_task_end();
+        });
         Ok(())
     }
 
@@ -486,6 +505,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         };
     }
 
+    pub fn is_end(&self) -> bool {
+        self.context.is_end()
+    }
     pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
         let task_id = TaskId::from(output_id.get_task_id()?);
         let receiver = self.receivers.lock()[output_id.get_output_id() as usize]
@@ -533,6 +555,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             .lock()
             .take()
             .expect("The state receivers must have been inited!")
+    }
+
+    pub fn report_mem_usage(&self) -> usize {
+        // self
+        self.context.get_mem_usage()
     }
 }
 

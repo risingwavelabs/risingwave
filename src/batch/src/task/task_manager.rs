@@ -44,6 +44,9 @@ pub struct BatchManager {
 
     /// Batch configuration
     config: BatchConfig,
+
+    /// Highest task id that use memory. Can be find quickly.
+    max_mem_task: Arc<Mutex<Option<TaskId>>>,
 }
 
 impl BatchManager {
@@ -65,6 +68,7 @@ impl BatchManager {
             // TODO: may manually shutdown the runtime after we implement graceful shutdown for
             // stream manager.
             runtime: Box::leak(Box::new(runtime)),
+            max_mem_task: Arc::new(Mutex::new(None)),
             config,
         }
     }
@@ -212,7 +216,27 @@ impl BatchManager {
     /// Called by global memory manager for total usage of batch tasks. This variable should be
     /// maintained by Batch Manager.
     pub fn get_all_memory_usage(&self) -> usize {
-        todo!()
+        let mut all = 0;
+        let mut max_mem_task_id = None;
+        let mut max_mem = usize::MIN;
+        let guard = self.tasks.lock();
+        for (k, v) in guard.iter() {
+            if v.is_end() {
+                // println!("End");
+                continue;
+            }
+
+            // println!("No End");
+            let mem_usage = v.report_mem_usage();
+            if mem_usage > max_mem {
+                max_mem = mem_usage;
+                max_mem_task_id = Some(k.clone());
+            }
+            all += mem_usage;
+        }
+
+        let guard = self.max_mem_task.lock();
+        all
     }
 }
 

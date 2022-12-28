@@ -5129,6 +5129,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "static_assertions",
+ "task_stats_alloc",
  "tempfile",
  "thiserror",
  "tikv-jemallocator",

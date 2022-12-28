@@ -81,4 +81,20 @@ impl BatchTaskContext for FrontendBatchTaskContext {
     fn source_metrics(&self) -> Arc<SourceMetrics> {
         self.env.source_metrics()
     }
+
+    fn record_mem_usage(&self, val: usize) {
+        todo!()
+    }
+
+    fn get_mem_usage(&self) -> usize {
+        todo!()
+    }
+
+    fn set_task_end(&self) {
+        todo!()
+    }
+
+    fn is_end(&self) -> bool {
+        todo!()
+    }
 }
