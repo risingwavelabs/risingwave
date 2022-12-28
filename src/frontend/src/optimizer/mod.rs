@@ -561,49 +561,41 @@ impl PlanRoot {
         row_id_index: Option<usize>,
         dml_flag: DmlFlag,
     ) -> Result<StreamMaterialize> {
-        let create_materialize = |this: &Self, input: PlanRef| -> Result<StreamMaterialize> {
-            StreamMaterialize::create_table(
-                input,
-                table_name.clone(),
-                this.required_dist.clone(),
-                this.required_order.clone(),
-                columns.clone(),
-                definition.clone(),
-                handle_pk_conflict,
-                row_id_index,
-            )
+        let mut stream_plan = self.gen_stream_plan()?;
+
+        match dml_flag {
+            // TODO: remove this branch after we deprecate the materialized source
+            DmlFlag::Disable => { /* do nothing */ }
+
+            // NOTE(stonepage): we can not use this the plan's input append-only property here
+            DmlFlag::All | DmlFlag::AppendOnly => {
+                // Add DML node.
+                stream_plan = StreamDml::new(
+                    stream_plan,
+                    dml_flag == DmlFlag::AppendOnly,
+                    columns.iter().map(|c| c.column_desc.clone()).collect(),
+                )
+                .into();
+                // Add RowIDGen node if needed.
+                if let Some(row_id_index) = row_id_index {
+                    stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
+                }
+            }
         };
 
-        let stream_plan = self.gen_stream_plan()?;
-
-        // TODO: we create this `Materialize` only for acquiring the table catalog, may need to find
-        // a better way to do this.
-        let materialize = create_materialize(self, stream_plan.clone())?;
-
-        // TODO: remove this after we deprecate the materialized source
-        if dml_flag == DmlFlag::Disable {
-            return Ok(materialize);
-        }
-
-        let table = materialize.table();
-
-        // NOTE(stonepage): we can not use this the plan's input append-only
-        // property here
-        let stream_plan = StreamDml::new(
+        StreamMaterialize::create_for_table(
             stream_plan,
-            dml_flag == DmlFlag::AppendOnly,
-            table.table_desc().columns,
+            table_name,
+            self.required_dist.clone(),
+            self.required_order.clone(),
+            columns,
+            definition,
+            handle_pk_conflict,
+            row_id_index,
         )
-        .into();
-
-        let stream_plan = match row_id_index {
-            Some(row_id_index) => StreamRowIdGen::new(stream_plan, row_id_index).into(),
-            None => stream_plan,
-        };
-        create_materialize(self, stream_plan)
     }
 
-    /// Optimize and generate a create materialize view plan.
+    /// Optimize and generate a create materialized view plan.
     pub fn gen_materialize_plan(
         &mut self,
         mv_name: String,
@@ -619,32 +611,28 @@ impl PlanRoot {
             self.out_fields.clone(),
             self.out_names.clone(),
             definition,
-            false,
-            None,
             TableType::MaterializedView,
         )
     }
 
     /// Optimize and generate a create index plan.
-    pub fn gen_create_index_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
+    pub fn gen_index_plan(&mut self, index_name: String) -> Result<StreamMaterialize> {
         let stream_plan = self.gen_stream_plan()?;
 
         StreamMaterialize::create(
             stream_plan,
-            mv_name,
+            index_name,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
             self.out_names.clone(),
             "".into(), // TODO: fill definition here for `SHOW CREATE`
-            false,
-            None,
             TableType::Index,
         )
     }
 
     /// Optimize and generate a create sink plan.
-    pub fn gen_create_sink_plan(
+    pub fn gen_sink_plan(
         &mut self,
         sink_name: String,
         definition: String,
@@ -660,8 +648,6 @@ impl PlanRoot {
             self.out_fields.clone(),
             self.out_names.clone(),
             definition,
-            false,
-            None,
             // Note: we first plan it like a materialized view, and then rewrite it into a sink.
             TableType::MaterializedView,
         )

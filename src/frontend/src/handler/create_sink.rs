@@ -106,7 +106,7 @@ pub fn gen_sink_plan(
         plan_root.set_out_names(col_names)?;
     };
 
-    let sink_plan = plan_root.gen_create_sink_plan(sink_table_name, definition, properties)?;
+    let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, properties)?;
 
     let sink_catalog_prost = sink_plan
         .sink_catalog()
