@@ -147,7 +147,7 @@ impl StateStoreImpl {
     }
 
     #[cfg(feature = "rocksdb-local")]
-    pub fn rocksdb_state_store(
+    pub fn rocksdb(
         state_store: RocksDBStateStore,
         state_store_metrics: Arc<StateStoreMetrics>,
     ) -> Self {
@@ -590,6 +590,12 @@ impl StateStoreImpl {
                 tracing::warn!("sled state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
                 let path = sled.strip_prefix("sled://").unwrap();
                 StateStoreImpl::sled(SledStateStore::new(path), state_store_stats.clone())
+            }
+
+            #[cfg(feature = "rocksdb-local")]
+            rocksdb if rocksdb.starts_with("rocksdb://") => { 
+                let path = rocksdb.strip_prefix("rocksdb://").unwrap();
+                StateStoreImpl::rocksdb(RocksDBStateStore::new(path), state_store_stats.clone())
             }
 
             other => unimplemented!("{} state store is not supported", other),
