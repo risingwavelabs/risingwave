@@ -102,7 +102,7 @@ pub async fn handle(
 ) -> Result<RwPgResponse> {
     let handler_args = HandlerArgs {
         session,
-        sql: Arc::from(sql),
+        sql: sql.into(),
         with_options: WithOptions::try_from(&stmt)?,
     };
     match stmt {

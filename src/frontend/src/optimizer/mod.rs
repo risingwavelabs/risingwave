@@ -538,38 +538,36 @@ impl PlanRoot {
         Ok(plan)
     }
 
-    /// Optimize and generate a create materialize view plan.
-    #[allow(clippy::too_many_arguments)]
-    pub fn gen_materialize_plan(
+    /// Optimize and generate a create table plan.
+    pub fn gen_table_plan(
         &mut self,
-        mv_name: String,
+        table_name: String,
         definition: String,
-        col_names: Option<Vec<String>>,
         handle_pk_conflict: bool,
         row_id_index: Option<usize>,
         dml_flag: DmlFlag,
-        table_type: TableType,
     ) -> Result<StreamMaterialize> {
-        let out_names = if let Some(col_names) = col_names {
-            col_names
-        } else {
-            self.out_names.clone()
+        let create_materialize = |this: &Self, input: PlanRef| -> Result<StreamMaterialize> {
+            StreamMaterialize::create(
+                input,
+                table_name.clone(),
+                this.required_dist.clone(),
+                this.required_order.clone(),
+                this.out_fields.clone(),
+                this.out_names.clone(), // TODO: managed columns
+                false,
+                definition.clone(),
+                handle_pk_conflict,
+                row_id_index,
+                TableType::Table,
+            )
         };
-        let stream_plan = self.gen_stream_plan()?;
-        let materialize = StreamMaterialize::create(
-            stream_plan.clone(),
-            mv_name.clone(),
-            self.required_dist.clone(),
-            self.required_order.clone(),
-            self.out_fields.clone(),
-            out_names.clone(),
-            false,
-            definition.clone(),
-            handle_pk_conflict,
-            row_id_index,
-            table_type,
-        )?;
 
+        let stream_plan = self.gen_stream_plan()?;
+        let materialize = create_materialize(self, stream_plan.clone())?;
+
+        // TODO: remove this after we deprecate the materialized source
+        // TODO: we create this `Materialize` only for acquiring the table catalog
         if dml_flag == DmlFlag::Disable {
             return Ok(materialize);
         }
@@ -578,7 +576,6 @@ impl PlanRoot {
 
         // NOTE(stonepage): we can not use this the plan's input append-only
         // property here
-        // table.append_only,
         let stream_plan = StreamDml::new(
             stream_plan,
             dml_flag == DmlFlag::AppendOnly,
@@ -590,19 +587,35 @@ impl PlanRoot {
             Some(row_id_index) => StreamRowIdGen::new(stream_plan, row_id_index).into(),
             None => stream_plan,
         };
+        create_materialize(self, stream_plan)
+    }
+
+    /// Optimize and generate a create materialize view plan.
+    pub fn gen_materialize_plan(
+        &mut self,
+        mv_name: String,
+        definition: String,
+        col_names: Option<Vec<String>>,
+    ) -> Result<StreamMaterialize> {
+        let out_names = if let Some(col_names) = col_names {
+            col_names
+        } else {
+            self.out_names.clone()
+        };
+        let stream_plan = self.gen_stream_plan()?;
 
         StreamMaterialize::create(
-            stream_plan,
-            mv_name,
+            stream_plan.clone(),
+            mv_name.clone(),
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
-            out_names,
+            out_names.clone(),
             false,
-            definition,
-            handle_pk_conflict,
-            row_id_index,
-            table_type,
+            definition.clone(),
+            false,
+            None,
+            TableType::MaterializedView,
         )
     }
 

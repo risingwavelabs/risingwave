@@ -19,11 +19,9 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
-use super::create_table::DmlFlag;
 use super::privilege::{check_privileges, resolve_relation_privileges};
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
-use crate::catalog::table_catalog::TableType;
 use crate::handler::HandlerArgs;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::planner::Planner;
@@ -111,15 +109,7 @@ pub fn gen_create_mv_plan(
     if let Some(col_names) = &col_names {
         check_column_names(col_names, &plan_root)?
     }
-    let materialize = plan_root.gen_materialize_plan(
-        table_name,
-        definition,
-        col_names,
-        false,
-        None, // We will never alter a materialized view, so it is safe to pass `None` here.
-        DmlFlag::Disable,
-        TableType::MaterializedView,
-    )?;
+    let materialize = plan_root.gen_materialize_plan(table_name, definition, col_names)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(

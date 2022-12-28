@@ -32,7 +32,6 @@ use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::table_catalog::TableType;
 use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
@@ -245,6 +244,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         true => DmlFlag::AppendOnly,
         false => DmlFlag::All,
     };
+    let definition = context.sql().to_owned(); // TODO: use formatted SQL
 
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -312,15 +312,8 @@ pub(crate) fn gen_create_table_plan_without_bind(
     // The materialize executor need not handle primary key conflict if the primary key is row id.
     let handle_pk_conflict = row_id_index.is_none();
 
-    let materialize = plan_root.gen_materialize_plan(
-        name,
-        "".into(),
-        None,
-        handle_pk_conflict,
-        row_id_index,
-        dml_flag,
-        TableType::Table,
-    )?;
+    let materialize =
+        plan_root.gen_table_plan(name, definition, handle_pk_conflict, row_id_index, dml_flag)?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
     table.owner = session.user_id();
@@ -336,6 +329,8 @@ pub(crate) fn gen_materialize_plan(
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         let row_id_index = source.row_id_index.as_ref().map(|index| index.index as _);
+        let definition = context.sql().to_owned(); // TODO: use formatted SQL
+
         // Manually assemble the materialization plan for the table.
         let source_node: PlanRef = LogicalSource::new(
             Some(Rc::new((&source).into())),
@@ -374,14 +369,12 @@ pub(crate) fn gen_materialize_plan(
             out_names,
         );
 
-        plan_root.gen_materialize_plan(
+        plan_root.gen_table_plan(
             source.name.clone(),
-            "".into(),
-            None,
+            definition,
             handle_pk_conflict,
             row_id_index,
             DmlFlag::Disable,
-            TableType::Table,
         )?
     };
     let mut table = materialize
