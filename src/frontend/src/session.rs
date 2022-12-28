@@ -42,6 +42,7 @@ use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
+use risingwave_source::monitor::SourceMetrics;
 use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
@@ -93,6 +94,8 @@ pub struct FrontendEnv {
 
     pub frontend_metrics: Arc<FrontendMetrics>,
 
+    source_metrics: Arc<SourceMetrics>,
+
     batch_config: BatchConfig,
 }
 
@@ -134,6 +137,7 @@ impl FrontendEnv {
             sessions_map: Arc::new(Mutex::new(HashMap::new())),
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             batch_config: BatchConfig::default(),
+            source_metrics: Arc::new(SourceMetrics::default()),
         }
     }
 
@@ -224,6 +228,7 @@ impl FrontendEnv {
         let registry = prometheus::Registry::new();
         monitor_process(&registry).unwrap();
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
+        let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
 
         if opts.metrics_level > 0 {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
@@ -258,6 +263,7 @@ impl FrontendEnv {
                 frontend_metrics,
                 sessions_map: Arc::new(Mutex::new(HashMap::new())),
                 batch_config,
+                source_metrics,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -319,6 +325,10 @@ impl FrontendEnv {
 
     pub fn batch_config(&self) -> &BatchConfig {
         &self.batch_config
+    }
+
+    pub fn source_metrics(&self) -> Arc<SourceMetrics> {
+        self.source_metrics.clone()
     }
 }
 

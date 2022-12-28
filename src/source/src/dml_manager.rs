@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, TableId};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use tokio::sync::oneshot;
 
@@ -32,27 +34,40 @@ pub type DmlManagerRef = Arc<DmlManager>;
 /// channel instead of offering a `write_chunk` interface).
 #[derive(Default, Debug)]
 pub struct DmlManager {
-    batch_dmls: Mutex<HashMap<TableId, TableSourceRef>>,
+    table_readers: RwLock<HashMap<TableId, Weak<TableSource>>>,
 }
 
 impl DmlManager {
     pub fn new() -> Self {
         Self {
-            batch_dmls: Mutex::new(HashMap::new()),
+            table_readers: RwLock::new(HashMap::new()),
         }
     }
 
     pub fn register_reader(
         &self,
-        table_id: &TableId,
+        table_id: TableId,
         column_descs: &[ColumnDesc],
-    ) -> TableSourceRef {
-        let mut batch_dmls = self.batch_dmls.lock();
-        if !batch_dmls.contains_key(table_id) {
-            let batch_dml = Arc::new(TableSource::new(column_descs.to_vec()));
-            batch_dmls.insert(*table_id, batch_dml);
+    ) -> Result<TableSourceRef> {
+        let mut table_readers = self.table_readers.write();
+
+        // Clear invalid table readers.
+        table_readers.drain_filter(|_, weak_ref| weak_ref.strong_count() == 0);
+
+        match table_readers.entry(table_id) {
+            Entry::Occupied(o) => o.get().upgrade().ok_or_else(|| {
+                InternalError(format!(
+                    "fail to register reader for table with id {:?}",
+                    table_id.table_id
+                ))
+                .into()
+            }),
+            Entry::Vacant(v) => {
+                let reader = Arc::new(TableSource::new(column_descs.to_vec()));
+                v.insert(Arc::downgrade(&reader));
+                Ok(reader)
+            }
         }
-        batch_dmls.get(table_id).unwrap().clone()
     }
 
     pub fn write_chunk(
@@ -60,7 +75,26 @@ impl DmlManager {
         table_id: &TableId,
         chunk: StreamChunk,
     ) -> Result<oneshot::Receiver<usize>> {
-        let batch_dmls = self.batch_dmls.lock();
-        batch_dmls.get(table_id).unwrap().write_chunk(chunk)
+        let table_readers = self.table_readers.read();
+        let writer = table_readers
+            .get(table_id)
+            .ok_or_else(|| {
+                InternalError(format!(
+                    "no reader for dml in table with id {:?}",
+                    table_id.table_id
+                ))
+            })?
+            .upgrade()
+            .ok_or_else(|| {
+                InternalError(format!(
+                    "no reader for dml in table with id {:?}",
+                    table_id.table_id
+                ))
+            })?;
+        writer.write_chunk(chunk)
+    }
+
+    pub fn clear(&self) {
+        self.table_readers.write().clear()
     }
 }

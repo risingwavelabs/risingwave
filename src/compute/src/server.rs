@@ -35,7 +35,6 @@ use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::dml_manager::DmlManager;
 use risingwave_source::monitor::SourceMetrics;
-use risingwave_source::TableSourceManager;
 use risingwave_storage::hummock::compactor::{
     CompactionExecutor, Compactor, CompactorContext, Context,
 };
@@ -239,10 +238,6 @@ pub async fn compute_node_serve(
     // of lru manager.
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
 
-    let source_mgr = Arc::new(TableSourceManager::new(
-        source_metrics,
-        stream_config.developer.stream_connector_message_buffer_size,
-    ));
     let grpc_stack_trace_mgr = async_stack_trace_config
         .map(|config| GrpcStackTraceManagerRef::new(StackTraceManager::new(config).into()));
     let dml_mgr = Arc::new(DmlManager::default());
@@ -250,7 +245,6 @@ pub async fn compute_node_serve(
     // Initialize batch environment.
     let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
     let batch_env = BatchEnvironment::new(
-        source_mgr.clone(),
         batch_mgr.clone(),
         client_addr.clone(),
         batch_config,
@@ -259,6 +253,7 @@ pub async fn compute_node_serve(
         batch_task_metrics.clone(),
         client_pool,
         dml_mgr.clone(),
+        source_metrics.clone(),
     );
 
     let connector_params = risingwave_connector::ConnectorParams {
@@ -266,13 +261,13 @@ pub async fn compute_node_serve(
     };
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
-        source_mgr,
         client_addr.clone(),
         connector_params,
         stream_config,
         worker_id,
         state_store,
         dml_mgr,
+        source_metrics,
     );
 
     // Generally, one may use `risedev ctl trace` to manually get the trace reports. However, if
