@@ -469,9 +469,7 @@ mod tests {
 
         let del = vec![(true, true), (true, false), (false, true)];
 
-        for i in 1..number_of_nodes {
-            let delete_leader = del[i as usize].0;
-            let delete_lease = del[i as usize].1;
+        for (delete_leader, delete_lease) in del {
             // delete leader/lease info in meta store
             let mut txn = Transaction::default();
             if delete_leader {
