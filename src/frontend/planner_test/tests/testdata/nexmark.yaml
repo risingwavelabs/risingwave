@@ -162,8 +162,8 @@
 
      Table 0 { columns: [auction.id, auction.seller], primary key: [$1 ASC, $0 ASC], value indices: [0, 1], distribution key: [1] }
      Table 1 { columns: [auction.seller, auction.id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 2 { columns: [person.id, person.name, person.city, person.state], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
-     Table 3 { columns: [person.id, person.id_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 2 { columns: [person.id, person.name, person.city, person.state], primary key: [$0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 3 { columns: [person.id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 4294967294 { columns: [name, city, state, id, auction.seller, person.id], primary key: [$3 ASC, $5 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [4] }
 - id: nexmark_q4
   before:
@@ -239,8 +239,8 @@
      Table 0 { columns: [auction.category, count, sum(max(bid.price)), count(max(bid.price))], primary key: [$0 ASC], value indices: [1, 2, 3], distribution key: [0] }
      Table 1 { columns: [auction.id, auction.category, bid.price, bid._row_id, bid.auction], primary key: [$0 ASC, $1 ASC, $2 DESC, $3 ASC, $4 ASC], value indices: [0, 2, 3, 4], distribution key: [0] }
      Table 2 { columns: [auction.id, auction.category, count, max(bid.price)], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0] }
-     Table 3 { columns: [auction.id, auction.date_time, auction.expires, auction.category], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
-     Table 4 { columns: [auction.id, auction.id_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 3 { columns: [auction.id, auction.date_time, auction.expires, auction.category], primary key: [$0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 4 { columns: [auction.id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 5 { columns: [bid.auction, bid.price, bid.date_time, bid._row_id], primary key: [$0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
      Table 6 { columns: [bid.auction, bid._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 4294967294 { columns: [category, avg], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
@@ -351,10 +351,10 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [bid.auction, count, window_start], primary key: [$2 ASC, $2 ASC, $0 ASC], value indices: [0, 1, 2], distribution key: [2] }
-     Table 1 { columns: [window_start, window_start_0, bid.auction, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0] }
-     Table 2 { columns: [max(count), window_start], primary key: [$1 ASC, $1 ASC], value indices: [0, 1], distribution key: [1] }
-     Table 3 { columns: [window_start, window_start_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 0 { columns: [bid.auction, count, window_start], primary key: [$2 ASC, $0 ASC], value indices: [0, 1, 2], distribution key: [2] }
+     Table 1 { columns: [window_start, bid.auction, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 2 { columns: [max(count), window_start], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
+     Table 3 { columns: [window_start, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 4 { columns: [window_start, bid.auction, count, count_0], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [1, 0] }
      Table 5 { columns: [window_start, count, bid.auction], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
      Table 6 { columns: [window_start, count, max(count)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
@@ -551,10 +551,10 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)], primary key: [$0 ASC, $2 ASC, $3 ASC, $0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 2, 3] }
-     Table 1 { columns: [person.id, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), person.id_0, person.name, TumbleStart(person.date_time, '00:00:10':Interval)_0, (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [7], distribution key: [0, 1, 2] }
-     Table 2 { columns: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)], primary key: [$0 ASC, $1 ASC, $2 ASC, $0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0, 1, 2] }
-     Table 3 { columns: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), auction.seller_0, TumbleStart(auction.date_time, '00:00:10':Interval)_0, (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)_0, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC], value indices: [6], distribution key: [0, 1, 2] }
+     Table 0 { columns: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval)], primary key: [$0 ASC, $2 ASC, $3 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 2, 3] }
+     Table 1 { columns: [person.id, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), person.name, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0, 1, 2] }
+     Table 2 { columns: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0, 1, 2] }
+     Table 3 { columns: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2] }
      Table 4 { columns: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval), (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
      Table 5 { columns: [auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval), count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2] }
      Table 4294967294 { columns: [id, name, starttime, (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval), auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval), (TumbleStart(auction.date_time, '00:00:10':Interval) + '00:00:10':Interval)], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [0, 2, 3] }
@@ -631,8 +631,8 @@
         BatchPlanNode
 
      Table 0 { columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], primary key: [$0 ASC, $11 DESC, $14 ASC, $16 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], distribution key: [0] }
-     Table 1 { columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [0] }
-     Table 2 { columns: [auction.id, auction.id_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 1 { columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], primary key: [$0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [0] }
+     Table 2 { columns: [auction.id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 3 { columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], primary key: [$0 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [0] }
      Table 4 { columns: [bid.auction, bid._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 4294967294 { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, bid._row_id], primary key: [$0 ASC, $13 ASC, $9 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [0] }
@@ -1040,8 +1040,8 @@
 
      Table 0 { columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid._row_id], primary key: [$0 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [0] }
      Table 1 { columns: [bid.auction, bid._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 2 { columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], primary key: [$0 ASC, $0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [0] }
-     Table 3 { columns: [auction.id, auction.id_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 2 { columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], primary key: [$0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [0] }
+     Table 3 { columns: [auction.id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 4294967294 { columns: [auction, bidder, price, channel, url, date_timeb, item_name, description, initial_bid, reserve, date_timea, expires, seller, category, bid._row_id, auction.id], primary key: [$14 ASC, $15 ASC, $0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], distribution key: [0] }
 - id: nexmark_q21
   before:
@@ -1148,10 +1148,10 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [auction.id, auction.item_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 1 { columns: [auction.id, auction.id_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 2 { columns: [bid.auction, max(bid.price)], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 3 { columns: [bid.auction, bid.auction_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 0 { columns: [auction.id, auction.item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 1 { columns: [auction.id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
+     Table 2 { columns: [bid.auction, max(bid.price)], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 3 { columns: [bid.auction, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 4 { columns: [bid.auction, count, max(bid.price)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [auction_id, auction_item_name, current_highest_bid, bid.auction], primary key: [$0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
 - id: nexmark_q102
@@ -1252,8 +1252,8 @@
      Table 0 { columns: [auction.id, auction.item_name, count(bid.auction), count(bid.auction)_0], primary key: [$3 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
      Table 1 { columns: [(sum0(count) / count(bid.auction))], primary key: [], value indices: [0], distribution key: [] }
      Table 2 { columns: [auction.id, auction.item_name, count, count(bid.auction), count(bid.auction)_0], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4], distribution key: [0] }
-     Table 3 { columns: [auction.id, auction.item_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 4 { columns: [auction.id, auction.id_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 3 { columns: [auction.id, auction.item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 4 { columns: [auction.id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 5 { columns: [bid.auction, bid._row_id], primary key: [$0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0] }
      Table 6 { columns: [bid.auction, bid._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 7 { columns: [count, sum0(count), count(bid.auction)], primary key: [], value indices: [0, 1, 2], distribution key: [] }
@@ -1320,10 +1320,10 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [auction.id, auction.item_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 1 { columns: [auction.id, auction.id_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 2 { columns: [bid.auction], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
-     Table 3 { columns: [bid.auction, bid.auction_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 0 { columns: [auction.id, auction.item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 1 { columns: [auction.id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
+     Table 2 { columns: [bid.auction], primary key: [$0 ASC], value indices: [0], distribution key: [0] }
+     Table 3 { columns: [bid.auction, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 4 { columns: [bid.auction, count, count_0], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
 - id: nexmark_q104
@@ -1387,10 +1387,10 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [auction.id, auction.item_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 1 { columns: [auction.id, auction.id_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 2 { columns: [bid.auction], primary key: [$0 ASC, $0 ASC], value indices: [0], distribution key: [0] }
-     Table 3 { columns: [bid.auction, bid.auction_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 0 { columns: [auction.id, auction.item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 1 { columns: [auction.id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
+     Table 2 { columns: [bid.auction], primary key: [$0 ASC], value indices: [0], distribution key: [0] }
+     Table 3 { columns: [bid.auction, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 4 { columns: [bid.auction, count, count_0], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
 - id: nexmark_q105
@@ -1467,8 +1467,8 @@
      Table 0 { columns: [auction.id, auction.item_name, count(bid.auction), Vnode(auction.id)], primary key: [$2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [] }
      Table 1 { columns: [auction.id, auction.item_name, count(bid.auction), Vnode(auction.id)], primary key: [$3 ASC, $2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [0], vnode column idx: 3 }
      Table 2 { columns: [auction.id, auction.item_name, count, count(bid.auction)], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0] }
-     Table 3 { columns: [auction.id, auction.item_name], primary key: [$0 ASC, $0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 4 { columns: [auction.id, auction.id_0, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 3 { columns: [auction.id, auction.item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 4 { columns: [auction.id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 5 { columns: [bid.auction, bid._row_id], primary key: [$0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0] }
      Table 6 { columns: [bid.auction, bid._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 4294967294 { columns: [auction_id, auction_item_name, bid_count], primary key: [$2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [] }

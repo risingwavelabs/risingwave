@@ -67,15 +67,29 @@ impl TableCatalogBuilder {
     }
 
     /// Check whether need to add a ordered column. Different from value, order desc equal pk in
-    /// semantics and they are encoded as storage key.
-    pub fn add_order_column(&mut self, index: usize, order_type: OrderType) {
-        self.pk.push(FieldOrder {
-            index,
-            direct: match order_type {
-                OrderType::Ascending => Direction::Asc,
-                OrderType::Descending => Direction::Desc,
-            },
-        });
+    /// semantics and they are encoded as storage key, dedup is true means ignoring duplicated pk.
+    pub fn add_order_column(&mut self, index: usize, order_type: OrderType, dedup: bool) {
+        match dedup {
+            true => {
+                let pk_indices = self.pk.iter().map(|pk| pk.index).collect_vec();
+                if !pk_indices.contains(&index) {
+                    self.pk.push(FieldOrder {
+                        index,
+                        direct: match order_type {
+                            OrderType::Ascending => Direction::Asc,
+                            OrderType::Descending => Direction::Desc,
+                        },
+                    });
+                }
+            }
+            false => self.pk.push(FieldOrder {
+                index,
+                direct: match order_type {
+                    OrderType::Ascending => Direction::Asc,
+                    OrderType::Descending => Direction::Desc,
+                },
+            }),
+        }
     }
 
     pub fn set_read_prefix_len_hint(&mut self, read_prefix_len_hint: usize) {

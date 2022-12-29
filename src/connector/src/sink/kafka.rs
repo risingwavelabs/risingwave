@@ -350,7 +350,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             dt @ DataType::Date
             | dt @ DataType::Time
             | dt @ DataType::Timestamp
-            | dt @ DataType::Timestampz
+            | dt @ DataType::Timestamptz
             | dt @ DataType::Interval
             | dt @ DataType::Bytea,
             scalar,

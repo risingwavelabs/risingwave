@@ -101,7 +101,7 @@ fn build_type_derive_map() -> FuncSigMap {
         T::Varchar,
         T::Date,
         T::Timestamp,
-        T::Timestampz,
+        T::Timestamptz,
         T::Time,
         T::Interval,
     ];
@@ -141,7 +141,11 @@ fn build_type_derive_map() -> FuncSigMap {
     ];
     build_binary_cmp_funcs(&mut map, cmp_exprs, &num_types);
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct]);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Date, T::Timestamp, T::Timestampz]);
+    build_binary_cmp_funcs(
+        &mut map,
+        cmp_exprs,
+        &[T::Date, T::Timestamp, T::Timestamptz],
+    );
     build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time, T::Interval]);
     for e in cmp_exprs {
         for t in [T::Boolean, T::Varchar] {
@@ -200,7 +204,7 @@ fn build_type_derive_map() -> FuncSigMap {
     for (base, delta) in [
         (T::Date, T::Int32),
         (T::Timestamp, T::Interval),
-        (T::Timestampz, T::Interval),
+        (T::Timestamptz, T::Interval),
         (T::Time, T::Interval),
     ] {
         build_commutative_funcs(&mut map, E::Add, base, delta, base);
@@ -221,7 +225,7 @@ fn build_type_derive_map() -> FuncSigMap {
         map.insert(E::Divide, vec![T::Interval, t], T::Interval);
     }
 
-    for t in [T::Timestampz, T::Timestamp, T::Time, T::Date] {
+    for t in [T::Timestamptz, T::Timestamp, T::Time, T::Date] {
         map.insert(E::Extract, vec![T::Varchar, t], T::Decimal);
     }
     for t in [T::Timestamp, T::Date] {
@@ -229,18 +233,26 @@ fn build_type_derive_map() -> FuncSigMap {
     }
     map.insert(
         E::TumbleStart,
-        vec![T::Timestampz, T::Interval],
-        T::Timestampz,
+        vec![T::Timestamptz, T::Interval],
+        T::Timestamptz,
     );
-    map.insert(E::ToTimestamp, vec![T::Float64], T::Timestampz);
+    map.insert(E::ToTimestamp, vec![T::Float64], T::Timestamptz);
     map.insert(E::ToTimestamp1, vec![T::Varchar, T::Varchar], T::Timestamp);
-    map.insert(E::AtTimeZone, vec![T::Timestamp, T::Varchar], T::Timestampz);
-    map.insert(E::AtTimeZone, vec![T::Timestampz, T::Varchar], T::Timestamp);
+    map.insert(
+        E::AtTimeZone,
+        vec![T::Timestamp, T::Varchar],
+        T::Timestamptz,
+    );
+    map.insert(
+        E::AtTimeZone,
+        vec![T::Timestamptz, T::Varchar],
+        T::Timestamp,
+    );
     map.insert(E::DateTrunc, vec![T::Varchar, T::Timestamp], T::Timestamp);
     map.insert(
         E::DateTrunc,
-        vec![T::Varchar, T::Timestampz, T::Varchar],
-        T::Timestampz,
+        vec![T::Varchar, T::Timestamptz, T::Varchar],
+        T::Timestamptz,
     );
     map.insert(E::DateTrunc, vec![T::Varchar, T::Interval], T::Interval);
 

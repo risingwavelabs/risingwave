@@ -30,7 +30,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     agg_call_state, AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode,
     FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph,
-    StreamNode,
+    StreamNode, StreamSource,
 };
 
 use crate::manager::MetaSrvEnv;
@@ -182,10 +182,12 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         .collect_vec();
     let source_node = StreamNode {
         node_body: Some(NodeBody::Source(SourceNode {
-            source_id: 1,
-            state_table: Some(make_source_internal_table(1)),
-            columns,
-            ..Default::default()
+            source_inner: Some(StreamSource {
+                source_id: 1,
+                state_table: Some(make_source_internal_table(1)),
+                columns,
+                ..Default::default()
+            }),
         })),
         stream_key: vec![2],
         ..Default::default()
