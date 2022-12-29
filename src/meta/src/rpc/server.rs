@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::process;
 use std::sync::Arc;
 use std::time::Duration;
 
