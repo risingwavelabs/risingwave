@@ -510,6 +510,7 @@ impl<S: StateStore> Debug for SourceExecutorV2<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU64;
     use std::time::Duration;
 
     use maplit::{convert_args, hashmap};
@@ -690,8 +691,7 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids,
             2,
-            None,
-            0,
+            Arc::new(AtomicU64::new(0)),
             false,
         )
         .await

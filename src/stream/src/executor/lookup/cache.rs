@@ -17,8 +17,8 @@ use std::collections::BTreeSet;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 
-use crate::cache::{new_unbounded, EvictableHashMap, ExecutorCache};
-use crate::task::AtomicU64RefOpt;
+use crate::cache::{new_unbounded, ExecutorCache};
+use crate::task::AtomicU64Ref;
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
@@ -64,12 +64,8 @@ impl LookupCache {
         self.data.update_epoch(epoch);
     }
 
-    pub fn new(watermark_epoch: AtomicU64RefOpt, cache_size: usize) -> Self {
-        let cache = if let Some(watermark_epoch) = watermark_epoch {
-            ExecutorCache::Managed(new_unbounded(watermark_epoch))
-        } else {
-            ExecutorCache::Local(EvictableHashMap::new(cache_size))
-        };
+    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
+        let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
         Self { data: cache }
     }
 }
