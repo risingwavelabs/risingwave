@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::process;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -150,6 +151,21 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 leader_addr.host,
                 leader_addr.port
             );
+        }
+    });
+
+    // separate fencing logic from the fencing logic introduced in elections.rs
+    // Will be triggered if leader looses leadership during election re-run
+    let fencing_leader_rx = leader_rx.clone();
+    tokio::spawn(async move {
+        let mut was_leader = false;
+        loop {
+            let (_, is_leader) = fencing_leader_rx.borrow().clone();
+            if was_leader {
+                tracing::error!("This node lost its leadership. Exiting node");
+                process::exit(0);
+            }
+            was_leader = is_leader;
         }
     });
 
