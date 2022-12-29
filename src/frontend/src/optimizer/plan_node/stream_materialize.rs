@@ -91,7 +91,7 @@ impl StreamMaterialize {
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let base = PlanBase::derive_stream_plan_base(&input);
         let schema = &base.schema;
-        let pk_indices = &base.logical_pk;
+        let pk_indices = &base.logical_pk.iter().copied().unique().collect_vec();
 
         let mut col_names = HashSet::new();
         for name in &out_names {

@@ -12,11 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use paste::paste;
 
 use super::*;
+use crate::optimizer::share_parent_counter::ShareParentCounter;
+use crate::optimizer::PlanVisitor;
 use crate::utils::Condition;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
+
 /// The trait for predicate pushdown, only logical plan node will use it, though all plan node impl
 /// it.
 pub trait PredicatePushdown {
@@ -35,14 +40,18 @@ pub trait PredicatePushdown {
     /// the predicates with the `Condition` of it.
     ///
     /// 3. those can be pushed down. We pass them to current `PlanNode`'s input.
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef;
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef;
 }
 
 macro_rules! ban_predicate_pushdown {
     ($( { $convention:ident, $name:ident }),*) => {
         paste!{
             $(impl PredicatePushdown for [<$convention $name>] {
-                fn predicate_pushdown(&self, _predicate: Condition) -> PlanRef {
+                fn predicate_pushdown(&self, _predicate: Condition, _ctx: &mut PredicatePushdownContext) -> PlanRef {
                     unreachable!("predicate pushdown is only allowed on logical plan")
                 }
             })*
@@ -57,8 +66,42 @@ pub fn gen_filter_and_pushdown<T: PlanTreeNodeUnary + PlanNode>(
     node: &T,
     filter_predicate: Condition,
     pushed_predicate: Condition,
+    ctx: &mut PredicatePushdownContext,
 ) -> PlanRef {
-    let new_input = node.input().predicate_pushdown(pushed_predicate);
+    let new_input = node.input().predicate_pushdown(pushed_predicate, ctx);
     let new_node = node.clone_with_input(new_input);
     LogicalFilter::create(Rc::new(new_node), filter_predicate)
+}
+
+#[derive(Debug, Clone)]
+pub struct PredicatePushdownContext {
+    share_predicate_map: HashMap<PlanNodeId, Vec<Condition>>,
+    share_parent_counter: ShareParentCounter,
+}
+
+impl PredicatePushdownContext {
+    pub fn new(root: PlanRef) -> Self {
+        let mut share_parent_counter = ShareParentCounter::default();
+        share_parent_counter.visit(root.clone());
+        Self {
+            share_predicate_map: Default::default(),
+            share_parent_counter,
+        }
+    }
+
+    pub fn get_parent_num(&self, share: &LogicalShare) -> usize {
+        self.share_parent_counter.get_parent_num(share)
+    }
+
+    pub fn add_predicate(&mut self, plan_node_id: PlanNodeId, predicate: Condition) -> usize {
+        self.share_predicate_map
+            .entry(plan_node_id)
+            .and_modify(|e| e.push(predicate.clone()))
+            .or_insert_with(|| vec![predicate])
+            .len()
+    }
+
+    pub fn take_predicate(&mut self, plan_node_id: PlanNodeId) -> Option<Vec<Condition>> {
+        self.share_predicate_map.remove(&plan_node_id)
+    }
 }

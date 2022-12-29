@@ -200,7 +200,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             T::Varchar,
             T::Date,
             T::Timestamp,
-            T::Timestampz,
+            T::Timestamptz,
             T::Time,
             T::Interval,
         ]

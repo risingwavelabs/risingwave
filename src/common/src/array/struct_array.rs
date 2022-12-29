@@ -22,10 +22,7 @@ use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
 
-use super::iterator::ArrayRawIter;
-use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
-};
+use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult};
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::to_text::ToText;
@@ -155,41 +152,15 @@ impl StructArrayBuilder {
 
 impl Array for StructArray {
     type Builder = StructArrayBuilder;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = StructValue;
-    type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = StructRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> StructRef<'_> {
         StructRef::Indexed { arr: self, idx }
     }
 
-    fn value_at(&self, idx: usize) -> Option<StructRef<'_>> {
-        if !self.is_null(idx) {
-            Some(StructRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
-    }
-
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<StructRef<'_>> {
-        if !self.is_null_unchecked(idx) {
-            Some(StructRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
-    }
-
     fn len(&self) -> usize {
         self.len
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        ArrayIterator::new(self)
-    }
-
-    fn raw_iter(&self) -> Self::RawIter<'_> {
-        ArrayRawIter::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -443,18 +414,25 @@ impl Debug for StructRef<'_> {
 }
 
 impl ToText for StructRef<'_> {
-    fn to_text(&self) -> String {
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         iter_fields_ref!(self, it, {
-            format!(
-                "({})",
-                it.map(|x| x.to_text()).collect::<Vec<String>>().join(",")
-            )
+            write!(f, "(")?;
+            let mut is_first = true;
+            for x in it {
+                if is_first {
+                    is_first = false;
+                } else {
+                    write!(f, ",")?;
+                }
+                ToText::write(&x, f)?;
+            }
+            write!(f, ")")
         })
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            DataType::Struct(_) => self.to_text(),
+            DataType::Struct(_) => self.write(f),
             _ => unreachable!(),
         }
     }

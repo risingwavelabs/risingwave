@@ -23,8 +23,11 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalInsert` iterates on input relation and insert the data into specified table.
 ///
@@ -34,10 +37,10 @@ use crate::utils::Condition;
 pub struct LogicalInsert {
     pub base: PlanBase,
     table_source_name: String, // explain-only
-    source_id: TableId,        // TODO: use SourceId
-    associated_mview_id: TableId,
+    table_id: TableId,
     input: PlanRef,
-    column_idxs: Vec<usize>, // columns in which to insert
+    column_indices: Vec<usize>, // columns in which to insert
+    row_id_index: Option<usize>,
 }
 
 impl LogicalInsert {
@@ -45,9 +48,9 @@ impl LogicalInsert {
     pub fn new(
         input: PlanRef,
         table_source_name: String,
-        source_id: TableId,
-        associated_mview_id: TableId,
-        column_idxs: Vec<usize>,
+        table_id: TableId,
+        column_indices: Vec<usize>,
+        row_id_index: Option<usize>,
     ) -> Self {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
@@ -56,10 +59,10 @@ impl LogicalInsert {
         Self {
             base,
             table_source_name,
-            source_id,
-            associated_mview_id,
+            table_id,
             input,
-            column_idxs,
+            column_indices,
+            row_id_index,
         }
     }
 
@@ -67,16 +70,16 @@ impl LogicalInsert {
     pub fn create(
         input: PlanRef,
         table_source_name: String,
-        source_id: TableId,
         table_id: TableId,
-        column_idxs: Vec<usize>,
+        column_indices: Vec<usize>,
+        row_id_index: Option<usize>,
     ) -> Result<Self> {
         Ok(Self::new(
             input,
             table_source_name,
-            source_id,
             table_id,
-            column_idxs,
+            column_indices,
+            row_id_index,
         ))
     }
 
@@ -84,21 +87,20 @@ impl LogicalInsert {
         write!(f, "{} {{ table: {} }}", name, self.table_source_name)
     }
 
-    /// Get the logical insert's source id.
-    #[must_use]
-    pub fn source_id(&self) -> TableId {
-        self.source_id
-    }
-
     // Get the column indexes in which to insert to
     #[must_use]
-    pub fn column_idxs(&self) -> Vec<usize> {
-        self.column_idxs.clone()
+    pub fn column_indices(&self) -> Vec<usize> {
+        self.column_indices.clone()
     }
 
     #[must_use]
-    pub fn associated_mview_id(&self) -> TableId {
-        self.associated_mview_id
+    pub fn table_id(&self) -> TableId {
+        self.table_id
+    }
+
+    #[must_use]
+    pub fn row_id_index(&self) -> Option<usize> {
+        self.row_id_index
     }
 }
 
@@ -111,9 +113,9 @@ impl PlanTreeNodeUnary for LogicalInsert {
         Self::new(
             input,
             self.table_source_name.clone(),
-            self.source_id,
-            self.associated_mview_id,
-            self.column_idxs.clone(),
+            self.table_id,
+            self.column_indices.clone(),
+            self.row_id_index,
         )
     }
 }
@@ -127,16 +129,20 @@ impl fmt::Display for LogicalInsert {
 }
 
 impl ColPrunable for LogicalInsert {
-    fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
-        self.clone_with_input(self.input.prune_col(&required_cols))
+        self.clone_with_input(self.input.prune_col(&required_cols, ctx))
             .into()
     }
 }
 
 impl PredicatePushdown for LogicalInsert {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
 
@@ -149,11 +155,14 @@ impl ToBatch for LogicalInsert {
 }
 
 impl ToStream for LogicalInsert {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         unreachable!("insert should always be converted to batch plan");
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         unreachable!("insert should always be converted to batch plan");
     }
 }

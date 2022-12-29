@@ -43,9 +43,14 @@ message ExprNode {
     // date functions
     EXTRACT = 101;
     TUMBLE_START = 103;
+    // From f64 to timestamp.
+    // e.g. `select to_timestamp(1672044740.0)`
     TO_TIMESTAMP = 104;
     AT_TIME_ZONE = 105;
     DATE_TRUNC = 106;
+    // Parse text to timestamp by format string.
+    // e.g. `select to_timestamp('2022 08 21', 'YYYY MM DD')`
+    TO_TIMESTAMP1 = 107;
     // other functions
     CAST = 201;
     SUBSTR = 202;

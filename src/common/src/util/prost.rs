@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::catalog::source_info::SourceInfo;
-use risingwave_pb::catalog::SourceInfo as StructSourceInfo;
-use risingwave_pb::stream_plan::SourceNode;
 use risingwave_pb::{batch_plan, data};
 
 pub trait TypeUrl {
@@ -31,14 +28,4 @@ impl TypeUrl for data::Column {
     fn type_url() -> &'static str {
         "type.googleapis.com/data.Column"
     }
-}
-
-#[inline(always)]
-pub fn is_stream_source(source_node: &SourceNode) -> bool {
-    matches!(
-        source_node.info.as_ref(),
-        Some(StructSourceInfo {
-            source_info: Some(SourceInfo::StreamSource(_))
-        })
-    )
 }

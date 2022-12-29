@@ -24,7 +24,10 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::LogicalFilter;
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, LogicalFilter, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -287,13 +290,17 @@ impl PlanTreeNodeBinary for LogicalApply {
 impl_plan_tree_node_for_binary! { LogicalApply }
 
 impl ColPrunable for LogicalApply {
-    fn prune_col(&self, _: &[usize]) -> PlanRef {
+    fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         panic!("LogicalApply should be unnested")
     }
 }
 
 impl PredicatePushdown for LogicalApply {
-    fn predicate_pushdown(&self, mut predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        mut predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         let left_col_num = self.left().schema().len();
         let right_col_num = self.right().schema().len();
         let join_type = self.join_type();
@@ -324,8 +331,8 @@ impl PredicatePushdown for LogicalApply {
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);
 
-        let new_left = self.left().predicate_pushdown(left_predicate);
-        let new_right = self.right().predicate_pushdown(right_predicate);
+        let new_left = self.left().predicate_pushdown(left_predicate, ctx);
+        let new_right = self.right().predicate_pushdown(right_predicate, ctx);
 
         let new_apply = LogicalApply::create(
             new_left,
@@ -349,13 +356,16 @@ impl ToBatch for LogicalApply {
 }
 
 impl ToStream for LogicalApply {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         Err(RwError::from(ErrorCode::InternalError(
             "LogicalApply should be unnested".to_string(),
         )))
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         Err(RwError::from(ErrorCode::InternalError(
             "LogicalApply should be unnested".to_string(),
         )))
