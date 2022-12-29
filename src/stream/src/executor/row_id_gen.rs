@@ -23,11 +23,15 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
 use risingwave_source::row_id::RowIdGenerator;
 
-use super::{expect_first_barrier, BoxedExecutor, Executor, PkIndices, PkIndicesRef};
+use super::{
+    expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, PkIndices, PkIndicesRef,
+};
 use crate::executor::{Message, StreamExecutorError};
 
 /// [`RowIdGenExecutor`] generates row id for data, where the user has not specified a pk.
 pub struct RowIdGenExecutor {
+    ctx: ActorContextRef,
+
     upstream: Option<BoxedExecutor>,
 
     schema: Schema,
@@ -43,6 +47,7 @@ pub struct RowIdGenExecutor {
 
 impl RowIdGenExecutor {
     pub fn new(
+        ctx: ActorContextRef,
         upstream: BoxedExecutor,
         schema: Schema,
         pk_indices: PkIndices,
@@ -50,20 +55,23 @@ impl RowIdGenExecutor {
         row_id_index: usize,
         vnodes: Bitmap,
     ) -> Self {
-        // TODO: We should generate row id for each vnode in the future instead of using the first
-        // vnode.
-        let vnode = vnodes.next_set_bit(0).unwrap();
         Self {
+            ctx,
             upstream: Some(upstream),
             schema,
             pk_indices,
             identity: format!("RowIdGenExecutor {:X}", executor_id),
             row_id_index,
-            row_id_generator: RowIdGenerator::with_epoch(
-                vnode as u32,
-                *UNIX_SINGULARITY_DATE_EPOCH,
-            ),
+            row_id_generator: Self::new_generator(&vnodes),
         }
+    }
+
+    /// Create a new row id generator based on the assigned vnodes.
+    fn new_generator(vnodes: &Bitmap) -> RowIdGenerator {
+        // TODO: We may generate row id for each vnode in the future instead of using the first
+        // vnode.
+        let vnode_id = vnodes.next_set_bit(0).unwrap() as u32;
+        RowIdGenerator::with_epoch(vnode_id, *UNIX_SINGULARITY_DATE_EPOCH)
     }
 
     /// Generate a row ID column according to ops.
@@ -93,16 +101,26 @@ impl RowIdGenExecutor {
         #[for_await]
         for msg in upstream {
             let msg = msg?;
-            if let Message::Chunk(chunk) = msg {
-                // For chunk message, we fill the row id column and then yield it.
-                let (ops, mut columns, bitmap) = chunk.into_inner();
-                columns[self.row_id_index] = self
-                    .gen_row_id_column_by_op(&columns[self.row_id_index], &ops)
-                    .await;
-                yield Message::Chunk(StreamChunk::new(ops, columns, bitmap));
-            } else {
-                // For barrier message or watermark message, we just yield it.
-                yield msg;
+
+            match msg {
+                Message::Chunk(chunk) => {
+                    // For chunk message, we fill the row id column and then yield it.
+                    let (ops, mut columns, bitmap) = chunk.into_inner();
+                    columns[self.row_id_index] = self
+                        .gen_row_id_column_by_op(&columns[self.row_id_index], &ops)
+                        .await;
+                    yield Message::Chunk(StreamChunk::new(ops, columns, bitmap));
+                }
+                Message::Barrier(barrier) => {
+                    // Update row id generator if vnode mapping is changed.
+                    // Note that: since update barrier will only occurs between pause and resume
+                    // barrier, duplicated row id won't be generated.
+                    if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
+                        self.row_id_generator = Self::new_generator(&vnodes);
+                    }
+                    yield Message::Barrier(barrier);
+                }
+                Message::Watermark(watermark) => yield Message::Watermark(watermark),
             }
         }
     }
@@ -136,7 +154,7 @@ mod tests {
 
     use super::*;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::Executor;
+    use crate::executor::{ActorContext, Executor};
 
     #[tokio::test]
     async fn test_row_id_gen_executor() {
@@ -149,6 +167,7 @@ mod tests {
         let row_id_generator = Bitmap::ones(VirtualNode::COUNT);
         let (mut tx, upstream) = MockSource::channel(schema.clone(), pk_indices.clone());
         let row_id_gen_executor = Box::new(RowIdGenExecutor::new(
+            ActorContext::create(233),
             Box::new(upstream),
             schema,
             pk_indices,
