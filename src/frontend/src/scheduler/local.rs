@@ -72,7 +72,6 @@ pub struct LocalQueryExecution {
     front_env: FrontendEnv,
     // The snapshot will be released when LocalQueryExecution is dropped.
     snapshot: PinnedHummockSnapshot,
-    checkpoint: bool,
     auth_context: Arc<AuthContext>,
 }
 
@@ -82,7 +81,6 @@ impl LocalQueryExecution {
         front_env: FrontendEnv,
         sql: S,
         snapshot: PinnedHummockSnapshot,
-        checkpoint: bool,
         auth_context: Arc<AuthContext>,
     ) -> Self {
         Self {
@@ -90,7 +88,6 @@ impl LocalQueryExecution {
             query,
             front_env,
             snapshot,
-            checkpoint,
             auth_context,
         }
     }
@@ -117,7 +114,7 @@ impl LocalQueryExecution {
             &plan_node,
             &task_id,
             context,
-            self.snapshot.get_batch_query_epoch(self.checkpoint),
+            self.snapshot.get_batch_query_epoch(),
         );
         let executor = executor.build().await?;
 
@@ -247,7 +244,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: Some(self.snapshot.get_batch_query_epoch(self.checkpoint)),
+                            epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
@@ -279,7 +276,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: Some(self.snapshot.get_batch_query_epoch(self.checkpoint)),
+                            epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         // NOTE: select a random work node here.
                         let worker_node = self.front_env.worker_node_manager().next_random()?;
@@ -311,7 +308,7 @@ impl LocalQueryExecution {
 
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
-                        epoch: Some(self.snapshot.get_batch_query_epoch(self.checkpoint)),
+                        epoch: Some(self.snapshot.get_batch_query_epoch()),
                     };
 
                     let workers = if second_stage.parallelism == 1 {

@@ -98,6 +98,7 @@ pub async fn handle_query(
     let stmt_type = to_statement_type(&stmt)?;
     let session = handler_args.session.clone();
     let query_start_time = Instant::now();
+    let only_checkpoint_visible = handler_args.session.config().only_checkpoint_visible();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, query_mode, output_schema) = {
@@ -138,7 +139,7 @@ pub async fn handle_query(
             let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
             let query_id = query.query_id().clone();
             let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
-            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot)
+            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, only_checkpoint_visible)
         };
         match query_mode {
             QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
@@ -254,7 +255,6 @@ pub async fn local_execute(
         front_env.clone(),
         "",
         pinned_snapshot,
-        session.config().only_checkpoint_visible(),
         session.auth_context(),
     );
 

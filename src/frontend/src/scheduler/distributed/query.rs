@@ -207,8 +207,7 @@ impl QueryExecution {
                 .collect::<Vec<Arc<StageExecution>>>();
 
             let stage_exec = Arc::new(StageExecution::new(
-                pinned_snapshot
-                    .get_batch_query_epoch(context.session.config().only_checkpoint_visible()),
+                pinned_snapshot.get_batch_query_epoch(),
                 self.query.stage_graph.stages[&stage_id].clone(),
                 worker_node_manager.clone(),
                 self.shutdown_tx.clone(),
@@ -400,7 +399,9 @@ pub(crate) mod tests {
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
-    use crate::scheduler::{ExecutionContext, HummockSnapshotManager, QueryExecutionInfo};
+    use crate::scheduler::{
+        ExecutionContext, HummockSnapshotManager, PinnedHummockSnapshot, QueryExecutionInfo,
+    };
     use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
@@ -426,7 +427,7 @@ pub(crate) mod tests {
             .start(
                 ExecutionContext::new(SessionImpl::mock().into()).into(),
                 worker_node_manager,
-                pinned_snapshot.into(),
+                PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, true),
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,

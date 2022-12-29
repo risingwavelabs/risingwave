@@ -34,7 +34,12 @@ const UNPIN_INTERVAL_SECS: u64 = 10;
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
 pub enum PinnedHummockSnapshot {
-    FrontendPinned(HummockSnapshotGuard),
+    FrontendPinned(
+        HummockSnapshotGuard,
+        // `only_checkpoint_visible`.
+        // It's embedded here because we always use it together with snapshot.
+        bool,
+    ),
     /// Other arbitrary epoch, e.g. user specified.
     /// Availability and consistency of underlying data should be guaranteed accordingly.
     /// Currently it's only used for querying meta snapshot backup.
@@ -42,19 +47,15 @@ pub enum PinnedHummockSnapshot {
 }
 
 impl PinnedHummockSnapshot {
-    pub fn get_batch_query_epoch(&self, checkpoint: bool) -> BatchQueryEpoch {
+    pub fn get_batch_query_epoch(&self) -> BatchQueryEpoch {
         match self {
-            PinnedHummockSnapshot::FrontendPinned(s) => s.get_batch_query_epoch(checkpoint),
+            PinnedHummockSnapshot::FrontendPinned(s, checkpoint) => {
+                s.get_batch_query_epoch(*checkpoint)
+            }
             PinnedHummockSnapshot::Other(e) => BatchQueryEpoch {
                 epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),
             },
         }
-    }
-}
-
-impl From<HummockSnapshotGuard> for PinnedHummockSnapshot {
-    fn from(s: HummockSnapshotGuard) -> Self {
-        PinnedHummockSnapshot::FrontendPinned(s)
     }
 }
 
