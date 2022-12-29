@@ -26,7 +26,7 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::{AggCall, AggStateStorage};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, HashAggExecutor, PkIndices};
-use crate::task::AtomicU64RefOpt;
+use crate::task::AtomicU64Ref;
 
 pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     ctx: ActorContextRef,
@@ -37,10 +37,9 @@ pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
     group_key_indices: Vec<usize>,
     group_key_types: Vec<DataType>,
     pk_indices: PkIndices,
-    group_by_cache_size: usize,
     extreme_cache_size: usize,
     executor_id: u64,
-    watermark_epoch: AtomicU64RefOpt,
+    watermark_epoch: AtomicU64Ref,
     metrics: Arc<StreamingMetrics>,
     chunk_size: usize,
 }
@@ -56,10 +55,9 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
             self.storages,
             self.result_table,
             self.pk_indices,
+            self.extreme_cache_size,
             self.executor_id,
             self.group_key_indices,
-            self.group_by_cache_size,
-            self.extreme_cache_size,
             self.watermark_epoch,
             self.metrics,
             self.chunk_size,
@@ -123,7 +121,6 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             group_key_indices,
             group_key_types,
             pk_indices: params.pk_indices,
-            group_by_cache_size: stream.config.developer.unsafe_stream_hash_agg_cache_size,
             extreme_cache_size: stream.config.developer.unsafe_stream_extreme_cache_size,
             executor_id: params.executor_id,
             watermark_epoch: stream.get_watermark_epoch(),
