@@ -13,19 +13,16 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
-use super::create_table::DmlFlag;
 use super::privilege::{check_privileges, resolve_relation_privileges};
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
-use crate::catalog::table_catalog::TableType;
 use crate::handler::HandlerArgs;
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
 use crate::planner::Planner;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
@@ -66,24 +63,6 @@ pub(super) fn get_column_names(
     Ok(col_names)
 }
 
-pub(super) fn check_column_names(col_names: &[String], plan_root: &PlanRoot) -> Result<()> {
-    // calculate the number of unhidden columns
-    let unhidden_len = plan_root
-        .schema()
-        .fields()
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| plan_root.out_fields().contains(*i))
-        .count();
-    if col_names.len() != unhidden_len {
-        return Err(InternalError(
-            "number of column names does not match number of columns".to_string(),
-        )
-        .into());
-    }
-    Ok(())
-}
-
 /// Generate create MV plan, return plan and mv table info.
 pub fn gen_create_mv_plan(
     session: &SessionImpl,
@@ -107,19 +86,10 @@ pub fn gen_create_mv_plan(
     let col_names = get_column_names(&bound, session, columns)?;
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
-    // Check the col_names match number of columns in the query.
-    if let Some(col_names) = &col_names {
-        check_column_names(col_names, &plan_root)?
+    if let Some(col_names) = col_names {
+        plan_root.set_out_names(col_names)?;
     }
-    let materialize = plan_root.gen_materialize_plan(
-        table_name,
-        definition,
-        col_names,
-        false,
-        None, // We will never alter a materialized view, so it is safe to pass `None` here.
-        DmlFlag::Disable,
-        TableType::MaterializedView,
-    )?;
+    let materialize = plan_root.gen_materialize_plan(table_name, definition)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(

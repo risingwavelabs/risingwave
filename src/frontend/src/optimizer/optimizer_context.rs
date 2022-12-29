@@ -121,6 +121,11 @@ impl OptimizerContext {
     pub fn session_ctx(&self) -> &Arc<SessionImpl> {
         &self.session_ctx
     }
+
+    /// Return the original SQL.
+    pub fn sql(&self) -> &str {
+        &self.sql
+    }
 }
 
 impl std::fmt::Debug for OptimizerContext {
