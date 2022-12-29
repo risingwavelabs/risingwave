@@ -112,8 +112,8 @@ impl RowIdGenExecutor {
                     yield Message::Chunk(StreamChunk::new(ops, columns, bitmap));
                 }
                 Message::Barrier(barrier) => {
-                    // Update row id generator if vnode mapping is changed.
-                    // Note that: since update barrier will only occurs between pause and resume
+                    // Update row id generator if vnode mapping changes.
+                    // Note that: since `Update` barrier only exists between `Pause` and `Resume`
                     // barrier, duplicated row id won't be generated.
                     if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.row_id_generator = Self::new_generator(&vnodes);
