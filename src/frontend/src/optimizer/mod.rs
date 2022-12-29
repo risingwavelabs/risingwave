@@ -206,6 +206,15 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
+        // Replace source to share source.
+        // Perform share source at the beginning so that we can benefit from predicate pushdown and
+        // column pruning for the share operator.
+        plan = ShareSourceRewriter::share_source(plan);
+        if explain_trace {
+            ctx.trace("Share Source:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
         // Simple Unnesting.
         plan = self.optimize_by_rules(
             plan,
@@ -325,12 +334,24 @@ impl PlanRoot {
         // visibility of these expressions. To avoid these expressions being pruned, we can't use
         // `self.out_fields` as `required_cols` here.
         let required_cols = (0..self.plan.schema().len()).collect_vec();
-        plan = plan.prune_col(&required_cols, &mut ColumnPruningContext::new(plan.clone()));
+        let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
+        plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
         // Column pruning may introduce additional projects, and filter can be pushed again.
         if explain_trace {
             ctx.trace("Prune Columns:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
+
+        if column_pruning_ctx.need_second_round() {
+            // Second round of column pruning and reuse the column pruning context.
+            // Try to replace original share operator with the new one.
+            plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
+            if explain_trace {
+                ctx.trace("Prune Columns (For DAG):");
+                ctx.trace(plan.explain_to_string().unwrap());
+            }
+        }
+
         plan = plan.predicate_pushdown(
             Condition::true_cond(),
             &mut PredicatePushdownContext::new(plan.clone()),
@@ -508,13 +529,6 @@ impl PlanRoot {
         let plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan()?;
-
-                // Replace source to share source.
-                let plan = ShareSourceRewriter::share_source(plan);
-                if explain_trace {
-                    ctx.trace("Reuse Source:");
-                    ctx.trace(plan.explain_to_string().unwrap());
-                }
 
                 let (plan, out_col_change) =
                     plan.logical_rewrite_for_stream(&mut Default::default())?;
