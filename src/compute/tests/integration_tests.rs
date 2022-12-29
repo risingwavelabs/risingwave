@@ -347,6 +347,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         delete_inner,
         1024,
         "DeleteExecutor".to_string(),
+        false,
     ));
 
     tokio::spawn(async move {
