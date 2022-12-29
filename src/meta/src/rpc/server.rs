@@ -448,20 +448,13 @@ mod tests {
     /// Creates `number_of_nodes` meta nodes
     /// Deletes leader and or lease `number_of_nodes` times
     /// After each deletion asserts that we have the correct number of leader nodes
-    async fn test_fencing(
-        number_of_nodes: u16,
-        meta_port: u16,
-        compute_port: u16,
-        delete_leader: bool,
-        delete_lease: bool,
-    ) {
+    #[tokio::test]
+    async fn test_fencing() {
+        let meta_port = 1600;
+        let compute_port = 1700;
+        let number_of_nodes = 4;
         use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
         use crate::storage::Transaction;
-
-        assert!(
-            delete_leader || delete_lease,
-            "please delete the lease and/or the leader for this test to work"
-        );
 
         let meta_store = Arc::new(MemStore::default());
         let vec_meta_handlers = setup_n_nodes_inner(number_of_nodes, meta_port, &meta_store).await;
@@ -474,7 +467,11 @@ mod tests {
             leader_count
         );
 
-        for _ in 1..number_of_nodes {
+        let del = vec![(true, true), (true, false), (false, true)];
+
+        for i in 1..number_of_nodes {
+            let delete_leader = del[i as usize].0;
+            let delete_lease = del[i as usize].1;
             // delete leader/lease info in meta store
             let mut txn = Transaction::default();
             if delete_leader {
@@ -498,42 +495,8 @@ mod tests {
             );
         }
 
-        // delete leader/lease info in meta store
-        let mut txn = Transaction::default();
-        if delete_leader {
-            txn.delete(
-                META_CF_NAME.to_string(),
-                META_LEADER_KEY.as_bytes().to_vec(),
-            );
-        }
-        if delete_lease {
-            txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
-        }
-        meta_store.txn(txn).await.unwrap();
-        sleep(WAIT_INTERVAL).await;
-        assert_eq!(
-            leader_count, 0,
-            "Expected to have 0 leader after test, instead got {} leaders",
-            leader_count
-        );
-
         for ele in vec_meta_handlers {
             ele.0.abort();
         }
-    }
-
-    #[tokio::test]
-    async fn test_fencing_leader() {
-        test_fencing(3, 1600, 1700, true, false).await;
-    }
-
-    #[tokio::test]
-    async fn test_fencing_lease() {
-        test_fencing(3, 1800, 1900, false, true).await;
-    }
-
-    #[tokio::test]
-    async fn test_fencing_leader_lease() {
-        test_fencing(3, 2000, 2100, true, true).await;
     }
 }
