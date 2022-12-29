@@ -367,7 +367,6 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             json!(vec)
         }
         (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
-            tracing::info!("ref: {:?}, field: {:?}", struct_ref, field);
             let mut map = Map::with_capacity(st.fields.len());
             for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq(
                 st.fields
