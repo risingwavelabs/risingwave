@@ -457,6 +457,7 @@ mod tests {
         reported_leader_addr.first().unwrap().clone()
     }
 
+    // TODO
     // FIXME: Leader svc test: Delete lease and/or leader info after PR is merged
     // https://github.com/risingwavelabs/risingwave/pull/7022
 
