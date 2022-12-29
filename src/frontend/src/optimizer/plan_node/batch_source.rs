@@ -38,6 +38,7 @@ impl BatchSource {
             Distribution::Single,
             Order::any(),
         );
+
         Self { base, logical }
     }
 
@@ -71,6 +72,7 @@ impl fmt::Display for BatchSource {
         builder
             .field("source", &self.logical.source_catalog().unwrap().name)
             .field("columns", &self.column_names())
+            .field("filter", &self.logical.kafka_timestamp_range_value())
             .finish()
     }
 }

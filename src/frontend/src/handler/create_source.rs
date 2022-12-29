@@ -33,6 +33,7 @@ use crate::binder::Binder;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::ColumnId;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::optimizer::OptimizerContext;
 use crate::stream_fragmenter::build_graph;
 

@@ -139,6 +139,8 @@ impl KafkaSplitEnumerator {
         } else {
             None
         };
+
+        println!("Start offset: {:?}", expect_start_offset);
         let mut expect_stop_offset = if let Some(ts) = expect_stop_timestamp_millis {
             Some(
                 self.fetch_offset_for_time(topic_partitions.as_ref(), ts)
@@ -147,6 +149,7 @@ impl KafkaSplitEnumerator {
         } else {
             None
         };
+        println!("Stop offset: {:?}", expect_stop_offset);
 
         // Watermark here has nothing to do with watermark in streaming processing. Watermark
         // here means smallest/largest offset available for reading.
@@ -161,6 +164,7 @@ impl KafkaSplitEnumerator {
             }
             ret
         };
+        println!("Watermark: {:?}", watermarks);
 
         topic_partitions.iter().map(|partition| {
             let (low, high) = watermarks.remove(&partition).unwrap();

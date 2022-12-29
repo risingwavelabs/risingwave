@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::{max, min};
 use std::fmt;
 use std::ops::Bound;
-use std::ops::Bound::Unbounded;
+use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::rc::Rc;
-use tonic::IntoRequest;
 
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
@@ -29,7 +29,7 @@ use super::{
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
-use crate::expr::{Expr, ExprImpl, ExprType, input_ref_to_column_indices};
+use crate::expr::{Expr, ExprImpl, ExprType};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -107,6 +107,33 @@ impl LogicalSource {
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
         generic::Source::infer_internal_table_catalog(&self.base)
     }
+
+    pub fn kafka_timestamp_range(&self) -> &(Bound<i64>, Bound<i64>) {
+        &self.kafka_timestamp_range
+    }
+
+    pub fn kafka_timestamp_range_value(&self) -> (Option<i64>, Option<i64>) {
+        let lower_bound = match &self.kafka_timestamp_range.0 {
+            Included(t) => Some(*t),
+            Excluded(t) => Some(*t - 1),
+            Unbounded => None,
+        };
+
+        let upper_bound = match &self.kafka_timestamp_range.1 {
+            Included(t) => Some(*t),
+            Excluded(t) => Some(*t + 1),
+            Unbounded => None,
+        };
+        (lower_bound, upper_bound)
+    }
+
+    fn clone_with_kafka_timestamp_range(&self, range: (Bound<i64>, Bound<i64>)) -> Self {
+        Self {
+            base: self.base.clone(),
+            core: self.core.clone(),
+            kafka_timestamp_range: range,
+        }
+    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalSource}
@@ -116,9 +143,10 @@ impl fmt::Display for LogicalSource {
         if let Some(catalog) = self.source_catalog() {
             write!(
                 f,
-                "LogicalSource {{ source: {}, columns: [{}] }}",
+                "LogicalSource {{ source: {}, columns: [{}], time_range: [{:?}] }}",
                 catalog.name,
-                self.column_names().join(", ")
+                self.column_names().join(", "),
+                self.kafka_timestamp_range(),
             )
         } else {
             write!(f, "LogicalSource")
@@ -133,36 +161,155 @@ impl ColPrunable for LogicalSource {
     }
 }
 
-fn expr_to_kafka_timestamp_range(expr: ExprImpl, mut range: (Bound<i64>, Bound<i64>),
-                                 schema: &Schema) -> Option<ExprImpl> {
-    match expr {
-        ExprImpl::FunctionCall(function_call) if function_call.inputs().len() == 2  => {
-
-            let () timestampz_literal: Option<i64> = {
-                match (function_call.inputs()[0], function_call.inputs()[1]) {
-                    (ExprImpl::InputRef(input_ref ), ExprImpl::Literal(literal)) if schema.fields[input_ref.index].name == KAFKA_TIMESTAMP_COLUMN_NAME &&
-                        literal.return_type() == DataType::Timestamptz => {
-                         {
-                            Some(literal.get_data().into())
-                        }
-                    },
-                    (ExprImpl::Literal(literal), ExprImpl::InputRef(input_ref )) if schema
-                        .fields[input_ref.index].name == KAFKA_TIMESTAMP_COLUMN_NAME &&
-                        literal.return_type() == DataType::Timestamptz => {
-                        {
-                            Some(literal.get_data().into())
-                        }
-                    },
-                    _ => None
+/// A util function to extract kafka offset timestamp range.
+///
+/// Currently we only support limiting kafka offset timestamp range using literals, e.g. we only
+/// support expressions like `_rw_kafka_timestamp <= '2022-10-11 1:00:00+00:00'`.
+///
+/// # Parameters
+///
+/// * `expr`: Expression to be consumed.
+/// * `range`: Original timestamp range, if `expr` can be recognized, we will update `range`.
+/// * `schema`: Input schema.
+///
+/// # Return Value
+///
+/// If `expr` can be recognized and consumed by this function, then we return `None`.
+/// Otherwise `expr` is returned.
+fn expr_to_kafka_timestamp_range(
+    expr: ExprImpl,
+    range: &mut (Bound<i64>, Bound<i64>),
+    schema: &Schema,
+) -> Option<ExprImpl> {
+    let merge_upper_bound = |first, second| -> Bound<i64> {
+        match (first, second) {
+            (first, Unbounded) => first,
+            (Unbounded, second) => second,
+            (Included(f1), Included(f2)) => Included(min(f1, f2)),
+            (Included(f1), Excluded(f2)) => {
+                if f1 < f2 {
+                    Included(f1)
+                } else {
+                    Excluded(f2)
                 }
             }
-
-           if let Some(timestampz_literal) = timestampz_literal {
-               match function_call.get_expr_type() {
-                   ExprType::GreaterThan
-               }
-           }
+            (Excluded(f1), Included(f2)) => {
+                if f2 < f1 {
+                    Included(f2)
+                } else {
+                    Excluded(f1)
+                }
+            }
+            (Excluded(f1), Excluded(f2)) => Excluded(min(f1, f2)),
         }
+    };
+
+    let merge_lower_bound = |first, second| -> Bound<i64> {
+        match (first, second) {
+            (first, Unbounded) => first,
+            (Unbounded, second) => second,
+            (Included(f1), Included(f2)) => Included(max(f1, f2)),
+            (Included(f1), Excluded(f2)) => {
+                if f1 > f2 {
+                    Included(f1)
+                } else {
+                    Excluded(f2)
+                }
+            }
+            (Excluded(f1), Included(f2)) => {
+                if f2 > f1 {
+                    Included(f2)
+                } else {
+                    Excluded(f1)
+                }
+            }
+            (Excluded(f1), Excluded(f2)) => Excluded(max(f1, f2)),
+        }
+    };
+
+    let extract_timestampz_literal = |expr: &ExprImpl| -> Result<Option<(i64, bool)>> {
+        match expr {
+            ExprImpl::FunctionCall(function_call) if function_call.inputs().len() == 2 => {
+                match (&function_call.inputs()[0], &function_call.inputs()[1]) {
+                    (ExprImpl::InputRef(input_ref), literal)
+                        if literal.is_const()
+                            && schema.fields[input_ref.index].name
+                                == KAFKA_TIMESTAMP_COLUMN_NAME
+                            && literal.return_type() == DataType::Timestamptz =>
+                    {
+                        Ok(Some((
+                            literal.eval_row_const()?.clone().unwrap().into_int64(),
+                            false,
+                        )))
+                    }
+                    (literal, ExprImpl::InputRef(input_ref))
+                        if literal.is_const()
+                            && schema.fields[input_ref.index].name
+                                == KAFKA_TIMESTAMP_COLUMN_NAME
+                            && literal.return_type() == DataType::Timestamptz =>
+                    {
+                        Ok(Some((
+                            literal.eval_row_const()?.clone().unwrap().into_int64(),
+                            true,
+                        )))
+                    }
+                    _ => Ok(None),
+                }
+            }
+            _ => Ok(None),
+        }
+    };
+
+    match &expr {
+        ExprImpl::FunctionCall(function_call) => {
+            if let Some((timestampz_literal, reverse)) = extract_timestampz_literal(&expr).unwrap()
+            {
+                match function_call.get_expr_type() {
+                    ExprType::GreaterThan => {
+                        if reverse {
+                            range.1 = merge_upper_bound(range.1, Excluded(timestampz_literal));
+                        } else {
+                            range.0 = merge_lower_bound(range.0, Excluded(timestampz_literal));
+                        }
+
+                        None
+                    }
+                    ExprType::GreaterThanOrEqual => {
+                        if reverse {
+                            range.1 = merge_upper_bound(range.1, Included(timestampz_literal));
+                        } else {
+                            range.0 = merge_lower_bound(range.0, Included(timestampz_literal));
+                        }
+                        None
+                    }
+                    ExprType::Equal => {
+                        range.0 = merge_lower_bound(range.0, Included(timestampz_literal));
+                        range.1 = merge_upper_bound(range.1, Included(timestampz_literal));
+                        None
+                    }
+                    ExprType::LessThan => {
+                        if reverse {
+                            range.0 = merge_lower_bound(range.0, Excluded(timestampz_literal));
+                        } else {
+                            range.1 = merge_upper_bound(range.1, Excluded(timestampz_literal));
+                        }
+                        None
+                    }
+                    ExprType::LessThanOrEqual => {
+                        if reverse {
+                            range.0 = merge_lower_bound(range.0, Included(timestampz_literal));
+                        } else {
+                            range.1 = merge_upper_bound(range.1, Included(timestampz_literal));
+                        }
+                        None
+                    }
+                    _ => Some(expr),
+                }
+            } else {
+                Some(expr)
+            }
+        }
+        _ => Some(expr),
     }
 }
 
@@ -172,13 +319,30 @@ impl PredicatePushdown for LogicalSource {
         predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        let (mut lower_bound, mut upper_bound) = (Unbounded, Unbounded);
+        let mut range = self.kafka_timestamp_range.clone();
 
-
+        println!("Before predicate: {:?}", predicate);
+        let mut new_conjunctions = Vec::with_capacity(predicate.conjunctions.len());
         for expr in predicate.conjunctions {
+            if let Some(e) = expr_to_kafka_timestamp_range(expr, &mut range, &self.base.schema) {
+                // Not recognized, so push back
+                new_conjunctions.push(e);
+            }
         }
 
-        LogicalFilter::create(self.clone().into(), predicate)
+        let new_source = self.clone_with_kafka_timestamp_range(range).into();
+
+        println!("After predicate: {:?}", new_conjunctions);
+        if new_conjunctions.is_empty() {
+            new_source
+        } else {
+            LogicalFilter::create(
+                new_source,
+                Condition {
+                    conjunctions: new_conjunctions,
+                },
+            )
+        }
     }
 }
 

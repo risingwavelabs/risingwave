@@ -35,6 +35,7 @@ use std::rc::Rc;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
 use itertools::Itertools;
+pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};

@@ -630,10 +630,14 @@ impl BatchPlanFragmenter {
                         )))
                     }
                 };
-                let split_info = block_on(kafka_enumerator.list_splits_batch(None, None))?
-                    .into_iter()
-                    .map(SplitImpl::Kafka)
-                    .collect_vec();
+                let timestamp_bound = source_node.logical().kafka_timestamp_range_value();
+                println!("Timestamp bound: {:?}", timestamp_bound);
+                let split_info = block_on(
+                    kafka_enumerator.list_splits_batch(timestamp_bound.0, timestamp_bound.1),
+                )?
+                .into_iter()
+                .map(SplitImpl::Kafka)
+                .collect_vec();
                 return Ok(Some(SourceScanInfo::new(split_info)));
             }
         }
