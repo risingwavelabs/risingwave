@@ -15,6 +15,7 @@
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use futures::stream::StreamExt;
@@ -198,8 +199,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         vec![OrderPair::new(0, OrderType::Ascending)],
         all_column_ids.clone(),
         4,
-        None,
-        0,
+        Arc::new(AtomicU64::new(0)),
         false,
     )
     .await
