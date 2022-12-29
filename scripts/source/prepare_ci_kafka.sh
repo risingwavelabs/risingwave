@@ -31,7 +31,7 @@ fi
 echo "--- Extract data for Kafka"
 cd ./source/
 mkdir -p ./test_data
-unzip -o test_data.zip -d ./test_data
+unzip -o test_data.zip -d .
 cd ..
 
 echo "Create topics"
