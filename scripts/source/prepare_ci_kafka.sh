@@ -15,6 +15,18 @@ cd "$SCRIPT_PATH/.." || exit 1
 
 KAFKA_BIN="$SCRIPT_PATH/../../.risingwave/bin/kafka/bin"
 
+echo "$SCRIPT_PATH"
+
+if [ "$1" == "compress" ]; then
+  echo "Compress test_data/ into test_data.zip"
+  cd ./source
+  zip_file=test_data.zip
+  if [ -f "$zip_file" ]; then
+    rm "$zip_file"
+  fi
+  zip -r "$zip_file" ./test_data/*
+  exit 0
+fi
 
 echo "--- Extract data for Kafka"
 cd ./source/
