@@ -446,15 +446,16 @@ mod tests {
         );
     }
 
-    /// returns number of leaders after activating fencing by deleting leader lease info
-    /// Fencing should be activated if leader and/or lease information is deleted
+    /// Creates `number_of_nodes` meta nodes
+    /// Deletes leader and or lease `number_of_nodes` times
+    /// After each deletion asserts that we have the correct number of leader nodes
     async fn test_fencing(
         number_of_nodes: u16,
         meta_port: u16,
         compute_port: u16,
         delete_leader: bool,
         delete_lease: bool,
-    ) -> u16 {
+    ) {
         use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
         use crate::storage::Transaction;
 
@@ -470,9 +471,33 @@ mod tests {
         let leader_count = number_of_leaders(number_of_nodes, meta_port, compute_port).await;
         assert_eq!(
             leader_count, 1,
-            "Expected to have 1 leader, instead got {} leaders",
+            "Expected to have 1 leader at beginning, instead got {} leaders",
             leader_count
         );
+
+        for _ in 1..number_of_nodes {
+            // delete leader/lease info in meta store
+            let mut txn = Transaction::default();
+            if delete_leader {
+                txn.delete(
+                    META_CF_NAME.to_string(),
+                    META_LEADER_KEY.as_bytes().to_vec(),
+                );
+            }
+            if delete_lease {
+                txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
+            }
+            meta_store.txn(txn).await.unwrap();
+            sleep(WAIT_INTERVAL * 2).await;
+
+            // assert that we still have 1 leader
+            let leader_count = number_of_leaders(number_of_nodes, meta_port, compute_port).await;
+            assert_eq!(
+                leader_count, 1,
+                "Expected to have 1 leader, instead got {} leaders",
+                leader_count
+            );
+        }
 
         // delete leader/lease info in meta store
         let mut txn = Transaction::default();
@@ -486,55 +511,30 @@ mod tests {
             txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
         }
         meta_store.txn(txn).await.unwrap();
+        sleep(WAIT_INTERVAL * 2).await;
+        assert_eq!(
+            leader_count, 0,
+            "Expected to have 0 leader after test, instead got {} leaders",
+            leader_count
+        );
 
-        // TODO: Do I need * 3 here?
-        sleep(WAIT_INTERVAL).await;
-
-        // expect that we still have 1 leader
-        // skipping first meta_port, since that node was former leader and got killed
-        let leaders = number_of_leaders(number_of_nodes - 1, meta_port + 1, compute_port).await;
         for ele in vec_meta_handlers {
             ele.0.abort();
         }
-        leaders
     }
 
     #[tokio::test]
-    async fn test_fencing_1() {
-        for params in &[(true, true), (true, false), (false, true)] {
-            let (del_leader, del_lease) = *params;
-            let leader_count = test_fencing(1, 1600, 1700, del_leader, del_lease).await;
-            assert_eq!(
-                leader_count, 0,
-                "Expected to have 1 leader, instead got {} leaders. Deleted leader: {}. Deleted lease {}",
-                leader_count, del_leader, del_lease
-            );
-        }
+    async fn test_fencing_leader() {
+        test_fencing(3, 1600, 1700, true, false).await;
     }
 
     #[tokio::test]
-    async fn test_fencing_3() {
-        for params in &[(true, true), (true, false), (false, true)] {
-            let (del_leader, del_lease) = *params;
-            let leader_count = test_fencing(3, 1800, 1900, true, true).await;
-            assert_eq!(
-                leader_count, 1,
-                "Expected to have 1 leader, instead got {} leaders. Deleted leader: {}. Deleted lease {}",
-                leader_count, del_leader, del_lease
-            );
-        }
+    async fn test_fencing_lease() {
+        test_fencing(3, 1800, 1900, false, true).await;
     }
 
     #[tokio::test]
-    async fn test_fencing_5() {
-        for params in &[(true, true), (true, false), (false, true)] {
-            let (del_leader, del_lease) = *params;
-            let leader_count = test_fencing(5, 2000, 2100, true, true).await;
-            assert_eq!(
-                leader_count, 1,
-                "Expected to have 1 leader, instead got {} leaders. Deleted leader: {}. Deleted lease {}",
-                leader_count, del_leader, del_lease
-            );
-        }
+    async fn test_fencing_leader_lease() {
+        test_fencing(3, 2000, 2100, true, true).await;
     }
 }
