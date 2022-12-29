@@ -244,6 +244,8 @@ mod tests {
     use tonic::transport::{Channel, Endpoint};
 
     use super::*;
+    use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
+    use crate::storage::Transaction;
 
     const WAIT_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -543,6 +545,57 @@ mod tests {
         );
     }
 
+    /// Deletes all leader nodes one after another by triggering fencing
+    /// Asserts that all nodes agree on who leader is
+    /// Gets next leader to delete by using leader service from nodes
+    #[tokio::test]
+    async fn test_leader_svc_fence_everything() {
+        let number_of_nodes = 4;
+        let meta_port = 2250;
+        let meta_store = Arc::new(MemStore::default());
+        let node_controllers = setup_n_nodes_inner(number_of_nodes, meta_port, &meta_store).await;
+
+        // All nodes should agree on who the leader is on beginning
+        let _ = get_agreed_leader(number_of_nodes, meta_port).await;
+
+        // delete all nodes on after another
+        let del = vec![(true, true), (true, false), (false, true)];
+
+        for (delete_leader, delete_lease) in del {
+            // trigger fencing on the current leader
+            let mut txn = Transaction::default();
+            if delete_leader {
+                txn.delete(
+                    META_CF_NAME.to_string(),
+                    META_LEADER_KEY.as_bytes().to_vec(),
+                );
+            }
+            if delete_lease {
+                txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
+            }
+            meta_store.txn(txn).await.unwrap();
+            sleep(WAIT_INTERVAL).await;
+
+            // Check if all nodes agree on who leader is
+            let _ = get_agreed_leader(number_of_nodes, meta_port).await;
+        }
+
+        // send shutdown to all nodes. There should only be one more node left
+        let mut active_nodes = 0;
+        for (join_handle, shutdown_tx) in node_controllers {
+            active_nodes = match shutdown_tx.send(()) {
+                Ok(_) => active_nodes + 1,
+                Err(_) => active_nodes,
+            };
+            join_handle.await.unwrap();
+        }
+        assert_eq!(
+            active_nodes, 1,
+            "After test there should only be one meta node left, but there were {} nodes alive",
+            active_nodes
+        );
+    }
+
     /// returns number of leaders after failover
     async fn test_failover(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
         let node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
@@ -601,8 +654,6 @@ mod tests {
         let meta_port = 1600;
         let compute_port = 1700;
         let number_of_nodes = 4;
-        use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
-        use crate::storage::Transaction;
 
         let meta_store = Arc::new(MemStore::default());
         let vec_meta_handlers = setup_n_nodes_inner(number_of_nodes, meta_port, &meta_store).await;
