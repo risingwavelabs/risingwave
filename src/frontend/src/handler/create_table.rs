@@ -204,6 +204,13 @@ pub fn bind_sql_table_constraints(
         pk_column_ids.push(row_id_column_id);
         row_id_index
     });
+
+    if let Some(col) = columns_catalog.iter().map(|c| c.name()).duplicates().next() {
+        Err(ErrorCode::InvalidInputSyntax(format!(
+            "column \"{col}\" specified more than once"
+        )))?;
+    }
+
     Ok((columns_catalog, pk_column_ids, row_id_index))
 }
 

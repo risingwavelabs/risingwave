@@ -101,6 +101,7 @@ impl PlanRoot {
 
     /// Set customized names of the output fields, used for `CREATE [MATERIALIZED VIEW | SINK] r(a,
     /// b, ..)`.
+    ///
     /// If the number of names does not match the number of output fields, an error is returned.
     pub fn set_out_names(&mut self, out_names: Vec<String>) -> Result<()> {
         if out_names.len() != self.out_fields.count_ones(..) {
