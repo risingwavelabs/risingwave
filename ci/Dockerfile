@@ -27,7 +27,7 @@ ENV PATH /root/.cargo/bin/:$PATH
 RUN rustup component add rustfmt llvm-tools-preview clippy
 
 # install sqllogictest-jdbc-driver
-RUN curl -sSL "https://github.com/risinglightdb/sqllogictest-driver-jdbc/releases/download/v1.0.5/sqllogictest-jdbc-runner-1.0.5-jar-with-dependencies.jar" -o sqllogictest-jdbc-runner.jar
+RUN curl -sSL "https://github.com/risinglightdb/sqllogictest-driver-jdbc/releases/download/v1.0.5/sqllogictest-jdbc-runner-1.0.5-jar-with-dependencies.jar" -o /usr/local/lib/sqllogictest-jdbc-runner.jar
 
 # install build tools
 RUN cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-cache \
