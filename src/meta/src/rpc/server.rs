@@ -280,8 +280,7 @@ mod tests {
         node_controllers
     }
 
-    /// Start `n` meta nodes on localhost. First node will be started at `meta_port`, 2nd node on
-    /// `meta_port + 1`, ...
+    /// wrapper for setup_n_nodes_inner
     async fn setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
         let meta_store = Arc::new(MemStore::default());
         setup_n_nodes_inner(n, meta_port, &meta_store).await
