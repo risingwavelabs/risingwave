@@ -25,22 +25,23 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
 use risingwave_sqlparser::ast::{
-    ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, TableConstraint,
+    ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, TableConstraint,
 };
 
+use super::create_source::resolve_source_schema;
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{check_valid_column_name, ColumnId};
+use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::Binder;
+use crate::{Binder, WithOptions};
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum DmlFlag {
@@ -210,6 +211,45 @@ pub fn bind_sql_table_constraints(
     Ok((columns_catalog, pk_column_ids, row_id_index))
 }
 
+/// `gen_create_table_plan_with_source` generates the plan for creating a table with an external
+/// stream source.
+pub(crate) async fn gen_create_table_plan_with_source(
+    handler_args: HandlerArgs,
+    table_name: ObjectName,
+    columns: Vec<ColumnDef>,
+    constraints: Vec<TableConstraint>,
+    source_schema: SourceSchema,
+) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
+    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
+    let (mut columns, pk_column_ids, row_id_index) =
+        bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
+
+    let session = handler_args.session.clone();
+    let properties = handler_args.with_options.inner().clone();
+    let context = OptimizerContext::new_with_handler_args(handler_args);
+
+    let source_info = resolve_source_schema(
+        source_schema,
+        &mut columns,
+        &properties,
+        row_id_index,
+        &pk_column_ids,
+    )
+    .await?;
+
+    gen_table_plan_inner(
+        &session,
+        context.into(),
+        table_name,
+        columns,
+        pk_column_ids,
+        row_id_index,
+        Some(source_info),
+    )
+}
+
+/// `gen_create_table_plan` generates the plan for creating a table without an external stream
+/// source.
 pub(crate) fn gen_create_table_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
@@ -238,57 +278,55 @@ pub(crate) fn gen_create_table_plan_without_bind(
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
-    let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
-    let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect_vec();
-    let properties = context.with_options().inner().clone();
-    let dml_flag = match context.with_options().append_only() {
-        true => DmlFlag::AppendOnly,
-        false => DmlFlag::All,
-    };
 
+    gen_table_plan_inner(
+        session,
+        context,
+        table_name,
+        columns,
+        pk_column_ids,
+        row_id_index,
+        None,
+    )
+}
+
+fn gen_table_plan_inner(
+    session: &SessionImpl,
+    context: OptimizerContextRef,
+    table_name: ObjectName,
+    columns: Vec<ProstColumnCatalog>,
+    pk_column_ids: Vec<ColumnId>,
+    row_id_index: Option<usize>,
+    source_info: Option<StreamSourceInfo>,
+) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
-    // TODO(Yuanxin): Detect if there is an external source based on `properties` (WITH CONNECTOR)
-    // and set `has_external_source` accordingly.
-    let has_external_source = false;
-    let source = if has_external_source {
-        Some(ProstSource {
-            id: 0,
-            schema_id,
-            database_id,
-            name: name.clone(),
-            row_id_index: row_id_index.clone(),
-            columns: columns.clone(),
-            pk_column_ids: pk_column_ids.clone(),
-            properties,
-            info: Some(StreamSourceInfo::default()),
-            owner: session.user_id(),
-        })
-    } else {
-        None
-    };
+    let source = source_info.map(|source_info| ProstSource {
+        id: 0,
+        schema_id,
+        database_id,
+        name: name.clone(),
+        row_id_index: row_id_index.map(|i| ProstColumnIndex { index: i as _ }),
+        columns: columns.clone(),
+        pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
+        properties: context.with_options().inner().clone(),
+        info: Some(source_info),
+        owner: session.user_id(),
+    });
 
-    let source_catalog: Option<Rc<SourceCatalog>> =
-        source.as_ref().map(|source| Rc::new(source.into()));
-    let pk_column_ids = pk_column_ids
-        .iter()
-        .map(|id| ColumnId::new(*id))
-        .collect_vec();
-    let column_descs = columns
-        .iter()
-        .map(|column| column.column_desc.clone().unwrap().into())
-        .collect_vec();
-
-    let row_id_index = row_id_index.as_ref().map(|index| index.index as _);
+    let source_catalog = source.as_ref().map(|source| Rc::new((source).into()));
     let source_node: PlanRef = LogicalSource::new(
         source_catalog,
-        column_descs,
+        columns
+            .iter()
+            .map(|column| column.column_desc.clone().unwrap().into())
+            .collect_vec(),
         pk_column_ids,
         row_id_index,
         false,
-        context,
+        context.clone(),
     )
     .into();
 
@@ -311,6 +349,10 @@ pub(crate) fn gen_create_table_plan_without_bind(
 
     // The materialize executor need not handle primary key conflict if the primary key is row id.
     let handle_pk_conflict = row_id_index.is_none();
+    let dml_flag = match context.with_options().append_only() {
+        true => DmlFlag::AppendOnly,
+        false => DmlFlag::All,
+    };
 
     let materialize = plan_root.gen_materialize_plan(
         name,
@@ -323,8 +365,8 @@ pub(crate) fn gen_create_table_plan_without_bind(
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
-    table.owner = session.user_id();
 
+    table.owner = session.user_id();
     Ok((materialize.into(), source, table))
 }
 
@@ -397,6 +439,7 @@ pub async fn handle_create_table(
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     if_not_exists: bool,
+    source_schema: Option<SourceSchema>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -412,14 +455,30 @@ pub async fn handle_create_table(
     }
 
     let (graph, source, table) = {
-        let context = OptimizerContext::new_with_handler_args(handler_args);
-        let (plan, source, table) = gen_create_table_plan(
-            &session,
-            context.into(),
-            table_name.clone(),
-            columns,
-            constraints,
-        )?;
+        let (plan, source, table) =
+            match check_create_table_with_source(&handler_args.with_options, source_schema)? {
+                Some(source_schema) => {
+                    gen_create_table_plan_with_source(
+                        handler_args,
+                        table_name.clone(),
+                        columns,
+                        constraints,
+                        source_schema,
+                    )
+                    .await?
+                }
+                None => {
+                    let context = OptimizerContext::new_with_handler_args(handler_args);
+                    gen_create_table_plan(
+                        &session,
+                        context.into(),
+                        table_name.clone(),
+                        columns,
+                        constraints,
+                    )?
+                }
+            };
+
         let graph = build_graph(plan);
 
         (graph, source, table)
@@ -436,6 +495,20 @@ pub async fn handle_create_table(
     catalog_writer.create_table(source, table, graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
+}
+
+pub fn check_create_table_with_source(
+    with_options: &WithOptions,
+    source_schema: Option<SourceSchema>,
+) -> Result<Option<SourceSchema>> {
+    if with_options.inner().contains_key(UPSTREAM_SOURCE_KEY) {
+        source_schema.as_ref().ok_or_else(|| {
+            ErrorCode::InvalidInputSyntax(
+                "Please specify a source schema using ROW FORMAT".to_owned(),
+            )
+        })?;
+    }
+    Ok(source_schema)
 }
 
 #[cfg(test)]

@@ -18,6 +18,7 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
 };
@@ -28,9 +29,11 @@ use risingwave_sqlparser::ast::{AvroSchema, CreateSourceStatement, ProtobufSchem
 use super::create_table::{bind_sql_columns, bind_sql_table_constraints, gen_materialize_plan};
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::ColumnId;
 use crate::handler::HandlerArgs;
-use crate::optimizer::OptimizerContext;
-use crate::stream_fragmenter::build_graph;
+use crate::{build_graph, OptimizerContext};
+
+pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 /// Map an Avro schema to a relational schema.
 async fn extract_avro_table_schema(
@@ -76,7 +79,137 @@ async fn extract_protobuf_table_schema(
         .collect_vec())
 }
 
-// TODO(Yuanxin): Only create a source w/o materializing.
+pub(crate) async fn resolve_source_schema(
+    source_schema: SourceSchema,
+    columns: &mut Vec<ProstColumnCatalog>,
+    with_properties: &HashMap<String, String>,
+    row_id_index: Option<usize>,
+    pk_column_ids: &[ColumnId],
+) -> Result<StreamSourceInfo> {
+    // confluent schema registry must be used with kafka
+    let is_kafka = with_properties
+        .get(UPSTREAM_SOURCE_KEY)
+        .unwrap_or(&"".to_string())
+        .to_lowercase()
+        .eq(KAFKA_CONNECTOR);
+    if !is_kafka
+        && matches!(
+            &source_schema,
+            SourceSchema::Protobuf(ProtobufSchema {
+                use_schema_registry: true,
+                ..
+            }) | SourceSchema::Avro(AvroSchema {
+                use_schema_registry: true,
+                ..
+            })
+        )
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "The {} must be kafka when schema registry is used",
+            UPSTREAM_SOURCE_KEY
+        ))));
+    }
+
+    let source_info = match &source_schema {
+        SourceSchema::Protobuf(protobuf_schema) => {
+            if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
+                return Err(RwError::from(ProtocolError(
+                    "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string(),
+                )));
+            }
+
+            columns.extend(
+                extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
+            );
+
+            StreamSourceInfo {
+                row_format: RowFormatType::Protobuf as i32,
+                row_schema_location: protobuf_schema.row_schema_location.0.clone(),
+                use_schema_registry: protobuf_schema.use_schema_registry,
+                proto_message_name: protobuf_schema.message_name.0.clone(),
+                ..Default::default()
+            }
+        }
+
+        SourceSchema::Avro(avro_schema) => {
+            if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
+                return Err(RwError::from(ProtocolError(
+                    "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string(),
+                )));
+            }
+
+            columns.extend(extract_avro_table_schema(avro_schema, with_properties.clone()).await?);
+
+            StreamSourceInfo {
+                row_format: RowFormatType::Avro as i32,
+                row_schema_location: avro_schema.row_schema_location.0.clone(),
+                use_schema_registry: avro_schema.use_schema_registry,
+                proto_message_name: "".to_owned(),
+                ..Default::default()
+            }
+        }
+
+        SourceSchema::Json => StreamSourceInfo {
+            row_format: RowFormatType::Json as i32,
+            ..Default::default()
+        },
+
+        SourceSchema::Maxwell => {
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format debezium."
+                        .to_string(),
+                )));
+            }
+
+            StreamSourceInfo {
+                row_format: RowFormatType::Maxwell as i32,
+                ..Default::default()
+            }
+        }
+
+        SourceSchema::DebeziumJson => {
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format debezium."
+                        .to_string(),
+                )));
+            }
+
+            StreamSourceInfo {
+                row_format: RowFormatType::DebeziumJson as i32,
+                ..Default::default()
+            }
+        }
+
+        SourceSchema::CanalJson => {
+            // return err if user has not specified a pk
+            if row_id_index.is_some() {
+                return Err(RwError::from(ProtocolError(
+                    "Primary key must be specified when creating source with row format cannal_json."
+                        .to_string(),
+                )));
+            }
+
+            StreamSourceInfo {
+                row_format: RowFormatType::CanalJson as i32,
+                ..Default::default()
+            }
+        }
+
+        SourceSchema::CSV(csv_info) => StreamSourceInfo {
+            row_format: RowFormatType::Csv as i32,
+            csv_delimiter: csv_info.delimiter as i32,
+            csv_has_header: csv_info.has_header,
+            ..Default::default()
+        },
+    };
+
+    Ok(source_info)
+}
+
 pub async fn handle_create_source(
     handler_args: HandlerArgs,
     is_materialized: bool,
@@ -92,136 +225,15 @@ pub async fn handle_create_source(
         .into());
     }
     let with_properties = handler_args.with_options.inner().clone();
-    const UPSTREAM_SOURCE_KEY: &str = "connector";
-    // confluent schema registry must be used with kafka
-    let is_kafka = with_properties
-        .get("connector")
-        .unwrap_or(&"".to_string())
-        .to_lowercase()
-        .eq("kafka");
-    if !is_kafka
-        && matches!(
-            &stmt.source_schema,
-            SourceSchema::Protobuf(ProtobufSchema {
-                use_schema_registry: true,
-                ..
-            }) | SourceSchema::Avro(AvroSchema {
-                use_schema_registry: true,
-                ..
-            })
-        )
-    {
-        return Err(RwError::from(ProtocolError(format!(
-            "The {} must be kafka when schema registry is used",
-            UPSTREAM_SOURCE_KEY
-        ))));
-    }
-    let (columns, source_info) = match &stmt.source_schema {
-        SourceSchema::Protobuf(protobuf_schema) => {
-            if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
-                return Err(RwError::from(ProtocolError(
-                    "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string(),
-                )));
-            }
 
-            columns.extend(
-                extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
-            );
-
-            (
-                columns,
-                StreamSourceInfo {
-                    row_format: RowFormatType::Protobuf as i32,
-                    row_schema_location: protobuf_schema.row_schema_location.0.clone(),
-                    use_schema_registry: protobuf_schema.use_schema_registry,
-                    proto_message_name: protobuf_schema.message_name.0.clone(),
-                    ..Default::default()
-                },
-            )
-        }
-        SourceSchema::Avro(avro_schema) => {
-            if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
-                return Err(RwError::from(ProtocolError(
-                    "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string(),
-                )));
-            }
-            columns.extend(extract_avro_table_schema(avro_schema, with_properties.clone()).await?);
-            (
-                columns,
-                StreamSourceInfo {
-                    row_format: RowFormatType::Avro as i32,
-                    row_schema_location: avro_schema.row_schema_location.0.clone(),
-                    use_schema_registry: avro_schema.use_schema_registry,
-                    proto_message_name: "".to_owned(),
-                    ..Default::default()
-                },
-            )
-        }
-        SourceSchema::Json => (
-            columns,
-            StreamSourceInfo {
-                row_format: RowFormatType::Json as i32,
-                ..Default::default()
-            },
-        ),
-        SourceSchema::Maxwell => {
-            // return err if user has not specified a pk
-            if row_id_index.is_some() {
-                return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with row format debezium."
-                        .to_string(),
-                )));
-            }
-            (
-                columns,
-                StreamSourceInfo {
-                    row_format: RowFormatType::Maxwell as i32,
-                    ..Default::default()
-                },
-            )
-        }
-        SourceSchema::DebeziumJson => {
-            // return err if user has not specified a pk
-            if row_id_index.is_some() {
-                return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with row format debezium."
-                        .to_string(),
-                )));
-            }
-            (
-                columns,
-                StreamSourceInfo {
-                    row_format: RowFormatType::DebeziumJson as i32,
-                    ..Default::default()
-                },
-            )
-        }
-        SourceSchema::CanalJson => {
-            // return err if user has not specified a pk
-            if row_id_index.is_some() {
-                return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with row format cannal_json."
-                        .to_string(),
-                )));
-            }
-            (
-                columns,
-                StreamSourceInfo {
-                    row_format: RowFormatType::CanalJson as i32,
-                    ..Default::default()
-                },
-            )
-        }
-        SourceSchema::CSV(csv_info) => (
-            columns,
-            StreamSourceInfo {
-                row_format: RowFormatType::Csv as i32,
-                csv_delimiter: csv_info.delimiter as i32,
-                csv_has_header: csv_info.has_header,
-                ..Default::default()
-            },
-        ),
-    };
+    let source_info = resolve_source_schema(
+        stmt.source_schema,
+        &mut columns,
+        &with_properties,
+        row_id_index,
+        &pk_column_ids,
+    )
+    .await?;
 
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
@@ -265,6 +277,7 @@ pub async fn handle_create_source(
     } else {
         catalog_writer.create_source(source).await?;
     }
+
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))
 }
 

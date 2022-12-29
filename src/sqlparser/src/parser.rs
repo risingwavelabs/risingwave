@@ -1758,6 +1758,14 @@ impl Parser {
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
         let with_options = self.parse_with_properties()?;
+
+        // Table can be created with an external sourceq
+        let source_schema = if self.parse_keywords(&[Keyword::ROW, Keyword::FORMAT]) {
+            Some(SourceSchema::parse_to(self)?)
+        } else {
+            None
+        };
+
         // Parse optional `AS ( query )`
         let query = if self.parse_keyword(Keyword::AS) {
             Some(Box::new(self.parse_query()?))
@@ -1773,6 +1781,7 @@ impl Parser {
             with_options,
             or_replace,
             if_not_exists,
+            source_schema,
             query,
         })
     }

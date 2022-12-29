@@ -127,6 +127,7 @@ pub async fn handle(
             or_replace,
             temporary,
             if_not_exists,
+            source_schema,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
@@ -158,6 +159,7 @@ pub async fn handle(
                 columns,
                 constraints,
                 if_not_exists,
+                source_schema,
             )
             .await
         }

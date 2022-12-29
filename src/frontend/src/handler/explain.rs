@@ -22,7 +22,7 @@ use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
-use super::create_table::gen_create_table_plan;
+use super::create_table::{check_create_table_with_source, gen_create_table_plan};
 use super::query::gen_batch_query_plan;
 use super::RwPgResponse;
 use crate::handler::HandlerArgs;
@@ -41,7 +41,7 @@ pub(super) fn handle_explain(
     let context = OptimizerContext::new(
         handler_args.session,
         handler_args.sql,
-        handler_args.with_options,
+        handler_args.with_options.clone(),
         options.clone(),
     );
 
@@ -70,8 +70,18 @@ pub(super) fn handle_explain(
             name,
             columns,
             constraints,
+            source_schema,
             ..
-        } => gen_create_table_plan(&session, context.into(), name, columns, constraints)?.0,
+        } => match check_create_table_with_source(&handler_args.with_options, source_schema)? {
+            Some(_) => {
+                return Err(ErrorCode::NotImplemented(
+                    "explain create table with a connector".to_string(),
+                    None.into(),
+                )
+                .into())
+            }
+            None => gen_create_table_plan(&session, context.into(), name, columns, constraints)?.0,
+        },
 
         Statement::CreateIndex {
             name,
