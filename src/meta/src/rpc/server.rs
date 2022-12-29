@@ -503,7 +503,7 @@ mod tests {
                 txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
             }
             meta_store.txn(txn).await.unwrap();
-            sleep(WAIT_INTERVAL * 2).await;
+            sleep(WAIT_INTERVAL).await;
 
             // assert that we still have 1 leader
             let leader_count = number_of_leaders(number_of_nodes, meta_port, compute_port).await;
@@ -526,7 +526,7 @@ mod tests {
             txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
         }
         meta_store.txn(txn).await.unwrap();
-        sleep(WAIT_INTERVAL * 2).await;
+        sleep(WAIT_INTERVAL).await;
         assert_eq!(
             leader_count, 0,
             "Expected to have 0 leader after test, instead got {} leaders",
