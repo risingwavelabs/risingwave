@@ -84,7 +84,7 @@ export default function DataSources() {
                   <Td>{source.id}</Td>
                   <Td>{source.name}</Td>
                   <Td>{source.owner}</Td>
-                  <Td>{source.info?.$case}</Td>
+                  <Td>{source.info}</Td>
                   <Td>
                     <Button
                       size="sm"
@@ -121,18 +121,9 @@ export default function DataSources() {
                   </Td>
                   <Td overflowWrap="normal">
                     {(() => {
-                      switch (source.info?.$case) {
-                        case "streamSource":
-                          return source.info?.streamSource?.columns
-                            .map((col) => extractColumnInfo(col))
-                            .join(", ")
-                        case "tableSource":
-                          return source.info?.tableSource?.columns
-                            .map((col) => extractColumnInfo(col))
-                            .join(", ")
-                        default:
-                          return <Fragment />
-                      }
+                      return source.columns
+                        .map((col) => extractColumnInfo(col))
+                        .join(", ")
                     })()}
                   </Td>
                 </Tr>

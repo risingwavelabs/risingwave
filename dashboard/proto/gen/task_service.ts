@@ -1,6 +1,6 @@
 /* eslint-disable */
 import { PlanFragment, TaskId as TaskId1, TaskOutputId } from "./batch_plan";
-import { Status } from "./common";
+import { BatchQueryEpoch, Status } from "./common";
 import { DataChunk } from "./data";
 import { StreamMessage } from "./stream_plan";
 
@@ -81,7 +81,7 @@ export function taskInfo_TaskStatusToJSON(object: TaskInfo_TaskStatus): string {
 export interface CreateTaskRequest {
   taskId: TaskId1 | undefined;
   plan: PlanFragment | undefined;
-  epoch: number;
+  epoch: BatchQueryEpoch | undefined;
 }
 
 export interface AbortTaskRequest {
@@ -106,25 +106,42 @@ export interface GetDataResponse {
   recordBatch: DataChunk | undefined;
 }
 
-export interface GetStreamRequest {
-  upActorId: number;
-  downActorId: number;
-  upFragmentId: number;
-  downFragmentId: number;
-}
-
 export interface ExecuteRequest {
   taskId: TaskId1 | undefined;
   plan: PlanFragment | undefined;
-  epoch: number;
+  epoch: BatchQueryEpoch | undefined;
 }
 
 export interface GetDataRequest {
   taskOutputId: TaskOutputId | undefined;
 }
 
+export interface GetStreamRequest {
+  value?: { $case: "get"; get: GetStreamRequest_Get } | {
+    $case: "addPermits";
+    addPermits: GetStreamRequest_AddPermits;
+  };
+}
+
+/** The first message, which tells the upstream which channel this exchange stream is for. */
+export interface GetStreamRequest_Get {
+  upActorId: number;
+  downActorId: number;
+  upFragmentId: number;
+  downFragmentId: number;
+}
+
+/** The following messages, which adds the permits back to the upstream to achieve back-pressure. */
+export interface GetStreamRequest_AddPermits {
+  permits: number;
+}
+
 export interface GetStreamResponse {
-  message: StreamMessage | undefined;
+  message:
+    | StreamMessage
+    | undefined;
+  /** The number of permits acquired for this message, which should be sent back to the upstream with `AddPermits`. */
+  permits: number;
 }
 
 function createBaseTaskId(): TaskId {
@@ -189,7 +206,7 @@ export const TaskInfo = {
 };
 
 function createBaseCreateTaskRequest(): CreateTaskRequest {
-  return { taskId: undefined, plan: undefined, epoch: 0 };
+  return { taskId: undefined, plan: undefined, epoch: undefined };
 }
 
 export const CreateTaskRequest = {
@@ -197,7 +214,7 @@ export const CreateTaskRequest = {
     return {
       taskId: isSet(object.taskId) ? TaskId1.fromJSON(object.taskId) : undefined,
       plan: isSet(object.plan) ? PlanFragment.fromJSON(object.plan) : undefined,
-      epoch: isSet(object.epoch) ? Number(object.epoch) : 0,
+      epoch: isSet(object.epoch) ? BatchQueryEpoch.fromJSON(object.epoch) : undefined,
     };
   },
 
@@ -205,7 +222,7 @@ export const CreateTaskRequest = {
     const obj: any = {};
     message.taskId !== undefined && (obj.taskId = message.taskId ? TaskId1.toJSON(message.taskId) : undefined);
     message.plan !== undefined && (obj.plan = message.plan ? PlanFragment.toJSON(message.plan) : undefined);
-    message.epoch !== undefined && (obj.epoch = Math.round(message.epoch));
+    message.epoch !== undefined && (obj.epoch = message.epoch ? BatchQueryEpoch.toJSON(message.epoch) : undefined);
     return obj;
   },
 
@@ -217,7 +234,9 @@ export const CreateTaskRequest = {
     message.plan = (object.plan !== undefined && object.plan !== null)
       ? PlanFragment.fromPartial(object.plan)
       : undefined;
-    message.epoch = object.epoch ?? 0;
+    message.epoch = (object.epoch !== undefined && object.epoch !== null)
+      ? BatchQueryEpoch.fromPartial(object.epoch)
+      : undefined;
     return message;
   },
 };
@@ -357,41 +376,8 @@ export const GetDataResponse = {
   },
 };
 
-function createBaseGetStreamRequest(): GetStreamRequest {
-  return { upActorId: 0, downActorId: 0, upFragmentId: 0, downFragmentId: 0 };
-}
-
-export const GetStreamRequest = {
-  fromJSON(object: any): GetStreamRequest {
-    return {
-      upActorId: isSet(object.upActorId) ? Number(object.upActorId) : 0,
-      downActorId: isSet(object.downActorId) ? Number(object.downActorId) : 0,
-      upFragmentId: isSet(object.upFragmentId) ? Number(object.upFragmentId) : 0,
-      downFragmentId: isSet(object.downFragmentId) ? Number(object.downFragmentId) : 0,
-    };
-  },
-
-  toJSON(message: GetStreamRequest): unknown {
-    const obj: any = {};
-    message.upActorId !== undefined && (obj.upActorId = Math.round(message.upActorId));
-    message.downActorId !== undefined && (obj.downActorId = Math.round(message.downActorId));
-    message.upFragmentId !== undefined && (obj.upFragmentId = Math.round(message.upFragmentId));
-    message.downFragmentId !== undefined && (obj.downFragmentId = Math.round(message.downFragmentId));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<GetStreamRequest>, I>>(object: I): GetStreamRequest {
-    const message = createBaseGetStreamRequest();
-    message.upActorId = object.upActorId ?? 0;
-    message.downActorId = object.downActorId ?? 0;
-    message.upFragmentId = object.upFragmentId ?? 0;
-    message.downFragmentId = object.downFragmentId ?? 0;
-    return message;
-  },
-};
-
 function createBaseExecuteRequest(): ExecuteRequest {
-  return { taskId: undefined, plan: undefined, epoch: 0 };
+  return { taskId: undefined, plan: undefined, epoch: undefined };
 }
 
 export const ExecuteRequest = {
@@ -399,7 +385,7 @@ export const ExecuteRequest = {
     return {
       taskId: isSet(object.taskId) ? TaskId1.fromJSON(object.taskId) : undefined,
       plan: isSet(object.plan) ? PlanFragment.fromJSON(object.plan) : undefined,
-      epoch: isSet(object.epoch) ? Number(object.epoch) : 0,
+      epoch: isSet(object.epoch) ? BatchQueryEpoch.fromJSON(object.epoch) : undefined,
     };
   },
 
@@ -407,7 +393,7 @@ export const ExecuteRequest = {
     const obj: any = {};
     message.taskId !== undefined && (obj.taskId = message.taskId ? TaskId1.toJSON(message.taskId) : undefined);
     message.plan !== undefined && (obj.plan = message.plan ? PlanFragment.toJSON(message.plan) : undefined);
-    message.epoch !== undefined && (obj.epoch = Math.round(message.epoch));
+    message.epoch !== undefined && (obj.epoch = message.epoch ? BatchQueryEpoch.toJSON(message.epoch) : undefined);
     return obj;
   },
 
@@ -419,7 +405,9 @@ export const ExecuteRequest = {
     message.plan = (object.plan !== undefined && object.plan !== null)
       ? PlanFragment.fromPartial(object.plan)
       : undefined;
-    message.epoch = object.epoch ?? 0;
+    message.epoch = (object.epoch !== undefined && object.epoch !== null)
+      ? BatchQueryEpoch.fromPartial(object.epoch)
+      : undefined;
     return message;
   },
 };
@@ -449,19 +437,122 @@ export const GetDataRequest = {
   },
 };
 
+function createBaseGetStreamRequest(): GetStreamRequest {
+  return { value: undefined };
+}
+
+export const GetStreamRequest = {
+  fromJSON(object: any): GetStreamRequest {
+    return {
+      value: isSet(object.get)
+        ? { $case: "get", get: GetStreamRequest_Get.fromJSON(object.get) }
+        : isSet(object.addPermits)
+        ? { $case: "addPermits", addPermits: GetStreamRequest_AddPermits.fromJSON(object.addPermits) }
+        : undefined,
+    };
+  },
+
+  toJSON(message: GetStreamRequest): unknown {
+    const obj: any = {};
+    message.value?.$case === "get" &&
+      (obj.get = message.value?.get ? GetStreamRequest_Get.toJSON(message.value?.get) : undefined);
+    message.value?.$case === "addPermits" && (obj.addPermits = message.value?.addPermits
+      ? GetStreamRequest_AddPermits.toJSON(message.value?.addPermits)
+      : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetStreamRequest>, I>>(object: I): GetStreamRequest {
+    const message = createBaseGetStreamRequest();
+    if (object.value?.$case === "get" && object.value?.get !== undefined && object.value?.get !== null) {
+      message.value = { $case: "get", get: GetStreamRequest_Get.fromPartial(object.value.get) };
+    }
+    if (
+      object.value?.$case === "addPermits" &&
+      object.value?.addPermits !== undefined &&
+      object.value?.addPermits !== null
+    ) {
+      message.value = {
+        $case: "addPermits",
+        addPermits: GetStreamRequest_AddPermits.fromPartial(object.value.addPermits),
+      };
+    }
+    return message;
+  },
+};
+
+function createBaseGetStreamRequest_Get(): GetStreamRequest_Get {
+  return { upActorId: 0, downActorId: 0, upFragmentId: 0, downFragmentId: 0 };
+}
+
+export const GetStreamRequest_Get = {
+  fromJSON(object: any): GetStreamRequest_Get {
+    return {
+      upActorId: isSet(object.upActorId) ? Number(object.upActorId) : 0,
+      downActorId: isSet(object.downActorId) ? Number(object.downActorId) : 0,
+      upFragmentId: isSet(object.upFragmentId) ? Number(object.upFragmentId) : 0,
+      downFragmentId: isSet(object.downFragmentId) ? Number(object.downFragmentId) : 0,
+    };
+  },
+
+  toJSON(message: GetStreamRequest_Get): unknown {
+    const obj: any = {};
+    message.upActorId !== undefined && (obj.upActorId = Math.round(message.upActorId));
+    message.downActorId !== undefined && (obj.downActorId = Math.round(message.downActorId));
+    message.upFragmentId !== undefined && (obj.upFragmentId = Math.round(message.upFragmentId));
+    message.downFragmentId !== undefined && (obj.downFragmentId = Math.round(message.downFragmentId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetStreamRequest_Get>, I>>(object: I): GetStreamRequest_Get {
+    const message = createBaseGetStreamRequest_Get();
+    message.upActorId = object.upActorId ?? 0;
+    message.downActorId = object.downActorId ?? 0;
+    message.upFragmentId = object.upFragmentId ?? 0;
+    message.downFragmentId = object.downFragmentId ?? 0;
+    return message;
+  },
+};
+
+function createBaseGetStreamRequest_AddPermits(): GetStreamRequest_AddPermits {
+  return { permits: 0 };
+}
+
+export const GetStreamRequest_AddPermits = {
+  fromJSON(object: any): GetStreamRequest_AddPermits {
+    return { permits: isSet(object.permits) ? Number(object.permits) : 0 };
+  },
+
+  toJSON(message: GetStreamRequest_AddPermits): unknown {
+    const obj: any = {};
+    message.permits !== undefined && (obj.permits = Math.round(message.permits));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetStreamRequest_AddPermits>, I>>(object: I): GetStreamRequest_AddPermits {
+    const message = createBaseGetStreamRequest_AddPermits();
+    message.permits = object.permits ?? 0;
+    return message;
+  },
+};
+
 function createBaseGetStreamResponse(): GetStreamResponse {
-  return { message: undefined };
+  return { message: undefined, permits: 0 };
 }
 
 export const GetStreamResponse = {
   fromJSON(object: any): GetStreamResponse {
-    return { message: isSet(object.message) ? StreamMessage.fromJSON(object.message) : undefined };
+    return {
+      message: isSet(object.message) ? StreamMessage.fromJSON(object.message) : undefined,
+      permits: isSet(object.permits) ? Number(object.permits) : 0,
+    };
   },
 
   toJSON(message: GetStreamResponse): unknown {
     const obj: any = {};
     message.message !== undefined &&
       (obj.message = message.message ? StreamMessage.toJSON(message.message) : undefined);
+    message.permits !== undefined && (obj.permits = Math.round(message.permits));
     return obj;
   },
 
@@ -470,6 +561,7 @@ export const GetStreamResponse = {
     message.message = (object.message !== undefined && object.message !== null)
       ? StreamMessage.fromPartial(object.message)
       : undefined;
+    message.permits = object.permits ?? 0;
     return message;
   },
 };

@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod backup_meta;
 mod cluster_info;
 mod pause_resume;
 mod reschedule;
 
+pub use backup_meta::*;
 pub use cluster_info::*;
 pub use pause_resume::*;
 pub use reschedule::*;

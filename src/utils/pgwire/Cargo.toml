@@ -1,7 +1,11 @@
 [package]
 name = "pgwire"
-version = "0.2.0-alpha"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -16,6 +20,7 @@ openssl = "0.10.3"
 pg_interval = "0.4"
 postgres-types = { version = "0.2.4", features = ["derive","with-chrono-0_4"] }
 regex = "1.5"
+risingwave_common = { path = "../../common" }
 rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
@@ -23,7 +28,7 @@ tokio-openssl = "0.6.3"
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.2.0-alpha", path = "../../workspace-hack" }
+workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
 tokio-postgres = "0.7.7"

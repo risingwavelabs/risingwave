@@ -120,7 +120,7 @@ pub trait HummockVersionExt {
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
         member_table_ids: &HashSet<StateTableId>,
-    ) -> Vec<(HummockSstableId, u64)>;
+    ) -> Vec<(HummockSstableId, u64, u32)>;
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta);
 
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
@@ -252,7 +252,7 @@ impl HummockVersionExt for HummockVersion {
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
         member_table_ids: &HashSet<StateTableId>,
-    ) -> Vec<(HummockSstableId, u64)> {
+    ) -> Vec<(HummockSstableId, u64, u32)> {
         let mut split_id_vers = vec![];
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
             || !self.levels.contains_key(&parent_group_id)
@@ -273,7 +273,11 @@ impl HummockVersionExt for HummockVersion {
                         .any(|table_id| member_table_ids.contains(table_id))
                     {
                         table_info.divide_version += 1;
-                        split_id_vers.push((table_info.get_id(), table_info.get_divide_version()));
+                        split_id_vers.push((
+                            table_info.get_id(),
+                            table_info.get_divide_version(),
+                            0,
+                        ));
                         let mut branch_table_info = table_info.clone();
                         branch_table_info.table_ids = table_info
                             .table_ids
@@ -291,6 +295,7 @@ impl HummockVersionExt for HummockVersion {
             }
         }
         for (z, level) in parent_levels.levels.iter_mut().enumerate() {
+            let level_idx = level.get_level_idx();
             for table_info in &mut level.table_infos {
                 if table_info
                     .get_table_ids()
@@ -298,7 +303,11 @@ impl HummockVersionExt for HummockVersion {
                     .any(|table_id| member_table_ids.contains(table_id))
                 {
                     table_info.divide_version += 1;
-                    split_id_vers.push((table_info.get_id(), table_info.get_divide_version()));
+                    split_id_vers.push((
+                        table_info.get_id(),
+                        table_info.get_divide_version(),
+                        level_idx,
+                    ));
                     let mut branch_table_info = table_info.clone();
                     branch_table_info.table_ids = table_info
                         .table_ids
@@ -552,7 +561,7 @@ pub fn new_sub_level(
 ) -> Level {
     if level_type == LevelType::Nonoverlapping {
         debug_assert!(
-            can_concat(&table_infos.iter().collect_vec()),
+            can_concat(&table_infos),
             "sst of non-overlapping level is not concat-able: {:?}",
             table_infos
         );
@@ -622,7 +631,7 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: Vec<SstableInfo>) 
     if operand.level_type == LevelType::Overlapping as i32 {
         operand.level_type = LevelType::Nonoverlapping as i32;
     }
-    debug_assert!(can_concat(&operand.table_infos.iter().collect_vec()));
+    debug_assert!(can_concat(&operand.table_infos));
 }
 
 pub trait HummockVersionDeltaExt {

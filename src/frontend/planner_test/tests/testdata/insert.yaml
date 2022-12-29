@@ -20,6 +20,39 @@
     create table t (v1 real, v2 int);
     insert into t values (22.33, true);
   binder_error: 'Bind error: cannot cast type "boolean" to "integer" in Assign context'
+- name: simple insert
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t values (1, 2);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchInsert { table: t }
+      └─BatchValues { rows: [[1:Int32, 2:Int32]] }
+- name: Invalid column name
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t (v1, v3) values (1, 2);
+  binder_error: 'Bind error: Column v3 not found in table t'
+- name: Invalid column name 2
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t (v3, v1) values (1, 2);
+  binder_error: 'Bind error: Column v3 not found in table t'
+- name: Duplicate column
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t (v1, v1) values (1, 2);
+  binder_error: 'Bind error: Column specified more than once'
+- name: To many target columns
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t (v1, v2, v2) values (5, 6);
+  binder_error: 'Bind error: INSERT has more target columns than values'
+- name: Not enough target columns
+  sql: |
+    create table t (v1 int, v2 int);
+    insert into t (v1) values (5, 6);
+  binder_error: 'Bind error: INSERT has less target columns than values'
 - name: insert values mismatch columns length
   sql: |
     create table t (v1 real, v2 int, v3 varchar);
@@ -41,8 +74,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
       └─BatchValues { rows: [['2020-01-01 01:02:03':Varchar::Timestamp::Time], ['03:04:05':Varchar::Time]] }
-- name: a `VALUES` without insert context may be invalid on its own (compare with
-    above)
+- name: a `VALUES` without insert context may be invalid on its own (compare with above)
   sql: |
     create table t (v1 time);
     values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
@@ -89,8 +121,7 @@
   sql: |
     create table t (v1 timestamp, v2 real);
     insert into t select time '01:02:03', 4.5 from t;
-  binder_error: 'Bind error: cannot cast type "time without time zone" to "timestamp
-    without time zone" in Assign context'
+  binder_error: 'Bind error: cannot cast type "time without time zone" to "timestamp without time zone" in Assign context'
 - name: insert into select mismatch columns length
   sql: |
     create table t (v1 int, v2 real);

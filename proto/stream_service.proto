@@ -86,6 +86,7 @@ message BarrierCompleteResponse {
   message GroupedSstableInfo {
     uint64 compaction_group_id = 1;
     hummock.SstableInfo sst = 2;
+    map<uint32, hummock.TableStats> table_stats_map = 3;
   }
   repeated GroupedSstableInfo synced_sstables = 4;
   uint32 worker_id = 5;

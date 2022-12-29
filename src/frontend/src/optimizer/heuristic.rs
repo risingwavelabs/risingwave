@@ -18,6 +18,7 @@ use std::fmt;
 
 use itertools::Itertools;
 
+use crate::optimizer::plan_node::PlanTreeNode;
 use crate::optimizer::rule::BoxedRule;
 use crate::optimizer::PlanRef;
 

@@ -27,6 +27,7 @@ use bloom::Bloom;
 pub mod builder;
 pub use builder::*;
 pub mod writer;
+use risingwave_common::catalog::TableId;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
@@ -35,15 +36,22 @@ use fail::fail_point;
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::key::{TableKey, UserKey};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
+mod delete_range_aggregator;
 mod sstable_id_manager;
 mod utils;
+pub use delete_range_aggregator::{
+    get_delete_range_epoch_from_sstable, DeleteRangeAggregator, DeleteRangeAggregatorBuilder,
+    RangeTombstonesCollector, SstableDeleteRangeIterator,
+};
 pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
+use xxhash_rust::xxh32;
 
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
@@ -51,6 +59,61 @@ use super::{HummockError, HummockResult};
 const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;
 const VERSION: u32 = 1;
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+// delete keys located in [start_user_key, end_user_key)
+pub struct DeleteRangeTombstone {
+    pub start_user_key: UserKey<Vec<u8>>,
+    pub end_user_key: UserKey<Vec<u8>>,
+    pub sequence: HummockEpoch,
+}
+
+impl PartialOrd for DeleteRangeTombstone {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DeleteRangeTombstone {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.start_user_key
+            .cmp(&other.start_user_key)
+            .then_with(|| self.end_user_key.cmp(&other.end_user_key))
+            .then_with(|| other.sequence.cmp(&self.sequence))
+    }
+}
+
+impl DeleteRangeTombstone {
+    pub fn new(
+        table_id: TableId,
+        start_table_key: Vec<u8>,
+        end_table_key: Vec<u8>,
+        sequence: HummockEpoch,
+    ) -> Self {
+        Self {
+            start_user_key: UserKey::new(table_id, TableKey(start_table_key)),
+            end_user_key: UserKey::new(table_id, TableKey(end_table_key)),
+            sequence,
+        }
+    }
+
+    pub fn encode(&self, buf: &mut Vec<u8>) {
+        self.start_user_key.encode_length_prefixed(buf);
+        self.end_user_key.encode_length_prefixed(buf);
+        buf.put_u64_le(self.sequence);
+    }
+
+    pub fn decode(buf: &mut &[u8]) -> Self {
+        let start_user_key = UserKey::decode_length_prefixed(buf);
+        let end_user_key = UserKey::decode_length_prefixed(buf);
+        let sequence = buf.get_u64_le();
+        Self {
+            start_user_key,
+            end_user_key,
+            sequence,
+        }
+    }
+}
 
 /// [`Sstable`] is a handle for accessing SST.
 #[derive(Clone)]
@@ -77,18 +140,28 @@ impl Sstable {
         !self.meta.bloom_filter.is_empty()
     }
 
-    pub fn surely_not_have_user_key(&self, user_key: &[u8]) -> bool {
+    pub fn surely_not_have_dist_key(&self, dist_key: &[u8]) -> bool {
         let enable_bloom_filter: fn() -> bool = || {
             fail_point!("disable_bloom_filter", |_| false);
             true
         };
         if enable_bloom_filter() && self.has_bloom_filter() {
-            let hash = farmhash::fingerprint32(user_key);
-            let bloom = Bloom::new(&self.meta.bloom_filter);
-            bloom.surely_not_have_hash(hash)
+            let hash = xxh32::xxh32(dist_key, 0);
+            self.surely_not_have_hashvalue(hash)
         } else {
             false
         }
+    }
+
+    #[inline(always)]
+    pub fn hash_for_bloom_filter(dist_key: &[u8]) -> u32 {
+        xxh32::xxh32(dist_key, 0)
+    }
+
+    #[inline(always)]
+    pub fn surely_not_have_hashvalue(&self, hash: u32) -> bool {
+        let bloom = Bloom::new(&self.meta.bloom_filter);
+        bloom.surely_not_have_hash(hash)
     }
 
     pub fn block_count(&self) -> usize {
@@ -107,6 +180,7 @@ impl Sstable {
             key_range: Some(KeyRange {
                 left: self.meta.smallest_key.clone(),
                 right: self.meta.largest_key.clone(),
+                right_exclusive: false,
             }),
             file_size: self.meta.estimated_size as u64,
             table_ids: vec![],
@@ -167,6 +241,7 @@ pub struct SstableMeta {
     pub smallest_key: Vec<u8>,
     pub largest_key: Vec<u8>,
     pub meta_offset: u64,
+    pub range_tombstone_list: Vec<DeleteRangeTombstone>,
     /// Format version, for further compatibility.
     pub version: u32,
 }
@@ -181,6 +256,7 @@ impl SstableMeta {
     /// | estimated size (4B) | key count (4B) |
     /// | smallest key len (4B) | smallest key |
     /// | largest key len (4B) | largest key |
+    /// | range-tombstone 0 | ... | range-tombstone M-1 |
     /// | checksum (8B) | version (4B) | magic (4B) |
     /// ```
     pub fn encode_to_bytes(&self) -> Vec<u8> {
@@ -201,6 +277,10 @@ impl SstableMeta {
         put_length_prefixed_slice(buf, &self.smallest_key);
         put_length_prefixed_slice(buf, &self.largest_key);
         buf.put_u64_le(self.meta_offset);
+        buf.put_u32_le(self.range_tombstone_list.len() as u32);
+        for tombstone in &self.range_tombstone_list {
+            tombstone.encode(buf);
+        }
         let checksum = xxhash64_checksum(&buf[start_offset..]);
         buf.put_u64_le(checksum);
         buf.put_u32_le(VERSION);
@@ -238,6 +318,12 @@ impl SstableMeta {
         let smallest_key = get_length_prefixed_slice(buf);
         let largest_key = get_length_prefixed_slice(buf);
         let meta_offset = buf.get_u64_le();
+        let range_del_count = buf.get_u32_le() as usize;
+        let mut range_tombstone_list = Vec::with_capacity(range_del_count);
+        for _ in 0..range_del_count {
+            let tombstone = DeleteRangeTombstone::decode(buf);
+            range_tombstone_list.push(tombstone);
+        }
 
         Ok(Self {
             block_metas,
@@ -247,6 +333,7 @@ impl SstableMeta {
             smallest_key,
             largest_key,
             meta_offset,
+            range_tombstone_list,
             version,
         })
     }
@@ -258,6 +345,12 @@ impl SstableMeta {
             .block_metas
             .iter()
             .map(|block_meta| block_meta.encoded_size())
+            .sum::<usize>()
+            + 4 // delete range tombstones len
+            + self
+            .range_tombstone_list
+            .iter()
+            .map(| tombstone| 16 + tombstone.start_user_key.encoded_len() + tombstone.end_user_key.encoded_len())
             .sum::<usize>()
             + 4 // bloom filter len
             + self.bloom_filter.len()
@@ -306,6 +399,7 @@ mod tests {
             smallest_key: b"0-smallest-key".to_vec(),
             largest_key: b"9-largest-key".to_vec(),
             meta_offset: 123,
+            range_tombstone_list: vec![],
             version: VERSION,
         };
         let sz = meta.encoded_size();

@@ -45,7 +45,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
     manager
         .send_barrier(&barrier, actor_ids.clone(), actor_ids, None)
         .unwrap();
-    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev);
+    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev)?;
     // Collect barriers from actors
     let collected_barriers = rxs
         .iter_mut()
@@ -58,7 +58,7 @@ async fn test_managed_barrier_collection() -> StreamResult<()> {
 
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
-        manager.collect(actor_id, &barrier).unwrap();
+        manager.collect(actor_id, &barrier);
         let notified = complete_receiver
             .complete_receiver
             .as_mut()
@@ -102,14 +102,14 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
     let epoch = 114514;
     let barrier = Barrier::new_test_barrier(epoch);
 
-    // Collect a barrer before sending
-    manager.collect(extra_actor_id, &barrier).unwrap();
+    // Collect a barrier before sending
+    manager.collect(extra_actor_id, &barrier);
 
     // Send the barrier to all actors
     manager
         .send_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect, None)
         .unwrap();
-    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev);
+    let mut complete_receiver = manager.remove_collect_rx(barrier.epoch.prev)?;
 
     // Collect barriers from actors
     let collected_barriers = rxs
@@ -123,7 +123,7 @@ async fn test_managed_barrier_collection_before_send_request() -> StreamResult<(
 
     // Report to local barrier manager
     for (i, (actor_id, barrier)) in collected_barriers.into_iter().enumerate() {
-        manager.collect(actor_id, &barrier).unwrap();
+        manager.collect(actor_id, &barrier);
         let notified = complete_receiver
             .complete_receiver
             .as_mut()

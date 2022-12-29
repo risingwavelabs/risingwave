@@ -27,14 +27,15 @@ use rand::seq::SliceRandom;
 use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::TaskId as TaskIdBatch;
 use risingwave_common::array::DataChunk;
-use risingwave_common::types::VnodeMapping;
+use risingwave_common::hash::VnodeMapping;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::select_all;
+use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::plan_node::NodeBody::{Delete, Insert, Update};
 use risingwave_pb::batch_plan::{
-    ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
-    TaskId as TaskIdProst, TaskOutputId,
+    DistributedLookupJoinNode, ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment,
+    PlanNode as PlanNodeProst, PlanNode, TaskId as TaskIdProst, TaskOutputId,
 };
 use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
 use risingwave_pb::task_service::{AbortTaskRequest, TaskInfoResponse};
@@ -324,10 +325,22 @@ impl StageRunner {
                     task_id: i as u32,
                 };
                 let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
-                let plan_fragment = self.create_plan_fragment(i as u32, Some(vnode_ranges));
+                let plan_fragment = self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
                 futures.push(self.schedule_task(task_id, plan_fragment, Some(worker)));
             }
-        } else {
+        } else if let Some(source_info) = self.stage.source_info.as_ref() {
+            for (id, split) in source_info.split_info().iter().enumerate() {
+                let task_id = TaskIdProst {
+                    query_id: self.stage.query_id.id.clone(),
+                    stage_id: self.stage.id,
+                    task_id: id as u32,
+                };
+                let plan_fragment = self.create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
+                let worker = self.choose_worker(&plan_fragment, id as u32)?;
+                futures.push(self.schedule_task(task_id, plan_fragment, worker));
+            }
+        }
+        else {
             for id in 0..self.stage.parallelism {
                 let task_id = TaskIdProst {
                     query_id: self.stage.query_id.id.clone(),
@@ -335,7 +348,7 @@ impl StageRunner {
                     task_id: id,
                 };
                 let plan_fragment = self.create_plan_fragment(id, None);
-                let worker = self.choose_worker(&plan_fragment)?;
+                let worker = self.choose_worker(&plan_fragment, id)?;
                 futures.push(self.schedule_task(task_id, plan_fragment, worker));
             }
         }
@@ -419,7 +432,11 @@ impl StageRunner {
                          } else {
                             // After processing all stream status, we must have sent signal (Either Scheduled or
                             // Failed) to Query Runner. If this is not true, query runner will stuck cuz it do not receive any signals.
-                            assert!(sent_signal_to_next);
+                            if !sent_signal_to_next {
+                                // For now, this kind of situation may come from recovery test: CN may get killed before reporting status, so sent signal flag is not set yet.
+                                // In this case, batch query is expected to fail. Client in simulation test should retry this query (w/o kill nodes).
+                                return Err(TaskExecutionError("compute node lose connection before response".to_string()));
+                            }
                             break;
                     }
                 }
@@ -462,17 +479,20 @@ impl StageRunner {
         for chunk in &mut terminated_chunk_stream {
             if let Err(ref e) = chunk {
                 let err_str = e.to_string();
-                result_tx
-                    .send(chunk.map_err(|e| e.into()))
-                    .await
-                    .expect("Receiver should always exist! ");
+
+                // This is possible if The Query Runner drop early before schedule the root
+                // executor. Detail described in https://github.com/risingwavelabs/risingwave/issues/6883#issuecomment-1348102037.
+                // The error format is just channel closed so no care.
+                if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
+                    warn!("Root executor has been dropped before receive any events so the send is failed");
+                }
                 // Different from below, return this function and report error.
                 return Err(SchedulerError::TaskExecutionError(err_str));
             } else {
-                result_tx
-                    .send(chunk.map_err(|e| e.into()))
-                    .await
-                    .expect("Receiver should always exist! ");
+                // Same for below.
+                if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
+                    warn!("Root executor has been dropped before receive any events so the send is failed");
+                }
             }
         }
 
@@ -519,25 +539,53 @@ impl StageRunner {
             .flatten()
     }
 
-    fn choose_worker(&self, plan_fragment: &PlanFragment) -> SchedulerResult<Option<WorkerNode>> {
-        let node_body = plan_fragment
-            .root
-            .as_ref()
-            .expect("fail to get plan node")
-            .node_body
-            .as_ref()
-            .expect("fail to get node body");
+    fn choose_worker(
+        &self,
+        plan_fragment: &PlanFragment,
+        task_id: u32,
+    ) -> SchedulerResult<Option<WorkerNode>> {
+        let plan_node = plan_fragment.root.as_ref().expect("fail to get plan node");
+        let node_body = plan_node.node_body.as_ref().expect("fail to get node body");
 
         let vnode_mapping = match node_body {
-            Insert(insert_node) => self.get_vnode_mapping(&insert_node.associated_mview_id.into()),
-            Update(update_node) => self.get_vnode_mapping(&update_node.associated_mview_id.into()),
-            Delete(delete_node) => self.get_vnode_mapping(&delete_node.associated_mview_id.into()),
-            _ => None,
+            Insert(insert_node) => self.get_vnode_mapping(&insert_node.table_id.into()),
+            Update(update_node) => self.get_vnode_mapping(&update_node.table_id.into()),
+            Delete(delete_node) => self.get_vnode_mapping(&delete_node.table_id.into()),
+            _ => {
+                if let Some(distributed_lookup_join_node) =
+                    Self::find_distributed_lookup_join_node(plan_node)
+                {
+                    // Choose worker for distributed lookup join based on inner side vnode_mapping
+                    let id2pu_vec = self
+                        .get_vnode_mapping(&TableId::new(
+                            distributed_lookup_join_node
+                                .inner_side_table_desc
+                                .as_ref()
+                                .unwrap()
+                                .table_id,
+                        ))
+                        .unwrap_or_default()
+                        .iter()
+                        .copied()
+                        .sorted()
+                        .dedup()
+                        .collect_vec();
+
+                    let pu = id2pu_vec[task_id as usize];
+                    let candidates = self
+                        .worker_node_manager
+                        .get_workers_by_parallel_unit_ids(&[pu])?;
+                    return Ok(Some(candidates[0].clone()));
+                } else {
+                    None
+                }
+            }
         };
 
         let worker_node = match vnode_mapping {
-            Some(mut parallel_unit_ids) => {
-                parallel_unit_ids.dedup();
+            Some(parallel_unit_ids) => {
+                let parallel_unit_ids =
+                    parallel_unit_ids.into_iter().sorted().dedup().collect_vec();
                 let candidates = self
                     .worker_node_manager
                     .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
@@ -547,6 +595,22 @@ impl StageRunner {
         };
 
         Ok(worker_node)
+    }
+
+    fn find_distributed_lookup_join_node(
+        plan_node: &PlanNode,
+    ) -> Option<&DistributedLookupJoinNode> {
+        let node_body = plan_node.node_body.as_ref().expect("fail to get node body");
+
+        match node_body {
+            NodeBody::DistributedLookupJoin(distributed_lookup_join_node) => {
+                Some(distributed_lookup_join_node)
+            }
+            _ => plan_node
+                .children
+                .iter()
+                .find_map(Self::find_distributed_lookup_join_node),
+        }
     }
 
     /// Write message into channel to notify query runner current stage have been scheduled.
@@ -724,7 +788,10 @@ impl StageRunner {
                 let NodeBody::RowSeqScan(mut scan_node) = node_body else {
                     unreachable!();
                 };
-                let partition = partition.expect("no partition info for seq scan");
+                let partition = partition
+                    .expect("no partition info for seq scan")
+                    .into_table()
+                    .expect("PartitionInfo should be TablePartitionInfo");
                 scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
                 scan_node.scan_ranges = partition.scan_ranges;
                 PlanNodeProst {
@@ -733,33 +800,20 @@ impl StageRunner {
                     node_body: Some(NodeBody::RowSeqScan(scan_node)),
                 }
             }
-            PlanNodeType::BatchLookupJoin => {
-                let mut node_body = execution_plan_node.node.clone();
-                match &mut node_body {
-                    NodeBody::LookupJoin(node) => {
-                        let side_table_desc = node
-                            .inner_side_table_desc
-                            .as_ref()
-                            .expect("no side table desc");
-                        node.inner_side_vnode_mapping = self
-                            .get_vnode_mapping(&side_table_desc.table_id.into())
-                            .unwrap_or_default();
-                        node.worker_nodes = self.worker_node_manager.list_worker_nodes();
-                    }
-                    _ => unreachable!(),
-                }
-
-                let left_child = self.convert_plan_node(
-                    &execution_plan_node.children[0],
-                    task_id,
-                    partition,
-                    identity_id,
-                );
-
+            PlanNodeType::BatchSource => {
+                let node_body = execution_plan_node.node.clone();
+                let NodeBody::Source(mut source_node) = node_body else {
+                    unreachable!();
+                };
+                let partition = partition
+                    .expect("no partition info for seq scan")
+                    .into_source()
+                    .expect("PartitionInfo should be SourcePartitionInfo");
+                source_node.split = partition.encode_to_bytes().into();
                 PlanNodeProst {
-                    children: vec![left_child],
+                    children: vec![],
                     identity,
-                    node_body: Some(node_body),
+                    node_body: Some(NodeBody::Source(source_node)),
                 }
             }
             _ => {

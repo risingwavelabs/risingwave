@@ -18,12 +18,16 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
+use super::generic::GenericPlanNode;
 use super::{
     gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::{BatchTopN, LogicalProject, StreamTopN};
+use crate::optimizer::plan_node::{
+    BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext,
+    RewriteStreamContext, StreamTopN, ToStreamContext,
+};
 use crate::optimizer::property::{Distribution, FieldOrder, Order, OrderDisplay, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::utils::{ColIndexMapping, Condition};
@@ -41,22 +45,24 @@ impl LogicalTopN {
         if with_ties {
             assert!(offset == 0, "WITH TIES is not supported with OFFSET");
         }
-        let ctx = input.ctx();
-        let schema = input.schema().clone();
-        let pk_indices = input.logical_pk().to_vec();
-        let functional_dependency = input.functional_dependency().clone();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
-        LogicalTopN {
-            base,
-            core: generic::TopN {
-                input,
-                limit,
-                offset,
-                with_ties,
-                order,
-                group_key: vec![],
-            },
-        }
+
+        let core = generic::TopN {
+            input,
+            limit,
+            offset,
+            with_ties,
+            order,
+            group_key: vec![],
+        };
+
+        let ctx = core.ctx();
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+        let functional_dependency = core.input.functional_dependency().clone();
+
+        let base = PlanBase::new_logical(ctx, schema, pk_indices.unwrap(), functional_dependency);
+
+        LogicalTopN { base, core }
     }
 
     pub fn with_group(
@@ -130,10 +136,10 @@ impl LogicalTopN {
             ),
         );
         builder
-            .field("limit", &format_args!("{}", self.limit()))
-            .field("offset", &format_args!("{}", self.offset()));
+            .field("limit", &self.limit())
+            .field("offset", &self.offset());
         if self.with_ties() {
-            builder.field("with_ties", &format_args!("{}", true));
+            builder.field("with_ties", &true);
         }
         if !self.group_key().is_empty() {
             builder.field("group_key", &self.group_key());
@@ -168,7 +174,7 @@ impl LogicalTopN {
                 "topN does not support Broadcast".to_string(),
                 None.into(),
             ))),
-            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists) => {
+            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => {
                 self.gen_vnode_two_phase_streaming_top_n_plan(stream_input, &dists)
             }
         }
@@ -275,7 +281,7 @@ impl fmt::Display for LogicalTopN {
 }
 
 impl ColPrunable for LogicalTopN {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let input_required_bitset = FixedBitSet::from_iter(required_cols.iter().copied());
         let order_required_cols = {
             let mut order_required_cols = FixedBitSet::with_capacity(self.input().schema().len());
@@ -314,13 +320,19 @@ impl ColPrunable for LogicalTopN {
                 })
                 .collect(),
         };
-        let new_input = self.input().prune_col(&input_required_cols);
-        let top_n = Self::new(
+        let new_group_key = self
+            .group_key()
+            .iter()
+            .map(|group_key| mapping.map(*group_key))
+            .collect();
+        let new_input = self.input().prune_col(&input_required_cols, ctx);
+        let top_n = Self::with_group(
             new_input,
             self.limit(),
             self.offset(),
             self.with_ties(),
             new_order,
+            new_group_key,
         )
         .into();
 
@@ -342,21 +354,18 @@ impl ColPrunable for LogicalTopN {
 }
 
 impl PredicatePushdown for LogicalTopN {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        // filter can not transpose topN
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
 
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> Result<PlanRef> {
-        if self.with_ties() {
-            return Err(ErrorCode::NotImplemented(
-                "TopN with ties in batch mode".to_string(),
-                5302.into(),
-            )
-            .into());
-        }
-
         let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
         if self.group_key().is_empty() {
@@ -368,7 +377,7 @@ impl ToBatch for LogicalTopN {
 }
 
 impl ToStream for LogicalTopN {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         if self.offset() != 0 && self.limit() == LIMIT_ALL_COUNT {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                 "OFFSET without LIMIT in streaming mode".to_string(),
@@ -380,19 +389,61 @@ impl ToStream for LogicalTopN {
             )));
         }
         Ok(if !self.group_key().is_empty() {
-            let input = self.input().to_stream()?;
+            let input = self.input().to_stream(ctx)?;
             let input = RequiredDist::hash_shard(self.group_key())
                 .enforce_if_not_satisfies(input, &Order::any())?;
             let logical = self.clone_with_input(input);
             StreamGroupTopN::new(logical, None).into()
         } else {
-            self.gen_dist_stream_top_n_plan(self.input().to_stream()?)?
+            self.gen_dist_stream_top_n_plan(self.input().to_stream(ctx)?)?
         })
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (top_n, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((top_n.into(), out_col_change))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+
+    use super::LogicalTopN;
+    use crate::optimizer::optimizer_context::OptimizerContext;
+    use crate::optimizer::plan_node::{ColPrunable, ColumnPruningContext, LogicalValues};
+    use crate::optimizer::property::Order;
+    use crate::PlanRef;
+
+    #[tokio::test]
+    async fn test_prune_col() {
+        let ty = DataType::Int32;
+        let ctx = OptimizerContext::mock().await;
+        let fields: Vec<Field> = vec![
+            Field::with_name(ty.clone(), "v1"),
+            Field::with_name(ty.clone(), "v2"),
+            Field::with_name(ty.clone(), "v3"),
+        ];
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        let input = Rc::new(values);
+
+        let original_logical =
+            LogicalTopN::with_group(input, 1, 0, false, Order::default(), vec![1]);
+        assert_eq!(original_logical.group_key(), &[1]);
+        let original_logical: PlanRef = original_logical.into();
+        let pruned_node = original_logical.prune_col(
+            &[0, 1, 2],
+            &mut ColumnPruningContext::new(original_logical.clone()),
+        );
+
+        let pruned_logical = pruned_node.as_logical_top_n().unwrap();
+        assert_eq!(pruned_logical.group_key(), &[1]);
     }
 }

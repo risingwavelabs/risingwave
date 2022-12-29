@@ -29,6 +29,7 @@ mod project;
 mod project_set;
 mod row_seq_scan;
 mod sort_agg;
+mod source;
 mod sys_row_seq_scan;
 mod table_function;
 pub mod test_utils;
@@ -64,6 +65,7 @@ use risingwave_pb::batch_plan::PlanNode;
 use risingwave_pb::common::BatchQueryEpoch;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
+pub use source::*;
 pub use table_function::*;
 pub use top_n::TopNExecutor;
 pub use trace::*;
@@ -175,12 +177,10 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
 impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
     pub async fn build(&self) -> Result<BoxedExecutor> {
         self.try_build().await.map_err(|e| {
-            anyhow!(format!(
-                "[PlanNode: {:?}] Failed to build executor: {}",
-                self.plan_node.get_node_body(),
-                e,
-            ))
-            .into()
+            let err_msg = format!("Failed to build executor: {e}");
+            let plan_node_body = self.plan_node.get_node_body();
+            error!("{err_msg}, plan node is: \n {plan_node_body:?}");
+            anyhow!(err_msg).into()
         })
     }
 
@@ -201,7 +201,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Filter => FilterExecutor,
             NodeBody::Project => ProjectExecutor,
             NodeBody::SortAgg => SortAggExecutor,
-            NodeBody::OrderBy => OrderByExecutor,
+            NodeBody::Sort => SortExecutor,
             NodeBody::TopN => TopNExecutor,
             NodeBody::GroupTopN => GroupTopNExecutorBuilder,
             NodeBody::Limit => LimitExecutor,
@@ -215,9 +215,11 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::HopWindow => HopWindowExecutor,
             NodeBody::SysRowSeqScan => SysRowSeqScanExecutorBuilder,
             NodeBody::Expand => ExpandExecutor,
-            NodeBody::LookupJoin => LookupJoinExecutorBuilder,
+            NodeBody::LocalLookupJoin => LocalLookupJoinExecutorBuilder,
+            NodeBody::DistributedLookupJoin => DistributedLookupJoinExecutorBuilder,
             NodeBody::ProjectSet => ProjectSetExecutor,
             NodeBody::Union => UnionExecutor,
+            NodeBody::Source => SourceExecutor,
         }
         .await?;
         let input_desc = real_executor.identity().to_string();
@@ -226,11 +228,9 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
 }
 
 #[cfg(test)]
-pub mod tests {
-
+mod tests {
+    use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::PlanNode;
-    use risingwave_pb::common::batch_query_epoch::Epoch;
-    use risingwave_pb::common::BatchQueryEpoch;
 
     use crate::executor::ExecutorBuilder;
     use crate::task::{ComputeNodeContext, TaskId};
@@ -249,9 +249,7 @@ pub mod tests {
             &plan_node,
             task_id,
             ComputeNodeContext::for_test(),
-            BatchQueryEpoch {
-                epoch: Some(Epoch::Committed(u64::MAX)),
-            },
+            to_committed_batch_query_epoch(u64::MAX),
         );
         let child_plan = &PlanNode {
             ..Default::default()

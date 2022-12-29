@@ -28,11 +28,11 @@ Hummock consists of a manager service on the meta node, clients on worker nodes 
 
 The streaming state store has distinguished workload characteristics.
 
-* Every streaming executor will only ***read and write its own portion of data***, which are multiple consecutive non-overlapping ranges of keys (we call it ***key space***).
+* Every streaming executor will only ***read and write its own portion of data***.
 * Data (generally) ***won’t be shared across nodes***, so every worker node will only read and write its own data. Therefore, every Hummock API, like `get` or `scan`, only guarantees that writes on one node can be immediately read from the same node. In some cases, if we want to read data written from other nodes, we will need to ***wait for the epoch***.
 * Streaming data are ***committed in serial***. Based on the [barrier-based checkpoint algorithm](https://en.wikipedia.org/wiki/Chandy%E2%80%93Lamport_algorithm), the states are persisted epoch by epoch. We can tailor the write path specifically for the epoch-based checkpoint workload.
 
-This leads to the design of Hummock, the cloud-native KV-based streaming state store. We’ll explain concepts like “epoch”, “key space” and “barrier” in the following chapters.
+This leads to the design of Hummock, the cloud-native KV-based streaming state store. We’ll explain concepts like “epoch” and “barrier” in the following chapters.
 
 ## The Hummock User API
 
@@ -93,7 +93,7 @@ After compaction (w/ min watermark = 0), there will eventually be an SST with th
 (b, 1) => 2
 ```
 
-The final written key (aka. full key) is encoded by appending the 8-byte epoch after the user key. When doing full key comparison in Hummock, we should always compare full keys using the `VersionedComparator` to get the correct result.
+The final written key (aka. full key) is encoded by appending the 8-byte epoch after the user key. When doing full key comparison in Hummock, we should always compare full keys using the `KeyComparator` to get the correct result.
 
 ### Write Path
 
@@ -119,8 +119,8 @@ For `scan`, we simply select by overlapping key range. For point get, we will fi
 Hummock implements the following iterators:
 - `BlockIterator`: iterates a block of an SSTable.
 - `SSTableIterator`: iterates an SSTable.
-- `ConcatIterator`: iterates SSTables with non-overlapping keyspaces.
-- `MergeIterator`: iterates SSTables with overlapping keyspaces.
+- `ConcatIterator`: iterates SSTables with non-overlapping key ranges.
+- `MergeIterator`: iterates SSTables with overlapping key ranges.
 - `UserIterator`: wraps internal iterators and outputs user key-value with epoch <= read epoch.
 
 [iterators source code](https://github.com/risingwavelabs/risingwave/tree/main/src/storage/src/hummock/iterator)

@@ -28,7 +28,6 @@ pub struct ComputeNodeConfig {
     pub listen_address: String,
     pub exporter_port: u16,
     pub async_stack_trace: String,
-    pub enable_managed_cache: bool,
     pub enable_tiered_cache: bool,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
@@ -39,6 +38,10 @@ pub struct ComputeNodeConfig {
     pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub user_managed: bool,
     pub enable_in_memory_kv_state_backend: bool,
+    pub connector_rpc_endpoint: String,
+
+    pub total_memory_bytes: usize,
+    pub parallelism: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -58,17 +61,9 @@ pub struct MetaNodeConfig {
 
     pub user_managed: bool,
 
+    pub connector_rpc_endpoint: String,
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
-
-    pub max_heartbeat_interval_secs: u64,
-    pub unsafe_disable_recovery: bool,
-    pub max_idle_secs_to_exit: Option<u64>,
-    pub vacuum_interval_sec: u64,
-    pub collect_gc_watermark_spin_interval_sec: u64,
-    pub min_sst_retention_time_sec: u64,
-    pub enable_committed_sst_sanity_check: bool,
-    pub periodic_compaction_interval_sec: u64,
-    pub enable_compaction_deterministic: bool,
+    pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -84,6 +79,7 @@ pub struct FrontendConfig {
     pub port: u16,
     pub listen_address: String,
     pub exporter_port: u16,
+    pub health_check_port: u16,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,
@@ -153,6 +149,8 @@ pub struct EtcdConfig {
     pub unsafe_no_fsync: bool,
 
     pub exporter_port: u16,
+
+    pub provide_etcd: Option<Vec<EtcdConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -213,6 +211,9 @@ pub struct AwsS3Config {
     phantom_use: Option<String>,
     pub id: String,
     pub bucket: String,
+    // 's3_compatible' is true means using other s3 compatible object store, and the access key
+    // id and access key secret is configured in a specific profile.
+    pub s3_compatible: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -231,6 +232,19 @@ pub struct KafkaConfig {
     pub provide_zookeeper: Option<Vec<ZooKeeperConfig>>,
     pub persist_data: bool,
     pub broker_id: u32,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct PubsubConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+    #[serde(with = "string")]
+    pub port: u16,
+    pub address: String,
+
+    pub persist_data: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -275,6 +289,17 @@ pub struct RedisConfig {
     pub address: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
+pub struct ConnectorNodeConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+    pub port: u16,
+    pub address: String,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -289,9 +314,11 @@ pub enum ServiceConfig {
     Jaeger(JaegerConfig),
     AwsS3(AwsS3Config),
     Kafka(KafkaConfig),
+    Pubsub(PubsubConfig),
     Redis(RedisConfig),
     ZooKeeper(ZooKeeperConfig),
     RedPanda(RedPandaConfig),
+    ConnectorNode(ConnectorNodeConfig),
 }
 
 impl ServiceConfig {
@@ -309,8 +336,10 @@ impl ServiceConfig {
             Self::AwsS3(c) => &c.id,
             Self::ZooKeeper(c) => &c.id,
             Self::Kafka(c) => &c.id,
+            Self::Pubsub(c) => &c.id,
             Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
+            Self::ConnectorNode(c) => &c.id,
         }
     }
 }

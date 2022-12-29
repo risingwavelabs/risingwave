@@ -14,35 +14,35 @@
 
 #![allow(rustdoc::private_intra_doc_links)]
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![feature(backtrace)]
+#![feature(binary_heap_retain)]
 #![feature(iterator_try_collect)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
-#![feature(generic_associated_types)]
 #![feature(more_qualified_paths)]
 #![feature(lint_reasons)]
 #![feature(binary_heap_drain_sorted)]
-#![feature(map_first_last)]
-#![feature(let_else)]
+#![feature(let_chains)]
 #![feature(hash_drain_filter)]
 #![feature(drain_filter)]
 #![feature(generators)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
-#![feature(unzip_option)]
 #![feature(allocator_api)]
 #![feature(map_try_insert)]
 #![feature(result_option_inspect)]
 #![feature(never_type)]
 #![feature(btreemap_alloc)]
 #![feature(once_cell)]
+#![feature(error_generic_member_access)]
+#![feature(provide_any)]
 #![feature(btree_drain_filter)]
+#![feature(bound_map)]
 
 #[macro_use]
 extern crate tracing;
 
 pub mod cache;
-mod common;
+pub mod common;
 pub mod error;
 pub mod executor;
 mod from_proto;

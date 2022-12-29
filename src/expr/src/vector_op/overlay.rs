@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use std::fmt::Write;
 
 use crate::Result;
 
 #[inline(always)]
-pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: BytesWriter) -> Result<BytesGuard> {
+pub fn overlay(s: &str, new_sub_str: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
     // If count is omitted, it defaults to the length of new_sub_str.
     overlay_for(s, new_sub_str, start, new_sub_str.len() as i32, writer)
 }
@@ -28,8 +28,8 @@ pub fn overlay_for(
     new_sub_str: &str,
     start: i32,
     count: i32,
-    writer: BytesWriter,
-) -> Result<BytesGuard> {
+    writer: &mut dyn Write,
+) -> Result<()> {
     let count = count.max(0) as usize;
 
     // If start is out of range, attach it to the end.
@@ -38,21 +38,18 @@ pub fn overlay_for(
 
     let remaining = start + count;
 
-    let mut writer = writer.begin();
-    writer.write_ref(&s[..start])?;
-    writer.write_ref(new_sub_str)?;
+    writer.write_str(&s[..start]).unwrap();
+    writer.write_str(new_sub_str).unwrap();
 
     if remaining < s.len() {
-        writer.write_ref(&s[remaining..])?;
+        writer.write_str(&s[remaining..]).unwrap();
     }
 
-    writer.finish().map_err(Into::into)
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-
     use super::*;
 
     #[test]
@@ -77,16 +74,13 @@ mod tests {
         ];
 
         for (s, new_sub_str, start, count, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let guard = match count {
-                None => overlay(s, new_sub_str, start, writer),
-                Some(count) => overlay_for(s, new_sub_str, start, count, writer),
+            let mut writer = String::new();
+            match count {
+                None => overlay(s, new_sub_str, start, &mut writer),
+                Some(count) => overlay_for(s, new_sub_str, start, count, &mut writer),
             }
             .unwrap();
-            let array = guard.into_inner().finish();
-            let v = array.value_at(0).unwrap();
-            assert_eq!(v, expected);
+            assert_eq!(writer, expected);
         }
     }
 }

@@ -20,26 +20,24 @@ use bytes::Bytes;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::pin_version_response;
 use risingwave_pb::hummock::pin_version_response::Payload;
-use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 use crate::hummock::compactor::Context;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
-use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::local_version::{LocalVersion, ReadVersion};
+use crate::hummock::local_version::{LocalVersion, ReadVersion, SyncUncommittedDataStage};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::shared_buffer_uploader::{
     SharedBufferUploader, UploadTaskPayload,
 };
 use crate::hummock::shared_buffer::OrderIndex;
 use crate::hummock::utils::validate_table_key_range;
-use crate::hummock::{HummockEpoch, HummockResult, SstableIdManagerRef, TrackerId};
+use crate::hummock::{HummockEpoch, HummockError, HummockResult, SstableIdManagerRef, TrackerId};
 use crate::storage_value::StorageValue;
 use crate::store::SyncResult;
 
@@ -54,7 +52,6 @@ pub struct LocalVersionManager {
     buffer_tracker: BufferTracker,
     shared_buffer_uploader: Arc<SharedBufferUploader>,
     sstable_id_manager: SstableIdManagerRef,
-    event_sender: UnboundedSender<HummockEvent>,
 }
 
 impl LocalVersionManager {
@@ -62,7 +59,6 @@ impl LocalVersionManager {
         pinned_version: PinnedVersion,
         compactor_context: Arc<Context>,
         buffer_tracker: BufferTracker,
-        event_sender: UnboundedSender<HummockEvent>,
     ) -> Arc<Self> {
         assert!(pinned_version.is_valid());
         let sstable_id_manager = compactor_context.sstable_id_manager.clone();
@@ -72,12 +68,7 @@ impl LocalVersionManager {
             buffer_tracker,
             shared_buffer_uploader: Arc::new(SharedBufferUploader::new(compactor_context)),
             sstable_id_manager,
-            event_sender,
         })
-    }
-
-    fn send_event(&self, event: HummockEvent) {
-        self.event_sender.send(event).expect("should send success");
     }
 
     pub fn get_buffer_tracker(&self) -> &BufferTracker {
@@ -136,24 +127,30 @@ impl LocalVersionManager {
 
     pub fn write_shared_buffer_batch(&self, batch: SharedBufferBatch) {
         self.write_shared_buffer_inner(batch.epoch(), batch);
-        if self.buffer_tracker.need_more_flush() {
-            self.send_event(HummockEvent::BufferMayFlush);
-        }
     }
 
     pub async fn write_shared_buffer(
         &self,
         epoch: HummockEpoch,
         kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
         table_id: TableId,
     ) -> HummockResult<usize> {
+        let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items);
         let batch = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
-            kv_pairs,
+            sorted_items,
+            size,
+            delete_ranges,
             table_id,
-            Some(self.buffer_tracker.get_memory_limiter().as_ref()),
-        )
-        .await;
+            Some(
+                self.buffer_tracker
+                    .get_memory_limiter()
+                    .require_memory(size as u64)
+                    .await,
+            ),
+        );
         let batch_size = batch.size();
         self.write_shared_buffer_inner(batch.epoch(), batch);
         Ok(batch_size)
@@ -173,13 +170,10 @@ impl LocalVersionManager {
         let shared_buffer = match local_version_guard.get_mut_shared_buffer(epoch) {
             Some(shared_buffer) => shared_buffer,
             None => local_version_guard
-                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size()),
+                .new_shared_buffer(epoch, self.buffer_tracker.global_upload_task_size().clone()),
         };
         // The batch will be synced to S3 asynchronously if it is a local batch
         shared_buffer.write_batch(batch);
-
-        // Notify the buffer tracker after the batch has been added to shared buffer.
-        self.send_event(HummockEvent::BufferMayFlush);
     }
 
     /// Issue a concurrent upload task to flush some local shared buffer batch to object store.
@@ -189,7 +183,10 @@ impl LocalVersionManager {
     /// Return:
     ///   - Some(task join handle) when there is new upload task
     ///   - None when there is no new task
-    pub fn flush_shared_buffer(self: Arc<Self>) -> Option<(HummockEpoch, JoinHandle<()>)> {
+    #[expect(dead_code)]
+    pub(in crate::hummock) fn flush_shared_buffer(
+        self: Arc<Self>,
+    ) -> Option<(HummockEpoch, JoinHandle<()>)> {
         let (epoch, (order_index, payload, task_write_batch_size), compaction_group_index) = {
             let mut local_version_guard = self.local_version.write();
 
@@ -241,28 +238,43 @@ impl LocalVersionManager {
 
     /// send event to `event_handler` thaen seal epoch in local version.
     pub fn seal_epoch(&self, epoch: HummockEpoch, is_checkpoint: bool) {
-        self.send_event(HummockEvent::SealEpoch {
-            epoch,
-            is_checkpoint,
-        });
+        self.local_version.write().seal_epoch(epoch, is_checkpoint);
     }
 
     pub async fn await_sync_shared_buffer(&self, epoch: HummockEpoch) -> HummockResult<SyncResult> {
         tracing::trace!("sync epoch {}", epoch);
 
-        // Wait all epochs' task that less than epoch.
-        let (tx, rx) = oneshot::channel();
-        self.send_event(HummockEvent::SyncEpoch {
-            new_sync_epoch: epoch,
-            sync_result_sender: tx,
-        });
-
-        // TODO: re-enable it when conflict detector has enough information to do conflict detection
-        // if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
-        //     conflict_detector.archive_epoch(epochs.clone());
-        // }
-
-        rx.await.expect("should be able to get result")
+        let future = {
+            // Wait all epochs' task that less than epoch.
+            let mut local_version_guard = self.local_version.write();
+            let (payload, sync_size) = local_version_guard.start_syncing(epoch);
+            let compaction_group_index = local_version_guard
+                .pinned_version()
+                .compaction_group_index();
+            self.run_sync_upload_task(payload, compaction_group_index, sync_size, epoch)
+        };
+        future.await?;
+        let local_version_guard = self.local_version.read();
+        let sync_data = local_version_guard
+            .sync_uncommitted_data
+            .get(&epoch)
+            .expect("should exist");
+        match sync_data.stage() {
+            SyncUncommittedDataStage::CheckpointEpochSealed(_)
+            | SyncUncommittedDataStage::Syncing(_) => {
+                unreachable!("when a join handle is finished, the stage should be synced or failed")
+            }
+            SyncUncommittedDataStage::Failed(_) => Err(HummockError::other("sync task failed")),
+            SyncUncommittedDataStage::Synced(ssts, sync_size) => {
+                let ssts = ssts.clone();
+                let sync_size = *sync_size;
+                drop(local_version_guard);
+                Ok(SyncResult {
+                    sync_size,
+                    uncommitted_ssts: ssts,
+                })
+            }
+        }
     }
 
     pub async fn run_sync_upload_task(
@@ -290,6 +302,7 @@ impl LocalVersionManager {
         }
     }
 
+    #[expect(dead_code)]
     async fn run_flush_upload_task(
         &self,
         order_index: OrderIndex,
@@ -307,7 +320,7 @@ impl LocalVersionManager {
             .get_mut_shared_buffer(epoch)
             .expect("shared buffer should exist since some uncommitted data is not committed yet");
 
-        let ret = match task_result {
+        match task_result {
             Ok(ssts) => {
                 shared_buffer_guard.succeed_upload_task(order_index, ssts);
                 Ok(())
@@ -316,22 +329,20 @@ impl LocalVersionManager {
                 shared_buffer_guard.fail_upload_task(order_index);
                 Err(e)
             }
-        };
-        self.send_event(HummockEvent::BufferMayFlush);
-        ret
+        }
     }
 
     pub fn read_filter<R, B>(
         self: &LocalVersionManager,
         read_epoch: HummockEpoch,
         table_id: TableId,
-        key_range: &R,
+        table_key_range: &R,
     ) -> ReadVersion
     where
-        R: RangeBounds<B>,
+        R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
-        LocalVersion::read_filter(&self.local_version, read_epoch, table_id, key_range)
+        LocalVersion::read_filter(&self.local_version, read_epoch, table_id, table_key_range)
     }
 
     pub fn get_pinned_version(&self) -> PinnedVersion {
@@ -349,10 +360,9 @@ impl LocalVersionManager {
 
 // concurrent worker thread of `LocalVersionManager`
 impl LocalVersionManager {
-    pub async fn clear_shared_buffer(&self) {
-        let (tx, rx) = oneshot::channel();
-        self.send_event(HummockEvent::Clear(tx));
-        rx.await.unwrap();
+    pub fn clear_shared_buffer(&self) {
+        self.local_version.write().shared_buffer.clear();
+        self.local_version.write().sync_uncommitted_data.clear();
     }
 }
 

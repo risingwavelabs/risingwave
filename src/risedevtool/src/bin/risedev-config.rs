@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_else)]
 #![allow(clippy::needless_question_mark)]
 
 use std::fs::OpenOptions;
@@ -24,6 +23,7 @@ use console::style;
 use dialoguer::MultiSelect;
 use enum_iterator::{all, Sequence};
 use itertools::Itertools;
+use risedev::RISEDEV_CONFIG_FILE;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -62,7 +62,9 @@ pub enum Components {
     PrometheusAndGrafana,
     Etcd,
     Kafka,
+    Pubsub,
     Redis,
+    ConnectorNode,
     Tracing,
     RustComponents,
     Dashboard,
@@ -78,7 +80,9 @@ impl Components {
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Etcd => "[Component] Etcd",
             Self::Kafka => "[Component] Kafka",
+            Self::Pubsub => "[Component] Google Pubsub",
             Self::Redis => "[Component] Redis",
+            Self::ConnectorNode => "[Component] RisingWave Connector",
             Self::RustComponents => "[Build] Rust components",
             Self::Dashboard => "[Build] Dashboard v2",
             Self::Tracing => "[Component] Tracing: Jaeger",
@@ -107,6 +111,11 @@ Required if you want to persistent meta-node data.
             Self::Kafka => {
                 "
 Required if you want to create source from Kafka.
+                "
+            }
+            Self::Pubsub => {
+                "
+Required if you want to create source from Emulated Google Pub/sub.
                 "
             }
             Self::RustComponents => {
@@ -148,6 +157,11 @@ a dev cluster.
 Required if you want to sink data to redis.
                 "
             }
+            Self::ConnectorNode => {
+                "
+Required if you want to create CDC source from external Databases.
+                "
+            }
         }
         .into()
     }
@@ -158,6 +172,7 @@ Required if you want to sink data to redis.
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
             "ENABLE_ETCD" => Some(Self::Etcd),
             "ENABLE_KAFKA" => Some(Self::Kafka),
+            "ENABLE_PUBSUB" => Some(Self::Pubsub),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
             "ENABLE_BUILD_DASHBOARD_V2" => Some(Self::Dashboard),
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
@@ -165,6 +180,7 @@ Required if you want to sink data to redis.
             "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
+            "ENABLE_RW_CONNECTOR" => Some(Self::ConnectorNode),
             _ => None,
         }
     }
@@ -175,6 +191,7 @@ Required if you want to sink data to redis.
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
             Self::Kafka => "ENABLE_KAFKA",
+            Self::Pubsub => "ENABLE_PUBSUB",
             Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD_V2",
@@ -182,6 +199,7 @@ Required if you want to sink data to redis.
             Self::Release => "ENABLE_RELEASE_PROFILE",
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
+            Self::ConnectorNode => "ENABLE_RW_CONNECTOR",
         }
         .into()
     }
@@ -360,7 +378,7 @@ fn main() -> Result<()> {
     println!(
         "If you want to use these components, please {} in {} to start that component.",
         style("modify the cluster config").yellow().bold(),
-        style("risedev.yml").bold(),
+        style(RISEDEV_CONFIG_FILE).bold(),
     );
     println!("See CONTRIBUTING.md or RiseDev's readme for more information.");
 

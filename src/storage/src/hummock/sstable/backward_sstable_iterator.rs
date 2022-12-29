@@ -16,7 +16,8 @@ use std::cmp::Ordering::{Equal, Less};
 use std::future::Future;
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::KeyComparator;
 
 use crate::hummock::iterator::{Backward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -93,9 +94,7 @@ impl HummockIterator for BackwardSstableIterator {
         self.stats.total_key_count += 1;
         async move {
             let block_iter = self.block_iter.as_mut().expect("no block iter");
-            block_iter.prev();
-
-            if block_iter.is_valid() {
+            if block_iter.try_prev() {
                 Ok(())
             } else {
                 // seek to the previous block
@@ -104,8 +103,8 @@ impl HummockIterator for BackwardSstableIterator {
         }
     }
 
-    fn key(&self) -> &[u8] {
-        self.block_iter.as_ref().expect("no block iter").key()
+    fn key(&self) -> FullKey<&[u8]> {
+        FullKey::decode(self.block_iter.as_ref().expect("no block iter").key())
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -127,8 +126,10 @@ impl HummockIterator for BackwardSstableIterator {
         }
     }
 
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
+            let encoded_key = key.encode();
+            let encoded_key_slice = encoded_key.as_slice();
             let block_idx = self
                 .sst
                 .value()
@@ -138,14 +139,16 @@ impl HummockIterator for BackwardSstableIterator {
                     // Compare by version comparator
                     // Note: we are comparing against the `smallest_key` of the `block`, thus the
                     // partition point should be `prev(<=)` instead of `<`.
-                    let ord =
-                        VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
+                    let ord = KeyComparator::compare_encoded_full_key(
+                        block_meta.smallest_key.as_slice(),
+                        encoded_key_slice,
+                    );
                     ord == Less || ord == Equal
                 })
                 .saturating_sub(1); // considering the boundary of 0
             let block_idx = block_idx as isize;
 
-            self.seek_idx(block_idx, Some(key)).await?;
+            self.seek_idx(block_idx, Some(encoded_key_slice)).await?;
             if !self.is_valid() {
                 // Seek to prev block
                 self.seek_idx(block_idx - 1, None).await?;
@@ -175,14 +178,14 @@ impl SstableIteratorType for BackwardSstableIterator {
 mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
-    use risingwave_hummock_sdk::key::key_with_epoch;
+    use risingwave_common::catalog::TableId;
 
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
         create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
-        prefixed_key, test_key_of, test_value_of, TEST_KEYS_COUNT,
+        test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
 
     #[tokio::test]
@@ -205,7 +208,7 @@ mod tests {
             cnt -= 1;
             let key = sstable_iter.key();
             let value = sstable_iter.value();
-            assert_bytes_eq!(key, test_key_of(cnt));
+            assert_eq!(key, test_key_of(cnt).to_ref());
             assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
             sstable_iter.next().await.unwrap();
         }
@@ -231,38 +234,40 @@ mod tests {
 
         // We seek and access all the keys in random order
         for i in all_key_to_test {
-            sstable_iter.seek(&test_key_of(i)).await.unwrap();
+            sstable_iter.seek(test_key_of(i).to_ref()).await.unwrap();
             // sstable_iter.next().await.unwrap();
             let key = sstable_iter.key();
-            assert_bytes_eq!(key, test_key_of(i));
+            assert_eq!(key, test_key_of(i).to_ref());
         }
 
         // Seek to key #TEST_KEYS_COUNT-500 and start iterating
         sstable_iter
-            .seek(&test_key_of(TEST_KEYS_COUNT - 500))
+            .seek(test_key_of(TEST_KEYS_COUNT - 500).to_ref())
             .await
             .unwrap();
         for i in (0..TEST_KEYS_COUNT - 500 + 1).rev() {
             let key = sstable_iter.key();
-            assert_eq!(key, test_key_of(i), "key index:{}", i);
+            assert_eq!(key, test_key_of(i).to_ref(), "key index:{}", i);
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());
 
-        let largest_key = key_with_epoch(
-            prefixed_key(format!("key_zzzz_{:05}", 0).as_bytes()).to_vec(),
+        let largest_key = FullKey::for_test(
+            TableId::default(),
+            format!("key_zzzz_{:05}", 0).as_bytes().to_vec(),
             233,
         );
-        sstable_iter.seek(largest_key.as_slice()).await.unwrap();
+        sstable_iter.seek(largest_key.to_ref()).await.unwrap();
         let key = sstable_iter.key();
-        assert_eq!(key, test_key_of(TEST_KEYS_COUNT - 1));
+        assert_eq!(key, test_key_of(TEST_KEYS_COUNT - 1).to_ref());
 
         // Seek to > last key
-        let smallest_key = key_with_epoch(
-            prefixed_key(format!("key_aaaa_{:05}", 0).as_bytes()).to_vec(),
+        let smallest_key = FullKey::for_test(
+            TableId::default(),
+            format!("key_aaaa_{:05}", 0).as_bytes().to_vec(),
             233,
         );
-        sstable_iter.seek(smallest_key.as_slice()).await.unwrap();
+        sstable_iter.seek(smallest_key.to_ref()).await.unwrap();
         assert!(!sstable_iter.is_valid());
 
         // Seek to non-existing key
@@ -273,17 +278,18 @@ mod tests {
             // (will produce `key_test_00004`).
             sstable_iter
                 .seek(
-                    key_with_epoch(
-                        prefixed_key(format!("key_test_{:05}", idx * 2 - 1).as_bytes()).to_vec(),
+                    FullKey::for_test(
+                        TableId::default(),
+                        format!("key_test_{:05}", idx * 2 - 1).as_bytes().to_vec(),
                         0,
                     )
-                    .as_slice(),
+                    .to_ref(),
                 )
                 .await
                 .unwrap();
 
             let key = sstable_iter.key();
-            assert_eq!(key, test_key_of(idx - 1));
+            assert_eq!(key, test_key_of(idx - 1).to_ref());
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::valid_table_name;
 use risingwave_common::error::ErrorCode::PermissionDenied;
@@ -23,26 +22,24 @@ use super::privilege::check_super_user;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::handler::drop_table::check_source;
-use crate::session::OptimizerContext;
+use crate::catalog::table_catalog::TableType;
+use crate::catalog::CatalogError;
+use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_mv(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     table_name: ObjectName,
     if_exists: bool,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, table_name)?;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let search_path = session.config().get_search_path();
     let user_name = &session.auth_context().user_name;
 
-    let schema_path = match schema_name.as_deref() {
-        Some(schema_name) => SchemaPath::Name(schema_name),
-        None => SchemaPath::Path(&search_path, user_name),
-    };
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let (table_id, index_ids) = {
+    let table_id = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             match reader.get_table_by_name(session.database(), schema_path, &table_name) {
@@ -57,8 +54,13 @@ pub async fn handle_drop_mv(
                             ),
                         ))
                     } else {
-                        Err(e)
-                    }
+                        match e {
+                            CatalogError::NotFound(kind, name) if kind == "table" => {
+                                Err(CatalogError::NotFound("materialized view", name).into())
+                            }
+                            _ => Err(e.into()),
+                        }
+                    };
                 }
             };
 
@@ -74,18 +76,29 @@ pub async fn handle_drop_mv(
         }
 
         // If associated source is `Some`, then it is actually a materialized source / table v2.
-        if table.associated_source_id().is_some() {
-            check_source(&reader, db_name, schema_name, &table_name)?;
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP TABLE` to drop a table.".to_owned(),
-            )));
-        }
-
-        // If is index on is `Some`, then it is actually an index.
-        if table.is_index {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP INDEX` to drop an index.".to_owned(),
-            )));
+        match table.table_type() {
+            TableType::MaterializedView => {}
+            TableType::Table => {
+                // TODO(Yuanxin): Remove this after unsupporting `CREATE MATERIALIZED SOURCE`.
+                if table.associated_source_id().is_some() {
+                    return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                        "Use `DROP SOURCE` to drop a source.".to_owned(),
+                    )));
+                }
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP TABLE` to drop a table.".to_owned(),
+                )));
+            }
+            TableType::Index => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP INDEX` to drop an index.".to_owned(),
+                )));
+            }
+            TableType::Internal => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Internal tables cannot be dropped.".to_owned(),
+                )));
+            }
         }
 
         // If the name is not valid, then it is actually an internal table.
@@ -95,19 +108,11 @@ pub async fn handle_drop_mv(
             )));
         }
 
-        let index_ids = schema_catalog
-            .get_indexes_by_table_id(&table.id)
-            .iter()
-            .map(|x| x.id)
-            .collect_vec();
-
-        (table.id(), index_ids)
+        table.id()
     };
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer
-        .drop_materialized_view(table_id, index_ids)
-        .await?;
+    catalog_writer.drop_materialized_view(table_id).await?;
 
     Ok(PgResponse::empty_result(
         StatementType::DROP_MATERIALIZED_VIEW,

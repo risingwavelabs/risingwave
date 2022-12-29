@@ -23,14 +23,14 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::handler::privilege::ObjectCheckItem;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
 pub async fn handle_create_schema(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     schema_name: ObjectName,
     if_not_exist: bool,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let database_name = session.database();
     let schema_name = Binder::resolve_schema_name(schema_name)?;
 

@@ -97,7 +97,7 @@ impl CacheFile {
             fallocate(
                 fd,
                 FallocateFlags::FALLOC_FL_KEEP_SIZE,
-                stat.st_size as i64,
+                stat.st_size,
                 options.fallocate_unit as i64,
             )?;
             Ok((

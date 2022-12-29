@@ -16,10 +16,11 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 
 use super::RwPgResponse;
-use crate::session::{OptimizerContext, SessionImpl};
+use crate::handler::HandlerArgs;
+use crate::session::SessionImpl;
 
-pub(super) async fn handle_flush(context: OptimizerContext) -> Result<RwPgResponse> {
-    do_flush(&context.session_ctx).await?;
+pub(super) async fn handle_flush(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    do_flush(&handler_args.session).await?;
     Ok(PgResponse::empty_result(StatementType::FLUSH))
 }
 

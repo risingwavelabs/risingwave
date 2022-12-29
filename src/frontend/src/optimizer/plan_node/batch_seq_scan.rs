@@ -26,7 +26,7 @@ use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
-use crate::optimizer::property::{Distribution, DistributionDisplay};
+use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone)]
@@ -39,12 +39,12 @@ pub struct BatchSeqScan {
 impl BatchSeqScan {
     fn new_inner(logical: LogicalScan, dist: Distribution, scan_ranges: Vec<ScanRange>) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            dist,
-            logical.get_out_column_index_order(),
-        );
+        let order = if scan_ranges.len() > 1 {
+            Order::any()
+        } else {
+            logical.get_out_column_index_order()
+        };
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, order);
 
         {
             // validate scan_range
@@ -93,7 +93,10 @@ impl BatchSeqScan {
                             // They are incompatible, so we just specify its distribution as
                             // `SomeShard` to force an exchange is
                             // inserted.
-                            Distribution::UpstreamHashShard(distribution_key)
+                            Distribution::UpstreamHashShard(
+                                distribution_key,
+                                self.logical.table_desc().table_id,
+                            )
                         }
                     }
                 }
@@ -220,7 +223,7 @@ impl ToBatchProst for BatchSeqScan {
 
         if self.logical.is_sys_table() {
             NodeBody::SysRowSeqScan(SysRowSeqScanNode {
-                table_name: self.logical.table_name().to_string(),
+                table_id: self.logical.table_desc().table_id.table_id,
                 column_descs,
             })
         } else {
@@ -235,6 +238,7 @@ impl ToBatchProst for BatchSeqScan {
                 scan_ranges: self.scan_ranges.iter().map(|r| r.to_protobuf()).collect(),
                 // To be filled by the scheduler.
                 vnode_bitmap: None,
+                ordered: !self.order().is_any(),
             })
         }
     }

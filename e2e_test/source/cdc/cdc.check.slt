@@ -1,0 +1,28 @@
+# CDC source basic test
+
+query I
+select cnt from products_cnt;
+----
+9
+
+query II
+select cnt from orders_cnt;
+----
+3
+
+query III
+select cnt from shipments_cnt;
+----
+3
+
+query IIII
+select order_id, product_id, shipment_id from enriched_orders order by order_id;
+----
+10001  102   1001
+10002  105   1002
+10003  106   1003
+
+query V
+select count(*) as cnt from mytable;
+----
+4

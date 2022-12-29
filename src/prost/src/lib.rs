@@ -24,6 +24,9 @@ pub mod catalog;
 #[cfg_attr(madsim, path = "sim/common.rs")]
 pub mod common;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/compute.rs")]
+pub mod compute;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/data.rs")]
 pub mod data;
 #[rustfmt::skip]
@@ -45,6 +48,9 @@ pub mod batch_plan;
 #[cfg_attr(madsim, path = "sim/task_service.rs")]
 pub mod task_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path="sim/connector_service.rs")]
+pub mod connector_service;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/stream_plan.rs")]
 pub mod stream_plan;
 #[rustfmt::skip]
@@ -53,6 +59,9 @@ pub mod stream_service;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/hummock.rs")]
 pub mod hummock;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/compactor.rs")]
+pub mod compactor;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/user.rs")]
 pub mod user;
@@ -63,15 +72,23 @@ pub mod source;
 #[cfg_attr(madsim, path = "sim/monitor_service.rs")]
 pub mod monitor_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/backup_service.rs")]
+pub mod backup_service;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/health.rs")]
 pub mod health;
-
+#[rustfmt::skip]
+#[path = "connector_service.serde.rs"]
+pub mod connector_service_serde;
 #[rustfmt::skip]
 #[path = "catalog.serde.rs"]
 pub mod catalog_serde;
 #[rustfmt::skip]
 #[path = "common.serde.rs"]
 pub mod common_serde;
+#[rustfmt::skip]
+#[path = "compute.serde.rs"]
+pub mod compute_serde;
 #[rustfmt::skip]
 #[path = "data.serde.rs"]
 pub mod data_serde;
@@ -103,6 +120,9 @@ pub mod stream_service_serde;
 #[path = "hummock.serde.rs"]
 pub mod hummock_serde;
 #[rustfmt::skip]
+#[path = "compactor.serde.rs"]
+pub mod compactor_serde;
+#[rustfmt::skip]
 #[path = "user.serde.rs"]
 pub mod user_serde;
 #[rustfmt::skip]
@@ -111,6 +131,9 @@ pub mod source_serde;
 #[rustfmt::skip]
 #[path = "monitor_service.serde.rs"]
 pub mod monitor_service_serde;
+#[rustfmt::skip]
+#[path = "backup_service.serde.rs"]
+pub mod backup_service_serde;
 
 
 #[derive(Clone, PartialEq, Eq, Debug)]

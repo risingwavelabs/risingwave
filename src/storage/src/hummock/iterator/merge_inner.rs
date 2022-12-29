@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
 use std::future::Future;
+use std::ops::{Deref, DerefMut};
 
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use tracing::warn;
 
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::value::HummockValue;
@@ -55,12 +56,8 @@ impl<I: HummockIterator> PartialOrd for Node<I, UnorderedNodeExtra> {
         // order should be reversed.
 
         Some(match I::Direction::direction() {
-            DirectionEnum::Forward => {
-                VersionedComparator::compare_key(other.iter.key(), self.iter.key())
-            }
-            DirectionEnum::Backward => {
-                VersionedComparator::compare_key(self.iter.key(), other.iter.key())
-            }
+            DirectionEnum::Forward => other.iter.key().cmp(&self.iter.key()),
+            DirectionEnum::Backward => self.iter.key().cmp(&other.iter.key()),
         })
     }
 }
@@ -70,14 +67,16 @@ impl<I: HummockIterator> PartialOrd for Node<I, OrderedNodeExtra> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         // The `extra_info` is used as a tie-breaker when the keys are equal.
         Some(match I::Direction::direction() {
-            DirectionEnum::Forward => {
-                VersionedComparator::compare_key(other.iter.key(), self.iter.key())
-                    .then_with(|| other.extra_order_info.cmp(&self.extra_order_info))
-            }
-            DirectionEnum::Backward => {
-                VersionedComparator::compare_key(self.iter.key(), other.iter.key())
-                    .then_with(|| self.extra_order_info.cmp(&other.extra_order_info))
-            }
+            DirectionEnum::Forward => other
+                .iter
+                .key()
+                .cmp(&self.iter.key())
+                .then_with(|| other.extra_order_info.cmp(&self.extra_order_info)),
+            DirectionEnum::Backward => self
+                .iter
+                .key()
+                .cmp(&other.iter.key())
+                .then_with(|| self.extra_order_info.cmp(&other.extra_order_info)),
         })
     }
 }
@@ -101,6 +100,8 @@ pub struct MergeIteratorInner<I: HummockIterator, NE: NodeExtraOrderInfo> {
 
     /// The heap for merge sort.
     heap: BinaryHeap<Node<I, NE>>,
+
+    last_table_key: Vec<u8>,
 }
 
 /// An order aware merge iterator.
@@ -127,6 +128,7 @@ impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
                 })
                 .collect(),
             heap: BinaryHeap::new(),
+            last_table_key: Vec::new(),
         }
     }
 }
@@ -165,6 +167,7 @@ impl<I: HummockIterator> UnorderedMergeIteratorInner<I> {
                 })
                 .collect(),
             heap: BinaryHeap::new(),
+            last_table_key: Vec::new(),
         }
     }
 }
@@ -199,46 +202,113 @@ trait MergeIteratorNext {
     fn next_inner(&mut self) -> Self::HummockResultFuture<'_>;
 }
 
+/// This is a wrapper for the `PeekMut` of heap.
+///
+/// Several panics due to future cancellation are caused by calling `drop` on the `PeekMut` when
+/// futures holding the `PeekMut` are cancelled and dropped. Dropping a `PeekMut` will accidentally
+/// cause a comparison between the top node and the node below, and may call `key()` for top node
+/// iterators that are in some intermediate inconsistent states.
+///
+/// When a `PeekMut` is wrapped by this guard, when the guard is dropped, `PeekMut::pop` will be
+/// called on the `PeekMut`, and the popped node will be added to the linked list that collects the
+/// unused nodes. In this way, when the future holding the guard is dropped, the `PeekMut` will not
+/// be called `drop`, and there will not be unexpected `key()` called for heap comparison.
+///
+/// In normal usage, when we finished using the `PeekMut`, we should explicitly call `guard.used()`
+/// in every branch carefully. When we want to pop the `PeekMut`, we can simply call `guard.pop()`.
+struct PeekMutGuard<'a, T: Ord> {
+    peek: Option<PeekMut<'a, T>>,
+    unused: &'a mut LinkedList<T>,
+}
+
+impl<'a, T: Ord> PeekMutGuard<'a, T> {
+    /// Call `peek_mut` on the top of heap and return a guard over the `PeekMut` if the heap is not
+    /// empty.
+    fn peek_mut(heap: &'a mut BinaryHeap<T>, unused: &'a mut LinkedList<T>) -> Option<Self> {
+        heap.peek_mut().map(|peek| Self {
+            peek: Some(peek),
+            unused,
+        })
+    }
+
+    /// Call `pop` on the `PeekMut`.
+    fn pop(mut self) -> T {
+        PeekMut::pop(self.peek.take().expect("should not be None"))
+    }
+
+    /// Mark finish using the `PeekMut`. `drop` will be called on the `PeekMut` directly.
+    fn used(mut self) {
+        self.peek.take().expect("should not be None");
+    }
+}
+
+impl<'a, T: Ord> Deref for PeekMutGuard<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.peek.as_ref().expect("should not be None")
+    }
+}
+
+impl<'a, T: Ord> DerefMut for PeekMutGuard<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.peek.as_mut().expect("should not be None")
+    }
+}
+
+impl<'a, T: Ord> Drop for PeekMutGuard<'a, T> {
+    /// When the guard is dropped, if `pop` or `used` is not called before it is dropped, we will
+    /// call `PeekMut::pop` on the `PeekMut` and recycle the node to the unused list.
+    fn drop(&mut self) {
+        if let Some(peek) = self.peek.take() {
+            warn!("PeekMut are dropped without used. May be caused by future cancellation");
+            let top = PeekMut::pop(peek);
+            self.unused.push_back(top);
+        }
+    }
+}
+
 impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
-    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>>;
+    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
         async {
-            let top_node = self.heap.pop().expect("no inner iter");
-            let mut popped_nodes = vec![];
-
-            // Take all nodes with the same current key as the top_node out of the heap.
-            while let Some(next_node) = self.heap.peek_mut() {
-                match VersionedComparator::compare_key(top_node.iter.key(), next_node.iter.key()) {
-                    Ordering::Equal => {
-                        popped_nodes.push(PeekMut::pop(next_node));
-                    }
-                    _ => break,
+            let top_key = {
+                let top_key = self.heap.peek().expect("no inner iter").iter.key();
+                self.last_table_key.clear();
+                self.last_table_key
+                    .extend_from_slice(top_key.user_key.table_key.0);
+                FullKey {
+                    user_key: UserKey {
+                        table_id: top_key.user_key.table_id,
+                        table_key: TableKey(self.last_table_key.as_slice()),
+                    },
+                    epoch: top_key.epoch,
                 }
-            }
+            };
+            loop {
+                let Some(mut node) = PeekMutGuard::peek_mut(&mut self.heap, &mut self.unused_iters) else {
+                    break;
+                };
+                // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places
+                // of return. Once the iterator enters an invalid state, we should
+                // remove it from heap before returning.
 
-            popped_nodes.push(top_node);
-
-            // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
-            // return. Once the iterator enters an invalid state, we should remove it from heap
-            // before returning.
-
-            // Put the popped nodes back to the heap if valid or unused_iters if invalid.
-            for mut node in popped_nodes {
-                match node.iter.next().await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        // If the iterator returns error, we should clear the heap, so that this
-                        // iterator becomes invalid.
+                if node.iter.key() == top_key {
+                    if let Err(e) = node.iter.next().await {
+                        node.pop();
                         self.heap.clear();
                         return Err(e);
+                    };
+                    if !node.iter.is_valid() {
+                        let node = node.pop();
+                        self.unused_iters.push_back(node);
+                    } else {
+                        node.used();
                     }
-                }
-
-                if !node.iter.is_valid() {
-                    self.unused_iters.push_back(node);
                 } else {
-                    self.heap.push(node);
+                    node.used();
+                    break;
                 }
             }
 
@@ -248,11 +318,12 @@ impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
 }
 
 impl<I: HummockIterator> MergeIteratorNext for UnorderedMergeIteratorInner<I> {
-    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>>;
+    type HummockResultFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
 
     fn next_inner(&mut self) -> Self::HummockResultFuture<'_> {
         async {
-            let mut node = self.heap.peek_mut().expect("no inner iter");
+            let mut node = PeekMutGuard::peek_mut(&mut self.heap, &mut self.unused_iters)
+                .expect("no inner iter");
 
             // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
             // return. Once the iterator enters an invalid state, we should remove it from heap
@@ -263,7 +334,7 @@ impl<I: HummockIterator> MergeIteratorNext for UnorderedMergeIteratorInner<I> {
                 Err(e) => {
                     // If the iterator returns error, we should clear the heap, so that this
                     // iterator becomes invalid.
-                    PeekMut::pop(node);
+                    node.pop();
                     self.heap.clear();
                     return Err(e);
                 }
@@ -271,11 +342,11 @@ impl<I: HummockIterator> MergeIteratorNext for UnorderedMergeIteratorInner<I> {
 
             if !node.iter.is_valid() {
                 // Put back to `unused_iters`
-                let node = PeekMut::pop(node);
+                let node = node.pop();
                 self.unused_iters.push_back(node);
             } else {
                 // This will update the heap top.
-                drop(node);
+                node.used();
             }
 
             Ok(())
@@ -298,7 +369,7 @@ where
         self.next_inner()
     }
 
-    fn key(&self) -> &[u8] {
+    fn key(&self) -> FullKey<&[u8]> {
         self.heap.peek().expect("no inner iter").iter.key()
     }
 
@@ -320,7 +391,7 @@ where
         }
     }
 
-    fn seek<'a>(&'a mut self, key: &'a [u8]) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
             self.reset_heap();
             futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.seek(key)))

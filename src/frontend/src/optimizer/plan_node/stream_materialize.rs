@@ -23,13 +23,14 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
 use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::table_catalog::TableCatalog;
+use crate::catalog::table_catalog::{TableCatalog, TableType};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::WithOptions;
 
 /// The first column id to allocate for a new materialized view.
 ///
@@ -46,27 +47,9 @@ pub struct StreamMaterialize {
 }
 
 impl StreamMaterialize {
-    fn derive_plan_base(input: &PlanRef) -> Result<PlanBase> {
-        let ctx = input.ctx();
-
-        let schema = input.schema().clone();
-        let pk_indices = input.logical_pk();
-
-        // Materialize executor won't change the append-only behavior of the stream, so it depends
-        // on input's `append_only`.
-        Ok(PlanBase::new_stream(
-            ctx,
-            schema,
-            pk_indices.to_vec(),
-            input.functional_dependency().clone(),
-            input.distribution().clone(),
-            input.append_only(),
-        ))
-    }
-
     #[must_use]
     pub fn new(input: PlanRef, table: TableCatalog) -> Self {
-        let base = Self::derive_plan_base(&input).unwrap();
+        let base = PlanBase::derive_stream_plan_base(&input);
         Self { base, input, table }
     }
 
@@ -84,8 +67,9 @@ impl StreamMaterialize {
         out_names: Vec<String>,
         is_index: bool,
         definition: String,
-        // If user_assign_names is Some(_), we will use it instead of out_names.
-        user_assign_names: Option<Vec<String>>,
+        handle_pk_conflict: bool,
+        row_id_index: Option<usize>,
+        table_type: TableType,
     ) -> Result<Self> {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
@@ -105,22 +89,10 @@ impl StreamMaterialize {
         };
 
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
-        let base = Self::derive_plan_base(&input)?;
+        let base = PlanBase::derive_stream_plan_base(&input);
         let schema = &base.schema;
-        let pk_indices = &base.logical_pk;
+        let pk_indices = &base.logical_pk.iter().copied().unique().collect_vec();
 
-        let out_names = if let Some(user_assign_names) = user_assign_names {
-            // Len of user_assign_names(User specified column names) should equal to output columns.
-            if user_assign_names.len() != out_names.len() {
-                return Err(InternalError(
-                    "number of column names does not match number of columns".to_string(),
-                )
-                .into());
-            }
-            user_assign_names
-        } else {
-            out_names
-        };
         let mut col_names = HashSet::new();
         for name in &out_names {
             if !col_names.insert(name.clone()) {
@@ -180,8 +152,9 @@ impl StreamMaterialize {
         }
 
         let ctx = input.ctx();
-        let properties = ctx.inner().with_options.internal_table_subset();
-
+        let distribution_key = base.dist.dist_column_indices().to_vec();
+        let properties = ctx.with_options().internal_table_subset();
+        let read_prefix_len_hint = pk_indices.len();
         let table = TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -189,16 +162,19 @@ impl StreamMaterialize {
             columns,
             pk: pk_list,
             stream_key: pk_indices.clone(),
-            distribution_key: base.dist.dist_column_indices().to_vec(),
-            is_index,
-            appendonly: input.append_only(),
+            distribution_key,
+            table_type,
+            append_only: input.append_only(),
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
-            vnode_col_idx: None,
+            vnode_col_index: None,
+            row_id_index,
             value_indices,
             definition,
+            handle_pk_conflict,
+            read_prefix_len_hint,
         };
 
         Ok(Self { base, input, table })
@@ -212,6 +188,16 @@ impl StreamMaterialize {
 
     pub fn name(&self) -> &str {
         self.table.name()
+    }
+
+    pub fn rewrite_into_sink(self, properties: WithOptions) -> StreamSink {
+        let Self {
+            base,
+            input,
+            mut table,
+        } = self;
+        table.properties = properties;
+        StreamSink::with_base(input, table, base)
     }
 }
 
@@ -279,7 +265,7 @@ impl StreamNode for StreamMaterialize {
                 .map(FieldOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
-            ignore_on_conflict: true,
+            handle_pk_conflict: self.table.handle_pk_conflict(),
         })
     }
 }

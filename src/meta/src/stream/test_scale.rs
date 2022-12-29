@@ -19,7 +19,7 @@ mod tests {
     use itertools::Itertools;
     use maplit::btreeset;
     use risingwave_common::buffer::Bitmap;
-    use risingwave_common::types::{ParallelUnitId, VIRTUAL_NODE_COUNT};
+    use risingwave_common::hash::{ParallelUnitId, VirtualNode};
     use risingwave_common::util::compress::decompress_data;
     use risingwave_pb::common::ParallelUnit;
     use risingwave_pb::stream_plan::{ActorMapping, StreamActor};
@@ -34,7 +34,7 @@ mod tests {
     };
 
     fn simulated_parallel_unit_nums(min: Option<usize>, max: Option<usize>) -> Vec<usize> {
-        let mut raw = vec![1, 3, 12, 42, VIRTUAL_NODE_COUNT];
+        let mut raw = vec![1, 3, 12, 42, VirtualNode::COUNT];
         if let Some(min) = min {
             raw.drain_filter(|n| *n <= min);
             raw.push(min);
@@ -74,7 +74,7 @@ mod tests {
     fn check_affinity_for_scale_in(bitmap: &Bitmap, actor: &StreamActor) {
         let prev_bitmap = Bitmap::from(actor.vnode_bitmap.as_ref().unwrap());
 
-        for idx in 0..VIRTUAL_NODE_COUNT {
+        for idx in 0..VirtualNode::COUNT {
             if prev_bitmap.is_set(idx) {
                 assert!(bitmap.is_set(idx));
             }
@@ -82,7 +82,7 @@ mod tests {
     }
 
     fn check_bitmaps<T>(bitmaps: &HashMap<T, Bitmap>) {
-        let mut target = (0..VIRTUAL_NODE_COUNT).map(|_| false).collect_vec();
+        let mut target = (0..VirtualNode::COUNT).map(|_| false).collect_vec();
 
         for bitmap in bitmaps.values() {
             for (idx, pos) in target.iter_mut().enumerate() {
@@ -98,7 +98,7 @@ mod tests {
             assert!(*b, "vnode {} should be set", idx);
         }
 
-        let vnodes = bitmaps.values().map(|bitmap| bitmap.num_high_bits());
+        let vnodes = bitmaps.values().map(|bitmap| bitmap.count_ones());
         let (min, max) = vnodes.minmax().into_option().unwrap();
 
         assert!((max - min) <= 1, "min {} max {}", min, max);
@@ -113,7 +113,7 @@ mod tests {
             let parallel_units = generate_parallel_units(&info);
             let vnode_mapping = build_vnode_mapping(&parallel_units);
 
-            assert_eq!(vnode_mapping.len(), VIRTUAL_NODE_COUNT);
+            assert_eq!(vnode_mapping.len(), VirtualNode::COUNT);
 
             let mut check: HashMap<u32, Vec<_>> = HashMap::new();
             for (idx, parallel_unit_id) in vnode_mapping.into_iter().enumerate() {
@@ -249,13 +249,13 @@ mod tests {
             check_bitmaps(&result);
 
             let (_, bitmap) = result.iter().exactly_one().unwrap();
-            assert!(bitmap.is_all_set());
+            assert!(bitmap.all());
         }
     }
 
     #[test]
     fn test_rebalance_scale_out() {
-        for parallel_unit_num in simulated_parallel_unit_nums(Some(3), Some(VIRTUAL_NODE_COUNT - 1))
+        for parallel_unit_num in simulated_parallel_unit_nums(Some(3), Some(VirtualNode::COUNT - 1))
         {
             let actors = build_fake_actors(
                 &(0..parallel_unit_num)
@@ -274,9 +274,9 @@ mod tests {
                     .map(|i| (i as ActorId, i as ParallelUnitId))
                     .collect_vec(),
             );
-            // add to VIRTUAL_NODE_COUNT
+            // add to VirtualNode::COUNT
             let actors_to_add =
-                (parallel_unit_num as ActorId..VIRTUAL_NODE_COUNT as ActorId).collect();
+                (parallel_unit_num as ActorId..VirtualNode::COUNT as ActorId).collect();
             let result = rebalance_actor_vnode(&actors, &BTreeSet::new(), &actors_to_add);
             assert_eq!(result.len(), actors.len() + actors_to_add.len());
             check_bitmaps(&result);
@@ -374,7 +374,7 @@ mod tests {
 
     #[test]
     fn test_rebalance_scale_real() {
-        let parallel_units = (0..(VIRTUAL_NODE_COUNT - 1) as ActorId)
+        let parallel_units = (0..(VirtualNode::COUNT - 1) as ActorId)
             .map(|i| (i, i))
             .collect_vec();
         let actors = build_fake_actors(&parallel_units);

@@ -14,29 +14,29 @@
 
 use std::collections::HashSet;
 
-use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
+use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tonic::{Request, Response, Status};
 
+use crate::barrier::BarrierManagerRef;
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType, IndexId,
-    MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, StreamingJobBackgroundDeleterRef,
-    StreamingJobId, TableId,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, IdCategoryType,
+    MetaSrvEnv, NotificationVersion, SourceId, StreamingJob, TableId,
 };
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    ActorGraphBuilder, CreateMaterializedViewContext, GlobalStreamManagerRef, SourceManagerRef,
+    ActorGraphBuilder, CreateStreamingJobContext, GlobalStreamManagerRef, SourceManagerRef,
 };
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 #[derive(Clone)]
 pub struct DdlServiceImpl<S: MetaStore> {
@@ -47,7 +47,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
     source_manager: SourceManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
-    table_background_deleter: StreamingJobBackgroundDeleterRef,
+    barrier_manager: BarrierManagerRef<S>,
 }
 
 impl<S> DdlServiceImpl<S>
@@ -62,7 +62,7 @@ where
         source_manager: SourceManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
-        table_background_deleter: StreamingJobBackgroundDeleterRef,
+        barrier_manager: BarrierManagerRef<S>,
     ) -> Self {
         Self {
             env,
@@ -71,7 +71,7 @@ where
             source_manager,
             cluster_manager,
             fragment_manager,
-            table_background_deleter,
+            barrier_manager,
         }
     }
 }
@@ -102,12 +102,18 @@ where
         &self,
         request: Request<DropDatabaseRequest>,
     ) -> Result<Response<DropDatabaseResponse>, Status> {
+        self.check_barrier_manager_status().await?;
         let req = request.into_inner();
         let database_id = req.get_database_id();
-        let (version, catalog_ids) = self.catalog_manager.drop_database(database_id).await?;
 
-        if !catalog_ids.is_empty() {
-            self.table_background_deleter.delete(catalog_ids);
+        // 1. drop all catalogs in this database.
+        let (version, streaming_ids, source_ids) =
+            self.catalog_manager.drop_database(database_id).await?;
+        // 2. Unregister source connector worker.
+        self.source_manager.unregister_sources(source_ids).await;
+        // 3. drop streaming jobs.
+        if !streaming_ids.is_empty() {
+            self.stream_manager.drop_streaming_jobs(streaming_ids).await;
         }
 
         Ok(Response::new(DropDatabaseResponse {
@@ -159,8 +165,7 @@ where
             .start_create_source_procedure(&source)
             .await?;
 
-        // QUESTION(patrick): why do we need to contact compute node on create source
-        if let Err(e) = self.source_manager.create_source(&source).await {
+        if let Err(e) = self.source_manager.register_source(&source).await {
             self.catalog_manager
                 .cancel_create_source_procedure(&source)
                 .await?;
@@ -184,12 +189,12 @@ where
     ) -> Result<Response<DropSourceResponse>, Status> {
         let source_id = request.into_inner().source_id;
 
-        // 1. Drop source in catalog. Ref count will be checked.
+        // 1. Drop source in catalog.
         let version = self.catalog_manager.drop_source(source_id).await?;
-
-        // 2. Drop source in table background deleter asynchronously.
-        self.table_background_deleter
-            .delete(vec![StreamingJobId::Source(source_id)]);
+        // 2. Unregister source connector worker.
+        self.source_manager
+            .unregister_sources(vec![source_id])
+            .await;
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -223,14 +228,15 @@ where
         &self,
         request: Request<DropSinkRequest>,
     ) -> Result<Response<DropSinkResponse>, Status> {
+        self.check_barrier_manager_status().await?;
         let sink_id = request.into_inner().sink_id;
 
         // 1. Drop sink in catalog.
         let version = self.catalog_manager.drop_sink(sink_id).await?;
-
-        // 2. drop sink in table background deleter asynchronously.
-        self.table_background_deleter
-            .delete(vec![StreamingJobId::Sink(sink_id.into())]);
+        // 2. drop streaming job of sink.
+        self.stream_manager
+            .drop_streaming_jobs(vec![sink_id.into()])
+            .await;
 
         Ok(Response::new(DropSinkResponse {
             status: None,
@@ -264,6 +270,7 @@ where
         &self,
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
+        self.check_barrier_manager_status().await?;
         self.env.idle_manager().record_activity();
 
         let request = request.into_inner();
@@ -273,33 +280,14 @@ where
             .select_table_fragments_by_table_id(&table_id.into())
             .await?;
         let internal_tables = table_fragment.internal_table_ids();
-        let indexes_id = request.index_ids;
-        let mut index_and_table_ids = vec![];
-        for &index_id in &indexes_id {
-            let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
-            index_and_table_ids.push((index_id, index_table_id));
-        }
 
-        let indexes_delete_job = index_and_table_ids
-            .iter()
-            .map(|(_, index_table_id)| StreamingJobId::Table(index_table_id.into()))
-            .collect_vec();
         // 1. Drop table in catalog. Ref count will be checked.
-        let version = self
+        let (version, delete_jobs) = self
             .catalog_manager
-            .drop_table(table_id, internal_tables, index_and_table_ids)
+            .drop_table(table_id, internal_tables)
             .await?;
-
-        // 2. Drop mv in table background deleter asynchronously.
-        // Note: the drop order matters.
-        //  1. indexes
-        //  2. materialized view
-        self.table_background_deleter.delete(
-            indexes_delete_job
-                .into_iter()
-                .chain(vec![StreamingJobId::Table(table_id.into())].into_iter())
-                .collect_vec(),
-        );
+        // 2. Drop streaming jobs.
+        self.stream_manager.drop_streaming_jobs(delete_jobs).await;
 
         Ok(Response::new(DropMaterializedViewResponse {
             status: None,
@@ -334,6 +322,7 @@ where
         &self,
         request: Request<DropIndexRequest>,
     ) -> Result<Response<DropIndexResponse>, Status> {
+        self.check_barrier_manager_status().await?;
         self.env.idle_manager().record_activity();
 
         let index_id = request.into_inner().index_id;
@@ -344,10 +333,10 @@ where
             .catalog_manager
             .drop_index(index_id, index_table_id)
             .await?;
-
-        // 2. drop mv(index) in table background deleter asynchronously.
-        self.table_background_deleter
-            .delete(vec![StreamingJobId::Table(index_table_id.into())]);
+        // 2. drop streaming jobs of the index tables.
+        self.stream_manager
+            .drop_streaming_jobs(vec![index_table_id.into()])
+            .await;
 
         Ok(Response::new(DropIndexResponse {
             status: None,
@@ -355,41 +344,71 @@ where
         }))
     }
 
-    async fn create_materialized_source(
+    async fn create_table(
         &self,
-        request: Request<CreateMaterializedSourceRequest>,
-    ) -> Result<Response<CreateMaterializedSourceResponse>, Status> {
+        request: Request<CreateTableRequest>,
+    ) -> Result<Response<CreateTableResponse>, Status> {
         let request = request.into_inner();
-        let source = request.source.unwrap();
+        let source = request.source;
         let mview = request.materialized_view.unwrap();
         let fragment_graph = request.fragment_graph.unwrap();
 
-        let (source_id, table_id, version) = self
-            .create_materialized_source_inner(source, mview, fragment_graph)
+        let (table_id, version) = self
+            .create_table_inner(source, mview, fragment_graph)
             .await?;
 
-        Ok(Response::new(CreateMaterializedSourceResponse {
+        Ok(Response::new(CreateTableResponse {
             status: None,
-            source_id,
             table_id,
             version,
         }))
     }
 
-    async fn drop_materialized_source(
+    async fn drop_table(
         &self,
-        request: Request<DropMaterializedSourceRequest>,
-    ) -> Result<Response<DropMaterializedSourceResponse>, Status> {
+        request: Request<DropTableRequest>,
+    ) -> Result<Response<DropTableResponse>, Status> {
+        self.check_barrier_manager_status().await?;
         let request = request.into_inner();
         let source_id = request.source_id;
         let table_id = request.table_id;
-        let index_ids = request.index_ids;
 
         let version = self
-            .drop_materialized_source_inner(source_id, table_id, index_ids)
+            .drop_table_inner(source_id.map(|ProstSourceId::Id(id)| id), table_id)
             .await?;
 
-        Ok(Response::new(DropMaterializedSourceResponse {
+        Ok(Response::new(DropTableResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn create_view(
+        &self,
+        request: Request<CreateViewRequest>,
+    ) -> Result<Response<CreateViewResponse>, Status> {
+        let req = request.into_inner();
+        let mut view = req.get_view()?.clone();
+        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+        view.id = id;
+
+        let version = self.catalog_manager.create_view(&view).await?;
+
+        Ok(Response::new(CreateViewResponse {
+            status: None,
+            view_id: id,
+            version,
+        }))
+    }
+
+    async fn drop_view(
+        &self,
+        request: Request<DropViewRequest>,
+    ) -> Result<Response<DropViewResponse>, Status> {
+        let req = request.into_inner();
+        let view_id = req.get_view_id();
+        let version = self.catalog_manager.drop_view(view_id).await?;
+        Ok(Response::new(DropViewResponse {
             status: None,
             version,
         }))
@@ -399,8 +418,7 @@ where
         &self,
         _request: Request<RisectlListStateTablesRequest>,
     ) -> Result<Response<RisectlListStateTablesResponse>, Status> {
-        use crate::model::MetadataModel;
-        let tables = Table::list(self.env.meta_store()).await?;
+        let tables = self.catalog_manager.list_tables().await;
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
 }
@@ -409,17 +427,30 @@ impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
+    /// `check_barrier_manager_status` checks the status of the barrier manager, return unavailable
+    /// when it's not running.
+    async fn check_barrier_manager_status(&self) -> MetaResult<()> {
+        if !self.barrier_manager.is_running().await {
+            return Err(MetaError::unavailable(
+                "The cluster is starting or recovering".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// `create_stream_job` creates a stream job and returns the version of the catalog.
     async fn create_stream_job(
         &self,
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraph,
     ) -> MetaResult<NotificationVersion> {
+        self.check_barrier_manager_status().await?;
+
         let (mut ctx, table_fragments) =
             self.prepare_stream_job(stream_job, fragment_graph).await?;
         match self
             .stream_manager
-            .create_materialized_view(table_fragments, &mut ctx)
+            .create_streaming_job(table_fragments, &mut ctx)
             .await
         {
             Ok(_) => self.finish_stream_job(stream_job, &ctx).await,
@@ -435,17 +466,13 @@ where
         &self,
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraph,
-    ) -> MetaResult<(CreateMaterializedViewContext, TableFragments)> {
+    ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
         // 1. assign a new id to the stream job.
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         stream_job.set_id(id);
 
         // 2. resolve the dependent relations.
         let dependent_relations = get_dependent_relations(&fragment_graph)?;
-        assert!(
-            !dependent_relations.is_empty(),
-            "there should be at lease 1 dependent relation when creating table or sink"
-        );
         stream_job.set_dependent_relations(dependent_relations);
 
         // 3. Mark current relation as "creating" and add reference count to dependent relations.
@@ -461,17 +488,17 @@ where
             .map(|table_id| TableId::new(*table_id))
             .collect();
 
-        let mut ctx = CreateMaterializedViewContext {
+        let mut ctx = CreateStreamingJobContext {
             schema_id: stream_job.schema_id(),
             database_id: stream_job.database_id(),
-            mview_name: stream_job.name(),
-            mview_definition: stream_job.mview_definition(),
+            streaming_job_name: stream_job.name(),
+            streaming_definition: stream_job.mview_definition(),
             table_properties: stream_job.properties(),
-            table_sink_map: self
+            table_mview_map: self
                 .fragment_manager
                 .get_build_graph_info(&dependent_table_ids)
                 .await?
-                .table_sink_actor_ids,
+                .table_mview_actor_ids,
             dependent_table_ids,
             ..Default::default()
         };
@@ -494,11 +521,23 @@ where
         .await?;
 
         // fill correct table id in fragment graph and fill fragment id in table.
-        if let StreamingJob::MaterializedView(table)
-        | StreamingJob::Index(_, table)
-        | StreamingJob::MaterializedSource(_, table) = stream_job
-        {
-            actor_graph_builder.fill_mview_id(table);
+        match stream_job {
+            StreamingJob::MaterializedView(table)
+            | StreamingJob::Index(_, table)
+            | StreamingJob::Table(_, table) => {
+                table.fragment_id = actor_graph_builder.fill_database_object_id(
+                    table.database_id,
+                    table.schema_id,
+                    table.id.into(),
+                );
+            }
+            StreamingJob::Sink(sink) => {
+                actor_graph_builder.fill_database_object_id(
+                    sink.database_id,
+                    sink.schema_id,
+                    sink.id.into(),
+                );
+            }
         }
 
         let graph = actor_graph_builder
@@ -512,8 +551,11 @@ where
         match stream_job {
             StreamingJob::MaterializedView(table)
             | StreamingJob::Index(_, table)
-            | StreamingJob::MaterializedSource(_, table) => creating_tables.push(table.clone()),
-            _ => {}
+            | StreamingJob::Table(_, table) => creating_tables.push(table.clone()),
+
+            StreamingJob::Sink(_) => {
+                // No need to mark it as creating. Do nothing.
+            }
         }
 
         self.catalog_manager
@@ -527,7 +569,7 @@ where
     async fn cancel_stream_job(
         &self,
         stream_job: &StreamingJob,
-        ctx: &CreateMaterializedViewContext,
+        ctx: &CreateStreamingJobContext,
     ) -> MetaResult<()> {
         let mut creating_internal_table_ids = ctx.internal_table_ids();
         // 1. cancel create procedure.
@@ -543,11 +585,17 @@ where
                     .cancel_create_sink_procedure(sink)
                     .await?;
             }
-            StreamingJob::MaterializedSource(source, table) => {
+            StreamingJob::Table(source, table) => {
                 creating_internal_table_ids.push(table.id);
-                self.catalog_manager
-                    .cancel_create_materialized_source_procedure(source, table)
-                    .await?;
+                if let Some(source) = source {
+                    self.catalog_manager
+                        .cancel_create_table_procedure_with_source(source, table)
+                        .await?;
+                } else {
+                    self.catalog_manager
+                        .cancel_create_table_procedure(table)
+                        .await?;
+                }
             }
             StreamingJob::Index(index, table) => {
                 creating_internal_table_ids.push(table.id);
@@ -568,7 +616,7 @@ where
     async fn finish_stream_job(
         &self,
         stream_job: &StreamingJob,
-        ctx: &CreateMaterializedViewContext,
+        ctx: &CreateStreamingJobContext,
     ) -> MetaResult<u64> {
         // 1. finish procedure.
         let mut creating_internal_table_ids = ctx.internal_table_ids();
@@ -584,15 +632,26 @@ where
                     .finish_create_sink_procedure(sink)
                     .await?
             }
-            StreamingJob::MaterializedSource(source, table) => {
+            StreamingJob::Table(source, table) => {
                 creating_internal_table_ids.push(table.id);
-                self.catalog_manager
-                    .finish_create_materialized_source_procedure(
-                        source,
-                        table,
-                        ctx.internal_tables(),
-                    )
-                    .await?
+                if let Some(source) = source {
+                    let internal_tables: [_; 1] = ctx.internal_tables().try_into().unwrap();
+                    self.catalog_manager
+                        .finish_create_table_procedure_with_source(
+                            source,
+                            table,
+                            &internal_tables[0],
+                        )
+                        .await?
+                } else {
+                    let internal_tables = ctx.internal_tables();
+                    assert!(internal_tables.is_empty());
+                    // Though `internal_tables` is empty here, we pass it as a parameter to reuse
+                    // the method.
+                    self.catalog_manager
+                        .finish_create_table_procedure(internal_tables, table)
+                        .await?
+                }
             }
             StreamingJob::Index(index, table) => {
                 creating_internal_table_ids.push(table.id);
@@ -610,64 +669,70 @@ where
         Ok(version)
     }
 
-    async fn create_materialized_source_inner(
+    /// If `source` is `None` here, then there is no external streaming source for this table.
+    async fn create_table_inner(
         &self,
-        mut source: Source,
+        mut source: Option<Source>,
         mut mview: Table,
         mut fragment_graph: StreamFragmentGraph,
-    ) -> MetaResult<(SourceId, TableId, CatalogVersion)> {
-        // Generate source id.
-        let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: use source category
-        source.id = source_id;
+    ) -> MetaResult<(TableId, CatalogVersion)> {
+        self.check_barrier_manager_status().await?;
 
-        // Fill in the correct source id for stream node.
-        fn fill_source_id(stream_node: &mut StreamNode, source_id: u32) -> usize {
+        if let Some(source) = &mut source {
+            // Generate source id.
+            let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: Use source category
+            source.id = source_id;
+
+            // Fill in the correct source id for stream node.
+            fn fill_source_id(stream_node: &mut StreamNode, source_id: u32) -> usize {
+                let mut source_count = 0;
+                if let NodeBody::Source(source_node) = stream_node.node_body.as_mut().unwrap() {
+                    // TODO: Refactor using source id.
+                    source_node.source_inner.as_mut().unwrap().source_id = source_id;
+                    source_count += 1;
+                }
+                for input in &mut stream_node.input {
+                    source_count += fill_source_id(input, source_id);
+                }
+                source_count
+            }
+
             let mut source_count = 0;
-            if let NodeBody::Source(source_node) = stream_node.node_body.as_mut().unwrap() {
-                // TODO: refactor using source id.
-                source_node.source_id = source_id;
-                source_count += 1;
+            for fragment in fragment_graph.fragments.values_mut() {
+                source_count += fill_source_id(fragment.node.as_mut().unwrap(), source_id);
             }
-            for input in &mut stream_node.input {
-                source_count += fill_source_id(input, source_id);
-            }
-            source_count
+            assert_eq!(
+                source_count, 1,
+                "require exactly 1 external stream source when creating table with a connector"
+            );
+
+            // Fill in the correct source id for mview.
+            mview.optional_associated_source_id =
+                Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
 
-        let mut source_count = 0;
-        for fragment in fragment_graph.fragments.values_mut() {
-            source_count += fill_source_id(fragment.node.as_mut().unwrap(), source_id);
-        }
-        assert_eq!(
-            source_count, 1,
-            "require exactly 1 source node when creating materialized source"
-        );
-
-        // Fill in the correct source id for mview.
-        mview.optional_associated_source_id =
-            Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
-
-        let mut stream_job = StreamingJob::MaterializedSource(source.clone(), mview.clone());
+        let mut stream_job = StreamingJob::Table(source.clone(), mview.clone());
         let (mut ctx, table_fragments) = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
             .await?;
 
-        // Create source on compute node.
-        if let Err(e) = self.source_manager.create_source(&source).await {
-            self.catalog_manager
-                .cancel_create_materialized_source_procedure(&source, &mview)
-                .await?;
-            return Err(e);
+        if let Some(source) = &source {
+            if let Err(e) = self.source_manager.register_source(source).await {
+                self.catalog_manager
+                    .cancel_create_table_procedure_with_source(source, &mview)
+                    .await?;
+                return Err(e);
+            }
         }
 
         match self
             .stream_manager
-            .create_materialized_view(table_fragments, &mut ctx)
+            .create_streaming_job(table_fragments, &mut ctx)
             .await
         {
             Ok(_) => {
                 let version = self.finish_stream_job(&stream_job, &ctx).await?;
-                Ok((source_id, stream_job.id(), version))
+                Ok((stream_job.id(), version))
             }
             Err(err) => {
                 self.cancel_stream_job(&stream_job, &ctx).await?;
@@ -676,58 +741,39 @@ where
         }
     }
 
-    async fn drop_materialized_source_inner(
+    async fn drop_table_inner(
         &self,
-        source_id: SourceId,
+        source_id: Option<SourceId>,
         table_id: TableId,
-        index_ids: Vec<IndexId>,
     ) -> MetaResult<CatalogVersion> {
-        let mut index_and_table_ids = vec![];
-        for &index_id in &index_ids {
-            let index_table_id = self.catalog_manager.get_index_table(index_id).await?;
-            index_and_table_ids.push((index_id, index_table_id));
-        }
-
-        let indexes_delete_job = index_and_table_ids
-            .iter()
-            .map(|(_, index_table_id)| StreamingJobId::Table(index_table_id.into()))
-            .collect_vec();
-
         let table_fragment = self
             .fragment_manager
             .select_table_fragments_by_table_id(&table_id.into())
             .await?;
         let internal_table_ids = table_fragment.internal_table_ids();
-        assert!(internal_table_ids.len() == 1);
 
-        // 1. Drop materialized source in catalog, source_id will be checked if it is
-        // associated_source_id in mview. Indexes are also need to be dropped atomically.
-        let version = self
-            .catalog_manager
-            .drop_materialized_source(
-                source_id,
-                table_id,
-                internal_table_ids[0],
-                index_and_table_ids,
-            )
-            .await?;
-        // 2. Drop source and mv in table background deleter asynchronously.
-        // Note: the drop order matters.
-        //  1. indexes
-        //  2. materialized view
-        //  3. source
-        self.table_background_deleter.delete(
-            indexes_delete_job
-                .into_iter()
-                .chain(
-                    vec![
-                        StreamingJobId::Table(table_id.into()),
-                        StreamingJobId::Source(source_id),
-                    ]
-                    .into_iter(),
-                )
-                .collect(),
-        );
+        let (version, delete_jobs) = if let Some(source_id) = source_id {
+            // Drop table and source in catalog. Check `source_id` if it is the table's
+            // `associated_source_id`. Indexes also need to be dropped atomically.
+            assert_eq!(internal_table_ids.len(), 1);
+            let (version, delete_jobs) = self
+                .catalog_manager
+                .drop_table_with_source(source_id, table_id, internal_table_ids[0])
+                .await?;
+            // Unregister source connector worker.
+            self.source_manager
+                .unregister_sources(vec![source_id])
+                .await;
+            (version, delete_jobs)
+        } else {
+            assert!(internal_table_ids.is_empty());
+            self.catalog_manager
+                .drop_table(table_id, internal_table_ids)
+                .await?
+        };
+
+        // Drop streaming jobs.
+        self.stream_manager.drop_streaming_jobs(delete_jobs).await;
 
         Ok(version)
     }
@@ -746,7 +792,9 @@ fn get_dependent_relations(fragment_graph: &StreamFragmentGraph) -> MetaResult<V
     ) -> MetaResult<()> {
         match stream_node.node_body.as_ref().unwrap() {
             NodeBody::Source(source_node) => {
-                dependent_relations.insert(source_node.get_source_id());
+                if let Some(source) = &source_node.source_inner {
+                    dependent_relations.insert(source.get_source_id());
+                }
             }
             NodeBody::Chain(chain_node) => {
                 dependent_relations.insert(chain_node.get_table_id());

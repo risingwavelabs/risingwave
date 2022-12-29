@@ -27,10 +27,11 @@ use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio_openssl::SslStream;
 use tracing::log::trace;
+use tracing::warn;
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_extended::{PgPortal, PgStatement, PreparedStatement};
-use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
     FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
@@ -149,12 +150,12 @@ where
     }
 
     /// Processes one message. Returns true if the connection is terminated.
-    pub async fn process(&mut self) -> bool {
-        self.do_process().await || self.is_terminate
+    pub async fn process(&mut self, msg: FeMessage) -> bool {
+        self.do_process(msg).await || self.is_terminate
     }
 
-    async fn do_process(&mut self) -> bool {
-        match self.do_process_inner().await {
+    async fn do_process(&mut self, msg: FeMessage) -> bool {
+        match self.do_process_inner(msg).await {
             Ok(v) => v,
             Err(e) => {
                 match e {
@@ -164,7 +165,9 @@ where
                         }
                     }
 
-                    PsqlError::StartupError(_) | PsqlError::PasswordError(_) => {
+                    PsqlError::StartupError(_)
+                    | PsqlError::PasswordError(_)
+                    | PsqlError::SslError(_) => {
                         // TODO: Fix the unwrap in this stream.
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
@@ -197,8 +200,7 @@ where
         }
     }
 
-    async fn do_process_inner(&mut self) -> PsqlResult<bool> {
-        let msg = self.read_message().await?;
+    async fn do_process_inner(&mut self, msg: FeMessage) -> PsqlResult<bool> {
         match msg {
             FeMessage::Ssl => self.process_ssl_msg().await?,
             FeMessage::Startup(msg) => self.process_startup_msg(msg)?,
@@ -218,7 +220,7 @@ where
         Ok(false)
     }
 
-    async fn read_message(&mut self) -> io::Result<FeMessage> {
+    pub async fn read_message(&mut self) -> io::Result<FeMessage> {
         match self.state {
             PgProtocolState::Startup => self.stream.read_startup().await,
             PgProtocolState::Regular => self.stream.read().await,
@@ -230,7 +232,7 @@ where
             // If got and ssl context, say yes for ssl connection.
             // Construct ssl stream and replace with current one.
             self.stream.write(&BeMessage::EncryptionResponseYes).await?;
-            let ssl_stream = self.stream.ssl(context).await;
+            let ssl_stream = self.stream.ssl(context).await?;
             self.stream = Conn::Ssl(ssl_stream);
         } else {
             // If no, say no for encryption.
@@ -307,7 +309,9 @@ where
 
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
         let sql = query_string.map_err(|err| PsqlError::QueryError(Box::new(err)))?;
-        tracing::trace!("(simple query)receive query: {}", sql);
+        tracing::trace!(
+            target: "pgwire_query_log",
+            "(simple query)receive query: {}", sql);
 
         let session = self.session.clone().unwrap();
         // execute query
@@ -321,9 +325,7 @@ where
                 .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
         }
 
-        if res.is_empty() {
-            self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
-        } else if res.is_query() {
+        if res.is_query() {
             self.stream
                 .write_no_flush(&BeMessage::RowDescription(&res.get_row_desc()))?;
 
@@ -363,12 +365,6 @@ where
     async fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
         tracing::trace!("(extended query)parse query: {}", sql);
-        // Create the types description.
-        let types = msg
-            .type_ids
-            .iter()
-            .map(|x| TypeOid::as_type(*x).map_err(|e| PsqlError::ParseError(Box::new(e))))
-            .collect::<PsqlResult<Vec<TypeOid>>>()?;
 
         // Flag indicate whether statement is a query statement.
         let is_query_sql = {
@@ -378,9 +374,10 @@ where
                 || lower_sql.starts_with("show")
                 || lower_sql.starts_with("with")
                 || lower_sql.starts_with("describe")
+                || lower_sql.starts_with("explain")
         };
 
-        let prepared_statement = PreparedStatement::parse_statement(sql.to_string(), types)?;
+        let prepared_statement = PreparedStatement::parse_statement(sql.to_string(), msg.type_ids)?;
 
         // 2. Create the row description.
         let fields: Vec<PgFieldDescriptor> = if is_query_sql {
@@ -418,6 +415,7 @@ where
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
         // 1. Get statement.
         trace!(
+            target: "pgwire_query_log",
             "(extended query)bind: get statement name: {}",
             &statement_name
         );
@@ -464,7 +462,7 @@ where
                 .ok_or_else(PsqlError::no_portal)?
         };
 
-        tracing::trace!("(extended query)execute query: {}", portal.query_string());
+        tracing::trace!(target: "pgwire_query_log", "(extended query)execute query: {}", portal.query_string());
 
         // 2. Execute instance statement using portal.
         let session = self.session.clone().unwrap();
@@ -480,6 +478,7 @@ where
         //  b'S' => Statement
         //  b'P' => Portal
         tracing::trace!(
+            target: "pgwire_query_log",
             "(extended query)describe name: {}",
             cstr_to_str(&msg.name).unwrap()
         );
@@ -500,7 +499,9 @@ where
 
             // 1. Send parameter description.
             self.stream
-                .write_no_flush(&BeMessage::ParameterDescription(&statement.type_desc()))?;
+                .write_no_flush(&BeMessage::ParameterDescription(
+                    &statement.param_oid_desc(),
+                ))?;
 
             // 2. Send row description.
             if statement.is_query() {
@@ -620,7 +621,7 @@ impl<S> PgStream<S>
 where
     S: AsyncWrite + AsyncRead + Unpin,
 {
-    async fn ssl(&mut self, ssl_ctx: &SslContextRef) -> PgStream<SslStream<S>> {
+    async fn ssl(&mut self, ssl_ctx: &SslContextRef) -> PsqlResult<PgStream<SslStream<S>>> {
         // Note: Currently we take the ownership of previous Tcp Stream and then turn into a
         // SslStream. Later we can avoid storing stream inside PgProtocol to do this more
         // fluently.
@@ -628,13 +629,15 @@ where
         let ssl = openssl::ssl::Ssl::new(ssl_ctx).unwrap();
         let mut stream = tokio_openssl::SslStream::new(ssl, stream).unwrap();
         if let Err(e) = Pin::new(&mut stream).accept().await {
-            panic!("Unable to set up a ssl connection, reason: {}", e);
+            warn!("Unable to set up a ssl connection, reason: {}", e);
+            let _ = stream.shutdown().await;
+            return Err(PsqlError::SslError(e.to_string()));
         }
 
-        PgStream {
+        Ok(PgStream {
             stream: Some(stream),
             write_buf: BytesMut::with_capacity(10 * 1024),
-        }
+        })
     }
 }
 
@@ -688,7 +691,7 @@ where
         }
     }
 
-    async fn ssl(&mut self, ssl_ctx: &SslContextRef) -> PgStream<SslStream<S>> {
+    async fn ssl(&mut self, ssl_ctx: &SslContextRef) -> PsqlResult<PgStream<SslStream<S>>> {
         match self {
             Conn::Unencrypted(s) => s.ssl(ssl_ctx).await,
             Conn::Ssl(_s) => panic!("can not turn a ssl stream into a ssl stream"),

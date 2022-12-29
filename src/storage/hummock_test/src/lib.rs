@@ -15,6 +15,8 @@
 #![feature(custom_test_frameworks)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(bound_map)]
+#![feature(type_alias_impl_trait)]
+#![feature(associated_type_bounds)]
 
 #[cfg(test)]
 mod compactor_tests;
@@ -26,8 +28,8 @@ mod local_version_manager_tests;
 mod snapshot_tests;
 #[cfg(test)]
 mod state_store_tests;
-#[cfg(test)]
-mod test_utils;
+#[cfg(any(test, feature = "test"))]
+pub mod test_utils;
 #[cfg(test)]
 mod vacuum_tests;
 
@@ -36,5 +38,7 @@ mod hummock_read_version_tests;
 
 #[cfg(test)]
 mod hummock_storage_tests;
+mod mock_notification_client;
 #[cfg(all(test, feature = "sync_point"))]
 mod sync_point_tests;
+pub use mock_notification_client::get_test_notification_client;

@@ -19,6 +19,7 @@ use risingwave_common::catalog::Schema;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message};
+use crate::executor::PkIndices;
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
@@ -55,11 +56,12 @@ impl ChainExecutor {
         upstream_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
+        pk_indices: PkIndices,
     ) -> Self {
         Self {
             info: ExecutorInfo {
                 schema,
-                pk_indices: upstream.pk_indices().to_owned(),
+                pk_indices,
                 identity: "Chain".into(),
             },
             snapshot,
@@ -191,7 +193,7 @@ mod test {
             ],
         ));
 
-        let chain = ChainExecutor::new(first, second, vec![0], progress, schema);
+        let chain = ChainExecutor::new(first, second, vec![0], progress, schema, PkIndices::new());
 
         let mut chain = Box::new(chain).execute();
         chain.next().await;

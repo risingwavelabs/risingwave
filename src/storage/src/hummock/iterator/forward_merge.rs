@@ -14,7 +14,13 @@
 
 #[cfg(test)]
 mod test {
+    use std::future::{pending, poll_fn, Future};
+    use std::iter::once;
     use std::sync::Arc;
+    use std::task::Poll;
+
+    use futures::{pin_mut, FutureExt};
+    use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
@@ -30,6 +36,8 @@ mod test {
     };
     use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
     use crate::hummock::value::HummockValue;
+    use crate::hummock::HummockResult;
+    use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
     async fn test_merge_basic() {
@@ -56,7 +64,7 @@ mod test {
             while iter.is_valid() {
                 let key = iter.key();
                 let val = iter.value();
-                assert_eq!(key, iterator_test_key_of(i).as_slice());
+                assert_eq!(key, iterator_test_key_of(i).to_ref());
                 assert_eq!(
                     val.into_user_value().unwrap(),
                     iterator_test_value_of(i).as_slice()
@@ -94,13 +102,13 @@ mod test {
 
         for iter in test_iters {
             // right edge case
-            iter.seek(iterator_test_key_of(TEST_KEYS_COUNT * 3).as_slice())
+            iter.seek(iterator_test_key_of(TEST_KEYS_COUNT * 3).to_ref())
                 .await
                 .unwrap();
             assert!(!iter.is_valid());
 
             // normal case
-            iter.seek(iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).as_slice())
+            iter.seek(iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).to_ref())
                 .await
                 .unwrap();
             let k = iter.key();
@@ -109,28 +117,26 @@ mod test {
                 v.into_user_value().unwrap(),
                 iterator_test_value_of(TEST_KEYS_COUNT * 2 + 5).as_slice()
             );
-            assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).as_slice());
+            assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).to_ref());
 
-            iter.seek(iterator_test_key_of(17).as_slice())
-                .await
-                .unwrap();
+            iter.seek(iterator_test_key_of(17).to_ref()).await.unwrap();
             let k = iter.key();
             let v = iter.value();
             assert_eq!(
                 v.into_user_value().unwrap(),
                 iterator_test_value_of(TEST_KEYS_COUNT + 7).as_slice()
             );
-            assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT + 7).as_slice());
+            assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT + 7).to_ref());
 
             // left edge case
-            iter.seek(iterator_test_key_of(0).as_slice()).await.unwrap();
+            iter.seek(iterator_test_key_of(0).to_ref()).await.unwrap();
             let k = iter.key();
             let v = iter.value();
             assert_eq!(
                 v.into_user_value().unwrap(),
                 iterator_test_value_of(0).as_slice()
             );
-            assert_eq!(k, iterator_test_key_of(0).as_slice());
+            assert_eq!(k, iterator_test_key_of(0).to_ref());
         }
     }
 
@@ -305,7 +311,7 @@ mod test {
         let mut count = 0;
 
         while iter.is_valid() {
-            assert_eq!(iter.key(), iterator_test_key_of(count));
+            assert_eq!(iter.key(), iterator_test_key_of(count).to_ref());
             let expected_value = match count % 3 {
                 0 => format!("non_overlapped_{}", count).as_bytes().to_vec(),
                 1 => format!("overlapped_new_{}", count).as_bytes().to_vec(),
@@ -318,5 +324,68 @@ mod test {
         }
 
         assert_eq!(count, TEST_KEYS_COUNT);
+    }
+
+    struct CancellationTestIterator {}
+
+    impl HummockIterator for CancellationTestIterator {
+        type Direction = Forward;
+
+        type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+        type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+        type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+
+        fn next(&mut self) -> Self::NextFuture<'_> {
+            async { pending::<HummockResult<()>>().await }
+        }
+
+        fn key(&self) -> FullKey<&[u8]> {
+            FullKey {
+                user_key: UserKey {
+                    table_id: Default::default(),
+                    table_key: TableKey(&b"test_key"[..]),
+                },
+                epoch: 0,
+            }
+        }
+
+        fn value(&self) -> HummockValue<&[u8]> {
+            HummockValue::delete()
+        }
+
+        fn is_valid(&self) -> bool {
+            true
+        }
+
+        fn rewind(&mut self) -> Self::RewindFuture<'_> {
+            async { Ok(()) }
+        }
+
+        fn seek<'a>(&'a mut self, _key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
+            async { Ok(()) }
+        }
+
+        fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}
+    }
+
+    #[tokio::test]
+    async fn test_merge_iter_cancel() {
+        let mut merge_iter = UnorderedMergeIteratorInner::new(vec![
+            OrderedMergeIteratorInner::new(once(CancellationTestIterator {})),
+            OrderedMergeIteratorInner::new(once(CancellationTestIterator {})),
+        ]);
+        merge_iter.rewind().await.unwrap();
+        let future = merge_iter.next();
+
+        pin_mut!(future);
+
+        for _ in 0..10 {
+            assert!(poll_fn(|cx| { Poll::Ready(future.poll_unpin(cx)) })
+                .await
+                .is_pending());
+        }
+
+        // Dropping the future will panic if the OrderedMergeIteratorInner is not cancellation safe.
+        // See https://github.com/risingwavelabs/risingwave/issues/6637
     }
 }

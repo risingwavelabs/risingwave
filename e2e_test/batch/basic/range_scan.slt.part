@@ -7,7 +7,7 @@ CREATE TABLE orders (
         user_id BIGINT,
         date INTEGER);
 
-statement ok 
+statement ok
 CREATE MATERIALIZED VIEW orders_count_by_user AS
       SELECT user_id, date, count(*) AS orders_count 
       FROM orders 
@@ -126,7 +126,7 @@ SELECT * FROM orders_count_by_user WHERE user_id = 9999 or (user_id = 9999 and d
 statement ok
 drop materialized view orders_count_by_user;
 
-statement ok 
+statement ok
 CREATE MATERIALIZED VIEW orders_count_by_user AS
       SELECT user_id, date, count(*) AS orders_count 
       FROM orders 
@@ -136,11 +136,11 @@ CREATE MATERIALIZED VIEW orders_count_by_user AS
 query III rowsort
 SELECT * FROM orders_count_by_user WHERE user_id < 100;
 ----
-42 1111 1
-42 3333 1
-43 1111 1
-43 2222 1
-42 2222 2
+42	1111	1
+42	2222	2
+42	3333	1
+43	1111	1
+43	2222	1
 
 query III
 SELECT * FROM orders_count_by_user WHERE orders_count=2 AND user_id < 100;

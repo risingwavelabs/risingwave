@@ -20,7 +20,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::{DataType, Scalar};
+use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
@@ -125,8 +125,11 @@ impl Binder {
             "ceil" => ExprType::Ceil,
             "floor" => ExprType::Floor,
             "abs" => ExprType::Abs,
+            "mod" => ExprType::Modulus,
             // temporal/chrono
-            "to_timestamp" => ExprType::ToTimestamp,
+            "to_timestamp" if inputs.len() == 1 => ExprType::ToTimestamp,
+            "to_timestamp" if inputs.len() == 2 => ExprType::ToTimestamp1,
+            "date_trunc" => ExprType::DateTrunc,
             // string
             "substr" => ExprType::Substr,
             "length" => ExprType::Length,
@@ -221,7 +224,7 @@ impl Binder {
                         .get_schema_by_name(&self.db_name, schema_name)
                         .is_ok()
                     {
-                        schema_names.push(Some(schema_name.clone().to_scalar_value()));
+                        schema_names.push(Some(schema_name.into()));
                     }
                 }
 
@@ -257,9 +260,37 @@ impl Binder {
                     .into())
                 };
             }
+            "pg_get_expr" => {
+                return if inputs.len() == 2 || inputs.len() == 3 {
+                    // TODO: implement pg_get_expr rather than just return empty as an workaround.
+                    Ok(ExprImpl::literal_varchar("".into()))
+                } else {
+                    Err(ErrorCode::ExprError(
+                        "Too many/few arguments for pg_catalog.pg_get_expr()".into(),
+                    )
+                    .into())
+                };
+            }
+            "format_type" => {
+                return if inputs.len() == 2 {
+                    // TODO
+                    // return null as an workaround for now
+                    Ok(ExprImpl::literal_null(DataType::Varchar))
+                } else {
+                    Err(
+                        ErrorCode::ExprError("Too many/few arguments for format_type()".into())
+                            .into(),
+                    )
+                };
+            }
             "pg_table_is_visible" => return Ok(ExprImpl::literal_bool(true)),
             // internal
             "rw_vnode" => ExprType::Vnode,
+            // TODO: include version/tag/commit_id
+            // TODO: choose which pg version we should return.
+            "version" => return Ok(ExprImpl::literal_varchar("PostgreSQL 13.9-RW".to_string())),
+            // non-deterministic
+            "now" => ExprType::Now,
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported function: {:?}", function_name),

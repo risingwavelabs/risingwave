@@ -76,12 +76,12 @@ impl BoundQuery {
     /// * The second example is correlated, because it depend on a correlated input ref (`a1`) that
     ///   goes out.
     /// * The last example is also correlated. because it cannot be evaluated independently either.
-    pub fn is_correlated(&self) -> bool {
-        self.body.is_correlated()
+    pub fn is_correlated(&self, depth: Depth) -> bool {
+        self.body.is_correlated(depth)
             || self
                 .extra_order_exprs
                 .iter()
-                .any(|e| e.has_correlated_input_ref_by_depth())
+                .any(|e| e.has_correlated_input_ref_by_depth(depth))
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
@@ -221,7 +221,7 @@ impl Binder {
         let index = match expr {
             Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => match *index != usize::MAX {
                 true => *index,
-                false => return Err(ErrorCode::BindError(format!("ORDER BY \"{}\" is ambiguous", name.value)).into()),
+                false => return Err(ErrorCode::BindError(format!("ORDER BY \"{}\" is ambiguous", name.real_value())).into()),
             }
             Expr::Value(Value::Number(number)) => match number.parse::<usize>() {
                 Ok(index) if 1 <= index && index <= visible_output_num => index - 1,

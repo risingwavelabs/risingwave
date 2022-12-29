@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod manager;
-
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 
@@ -27,11 +25,11 @@ use crate::model::{MetadataModel, MetadataModelResult};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompactionGroup {
-    group_id: CompactionGroupId,
-    pub parent_group_id: CompactionGroupId,
-    pub member_table_ids: HashSet<StateTableId>,
-    pub compaction_config: CompactionConfig,
-    table_id_to_options: HashMap<StateTableId, TableOption>,
+    pub(crate) group_id: CompactionGroupId,
+    pub(crate) parent_group_id: CompactionGroupId,
+    pub(crate) member_table_ids: HashSet<StateTableId>,
+    pub(crate) compaction_config: CompactionConfig,
+    pub(crate) table_id_to_options: HashMap<StateTableId, TableOption>,
 }
 
 impl CompactionGroup {

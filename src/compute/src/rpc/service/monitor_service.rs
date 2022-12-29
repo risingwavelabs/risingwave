@@ -25,13 +25,13 @@ use tonic::{Request, Response, Status};
 #[derive(Clone)]
 pub struct MonitorServiceImpl {
     stream_mgr: Arc<LocalStreamManager>,
-    grpc_stack_trace_mgr: GrpcStackTraceManagerRef,
+    grpc_stack_trace_mgr: Option<GrpcStackTraceManagerRef>,
 }
 
 impl MonitorServiceImpl {
     pub fn new(
         stream_mgr: Arc<LocalStreamManager>,
-        grpc_stack_trace_mgr: GrpcStackTraceManagerRef,
+        grpc_stack_trace_mgr: Option<GrpcStackTraceManagerRef>,
     ) -> Self {
         Self {
             stream_mgr,
@@ -52,17 +52,20 @@ impl MonitorService for MonitorServiceImpl {
         let actor_traces = self
             .stream_mgr
             .get_actor_traces()
+            .await
             .into_iter()
             .map(|(k, v)| (k, v.to_string()))
             .collect();
 
-        let rpc_traces = self
-            .grpc_stack_trace_mgr
-            .lock()
-            .await
-            .get_all()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
+        let rpc_traces = if let Some(m) = &self.grpc_stack_trace_mgr {
+            m.lock()
+                .await
+                .get_all()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        } else {
+            Default::default()
+        };
 
         Ok(Response::new(StackTraceResponse {
             actor_traces,
@@ -109,7 +112,7 @@ pub mod grpc_middleware {
     use std::sync::Arc;
     use std::task::{Context, Poll};
 
-    use async_stack_trace::{SpanValue, StackTraceManager, TraceConfig};
+    use async_stack_trace::{SpanValue, StackTraceManager};
     use futures::Future;
     use hyper::Body;
     use tokio::sync::Mutex;
@@ -123,20 +126,19 @@ pub mod grpc_middleware {
     #[derive(Clone)]
     pub struct StackTraceMiddlewareLayer {
         manager: GrpcStackTraceManagerRef,
-        config: TraceConfig,
     }
     pub type OptionalStackTraceMiddlewareLayer = Either<StackTraceMiddlewareLayer, Identity>;
 
     impl StackTraceMiddlewareLayer {
-        pub fn new(manager: GrpcStackTraceManagerRef, config: TraceConfig) -> Self {
-            Self { manager, config }
+        pub fn new(manager: GrpcStackTraceManagerRef) -> Self {
+            Self { manager }
         }
 
         pub fn new_optional(
-            optional: Option<(GrpcStackTraceManagerRef, TraceConfig)>,
+            optional: Option<GrpcStackTraceManagerRef>,
         ) -> OptionalStackTraceMiddlewareLayer {
-            if let Some((manager, config)) = optional {
-                Either::A(Self::new(manager, config))
+            if let Some(manager) = optional {
+                Either::A(Self::new(manager))
             } else {
                 Either::B(Identity::new())
             }
@@ -150,7 +152,6 @@ pub mod grpc_middleware {
             StackTraceMiddleware {
                 inner: service,
                 manager: self.manager.clone(),
-                config: self.config.clone(),
                 next_id: Default::default(),
             }
         }
@@ -160,7 +161,6 @@ pub mod grpc_middleware {
     pub struct StackTraceMiddleware<S> {
         inner: S,
         manager: GrpcStackTraceManagerRef,
-        config: TraceConfig,
         next_id: Arc<AtomicU64>,
     }
 
@@ -187,13 +187,12 @@ pub mod grpc_middleware {
 
             let id = self.next_id.fetch_add(1, Ordering::SeqCst);
             let manager = self.manager.clone();
-            let config = self.config.clone();
 
             async move {
                 let sender = manager.lock().await.register(id);
                 let root_span: SpanValue = format!("{}:{}", req.uri().path(), id).into();
 
-                sender.trace(inner.call(req), root_span, config).await
+                sender.trace(inner.call(req), root_span).await
             }
         }
     }

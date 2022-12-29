@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::compress::decompress_data;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
 use risingwave_pb::common::WorkerNode;
@@ -30,7 +29,7 @@ use crate::scheduler::HummockSnapshotManagerRef;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::UserInfoVersion;
 
-pub(crate) struct FrontendObserverNode {
+pub struct FrontendObserverNode {
     worker_node_manager: WorkerNodeManagerRef,
     catalog: Arc<RwLock<Catalog>>,
     catalog_updated_tx: Sender<CatalogVersion>,
@@ -53,7 +52,8 @@ impl ObserverState for FrontendObserverNode {
             | Info::Table(_)
             | Info::Source(_)
             | Info::Index(_)
-            | Info::Sink(_) => {
+            | Info::Sink(_)
+            | Info::View(_) => {
                 self.handle_catalog_notification(resp);
             }
             Info::Node(node) => {
@@ -75,63 +75,71 @@ impl ObserverState for FrontendObserverNode {
             Info::HummockVersionDeltas(_) => {
                 panic!("frontend node should not receive HummockVersionDeltas");
             }
+            Info::MetaBackupManifestId(_) => {
+                panic!("frontend node should not receive MetaBackupManifestId");
+            }
         }
     }
 
-    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
+    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
         let mut catalog_guard = self.catalog.write();
         let mut user_guard = self.user_info_manager.write();
         catalog_guard.clear();
         user_guard.clear();
-        match resp.info {
-            Some(Info::Snapshot(snapshot)) => {
-                for db in snapshot.databases {
-                    catalog_guard.create_database(db)
-                }
-                for schema in snapshot.schemas {
-                    catalog_guard.create_schema(schema)
-                }
-                for table in snapshot.tables {
-                    catalog_guard.create_table(&table)
-                }
-                for source in snapshot.sources {
-                    catalog_guard.create_source(source)
-                }
-                for user in snapshot.users {
-                    user_guard.create_user(user)
-                }
-                for index in snapshot.indexes {
-                    catalog_guard.create_index(&index)
-                }
-                self.worker_node_manager.refresh(
-                    snapshot.nodes,
-                    snapshot
-                        .parallel_unit_mappings
-                        .iter()
-                        .map(|mapping| {
-                            (
-                                mapping.fragment_id,
-                                decompress_data(&mapping.original_indices, &mapping.data),
-                            )
-                        })
-                        .collect(),
-                );
-                self.hummock_snapshot_manager
-                    .update_epoch(snapshot.hummock_snapshot.unwrap());
-            }
-            _ => {
-                return Err(ErrorCode::InternalError(format!(
-                    "the first notify should be frontend snapshot, but get {:?}",
-                    resp
-                ))
-                .into())
-            }
+
+        let Some(Info::Snapshot(snapshot)) = resp.info else {
+            unreachable!();
+        };
+
+        for db in snapshot.databases {
+            catalog_guard.create_database(&db)
         }
-        catalog_guard.set_version(resp.version);
-        self.catalog_updated_tx.send(resp.version).unwrap();
-        user_guard.set_version(resp.version);
-        self.user_info_updated_tx.send(resp.version).unwrap();
-        Ok(())
+        for schema in snapshot.schemas {
+            catalog_guard.create_schema(&schema)
+        }
+        for table in snapshot.tables {
+            catalog_guard.create_table(&table)
+        }
+        for source in snapshot.sources {
+            catalog_guard.create_source(&source)
+        }
+        for user in snapshot.users {
+            user_guard.create_user(user)
+        }
+        for index in snapshot.indexes {
+            catalog_guard.create_index(&index)
+        }
+        for sink in snapshot.sinks {
+            catalog_guard.create_sink(&sink)
+        }
+        for view in snapshot.views {
+            catalog_guard.create_view(&view)
+        }
+        self.worker_node_manager.refresh(
+            snapshot.nodes,
+            snapshot
+                .parallel_unit_mappings
+                .iter()
+                .map(|mapping| {
+                    (
+                        mapping.fragment_id,
+                        decompress_data(&mapping.original_indices, &mapping.data),
+                    )
+                })
+                .collect(),
+        );
+        self.hummock_snapshot_manager
+            .update_epoch(snapshot.hummock_snapshot.unwrap());
+
+        let snapshot_version = snapshot.version.unwrap();
+        catalog_guard.set_version(snapshot_version.catalog_version);
+        self.catalog_updated_tx
+            .send(snapshot_version.catalog_version)
+            .unwrap();
+        user_guard.set_version(snapshot_version.catalog_version);
+        self.user_info_updated_tx
+            .send(snapshot_version.catalog_version)
+            .unwrap();
     }
 }
 
@@ -162,12 +170,12 @@ impl FrontendObserverNode {
         let mut catalog_guard = self.catalog.write();
         match info {
             Info::Database(database) => match resp.operation() {
-                Operation::Add => catalog_guard.create_database(database.clone()),
+                Operation::Add => catalog_guard.create_database(database),
                 Operation::Delete => catalog_guard.drop_database(database.id),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Schema(schema) => match resp.operation() {
-                Operation::Add => catalog_guard.create_schema(schema.clone()),
+                Operation::Add => catalog_guard.create_schema(schema),
                 Operation::Delete => catalog_guard.drop_schema(schema.database_id, schema.id),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
@@ -180,14 +188,14 @@ impl FrontendObserverNode {
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Source(source) => match resp.operation() {
-                Operation::Add => catalog_guard.create_source(source.clone()),
+                Operation::Add => catalog_guard.create_source(source),
                 Operation::Delete => {
                     catalog_guard.drop_source(source.database_id, source.schema_id, source.id)
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Sink(sink) => match resp.operation() {
-                Operation::Add => catalog_guard.create_sink(sink.clone()),
+                Operation::Add => catalog_guard.create_sink(sink),
                 Operation::Delete => {
                     catalog_guard.drop_sink(sink.database_id, sink.schema_id, sink.id)
                 }
@@ -197,6 +205,13 @@ impl FrontendObserverNode {
                 Operation::Add => catalog_guard.create_index(index),
                 Operation::Delete => {
                     catalog_guard.drop_index(index.database_id, index.schema_id, index.id.into())
+                }
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            Info::View(view) => match resp.operation() {
+                Operation::Add => catalog_guard.create_view(view),
+                Operation::Delete => {
+                    catalog_guard.drop_view(view.database_id, view.schema_id, view.id)
                 }
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },

@@ -15,8 +15,9 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
-use risingwave_common::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk, Row};
+use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::for_all_variants;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{literal_type_match, DataType, Datum, Scalar, ScalarImpl};
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -47,10 +48,10 @@ impl Expression for LiteralExpression {
                 match (builder, literal) {
                     $(
                         (ArrayBuilderImpl::$variant_name(inner), Some(ScalarImpl::$variant_name(v))) => {
-                            append_literal_to_arr(inner, Some(v.as_scalar_ref()), capacity)?;
+                            inner.append_n(capacity, Some(v.as_scalar_ref()));
                         }
                         (ArrayBuilderImpl::$variant_name(inner), None) => {
-                            append_literal_to_arr(inner, None, capacity)?;
+                            inner.append_n(capacity, None);
                         }
                     )*
                     (_, _) => $crate::bail!(
@@ -65,23 +66,9 @@ impl Expression for LiteralExpression {
         Ok(Arc::new(array_builder.finish()))
     }
 
-    fn eval_row(&self, _input: &Row) -> Result<Datum> {
+    fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
         Ok(self.literal.as_ref().cloned())
     }
-}
-
-fn append_literal_to_arr<'a, A1>(
-    a: &'a mut A1,
-    v: Option<<<A1 as ArrayBuilder>::ArrayType as Array>::RefItem<'a>>,
-    cardinality: usize,
-) -> Result<()>
-where
-    A1: ArrayBuilder,
-{
-    for _ in 0..cardinality {
-        a.append(v)
-    }
-    Ok(())
 }
 
 impl LiteralExpression {
@@ -133,7 +120,7 @@ mod tests {
     use risingwave_common::array::{I32Array, StructValue};
     use risingwave_common::array_nonnull;
     use risingwave_common::types::{Decimal, IntervalUnit, IntoOrdered};
-    use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
+    use risingwave_common::util::value_encoding::serialize_datum;
     use risingwave_pb::data::data_type::{IntervalType, TypeName};
     use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
     use risingwave_pb::expr::expr_node::RexNode::Constant;
@@ -145,11 +132,11 @@ mod tests {
     #[test]
     fn test_struct_expr_literal_from() {
         let value = StructValue::new(vec![
-            Some(ScalarImpl::Utf8("12222".to_string())),
+            Some(ScalarImpl::Utf8("12222".into())),
             Some(2.into()),
             None,
         ]);
-        let body = serialize_datum_to_bytes(Some(value.clone().to_scalar_value()).as_ref());
+        let body = serialize_datum(Some(value.clone().to_scalar_value()).as_ref());
         let expr = ExprNode {
             expr_type: Type::ConstantValue as i32,
             return_type: Some(ProstDataType {
@@ -180,39 +167,39 @@ mod tests {
     fn test_expr_literal_from() {
         let v = true;
         let t = TypeName::Boolean;
-        let bytes = serialize_datum_to_bytes(Some(v.to_scalar_value()).as_ref());
+        let bytes = serialize_datum(Some(v.to_scalar_value()).as_ref());
 
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = 1i16;
         let t = TypeName::Int16;
-        let bytes = serialize_datum_to_bytes(Some(v.to_scalar_value()).as_ref());
+        let bytes = serialize_datum(Some(v.to_scalar_value()).as_ref());
 
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = 1i32;
         let t = TypeName::Int32;
-        let bytes = serialize_datum_to_bytes(Some(v.to_scalar_value()).as_ref());
+        let bytes = serialize_datum(Some(v.to_scalar_value()).as_ref());
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = 1i64;
         let t = TypeName::Int64;
-        let bytes = serialize_datum_to_bytes(Some(v.to_scalar_value()).as_ref());
+        let bytes = serialize_datum(Some(v.to_scalar_value()).as_ref());
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = 1f32.into_ordered();
         let t = TypeName::Float;
-        let bytes = serialize_datum_to_bytes(Some(v.to_scalar_value()).as_ref());
+        let bytes = serialize_datum(Some(v.to_scalar_value()).as_ref());
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = 1f64.into_ordered();
         let t = TypeName::Double;
-        let bytes = serialize_datum_to_bytes(Some(v.to_scalar_value()).as_ref());
+        let bytes = serialize_datum(Some(v.to_scalar_value()).as_ref());
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
@@ -221,22 +208,21 @@ mod tests {
         let expr = LiteralExpression::try_from(&make_expression(None, t)).unwrap();
         assert_eq!(v, expr.literal());
 
-        let v = String::from("varchar");
+        let v: Box<str> = "varchar".into();
         let t = TypeName::Varchar;
-        let bytes = serialize_datum_to_bytes(Some(v.clone().to_scalar_value()).as_ref());
+        let bytes = serialize_datum(Some(v.clone().to_scalar_value()).as_ref());
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = Decimal::new(3141, 3);
         let t = TypeName::Decimal;
-        let bytes = serialize_datum_to_bytes(Some(v.to_scalar_value()).as_ref());
+        let bytes = serialize_datum(Some(v.to_scalar_value()).as_ref());
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 
         let v = 32i32;
         let t = TypeName::Interval;
-        let bytes =
-            serialize_datum_to_bytes(Some(IntervalUnit::from_month(v).to_scalar_value()).as_ref());
+        let bytes = serialize_datum(Some(IntervalUnit::from_month(v).to_scalar_value()).as_ref());
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(
             IntervalUnit::from_month(v).to_scalar_value(),
@@ -266,7 +252,7 @@ mod tests {
     #[test]
     fn test_literal_eval_row_dummy_chunk() {
         let literal = LiteralExpression::new(DataType::Int32, Some(1.into()));
-        let result = literal.eval_row(&Row::new(vec![])).unwrap();
+        let result = literal.eval_row(&OwnedRow::new(vec![])).unwrap();
         assert_eq!(result, Some(1.into()))
     }
 }

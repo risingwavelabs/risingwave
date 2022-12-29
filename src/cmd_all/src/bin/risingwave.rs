@@ -13,11 +13,13 @@
 // limitations under the License.
 
 #![cfg_attr(coverage, feature(no_coverage))]
+#![feature(let_chains)]
 
+use task_stats_alloc::TaskLocalAlloc;
 use tikv_jemallocator::Jemalloc;
 
 #[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+static GLOBAL: TaskLocalAlloc<Jemalloc> = TaskLocalAlloc(Jemalloc);
 
 use std::collections::HashMap;
 use std::env;
@@ -41,10 +43,7 @@ fn main() -> Result<()> {
 
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from(args);
 
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(
-                    opts.enable_jaeger_tracing,
-                    false,
-                ));
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(false));
 
                 risingwave_rt::main_okk(risingwave_compute::start(opts));
 
@@ -108,17 +107,19 @@ fn main() -> Result<()> {
     }
 
     // risectl
-    fns.insert(
-        "risectl",
-        Box::new(move |args: Vec<String>| {
-            eprintln!("launching risectl");
+    for fn_name in ["ctl", "risectl"] {
+        fns.insert(
+            fn_name,
+            Box::new(move |args: Vec<String>| {
+                eprintln!("launching risectl");
 
-            let opts = risingwave_ctl::CliOpts::parse_from(args);
-            risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+                let opts = risingwave_ctl::CliOpts::parse_from(args);
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
 
-            risingwave_rt::main_okk(risingwave_ctl::start(opts))
-        }),
-    );
+                risingwave_rt::main_okk(risingwave_ctl::start(opts))
+            }),
+        );
+    }
 
     // playground
     for fn_name in ["play", "playground"] {

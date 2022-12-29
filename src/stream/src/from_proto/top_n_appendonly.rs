@@ -15,37 +15,51 @@
 use std::sync::Arc;
 
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_pb::stream_plan::TopNNode;
 
 use super::*;
+use crate::common::table::state_table::StateTable;
 use crate::executor::AppendOnlyTopNExecutor;
 
 pub struct AppendOnlyTopNExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
-    fn new_boxed_executor(
+    type Node = TopNNode;
+
+    async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::AppendOnlyTopN)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let state_table = StateTable::from_table_catalog(table, store, vnodes);
-        let order_pairs = table.get_pk().iter().map(OrderPair::from_prost).collect();
+        let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
+        let storage_key = table.get_pk().iter().map(OrderPair::from_prost).collect();
+        let order_by = node.order_by.iter().map(OrderPair::from_prost).collect();
+
+        assert_eq!(&params.pk_indices, input.pk_indices());
         if node.with_ties {
-            unreachable!("Not supported yet. Banned in planner");
-        } else {
-            Ok(AppendOnlyTopNExecutor::new(
+            Ok(AppendOnlyTopNExecutor::new_with_ties(
                 input,
                 params.actor_context,
-                order_pairs,
+                storage_key,
                 (node.offset as usize, node.limit as usize),
-                node.order_by_len as usize,
-                params.pk_indices,
+                order_by,
+                params.executor_id,
+                state_table,
+            )?
+            .boxed())
+        } else {
+            Ok(AppendOnlyTopNExecutor::new_without_ties(
+                input,
+                params.actor_context,
+                storage_key,
+                (node.offset as usize, node.limit as usize),
+                order_by,
                 params.executor_id,
                 state_table,
             )?

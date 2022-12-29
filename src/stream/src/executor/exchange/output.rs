@@ -19,8 +19,8 @@ use async_stack_trace::{SpanValue, StackTrace};
 use async_trait::async_trait;
 use risingwave_common::util::addr::is_local_address;
 use tokio::sync::mpsc::error::SendError;
-use tokio::sync::mpsc::Sender;
 
+use super::permit::Sender;
 use crate::error::StreamResult;
 use crate::executor::Message;
 use crate::task::{ActorId, SharedContext};
@@ -49,7 +49,7 @@ pub struct LocalOutput {
 
     span: SpanValue,
 
-    ch: Sender<Message>,
+    ch: Sender,
 }
 
 impl Debug for LocalOutput {
@@ -61,7 +61,7 @@ impl Debug for LocalOutput {
 }
 
 impl LocalOutput {
-    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
+    pub fn new(actor_id: ActorId, ch: Sender) -> Self {
         Self {
             actor_id,
             span: format!("LocalOutput (actor {:?})", actor_id).into(),
@@ -79,7 +79,7 @@ impl Output for LocalOutput {
             .await
             .map_err(|SendError(message)| {
                 anyhow!(
-                    "failed to send message to actor {}: {:#?}",
+                    "failed to send message to actor {}: {:?}",
                     self.actor_id,
                     message
                 )
@@ -102,7 +102,7 @@ pub struct RemoteOutput {
 
     span: SpanValue,
 
-    ch: Sender<Message>,
+    ch: Sender,
 }
 
 impl Debug for RemoteOutput {
@@ -114,7 +114,7 @@ impl Debug for RemoteOutput {
 }
 
 impl RemoteOutput {
-    pub fn new(actor_id: ActorId, ch: Sender<Message>) -> Self {
+    pub fn new(actor_id: ActorId, ch: Sender) -> Self {
         Self {
             actor_id,
             span: format!("RemoteOutput (actor {:?})", actor_id).into(),

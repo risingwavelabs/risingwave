@@ -27,7 +27,7 @@ describe t3;
 v1 Int32
 v2 Int32
 v3 Int32
-idx1 index(v1, v2) distributed by(v1, v2)
+idx1 index(v1, v2) include(v3) distributed by(v1, v2)
 
 statement ok
 drop index idx1;
@@ -40,8 +40,10 @@ dev
 query T rowsort
 show schemas;
 ----
-public
+information_schema
 pg_catalog
+public
+rw_catalog
 
 query T
 show tables;
@@ -71,8 +73,44 @@ query T
 show sources;
 ----
 
+query TT
+show create materialized view mv3;
+----
+public.mv3 CREATE MATERIALIZED VIEW mv3 AS SELECT sum(v1) AS sum_v1 FROM t3
+
+statement ok
+create view v1 as select * from t3;
+
+query TT
+show create view v1;
+----
+public.v1 CREATE VIEW v1 AS SELECT * FROM t3
+
 statement ok
 drop materialized view mv3;
 
 statement ok
+drop view v1;
+
+statement ok
 drop table t3;
+
+query TT
+describe pg_matviews;
+----
+schemaname Varchar
+matviewname Varchar
+matviewowner Int32
+definition Varchar
+matviewid Int32
+matviewgraph Varchar
+
+query TT
+show columns from pg_catalog.pg_matviews;
+----
+schemaname Varchar
+matviewname Varchar
+matviewowner Int32
+definition Varchar
+matviewid Int32
+matviewgraph Varchar

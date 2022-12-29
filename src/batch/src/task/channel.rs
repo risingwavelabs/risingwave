@@ -21,6 +21,9 @@ use risingwave_pb::batch_plan::ExchangeInfo;
 
 use crate::error::Result as BatchResult;
 use crate::task::broadcast_channel::{new_broadcast_channel, BroadcastReceiver, BroadcastSender};
+use crate::task::consistent_hash_shuffle_channel::{
+    new_consistent_shuffle_channel, ConsistentHashShuffleReceiver, ConsistentHashShuffleSender,
+};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 use crate::task::fifo_channel::{new_fifo_channel, FifoReceiver, FifoSender};
 use crate::task::hash_shuffle_channel::{
@@ -40,6 +43,7 @@ pub(super) trait ChanSender: Send {
 #[derive(Debug)]
 pub enum ChanSenderImpl {
     HashShuffle(HashShuffleSender),
+    ConsistentHashShuffle(ConsistentHashShuffleSender),
     Fifo(FifoSender),
     Broadcast(BroadcastSender),
 }
@@ -48,6 +52,7 @@ impl ChanSenderImpl {
     pub(super) async fn send(&mut self, chunk: Option<DataChunk>) -> BatchResult<()> {
         match self {
             Self::HashShuffle(sender) => sender.send(chunk).await,
+            Self::ConsistentHashShuffle(sender) => sender.send(chunk).await,
             Self::Fifo(sender) => sender.send(chunk).await,
             Self::Broadcast(sender) => sender.send(chunk).await,
         }
@@ -65,6 +70,7 @@ pub(super) trait ChanReceiver: Send {
 
 pub enum ChanReceiverImpl {
     HashShuffle(HashShuffleReceiver),
+    ConsistentHashShuffle(ConsistentHashShuffleReceiver),
     Fifo(FifoReceiver),
     Broadcast(BroadcastReceiver),
 }
@@ -73,6 +79,7 @@ impl ChanReceiverImpl {
     pub(super) async fn recv(&mut self) -> Result<Option<DataChunkInChannel>> {
         match self {
             Self::HashShuffle(receiver) => receiver.recv().await,
+            Self::ConsistentHashShuffle(receiver) => receiver.recv().await,
             Self::Broadcast(receiver) => receiver.recv().await,
             Self::Fifo(receiver) => receiver.recv().await,
         }
@@ -90,6 +97,9 @@ pub fn create_output_channel(
     match shuffle.get_mode()? {
         ShuffleDistributionMode::Single => Ok(new_fifo_channel(output_channel_size)),
         ShuffleDistributionMode::Hash => Ok(new_hash_shuffle_channel(shuffle, output_channel_size)),
+        ShuffleDistributionMode::ConsistentHash => {
+            Ok(new_consistent_shuffle_channel(shuffle, output_channel_size))
+        }
         ShuffleDistributionMode::Broadcast => {
             Ok(new_broadcast_channel(shuffle, output_channel_size))
         }

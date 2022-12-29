@@ -27,10 +27,11 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
+use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable,
+    Source as ProstSource, Table as ProstTable, View as ProstView,
 };
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
@@ -184,7 +185,7 @@ pub struct MockCatalogWriter {
 impl CatalogWriter for MockCatalogWriter {
     async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()> {
         let database_id = self.gen_id();
-        self.catalog.write().create_database(ProstDatabase {
+        self.catalog.write().create_database(&ProstDatabase {
             name: db_name.to_string(),
             id: database_id,
             owner,
@@ -203,7 +204,7 @@ impl CatalogWriter for MockCatalogWriter {
         owner: UserId,
     ) -> Result<()> {
         let id = self.gen_id();
-        self.catalog.write().create_schema(ProstSchema {
+        self.catalog.write().create_schema(&ProstSchema {
             id,
             name: schema_name.to_string(),
             database_id: db_id,
@@ -224,15 +225,21 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_materialized_source(
+    async fn create_view(&self, _view: ProstView) -> Result<()> {
+        todo!()
+    }
+
+    async fn create_table(
         &self,
-        source: ProstSource,
+        source: Option<ProstSource>,
         mut table: ProstTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
-        let source_id = self.create_source_inner(source)?;
-        table.optional_associated_source_id =
-            Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
+        if let Some(source) = source {
+            let source_id = self.create_source_inner(source)?;
+            table.optional_associated_source_id =
+                Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
+        }
         self.create_materialized_view(table, graph).await?;
         Ok(())
     }
@@ -265,35 +272,42 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_materialized_source(
-        &self,
-        source_id: u32,
-        table_id: TableId,
-        indexes_id: Vec<IndexId>,
-    ) -> Result<()> {
-        for index_id in indexes_id {
-            self.drop_index(index_id).await?;
+    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
+        if let Some(source_id) = source_id {
+            self.drop_table_or_source_id(source_id);
         }
-        let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
-        self.drop_table_or_source_id(table_id.table_id);
+        let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
+        let indexes =
+            self.catalog
+                .read()
+                .get_all_indexes_related_to_object(database_id, schema_id, table_id);
+        for index in indexes {
+            self.drop_index(index.id).await?;
+        }
         self.catalog
             .write()
             .drop_table(database_id, schema_id, table_id);
-        self.catalog
-            .write()
-            .drop_source(database_id, schema_id, source_id);
+        if let Some(source_id) = source_id {
+            self.catalog
+                .write()
+                .drop_source(database_id, schema_id, source_id);
+        }
         Ok(())
     }
 
-    async fn drop_materialized_view(
-        &self,
-        table_id: TableId,
-        indexes_id: Vec<IndexId>,
-    ) -> Result<()> {
-        for index_id in indexes_id {
-            self.drop_index(index_id).await?;
-        }
+    async fn drop_view(&self, _view_id: u32) -> Result<()> {
+        todo!()
+    }
+
+    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
         let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
+        let indexes =
+            self.catalog
+                .read()
+                .get_all_indexes_related_to_object(database_id, schema_id, table_id);
+        for index in indexes {
+            self.drop_index(index.id).await?;
+        }
         self.catalog
             .write()
             .drop_table(database_id, schema_id, table_id);
@@ -357,18 +371,18 @@ impl CatalogWriter for MockCatalogWriter {
 
 impl MockCatalogWriter {
     pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
-        catalog.write().create_database(ProstDatabase {
+        catalog.write().create_database(&ProstDatabase {
             id: 0,
             name: DEFAULT_DATABASE_NAME.to_string(),
             owner: DEFAULT_SUPER_USER_ID,
         });
-        catalog.write().create_schema(ProstSchema {
+        catalog.write().create_schema(&ProstSchema {
             id: 1,
             name: DEFAULT_SCHEMA_NAME.to_string(),
             database_id: 0,
             owner: DEFAULT_SUPER_USER_ID,
         });
-        catalog.write().create_schema(ProstSchema {
+        catalog.write().create_schema(&ProstSchema {
             id: 2,
             name: PG_CATALOG_SCHEMA_NAME.to_string(),
             database_id: 0,
@@ -450,14 +464,14 @@ impl MockCatalogWriter {
 
     fn create_source_inner(&self, mut source: ProstSource) -> Result<u32> {
         source.id = self.gen_id();
-        self.catalog.write().create_source(source.clone());
+        self.catalog.write().create_source(&source);
         self.add_table_or_source_id(source.id, source.schema_id, source.database_id);
         Ok(source.id)
     }
 
     fn create_sink_inner(&self, mut sink: ProstSink, _graph: StreamFragmentGraph) -> Result<()> {
         sink.id = self.gen_id();
-        self.catalog.write().create_sink(sink.clone());
+        self.catalog.write().create_sink(&sink);
         self.add_table_or_sink_id(sink.id, sink.schema_id, sink.database_id);
         Ok(())
     }
@@ -643,6 +657,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn unpin_snapshot_before(&self, _epoch: u64) -> RpcResult<()> {
         Ok(())
+    }
+
+    async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
+        Ok(vec![])
     }
 }
 

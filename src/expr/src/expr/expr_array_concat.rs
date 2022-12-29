@@ -15,8 +15,9 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::{ArrayRef, DataChunk, ListValue, Row};
-use risingwave_common::types::{to_datum_ref, DataType, Datum, DatumRef, ScalarRefImpl};
+use risingwave_common::array::{ArrayRef, DataChunk, ListValue};
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, Datum, DatumRef, ScalarRefImpl, ToDatumRef};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -337,10 +338,10 @@ impl Expression for ArrayConcatExpression {
         Ok(Arc::new(builder.finish()))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let left_data = self.left.eval_row(input)?;
         let right_data = self.right.eval_row(input)?;
-        Ok(self.evaluate(to_datum_ref(&left_data), to_datum_ref(&right_data)))
+        Ok(self.evaluate(left_data.to_datum_ref(), right_data.to_datum_ref()))
     }
 }
 

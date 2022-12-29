@@ -17,10 +17,11 @@ use std::sync::Arc;
 use itertools::Itertools;
 use regex::Regex;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListRef, ListValue, Row,
+    Array, ArrayBuilder, ArrayMeta, ArrayRef, DataChunk, ListArrayBuilder, ListRef, ListValue,
     Utf8Array,
 };
-use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -102,7 +103,7 @@ impl RegexpMatchExpression {
                         }
                     })
                     .flatten()
-                    .map(|mat| Some(mat.as_str().to_string().to_scalar_value()))
+                    .map(|mat| Some(mat.as_str().into()))
                     .collect_vec();
                 let list = ListValue::new(list);
                 Some(list)
@@ -146,7 +147,7 @@ impl Expression for RegexpMatchExpression {
         Ok(Arc::new(output.finish().into()))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let text = self.child.eval_row(input)?;
         Ok(if let Some(ScalarImpl::Utf8(text)) = text {
             self.match_one(Some(&text)).map(Into::into)

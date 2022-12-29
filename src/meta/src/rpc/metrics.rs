@@ -60,8 +60,12 @@ pub struct MetaMetrics {
     pub current_version_id: IntGauge,
     /// The version id of checkpoint version.
     pub checkpoint_version_id: IntGauge,
-    /// The smallest version id that is being pinned.
+    /// The smallest version id that is being pinned by worker nodes.
     pub min_pinned_version_id: IntGauge,
+    /// The smallest version id that is being guarded by meta node safe points.
+    pub min_safepoint_version_id: IntGauge,
+    /// Hummock version stats
+    pub version_stats: IntGaugeVec,
 
     /// Latency for hummock manager to acquire lock
     pub hummock_manager_lock_time: HistogramVec,
@@ -73,6 +77,7 @@ pub struct MetaMetrics {
 
     /// The number of workers in the cluster.
     pub worker_num: IntGaugeVec,
+    pub compact_skip_frequency: IntCounterVec,
 }
 
 impl MetaMetrics {
@@ -162,6 +167,13 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
+        let compact_skip_frequency = register_int_counter_vec_with_registry!(
+            "storage_skip_compact_frequency",
+            "num of compactions from each level to next level",
+            &["level", "type"],
+            registry
+        )
+        .unwrap();
 
         let version_size =
             register_int_gauge_with_registry!("storage_version_size", "version size", registry)
@@ -188,10 +200,25 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let min_safepoint_version_id = register_int_gauge_with_registry!(
+            "storage_min_safepoint_version_id",
+            "min safepoint version id",
+            registry
+        )
+        .unwrap();
+
         let level_file_size = register_int_gauge_vec_with_registry!(
             "storage_level_total_file_size",
             "KBs total file bytes in each level",
             &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let version_stats = register_int_gauge_vec_with_registry!(
+            "storage_version_stats",
+            "per table stats in current hummock version",
+            &["table_id", "metric"],
             registry
         )
         .unwrap();
@@ -236,11 +263,14 @@ impl MetaMetrics {
             level_sst_num,
             level_compact_cnt,
             compact_frequency,
+            compact_skip_frequency,
             level_file_size,
             version_size,
+            version_stats,
             current_version_id,
             checkpoint_version_id,
             min_pinned_version_id,
+            min_safepoint_version_id,
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),

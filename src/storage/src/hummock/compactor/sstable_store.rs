@@ -15,9 +15,8 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_object_store::object::ObjectError;
+use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
 use risingwave_pb::hummock::SstableInfo;
-use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::{
@@ -114,7 +113,7 @@ impl MemoryCollector for CompactorMemoryCollector {
 /// An iterator that reads the blocks of an SST step by step from a given stream of bytes.
 pub struct BlockStream {
     /// The stream that provides raw data.
-    byte_stream: Box<dyn AsyncRead + Unpin + Send + Sync>,
+    byte_stream: MonitoredStreamingReader,
 
     /// The index of the next block. Note that `block_idx` is relative to the start index of the
     /// stream (and is compatible with `block_size_vec`); it is not relative to the corresponding
@@ -138,7 +137,7 @@ impl BlockStream {
     /// from `byte_stream`.
     fn new(
         // The stream that provides raw data.
-        byte_stream: Box<dyn AsyncRead + Unpin + Send + Sync>,
+        byte_stream: MonitoredStreamingReader,
 
         // Index of the SST's block where the stream starts.
         block_index: usize,
@@ -178,7 +177,7 @@ impl BlockStream {
 
         let bytes_read = self
             .byte_stream
-            .read_exact(&mut buffer[..])
+            .read_bytes(&mut buffer[..])
             .await
             .map_err(|e| HummockError::object_io_error(ObjectError::internal(e)))?;
 

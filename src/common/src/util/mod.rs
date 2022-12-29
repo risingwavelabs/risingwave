@@ -20,25 +20,26 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
 
 pub mod addr;
-pub mod bit_util;
 pub mod chunk_coalesce;
 pub mod compress;
 pub mod encoding_for_comparison;
 pub mod env_var;
+pub mod epoch;
+mod future_utils;
 pub mod hash_util;
 pub mod ordered;
 pub mod prost;
-pub mod sort_util;
-#[macro_use]
-pub mod match_util;
-pub mod epoch;
-mod future_utils;
+pub mod resource_util;
 pub mod scan_range;
 pub mod schema_check;
+pub mod sort_util;
 pub mod value_encoding;
 pub mod worker_util;
 
 pub use future_utils::select_all;
+
+#[macro_use]
+pub mod match_util;
 
 pub fn downcast_ref<S, T>(source: &S) -> Result<&T>
 where

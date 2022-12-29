@@ -66,7 +66,7 @@ impl TraceExecutor {
 
         while let Some(chunk) = child_stream.next().in_span(span()).await {
             let chunk = chunk?;
-            event!(tracing::Level::TRACE, prev = %input_desc, msg = "chunk", "input = \n{:#?}", 
+            event!(tracing::Level::TRACE, prev = %input_desc, msg = "chunk", "input = \n{:#?}",
                 chunk);
             yield chunk;
         }

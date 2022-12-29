@@ -47,7 +47,6 @@ pub fn build_compaction_config_vec(
     max_bytes_for_level_multiplier: Option<u64>,
     max_compaction_bytes: Option<u64>,
     sub_level_max_compaction_bytes: Option<u64>,
-    level0_trigger_file_number: Option<u64>,
     level0_tier_compact_file_number: Option<u64>,
     target_file_size_base: Option<u64>,
     compaction_filter_mask: Option<u32>,
@@ -65,9 +64,6 @@ pub fn build_compaction_config_vec(
     }
     if let Some(c) = sub_level_max_compaction_bytes {
         configs.push(MutableConfig::SubLevelMaxCompactionBytes(c));
-    }
-    if let Some(c) = level0_trigger_file_number {
-        configs.push(MutableConfig::Level0TriggerFileNumber(c));
     }
     if let Some(c) = level0_tier_compact_file_number {
         configs.push(MutableConfig::Level0TierCompactFileNumber(c));

@@ -30,6 +30,7 @@ where
     F: FnOnce() -> error::Result<T> + Send + 'static,
     T: Send + 'static,
 {
+    #[cfg_attr(madsim, expect(deprecated))]
     match tokio::task::spawn_blocking(f).await {
         Ok(res) => res,
         Err(_) => Err(error::Error::Other("background task failed".to_string())),

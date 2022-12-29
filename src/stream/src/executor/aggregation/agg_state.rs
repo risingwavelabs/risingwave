@@ -13,18 +13,19 @@
 // limitations under the License.
 
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayImpl, Row};
+use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::Datum;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
-use super::table_state::TableState;
+use super::table::TableState;
 use super::value::ValueState;
 use super::AggCall;
+use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
 use crate::executor::{PkIndices, StreamExecutorResult};
 
@@ -80,7 +81,7 @@ impl<S: StateStore> AggState<S> {
         row_count: usize,
         prev_output: Option<&Datum>,
         pk_indices: &PkIndices,
-        group_key: Option<&Row>,
+        group_key: Option<&OwnedRow>,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
@@ -89,14 +90,11 @@ impl<S: StateStore> AggState<S> {
                 Self::Value(ValueState::new(agg_call, prev_output.cloned())?)
             }
             AggStateStorage::Table { table } => {
-                let mut state = TableState::new(agg_call);
-                state.update_from_state_table(table, group_key).await?;
-                Self::Table(state)
+                Self::Table(TableState::new(agg_call, table, group_key).await?)
             }
             AggStateStorage::MaterializedInput { mapping, .. } => {
                 Self::MaterializedInput(MaterializedInputState::new(
                     agg_call,
-                    group_key,
                     pk_indices,
                     mapping,
                     row_count,
@@ -136,6 +134,7 @@ impl<S: StateStore> AggState<S> {
     pub async fn get_output(
         &mut self,
         storage: &AggStateStorage<S>,
+        group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<Datum> {
         match self {
             Self::Value(state) => {
@@ -151,23 +150,16 @@ impl<S: StateStore> AggState<S> {
                     storage,
                     AggStateStorage::MaterializedInput { table, .. } => table
                 );
-                state.get_output(state_table).await
+                state.get_output(state_table, group_key).await
             }
         }
     }
 
-    /// reset the value state to initial state.
+    /// Reset the value state to initial state.
     pub fn reset(&mut self) {
-        match self {
-            Self::Value(state) => {
-                state.reset();
-            }
-            Self::Table(_) => {
-                // pass
-            }
-            Self::MaterializedInput(_state) => {
-                // pass
-            }
+        if let Self::Value(state) = self {
+            // now only value states need to be reset
+            state.reset();
         }
     }
 }

@@ -25,6 +25,7 @@ use super::error::StreamExecutorError;
 use super::{
     expect_first_barrier, Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream,
 };
+use crate::executor::PkIndices;
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
@@ -114,11 +115,12 @@ impl RearrangedChainExecutor {
         upstream_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
+        pk_indices: PkIndices,
     ) -> Self {
         Self {
             info: ExecutorInfo {
                 schema,
-                pk_indices: upstream.pk_indices().to_owned(),
+                pk_indices,
                 identity: "RearrangedChain".to_owned(),
             },
             snapshot,
@@ -325,6 +327,10 @@ impl Executor for RearrangedChainExecutor {
 
     fn identity(&self) -> &str {
         &self.info.identity
+    }
+
+    fn info(&self) -> ExecutorInfo {
+        self.info.clone()
     }
 }
 

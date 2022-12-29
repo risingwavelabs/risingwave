@@ -21,6 +21,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::catalog::Index as ProstIndex;
 use risingwave_pb::expr::expr_node::RexNode;
 
+use super::ColumnId;
 use crate::catalog::{DatabaseId, SchemaId, TableCatalog};
 use crate::expr::{Expr, InputRef};
 use crate::optimizer::property::FieldOrder;
@@ -43,6 +44,8 @@ pub struct IndexCatalog {
     pub primary_to_secondary_mapping: HashMap<usize, usize>,
 
     pub secondary_to_primary_mapping: HashMap<usize, usize>,
+
+    pub original_columns: Vec<ColumnId>,
 }
 
 impl IndexCatalog {
@@ -76,6 +79,13 @@ impl IndexCatalog {
             .map(|(i, input_ref)| (i, input_ref.index))
             .collect();
 
+        let original_columns = index_prost
+            .original_columns
+            .clone()
+            .into_iter()
+            .map(Into::into)
+            .collect();
+
         IndexCatalog {
             id: index_prost.id.into(),
             name: index_prost.name.clone(),
@@ -84,6 +94,7 @@ impl IndexCatalog {
             primary_table: Arc::new(primary_table.clone()),
             primary_to_secondary_mapping,
             secondary_to_primary_mapping,
+            original_columns,
         }
     }
 
@@ -138,6 +149,7 @@ impl IndexCatalog {
                 .iter()
                 .map(InputRef::to_expr_proto)
                 .collect_vec(),
+            original_columns: self.original_columns.iter().map(Into::into).collect_vec(),
         }
     }
 }

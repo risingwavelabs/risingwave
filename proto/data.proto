@@ -44,9 +44,10 @@ message DataType {
     INTERVAL = 11;
     DATE = 12;
     // Timestamp type with timezone
-    TIMESTAMPZ = 13;
+    TIMESTAMPTZ = 13;
     STRUCT = 15;
     LIST = 16;
+    BYTEA = 17;
   }
   TypeName type_name = 1;
   // Data length for char.
@@ -92,6 +93,7 @@ enum ArrayType {
   INTERVAL = 12;
   STRUCT = 13;
   LIST = 14;
+  BYTEA = 15;
 }
 
 message Array {

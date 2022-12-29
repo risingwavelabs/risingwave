@@ -20,24 +20,23 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_connector::source::{
     ConnectorProperties, SplitEnumeratorImpl, SplitId, SplitImpl, SplitMetaData,
 };
-use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::catalog::Source;
+use risingwave_pb::connector_service::table_schema::Column;
+use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use tokio::{select, time};
-use tokio_retry::strategy::FixedInterval;
 
 use crate::barrier::{BarrierScheduler, Command};
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, SourceId};
-use crate::model::{ActorId, FragmentId};
+use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
@@ -48,6 +47,7 @@ pub struct SourceManager<S: MetaStore> {
     pub(crate) paused: Mutex<()>,
     barrier_scheduler: BarrierScheduler<S>,
     core: Mutex<SourceManagerCore<S>>,
+    connector_rpc_endpoint: Option<String>,
 }
 
 struct SharedSplitMap {
@@ -63,8 +63,17 @@ struct ConnectorSourceWorker {
 }
 
 impl ConnectorSourceWorker {
-    pub async fn create(source: &Source, period: Duration) -> MetaResult<Self> {
-        let properties = ConnectorProperties::extract(source.properties.clone())?;
+    pub async fn create(
+        connector_rpc_endpoint: &Option<String>,
+        source: &Source,
+        period: Duration,
+    ) -> MetaResult<Self> {
+        let mut properties = ConnectorProperties::extract(source.properties.clone())?;
+        // init cdc properties
+        if let Some(endpoint) = connector_rpc_endpoint {
+            let table_schema = Self::extract_source_schema(source);
+            properties.init_properties_for_cdc(source.id, endpoint.to_string(), Some(table_schema));
+        }
         let enumerator = SplitEnumeratorImpl::create(properties).await?;
         let splits = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         Ok(Self {
@@ -108,6 +117,21 @@ impl ConnectorSourceWorker {
         );
 
         Ok(())
+    }
+
+    fn extract_source_schema(source: &Source) -> TableSchema {
+        TableSchema {
+            columns: source
+                .columns
+                .iter()
+                .flat_map(|col| &col.column_desc)
+                .map(|col| Column {
+                    name: col.name.clone(),
+                    data_type: col.column_type.as_ref().unwrap().type_name,
+                })
+                .collect(),
+            pk_indices: source.pk_column_ids.iter().map(|i| *i as u32).collect(),
+        }
     }
 }
 
@@ -170,44 +194,40 @@ where
             let fragment_ids = match self.source_fragments.get(source_id) {
                 Some(fragment_ids) if !fragment_ids.is_empty() => fragment_ids,
                 _ => {
-                    tracing::error!(
-                        "Can't find fragments related to source {}, skipping",
-                        source_id
-                    );
                     continue;
                 }
             };
 
-            let discovered_splits = handle.discovered_splits().await.unwrap();
+            if let Some(discovered_splits) = handle.discovered_splits().await {
+                for fragment_id in fragment_ids {
+                    let actor_ids = match self
+                        .fragment_manager
+                        .get_running_actors_of_fragment(*fragment_id)
+                        .await
+                    {
+                        Ok(actor_ids) => actor_ids,
+                        Err(err) => {
+                            tracing::warn!("Failed to get the actor of the fragment {}, maybe the fragment doesn't exist anymore", err.to_string());
+                            continue;
+                        }
+                    };
 
-            for fragment_id in fragment_ids {
-                let actor_ids = match self
-                    .fragment_manager
-                    .get_running_actors_of_fragment(*fragment_id)
-                    .await
-                {
-                    Ok(actor_ids) => actor_ids,
-                    Err(err) => {
-                        tracing::warn!("Failed to get the actor of the fragment {}, maybe the fragment doesn't exist anymore", err.to_string());
-                        continue;
+                    let prev_actor_splits: HashMap<_, _> = actor_ids
+                        .into_iter()
+                        .map(|actor_id| {
+                            (
+                                actor_id,
+                                self.actor_splits
+                                    .get(&actor_id)
+                                    .cloned()
+                                    .unwrap_or_default(),
+                            )
+                        })
+                        .collect();
+
+                    if let Some(change) = diff_splits(prev_actor_splits, &discovered_splits) {
+                        split_assignment.insert(*fragment_id, change);
                     }
-                };
-
-                let prev_actor_splits: HashMap<_, _> = actor_ids
-                    .into_iter()
-                    .map(|actor_id| {
-                        (
-                            actor_id,
-                            self.actor_splits
-                                .get(&actor_id)
-                                .cloned()
-                                .unwrap_or_default(),
-                        )
-                    })
-                    .collect();
-
-                if let Some(change) = diff_splits(prev_actor_splits, &discovered_splits) {
-                    split_assignment.insert(*fragment_id, change);
                 }
             }
         }
@@ -356,10 +376,10 @@ impl<S> SourceManager<S>
 where
     S: MetaStore,
 {
-    const SOURCE_RETRY_INTERVAL: Duration = Duration::from_secs(10);
     const SOURCE_TICK_INTERVAL: Duration = Duration::from_secs(10);
 
     pub async fn new(
+        connector_rpc_endpoint: Option<String>,
         barrier_scheduler: BarrierScheduler<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
@@ -369,16 +389,20 @@ where
             let sources = catalog_manager.list_sources().await;
 
             for source in sources {
-                if let Some(StreamSource(_)) = source.info {
-                    Self::create_source_worker(&source, &mut managed_sources, false).await?
-                }
+                Self::create_source_worker(
+                    &connector_rpc_endpoint,
+                    &source,
+                    &mut managed_sources,
+                    false,
+                )
+                .await?
             }
         }
 
         let mut actor_splits = HashMap::new();
         let mut source_fragments = HashMap::new();
         for table_fragments in fragment_manager.list_table_fragments().await? {
-            source_fragments.extend(table_fragments.source_fragments());
+            source_fragments.extend(table_fragments.stream_source_fragments());
             actor_splits.extend(table_fragments.actor_splits.clone());
         }
 
@@ -393,15 +417,31 @@ where
             barrier_scheduler,
             core,
             paused: Mutex::new(()),
+            connector_rpc_endpoint,
         })
     }
 
-    pub async fn drop_source_change(
-        &self,
-        source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,
-        dropped_actors: HashSet<ActorId>,
-    ) {
+    pub async fn drop_source_change(&self, table_fragments_vec: &[TableFragments]) {
         let mut core = self.core.lock().await;
+
+        // Extract the fragments that include source operators.
+        let source_fragments = table_fragments_vec
+            .iter()
+            .flat_map(|table_fragments| table_fragments.stream_source_fragments())
+            .collect::<HashMap<_, _>>();
+
+        let fragments = table_fragments_vec
+            .iter()
+            .flat_map(|table_fragments| &table_fragments.fragments)
+            .collect::<BTreeMap<_, _>>();
+
+        let dropped_actors = source_fragments
+            .values()
+            .flatten()
+            .flat_map(|fragment_id| fragments.get(fragment_id).unwrap().get_actors())
+            .map(|actor| actor.get_actor_id())
+            .collect::<HashSet<_>>();
+
         core.drop_source_change(source_fragments, &dropped_actors);
     }
 
@@ -455,7 +495,7 @@ where
             .select_table_fragments_by_table_id(table_id)
             .await?;
 
-        let source_fragments = table_fragments.source_fragments();
+        let source_fragments = table_fragments.stream_source_fragments();
 
         let mut assigned = HashMap::new();
 
@@ -501,26 +541,32 @@ where
         Ok(assigned)
     }
 
-    /// create connector worker for source.
-    pub async fn create_source(&self, source: &Source) -> MetaResult<()> {
+    /// register connector worker for source.
+    pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source.get_id()) {
             tracing::warn!("source {} already registered", source.get_id());
-            return Ok(());
-        }
-
-        if let Some(StreamSource(_)) = source.info {
-            Self::create_source_worker(source, &mut core.managed_sources, true).await?;
+        } else {
+            Self::create_source_worker(
+                &self.connector_rpc_endpoint,
+                source,
+                &mut core.managed_sources,
+                true,
+            )
+            .await?;
         }
         Ok(())
     }
 
     async fn create_source_worker(
+        connector_rpc_endpoint: &Option<String>,
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
         force_tick: bool,
     ) -> MetaResult<()> {
-        let mut worker = ConnectorSourceWorker::create(source, Duration::from_secs(10)).await?;
+        let mut worker =
+            ConnectorSourceWorker::create(connector_rpc_endpoint, source, Duration::from_secs(10))
+                .await?;
         let current_splits_ref = worker.current_splits.clone();
         tracing::info!("spawning new watcher for source {}", source.id);
 
@@ -547,20 +593,14 @@ where
         Ok(())
     }
 
-    pub async fn drop_sources(&self, source_ids: Vec<SourceId>) -> MetaResult<()> {
+    /// unregister connector worker for source.
+    pub async fn unregister_sources(&self, source_ids: Vec<SourceId>) {
         let mut core = self.core.lock().await;
         for source_id in source_ids {
             if let Some(handle) = core.managed_sources.remove(&source_id) {
                 handle.handle.abort();
             }
-
-            assert!(
-                !core.source_fragments.contains_key(&source_id),
-                "dropping source {}, but associated fragments still exists",
-                source_id
-            );
         }
-        Ok(())
     }
 
     pub async fn list_assignments(&self) -> HashMap<ActorId, Vec<SplitImpl>> {
@@ -577,13 +617,7 @@ where
         if !diff.is_empty() {
             let command = Command::SourceSplitAssignment(diff);
             tracing::debug!("pushing down command {:#?}", command);
-
-            tokio_retry::Retry::spawn(FixedInterval::new(Self::SOURCE_RETRY_INTERVAL), || async {
-                let command = command.clone();
-                self.barrier_scheduler.run_command(command).await
-            })
-            .await
-            .expect("source manager barrier push down failed");
+            self.barrier_scheduler.run_command(command).await?;
         }
 
         Ok(())
@@ -602,16 +636,6 @@ where
                 );
             }
         }
-    }
-
-    pub async fn get_source_ids_in_fragments(&self) -> Vec<SourceId> {
-        self.core
-            .lock()
-            .await
-            .source_fragments
-            .keys()
-            .cloned()
-            .collect_vec()
     }
 
     pub async fn get_actor_splits(&self) -> HashMap<ActorId, Vec<SplitImpl>> {

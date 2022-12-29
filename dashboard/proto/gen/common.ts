@@ -213,6 +213,13 @@ export interface ParallelUnitMapping {
   data: number[];
 }
 
+export interface BatchQueryEpoch {
+  epoch?: { $case: "committed"; committed: number } | { $case: "current"; current: number } | {
+    $case: "backup";
+    backup: number;
+  };
+}
+
 function createBaseStatus(): Status {
   return { code: Status_Code.UNSPECIFIED, message: "" };
 }
@@ -434,6 +441,48 @@ export const ParallelUnitMapping = {
     message.fragmentId = object.fragmentId ?? 0;
     message.originalIndices = object.originalIndices?.map((e) => e) || [];
     message.data = object.data?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseBatchQueryEpoch(): BatchQueryEpoch {
+  return { epoch: undefined };
+}
+
+export const BatchQueryEpoch = {
+  fromJSON(object: any): BatchQueryEpoch {
+    return {
+      epoch: isSet(object.committed)
+        ? { $case: "committed", committed: Number(object.committed) }
+        : isSet(object.current)
+        ? { $case: "current", current: Number(object.current) }
+        : isSet(object.backup)
+        ? { $case: "backup", backup: Number(object.backup) }
+        : undefined,
+    };
+  },
+
+  toJSON(message: BatchQueryEpoch): unknown {
+    const obj: any = {};
+    message.epoch?.$case === "committed" && (obj.committed = Math.round(message.epoch?.committed));
+    message.epoch?.$case === "current" && (obj.current = Math.round(message.epoch?.current));
+    message.epoch?.$case === "backup" && (obj.backup = Math.round(message.epoch?.backup));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<BatchQueryEpoch>, I>>(object: I): BatchQueryEpoch {
+    const message = createBaseBatchQueryEpoch();
+    if (
+      object.epoch?.$case === "committed" && object.epoch?.committed !== undefined && object.epoch?.committed !== null
+    ) {
+      message.epoch = { $case: "committed", committed: object.epoch.committed };
+    }
+    if (object.epoch?.$case === "current" && object.epoch?.current !== undefined && object.epoch?.current !== null) {
+      message.epoch = { $case: "current", current: object.epoch.current };
+    }
+    if (object.epoch?.$case === "backup" && object.epoch?.backup !== undefined && object.epoch?.backup !== null) {
+      message.epoch = { $case: "backup", backup: object.epoch.backup };
+    }
     return message;
   },
 };

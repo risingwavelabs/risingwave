@@ -92,8 +92,9 @@ impl ReceiverExecutor {
     }
 
     #[cfg(test)]
-    pub fn for_test(input: tokio::sync::mpsc::Receiver<Message>) -> Self {
+    pub fn for_test(input: super::exchange::permit::Receiver) -> Self {
         use super::exchange::input::LocalInput;
+        use crate::executor::exchange::input::Input;
         use crate::executor::ActorContext;
 
         Self::new(
@@ -102,7 +103,7 @@ impl ReceiverExecutor {
             ActorContext::create(114),
             514,
             1919,
-            LocalInput::for_test(input),
+            LocalInput::new(input, 0).boxed_input(),
             SharedContext::for_test().into(),
             810,
             StreamingMetrics::unused().into(),
@@ -128,7 +129,7 @@ impl Executor for ReceiverExecutor {
 
                 match &mut msg {
                     Message::Watermark(_) => {
-                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        // Do nothing.
                     }
                     Message::Chunk(chunk) => {
                         self.metrics
@@ -199,6 +200,10 @@ impl Executor for ReceiverExecutor {
 
     fn identity(&self) -> &str {
         &self.info.identity
+    }
+
+    fn info(&self) -> ExecutorInfo {
+        self.info.clone()
     }
 }
 

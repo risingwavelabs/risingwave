@@ -16,11 +16,11 @@ use std::collections::HashMap;
 
 use bytes::{Buf, Bytes};
 use itertools::Itertools;
-use risingwave_common::array::RowDeserializer;
-use risingwave_common::types::{display_datum_ref, to_datum_ref};
+use risingwave_common::row::{Row, RowDeserializer};
+use risingwave_common::types::to_text::ToText;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::BlockLocation;
 use risingwave_rpc_client::MetaClient;
@@ -148,8 +148,9 @@ fn print_kv_pairs(
     block_iter.seek_to_first();
 
     while block_iter.is_valid() {
-        let full_key = block_iter.key();
-        let user_key = user_key(full_key);
+        let raw_full_key = block_iter.key();
+        let full_key = FullKey::decode(block_iter.key());
+        let raw_user_key = full_key.user_key.encode();
 
         let full_val = block_iter.value();
         let humm_val = HummockValue::from_slice(block_iter.value())?;
@@ -158,11 +159,11 @@ fn print_kv_pairs(
             HummockValue::Delete => (false, &[] as &[u8]),
         };
 
-        let epoch = get_epoch(full_key);
+        let epoch = full_key.epoch;
 
-        println!("\t\t  full key: {:02x?}", full_key);
+        println!("\t\t  full key: {:02x?}", raw_full_key);
         println!("\t\tfull value: {:02x?}", full_val);
-        println!("\t\t  user key: {:02x?}", user_key);
+        println!("\t\t  user key: {:02x?}", raw_user_key);
         println!("\t\tuser value: {:02x?}", user_val);
         println!("\t\t     epoch: {}", epoch);
         println!("\t\t      type: {}", if is_put { "Put" } else { "Delete" });
@@ -179,12 +180,12 @@ fn print_kv_pairs(
 
 /// If possible, prints information about the table, column, and stored value.
 fn print_table_column(
-    full_key: &[u8],
+    full_key: FullKey<&[u8]>,
     user_val: &[u8],
     table_data: &TableData,
     is_put: bool,
 ) -> anyhow::Result<()> {
-    let table_id = get_table_id(full_key);
+    let table_id = full_key.user_key.table_id.table_id();
 
     print!("\t\t     table: {} - ", table_id);
     let table_catalog = match table_data.get(&table_id) {
@@ -212,12 +213,8 @@ fn print_table_column(
         .collect_vec();
     let row_deserializer = RowDeserializer::new(data_types);
     let row = row_deserializer.deserialize(user_val)?;
-    for (c, v) in column_desc.iter().zip_eq(row.0.iter()) {
-        println!(
-            "\t\t    column: {} {}",
-            c,
-            display_datum_ref(to_datum_ref(v))
-        );
+    for (c, v) in column_desc.iter().zip_eq(row.iter()) {
+        println!("\t\t    column: {} {}", c, v.to_text());
     }
 
     Ok(())

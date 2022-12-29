@@ -95,12 +95,25 @@ pub struct MetaOpts {
     pub periodic_compaction_interval_sec: u64,
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
+
+    /// The prometheus endpoint for dashboard service.
+    pub prometheus_endpoint: Option<String>,
+
+    /// Endpoint of the connector node, there will be a sidecar connector node
+    /// colocated with Meta node in the cloud environment
+    pub connector_rpc_endpoint: Option<String>,
+
+    /// The storage url for storing backups.
+    pub backup_storage_url: String,
+    /// The storage directory for storing backups.
+    pub backup_storage_directory: String,
 }
 
-impl Default for MetaOpts {
-    fn default() -> Self {
+impl MetaOpts {
+    /// Default opts for testing. Some tests need `enable_recovery=true`
+    pub fn test(enable_recovery: bool) -> Self {
         Self {
-            enable_recovery: false,
+            enable_recovery,
             barrier_interval: Duration::from_millis(250),
             in_flight_barrier_nums: 40,
             minimal_scheduling: false,
@@ -113,21 +126,10 @@ impl Default for MetaOpts {
             enable_committed_sst_sanity_check: false,
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
-        }
-    }
-}
-
-impl MetaOpts {
-    /// some test need `enable_recovery=true`
-    #[cfg(test)]
-    pub fn test(enable_recovery: bool) -> Self {
-        Self {
-            enable_recovery,
-            barrier_interval: Duration::from_millis(250),
-            max_idle_ms: 0,
-            in_flight_barrier_nums: 40,
-            checkpoint_frequency: 10,
-            ..Default::default()
+            prometheus_endpoint: None,
+            connector_rpc_endpoint: None,
+            backup_storage_url: "memory".to_string(),
+            backup_storage_directory: "backup".to_string(),
         }
     }
 }
@@ -203,7 +205,7 @@ where
 impl MetaSrvEnv<MemStore> {
     // Instance for test.
     pub async fn for_test() -> Self {
-        Self::for_test_opts(MetaOpts::default().into()).await
+        Self::for_test_opts(MetaOpts::test(false).into()).await
     }
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {

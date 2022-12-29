@@ -182,7 +182,14 @@
         └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - sql: |
     create table t (v1 int, v2 int);
-    create materialized view mv(a,b) as select * from t;
+    create materialized view mv(A,b) as select * from t;
+    select a, b from mv;
+  stream_plan: |
+    StreamMaterialize { columns: [a, b, mv.t._row_id(hidden)], pk_columns: [mv.t._row_id] }
+    └─StreamTableScan { table: mv, columns: [mv.a, mv.b, mv.t._row_id], pk: [mv.t._row_id], dist: UpstreamHashShard(mv.t._row_id) }
+- sql: |
+    create table t (v1 int, v2 int);
+    create materialized view mv(a,b) as select v1+1,v2+1 from t;
     select * from mv;
   stream_plan: |
     StreamMaterialize { columns: [a, b, mv.t._row_id(hidden)], pk_columns: [mv.t._row_id] }

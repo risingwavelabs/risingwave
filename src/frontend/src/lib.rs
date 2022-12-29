@@ -18,15 +18,16 @@
 #![feature(negative_impls)]
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
-#![feature(let_else)]
 #![feature(trait_alias)]
 #![feature(drain_filter)]
 #![feature(if_let_guard)]
+#![feature(let_chains)]
 #![feature(assert_matches)]
-#![feature(map_first_last)]
 #![feature(lint_reasons)]
 #![feature(box_patterns)]
 #![feature(once_cell)]
+#![feature(result_option_inspect)]
+#![feature(macro_metavar_expr)]
 #![recursion_limit = "256"]
 
 #[macro_use]
@@ -39,7 +40,7 @@ pub mod handler;
 pub use handler::PgResponseStream;
 mod observer;
 mod optimizer;
-pub use optimizer::PlanRef;
+pub use optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 pub use planner::Planner;
 #[expect(dead_code)]
@@ -53,6 +54,7 @@ mod meta_client;
 pub mod test_utils;
 mod user;
 
+pub mod health_service;
 mod monitor;
 
 use std::ffi::OsString;
@@ -61,7 +63,6 @@ use std::sync::Arc;
 
 use clap::Parser;
 use pgwire::pg_server::pg_serve;
-use serde::{Deserialize, Serialize};
 use session::SessionManagerImpl;
 
 #[derive(Parser, Clone, Debug)]
@@ -81,18 +82,26 @@ pub struct FrontendOpts {
     #[clap(long, default_value = "http://127.0.0.1:5690")]
     pub meta_addr: String,
 
-    /// No given `config_path` means to use default config.
-    #[clap(long, default_value = "")]
-    pub config_path: String,
-
     #[clap(long, default_value = "127.0.0.1:2222")]
     pub prometheus_listener_addr: String,
+
+    #[clap(long, default_value = "127.0.0.1:6786")]
+    pub health_check_listener_addr: String,
 
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics
     /// >0 = open metrics
     #[clap(long, default_value = "0")]
     pub metrics_level: u32,
+
+    /// The path of `risingwave.toml` configuration file.
+    ///
+    /// If empty, default configuration values will be used.
+    ///
+    /// Note that internal system parameters should be defined in the configuration file at
+    /// [`risingwave_common::config`] instead of command line arguments.
+    #[clap(long, default_value = "")]
+    pub config_path: String,
 }
 
 impl Default for FrontendOpts {
@@ -105,7 +114,6 @@ use std::future::Future;
 use std::pin::Pin;
 
 use pgwire::pg_protocol::TlsConfig;
-use risingwave_common::config::ServerConfig;
 
 /// Start frontend
 pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
@@ -117,11 +125,4 @@ pub fn start(opts: FrontendOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             .await
             .unwrap();
     })
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
-pub struct FrontendConfig {
-    // For connection
-    #[serde(default)]
-    pub server: ServerConfig,
 }

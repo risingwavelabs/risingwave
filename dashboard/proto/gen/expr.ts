@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { DataType } from "./data";
+import { DataType, Datum } from "./data";
 import { OrderType, orderTypeFromJSON, orderTypeToJSON } from "./plan_common";
 
 export const protobufPackage = "expr";
@@ -7,12 +7,17 @@ export const protobufPackage = "expr";
 export interface ExprNode {
   exprType: ExprNode_Type;
   returnType: DataType | undefined;
-  rexNode?: { $case: "inputRef"; inputRef: InputRefExpr } | { $case: "constant"; constant: ConstantValue } | {
+  rexNode?: { $case: "inputRef"; inputRef: InputRefExpr } | { $case: "constant"; constant: Datum } | {
     $case: "funcCall";
     funcCall: FunctionCall;
   };
 }
 
+/**
+ * a "pure function" will be defined as having `1 < expr_node as i32 <= 600`.
+ * Please modify this definition if adding a pure function that does not belong
+ * to this range.
+ */
 export const ExprNode_Type = {
   UNSPECIFIED: "UNSPECIFIED",
   INPUT_REF: "INPUT_REF",
@@ -45,6 +50,18 @@ export const ExprNode_Type = {
   /** EXTRACT - date functions */
   EXTRACT: "EXTRACT",
   TUMBLE_START: "TUMBLE_START",
+  /**
+   * TO_TIMESTAMP - From f64 to timestamp.
+   * e.g. `select to_timestamp(1672044740.0)`
+   */
+  TO_TIMESTAMP: "TO_TIMESTAMP",
+  AT_TIME_ZONE: "AT_TIME_ZONE",
+  DATE_TRUNC: "DATE_TRUNC",
+  /**
+   * TO_TIMESTAMP1 - Parse text to timestamp by format string.
+   * e.g. `select to_timestamp('2022 08 21', 'YYYY MM DD')`
+   */
+  TO_TIMESTAMP1: "TO_TIMESTAMP1",
   /** CAST - other functions */
   CAST: "CAST",
   SUBSTR: "SUBSTR",
@@ -110,6 +127,8 @@ export const ExprNode_Type = {
   SARG: "SARG",
   /** VNODE - Internal functions */
   VNODE: "VNODE",
+  /** NOW - Non-deterministic functions */
+  NOW: "NOW",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -195,6 +214,18 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 103:
     case "TUMBLE_START":
       return ExprNode_Type.TUMBLE_START;
+    case 104:
+    case "TO_TIMESTAMP":
+      return ExprNode_Type.TO_TIMESTAMP;
+    case 105:
+    case "AT_TIME_ZONE":
+      return ExprNode_Type.AT_TIME_ZONE;
+    case 106:
+    case "DATE_TRUNC":
+      return ExprNode_Type.DATE_TRUNC;
+    case 107:
+    case "TO_TIMESTAMP1":
+      return ExprNode_Type.TO_TIMESTAMP1;
     case 201:
     case "CAST":
       return ExprNode_Type.CAST;
@@ -348,6 +379,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 1101:
     case "VNODE":
       return ExprNode_Type.VNODE;
+    case 2022:
+    case "NOW":
+      return ExprNode_Type.NOW;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -409,6 +443,14 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "EXTRACT";
     case ExprNode_Type.TUMBLE_START:
       return "TUMBLE_START";
+    case ExprNode_Type.TO_TIMESTAMP:
+      return "TO_TIMESTAMP";
+    case ExprNode_Type.AT_TIME_ZONE:
+      return "AT_TIME_ZONE";
+    case ExprNode_Type.DATE_TRUNC:
+      return "DATE_TRUNC";
+    case ExprNode_Type.TO_TIMESTAMP1:
+      return "TO_TIMESTAMP1";
     case ExprNode_Type.CAST:
       return "CAST";
     case ExprNode_Type.SUBSTR:
@@ -511,6 +553,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "SARG";
     case ExprNode_Type.VNODE:
       return "VNODE";
+    case ExprNode_Type.NOW:
+      return "NOW";
     case ExprNode_Type.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -528,6 +572,7 @@ export const TableFunction_Type = {
   GENERATE: "GENERATE",
   UNNEST: "UNNEST",
   REGEXP_MATCHES: "REGEXP_MATCHES",
+  RANGE: "RANGE",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -547,6 +592,9 @@ export function tableFunction_TypeFromJSON(object: any): TableFunction_Type {
     case 3:
     case "REGEXP_MATCHES":
       return TableFunction_Type.REGEXP_MATCHES;
+    case 4:
+    case "RANGE":
+      return TableFunction_Type.RANGE;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -564,6 +612,8 @@ export function tableFunction_TypeToJSON(object: TableFunction_Type): string {
       return "UNNEST";
     case TableFunction_Type.REGEXP_MATCHES:
       return "REGEXP_MATCHES";
+    case TableFunction_Type.RANGE:
+      return "RANGE";
     case TableFunction_Type.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -606,26 +656,6 @@ export interface ProjectSetSelectItem {
   selectItem?: { $case: "expr"; expr: ExprNode } | { $case: "tableFunction"; tableFunction: TableFunction };
 }
 
-export interface ConstantValue {
-  /**
-   * bool array/bitmap: one byte, 0 for false (null), non-zero for true (non-null)
-   * integer, float,  double: big-endianness
-   * interval: encoded to (months, days, milliseconds), big-endianness
-   * varchar: encoded accorded to encoding, currently only utf8 is supported.
-   */
-  body: Uint8Array;
-}
-
-/** For serializing struct value to vec<bytes>. */
-export interface StructValue {
-  fields: Uint8Array[];
-}
-
-/** For serializing list value to vec<bytes>. */
-export interface ListValue {
-  fields: Uint8Array[];
-}
-
 export interface FunctionCall {
   children: ExprNode[];
 }
@@ -650,6 +680,8 @@ export const AggCall_Type = {
   STRING_AGG: "STRING_AGG",
   APPROX_COUNT_DISTINCT: "APPROX_COUNT_DISTINCT",
   ARRAY_AGG: "ARRAY_AGG",
+  FIRST_VALUE: "FIRST_VALUE",
+  SUM0: "SUM0",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -684,6 +716,12 @@ export function aggCall_TypeFromJSON(object: any): AggCall_Type {
     case 8:
     case "ARRAY_AGG":
       return AggCall_Type.ARRAY_AGG;
+    case 9:
+    case "FIRST_VALUE":
+      return AggCall_Type.FIRST_VALUE;
+    case 10:
+    case "SUM0":
+      return AggCall_Type.SUM0;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -711,6 +749,10 @@ export function aggCall_TypeToJSON(object: AggCall_Type): string {
       return "APPROX_COUNT_DISTINCT";
     case AggCall_Type.ARRAY_AGG:
       return "ARRAY_AGG";
+    case AggCall_Type.FIRST_VALUE:
+      return "FIRST_VALUE";
+    case AggCall_Type.SUM0:
+      return "SUM0";
     case AggCall_Type.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -741,7 +783,7 @@ export const ExprNode = {
       rexNode: isSet(object.inputRef)
         ? { $case: "inputRef", inputRef: InputRefExpr.fromJSON(object.inputRef) }
         : isSet(object.constant)
-        ? { $case: "constant", constant: ConstantValue.fromJSON(object.constant) }
+        ? { $case: "constant", constant: Datum.fromJSON(object.constant) }
         : isSet(object.funcCall)
         ? { $case: "funcCall", funcCall: FunctionCall.fromJSON(object.funcCall) }
         : undefined,
@@ -756,7 +798,7 @@ export const ExprNode = {
     message.rexNode?.$case === "inputRef" &&
       (obj.inputRef = message.rexNode?.inputRef ? InputRefExpr.toJSON(message.rexNode?.inputRef) : undefined);
     message.rexNode?.$case === "constant" &&
-      (obj.constant = message.rexNode?.constant ? ConstantValue.toJSON(message.rexNode?.constant) : undefined);
+      (obj.constant = message.rexNode?.constant ? Datum.toJSON(message.rexNode?.constant) : undefined);
     message.rexNode?.$case === "funcCall" &&
       (obj.funcCall = message.rexNode?.funcCall ? FunctionCall.toJSON(message.rexNode?.funcCall) : undefined);
     return obj;
@@ -780,7 +822,7 @@ export const ExprNode = {
       object.rexNode?.constant !== undefined &&
       object.rexNode?.constant !== null
     ) {
-      message.rexNode = { $case: "constant", constant: ConstantValue.fromPartial(object.rexNode.constant) };
+      message.rexNode = { $case: "constant", constant: Datum.fromPartial(object.rexNode.constant) };
     }
     if (
       object.rexNode?.$case === "funcCall" &&
@@ -898,81 +940,6 @@ export const ProjectSetSelectItem = {
         tableFunction: TableFunction.fromPartial(object.selectItem.tableFunction),
       };
     }
-    return message;
-  },
-};
-
-function createBaseConstantValue(): ConstantValue {
-  return { body: new Uint8Array() };
-}
-
-export const ConstantValue = {
-  fromJSON(object: any): ConstantValue {
-    return { body: isSet(object.body) ? bytesFromBase64(object.body) : new Uint8Array() };
-  },
-
-  toJSON(message: ConstantValue): unknown {
-    const obj: any = {};
-    message.body !== undefined &&
-      (obj.body = base64FromBytes(message.body !== undefined ? message.body : new Uint8Array()));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<ConstantValue>, I>>(object: I): ConstantValue {
-    const message = createBaseConstantValue();
-    message.body = object.body ?? new Uint8Array();
-    return message;
-  },
-};
-
-function createBaseStructValue(): StructValue {
-  return { fields: [] };
-}
-
-export const StructValue = {
-  fromJSON(object: any): StructValue {
-    return { fields: Array.isArray(object?.fields) ? object.fields.map((e: any) => bytesFromBase64(e)) : [] };
-  },
-
-  toJSON(message: StructValue): unknown {
-    const obj: any = {};
-    if (message.fields) {
-      obj.fields = message.fields.map((e) => base64FromBytes(e !== undefined ? e : new Uint8Array()));
-    } else {
-      obj.fields = [];
-    }
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<StructValue>, I>>(object: I): StructValue {
-    const message = createBaseStructValue();
-    message.fields = object.fields?.map((e) => e) || [];
-    return message;
-  },
-};
-
-function createBaseListValue(): ListValue {
-  return { fields: [] };
-}
-
-export const ListValue = {
-  fromJSON(object: any): ListValue {
-    return { fields: Array.isArray(object?.fields) ? object.fields.map((e: any) => bytesFromBase64(e)) : [] };
-  },
-
-  toJSON(message: ListValue): unknown {
-    const obj: any = {};
-    if (message.fields) {
-      obj.fields = message.fields.map((e) => base64FromBytes(e !== undefined ? e : new Uint8Array()));
-    } else {
-      obj.fields = [];
-    }
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<ListValue>, I>>(object: I): ListValue {
-    const message = createBaseListValue();
-    message.fields = object.fields?.map((e) => e) || [];
     return message;
   },
 };
@@ -1127,50 +1094,6 @@ export const AggCall_OrderByField = {
     return message;
   },
 };
-
-declare var self: any | undefined;
-declare var window: any | undefined;
-declare var global: any | undefined;
-var globalThis: any = (() => {
-  if (typeof globalThis !== "undefined") {
-    return globalThis;
-  }
-  if (typeof self !== "undefined") {
-    return self;
-  }
-  if (typeof window !== "undefined") {
-    return window;
-  }
-  if (typeof global !== "undefined") {
-    return global;
-  }
-  throw "Unable to locate global object";
-})();
-
-function bytesFromBase64(b64: string): Uint8Array {
-  if (globalThis.Buffer) {
-    return Uint8Array.from(globalThis.Buffer.from(b64, "base64"));
-  } else {
-    const bin = globalThis.atob(b64);
-    const arr = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; ++i) {
-      arr[i] = bin.charCodeAt(i);
-    }
-    return arr;
-  }
-}
-
-function base64FromBytes(arr: Uint8Array): string {
-  if (globalThis.Buffer) {
-    return globalThis.Buffer.from(arr).toString("base64");
-  } else {
-    const bin: string[] = [];
-    arr.forEach((byte) => {
-      bin.push(String.fromCharCode(byte));
-    });
-    return globalThis.btoa(bin.join(""));
-  }
-}
 
 type Builtin = Date | Function | Uint8Array | string | number | boolean | undefined;
 

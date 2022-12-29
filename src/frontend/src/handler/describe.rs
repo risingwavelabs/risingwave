@@ -16,56 +16,36 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use super::RwPgResponse;
-use crate::binder::Binder;
-use crate::catalog::root_catalog::SchemaPath;
+use crate::binder::{Binder, Relation};
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::handler::util::col_descs_to_rows;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
-pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
-    let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, table_name)?;
-    let search_path = session.config().get_search_path();
-    let user_name = &session.auth_context().user_name;
-    let schema_path = match schema_name.as_deref() {
-        Some(schema_name) => SchemaPath::Name(schema_name),
-        None => SchemaPath::Path(&search_path, user_name),
-    };
-
-    let catalog_reader = session.env().catalog_reader().read_guard();
-
+pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    let mut binder = Binder::new(&session);
+    let relation = binder.bind_relation_by_name(table_name.clone(), None)?;
     // For Source, it doesn't have table catalog so use get source to get column descs.
     let (columns, indices): (Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>) = {
-        let (catalogs, indices) =
-            match catalog_reader.get_table_by_name(db_name, schema_path, &table_name) {
-                Ok((table, schema_name)) => (
-                    &table.columns,
-                    catalog_reader
-                        .get_schema_by_name(session.database(), schema_name)?
-                        .get_indexes_by_table_id(&table.id),
-                ),
-                Err(_) => {
-                    match catalog_reader.get_source_by_name(db_name, schema_path, &table_name) {
-                        Ok((source, _)) => (&source.columns, vec![]),
-                        Err(_) => {
-                            return Err(CatalogError::NotFound(
-                                "table or source",
-                                table_name.to_string(),
-                            )
-                            .into());
-                        }
-                    }
-                }
-            };
+        let (catalogs, indices) = match relation {
+            Relation::Source(s) => (s.catalog.columns, vec![]),
+            Relation::BaseTable(t) => (t.table_catalog.columns, t.table_indexes),
+            Relation::SystemTable(t) => (t.sys_table_catalog.columns, vec![]),
+            _ => {
+                return Err(
+                    CatalogError::NotFound("table or source", table_name.to_string()).into(),
+                );
+            }
+        };
         (
             catalogs
                 .iter()
@@ -142,8 +122,16 @@ pub fn handle_describe(context: OptimizerContext, table_name: ObjectName) -> Res
         Some(rows.len() as i32),
         rows.into(),
         vec![
-            PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
-            PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+            PgFieldDescriptor::new(
+                "Name".to_owned(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Type".to_owned(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
         ],
     ))
 }

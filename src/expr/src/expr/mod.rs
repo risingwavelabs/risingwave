@@ -32,9 +32,11 @@ mod expr_quaternary_bytes;
 mod expr_regexp;
 mod expr_ternary_bytes;
 mod expr_to_char_const_tmpl;
+mod expr_to_timestamp_const_tmpl;
 pub mod expr_unary;
 mod expr_vnode;
 mod template;
+mod template_fast;
 
 use std::convert::TryFrom;
 use std::sync::Arc;
@@ -42,7 +44,8 @@ use std::sync::Arc;
 pub use agg::AggKind;
 pub use expr_input_ref::InputRefExpression;
 pub use expr_literal::*;
-use risingwave_common::array::{ArrayRef, DataChunk, Row};
+use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 
@@ -83,7 +86,7 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef>;
 
     /// Evaluate the expression in row-based execution.
-    fn eval_row(&self, input: &Row) -> Result<Datum>;
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum>;
 
     fn boxed(self) -> BoxedExpression
     where
@@ -111,6 +114,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             build_nullable_binary_expr_prost(prost)
         }
         ToChar => build_to_char_expr(prost),
+        ToTimestamp1 => build_to_timestamp_expr(prost),
         Length => build_length_expr(prost),
         Replace => build_replace_expr(prost),
         Like => build_like_expr(prost),
@@ -124,6 +128,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Trim => build_trim_expr(prost),
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
+        DateTrunc => build_date_trunc_expr(prost),
 
         // Dedicated types
         In => InExpression::try_from(prost).map(Expression::boxed),

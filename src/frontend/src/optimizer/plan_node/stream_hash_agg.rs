@@ -37,7 +37,7 @@ impl StreamHashAgg {
         let input = logical.input();
         let input_dist = input.distribution();
         let dist = match input_dist {
-            Distribution::HashShard(_) => logical
+            Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) => logical
                 .i2o_col_mapping()
                 .rewrite_provided_distribution(input_dist),
             d => d.clone(),

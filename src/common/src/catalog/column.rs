@@ -70,7 +70,7 @@ impl std::fmt::Display for ColumnId {
 pub struct ColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
-    pub name: String, // for debugging
+    pub name: String,
     pub field_descs: Vec<ColumnDesc>,
     pub type_name: String,
 }

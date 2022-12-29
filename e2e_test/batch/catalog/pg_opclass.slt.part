@@ -1,0 +1,13 @@
+query IITIIIIII
+SELECT
+    oid,
+    opcmethod,
+    opcname,
+    opcnamespace,
+    opcowner,
+    opcfamily,
+    opcintype,
+    opcdefault,
+    opckeytype
+FROM pg_catalog.pg_opclass;
+----

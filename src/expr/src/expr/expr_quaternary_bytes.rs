@@ -41,7 +41,8 @@ pub fn new_overlay_for_exp(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{DataChunk, Row};
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{Datum, ScalarImpl};
 
     use super::*;
@@ -55,7 +56,7 @@ mod tests {
             assert_eq!(res.unwrap().to_datum(), expected);
         }
 
-        let res = expr.eval_row(&Row::new(vec![]));
+        let res = expr.eval_row(&OwnedRow::new(vec![]));
         if is_negative_len {
             assert!(res.is_err());
         } else {

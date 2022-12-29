@@ -16,17 +16,19 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::{valid_table_name, IndexId, TableId, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::{valid_table_name, IndexId, TableId};
 use risingwave_pb::catalog::{
     Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
-    Table as ProstTable,
+    Table as ProstTable, View as ProstView,
 };
 
 use super::source_catalog::SourceCatalog;
+use super::ViewId;
 use crate::catalog::index_catalog::IndexCatalog;
 use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
+use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::SchemaId;
 
 pub type SourceId = u32;
@@ -45,6 +47,8 @@ pub struct SchemaCatalog {
     index_by_name: HashMap<String, Arc<IndexCatalog>>,
     index_by_id: HashMap<IndexId, Arc<IndexCatalog>>,
     indexes_by_table_id: HashMap<TableId, Vec<Arc<IndexCatalog>>>,
+    view_by_name: HashMap<String, Arc<ViewCatalog>>,
+    view_by_id: HashMap<ViewId, Arc<ViewCatalog>>,
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
@@ -65,7 +69,6 @@ impl SchemaCatalog {
     }
 
     pub fn create_sys_table(&mut self, sys_table: SystemCatalog) {
-        assert_eq!(self.name, PG_CATALOG_SCHEMA_NAME);
         self.system_table_by_name
             .try_insert(sys_table.name.clone(), sys_table)
             .unwrap();
@@ -128,10 +131,10 @@ impl SchemaCatalog {
         };
     }
 
-    pub fn create_source(&mut self, prost: ProstSource) {
+    pub fn create_source(&mut self, prost: &ProstSource) {
         let name = prost.name.clone();
         let id = prost.id;
-        let source = SourceCatalog::from(&prost);
+        let source = SourceCatalog::from(prost);
         let source_ref = Arc::new(source);
 
         self.source_by_name
@@ -145,10 +148,10 @@ impl SchemaCatalog {
         self.source_by_name.remove(&source_ref.name).unwrap();
     }
 
-    pub fn create_sink(&mut self, prost: ProstSink) {
+    pub fn create_sink(&mut self, prost: &ProstSink) {
         let name = prost.name.clone();
         let id = prost.id;
-        let sink = SinkCatalog::from(&prost);
+        let sink = SinkCatalog::from(prost);
         let sink_ref = Arc::new(sink);
 
         self.sink_by_name
@@ -162,25 +165,41 @@ impl SchemaCatalog {
         self.sink_by_name.remove(&sink_ref.name).unwrap();
     }
 
+    pub fn create_view(&mut self, prost: &ProstView) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let view = ViewCatalog::from(prost);
+        let view_ref = Arc::new(view);
+
+        self.view_by_name
+            .try_insert(name, view_ref.clone())
+            .unwrap();
+        self.view_by_id.try_insert(id, view_ref).unwrap();
+    }
+
+    pub fn drop_view(&mut self, id: ViewId) {
+        let view_ref = self.view_by_id.remove(&id).unwrap();
+        self.view_by_name.remove(&view_ref.name).unwrap();
+    }
+
     pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| {
-                // Internally, a table with an associated source can be
-                // MATERIALIZED SOURCE or TABLE.
-                v.associated_source_id.is_some()
-                    && self.get_source_by_name(v.name()).unwrap().is_table()
-            })
+            .filter(|(_, v)| v.is_table() && v.associated_source_id().is_none())
             .map(|(_, v)| v)
+    }
+
+    pub fn iter_valid_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_name
+            .iter()
+            .filter_map(|(key, v)| valid_table_name(key).then_some(v))
     }
 
     /// Iterate all materialized views, excluding the indices.
     pub fn iter_mv(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| {
-                v.associated_source_id.is_none() && valid_table_name(&v.name) && !v.is_index
-            })
+            .filter(|(_, v)| v.is_mview() && valid_table_name(&v.name))
             .map(|(_, v)| v)
     }
 
@@ -191,22 +210,24 @@ impl SchemaCatalog {
 
     /// Iterate all sources, including the materialized sources.
     pub fn iter_source(&self) -> impl Iterator<Item = &Arc<SourceCatalog>> {
-        self.source_by_name
-            .iter()
-            .filter(|(_, v)| v.is_stream())
-            .map(|(_, v)| v)
+        self.source_by_name.values()
     }
 
     /// Iterate the materialized sources.
+    /// TODO(Yuanxin): Remove this method.
     pub fn iter_materialized_source(&self) -> impl Iterator<Item = &Arc<SourceCatalog>> {
         self.source_by_name
             .iter()
-            .filter(|(name, v)| v.is_stream() && self.table_by_name.get(*name).is_some())
+            .filter(|(name, _)| self.table_by_name.get(*name).is_some())
             .map(|(_, v)| v)
     }
 
     pub fn iter_sink(&self) -> impl Iterator<Item = &Arc<SinkCatalog>> {
         self.sink_by_name.values()
+    }
+
+    pub fn iter_view(&self) -> impl Iterator<Item = &Arc<ViewCatalog>> {
+        self.view_by_name.values()
     }
 
     pub fn iter_system_tables(&self) -> impl Iterator<Item = &SystemCatalog> {
@@ -254,6 +275,10 @@ impl SchemaCatalog {
             .map(|table| table.name.clone())
     }
 
+    pub fn get_view_by_name(&self, view_name: &str) -> Option<&Arc<ViewCatalog>> {
+        self.view_by_name.get(view_name)
+    }
+
     pub fn id(&self) -> SchemaId {
         self.id
     }
@@ -271,6 +296,7 @@ impl From<&ProstSchema> for SchemaCatalog {
     fn from(schema: &ProstSchema) -> Self {
         Self {
             id: schema.id,
+            owner: schema.owner,
             name: schema.name.clone(),
             table_by_name: HashMap::new(),
             table_by_id: HashMap::new(),
@@ -282,7 +308,8 @@ impl From<&ProstSchema> for SchemaCatalog {
             index_by_id: HashMap::new(),
             indexes_by_table_id: HashMap::new(),
             system_table_by_name: HashMap::new(),
-            owner: schema.owner,
+            view_by_name: HashMap::new(),
+            view_by_id: HashMap::new(),
         }
     }
 }

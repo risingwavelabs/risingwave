@@ -5,26 +5,29 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0"
 async-trait = "0.1"
 clap = "3"
-etcd-client = { version = "0.2.8", package = "madsim-etcd-client" }
+console = "0.15"
+etcd-client = { version = "0.2.11", package = "madsim-etcd-client" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
-madsim = "0.2.7"
-openssl = "0.10.4"
-postgres-openssl = "0.5.0"
+itertools = "0.10"
+madsim = "0.2.12"
+paste = "1"
 rand = "0.8"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.8-alpha", features = ["cmake-build"] }
+risingwave_common = { path = "../../common" }
 risingwave_compactor = { path = "../../storage/compactor" }
 risingwave_compute = { path = "../../compute" }
+risingwave_ctl = { path = "../../ctl" }
 risingwave_frontend = { path = "../../frontend" }
 risingwave_meta = { path = "../../meta" }
+risingwave_pb = { path = "../../prost" }
 risingwave_sqlsmith = { path = "../sqlsmith" }
-sqllogictest = "0.6.4"
+sqllogictest = "0.9"
 tempfile = "3"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7.7"
 tracing = "0.1"
-
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.2.0-alpha", path = "../../workspace-hack" }
+tracing-subscriber = "0.3"

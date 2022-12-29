@@ -12,35 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use std::fmt::Write;
 
 use crate::Result;
 
 #[inline(always)]
-pub fn trim(s: &str, writer: BytesWriter) -> Result<BytesGuard> {
-    writer.write_ref(s.trim()).map_err(Into::into)
+pub fn trim(s: &str, writer: &mut dyn Write) -> Result<()> {
+    writer.write_str(s.trim()).unwrap();
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-
     use super::*;
 
     #[test]
-    fn test_trim() {
+    fn test_trim() -> Result<()> {
         let cases = [
             (" Hello\tworld\t", "Hello\tworld"),
             (" 空I ❤️ databases空 ", "空I ❤️ databases空"),
         ];
 
         for (s, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let guard = trim(s, writer).unwrap();
-            let array = guard.into_inner().finish();
-            let v = array.value_at(0).unwrap();
-            assert_eq!(v, expected);
+            let mut writer = String::new();
+            trim(s, &mut writer)?;
+            assert_eq!(writer, expected);
         }
+        Ok(())
     }
 }

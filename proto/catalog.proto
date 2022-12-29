@@ -7,9 +7,9 @@ import "plan_common.proto";
 
 option optimize_for = SPEED;
 
-// The rust prost library always treats uint64 as required and message as optional.
-// In order to allow `row_id_index` as optional field in `StreamSourceInfo` and `TableSourceInfo`,
-// we wrap uint64 inside this message.
+// The rust prost library always treats uint64 as required and message as
+// optional. In order to allow `row_id_index` as optional field in
+// `StreamSourceInfo` and `TableSourceInfo`, we wrap uint64 inside this message.
 message ColumnIndex {
   uint64 index = 1;
 }
@@ -17,29 +17,31 @@ message ColumnIndex {
 message StreamSourceInfo {
   plan_common.RowFormatType row_format = 1;
   string row_schema_location = 2;
+  bool use_schema_registry = 3;
+  string proto_message_name = 4;
+  int32 csv_delimiter = 5;
+  bool csv_has_header = 6;
 }
-
-message TableSourceInfo {}
 
 message Source {
   uint32 id = 1;
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
-  // The column index of row ID. If the primary key is specified by the user, this will be `None`.
+  // The column index of row ID. If the primary key is specified by the user,
+  // this will be `None`.
   ColumnIndex row_id_index = 5;
   // Columns of the source.
   repeated plan_common.ColumnCatalog columns = 6;
-  // Column id of the primary key specified by the user. If the user does not specify a primary key, the vector will be empty.
+  // Column id of the primary key specified by the user. If the user does not
+  // specify a primary key, the vector will be empty.
   repeated int32 pk_column_ids = 7;
   // Properties specified by the user in WITH clause.
   map<string, string> properties = 8;
-  // Information of either stream source (connector) or table source.
-  oneof info {
-    StreamSourceInfo stream_source = 9;
-    TableSourceInfo table_source = 10;
-  }
-  uint32 owner = 11;
+
+  uint32 owner = 9;
+
+  StreamSourceInfo info = 10;
 }
 
 message Sink {
@@ -47,10 +49,16 @@ message Sink {
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
-  uint32 associated_table_id = 5;
-  map<string, string> properties = 6;
-  uint32 owner = 7;
-  repeated uint32 dependent_relations = 8;
+  repeated plan_common.ColumnCatalog columns = 5;
+  repeated plan_common.ColumnOrder pk = 6;
+  repeated uint32 dependent_relations = 7;
+  repeated int32 distribution_key = 8;
+  // pk_indices of the corresponding materialize operator's output.
+  repeated int32 stream_key = 9;
+  bool append_only = 10;
+  uint32 owner = 11;
+  map<string, string> properties = 12;
+  string definition = 13;
 }
 
 message Index {
@@ -64,10 +72,18 @@ message Index {
   // Only `InputRef` type index is supported Now.
   // The index of `InputRef` is the column index of the primary table.
   repeated expr.ExprNode index_item = 8;
+  repeated int32 original_columns = 9;
 }
 
 // See `TableCatalog` struct in frontend crate for more information.
 message Table {
+  enum TableType {
+    UNSPECIFIED = 0;
+    TABLE = 1;
+    MATERIALIZED_VIEW = 2;
+    INDEX = 3;
+    INTERNAL = 4;
+  }
   uint32 id = 1;
   uint32 schema_id = 2;
   uint32 database_id = 3;
@@ -78,20 +94,40 @@ message Table {
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;
   }
-  bool is_index = 10;
+  TableType table_type = 10;
   repeated int32 distribution_key = 12;
   // pk_indices of the corresponding materialize operator's output.
   repeated int32 stream_key = 13;
-  bool appendonly = 14;
+  bool append_only = 14;
   uint32 owner = 15;
   map<string, string> properties = 16;
   uint32 fragment_id = 17;
-  // an optional column index which is the vnode of each row computed by the table's consistent hash distribution
-  ColumnIndex vnode_col_idx = 18;
-  // The column indices which are stored in the state store's value with row-encoding.
-  // Currently is not supported yet and expected to be `[0..columns.len()]`.
-  repeated int32 value_indices = 19;
-  string definition = 20;
+  // an optional column index which is the vnode of each row computed by the
+  // table's consistent hash distribution
+  ColumnIndex vnode_col_index = 18;
+  // An optional column index of row id. If the primary key is specified by users,
+  // this will be `None`.
+  ColumnIndex row_id_index = 19;
+  // The column indices which are stored in the state store's value with
+  // row-encoding. Currently is not supported yet and expected to be
+  // `[0..columns.len()]`.
+  repeated int32 value_indices = 20;
+  string definition = 21;
+  bool handle_pk_conflict = 22;
+  uint32 read_prefix_len_hint = 23;
+}
+
+message View {
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+  uint32 owner = 5;
+  map<string, string> properties = 6;
+  string sql = 7;
+  repeated uint32 dependent_relations = 8;
+  // User-specified column names.
+  repeated plan_common.Field columns = 9;
 }
 
 message Schema {

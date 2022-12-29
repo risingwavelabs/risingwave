@@ -23,8 +23,10 @@ use rdkafka::message::ToBytes;
 use rdkafka::producer::{BaseRecord, DefaultProducerContext, Producer, ThreadedProducer};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
-use risingwave_common::array::{ArrayResult, Op, RowRef, StreamChunk};
+use risingwave_common::array::{ArrayError, ArrayResult, Op, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::row::Row;
+use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -98,16 +100,18 @@ pub struct KafkaSink {
     pub config: KafkaConfig,
     pub conductor: KafkaTransactionConductor,
     state: KafkaSinkState,
+    schema: Schema,
     in_transaction_epoch: Option<u64>,
 }
 
 impl KafkaSink {
-    pub async fn new(config: KafkaConfig) -> Result<Self> {
+    pub async fn new(config: KafkaConfig, schema: Schema) -> Result<Self> {
         Ok(KafkaSink {
             config: config.clone(),
             conductor: KafkaTransactionConductor::new(config).await?,
             in_transaction_epoch: None,
             state: KafkaSinkState::Init,
+            schema,
         })
     }
 
@@ -171,7 +175,7 @@ impl KafkaSink {
                     "schema": schema_to_json(schema),
                     "payload": {
                         "before": null,
-                        "after": record_to_json(row.clone(), schema.fields.clone())?,
+                        "after": record_to_json(row, schema.fields.clone())?,
                         "op": "c",
                         "ts_ms": ts_ms,
                     }
@@ -179,14 +183,14 @@ impl KafkaSink {
                 Op::Delete => Some(json!({
                     "schema": schema_to_json(schema),
                     "payload": {
-                        "before": record_to_json(row.clone(), schema.fields.clone())?,
+                        "before": record_to_json(row, schema.fields.clone())?,
                         "after": null,
                         "op": "d",
                         "ts_ms": ts_ms,
                     }
                 })),
                 Op::UpdateDelete => {
-                    update_cache = Some(record_to_json(row.clone(), schema.fields.clone())?);
+                    update_cache = Some(record_to_json(row, schema.fields.clone())?);
                     continue;
                 }
                 Op::UpdateInsert => {
@@ -195,7 +199,7 @@ impl KafkaSink {
                             "schema": schema_to_json(schema),
                             "payload": {
                                 "before": before,
-                                "after": record_to_json(row.clone(), schema.fields.clone())?,
+                                "after": record_to_json(row, schema.fields.clone())?,
                                 "op": "u",
                                 "ts_ms": ts_ms,
                             }
@@ -239,20 +243,18 @@ impl KafkaSink {
 
 #[async_trait::async_trait]
 impl Sink for KafkaSink {
-    async fn write_batch(&mut self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
+    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         // when sinking the snapshot, it is required to begin epoch 0 for transaction
         // if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state,
         // &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {     return Ok(())
         // }
 
-        println!("sink chunk {:?}", chunk);
-
         match self.config.format.as_str() {
-            "append_only" => self.append_only(chunk, schema).await,
+            "append_only" => self.append_only(chunk, &self.schema).await,
             "debezium" => {
                 self.debezium_update(
                     chunk,
-                    schema,
+                    &self.schema,
                     SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap()
@@ -316,6 +318,8 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 
     let data_type = field.data_type();
 
+    tracing::debug!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
+
     let value = match (data_type, scalar_ref) {
         (DataType::Boolean, ScalarRefImpl::Bool(v)) => {
             json!(v)
@@ -340,10 +344,18 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         }
         (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
             // fixme
-            json!(v.to_string())
+            json!(v.to_text())
         }
-        (DataType::Time, ScalarRefImpl::NaiveTime(_v)) => {
-            unimplemented!()
+        (
+            dt @ DataType::Date
+            | dt @ DataType::Time
+            | dt @ DataType::Timestamp
+            | dt @ DataType::Timestamptz
+            | dt @ DataType::Interval
+            | dt @ DataType::Bytea,
+            scalar,
+        ) => {
+            json!(scalar.to_text_with_type(&dt))
         }
         (DataType::List { .. }, ScalarRefImpl::List(list_ref)) => {
             let mut vec = Vec::with_capacity(field.sub_fields.len());
@@ -369,7 +381,11 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             }
             json!(map)
         }
-        _ => unimplemented!(),
+        _ => {
+            return Err(ArrayError::internal(
+                "datum_to_json_object: unsupported data type".to_string(),
+            ));
+        }
     };
 
     Ok(value)
@@ -377,7 +393,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 
 fn record_to_json(row: RowRef<'_>, schema: Vec<Field>) -> Result<Map<String, Value>> {
     let mut mappings = Map::with_capacity(schema.len());
-    for (field, datum_ref) in schema.iter().zip_eq(row.values()) {
+    for (field, datum_ref) in schema.iter().zip_eq(row.iter()) {
         let key = field.name.clone();
         let value = datum_to_json_object(field, datum_ref)
             .map_err(|e| SinkError::JsonParse(e.to_string()))?;
@@ -500,8 +516,22 @@ mod test {
             "sink.type".to_string() => "append_only".to_string(),
             "kafka.topic".to_string() => "test_topic".to_string(),
         };
+        let schema = Schema::new(vec![
+            Field {
+                data_type: DataType::Int32,
+                name: "id".into(),
+                sub_fields: vec![],
+                type_name: "".into(),
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "v2".into(),
+                sub_fields: vec![],
+                type_name: "".into(),
+            },
+        ]);
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
-        let mut sink = KafkaSink::new(kafka_config.clone()).await.unwrap();
+        let mut sink = KafkaSink::new(kafka_config.clone(), schema).await.unwrap();
 
         for i in 0..10 {
             let mut fail_flag = false;

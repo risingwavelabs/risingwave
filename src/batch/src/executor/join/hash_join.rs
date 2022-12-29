@@ -20,13 +20,14 @@ use std::sync::Arc;
 
 use fixedbitset::FixedBitSet;
 use futures_async_stream::try_stream;
-use itertools::{repeat_n, Itertools};
+use itertools::Itertools;
 use risingwave_common::array::{Array, DataChunk, RowRef};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
-use risingwave_common::types::DataType;
+use risingwave_common::row::{repeat_n, RowExt};
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -289,9 +290,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
             #[for_await]
             for chunk in stream {
-                #[for_await]
-                for output_chunk in output_chunk_builder
-                    .trunc_data_chunk(chunk?.reorder_columns(&self.output_indices))
+                for output_chunk in
+                    output_chunk_builder.append_chunk(chunk?.reorder_columns(&self.output_indices))
                 {
                     yield output_chunk
                 }
@@ -538,6 +538,15 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
     }
 
+    /// High-level idea:
+    /// 1. For each probe_row, append candidate rows to buffer.
+    ///    Candidate rows: Those satisfying equi_predicate (==).
+    /// 2. If buffer becomes full, process it.
+    ///    Apply non_equi_join predicates e.g. `>=`, `<=` to filter rows.
+    ///    Track if probe_row is matched to avoid duplicates.
+    /// 3. If we matched probe_row in spilled chunk,
+    ///    stop appending its candidate rows,
+    ///    to avoid matching it again in next spilled chunk.
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     pub async fn do_left_semi_join_with_non_equi_condition<'a>(
         EquiJoinParams {
@@ -568,6 +577,9 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     for build_row_id in
                         next_build_row_with_same_key.row_id_iter(Some(*first_matched_build_row_id))
                     {
+                        if non_equi_state.found_matched {
+                            break;
+                        }
                         let build_chunk = &build_side[build_row_id.chunk_id()];
                         if let Some(spilled) = Self::append_one_row(
                             &mut chunk_builder,
@@ -586,6 +598,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 }
             }
         }
+
+        // Process remaining rows in buffer
         if let Some(spilled) = chunk_builder.consume_all() {
             yield Self::process_left_semi_anti_join_non_equi_condition::<false>(
                 spilled,
@@ -1206,6 +1220,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
             .take())
     }
 
+    /// Filters for candidate rows which satisfy `non_equi` predicate.
+    /// Removes duplicate rows.
     fn process_left_semi_anti_join_non_equi_condition<const ANTI_JOIN: bool>(
         chunk: DataChunk,
         cond: &dyn Expression,
@@ -1376,11 +1392,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         probe_row_ref: RowRef<'_>,
         build_column_count: usize,
     ) -> Option<DataChunk> {
-        chunk_builder.append_one_row_from_datum_refs(
-            probe_row_ref
-                .values()
-                .chain(repeat_n(None, build_column_count)),
-        )
+        chunk_builder.append_one_row(probe_row_ref.chain(repeat_n(Datum::None, build_column_count)))
     }
 
     fn append_one_row_with_null_probe_side(
@@ -1388,9 +1400,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         build_row_ref: RowRef<'_>,
         probe_column_count: usize,
     ) -> Option<DataChunk> {
-        chunk_builder.append_one_row_from_datum_refs(
-            repeat_n(None, probe_column_count).chain(build_row_ref.values()),
-        )
+        chunk_builder.append_one_row(repeat_n(Datum::None, probe_column_count).chain(build_row_ref))
     }
 }
 
@@ -1459,6 +1469,9 @@ impl DataChunkMutator {
         self
     }
 
+    /// Removes duplicate rows using `filter`
+    /// and only returns the first match for each window.
+    /// Windows are indicated by `first_output_row_ids`.
     fn remove_duplicate_rows_for_left_semi_anti_join<const ANTI_JOIN: bool>(
         mut self,
         filter: &Bitmap,
@@ -1970,11 +1983,15 @@ mod tests {
             .unwrap()
         }
 
-        fn create_join_executor(&self, has_non_equi_cond: bool, null_safe: bool) -> BoxedExecutor {
+        fn create_join_executor_with_chunk_size_and_executors(
+            &self,
+            has_non_equi_cond: bool,
+            null_safe: bool,
+            chunk_size: usize,
+            left_child: BoxedExecutor,
+            right_child: BoxedExecutor,
+        ) -> BoxedExecutor {
             let join_type = self.join_type;
-
-            let left_child = self.create_left_executor();
-            let right_child = self.create_right_executor();
 
             let output_indices = (0..match join_type {
                 JoinType::LeftSemi | JoinType::LeftAnti => left_child.schema().fields().len(),
@@ -1999,12 +2016,40 @@ mod tests {
                 vec![null_safe],
                 cond,
                 "HashJoinExecutor".to_string(),
-                CHUNK_SIZE,
+                chunk_size,
             ))
         }
 
         async fn do_test(&self, expected: DataChunk, has_non_equi_cond: bool, null_safe: bool) {
-            let join_executor = self.create_join_executor(has_non_equi_cond, null_safe);
+            let left_executor = self.create_left_executor();
+            let right_executor = self.create_right_executor();
+            self.do_test_with_chunk_size_and_executors(
+                expected,
+                has_non_equi_cond,
+                null_safe,
+                self::CHUNK_SIZE,
+                left_executor,
+                right_executor,
+            )
+            .await
+        }
+
+        async fn do_test_with_chunk_size_and_executors(
+            &self,
+            expected: DataChunk,
+            has_non_equi_cond: bool,
+            null_safe: bool,
+            chunk_size: usize,
+            left_executor: BoxedExecutor,
+            right_executor: BoxedExecutor,
+        ) {
+            let join_executor = self.create_join_executor_with_chunk_size_and_executors(
+                has_non_equi_cond,
+                null_safe,
+                chunk_size,
+                left_executor,
+                right_executor,
+            );
 
             let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
 
@@ -2030,6 +2075,8 @@ mod tests {
             }
 
             let result_chunk = data_chunk_merger.finish().unwrap();
+            println!("expected: {:?}", expected);
+            println!("result: {:?}", result_chunk);
 
             // TODO: Replace this with unsorted comparison
             // assert_eq!(expected, result_chunk);
@@ -2382,6 +2429,69 @@ mod tests {
         );
 
         test_fixture.do_test(expected_chunk, true, false).await;
+    }
+
+    /// Tests handling of edge case:
+    /// Match is found for a probe_row,
+    /// but there are still candidate rows in the iterator for that probe_row.
+    /// These should not be buffered or we will have duplicate rows in output.
+    #[tokio::test]
+    async fn test_left_semi_join_with_non_equi_condition_duplicates() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Float32),
+            ],
+        };
+
+        // Build side
+        let mut left_executor = MockExecutor::new(schema);
+        left_executor.add(DataChunk::from_pretty(
+            "i f
+                 1 1.0
+                 1 1.0
+                 1 1.0
+                 1 1.0
+                 2 1.0",
+        ));
+
+        // Probe side
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int32),
+                Field::unnamed(DataType::Float64),
+            ],
+        };
+        let mut right_executor = MockExecutor::new(schema);
+        right_executor.add(DataChunk::from_pretty(
+            "i F
+                 1 2.0
+                 1 2.0
+                 1 2.0
+                 1 2.0
+                 2 2.0",
+        ));
+
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftSemi);
+        let expected_chunk = DataChunk::from_pretty(
+            "i f
+            1 1.0
+            1 1.0
+            1 1.0
+            1 1.0
+            2 1.0",
+        );
+
+        test_fixture
+            .do_test_with_chunk_size_and_executors(
+                expected_chunk,
+                true,
+                false,
+                3,
+                Box::new(left_executor),
+                Box::new(right_executor),
+            )
+            .await;
     }
 
     #[tokio::test]

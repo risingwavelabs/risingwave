@@ -19,6 +19,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
+use postgres_types::FromSql;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
@@ -29,13 +30,15 @@ use crate::binder::{Binder, BoundSetExpr, BoundStatement};
 use crate::handler::flush::do_flush;
 use crate::handler::privilege::{check_privileges, resolve_privileges};
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
+use crate::handler::HandlerArgs;
+use crate::optimizer::{OptimizerContext, OptimizerContextRef};
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
-    HummockSnapshotGuard, LocalQueryExecution, LocalQueryStream,
+    LocalQueryExecution, LocalQueryStream, PinnedHummockSnapshot,
 };
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::session::SessionImpl;
 use crate::PlanRef;
 
 pub fn gen_batch_query_plan(
@@ -88,16 +91,17 @@ pub fn gen_batch_query_plan(
 }
 
 pub async fn handle_query(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     stmt: Statement,
     format: bool,
 ) -> Result<RwPgResponse> {
     let stmt_type = to_statement_type(&stmt)?;
-    let session = context.session_ctx.clone();
+    let session = handler_args.session.clone();
     let query_start_time = Instant::now();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, query_mode, output_schema) = {
+        let context = OptimizerContext::new_with_handler_args(handler_args);
         let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
 
         tracing::trace!(
@@ -125,22 +129,27 @@ pub async fn handle_query(
         .collect_vec();
 
     let mut row_stream = {
-        // Acquire hummock snapshot for execution.
-        // TODO: if there's no table scan, we don't need to acquire snapshot.
-        let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
-        let query_id = query.query_id().clone();
-        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
-
+        let query_epoch = session.config().get_query_epoch();
+        let query_snapshot = if let Some(query_epoch) = query_epoch {
+            PinnedHummockSnapshot::Other(query_epoch)
+        } else {
+            // Acquire hummock snapshot for execution.
+            // TODO: if there's no table scan, we don't need to acquire snapshot.
+            let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
+            let query_id = query.query_id().clone();
+            let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
+            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot)
+        };
         match query_mode {
             QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-                local_execute(session.clone(), query, pinned_snapshot).await?,
+                local_execute(session.clone(), query, query_snapshot).await?,
                 column_types,
                 format,
             )),
             // Local mode do not support cancel tasks.
             QueryMode::Distributed => {
                 PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                    distribute_execute(session.clone(), query, pinned_snapshot).await?,
+                    distribute_execute(session.clone(), query, query_snapshot).await?,
                     column_types,
                     format,
                 ))
@@ -160,12 +169,21 @@ pub async fn handle_query(
             let affected_rows_str = first_row_set[0].values()[0]
                 .as_ref()
                 .expect("compute node should return affected rows in output");
-            Some(
-                String::from_utf8(affected_rows_str.to_vec())
-                    .unwrap()
-                    .parse()
-                    .unwrap_or_default(),
-            )
+            if format {
+                Some(
+                    i64::from_sql(&postgres_types::Type::INT8, affected_rows_str)
+                        .unwrap()
+                        .try_into()
+                        .expect("affected rows count large than i32"),
+                )
+            } else {
+                Some(
+                    String::from_utf8(affected_rows_str.to_vec())
+                        .unwrap()
+                        .parse()
+                        .unwrap_or_default(),
+                )
+            }
         }
         _ => unreachable!(),
     };
@@ -212,7 +230,7 @@ fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
 pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
-    pinned_snapshot: HummockSnapshotGuard,
+    pinned_snapshot: PinnedHummockSnapshot,
 ) -> Result<DistributedQueryStream> {
     let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
     let query_manager = session.env().query_manager().clone();
@@ -223,10 +241,10 @@ pub async fn distribute_execute(
 }
 
 #[expect(clippy::unused_async)]
-async fn local_execute(
+pub async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
-    pinned_snapshot: HummockSnapshotGuard,
+    pinned_snapshot: PinnedHummockSnapshot,
 ) -> Result<LocalQueryStream> {
     let front_env = session.env();
 
@@ -243,7 +261,7 @@ async fn local_execute(
     Ok(execution.stream_rows())
 }
 
-async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
+pub async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
     match stmt_type {
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             do_flush(session).await?;

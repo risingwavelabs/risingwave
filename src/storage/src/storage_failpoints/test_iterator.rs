@@ -15,11 +15,9 @@
 use std::ops::Bound::Unbounded;
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::user_key;
-
 use crate::hummock::iterator::test_utils::{
-    gen_iterator_test_sstable_base, iterator_test_key_of, iterator_test_value_of,
-    mock_sstable_store, TEST_KEYS_COUNT,
+    gen_iterator_test_sstable_base, iterator_test_key_of, iterator_test_user_key_of,
+    iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
 };
 use crate::hummock::iterator::{
     BackwardConcatIterator, BackwardUserIterator, ConcatIterator, HummockIterator,
@@ -60,13 +58,13 @@ async fn test_failpoints_concat_read_err() {
     );
     iter.rewind().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
-    let result = iter.seek(iterator_test_key_of(22).as_slice()).await;
+    let result = iter.seek(iterator_test_key_of(22).to_ref()).await;
     assert!(result.is_err());
     let result = iter
-        .seek(iterator_test_key_of(4 * TEST_KEYS_COUNT).as_slice())
+        .seek(iterator_test_key_of(4 * TEST_KEYS_COUNT).to_ref())
         .await;
     assert!(result.is_err());
-    let result = iter.seek(iterator_test_key_of(23).as_slice()).await;
+    let result = iter.seek(iterator_test_key_of(23).to_ref()).await;
     assert!(result.is_err());
     fail::remove(mem_read_err);
     iter.rewind().await.unwrap();
@@ -75,7 +73,7 @@ async fn test_failpoints_concat_read_err() {
     while iter.is_valid() {
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(i * 2).as_slice());
+        assert_eq!(key, iterator_test_key_of(i * 2).to_ref());
         assert_eq!(
             val.into_user_value().unwrap(),
             iterator_test_value_of(i * 2).as_slice()
@@ -121,9 +119,9 @@ async fn test_failpoints_backward_concat_read_err() {
     );
     iter.rewind().await.unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
-    let result = iter.seek(iterator_test_key_of(2).as_slice()).await;
+    let result = iter.seek(iterator_test_key_of(2).to_ref()).await;
     assert!(result.is_err());
-    let result = iter.seek(iterator_test_key_of(3).as_slice()).await;
+    let result = iter.seek(iterator_test_key_of(3).to_ref()).await;
     assert!(result.is_err());
     fail::remove(mem_read_err);
     iter.rewind().await.unwrap();
@@ -133,7 +131,7 @@ async fn test_failpoints_backward_concat_read_err() {
         i -= 1;
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(i * 2).as_slice());
+        assert_eq!(key, iterator_test_key_of(i * 2).to_ref());
         assert_eq!(
             val.into_user_value().unwrap(),
             iterator_test_value_of(i * 2).as_slice()
@@ -199,7 +197,7 @@ async fn test_failpoints_merge_invalid_key() {
         }
     }
     assert!(count < 200 * 2);
-    mi.seek(iterator_test_key_of(350).as_slice()).await.unwrap();
+    mi.seek(iterator_test_key_of(350).to_ref()).await.unwrap();
     assert!(!mi.is_valid());
     fail::remove(mem_read_err);
 }
@@ -253,7 +251,7 @@ async fn test_failpoints_backward_merge_invalid_key() {
         }
     }
     assert!(count < 200 * 2);
-    mi.seek(iterator_test_key_of(10).as_slice()).await.unwrap();
+    mi.seek(iterator_test_key_of(10).to_ref()).await.unwrap();
     assert!(!mi.is_valid());
     fail::remove(mem_read_err);
 }
@@ -309,7 +307,7 @@ async fn test_failpoints_user_read_err() {
     while ui.is_valid() {
         let key = ui.key();
         let val = ui.value();
-        assert_eq!(key, user_key(iterator_test_key_of(i).as_slice()));
+        assert_eq!(key, &iterator_test_key_of(i));
         assert_eq!(val, iterator_test_value_of(i).as_slice());
         i += 1;
         let result = ui.next().await;
@@ -318,7 +316,7 @@ async fn test_failpoints_user_read_err() {
         }
     }
     assert!(i < 400);
-    ui.seek(user_key(iterator_test_key_of(350).as_slice()))
+    ui.seek(iterator_test_user_key_of(350).as_ref())
         .await
         .unwrap();
     assert!(!ui.is_valid());
@@ -376,7 +374,7 @@ async fn test_failpoints_backward_user_read_err() {
         i -= 1;
         let key = ui.key();
         let val = ui.value();
-        assert_eq!(key, user_key(iterator_test_key_of(i).as_slice()));
+        assert_eq!(key, &iterator_test_key_of(i));
         assert_eq!(val, iterator_test_value_of(i).as_slice());
         let result = ui.next().await;
         if result.is_err() {
@@ -384,7 +382,7 @@ async fn test_failpoints_backward_user_read_err() {
         }
     }
     assert!(i > 0);
-    ui.seek(user_key(iterator_test_key_of(10).as_slice()))
+    ui.seek(iterator_test_user_key_of(10).as_ref())
         .await
         .unwrap();
     assert!(!ui.is_valid());

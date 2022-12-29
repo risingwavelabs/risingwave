@@ -88,10 +88,10 @@ where
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Ident {
     /// The value of the identifier without quotes.
-    pub value: String,
+    pub(crate) value: String,
     /// The starting quote if any. Valid quote characters are the single quote,
     /// double quote, backtick, and opening square bracket.
-    pub quote_style: Option<char>,
+    pub(crate) quote_style: Option<char>,
 }
 
 impl Ident {
@@ -157,6 +157,8 @@ impl fmt::Display for Ident {
 }
 
 /// A name of a table, view, custom type, etc., possibly multi-part, i.e. db.schema.obj
+///
+/// Is is ensured to be non-empty.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ObjectName(pub Vec<Ident>);
@@ -201,8 +203,17 @@ pub enum Expr {
     Identifier(Ident),
     /// Multi-part identifier, e.g. `table_alias.column` or `schema.table.col`
     CompoundIdentifier(Vec<Ident>),
-    /// Struct-field identifier, expr is a table or a column struct, ident is field.
+    /// Struct-field identifier.
+    /// Expr is an arbitrary expression, returning either a table or a column.
+    /// Idents are consecutive field accesses.
     /// e.g. `(table.v1).v2` or `(table).v1.v2`
+    ///
+    /// It must contain parentheses to be distinguished from a [`Expr::CompoundIdentifier`].
+    /// See also <https://www.postgresql.org/docs/current/rowtypes.html#ROWTYPES-ACCESSING>
+    ///
+    /// The left parentheses must be put at the beginning of the expression.
+    /// The first parenthesized part is the `expr` part, and the rest are flattened into `idents`.
+    /// e.g., `((v1).v2.v3).v4` is equivalent to `(v1).v2.v3.v4`.
     FieldIdentifier(Box<Expr>, Vec<Ident>),
     /// `IS NULL` operator
     IsNull(Box<Expr>),
@@ -339,7 +350,7 @@ impl fmt::Display for Expr {
         match self {
             Expr::Identifier(s) => write!(f, "{}", s),
             Expr::CompoundIdentifier(s) => write!(f, "{}", display_separated(s, ".")),
-            Expr::FieldIdentifier(ast, s) => write!(f, "{}.{}", ast, display_separated(s, ".")),
+            Expr::FieldIdentifier(ast, s) => write!(f, "({}).{}", ast, display_separated(s, ".")),
             Expr::IsNull(ast) => write!(f, "{} IS NULL", ast),
             Expr::IsNotNull(ast) => write!(f, "{} IS NOT NULL", ast),
             Expr::IsTrue(ast) => write!(f, "{} IS TRUE", ast),
@@ -739,6 +750,30 @@ impl fmt::Display for ShowObject {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ShowCreateType {
+    Table,
+    MaterializedView,
+    View,
+    Index,
+    Source,
+    Sink,
+}
+
+impl fmt::Display for ShowCreateType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ShowCreateType::Table => f.write_str("TABLE"),
+            ShowCreateType::MaterializedView => f.write_str("MATERIALIZED VIEW"),
+            ShowCreateType::View => f.write_str("VIEW"),
+            ShowCreateType::Index => f.write_str("INDEX"),
+            ShowCreateType::Source => f.write_str("SOURCE"),
+            ShowCreateType::Sink => f.write_str("SINK"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CommentObject {
     Column,
     Table,
@@ -842,7 +877,7 @@ pub enum Statement {
     /// UPDATE
     Update {
         /// TABLE
-        table: TableWithJoins,
+        table_name: ObjectName,
         /// Column assignments
         assignments: Vec<Assignment>,
         /// WHERE
@@ -897,6 +932,16 @@ pub enum Statement {
     },
     /// CREATE SINK
     CreateSink { stmt: CreateSinkStatement },
+    /// CREATE FUNCTION
+    ///
+    /// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
+    CreateFunction {
+        or_replace: bool,
+        name: ObjectName,
+        args: Option<Vec<CreateFunctionArg>>,
+        return_type: Option<DataType>,
+        bodies: Vec<CreateFunctionBody>,
+    },
     /// ALTER TABLE
     AlterTable {
         /// Table name
@@ -908,8 +953,15 @@ pub enum Statement {
         /// Table or Source name
         name: ObjectName,
     },
-    /// SHOW COMMAND
+    /// SHOW OBJECT COMMAND
     ShowObjects(ShowObject),
+    /// SHOW CREATE COMMAND
+    ShowCreateObject {
+        /// Show create object type
+        create_type: ShowCreateType,
+        /// Show create object name
+        name: ObjectName,
+    },
     /// DROP
     Drop(DropStatement),
     /// SET <variable>
@@ -1049,6 +1101,10 @@ impl fmt::Display for Statement {
                 write!(f, "SHOW {}", show_object)?;
                 Ok(())
             }
+            Statement::ShowCreateObject{ create_type: show_type, name } => {
+                write!(f, "SHOW CREATE {} {}", show_type, name)?;
+                Ok(())
+            }
             Statement::Insert {
                 table_name,
                 columns,
@@ -1087,11 +1143,11 @@ impl fmt::Display for Statement {
                 write!(f, "\n\\.")
             }
             Statement::Update {
-                table,
+                table_name,
                 assignments,
                 selection,
             } => {
-                write!(f, "UPDATE {}", table)?;
+                write!(f, "UPDATE {}", table_name)?;
                 if !assignments.is_empty() {
                     write!(f, " SET {}", display_comma_separated(assignments))?;
                 }
@@ -1119,6 +1175,27 @@ impl fmt::Display for Statement {
                     write!(f, " IF NOT EXISTS")?;
                 }
                 write!(f, " {}", db_name)?;
+                Ok(())
+            }
+            Statement::CreateFunction {
+                or_replace,
+                name,
+                args,
+                return_type,
+                bodies,
+            } => {
+                write!(
+                    f,
+                    "CREATE {or_replace}FUNCTION {name}",
+                    or_replace = if *or_replace { "OR REPLACE " } else { "" },
+                )?;
+                if let Some(args) = args {
+                    write!(f, "({})", display_comma_separated(args))?;
+                }
+                if let Some(return_type) = return_type {
+                    write!(f, " RETURNS {}", return_type)?;
+                }
+                write!(f, " {}", display_separated(bodies, " "))?;
                 Ok(())
             }
             Statement::CreateView {
@@ -1528,6 +1605,8 @@ pub enum GrantObjects {
     Sequences(Vec<ObjectName>),
     /// Grant privileges on specific tables
     Tables(Vec<ObjectName>),
+    /// Grant privileges on specific sinks
+    Sinks(Vec<ObjectName>),
 }
 
 impl fmt::Display for GrantObjects {
@@ -1579,6 +1658,9 @@ impl fmt::Display for GrantObjects {
             GrantObjects::Mviews(mviews) => {
                 write!(f, "MATERIALIZED VIEW {}", display_comma_separated(mviews))
             }
+            GrantObjects::Sinks(sinks) => {
+                write!(f, "SINK {}", display_comma_separated(sinks))
+            }
         }
     }
 }
@@ -1601,9 +1683,10 @@ impl fmt::Display for Assignment {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionArgExpr {
     Expr(Expr),
-    /// expr is a table or a column struct, object_name is field.
+    /// Expr is an arbitrary expression, returning either a table or a column.
+    /// Idents are the prefix of `*`, which are consecutive field accesses.
     /// e.g. `(table.v1).*` or `(table).v1.*`
-    ExprQualifiedWildcard(Expr, ObjectName),
+    ExprQualifiedWildcard(Expr, Vec<Ident>),
     /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
     QualifiedWildcard(ObjectName),
     /// An unqualified `*`
@@ -1615,7 +1698,14 @@ impl fmt::Display for FunctionArgExpr {
         match self {
             FunctionArgExpr::Expr(expr) => write!(f, "{}", expr),
             FunctionArgExpr::ExprQualifiedWildcard(expr, prefix) => {
-                write!(f, "{}.{}.*", expr, prefix)
+                write!(
+                    f,
+                    "({}){}.*",
+                    expr,
+                    prefix
+                        .iter()
+                        .format_with("", |i, f| f(&format_args!(".{i}")))
+                )
             }
             FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
             FunctionArgExpr::Wildcard => f.write_str("*"),
@@ -1847,6 +1937,118 @@ impl fmt::Display for ShowStatementFilter {
             Like(pattern) => write!(f, "LIKE '{}'", value::escape_single_quote_string(pattern)),
             ILike(pattern) => write!(f, "ILIKE {}", value::escape_single_quote_string(pattern)),
             Where(expr) => write!(f, "WHERE {}", expr),
+        }
+    }
+}
+
+/// Function argument in CREATE FUNCTION.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateFunctionArg {
+    pub mode: Option<ArgMode>,
+    pub name: Option<Ident>,
+    pub data_type: DataType,
+    pub default_expr: Option<Expr>,
+}
+
+impl CreateFunctionArg {
+    /// Returns an unnamed argument.
+    pub fn unnamed(data_type: DataType) -> Self {
+        Self {
+            mode: None,
+            name: None,
+            data_type,
+            default_expr: None,
+        }
+    }
+
+    /// Returns an argument with name.
+    pub fn with_name(name: &str, data_type: DataType) -> Self {
+        Self {
+            mode: None,
+            name: Some(name.into()),
+            data_type,
+            default_expr: None,
+        }
+    }
+}
+
+impl fmt::Display for CreateFunctionArg {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(mode) = &self.mode {
+            write!(f, "{} ", mode)?;
+        }
+        if let Some(name) = &self.name {
+            write!(f, "{} ", name)?;
+        }
+        write!(f, "{}", self.data_type)?;
+        if let Some(default_expr) = &self.default_expr {
+            write!(f, " = {}", default_expr)?;
+        }
+        Ok(())
+    }
+}
+
+/// The mode of an argument in CREATE FUNCTION.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ArgMode {
+    In,
+    Out,
+    InOut,
+}
+
+impl fmt::Display for ArgMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ArgMode::In => write!(f, "IN"),
+            ArgMode::Out => write!(f, "OUT"),
+            ArgMode::InOut => write!(f, "INOUT"),
+        }
+    }
+}
+
+/// These attributes inform the query optimizer about the behavior of the function.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum FunctionBehavior {
+    Immutable,
+    Stable,
+    Volatile,
+}
+
+impl fmt::Display for FunctionBehavior {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FunctionBehavior::Immutable => write!(f, "IMMUTABLE"),
+            FunctionBehavior::Stable => write!(f, "STABLE"),
+            FunctionBehavior::Volatile => write!(f, "VOLATILE"),
+        }
+    }
+}
+
+/// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
+pub enum CreateFunctionBody {
+    /// AS 'definition'
+    As(String),
+    /// LANGUAGE lang_name
+    Language(Ident),
+    /// IMMUTABLE | STABLE | VOLATILE
+    Behavior(FunctionBehavior),
+    /// RETURN expression
+    Return(Expr),
+}
+
+impl fmt::Display for CreateFunctionBody {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::As(definition) => write!(f, "AS '{definition}'"),
+            Self::Language(lang) => write!(f, "LANGUAGE {lang}"),
+            Self::Behavior(behavior) => write!(f, "{behavior}"),
+            Self::Return(expr) => write!(f, "RETURN {expr}"),
         }
     }
 }

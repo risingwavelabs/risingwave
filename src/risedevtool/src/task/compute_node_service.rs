@@ -59,11 +59,13 @@ impl ComputeNodeService {
             .arg("--metrics-level")
             .arg("1")
             .arg("--async-stack-trace")
-            .arg(&config.async_stack_trace);
-
-        if config.enable_managed_cache {
-            cmd.arg("--enable-managed-cache");
-        }
+            .arg(&config.async_stack_trace)
+            .arg("--connector-rpc-endpoint")
+            .arg(&config.connector_rpc_endpoint)
+            .arg("--parallelism")
+            .arg(&config.parallelism.to_string())
+            .arg("--total-memory-bytes")
+            .arg(&config.total_memory_bytes.to_string());
 
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {

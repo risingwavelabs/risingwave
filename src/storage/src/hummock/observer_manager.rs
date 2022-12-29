@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeHummock};
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef,
@@ -26,10 +25,13 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::event_handler::HummockEvent;
 
 pub struct HummockObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+
+    backup_reader: BackupReaderRef,
 
     version_update_sender: UnboundedSender<HummockEvent>,
 
@@ -44,16 +46,18 @@ impl ObserverState for HummockObserverNode {
             return;
         };
 
-        assert!(
-            resp.version > self.version,
-            "resp version={:?}, current version={:?}",
-            resp.version,
-            self.version
-        );
-
         match info.to_owned() {
             Info::Table(table_catalog) => {
+                assert!(
+                    resp.version > self.version,
+                    "resp version={:?}, current version={:?}",
+                    resp.version,
+                    self.version
+                );
+
                 self.handle_catalog_notification(resp.operation(), table_catalog);
+
+                self.version = resp.version;
             }
 
             Info::HummockVersionDeltas(hummock_version_deltas) => {
@@ -67,52 +71,54 @@ impl ObserverState for HummockObserverNode {
                     });
             }
 
+            Info::MetaBackupManifestId(id) => {
+                self.backup_reader.try_refresh_manifest(id.id);
+            }
+
             _ => {
                 panic!("error type notification");
             }
         }
-
-        self.version = resp.version;
     }
 
-    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
-        match resp.info {
-            Some(Info::Snapshot(snapshot)) => {
-                self.handle_catalog_snapshot(snapshot.tables);
-                let _ = self
-                    .version_update_sender
-                    .send(HummockEvent::VersionUpdate(
-                        pin_version_response::Payload::PinnedVersion(
-                            snapshot
-                                .hummock_version
-                                .expect("should get hummock version"),
-                        ),
-                    ))
-                    .inspect_err(|e| {
-                        tracing::error!("unable to send full version: {:?}", e);
-                    });
-                self.version = resp.version;
-            }
-            _ => {
-                return Err(ErrorCode::InternalError(format!(
-                    "the first notify should be compute snapshot, but get {:?}",
-                    resp
-                ))
-                .into())
-            }
-        }
+    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
+        let Some(Info::Snapshot(snapshot)) = resp.info else {
+            unreachable!();
+        };
 
-        Ok(())
+        self.handle_catalog_snapshot(snapshot.tables);
+        self.backup_reader.try_refresh_manifest(
+            snapshot
+                .meta_backup_manifest_id
+                .expect("should get meta backup manifest id")
+                .id,
+        );
+        let _ = self
+            .version_update_sender
+            .send(HummockEvent::VersionUpdate(
+                pin_version_response::Payload::PinnedVersion(
+                    snapshot
+                        .hummock_version
+                        .expect("should get hummock version"),
+                ),
+            ))
+            .inspect_err(|e| {
+                tracing::error!("unable to send full version: {:?}", e);
+            });
+        let snapshot_version = snapshot.version.unwrap();
+        self.version = snapshot_version.catalog_version;
     }
 }
 
 impl HummockObserverNode {
     pub fn new(
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        backup_reader: BackupReaderRef,
         version_update_sender: UnboundedSender<HummockEvent>,
     ) -> Self {
         Self {
             filter_key_extractor_manager,
+            backup_reader,
             version_update_sender,
             version: 0,
         }

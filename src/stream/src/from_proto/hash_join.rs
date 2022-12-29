@@ -18,24 +18,27 @@ use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::*;
-use crate::cache::LruManagerRef;
+use crate::common::table::state_table::StateTable;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, PkIndices};
+use crate::task::AtomicU64RefOpt;
 
 pub struct HashJoinExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for HashJoinExecutorBuilder {
-    fn new_boxed_executor(
+    type Node = HashJoinNode;
+
+    async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::HashJoin)?;
         let is_append_only = node.is_append_only;
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for hash join"));
 
@@ -89,14 +92,15 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .collect_vec();
 
         let state_table_l =
-            StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone()));
+            StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone())).await;
         let degree_state_table_l =
-            StateTable::from_table_catalog(degree_table_l, store.clone(), Some(vnodes.clone()));
+            StateTable::from_table_catalog(degree_table_l, store.clone(), Some(vnodes.clone()))
+                .await;
 
         let state_table_r =
-            StateTable::from_table_catalog(table_r, store.clone(), Some(vnodes.clone()));
+            StateTable::from_table_catalog(table_r, store.clone(), Some(vnodes.clone())).await;
         let degree_state_table_r =
-            StateTable::from_table_catalog(degree_table_r, store, Some(vnodes));
+            StateTable::from_table_catalog(degree_table_r, store, Some(vnodes)).await;
 
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
@@ -115,7 +119,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             degree_state_table_l,
             state_table_r,
             degree_state_table_r,
-            lru_manager: stream.context.lru_manager.clone(),
+            lru_manager: stream.get_watermark_epoch(),
             is_append_only,
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,
@@ -144,7 +148,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     degree_state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
     degree_state_table_r: StateTable<S>,
-    lru_manager: Option<LruManagerRef>,
+    lru_manager: AtomicU64RefOpt,
     is_append_only: bool,
     metrics: Arc<StreamingMetrics>,
     join_type_proto: JoinTypeProto,

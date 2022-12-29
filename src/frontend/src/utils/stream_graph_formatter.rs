@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, HashMap};
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table;
-use risingwave_pb::stream_plan::agg_call_state::{AggTableState, MaterializedAggInputState};
+use risingwave_pb::stream_plan::agg_call_state::{MaterializedInputState, TableState};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::{
     agg_call_state, stream_node, DispatcherType, StreamFragmentGraph, StreamNode,
@@ -96,7 +96,7 @@ impl StreamGraphFormatter {
             tb.pk,
             tb.value_indices,
             tb.distribution_key,
-            if let Some(vnode_col_idx) = tb.vnode_col_idx {
+            if let Some(vnode_col_idx) = tb.vnode_col_index {
                 format!(", vnode column idx: {}", vnode_col_idx)
             } else {
                 "".to_string()
@@ -142,10 +142,12 @@ impl StreamGraphFormatter {
         writeln!(f, "{}{}", " ".repeat(level * 2), one_line_explain)?;
         let explain_table_oneline =
             match node.get_node_body().unwrap() {
-                stream_node::NodeBody::Source(node) => Some(format!(
-                    "source state table: {}",
-                    self.add_table(node.get_state_table().unwrap())
-                )),
+                stream_node::NodeBody::Source(node) => node.source_inner.as_ref().map(|source| {
+                    format!(
+                        "source state table: {}",
+                        self.add_table(source.get_state_table().unwrap())
+                    )
+                }),
                 stream_node::NodeBody::Materialize(node) => Some(format!(
                     "materialized table: {}",
                     self.add_table(node.get_table().unwrap())
@@ -157,9 +159,9 @@ impl StreamGraphFormatter {
                         .iter()
                         .filter_map(|state| match state.get_inner().unwrap() {
                             agg_call_state::Inner::ResultValueState(_) => None,
-                            agg_call_state::Inner::TableState(AggTableState { table })
-                            | agg_call_state::Inner::MaterializedState(
-                                MaterializedAggInputState { table, .. },
+                            agg_call_state::Inner::TableState(TableState { table })
+                            | agg_call_state::Inner::MaterializedInputState(
+                                MaterializedInputState { table, .. },
                             ) => Some(self.add_table(table.as_ref().unwrap())),
                         })
                         .join(", ")
@@ -171,9 +173,9 @@ impl StreamGraphFormatter {
                         .iter()
                         .filter_map(|state| match state.get_inner().unwrap() {
                             agg_call_state::Inner::ResultValueState(_) => None,
-                            agg_call_state::Inner::TableState(AggTableState { table })
-                            | agg_call_state::Inner::MaterializedState(
-                                MaterializedAggInputState { table, .. },
+                            agg_call_state::Inner::TableState(TableState { table })
+                            | agg_call_state::Inner::MaterializedInputState(
+                                MaterializedInputState { table, .. },
                             ) => Some(self.add_table(table.as_ref().unwrap())),
                         })
                         .join(", ")

@@ -14,8 +14,8 @@
 
 use core::fmt;
 use std::cmp::Ordering;
-use std::fmt::{Debug, Display};
-use std::hash::{Hash, Hasher};
+use std::fmt::Debug;
+use std::hash::Hash;
 
 use bytes::{Buf, BufMut};
 use itertools::EitherOrBoth::{Both, Left, Right};
@@ -23,14 +23,13 @@ use itertools::Itertools;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
 use serde::{Deserializer, Serializer};
 
-use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
-    RowRef, NULL_VAL_FOR_HASH,
-};
+use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult, RowRef};
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::row::Row;
+use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, display_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
-    Datum, DatumRef, Scalar, ScalarRefImpl,
+    hash_datum, memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum,
+    DatumRef, Scalar, ScalarRefImpl, ToDatumRef,
 };
 
 /// This is a naive implementation of list array.
@@ -77,24 +76,28 @@ impl ArrayBuilder for ListArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<ListRef<'_>>) {
+    fn append_n(&mut self, n: usize, value: Option<ListRef<'_>>) {
         match value {
             None => {
-                self.bitmap.append(false);
+                self.bitmap.append_n(n, false);
                 let last = *self.offsets.last().unwrap();
-                self.offsets.push(last);
+                for _ in 0..n {
+                    self.offsets.push(last);
+                }
             }
             Some(v) => {
-                self.bitmap.append(true);
-                let last = *self.offsets.last().unwrap();
-                let values_ref = v.values_ref();
-                self.offsets.push(last + values_ref.len());
-                for f in values_ref {
-                    self.value.append_datum_ref(f);
+                self.bitmap.append_n(n, true);
+                for _ in 0..n {
+                    let last = *self.offsets.last().unwrap();
+                    let values_ref = v.values_ref();
+                    self.offsets.push(last + values_ref.len());
+                    for f in values_ref {
+                        self.value.append_datum(f);
+                    }
                 }
             }
         }
-        self.len += 1;
+        self.len += n;
     }
 
     fn append_array(&mut self, other: &ListArray) {
@@ -135,10 +138,10 @@ impl ListArrayBuilder {
     pub fn append_row_ref(&mut self, row: RowRef<'_>) {
         self.bitmap.append(true);
         let last = *self.offsets.last().unwrap();
-        self.offsets.push(last + row.size());
+        self.offsets.push(last + row.len());
         self.len += 1;
-        for v in row.values() {
-            self.value.append_datum_ref(v);
+        for v in row.iter() {
+            self.value.append_datum(v);
         }
     }
 }
@@ -156,32 +159,15 @@ pub struct ListArray {
 
 impl Array for ListArray {
     type Builder = ListArrayBuilder;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = ListValue;
     type RefItem<'a> = ListRef<'a>;
 
-    fn value_at(&self, idx: usize) -> Option<ListRef<'_>> {
-        if !self.is_null(idx) {
-            Some(ListRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
-    }
-
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<ListRef<'_>> {
-        if !self.is_null_unchecked(idx) {
-            Some(ListRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
+        ListRef::Indexed { arr: self, idx }
     }
 
     fn len(&self) -> usize {
         self.len
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        ArrayIterator::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -209,14 +195,6 @@ impl Array for ListArray {
 
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
-    }
-
-    fn hash_at<H: std::hash::Hasher>(&self, idx: usize, state: &mut H) {
-        if !self.is_null(idx) {
-            self.value.hash_at(idx, state)
-        } else {
-            NULL_VAL_FOR_HASH.hash(state);
-        }
     }
 
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
@@ -306,18 +284,6 @@ pub struct ListValue {
     values: Box<[Datum]>,
 }
 
-impl fmt::Display for ListValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Example of ListValue display: ARRAY[1, 2]
-        write!(f, "ARRAY")?;
-        let mut f = f.debug_list();
-        for v in self.values.iter() {
-            f.entry(&format_args!("{}", v.as_ref().unwrap()));
-        }
-        f.finish()
-    }
-}
-
 impl PartialOrd for ListValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
@@ -328,6 +294,19 @@ impl Ord for ListValue {
     fn cmp(&self, other: &Self) -> Ordering {
         self.partial_cmp(other).unwrap()
     }
+}
+
+// Used to display ListValue in explain for better readibilty.
+pub fn display_for_explain(list: &ListValue) -> String {
+    // Example of ListValue display: ARRAY[1, 2]
+    format!(
+        "ARRAY[{}]",
+        list.values
+            .iter()
+            .map(|v| v.as_ref().unwrap().as_scalar_ref_impl().to_text())
+            .collect::<Vec<String>>()
+            .join(", ")
+    )
 }
 
 impl ListValue {
@@ -341,7 +320,7 @@ impl ListValue {
         &self.values
     }
 
-    pub fn deserialize(
+    pub fn memcmp_deserialize(
         datatype: &DataType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
@@ -367,7 +346,10 @@ impl ListValue {
         let mut inner_deserializer = memcomparable::Deserializer::new(bytes.as_slice());
         let mut values = Vec::new();
         while inner_deserializer.has_remaining() {
-            values.push(deserialize_datum_from(datatype, &mut inner_deserializer)?)
+            values.push(memcmp_deserialize_datum_from(
+                datatype,
+                &mut inner_deserializer,
+            )?)
         }
         Ok(Self::new(values))
     }
@@ -387,7 +369,7 @@ macro_rules! iter_elems_ref {
                 $($body)*
             }
             ListRef::ValueRef { val } => {
-                let $it = val.values.iter().map(to_datum_ref);
+                let $it = val.values.iter().map(ToDatumRef::to_datum_ref);
                 $($body)*
             }
         }
@@ -424,7 +406,7 @@ impl<'a> ListRef<'a> {
             }
             ListRef::ValueRef { val } => {
                 if let Some(datum) = val.values().iter().nth(index - 1) {
-                    Ok(to_datum_ref(datum))
+                    Ok(datum.to_datum_ref())
                 } else {
                     Ok(None)
                 }
@@ -432,26 +414,25 @@ impl<'a> ListRef<'a> {
         }
     }
 
-    pub fn serialize(
+    pub fn memcmp_serialize(
         &self,
         serializer: &mut memcomparable::Serializer<impl BufMut>,
     ) -> memcomparable::Result<()> {
         let mut inner_serializer = memcomparable::Serializer::new(vec![]);
         iter_elems_ref!(self, it, {
             for datum_ref in it {
-                serialize_datum_ref_into(&datum_ref, &mut inner_serializer)?
+                memcmp_serialize_datum_into(datum_ref, &mut inner_serializer)?
             }
         });
         serializer.serialize_bytes(&inner_serializer.into_inner())
     }
-}
 
-impl Hash for ListRef<'_> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self {
-            ListRef::Indexed { arr, idx } => arr.hash_at(*idx, state),
-            ListRef::ValueRef { val } => val.hash(state),
-        }
+    pub fn hash_scalar_inner<H: std::hash::Hasher>(&self, state: &mut H) {
+        iter_elems_ref!(self, it, {
+            for datum_ref in it {
+                hash_datum(datum_ref, state);
+            }
+        })
     }
 }
 
@@ -496,23 +477,23 @@ impl Debug for ListRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         iter_elems_ref!(self, it, {
             for v in it {
-                v.fmt(f)?;
+                Debug::fmt(&v, f)?;
             }
             Ok(())
         })
     }
 }
 
-impl Display for ListRef<'_> {
+impl ToText for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     // Refer to PostgreSQL `array_out` or `appendPGArray`.
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         iter_elems_ref!(self, it, {
             write!(
                 f,
                 "{{{}}}",
                 it.format_with(",", |datum_ref, f| {
-                    let s = display_datum_ref(datum_ref);
+                    let s = datum_ref.to_text();
                     // Never quote null or inner list, but quote empty, verbatim 'null', special
                     // chars and whitespaces.
                     let need_quote = !matches!(datum_ref, None | Some(ScalarRefImpl::List(_)))
@@ -539,6 +520,13 @@ impl Display for ListRef<'_> {
                 })
             )
         })
+    }
+
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
+        match ty {
+            DataType::List { .. } => self.write(f),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -844,26 +832,26 @@ mod tests {
     fn test_list_ref_display() {
         let v = ListValue::new(vec![Some(1.into()), None]);
         let r = ListRef::ValueRef { val: &v };
-        assert_eq!("{1,NULL}".to_string(), format!("{}", r));
+        assert_eq!("{1,NULL}".to_string(), format!("{}", r.to_text()));
     }
 
     #[test]
     fn test_serialize_deserialize() {
         let value = ListValue::new(vec![
-            Some("abcd".to_string().to_scalar_value()),
-            Some("".to_string().to_scalar_value()),
+            Some("abcd".into()),
+            Some("".into()),
             None,
-            Some("a".to_string().to_scalar_value()),
+            Some("a".into()),
         ]);
         let list_ref = ListRef::ValueRef { val: &value };
         let mut serializer = memcomparable::Serializer::new(vec![]);
         serializer.set_reverse(true);
-        list_ref.serialize(&mut serializer).unwrap();
+        list_ref.memcmp_serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         deserializer.set_reverse(true);
         assert_eq!(
-            ListValue::deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
+            ListValue::memcmp_deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
             value
         );
 
@@ -877,11 +865,11 @@ mod tests {
         let array = builder.finish();
         let list_ref = array.value_at(0).unwrap();
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        list_ref.serialize(&mut serializer).unwrap();
+        list_ref.memcmp_serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         assert_eq!(
-            ListValue::deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
+            ListValue::memcmp_deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
             value
         );
     }
@@ -911,7 +899,7 @@ mod tests {
                 Ordering::Greater,
             ),
             (
-                ListValue::new(vec![None, Some("".to_string().to_scalar_value())]),
+                ListValue::new(vec![None, Some("".into())]),
                 ListValue::new(vec![None, None]),
                 DataType::Varchar,
                 Ordering::Less,
@@ -932,14 +920,14 @@ mod tests {
             let lhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 ListRef::ValueRef { val: &lhs }
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
             let rhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 ListRef::ValueRef { val: &rhs }
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -959,7 +947,7 @@ mod tests {
                 array
                     .value_at(0)
                     .unwrap()
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -968,7 +956,7 @@ mod tests {
                 array
                     .value_at(1)
                     .unwrap()
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };

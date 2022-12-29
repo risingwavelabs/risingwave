@@ -176,7 +176,7 @@ impl ProjectSetExecutor {
                                 }
                                 Either::Right(datum_ref) => {
                                     for _ in 0..max_tf_len {
-                                        builder.append_datum_ref(datum_ref);
+                                        builder.append_datum(datum_ref);
                                     }
                                 }
                             }

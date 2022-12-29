@@ -20,26 +20,37 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{
-    ColumnIndex as ProstColumnIndex, Source as ProstSource, Table as ProstTable, TableSourceInfo,
+    ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
 };
 use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, TableConstraint,
 };
 
-use super::create_source::make_prost_source;
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::{check_valid_column_name, ColumnId};
-use crate::optimizer::plan_node::{LogicalSource, StreamSource};
+use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::{PlanRef, PlanRoot};
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::Binder;
+
+#[derive(PartialEq, Clone, Debug)]
+pub enum DmlFlag {
+    /// used for `create materialized view / sink / index`
+    Disable,
+    /// used for `create table`
+    All,
+    /// used for `create table with (append_only = true)`
+    AppendOnly,
+}
 
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
@@ -61,6 +72,9 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Opt
                 collation,
                 options,
             } = column;
+            let data_type = data_type.ok_or(ErrorCode::InvalidInputSyntax(
+                "data type is not specified".into(),
+            ))?;
             if let Some(collation) = collation {
                 return Err(ErrorCode::NotImplemented(
                     format!("collation \"{}\"", collation),
@@ -202,38 +216,148 @@ pub(crate) fn gen_create_table_plan(
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-) -> Result<(PlanRef, ProstSource, ProstTable)> {
+) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
+    gen_create_table_plan_without_bind(
+        session,
+        context,
+        table_name,
+        column_descs,
+        pk_column_id_from_columns,
+        constraints,
+    )
+}
+
+pub(crate) fn gen_create_table_plan_without_bind(
+    session: &SessionImpl,
+    context: OptimizerContextRef,
+    table_name: ObjectName,
+    column_descs: Vec<ColumnDesc>,
+    pk_column_id_from_columns: Option<ColumnId>,
+    constraints: Vec<TableConstraint>,
+) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
-    let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
-    let properties = context.inner().with_options.inner().clone();
-    let source = make_prost_source(
-        session,
-        table_name,
-        row_id_index,
-        columns,
+    let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect_vec();
+    let properties = context.with_options().inner().clone();
+    let dml_flag = match context.with_options().append_only() {
+        true => DmlFlag::AppendOnly,
+        false => DmlFlag::All,
+    };
+
+    let db_name = session.database();
+    let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+
+    // TODO(Yuanxin): Detect if there is an external source based on `properties` (WITH CONNECTOR)
+    // and set `has_external_source` accordingly.
+    let has_external_source = false;
+    let source = if has_external_source {
+        Some(ProstSource {
+            id: 0,
+            schema_id,
+            database_id,
+            name: name.clone(),
+            row_id_index: row_id_index.clone(),
+            columns: columns.clone(),
+            pk_column_ids: pk_column_ids.clone(),
+            properties,
+            info: Some(StreamSourceInfo::default()),
+            owner: session.user_id(),
+        })
+    } else {
+        None
+    };
+
+    let source_catalog: Option<Rc<SourceCatalog>> =
+        source.as_ref().map(|source| Rc::new(source.into()));
+    let pk_column_ids = pk_column_ids
+        .iter()
+        .map(|id| ColumnId::new(*id))
+        .collect_vec();
+    let column_descs = columns
+        .iter()
+        .map(|column| column.column_desc.clone().unwrap().into())
+        .collect_vec();
+
+    let row_id_index = row_id_index.as_ref().map(|index| index.index as _);
+    let source_node: PlanRef = LogicalSource::new(
+        source_catalog,
+        column_descs,
         pk_column_ids,
-        properties,
-        Info::TableSource(TableSourceInfo {}),
+        row_id_index,
+        false,
+        context,
+    )
+    .into();
+
+    let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
+    required_cols.toggle_range(..);
+    let mut out_names = source_node.schema().names();
+
+    if let Some(row_id_index) = row_id_index {
+        required_cols.toggle(row_id_index);
+        out_names.remove(row_id_index);
+    }
+
+    let mut plan_root = PlanRoot::new(
+        source_node,
+        RequiredDist::Any,
+        Order::any(),
+        required_cols,
+        out_names,
+    );
+
+    // The materialize executor need not handle primary key conflict if the primary key is row id.
+    let handle_pk_conflict = row_id_index.is_none();
+
+    let materialize = plan_root.gen_materialize_plan(
+        name,
+        "".into(),
+        None,
+        handle_pk_conflict,
+        row_id_index,
+        dml_flag,
+        TableType::Table,
     )?;
-    let (plan, table) = gen_materialized_source_plan(context, source.clone(), session.user_id())?;
-    Ok((plan, source, table))
+
+    let mut table = materialize.table().to_prost(schema_id, database_id);
+    table.owner = session.user_id();
+
+    Ok((materialize.into(), source, table))
 }
 
-/// Generate a stream plan with `StreamSource` + `StreamMaterialize`, it resembles a
-/// `CREATE MATERIALIZED VIEW AS SELECT * FROM <source>`.
-pub(crate) fn gen_materialized_source_plan(
+/// TODO(Yuanxin): Remove this method after unsupporting `CREATE MATERIALIZED SOURCE`.
+pub(crate) fn gen_materialize_plan(
     context: OptimizerContextRef,
     source: ProstSource,
     owner: u32,
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
-        // Manually assemble the materialization plan for the table.
-        let source_node: PlanRef =
-            StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
         let row_id_index = source.row_id_index.as_ref().map(|index| index.index as _);
+        // Manually assemble the materialization plan for the table.
+        let source_node: PlanRef = LogicalSource::new(
+            Some(Rc::new((&source).into())),
+            source
+                .columns
+                .iter()
+                .map(|column| column.column_desc.clone().unwrap().into())
+                .collect(),
+            source
+                .pk_column_ids
+                .iter()
+                .map(|id| ColumnId::new(*id))
+                .collect(),
+            row_id_index,
+            true,
+            context,
+        )
+        .into();
+
+        // row_id_index is Some means that the user has not specified pk, then we will add a hidden
+        // column to store pk, and materialize executor do not need to handle pk conflict.
+        let handle_pk_conflict = row_id_index.is_none();
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
         required_cols.toggle_range(..);
         let mut out_names = source_node.schema().names();
@@ -242,14 +366,23 @@ pub(crate) fn gen_materialized_source_plan(
             out_names.remove(row_id_index);
         }
 
-        PlanRoot::new(
+        let mut plan_root = PlanRoot::new(
             source_node,
             RequiredDist::Any,
             Order::any(),
             required_cols,
             out_names,
-        )
-        .gen_create_mv_plan(source.name.clone(), "".into(), None)?
+        );
+
+        plan_root.gen_materialize_plan(
+            source.name.clone(),
+            "".into(),
+            None,
+            handle_pk_conflict,
+            row_id_index,
+            DmlFlag::Disable,
+            TableType::Table,
+        )?
     };
     let mut table = materialize
         .table()
@@ -259,32 +392,27 @@ pub(crate) fn gen_materialized_source_plan(
 }
 
 pub async fn handle_create_table(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
+    if_not_exists: bool,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx.clone();
-    {
-        let db_name = session.database();
-        let catalog_reader = session.env().catalog_reader().read_guard();
-        let (schema_name, table_name) = {
-            let (schema_name, table_name) =
-                Binder::resolve_table_or_source_name(db_name, table_name.clone())?;
-            let search_path = session.config().get_search_path();
-            let user_name = &session.auth_context().user_name;
-            let schema_name = match schema_name {
-                Some(schema_name) => schema_name,
-                None => catalog_reader
-                    .first_valid_schema(db_name, &search_path, user_name)?
-                    .name(),
-            };
-            (schema_name, table_name)
-        };
-        catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &table_name)?;
+    let session = handler_args.session.clone();
+
+    if let Err(e) = session.check_relation_name_duplicated(table_name.clone()) {
+        if if_not_exists {
+            return Ok(PgResponse::empty_result_with_notice(
+                StatementType::CREATE_TABLE,
+                format!("relation \"{}\" already exists, skipping", table_name),
+            ));
+        } else {
+            return Err(e);
+        }
     }
 
     let (graph, source, table) = {
+        let context = OptimizerContext::new_with_handler_args(handler_args);
         let (plan, source, table) = gen_create_table_plan(
             &session,
             context.into(),
@@ -304,9 +432,8 @@ pub async fn handle_create_table(
     );
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer
-        .create_materialized_source(source, table, graph)
-        .await?;
+
+    catalog_writer.create_table(source, table, graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }
@@ -333,16 +460,9 @@ mod tests {
         let catalog_reader = session.env().catalog_reader().read_guard();
         let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
-        // Check source exists.
-        let (source, schema_name) = catalog_reader
-            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
-            .unwrap();
-        assert_eq!(source.name, "t");
-        assert!(source.append_only);
-
         // Check table exists.
         let (table, _) = catalog_reader
-            .get_table_by_name(DEFAULT_DATABASE_NAME, SchemaPath::Name(schema_name), "t")
+            .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
             .unwrap();
         assert_eq!(table.name(), "t");
 

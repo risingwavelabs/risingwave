@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use regex::Regex;
 use risingwave_common::array::{Array, ArrayRef, DataChunk, ListValue, Utf8Array};
-use risingwave_common::types::{Scalar, ScalarImpl};
+use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::RexNode;
@@ -64,7 +64,7 @@ impl RegexpMatches {
                     }
                 })
                 .flatten()
-                .map(|mat| Some(mat.as_str().to_string().to_scalar_value()))
+                .map(|mat| Some(mat.as_str().into()))
                 .collect_vec();
             let list = ListValue::new(list);
             builder.append_datum(&Some(list.into()));
@@ -85,7 +85,7 @@ impl TableFunction for RegexpMatches {
         let text_arr = self.text.eval_checked(input)?;
         let text_arr: &Utf8Array = text_arr.as_ref().into();
 
-        let bitmap = input.get_visibility_ref();
+        let bitmap = input.visibility();
         let mut output_arrays: Vec<ArrayRef> = vec![];
 
         match bitmap {

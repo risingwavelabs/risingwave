@@ -1,7 +1,11 @@
 [package]
 name = "risingwave_common"
-version = "0.2.0-alpha"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
@@ -19,10 +23,12 @@ enum-as-inner = "0.5"
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
+hex = "0.4.3"
 humantime = "2.1"
 itertools = "0.10"
+itoa = "1.0"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", branch = "evict_by_timestamp" }
-memcomparable = { path = "../utils/memcomparable" }
+memcomparable = { version = "0.1", features = ["decimal"] }
 more-asserts = "0.3"
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -36,11 +42,13 @@ rand = "0.8"
 regex = "1"
 risingwave_pb = { path = "../prost" }
 rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
+ryu = "1.0"
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
 smallvec = "1"
 spin = "0.9"
+static_assertions = "1"
 strum = "0.24"
 strum_macros = "0.24"
 sysinfo = "0.26"
@@ -54,7 +62,7 @@ twox-hash = "1"
 url = "2"
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+workspace-hack = { path = "../workspace-hack" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procinfo = { git = "https://github.com/tikv/procinfo-rs", rev = "6599eb9dca74229b2c1fcc44118bef7eff127128" }
@@ -69,7 +77,12 @@ mach = "0.3.2"
 [dev-dependencies]
 criterion = "0.4"
 rand = "0.8"
+tempfile = "3"
 
 [[bench]]
 name = "bench_encoding"
+harness = false
+
+[[bench]]
+name = "bitmap"
 harness = false

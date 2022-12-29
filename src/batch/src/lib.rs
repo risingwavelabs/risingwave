@@ -15,7 +15,6 @@
 #![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
-#![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(exact_size_is_empty)]
 #![feature(type_alias_impl_trait)]
@@ -25,7 +24,11 @@
 #![feature(iterator_try_collect)]
 #![feature(lint_reasons)]
 #![feature(binary_heap_into_iter_sorted)]
+#![feature(is_sorted)]
 #![recursion_limit = "256"]
+#![feature(let_chains)]
+#![feature(bound_map)]
+#![feature(int_roundings)]
 
 mod error;
 pub mod exchange_source;

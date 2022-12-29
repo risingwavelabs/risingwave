@@ -1,0 +1,90 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation
+
+# description: Test parallel limit execution with strings
+# group: [limit]
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE other_table (i int);
+
+statement ok
+insert into other_table values (337), (948), (1779), (4779);
+
+statement ok
+CREATE TABLE integers (i int, k varchar);
+
+statement ok
+INSERT INTO integers SELECT i, CONCAT('quackquack', i) AS k FROM generate_series(0, 10000, 1) tbl(i);
+
+query I
+SELECT k FROM integers order by i LIMIT 5
+----
+quackquack0
+quackquack1
+quackquack2
+quackquack3
+quackquack4
+
+query I
+SELECT k FROM integers WHERE i>1978 OR i=334 order by i LIMIT 5
+----
+quackquack334
+quackquack1979
+quackquack1980
+quackquack1981
+quackquack1982
+
+query I
+SELECT k FROM integers WHERE i>1978 order by i LIMIT 5
+----
+quackquack1979
+quackquack1980
+quackquack1981
+quackquack1982
+quackquack1983
+
+query I
+SELECT k FROM integers WHERE i>4978 order by i LIMIT 5
+----
+quackquack4979
+quackquack4980
+quackquack4981
+quackquack4982
+quackquack4983
+
+# large offset
+query I
+SELECT k FROM integers WHERE i>4978 order by i LIMIT 5 OFFSET 100;
+----
+quackquack5079
+quackquack5080
+quackquack5081
+quackquack5082
+quackquack5083
+
+query I
+SELECT k FROM integers WHERE i>4978 order by i LIMIT 5 OFFSET 1000;
+----
+quackquack5979
+quackquack5980
+quackquack5981
+quackquack5982
+quackquack5983
+
+# IN-clause (semi join)
+query I rowsort
+SELECT k FROM integers WHERE i IN (SELECT * FROM other_table)
+----
+quackquack1779
+quackquack337
+quackquack4779
+quackquack948
+
+statement ok
+DROP TABLE integers
+
+statement ok
+DROP table other_table

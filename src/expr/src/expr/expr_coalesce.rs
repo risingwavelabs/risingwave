@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
+use std::ops::BitAnd;
 use std::sync::Arc;
 
-use risingwave_common::array::{ArrayRef, DataChunk, Row};
+use risingwave_common::array::{ArrayRef, DataChunk, Vis, VisRef};
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -35,44 +37,46 @@ impl Expression for CoalesceExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let children_array = self
-            .children
-            .iter()
-            .map(|c| c.eval_checked(input))
-            .collect::<Result<Vec<_>>>()?;
-
-        let len = children_array[0].len();
+        let init_vis = input.vis();
+        let mut input = input.clone();
+        let len = input.capacity();
+        let mut selection: Vec<Option<usize>> = vec![None; len];
+        let mut children_array = Vec::with_capacity(self.children.len());
+        for (child_idx, child) in self.children.iter().enumerate() {
+            let res = child.eval_checked(&input)?;
+            let res_bitmap = res.null_bitmap();
+            let orig_vis = input.vis();
+            let res_bitmap_ref: VisRef<'_> = res_bitmap.into();
+            orig_vis
+                .as_ref()
+                .bitand(res_bitmap_ref)
+                .iter_ones()
+                .for_each(|pos| {
+                    selection[pos] = Some(child_idx);
+                });
+            let res_vis: Vis = (!res_bitmap).into();
+            let new_vis = orig_vis & res_vis;
+            input.set_vis(new_vis);
+            children_array.push(res);
+        }
         let mut builder = self.return_type.create_array_builder(len);
-        let vis = input.vis();
-
-        for i in 0..len {
-            let mut data = None;
-            if vis.is_set(i) {
-                for array in &children_array {
-                    let datum = array.datum_at(i);
-                    if datum.is_some() {
-                        data = datum;
-                        break;
-                    }
-                }
+        for (i, sel) in selection.iter().enumerate() {
+            if init_vis.is_set(i) && let Some(child_idx) = sel {
+                builder.append_datum(children_array[*child_idx].value_at(i));
+            } else {
+                builder.append_null()
             }
-            builder.append_datum(&data);
         }
         Ok(Arc::new(builder.finish()))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
-        let children_array = self
-            .children
-            .iter()
-            .map(|c| c.eval_row(input))
-            .collect::<Result<Vec<_>>>()?;
-        for datum in children_array {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        for child in &self.children {
+            let datum = child.eval_row(input)?;
             if datum.is_some() {
                 return Ok(datum);
             }
         }
-
         Ok(None)
     }
 }
@@ -109,7 +113,8 @@ impl<'a> TryFrom<&'a ExprNode> for CoalesceExpression {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{DataChunk, Row};
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{Scalar, ScalarImpl};
     use risingwave_pb::data::data_type::TypeName;
@@ -190,7 +195,7 @@ mod tests {
                 .iter()
                 .map(|o| o.map(|int| int.to_scalar_value()))
                 .collect();
-            let row = Row::new(datum_vec);
+            let row = OwnedRow::new(datum_vec);
 
             let result = nullif_expr.eval_row(&row).unwrap();
             assert_eq!(result, expected[i]);

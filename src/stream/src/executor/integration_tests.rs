@@ -22,8 +22,8 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
 use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
-use tokio::sync::mpsc::channel;
 
+use super::exchange::permit::channel_for_test;
 use super::*;
 use crate::executor::actor::ActorContext;
 use crate::executor::aggregation::{AggArgs, AggCall};
@@ -74,7 +74,7 @@ async fn test_merger_sum_aggr() {
             1,
         )
         .unwrap();
-        let (tx, rx) = channel(16);
+        let (tx, rx) = channel_for_test();
         let consumer = SenderConsumer {
             input: aggregator.boxed(),
             channel: Box::new(LocalOutput::new(233, tx)),
@@ -102,7 +102,7 @@ async fn test_merger_sum_aggr() {
 
     // create 17 local aggregation actors
     for _ in 0..17 {
-        let (tx, rx) = channel(16);
+        let (tx, rx) = channel_for_test();
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
@@ -110,7 +110,7 @@ async fn test_merger_sum_aggr() {
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
-    let (input, rx) = channel(16);
+    let (input, rx) = channel_for_test();
     let _schema = Schema {
         fields: vec![Field::unnamed(DataType::Int64)],
     };
@@ -163,7 +163,8 @@ async fn test_merger_sum_aggr() {
         ],
         vec![],
         2,
-    );
+    )
+    .await;
 
     let projection = ProjectExecutor::new(
         actor_ctx.clone(),
@@ -202,7 +203,7 @@ async fn test_merger_sum_aggr() {
         for i in 0..10 {
             let chunk = StreamChunk::new(
                 vec![op; i],
-                vec![I64Array::from_slice(vec![Some(1); i].as_slice()).into()],
+                vec![I64Array::from_iter(vec![1; i]).into()],
                 None,
             );
             input.send(Message::Chunk(chunk)).await.unwrap();

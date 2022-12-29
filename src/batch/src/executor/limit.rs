@@ -155,7 +155,7 @@ mod tests {
     use crate::executor::test_utils::MockExecutor;
 
     fn create_column(vec: &[Option<i32>]) -> Column {
-        PrimitiveArray::from_slice(vec).into()
+        PrimitiveArray::from_iter(vec).into()
     }
 
     async fn test_limit_all_visible(
@@ -287,14 +287,7 @@ mod tests {
                 .as_slice(),
         );
 
-        let visible_array = BoolArray::from_slice(
-            visible
-                .clone()
-                .into_iter()
-                .map(Some)
-                .collect_vec()
-                .as_slice(),
-        );
+        let visible_array = BoolArray::from_iter(visible.iter().cloned());
 
         let col1 = visible_array.into();
         let schema = Schema {

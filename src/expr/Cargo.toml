@@ -1,7 +1,11 @@
 [package]
 name = "risingwave_expr"
-version = "0.2.0-alpha"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -16,10 +20,11 @@ chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 crc32fast = "1"
 dyn-clone = "1"
 either = "1"
+hex = "0.4.3"
 itertools = "0.10"
 md5 = "0.7.0"
-memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
+ouroboros = "0.15"
 parse-display = "0.6"
 paste = "1"
 postgres-types = { version = "0.2.4", features = ["derive","with-chrono-0_4"] }
@@ -38,4 +43,11 @@ toml = "0.5"
 tonic = { version = "0.2", package = "madsim-tonic" }
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+workspace-hack = { path = "../workspace-hack" }
+
+[dev-dependencies]
+criterion = "0.4"
+
+[[bench]]
+name = "expr"
+harness = false

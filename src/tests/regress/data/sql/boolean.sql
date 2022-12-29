@@ -22,23 +22,23 @@ SELECT bool '   f           ' AS false;
 
 SELECT bool 'true' AS true;
 
--- SELECT bool 'test' AS error;
+SELECT bool 'test' AS error;
 
 SELECT bool 'false' AS false;
 
--- SELECT bool 'foo' AS error;
+SELECT bool 'foo' AS error;
 
 SELECT bool 'y' AS true;
 
 SELECT bool 'yes' AS true;
 
--- SELECT bool 'yeah' AS error;
+SELECT bool 'yeah' AS error;
 
 SELECT bool 'n' AS false;
 
 SELECT bool 'no' AS false;
 
--- SELECT bool 'nay' AS error;
+SELECT bool 'nay' AS error;
 
 SELECT bool 'on' AS true;
 
@@ -46,21 +46,21 @@ SELECT bool 'off' AS false;
 
 SELECT bool 'of' AS false;
 
--- SELECT bool 'o' AS error;
+SELECT bool 'o' AS error;
 
--- SELECT bool 'on_' AS error;
+SELECT bool 'on_' AS error;
 
--- SELECT bool 'off_' AS error;
+SELECT bool 'off_' AS error;
 
 SELECT bool '1' AS true;
 
--- SELECT bool '11' AS error;
+SELECT bool '11' AS error;
 
 SELECT bool '0' AS false;
 
--- SELECT bool '000' AS error;
+SELECT bool '000' AS error;
 
--- SELECT bool '' AS error;
+SELECT bool '' AS error;
 
 -- and, or, not in qualifications
 
@@ -88,8 +88,8 @@ SELECT '    true   '::text::boolean AS true,
        '     FALSE'::text::boolean AS false;
 SELECT true::boolean::text AS true, false::boolean::text AS false;
 
--- SELECT '  tru e '::text::boolean AS invalid;    -- error
--- SELECT ''::text::boolean AS invalid;            -- error
+SELECT '  tru e '::text::boolean AS invalid;    -- error
+SELECT ''::text::boolean AS invalid;            -- error
 
 CREATE TABLE BOOLTBL1 (f1 bool);
 
@@ -136,8 +136,8 @@ INSERT INTO BOOLTBL2 (f1) VALUES (bool 'FALSE');
 
 -- This is now an invalid expression
 -- For pre-v6.3 this evaluated to false - thomas 1997-10-23
--- INSERT INTO BOOLTBL2 (f1)
---    VALUES (bool 'XXX');
+INSERT INTO BOOLTBL2 (f1)
+   VALUES (bool 'XXX');
 
 -- BOOLTBL2 should be full of false's at this point
 SELECT BOOLTBL2.* FROM BOOLTBL2;

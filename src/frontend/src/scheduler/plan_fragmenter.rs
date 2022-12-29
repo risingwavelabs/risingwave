@@ -17,10 +17,15 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use enum_as_inner::EnumAsInner;
+use futures::executor::block_on;
+use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableDesc;
-use risingwave_common::types::{ParallelUnitId, VnodeMapping};
+use risingwave_common::error::RwError;
+use risingwave_common::hash::{ParallelUnitId, VirtualNode, VnodeMapping};
 use risingwave_common::util::scan_range::ScanRange;
+use risingwave_connector::source::{ConnectorProperties, SplitEnumeratorImpl, SplitImpl};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::common::Buffer;
@@ -29,7 +34,9 @@ use serde::ser::SerializeStruct;
 use serde::Serialize;
 use uuid::Uuid;
 
+use super::SchedulerError;
 use crate::catalog::catalog_service::CatalogReader;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
@@ -184,10 +191,36 @@ impl Query {
             })
             .collect()
     }
+
+    pub fn has_lookup_join_stage(&self) -> bool {
+        self.stage_graph
+            .stages
+            .iter()
+            .any(|(_stage_id, stage_query)| stage_query.has_lookup_join())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SourceScanInfo {
+    /// Split Info
+    split_info: Vec<SplitImpl>,
+}
+
+impl SourceScanInfo {
+    pub fn new(split_info: Vec<SplitImpl>) -> Self {
+        Self { split_info }
+    }
+
+    pub fn split_info(&self) -> &Vec<SplitImpl> {
+        &self.split_info
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct TableScanInfo {
+    /// The name of the table to scan.
+    name: String,
+
     /// Indicates the table partitions to be read by scan tasks. Unnecessary partitions are already
     /// pruned.
     ///
@@ -195,31 +228,45 @@ pub struct TableScanInfo {
     /// full vnode bitmap, since we need to know where to schedule the singleton scan task.
     ///
     /// `None` iff the table is a system table.
-    partitions: Option<HashMap<ParallelUnitId, PartitionInfo>>,
+    partitions: Option<HashMap<ParallelUnitId, TablePartitionInfo>>,
 }
 
 impl TableScanInfo {
     /// For normal tables, `partitions` should always be `Some`.
-    pub fn new(partitions: HashMap<ParallelUnitId, PartitionInfo>) -> Self {
+    pub fn new(name: String, partitions: HashMap<ParallelUnitId, TablePartitionInfo>) -> Self {
         Self {
+            name,
             partitions: Some(partitions),
         }
     }
 
     /// For system table, there's no partition info.
-    pub fn system_table() -> Self {
-        Self { partitions: None }
+    pub fn system_table(name: String) -> Self {
+        Self {
+            name,
+            partitions: None,
+        }
     }
 
-    pub fn partitions(&self) -> Option<&HashMap<u32, PartitionInfo>> {
+    pub fn name(&self) -> &str {
+        self.name.as_ref()
+    }
+
+    pub fn partitions(&self) -> Option<&HashMap<u32, TablePartitionInfo>> {
         self.partitions.as_ref()
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct PartitionInfo {
+pub struct TablePartitionInfo {
     pub vnode_bitmap: Buffer,
     pub scan_ranges: Vec<ScanRangeProto>,
+}
+
+#[derive(Clone, Debug, EnumAsInner)]
+pub enum PartitionInfo {
+    Table(TablePartitionInfo),
+    Source(SplitImpl),
 }
 
 /// Fragment part of `Query`.
@@ -231,6 +278,8 @@ pub struct QueryStage {
     pub parallelism: u32,
     /// Indicates whether this stage contains a table scan node and the table's information if so.
     pub table_scan_info: Option<TableScanInfo>,
+    pub source_info: Option<SourceScanInfo>,
+    pub has_lookup_join: bool,
 }
 
 impl QueryStage {
@@ -239,6 +288,12 @@ impl QueryStage {
     /// the executor building process on the batch execution engine.
     pub fn has_table_scan(&self) -> bool {
         self.table_scan_info.is_some()
+    }
+
+    /// If true, this stage contains lookup join executor.
+    /// We need to delay epoch unpin util the end of the query.
+    pub fn has_lookup_join(&self) -> bool {
+        self.has_lookup_join
     }
 }
 
@@ -278,6 +333,8 @@ struct QueryStageBuilder {
     children_stages: Vec<QueryStageRef>,
     /// See also [`QueryStage::table_scan_info`].
     table_scan_info: Option<TableScanInfo>,
+    source_info: Option<SourceScanInfo>,
+    has_lookup_join: bool,
 }
 
 impl QueryStageBuilder {
@@ -287,6 +344,8 @@ impl QueryStageBuilder {
         parallelism: u32,
         exchange_info: ExchangeInfo,
         table_scan_info: Option<TableScanInfo>,
+        source_info: Option<SourceScanInfo>,
+        has_lookup_join: bool,
     ) -> Self {
         Self {
             query_id,
@@ -296,6 +355,8 @@ impl QueryStageBuilder {
             exchange_info,
             children_stages: vec![],
             table_scan_info,
+            source_info,
+            has_lookup_join,
         }
     }
 
@@ -307,6 +368,8 @@ impl QueryStageBuilder {
             exchange_info: self.exchange_info,
             parallelism: self.parallelism,
             table_scan_info: self.table_scan_info,
+            source_info: self.source_info,
+            has_lookup_join: self.has_lookup_join,
         });
 
         stage_graph_builder.add_node(stage.clone());
@@ -405,7 +468,8 @@ impl StageGraphBuilder {
 impl BatchPlanFragmenter {
     /// Split the plan node into each stages, based on exchange node.
     pub fn split(mut self, batch_node: PlanRef) -> SchedulerResult<Query> {
-        let root_stage = self.new_stage(batch_node.clone(), Distribution::Single.to_prost(1))?;
+        let root_stage =
+            self.new_stage(batch_node.clone(), Distribution::Single.to_prost(1, &self))?;
         let stage_graph = self.stage_graph_builder.build(root_stage.id);
         Ok(Query {
             stage_graph,
@@ -421,24 +485,63 @@ impl BatchPlanFragmenter {
         let next_stage_id = self.next_stage_id;
         self.next_stage_id += 1;
 
-        let table_scan_info = self.collect_stage_table_scan(root.clone())?;
+        let mut table_scan_info = self.collect_stage_table_scan(root.clone())?;
+        // For current implementation, we can guarantee that each stage has only one table
+        // scan(except System table) or ont source.
+        let source_info = if table_scan_info.is_none() {
+            Self::collect_stage_source(root.clone())?
+        } else {
+            None
+        };
+        let mut has_lookup_join = false;
         let parallelism = match root.distribution() {
             Distribution::Single => {
-                assert!(
-                    table_scan_info.is_none() // no table scan
-                        || table_scan_info.as_ref().unwrap().partitions().is_none() // system table
-                        || table_scan_info.as_ref().unwrap().partitions().unwrap().len() == 1, // single partition
-                    "The stage has single distribution, but contains a table scan node with multiple partitions.
-                    \nplan: {:#?}\ntable_scan_info: {:#?}",
-                    root,
-                    table_scan_info
-                );
+                if let Some(info) = &mut table_scan_info {
+                    if let Some(partitions) = &mut info.partitions {
+                        if partitions.len() != 1 {
+                            // This is rare case, but it's possible on the internal state of the
+                            // Source operator.
+                            tracing::warn!(
+                                "The stage has single distribution, but contains a scan of table `{}` with {} partitions. A single random worker will be assigned",
+                                info.name,
+                                partitions.len()
+                            );
+
+                            *partitions = partitions
+                                .drain()
+                                .take(1)
+                                .update(|(_, info)| {
+                                    info.vnode_bitmap =
+                                        Bitmap::ones(VirtualNode::COUNT).to_protobuf();
+                                })
+                                .collect();
+                        }
+                    } else {
+                        // System table
+                    }
+                } else {
+                    // No table scan
+                }
                 1
             }
-            _ => match &table_scan_info {
-                None => self.worker_node_manager.worker_node_count(),
-                Some(info) => info.partitions.as_ref().map(|m| m.len()).unwrap_or(1),
-            },
+            _ => {
+                if let Some(table_scan_info) = &table_scan_info {
+                    table_scan_info
+                        .partitions
+                        .as_ref()
+                        .map(|m| m.len())
+                        .unwrap_or(1)
+                } else if let Some(lookup_join_parallelism) =
+                    self.collect_stage_lookup_join_parallelism(root.clone())?
+                {
+                    has_lookup_join = true;
+                    lookup_join_parallelism
+                } else if let Some(source_info) = &source_info {
+                    source_info.split_info().len()
+                } else {
+                    self.worker_node_manager.worker_node_count()
+                }
+            }
         };
 
         let mut builder = QueryStageBuilder::new(
@@ -447,6 +550,8 @@ impl BatchPlanFragmenter {
             parallelism as u32,
             exchange_info,
             table_scan_info,
+            source_info,
+            has_lookup_join,
         );
 
         self.visit_node(root, &mut builder, None)?;
@@ -488,7 +593,7 @@ impl BatchPlanFragmenter {
         parent_exec_node: Option<&mut ExecutionPlanNode>,
     ) -> SchedulerResult<()> {
         let mut execution_plan_node = ExecutionPlanNode::from(node.clone());
-        let child_exchange_info = node.distribution().to_prost(builder.parallelism);
+        let child_exchange_info = node.distribution().to_prost(builder.parallelism, self);
         let child_stage = self.new_stage(node.inputs()[0].clone(), child_exchange_info)?;
         execution_plan_node.source_stage_id = Some(child_stage.id);
 
@@ -502,6 +607,43 @@ impl BatchPlanFragmenter {
         Ok(())
     }
 
+    /// Check whether this stage contains a source node.
+    /// If so, use  `SplitEnumeratorImpl` to get the split info from exteneral source.
+    ///
+    /// For current implementation, we can guarantee that each stage has only one source.
+    fn collect_stage_source(node: PlanRef) -> SchedulerResult<Option<SourceScanInfo>> {
+        if node.node_type() == PlanNodeType::BatchExchange {
+            // Do not visit next stage.
+            return Ok(None);
+        }
+
+        if let Some(source_node) = node.as_batch_source() {
+            let source_catalog = source_node.logical().source_catalog();
+            if let Some(source_catalog) = source_catalog {
+                let property = ConnectorProperties::extract(source_catalog.properties.clone())?;
+                let mut enumerator = block_on(SplitEnumeratorImpl::create(property))?;
+                let kafka_enumerator = match enumerator {
+                    SplitEnumeratorImpl::Kafka(ref mut kafka_enumerator) => kafka_enumerator,
+                    _ => {
+                        return Err(SchedulerError::Internal(anyhow!(
+                            "Unsupported to query directly from this source"
+                        )))
+                    }
+                };
+                let split_info = block_on(kafka_enumerator.list_splits_batch(None, None))?
+                    .into_iter()
+                    .map(SplitImpl::Kafka)
+                    .collect_vec();
+                return Ok(Some(SourceScanInfo::new(split_info)));
+            }
+        }
+
+        node.inputs()
+            .into_iter()
+            .find_map(|n| Self::collect_stage_source(n).transpose())
+            .transpose()
+    }
+
     /// Check whether this stage contains a table scan node and the table's information if so.
     ///
     /// If there are multiple scan nodes in this stage, they must have the same distribution, but
@@ -513,14 +655,16 @@ impl BatchPlanFragmenter {
         }
 
         if let Some(scan_node) = node.as_batch_seq_scan() {
+            let name = scan_node.logical().table_name().to_owned();
             let info = if scan_node.logical().is_sys_table() {
-                TableScanInfo::system_table()
+                TableScanInfo::system_table(name)
             } else {
                 let table_desc = scan_node.logical().table_desc();
                 let table_catalog = self
                     .catalog_reader
                     .read_guard()
-                    .get_table_by_id(&table_desc.table_id)?;
+                    .get_table_by_id(&table_desc.table_id)
+                    .map_err(RwError::from)?;
                 let vnode_mapping = self
                     .worker_node_manager
                     .get_fragment_mapping(&table_catalog.fragment_id)
@@ -532,7 +676,7 @@ impl BatchPlanFragmenter {
                     })?;
                 let partitions =
                     derive_partitions(scan_node.scan_ranges(), table_desc, &vnode_mapping);
-                TableScanInfo::new(partitions)
+                TableScanInfo::new(name, partitions)
             };
             Ok(Some(info))
         } else {
@@ -541,6 +685,49 @@ impl BatchPlanFragmenter {
                 .find_map(|n| self.collect_stage_table_scan(n).transpose())
                 .transpose()
         }
+    }
+
+    fn collect_stage_lookup_join_parallelism(
+        &self,
+        node: PlanRef,
+    ) -> SchedulerResult<Option<usize>> {
+        if node.node_type() == PlanNodeType::BatchExchange {
+            // Do not visit next stage.
+            return Ok(None);
+        }
+
+        if let Some(lookup_join) = node.as_batch_lookup_join() {
+            let table_desc = lookup_join.right_table_desc();
+            let table_catalog = self
+                .catalog_reader
+                .read_guard()
+                .get_table_by_id(&table_desc.table_id)
+                .map_err(RwError::from)?;
+            let vnode_mapping = self
+                .worker_node_manager
+                .get_fragment_mapping(&table_catalog.fragment_id)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "failed to get the vnode mapping for the `Materialize` of {}",
+                        table_catalog.name()
+                    )
+                })?;
+            let parallelism = vnode_mapping.iter().sorted().dedup().count();
+            Ok(Some(parallelism))
+        } else {
+            node.inputs()
+                .into_iter()
+                .find_map(|n| self.collect_stage_lookup_join_parallelism(n).transpose())
+                .transpose()
+        }
+    }
+
+    pub fn worker_node_manager(&self) -> &WorkerNodeManagerRef {
+        &self.worker_node_manager
+    }
+
+    pub fn catalog_reader(&self) -> &CatalogReader {
+        &self.catalog_reader
     }
 }
 
@@ -563,7 +750,7 @@ fn derive_partitions(
     scan_ranges: &[ScanRange],
     table_desc: &TableDesc,
     vnode_mapping: &VnodeMapping,
-) -> HashMap<ParallelUnitId, PartitionInfo> {
+) -> HashMap<ParallelUnitId, TablePartitionInfo> {
     let num_vnodes = vnode_mapping.len();
     let mut partitions: HashMap<ParallelUnitId, (BitmapBuilder, Vec<_>)> = HashMap::new();
 
@@ -573,7 +760,7 @@ fn derive_partitions(
             .map(|(k, vnode_bitmap)| {
                 (
                     k,
-                    PartitionInfo {
+                    TablePartitionInfo {
                         vnode_bitmap: vnode_bitmap.to_protobuf(),
                         scan_ranges: vec![],
                     },
@@ -605,11 +792,11 @@ fn derive_partitions(
             }
             // scan a single partition
             Some(vnode) => {
-                let parallel_unit_id = vnode_mapping[vnode as usize];
+                let parallel_unit_id = vnode_mapping[vnode.to_index()];
                 let (bitmap, scan_ranges) = partitions
                     .entry(parallel_unit_id)
                     .or_insert_with(|| (BitmapBuilder::zeroed(num_vnodes), vec![]));
-                bitmap.set(vnode as usize, true);
+                bitmap.set(vnode.to_index(), true);
                 scan_ranges.push(scan_range.to_protobuf());
             }
         }
@@ -620,7 +807,7 @@ fn derive_partitions(
         .map(|(k, (bitmap, scan_ranges))| {
             (
                 k,
-                PartitionInfo {
+                TablePartitionInfo {
                     vnode_bitmap: bitmap.finish().to_protobuf(),
                     scan_ranges,
                 },
@@ -633,7 +820,7 @@ fn derive_partitions(
 mod tests {
     use std::collections::{HashMap, HashSet};
 
-    use risingwave_common::types::ParallelUnitId;
+    use risingwave_common::hash::ParallelUnitId;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::common::ParallelUnit;
 

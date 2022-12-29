@@ -27,7 +27,7 @@ use super::*;
 use crate::ExprError;
 
 #[derive(Debug)]
-pub struct GenerateSeries<T: Array, S: Array> {
+pub struct GenerateSeries<T: Array, S: Array, const STOP_INCLUSIVE: bool> {
     start: BoxedExpression,
     stop: BoxedExpression,
     step: BoxedExpression,
@@ -35,7 +35,7 @@ pub struct GenerateSeries<T: Array, S: Array> {
     _phantom: std::marker::PhantomData<(T, S)>,
 }
 
-impl<T: Array, S: Array> GenerateSeries<T, S>
+impl<T: Array, S: Array, const STOP_INCLUSIVE: bool> GenerateSeries<T, S, STOP_INCLUSIVE>
 where
     T::OwnedItem: for<'a> PartialOrd<T::RefItem<'a>>,
     T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
@@ -74,9 +74,15 @@ where
         let mut cur: T::OwnedItem = start.to_owned_scalar();
 
         while if step.is_negative() {
-            cur >= stop
-        } else {
+            if STOP_INCLUSIVE {
+                cur >= stop
+            } else {
+                cur > stop
+            }
+        } else if STOP_INCLUSIVE {
             cur <= stop
+        } else {
+            cur < stop
         } {
             builder.append(Some(cur.as_scalar_ref()));
             cur = cur.checked_add(step).ok_or(ExprError::NumericOutOfRange)?;
@@ -86,7 +92,8 @@ where
     }
 }
 
-impl<T: Array, S: Array> TableFunction for GenerateSeries<T, S>
+impl<T: Array, S: Array, const STOP_INCLUSIVE: bool> TableFunction
+    for GenerateSeries<T, S, STOP_INCLUSIVE>
 where
     T::OwnedItem: for<'a> PartialOrd<T::RefItem<'a>>,
     T::OwnedItem: for<'a> CheckedAdd<S::RefItem<'a>, Output = T::OwnedItem>,
@@ -107,7 +114,7 @@ where
         let ret_step = self.step.eval_checked(input)?;
         let arr_step: &S = ret_step.as_ref().into();
 
-        let bitmap = input.get_visibility_ref();
+        let bitmap = input.visibility();
         let mut output_arrays: Vec<ArrayRef> = vec![];
 
         match bitmap {
@@ -144,7 +151,7 @@ where
     }
 }
 
-pub fn new_generate_series(
+pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
     prost: &TableFunctionProst,
     chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
@@ -153,13 +160,16 @@ pub fn new_generate_series(
     let [start, stop, step]: [_; 3] = args.try_into().unwrap();
 
     match return_type {
-        DataType::Timestamp => Ok(GenerateSeries::<NaiveDateTimeArray, IntervalArray>::new(
+        DataType::Timestamp => Ok(GenerateSeries::<
+            NaiveDateTimeArray,
+            IntervalArray,
+            STOP_INCLUSIVE,
+        >::new(start, stop, step, chunk_size)
+        .boxed()),
+        DataType::Int32 => Ok(GenerateSeries::<I32Array, I32Array, STOP_INCLUSIVE>::new(
             start, stop, step, chunk_size,
         )
         .boxed()),
-        DataType::Int32 => {
-            Ok(GenerateSeries::<I32Array, I32Array>::new(start, stop, step, chunk_size).boxed())
-        }
         _ => Err(ExprError::Internal(anyhow!(
             "the return type of Generate Series Function is incorrect".to_string(),
         ))),
@@ -189,13 +199,12 @@ mod tests {
             LiteralExpression::new(DataType::Int32, Some(v.into())).boxed()
         }
 
-        let function = GenerateSeries::<I32Array, I32Array> {
-            start: to_lit_expr(start),
-            stop: to_lit_expr(stop),
-            step: to_lit_expr(step),
-            chunk_size: CHUNK_SIZE,
-            _phantom: Default::default(),
-        }
+        let function = GenerateSeries::<I32Array, I32Array, true>::new(
+            to_lit_expr(start),
+            to_lit_expr(stop),
+            to_lit_expr(step),
+            CHUNK_SIZE,
+        )
         .boxed();
         let expect_cnt = ((stop - start) / step + 1) as usize;
 
@@ -229,13 +238,78 @@ mod tests {
             LiteralExpression::new(ty, Some(v)).boxed()
         }
 
-        let function = GenerateSeries::<NaiveDateTimeArray, IntervalArray> {
-            start: to_lit_expr(DataType::Timestamp, start.into()),
-            stop: to_lit_expr(DataType::Timestamp, stop.into()),
-            step: to_lit_expr(DataType::Interval, step.into()),
-            chunk_size: CHUNK_SIZE,
-            _phantom: Default::default(),
-        };
+        let function = GenerateSeries::<NaiveDateTimeArray, IntervalArray, true>::new(
+            to_lit_expr(DataType::Timestamp, start.into()),
+            to_lit_expr(DataType::Timestamp, stop.into()),
+            to_lit_expr(DataType::Interval, step.into()),
+            CHUNK_SIZE,
+        );
+
+        let dummy_chunk = DataChunk::new_dummy(1);
+        let arrays = function.eval(&dummy_chunk).unwrap();
+
+        let cnt: usize = arrays.iter().map(|a| a.len()).sum();
+        assert_eq!(cnt, expect_cnt);
+    }
+
+    #[test]
+    fn test_i32_range() {
+        range_test_case(2, 4, 1);
+        range_test_case(4, 2, -1);
+        range_test_case(0, 9, 2);
+        range_test_case(0, (CHUNK_SIZE * 2 + 3) as i32, 1);
+    }
+
+    fn range_test_case(start: i32, stop: i32, step: i32) {
+        fn to_lit_expr(v: i32) -> BoxedExpression {
+            LiteralExpression::new(DataType::Int32, Some(v.into())).boxed()
+        }
+
+        let function = GenerateSeries::<I32Array, I32Array, false>::new(
+            to_lit_expr(start),
+            to_lit_expr(stop),
+            to_lit_expr(step),
+            CHUNK_SIZE,
+        )
+        .boxed();
+        let expect_cnt = ((stop - start - step.signum()) / step + 1) as usize;
+
+        let dummy_chunk = DataChunk::new_dummy(1);
+        let arrays = function.eval(&dummy_chunk).unwrap();
+
+        let cnt: usize = arrays.iter().map(|a| a.len()).sum();
+        assert_eq!(cnt, expect_cnt);
+    }
+
+    #[test]
+    fn test_time_range() {
+        let start_time = str_to_timestamp("2008-03-01 00:00:00").unwrap();
+        let stop_time = str_to_timestamp("2008-03-09 00:00:00").unwrap();
+        let one_minute_step = IntervalUnit::from_minutes(1);
+        let one_hour_step = IntervalUnit::from_minutes(60);
+        let one_day_step = IntervalUnit::from_days(1);
+        time_range_test_case(start_time, stop_time, one_minute_step, 60 * 24 * 8);
+        time_range_test_case(start_time, stop_time, one_hour_step, 24 * 8);
+        time_range_test_case(start_time, stop_time, one_day_step, 8);
+        time_range_test_case(stop_time, start_time, -one_day_step, 8);
+    }
+
+    fn time_range_test_case(
+        start: NaiveDateTimeWrapper,
+        stop: NaiveDateTimeWrapper,
+        step: IntervalUnit,
+        expect_cnt: usize,
+    ) {
+        fn to_lit_expr(ty: DataType, v: ScalarImpl) -> BoxedExpression {
+            LiteralExpression::new(ty, Some(v)).boxed()
+        }
+
+        let function = GenerateSeries::<NaiveDateTimeArray, IntervalArray, false>::new(
+            to_lit_expr(DataType::Timestamp, start.into()),
+            to_lit_expr(DataType::Timestamp, stop.into()),
+            to_lit_expr(DataType::Interval, step.into()),
+            CHUNK_SIZE,
+        );
 
         let dummy_chunk = DataChunk::new_dummy(1);
         let arrays = function.eval(&dummy_chunk).unwrap();

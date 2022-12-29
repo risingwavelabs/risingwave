@@ -15,17 +15,16 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![allow(rustdoc::private_intra_doc_links)]
 #![feature(trait_alias)]
-#![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
 #![feature(result_option_inspect)]
 #![feature(generators)]
 #![feature(hash_drain_filter)]
+#![feature(type_alias_impl_trait)]
 
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 pub use manager::*;
 pub use parser::*;
@@ -34,15 +33,16 @@ use risingwave_common::error::RwError;
 use risingwave_connector::source::SplitId;
 pub use table::*;
 
-use crate::connector_source::ConnectorSource;
-
 pub mod parser;
 
 mod manager;
-pub use manager::test_utils as table_test_utils;
+
+pub mod dml_manager;
 
 mod common;
 pub mod connector_source;
+pub use connector_source::test_utils as connector_test_utils;
+pub mod fs_connector_source;
 pub mod monitor;
 pub mod row_id;
 mod table;
@@ -55,15 +55,11 @@ pub enum SourceFormat {
     DebeziumJson,
     Avro,
     Maxwell,
+    CanalJson,
+    Csv,
 }
 
-#[derive(Debug, EnumAsInner)]
-pub enum SourceImpl {
-    Table(TableSource),
-    Connector(ConnectorSource),
-}
-
-pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
+pub type BoxSourceWithStateStream<T> = BoxStream<'static, Result<T, RwError>>;
 
 /// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
 /// current design, one connector source can have multiple split reader. The keys are unique
@@ -72,6 +68,14 @@ pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithSta
 pub struct StreamChunkWithState {
     pub chunk: StreamChunk,
     pub split_offset_mapping: Option<HashMap<SplitId, String>>,
+}
+
+/// [`FsStreamChunkWithState`] returns stream chunk together with offset for each split. The keys
+/// are unique `split_id` and values are the latest offset for each split.
+#[derive(Clone, Debug)]
+pub struct FsStreamChunkWithState {
+    pub chunk: StreamChunk,
+    pub split_offset_mapping: Option<HashMap<SplitId, usize>>,
 }
 
 /// The `split_offset_mapping` field is unused for the table source, so we implement `From` for it.

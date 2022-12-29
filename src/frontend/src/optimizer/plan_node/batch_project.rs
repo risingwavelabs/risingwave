@@ -39,12 +39,11 @@ impl BatchProject {
         let distribution = logical
             .i2o_col_mapping()
             .rewrite_provided_distribution(logical.input().distribution());
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            distribution,
-            logical.get_out_column_index_order(),
-        );
+        let order = logical
+            .i2o_col_mapping()
+            .rewrite_provided_order(logical.input().order());
+
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), distribution, order);
         BatchProject { base, logical }
     }
 

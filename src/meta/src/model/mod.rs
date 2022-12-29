@@ -35,7 +35,7 @@ use prost::Message;
 pub use stream::*;
 pub use user::*;
 
-use crate::storage::{MetaStore, MetaStoreError, Transaction};
+use crate::storage::{MetaStore, MetaStoreError, Snapshot, Transaction};
 
 /// A global, unique identifier of an actor
 pub type ActorId = u32;
@@ -86,6 +86,21 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
             .iter()
             .map(|bytes| {
                 Self::ProstType::decode(bytes.as_slice())
+                    .map(Self::from_protobuf)
+                    .map_err(Into::into)
+            })
+            .collect()
+    }
+
+    async fn list_at_snapshot<S>(snapshot: &S::Snapshot) -> MetadataModelResult<Vec<Self>>
+    where
+        S: MetaStore,
+    {
+        let bytes_vec = snapshot.list_cf(&Self::cf_name()).await?;
+        bytes_vec
+            .iter()
+            .map(|(_k, v)| {
+                Self::ProstType::decode(v.as_slice())
                     .map(Self::from_protobuf)
                     .map_err(Into::into)
             })

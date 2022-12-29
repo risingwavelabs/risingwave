@@ -24,7 +24,7 @@ use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
-use crate::catalog::pg_catalog::pg_user::{
+use crate::catalog::system_catalog::pg_catalog::{
     PG_USER_ID_INDEX, PG_USER_NAME_INDEX, PG_USER_TABLE_NAME,
 };
 use crate::expr::{
@@ -62,15 +62,14 @@ impl BoundSelect {
             .iter_mut()
             .chain(self.group_by.iter_mut())
             .chain(self.where_clause.iter_mut())
-        // TODO: uncomment `having` below after #4850 is fixed
-        // .chain(self.having.iter_mut())
+            .chain(self.having.iter_mut())
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn is_correlated(&self, depth: Depth) -> bool {
         self.exprs()
-            .any(|expr| expr.has_correlated_input_ref_by_depth())
+            .any(|expr| expr.has_correlated_input_ref_by_depth(depth))
             || match self.from.as_ref() {
-                Some(relation) => relation.is_correlated(),
+                Some(relation) => relation.is_correlated(depth),
                 None => false,
             }
     }
@@ -181,7 +180,7 @@ impl Binder {
         for item in select_items {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
-                    let (select_expr, alias) = match &expr.clone() {
+                    let (select_expr, alias) = match expr.clone() {
                         Expr::Identifier(ident) => {
                             (self.bind_expr(expr)?, Some(ident.real_value()))
                         }
@@ -190,7 +189,7 @@ impl Binder {
                             idents.last().map(|ident| ident.real_value()),
                         ),
                         Expr::FieldIdentifier(field_expr, idents) => (
-                            self.bind_single_field_column(*field_expr.clone(), idents)?,
+                            self.bind_single_field_column(*field_expr.clone(), &idents)?,
                             idents.last().map(|ident| ident.real_value()),
                         ),
                         _ => (self.bind_expr(expr)?, None),
@@ -218,8 +217,8 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
-                SelectItem::ExprQualifiedWildcard(expr, idents) => {
-                    let (exprs, names) = self.bind_wildcard_field_column(expr, &idents.0)?;
+                SelectItem::ExprQualifiedWildcard(expr, prefix) => {
+                    let (exprs, names) = self.bind_wildcard_field_column(expr, prefix)?;
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
@@ -286,7 +285,7 @@ impl Binder {
             ExprImpl::Literal(_) => input.clone(),
             _ => return Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
         };
-        let from = Some(self.bind_table_or_source(
+        let from = Some(self.bind_relation_by_name_inner(
             Some(PG_CATALOG_SCHEMA_NAME),
             PG_USER_TABLE_NAME,
             None,

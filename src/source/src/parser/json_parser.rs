@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::future::ready;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
-use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for JSON format
 #[derive(Debug)]
@@ -27,16 +28,77 @@ pub struct JsonParser;
     target_feature = "neon",
     target_feature = "simd128"
 )))]
-impl SourceParser for JsonParser {
-    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
+impl JsonParser {
+    fn parse_inner(
+        &self,
+        payload: &[u8],
+        mut writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
         use serde_json::Value;
 
         use crate::parser::common::json_parse_value;
+
         let value: Value = serde_json::from_slice(payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         writer.insert(|desc| {
             json_parse_value(&desc.data_type, value.get(&desc.name)).map_err(|e| {
+                tracing::error!(
+                    "failed to process value ({}): {}",
+                    String::from_utf8_lossy(payload),
+                    e
+                );
+                e.into()
+            })
+        })
+    }
+}
+
+#[cfg(not(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+)))]
+impl SourceParser for JsonParser {
+    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
+
+    fn parse<'a, 'b, 'c>(
+        &'a self,
+        payload: &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a,
+    {
+        ready(self.parse_inner(payload, writer))
+    }
+}
+
+#[cfg(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+))]
+impl JsonParser {
+    fn parse_inner(
+        &self,
+        payload: &[u8],
+        mut writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<WriteGuard> {
+        use simd_json::{BorrowedValue, ValueAccess};
+
+        use crate::parser::common::simd_json_parse_value;
+
+        let mut payload_mut = payload.to_vec();
+
+        let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
+            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+
+        writer.insert(|desc| {
+            simd_json_parse_value(&desc.data_type, value.get(desc.name.as_str())).map_err(|e| {
                 tracing::error!(
                     "failed to process value ({}): {}",
                     String::from_utf8_lossy(payload),
@@ -55,24 +117,18 @@ impl SourceParser for JsonParser {
     target_feature = "simd128"
 ))]
 impl SourceParser for JsonParser {
-    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard> {
-        use simd_json::{BorrowedValue, ValueAccess};
+    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
 
-        use crate::parser::common::simd_json_parse_value;
-        let mut payload_mut = payload.to_vec();
-        let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
-        writer.insert(|desc| {
-            simd_json_parse_value(&desc.data_type, value.get(desc.name.as_str())).map_err(|e| {
-                tracing::error!(
-                    "failed to process value ({}): {}",
-                    String::from_utf8_lossy(payload),
-                    e
-                );
-                e.into()
-            })
-        })
+    fn parse<'a, 'b, 'c>(
+        &'a self,
+        payload: &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a,
+    {
+        ready(self.parse_inner(payload, writer))
     }
 }
 
@@ -83,14 +139,15 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::catalog::ColumnDesc;
+    use risingwave_common::row::Row;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
     use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
 
     use crate::{JsonParser, SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
-    #[test]
-    fn test_json_parser() {
+    #[tokio::test]
+    async fn test_json_parser() {
         let parser = JsonParser;
         let descs = vec![
             SourceColumnDesc::simple("i32", DataType::Int32, 0.into()),
@@ -112,7 +169,7 @@ mod tests {
             br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.as_slice(),
         ] {
             let writer = builder.row_writer();
-            parser.parse(payload, writer).unwrap();
+            parser.parse(payload, writer).await.unwrap();
         }
 
         let chunk = builder.finish();
@@ -122,51 +179,43 @@ mod tests {
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
-            assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
             assert_eq!(
-                row.value_at(1).to_owned_datum(),
+                row.datum_at(1).to_owned_datum(),
                 (Some(ScalarImpl::Bool(true)))
             );
             assert_eq!(
-                row.value_at(2).to_owned_datum(),
+                row.datum_at(2).to_owned_datum(),
                 (Some(ScalarImpl::Int16(1)))
             );
             assert_eq!(
-                row.value_at(3).to_owned_datum(),
+                row.datum_at(3).to_owned_datum(),
                 (Some(ScalarImpl::Int64(12345678)))
             );
             assert_eq!(
-                row.value_at(4).to_owned_datum(),
+                row.datum_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Float32(1.23.into())))
             );
-            // Usage of avx2 or neon(used by M1) results in a floating point error. Since it is
-            // very small (close to precision of f64) we ignore it.
-            #[cfg(any(target_feature = "avx2", target_feature = "neon"))]
             assert_eq!(
-                row.value_at(5).to_owned_datum(),
-                (Some(ScalarImpl::Float64(1.2345000000000002.into())))
-            );
-            #[cfg(not(any(target_feature = "avx2", target_feature = "neon")))]
-            assert_eq!(
-                row.value_at(5).to_owned_datum(),
+                row.datum_at(5).to_owned_datum(),
                 (Some(ScalarImpl::Float64(1.2345.into())))
             );
             assert_eq!(
-                row.value_at(6).to_owned_datum(),
-                (Some(ScalarImpl::Utf8("varchar".to_string())))
+                row.datum_at(6).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("varchar".into())))
             );
             assert_eq!(
-                row.value_at(7).to_owned_datum(),
+                row.datum_at(7).to_owned_datum(),
                 (Some(ScalarImpl::NaiveDate(str_to_date("2021-01-01").unwrap())))
             );
             assert_eq!(
-                row.value_at(8).to_owned_datum(),
+                row.datum_at(8).to_owned_datum(),
                 (Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("2021-01-01 16:06:12.269").unwrap()
                 )))
             );
             assert_eq!(
-                row.value_at(9).to_owned_datum(),
+                row.datum_at(9).to_owned_datum(),
                 (Some(ScalarImpl::Decimal(
                     Decimal::from_str("12345.67890").unwrap()
                 )))
@@ -177,27 +226,27 @@ mod tests {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
             assert_eq!(
-                row.value_at(0).to_owned_datum(),
+                row.datum_at(0).to_owned_datum(),
                 (Some(ScalarImpl::Int32(1)))
             );
-            assert_eq!(row.value_at(1).to_owned_datum(), None);
+            assert_eq!(row.datum_at(1).to_owned_datum(), None);
             assert_eq!(
-                row.value_at(4).to_owned_datum(),
+                row.datum_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Float32(12345e+10.into())))
             );
             assert_eq!(
-                row.value_at(5).to_owned_datum(),
+                row.datum_at(5).to_owned_datum(),
                 (Some(ScalarImpl::Float64(12345.into())))
             );
             assert_eq!(
-                row.value_at(9).to_owned_datum(),
+                row.datum_at(9).to_owned_datum(),
                 (Some(ScalarImpl::Decimal(12345.into())))
             );
         }
     }
 
-    #[test]
-    fn test_json_parser_failed() {
+    #[tokio::test]
+    async fn test_json_parser_failed() {
         let parser = JsonParser;
         let descs = vec![
             SourceColumnDesc::simple("v1", DataType::Int32, 0.into()),
@@ -210,7 +259,7 @@ mod tests {
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#;
-            parser.parse(payload, writer).unwrap();
+            parser.parse(payload, writer).await.unwrap();
         }
 
         // Parse an incorrect record.
@@ -218,14 +267,14 @@ mod tests {
             let writer = builder.row_writer();
             // `v2` overflowed.
             let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#;
-            parser.parse(payload, writer).unwrap_err();
+            parser.parse(payload, writer).await.unwrap_err();
         }
 
         // Parse a correct record.
         {
             let writer = builder.row_writer();
             let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#;
-            parser.parse(payload, writer).unwrap();
+            parser.parse(payload, writer).await.unwrap();
         }
 
         let chunk = builder.finish();
@@ -234,8 +283,8 @@ mod tests {
         assert_eq!(chunk.cardinality(), 2);
     }
 
-    #[test]
-    fn test_json_parse_struct() {
+    #[tokio::test]
+    async fn test_json_parse_struct() {
         let parser = JsonParser;
 
         let descs = vec![
@@ -284,29 +333,29 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
         {
             let writer = builder.row_writer();
-            parser.parse(payload, writer).unwrap();
+            parser.parse(payload, writer).await.unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
-        let row = row.to_owned_row().0;
+        let row = row.into_owned_row().into_inner();
 
         let expected = vec![
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("2022-07-13 20:48:37.07").unwrap()
                 )),
-                Some(ScalarImpl::Utf8("1732524418112319151".to_string())),
-                Some(ScalarImpl::Utf8("Here man favor ourselves mysteriously most her sigh in straightaway for afterwards.".to_string())),
-                Some(ScalarImpl::Utf8("English".to_string())),
+                Some(ScalarImpl::Utf8("1732524418112319151".into())),
+                Some(ScalarImpl::Utf8("Here man favor ourselves mysteriously most her sigh in straightaway for afterwards.".into())),
+                Some(ScalarImpl::Utf8("English".into())),
             ]))),
             Some(ScalarImpl::Struct(StructValue::new(vec![
                 Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("2018-01-29 12:19:11.07").unwrap()
                 )),
-                Some(ScalarImpl::Utf8("7772634297".to_string())),
-                Some(ScalarImpl::Utf8("Lily Frami yet".to_string())),
-                Some(ScalarImpl::Utf8("Dooley5659".to_string())),
+                Some(ScalarImpl::Utf8("7772634297".into())),
+                Some(ScalarImpl::Utf8("Lily Frami yet".into())),
+                Some(ScalarImpl::Utf8("Dooley5659".into())),
             ]) ))
         ];
         assert_eq!(row, expected);

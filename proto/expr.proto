@@ -8,6 +8,9 @@ import "plan_common.proto";
 option optimize_for = SPEED;
 
 message ExprNode {
+  // a "pure function" will be defined as having `1 < expr_node as i32 <= 600`.
+  // Please modify this definition if adding a pure function that does not belong
+  // to this range.
   enum Type {
     UNSPECIFIED = 0;
     INPUT_REF = 1;
@@ -40,8 +43,14 @@ message ExprNode {
     // date functions
     EXTRACT = 101;
     TUMBLE_START = 103;
+    // From f64 to timestamp.
+    // e.g. `select to_timestamp(1672044740.0)`
     TO_TIMESTAMP = 104;
     AT_TIME_ZONE = 105;
+    DATE_TRUNC = 106;
+    // Parse text to timestamp by format string.
+    // e.g. `select to_timestamp('2022 08 21', 'YYYY MM DD')`
+    TO_TIMESTAMP1 = 107;
     // other functions
     CAST = 201;
     SUBSTR = 202;
@@ -106,6 +115,8 @@ message ExprNode {
     SARG = 999;
     // Internal functions
     VNODE = 1101;
+    // Non-deterministic functions
+    NOW = 2022;
   }
   Type expr_type = 1;
   data.DataType return_type = 3;
@@ -122,6 +133,7 @@ message TableFunction {
     GENERATE = 1;
     UNNEST = 2;
     REGEXP_MATCHES = 3;
+    RANGE = 4;
   }
   Type function_type = 1;
   repeated expr.ExprNode args = 2;

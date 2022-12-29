@@ -1,22 +1,22 @@
 query TTTTT
 select interval '500' year, interval '-50' month, interval '5' hour, interval '5' minute, interval '5' second;
 ----
-500 years 00:00:00 -4 years -2 mons 00:00:00 05:00:00 00:05:00 00:00:05
+500 years -4 years -2 mons 05:00:00 00:05:00 00:00:05
 
 query TTTTT
 SELECT interval '1 year', interval '1 y', interval '1 yr';
 ----
-1 year 00:00:00 1 year 00:00:00 1 year 00:00:00
+1 year 1 year 1 year
 
 query TTTTT
 SELECT interval '2 month', interval '2 mon';
 ----
-2 mons 00:00:00 2 mons 00:00:00
+2 mons 2 mons
 
 query TTTTT
 SELECT interval '3 day';
 ----
-3 days 00:00:00
+3 days
 
 query TTTTT
 SELECT interval '4 hour';
@@ -77,17 +77,17 @@ SELECT INTERVAL '3 mins' * 1.5;
 query TTTTT
 select distinct * from (values (interval '1' month), (interval '30' day)) as t;
 ----
-30 days 00:00:00
+30 days
 
 query TTTTT
 select distinct * from (values (interval '30' day), (interval '1' month)) as t;
 ----
-30 days 00:00:00
+30 days
 
 query TTTTT
 select distinct * from (values (interval '720' hour), (interval '1' month)) as t;
 ----
-30 days 00:00:00
+30 days
 
 query TTTTTT
 select interval '1 year 1 month 1 day 1';
@@ -108,3 +108,9 @@ query TTTTTT
 select interval '1 year 1 month 1 day 1:1:1.009';
 ----
 1 year 1 mon 1 day 01:01:01.009
+
+# issue#7059, if we improve precision, then this should be removed.
+query TTTTTT
+select '1 mons 1 days 00:00:00.000001'::INTERVAL;
+----
+1 mon 1 day

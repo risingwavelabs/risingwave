@@ -1,0 +1,42 @@
+statement ok
+create table t_remote (id integer primary key, name varchar);
+
+statement ok
+create materialized view mv_remote as select * from t_remote;
+
+statement ok
+CREATE SINK s_remote FROM mv_remote WITH (
+    connector='jdbc',
+    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    table.name='t_remote'
+);
+
+statement ok
+INSERT INTO t_remote VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carl');
+
+statement ok
+INSERT INTO t_remote VALUES (4, 'Doris'), (5, 'Eve'), (6, 'Frank');
+
+statement ok
+FLUSH;
+
+statement ok
+UPDATE t_remote SET name = 'Alex' WHERE id = 1;
+
+statement ok
+DELETE FROM t_remote WHERE id = 2;
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s_remote;
+
+statement ok
+DROP MATERIALIZED VIEW mv_remote;
+
+statement ok
+DROP TABLE t_remote;
+
+statement ok
+FLUSH;

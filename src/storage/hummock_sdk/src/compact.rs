@@ -20,8 +20,8 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     let mut s = String::new();
     writeln!(
         s,
-        "Compaction task id: {:?}, target level: {:?}",
-        compact_task.task_id, compact_task.target_level
+        "Compaction task id: {:?}, group-id: {:?}, target level: {:?}",
+        compact_task.task_id, compact_task.compaction_group_id, compact_task.target_level
     )
     .unwrap();
     writeln!(s, "Compaction watermark: {:?} ", compact_task.watermark).unwrap();
@@ -32,7 +32,12 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     )
     .unwrap();
     writeln!(s, "Compaction # splits: {:?} ", compact_task.splits.len()).unwrap();
-    writeln!(s, "Compaction task status: {:?} ", compact_task.task_status).unwrap();
+    writeln!(
+        s,
+        "Compaction task status: {:?} ",
+        compact_task.task_status()
+    )
+    .unwrap();
     s.push_str("Compaction Sstables structure: \n");
     for level_entry in &compact_task.input_ssts {
         let tables: Vec<String> = level_entry
@@ -86,5 +91,39 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
             sstable_info.file_size / 1024,
         )
         .unwrap();
+    }
+}
+
+/// Config that is updatable when compactor is running.
+#[derive(Clone)]
+pub struct CompactorRuntimeConfig {
+    pub max_concurrent_task_number: u64,
+}
+
+impl From<risingwave_pb::compactor::CompactorRuntimeConfig> for CompactorRuntimeConfig {
+    fn from(value: risingwave_pb::compactor::CompactorRuntimeConfig) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<&risingwave_pb::compactor::CompactorRuntimeConfig> for CompactorRuntimeConfig {
+    fn from(value: &risingwave_pb::compactor::CompactorRuntimeConfig) -> Self {
+        Self {
+            max_concurrent_task_number: value.max_concurrent_task_number,
+        }
+    }
+}
+
+impl From<CompactorRuntimeConfig> for risingwave_pb::compactor::CompactorRuntimeConfig {
+    fn from(value: CompactorRuntimeConfig) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<&CompactorRuntimeConfig> for risingwave_pb::compactor::CompactorRuntimeConfig {
+    fn from(value: &CompactorRuntimeConfig) -> Self {
+        risingwave_pb::compactor::CompactorRuntimeConfig {
+            max_concurrent_task_number: value.max_concurrent_task_number,
+        }
     }
 }

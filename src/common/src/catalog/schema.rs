@@ -48,6 +48,21 @@ impl Field {
     }
 }
 
+impl From<ColumnDesc> for Field {
+    fn from(column_desc: ColumnDesc) -> Self {
+        Self {
+            data_type: column_desc.data_type,
+            name: column_desc.name,
+            sub_fields: column_desc
+                .field_descs
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            type_name: column_desc.type_name,
+        }
+    }
+}
+
 pub struct FieldDisplay<'a>(pub &'a Field);
 
 impl std::fmt::Debug for FieldDisplay<'_> {

@@ -21,9 +21,9 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
+use crate::common::table::state_table::StateTable;
 use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::test_utils::*;
@@ -77,7 +77,7 @@ fn arrangement_col_arrange_rules_join_key() -> Vec<OrderPair> {
 /// | +  | 2337  | 8    | 3       |
 /// | -  | 2333  | 6    | 3       |
 /// | b  |       |      | 3 -> 4  |
-fn create_arrangement(
+async fn create_arrangement(
     table_id: TableId,
     memory_state_store: MemoryStateStore,
 ) -> Box<dyn Executor + Send> {
@@ -122,14 +122,20 @@ fn create_arrangement(
         ],
     );
 
-    Box::new(MaterializeExecutor::for_test(
-        Box::new(source),
-        memory_state_store,
-        table_id,
-        arrangement_col_arrange_rules(),
-        column_ids,
-        1,
-    ))
+    Box::new(
+        MaterializeExecutor::for_test(
+            Box::new(source),
+            memory_state_store,
+            table_id,
+            arrangement_col_arrange_rules(),
+            column_ids,
+            1,
+            None,
+            0,
+            false,
+        )
+        .await,
+    )
 }
 
 /// Create a test source.
@@ -202,7 +208,7 @@ fn check_chunk_eq(chunk1: &StreamChunk, chunk2: &StreamChunk) {
     assert_eq!(format!("{:?}", chunk1), format!("{:?}", chunk2));
 }
 
-fn build_state_table_helper<S: StateStore>(
+async fn build_state_table_helper<S: StateStore>(
     s: S,
     table_id: TableId,
     columns: Vec<ColumnDesc>,
@@ -216,6 +222,7 @@ fn build_state_table_helper<S: StateStore>(
         order_types.iter().map(|pair| pair.order_type).collect_vec(),
         pk_indices,
     )
+    .await
 }
 #[tokio::test]
 async fn test_lookup_this_epoch() {
@@ -223,7 +230,7 @@ async fn test_lookup_this_epoch() {
     // fails because read epoch doesn't take effect in memory state store.
     let store = MemoryStateStore::new();
     let table_id = TableId::new(1);
-    let arrangement = create_arrangement(table_id, store.clone());
+    let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         arrangement,
@@ -247,8 +254,9 @@ async fn test_lookup_this_epoch() {
             arrangement_col_descs(),
             arrangement_col_arrange_rules(),
             vec![1, 0],
-        ),
-        lru_manager: None,
+        )
+        .await,
+        watermark_epoch: None,
         cache_size: 1 << 16,
         chunk_size: 1024,
     }));
@@ -289,7 +297,7 @@ async fn test_lookup_this_epoch() {
 async fn test_lookup_last_epoch() {
     let store = MemoryStateStore::new();
     let table_id = TableId::new(1);
-    let arrangement = create_arrangement(table_id, store.clone());
+    let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         arrangement,
@@ -313,8 +321,9 @@ async fn test_lookup_last_epoch() {
             arrangement_col_descs(),
             arrangement_col_arrange_rules(),
             vec![1, 0],
-        ),
-        lru_manager: None,
+        )
+        .await,
+        watermark_epoch: None,
         cache_size: 1 << 16,
         chunk_size: 1024,
     }));
@@ -326,20 +335,13 @@ async fn test_lookup_last_epoch() {
     next_msg(&mut msgs, &mut lookup_executor).await;
     next_msg(&mut msgs, &mut lookup_executor).await;
     next_msg(&mut msgs, &mut lookup_executor).await;
-    next_msg(&mut msgs, &mut lookup_executor).await;
 
-    println!("{:#?}", msgs);
-
-    assert_eq!(msgs.len(), 5);
+    assert_eq!(msgs.len(), 4);
     assert_matches!(msgs[0], Message::Barrier(_));
-    assert_matches!(msgs[2], Message::Barrier(_));
-    assert_matches!(msgs[4], Message::Barrier(_));
+    assert_matches!(msgs[1], Message::Barrier(_));
+    assert_matches!(msgs[3], Message::Barrier(_));
 
-    let chunk1 = msgs[1].as_chunk().unwrap();
-    // the arrangement of epoch 0 is not ready yet, should be empty.
-    assert_eq!(chunk1.cardinality(), 0);
-
-    let chunk2 = msgs[3].as_chunk().unwrap();
+    let chunk2 = msgs[2].as_chunk().unwrap();
     let expected_chunk2 = StreamChunk::from_pretty(
         " I I    I I
         - 6 1 2333 6

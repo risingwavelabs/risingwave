@@ -22,12 +22,13 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::error_or_notice::ErrorOrNoticeMessage;
-use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_response::StatementType;
 use crate::pg_server::BoxedError;
 use crate::types::Row;
 
 /// Messages that can be sent from pg client to server. Implement `read`.
+#[derive(Debug)]
 pub enum FeMessage {
     Ssl,
     Startup(FeStartupMessage),
@@ -44,6 +45,7 @@ pub enum FeMessage {
     Flush,
 }
 
+#[derive(Debug)]
 pub struct FeStartupMessage {
     pub config: HashMap<String, String>,
 }
@@ -73,6 +75,7 @@ impl FeStartupMessage {
 }
 
 /// Query message contains the string sql.
+#[derive(Debug)]
 pub struct FeQueryMessage {
     pub sql_bytes: Bytes,
 }
@@ -125,6 +128,7 @@ pub struct FeCloseMessage {
     pub name: Bytes,
 }
 
+#[derive(Debug)]
 pub struct FeCancelMessage {
     pub target_process_id: i32,
     pub target_secret_key: i32,
@@ -195,16 +199,30 @@ impl FeBindMessage {
                 buf.copy_to_bytes(val_len as usize)
             })
             .collect();
-        // Read ResultFormatCode
-        let len = buf.get_i16();
 
-        assert!(len==0||len==1,"Only support default result format(len==0) or uniform result format(len==1), can't support mix format now.");
+        // Read ResultFormatCode
+        // result format code depend on following rule:
+        // - If the length is 0, format is false(text).
+        // - If the length is 1, format is decide by format_codes[0].
+        // - If the length > 1, each column can have their own format and it depend on according
+        //   format code. But RisingWave can't support return col with different format now, when
+        //   length>1, we guarantee all format code is the same (0,0,0..) or (1,1,1,...).
+        let len = buf.get_i16();
+        let format_codes = (0..len).map(|_| buf.get_i16()).collect::<Vec<_>>();
+        let all_elements_are_equal = format_codes.iter().all(|&x| x == format_codes[0]);
+
+        if !all_elements_are_equal {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Only support uniform result format (TEXT or BINARY), can't support mix format now.",
+            ));
+        }
 
         let result_format_code = if len == 0 {
             // default format:text
             false
         } else {
-            buf.get_i16() == 1
+            format_codes[0] == 1
         };
 
         Ok(FeMessage::Bind(FeBindMessage {
@@ -374,7 +392,8 @@ pub enum BeMessage<'a> {
     ParseComplete,
     BindComplete,
     PortalSuspended,
-    ParameterDescription(&'a [TypeOid]),
+    // array of parameter oid(i32)
+    ParameterDescription(&'a [i32]),
     NoData,
     DataRow(&'a Row),
     ParameterStatus(BeParameterStatusMessage<'a>),
@@ -561,7 +580,7 @@ impl<'a> BeMessage<'a> {
                         write_cstr(buf, pg_field.get_name().as_bytes())?;
                         buf.put_i32(pg_field.get_table_oid()); // table oid
                         buf.put_i16(pg_field.get_col_attr_num()); // attnum
-                        buf.put_i32(pg_field.get_type_oid().as_number());
+                        buf.put_i32(pg_field.get_type_oid());
                         buf.put_i16(pg_field.get_type_len());
                         buf.put_i32(pg_field.get_type_modifier()); // typmod
                         buf.put_i16(pg_field.get_format_code()); // format code
@@ -608,7 +627,7 @@ impl<'a> BeMessage<'a> {
                 write_body(buf, |buf| {
                     buf.put_i16(para_descs.len() as i16);
                     for oid in para_descs.iter() {
-                        buf.put_i32(oid.as_number());
+                        buf.put_i32(*oid);
                     }
                     Ok(())
                 })?;

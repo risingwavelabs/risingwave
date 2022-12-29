@@ -77,7 +77,7 @@ where
         for delta_id in versioning.deltas_to_delete.iter().take(batch_size) {
             hummock_version_deltas.remove(*delta_id);
         }
-        commit_multi_var!(self, None, hummock_version_deltas)?;
+        commit_multi_var!(self, None, Transaction::default(), hummock_version_deltas)?;
         let deleted = cmp::min(batch_size, versioning.deltas_to_delete.len());
         versioning.deltas_to_delete.drain(..deleted);
         let remain = versioning.deltas_to_delete.len();

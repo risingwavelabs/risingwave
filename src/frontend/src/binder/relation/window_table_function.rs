@@ -16,9 +16,9 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Field;
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::error::ErrorCode;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName, TableAlias};
+use risingwave_sqlparser::ast::{FunctionArg, TableAlias};
 
 use super::{Binder, Relation, Result};
 use crate::expr::{ExprImpl, InputRef};
@@ -51,6 +51,10 @@ pub struct BoundWindowTableFunction {
     pub(crate) args: Vec<ExprImpl>,
 }
 
+const ERROR_1ST_ARG: &str = "The 1st arg of window table function should be a table name (incl. source, CTE, view) but not complex structure (subquery, join, another table function). Consider using an intermediate CTE or view as workaround.";
+const ERROR_2ND_ARG_EXPR: &str = "The 2st arg of window table function should be a column name but not complex expression. Consider using an intermediate CTE or view as workaround.";
+const ERROR_2ND_ARG_TYPE: &str = "The 2st arg of window table function should be a column of type timestamp with time zone, timestamp or date.";
+
 impl Binder {
     pub(super) fn bind_window_table_function(
         &mut self,
@@ -62,35 +66,13 @@ impl Binder {
 
         self.push_context();
 
-        let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))) = args.next() else {
-            return Err(ErrorCode::BindError(
-                "the 1st arg of window table function should be table".to_string(),
-            )
-            .into());
-        };
-        let table_name = match expr {
-            Expr::Identifier(ident) => Ok::<_, RwError>(ObjectName(vec![ident])),
-            Expr::CompoundIdentifier(idents) => Ok(ObjectName(idents)),
-            _ => Err(ErrorCode::BindError(
-                "the 1st arg of window table function should be table".to_string(),
-            )
-            .into()),
-        }?;
+        let (base, table_name) = self.bind_relation_by_function_arg(args.next(), ERROR_1ST_ARG)?;
 
-        let base = self.bind_relation_by_name(table_name.clone(), None)?;
+        let time_col = self.bind_column_by_function_args(args.next(), ERROR_2ND_ARG_EXPR)?;
 
-        let time_col = if let Some(time_col_arg) = args.next()
-          && let Some(ExprImpl::InputRef(time_col)) = self.bind_function_arg(time_col_arg)?.into_iter().next()
-          && matches!(time_col.data_type, DataType::Timestampz | DataType::Timestamp | DataType::Date)
-        {
-            time_col
-        } else {
-            return Err(ErrorCode::BindError(
-                "the 2st arg of window table function should be a timestamp with time zone, timestamp or date column".to_string(),
-            )
-            .into());
+        let Some(output_type) = DataType::window_of(&time_col.data_type) else {
+            return Err(ErrorCode::BindError(ERROR_2ND_ARG_TYPE.to_string()).into());
         };
-        let output_type = DataType::window_of(&time_col.data_type).unwrap();
 
         let base_columns = std::mem::take(&mut self.context.columns);
 
@@ -116,7 +98,7 @@ impl Binder {
                 .into_iter(),
             ).collect::<Result<Vec<_>>>()?;
 
-        let (_, table_name) = Self::resolve_table_or_source_name(&self.db_name, table_name)?;
+        let (_, table_name) = Self::resolve_schema_qualified_name(&self.db_name, table_name)?;
         self.bind_table_to_context(columns, table_name, alias)?;
 
         // Other arguments are validated in `plan_window_table_function`

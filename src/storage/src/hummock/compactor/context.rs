@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_rpc_client::HummockMetaClient;
 
@@ -85,9 +86,37 @@ impl Context {
         }
     }
 }
-
 #[derive(Clone)]
 pub struct CompactorContext {
     pub context: Arc<Context>,
     pub sstable_store: CompactorSstableStoreRef,
+    config: Arc<tokio::sync::Mutex<CompactorRuntimeConfig>>,
+}
+
+impl CompactorContext {
+    pub fn new(context: Arc<Context>, sstable_store: CompactorSstableStoreRef) -> Self {
+        Self::with_config(
+            context,
+            sstable_store,
+            CompactorRuntimeConfig {
+                max_concurrent_task_number: u64::MAX,
+            },
+        )
+    }
+
+    pub fn with_config(
+        context: Arc<Context>,
+        sstable_store: CompactorSstableStoreRef,
+        config: CompactorRuntimeConfig,
+    ) -> Self {
+        Self {
+            context,
+            sstable_store,
+            config: Arc::new(tokio::sync::Mutex::new(config)),
+        }
+    }
+
+    pub async fn lock_config(&self) -> tokio::sync::MutexGuard<'_, CompactorRuntimeConfig> {
+        self.config.lock().await
+    }
 }

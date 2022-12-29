@@ -75,22 +75,22 @@ WHERE
 	castcontext = 'IMPLICIT'
 	and c.castsource = s.oid and c.casttarget = t.oid;
 ----
-int2      int4
-int2      int8
-int2      numeric
-int2      float4
-int2      float8
-int4      int8
-int4      numeric
-int4      float4
-int4      float8
-int8      numeric
-int8      float4
-int8      float8
-numeric   float4
-numeric   float8
-float4    float8
-date      timestamp
-date      timestamptz
-timestamp timestamptz
-time      interval
+date	timestamp
+date	timestamptz
+float4	float8
+int2	float4
+int2	float8
+int2	int4
+int2	int8
+int2	numeric
+int4	float4
+int4	float8
+int4	int8
+int4	numeric
+int8	float4
+int8	float8
+int8	numeric
+numeric	float4
+numeric	float8
+time	interval
+timestamp	timestamptz

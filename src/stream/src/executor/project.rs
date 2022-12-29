@@ -93,17 +93,14 @@ impl Debug for SimpleProjectExecutor {
 }
 
 impl SimpleExecutor for SimpleProjectExecutor {
-    fn map_filter_chunk(
-        &mut self,
-        chunk: StreamChunk,
-    ) -> StreamExecutorResult<Option<StreamChunk>> {
+    fn map_filter_chunk(&self, chunk: StreamChunk) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = chunk.compact();
 
         let (data_chunk, ops) = chunk.into_parts();
 
         let projected_columns = self
             .exprs
-            .iter_mut()
+            .iter()
             .map(|expr| {
                 Column::new(expr.eval_infallible(&data_chunk, |err| {
                     self.ctx.on_compute_error(err, &self.info.identity)

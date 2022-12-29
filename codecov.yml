@@ -13,6 +13,7 @@ coverage:
           - "src/"
         target: auto # compared with the coverage from the base commit
         threshold: 0.1% # allow the coverage to drop by 0.1% and posting a success status
+  allow_coverage_offsets: true
 ignore:
   - "src/risedevtooltool"
   - "src/bench/s3_bench"

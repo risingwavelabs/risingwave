@@ -24,6 +24,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::compress::decompress_data;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
@@ -32,6 +33,7 @@ use smallvec::{smallvec, SmallVec};
 use tracing::event;
 
 use super::exchange::output::{new_output, BoxedOutput};
+use super::Watermark;
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Barrier, BoxedExecutor, Message, Mutation, StreamConsumer};
@@ -64,17 +66,18 @@ impl DispatchExecutorInner {
     }
 
     async fn dispatch(&mut self, msg: Message) -> StreamResult<()> {
+        let start_time = minstant::Instant::now();
         match msg {
-            Message::Watermark(_) => {
-                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            Message::Watermark(watermark) => {
+                for dispatcher in &mut self.dispatchers {
+                    dispatcher.dispatch_watermark(watermark.clone()).await?;
+                }
             }
-
             Message::Chunk(chunk) => {
                 self.metrics
                     .actor_out_record_cnt
                     .with_label_values(&[&self.actor_id_str])
                     .inc_by(chunk.cardinality() as _);
-                let start_time = minstant::Instant::now();
                 if self.dispatchers.len() == 1 {
                     // special clone optimization when there is only one downstream dispatcher
                     self.single_inner_mut().dispatch_data(chunk).await?;
@@ -83,25 +86,20 @@ impl DispatchExecutorInner {
                         dispatcher.dispatch_data(chunk.clone()).await?;
                     }
                 }
-                self.metrics
-                    .actor_output_buffer_blocking_duration_ns
-                    .with_label_values(&[&self.actor_id_str])
-                    .inc_by(start_time.elapsed().as_nanos() as u64);
             }
             Message::Barrier(barrier) => {
-                let start_time = minstant::Instant::now();
                 let mutation = barrier.mutation.clone();
                 self.pre_mutate_dispatchers(&mutation)?;
                 for dispatcher in &mut self.dispatchers {
                     dispatcher.dispatch_barrier(barrier.clone()).await?;
                 }
                 self.post_mutate_dispatchers(&mutation)?;
-                self.metrics
-                    .actor_output_buffer_blocking_duration_ns
-                    .with_label_values(&[&self.actor_id_str])
-                    .inc_by(start_time.elapsed().as_nanos() as u64);
             }
         };
+        self.metrics
+            .actor_output_buffer_blocking_duration_ns
+            .with_label_values(&[&self.actor_id_str])
+            .inc_by(start_time.elapsed().as_nanos() as u64);
         Ok(())
     }
 
@@ -159,18 +157,20 @@ impl DispatchExecutorInner {
         let dispatcher = self.find_dispatcher(update.dispatcher_id);
         dispatcher.remove_outputs(&ids);
 
-        match dispatcher {
-            // The hash mapping is only used by the hash dispatcher.
-            DispatcherImpl::Hash(dispatcher) => {
-                dispatcher.hash_mapping = {
-                    let compressed_mapping = update.get_hash_mapping()?;
-                    decompress_data(
-                        &compressed_mapping.original_indices,
-                        &compressed_mapping.data,
-                    )
-                }
+        // The hash mapping is only used by the hash dispatcher.
+        //
+        // We specify a single upstream hash mapping for scaling the downstream fragment. However,
+        // it's possible that there're multiple upstreams with different exchange types, for
+        // example, the `Broadcast` inner side of the dynamic filter. There're too many combinations
+        // to handle here, so we just ignore the `hash_mapping` field for any other exchange types.
+        if let DispatcherImpl::Hash(dispatcher) = dispatcher {
+            dispatcher.hash_mapping = {
+                let compressed_mapping = update.get_hash_mapping()?;
+                decompress_data(
+                    &compressed_mapping.original_indices,
+                    &compressed_mapping.data,
+                )
             }
-            _ => assert!(update.hash_mapping.is_none()),
         }
 
         Ok(())
@@ -267,11 +267,17 @@ impl StreamConsumer for DispatchExecutor {
             #[for_await]
             for msg in input {
                 let msg: Message = msg?;
-                let barrier = msg.as_barrier().cloned();
+                let (barrier, is_watermark) = match msg {
+                    Message::Chunk(_) => (None, false),
+                    Message::Barrier(ref barrier) => (Some(barrier.clone()), false),
+                    Message::Watermark(_) => (None, true),
+                };
                 self.inner
                     .dispatch(msg)
                     .verbose_stack_trace(if barrier.is_some() {
                         "dispatch_barrier"
+                    } else if is_watermark {
+                        "dispatch_watermark"
                     } else {
                         "dispatch_chunk"
                     })
@@ -359,6 +365,12 @@ macro_rules! impl_dispatcher {
                 }
             }
 
+            pub async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
+                match self {
+                    $( Self::$variant_name(inner) => inner.dispatch_watermark(watermark).await, )*
+                }
+            }
+
             pub fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
                 match self {
                     $(Self::$variant_name(inner) => inner.add_outputs(outputs), )*
@@ -403,6 +415,7 @@ macro_rules! define_dispatcher_associated_types {
     () => {
         type DataFuture<'a> = impl DispatchFuture<'a>;
         type BarrierFuture<'a> = impl DispatchFuture<'a>;
+        type WatermarkFuture<'a> = impl DispatchFuture<'a>;
     };
 }
 
@@ -411,11 +424,14 @@ pub trait DispatchFuture<'a> = Future<Output = StreamResult<()>> + Send;
 pub trait Dispatcher: Debug + 'static {
     type DataFuture<'a>: DispatchFuture<'a>;
     type BarrierFuture<'a>: DispatchFuture<'a>;
+    type WatermarkFuture<'a>: DispatchFuture<'a>;
 
     /// Dispatch a data chunk to downstream actors.
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_>;
     /// Dispatch a barrier to downstream actors, generally by broadcasting it.
     fn dispatch_barrier(&mut self, barrier: Barrier) -> Self::BarrierFuture<'_>;
+    /// Dispatch a watermark to downstream actors, generally by broadcasting it.
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_>;
 
     /// Add new outputs to the dispatcher.
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>);
@@ -465,6 +481,16 @@ impl Dispatcher for RoundRobinDataDispatcher {
             // always broadcast barrier
             for output in &mut self.outputs {
                 output.send(Message::Barrier(barrier.clone())).await?;
+            }
+            Ok(())
+        }
+    }
+
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
+        async move {
+            // always broadcast watermark
+            for output in &mut self.outputs {
+                output.send(Message::Watermark(watermark.clone())).await?;
             }
             Ok(())
         }
@@ -542,6 +568,16 @@ impl Dispatcher for HashDataDispatcher {
         }
     }
 
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
+        async move {
+            // always broadcast watermark
+            for output in &mut self.outputs {
+                output.send(Message::Watermark(watermark.clone())).await?;
+            }
+            Ok(())
+        }
+    }
+
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
             // A chunk can be shuffled into multiple output chunks that to be sent to downstreams.
@@ -550,7 +586,7 @@ impl Dispatcher for HashDataDispatcher {
             let num_outputs = self.outputs.len();
 
             // get hash value of every line by its key
-            let hash_builder = Crc32FastBuilder {};
+            let hash_builder = Crc32FastBuilder;
             let vnodes = chunk
                 .data_chunk()
                 .get_hash_values(&self.keys, hash_builder)
@@ -563,67 +599,57 @@ impl Dispatcher for HashDataDispatcher {
             let mut vis_maps = repeat_with(|| BitmapBuilder::with_capacity(chunk.capacity()))
                 .take(num_outputs)
                 .collect_vec();
-            let mut last_vnode_when_update_delete = 0;
+            let mut last_vnode_when_update_delete = None;
             let mut new_ops: Vec<Op> = Vec::with_capacity(chunk.capacity());
 
+            // TODO: refactor with `Vis`.
             let (ops, columns, visibility) = chunk.into_inner();
+
+            let mut build_op_vis = |vnode: VirtualNode, op: Op, visible: bool| {
+                // Build visibility map for every output chunk.
+                for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
+                    vis_map.append(
+                        visible && self.hash_mapping[vnode.to_index()] == output.actor_id(),
+                    );
+                }
+
+                if !visible {
+                    new_ops.push(op);
+                    return;
+                }
+
+                // The 'update' message, noted by an `UpdateDelete` and a successive `UpdateInsert`,
+                // need to be rewritten to common `Delete` and `Insert` if they were dispatched to
+                // different actors.
+                if op == Op::UpdateDelete {
+                    last_vnode_when_update_delete = Some(vnode);
+                } else if op == Op::UpdateInsert {
+                    if vnode != last_vnode_when_update_delete.unwrap() {
+                        new_ops.push(Op::Delete);
+                        new_ops.push(Op::Insert);
+                    } else {
+                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::UpdateInsert);
+                    }
+                } else {
+                    new_ops.push(op);
+                }
+            };
 
             match visibility {
                 None => {
-                    vnodes.iter().zip_eq(ops).for_each(|(vnode, op)| {
-                        // get visibility map for every output chunk
-                        for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut()) {
-                            vis_map.append(self.hash_mapping[*vnode as usize] == output.actor_id());
-                        }
-                        // The 'update' message, noted by an UpdateDelete and a successive
-                        // UpdateInsert, need to be rewritten to common
-                        // Delete and Insert if they were dispatched to
-                        // different actors.
-                        if op == Op::UpdateDelete {
-                            last_vnode_when_update_delete = *vnode;
-                        } else if op == Op::UpdateInsert {
-                            if *vnode != last_vnode_when_update_delete {
-                                new_ops.push(Op::Delete);
-                                new_ops.push(Op::Insert);
-                            } else {
-                                new_ops.push(Op::UpdateDelete);
-                                new_ops.push(Op::UpdateInsert);
-                            }
-                        } else {
-                            new_ops.push(op);
-                        }
+                    vnodes.iter().copied().zip_eq(ops).for_each(|(vnode, op)| {
+                        build_op_vis(vnode, op, true);
                     });
                 }
                 Some(visibility) => {
                     vnodes
                         .iter()
-                        .zip_eq(visibility.iter())
+                        .copied()
                         .zip_eq(ops)
-                        .for_each(|((vnode, visible), op)| {
-                            for (output, vis_map) in self.outputs.iter().zip_eq(vis_maps.iter_mut())
-                            {
-                                vis_map.append(
-                                    visible
-                                        && self.hash_mapping[*vnode as usize] == output.actor_id(),
-                                );
-                            }
-                            if !visible {
-                                new_ops.push(op);
-                                return;
-                            }
-                            if op == Op::UpdateDelete {
-                                last_vnode_when_update_delete = *vnode;
-                            } else if op == Op::UpdateInsert {
-                                if *vnode != last_vnode_when_update_delete {
-                                    new_ops.push(Op::Delete);
-                                    new_ops.push(Op::Insert);
-                                } else {
-                                    new_ops.push(Op::UpdateDelete);
-                                    new_ops.push(Op::UpdateInsert);
-                                }
-                            } else {
-                                new_ops.push(op);
-                            }
+                        .zip_eq(visibility.iter())
+                        .for_each(|((vnode, op), visible)| {
+                            build_op_vis(vnode, op, visible);
                         });
                 }
             }
@@ -714,6 +740,15 @@ impl Dispatcher for BroadcastDispatcher {
         }
     }
 
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
+        async move {
+            for output in self.outputs.values_mut() {
+                output.send(Message::Watermark(watermark.clone())).await?;
+            }
+            Ok(())
+        }
+    }
+
     fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
         self.outputs.extend(Self::into_pairs(outputs));
     }
@@ -792,6 +827,18 @@ impl Dispatcher for SimpleDispatcher {
         }
     }
 
+    fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
+        async move {
+            let output = self
+                .output
+                .iter_mut()
+                .exactly_one()
+                .expect("expect exactly one output");
+
+            output.send(Message::Watermark(watermark)).await
+        }
+    }
+
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.output
             .retain(|output| !actor_ids.contains(&output.actor_id()));
@@ -817,13 +864,12 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
-    use risingwave_common::types::VIRTUAL_NODE_COUNT;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_pb::stream_plan::DispatcherType;
-    use static_assertions::const_assert_eq;
-    use tokio::sync::mpsc::channel;
 
     use super::*;
     use crate::executor::exchange::output::Output;
+    use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::receiver::ReceiverExecutor;
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
@@ -854,14 +900,13 @@ mod tests {
     // TODO: this test contains update being shuffled to different partitions, which is not
     // supported for now.
     #[tokio::test]
-    #[ignore]
     async fn test_hash_dispatcher_complex() {
         test_hash_dispatcher_complex_inner().await
     }
 
     async fn test_hash_dispatcher_complex_inner() {
-        // This test only works when VIRTUAL_NODE_COUNT is 256.
-        const_assert_eq!(VIRTUAL_NODE_COUNT, 256);
+        // This test only works when VirtualNode::COUNT is 256.
+        static_assertions::const_assert_eq!(VirtualNode::COUNT, 256);
 
         let num_outputs = 2; // actor id ranges from 1 to 2
         let key_indices = &[0, 2];
@@ -876,9 +921,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VIRTUAL_NODE_COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VIRTUAL_NODE_COUNT, num_outputs as u32);
+        hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
         let mut hash_dispatcher =
             HashDataDispatcher::new(outputs, key_indices.to_vec(), hash_mapping, 0);
 
@@ -928,7 +973,7 @@ mod tests {
     #[tokio::test]
     async fn test_configuration_change() {
         let _schema = Schema { fields: vec![] };
-        let (tx, rx) = channel(16);
+        let (tx, rx) = channel_for_test();
         let actor_id = 233;
         let input = Box::new(ReceiverExecutor::for_test(rx));
         let ctx = Arc::new(SharedContext::for_test());
@@ -1113,9 +1158,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
-            .flat_map(|id| vec![id as ActorId; VIRTUAL_NODE_COUNT / num_outputs])
+            .flat_map(|id| vec![id as ActorId; VirtualNode::COUNT / num_outputs])
             .collect_vec();
-        hash_mapping.resize(VIRTUAL_NODE_COUNT, num_outputs as u32);
+        hash_mapping.resize(VirtualNode::COUNT, num_outputs as u32);
         let mut hash_dispatcher =
             HashDataDispatcher::new(outputs, key_indices.to_vec(), hash_mapping.clone(), 0);
 
@@ -1135,7 +1180,7 @@ mod tests {
         let mut output_cols = vec![vec![vec![]; dimension]; num_outputs];
         let mut output_ops = vec![vec![]; num_outputs];
         for op in &ops {
-            let hash_builder = Crc32FastBuilder {};
+            let hash_builder = Crc32FastBuilder;
             let mut hasher = hash_builder.build_hasher();
             let one_row = (0..dimension).map(|_| start.next().unwrap()).collect_vec();
             for key_idx in key_indices.iter() {
@@ -1144,7 +1189,7 @@ mod tests {
                 hasher.update(&bytes);
             }
             let output_idx =
-                hash_mapping[hasher.finish() as usize % VIRTUAL_NODE_COUNT] as usize - 1;
+                hash_mapping[hasher.finish() as usize % VirtualNode::COUNT] as usize - 1;
             for (builder, val) in builders.iter_mut().zip_eq(one_row.iter()) {
                 builder.append(Some(*val));
             }

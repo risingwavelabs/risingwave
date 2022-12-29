@@ -91,8 +91,8 @@ impl StreamNode for StreamTopN {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
         let topn_node = TopNNode {
-            limit: self.limit() as u64,
-            offset: self.offset() as u64,
+            limit: self.limit(),
+            offset: self.offset(),
             with_ties: self.with_ties(),
             table: Some(
                 self.logical
@@ -100,11 +100,9 @@ impl StreamNode for StreamTopN {
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
-            order_by_len: self.topn_order().len() as u32,
+            order_by: self.topn_order().to_protobuf(),
         };
-        // TODO: support with ties for append only TopN
-        // <https://github.com/risingwavelabs/risingwave/issues/5642>
-        if self.input().append_only() && !self.with_ties() {
+        if self.input().append_only() {
             ProstStreamNode::AppendOnlyTopN(topn_node)
         } else {
             ProstStreamNode::TopN(topn_node)

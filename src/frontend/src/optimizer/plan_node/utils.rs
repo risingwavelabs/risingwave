@@ -20,6 +20,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::{FragmentId, TableCatalog, TableId};
 use crate::optimizer::property::{Direction, FieldOrder};
 use crate::utils::WithOptions;
@@ -33,6 +34,7 @@ pub struct TableCatalogBuilder {
     value_indices: Option<Vec<usize>>,
     vnode_col_idx: Option<usize>,
     column_names: HashMap<String, i32>,
+    read_prefix_len_hint: usize,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -65,15 +67,33 @@ impl TableCatalogBuilder {
     }
 
     /// Check whether need to add a ordered column. Different from value, order desc equal pk in
-    /// semantics and they are encoded as storage key.
-    pub fn add_order_column(&mut self, index: usize, order_type: OrderType) {
-        self.pk.push(FieldOrder {
-            index,
-            direct: match order_type {
-                OrderType::Ascending => Direction::Asc,
-                OrderType::Descending => Direction::Desc,
-            },
-        });
+    /// semantics and they are encoded as storage key, dedup is true means ignoring duplicated pk.
+    pub fn add_order_column(&mut self, index: usize, order_type: OrderType, dedup: bool) {
+        match dedup {
+            true => {
+                let pk_indices = self.pk.iter().map(|pk| pk.index).collect_vec();
+                if !pk_indices.contains(&index) {
+                    self.pk.push(FieldOrder {
+                        index,
+                        direct: match order_type {
+                            OrderType::Ascending => Direction::Asc,
+                            OrderType::Descending => Direction::Desc,
+                        },
+                    });
+                }
+            }
+            false => self.pk.push(FieldOrder {
+                index,
+                direct: match order_type {
+                    OrderType::Ascending => Direction::Asc,
+                    OrderType::Descending => Direction::Desc,
+                },
+            }),
+        }
+    }
+
+    pub fn set_read_prefix_len_hint(&mut self, read_prefix_len_hint: usize) {
+        self.read_prefix_len_hint = read_prefix_len_hint;
     }
 
     pub fn set_vnode_col_idx(&mut self, vnode_col_idx: usize) {
@@ -104,6 +124,7 @@ impl TableCatalogBuilder {
 
     /// Consume builder and create `TableCatalog` (for proto).
     pub fn build(self, distribution_key: Vec<usize>) -> TableCatalog {
+        assert!(self.read_prefix_len_hint <= self.pk.len());
         TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -112,17 +133,22 @@ impl TableCatalogBuilder {
             pk: self.pk,
             stream_key: vec![],
             distribution_key,
-            is_index: false,
-            appendonly: false,
+            // NOTE: This should be altered if `TableCatalogBuilder` is used to build something
+            // other than internal tables.
+            table_type: TableType::Internal,
+            append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: self.properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
-            vnode_col_idx: self.vnode_col_idx,
+            vnode_col_index: self.vnode_col_idx,
+            row_id_index: None,
             value_indices: self
                 .value_indices
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
+            handle_pk_conflict: false,
+            read_prefix_len_hint: self.read_prefix_len_hint,
         }
     }
 
@@ -147,10 +173,8 @@ impl fmt::Debug for IndicesDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut f = f.debug_list();
         for i in self.indices {
-            f.entry(&format_args!(
-                "{}",
-                self.input_schema.fields.get(*i).unwrap().name
-            ));
+            let name = &self.input_schema.fields.get(*i).unwrap().name;
+            f.entry(&format_args!("{}", name));
         }
         f.finish()
     }

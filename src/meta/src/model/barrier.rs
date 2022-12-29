@@ -34,7 +34,7 @@ impl BarrierManagerState {
             .get_cf(DEFAULT_COLUMN_FAMILY, BARRIER_MANAGER_STATE_KEY)
             .await
         {
-            Ok(byte_vec) => u64::from_be_bytes(byte_vec.as_slice().try_into().unwrap()).into(),
+            Ok(byte_vec) => memcomparable::from_slice::<u64>(&byte_vec).unwrap().into(),
             Err(MetaStoreError::ItemNotFound(_)) => INVALID_EPOCH.into(),
             Err(e) => panic!("{:?}", e),
         };
@@ -51,7 +51,7 @@ impl BarrierManagerState {
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
                 BARRIER_MANAGER_STATE_KEY.to_vec(),
-                self.in_flight_prev_epoch.0.to_be_bytes().to_vec(),
+                memcomparable::to_vec(&self.in_flight_prev_epoch.0).unwrap(),
             )
             .await
             .map_err(Into::into)

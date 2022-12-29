@@ -95,16 +95,19 @@ message Barrier {
 }
 
 message Watermark {
-  // the watermark column's index in the stream's schema
+  // The watermark column's index in the stream's schema.
   uint32 col_idx = 1;
-  // the watermark value, there will be no record having a greater value in the watermark column
-  data.Datum val = 2;
+  // The watermark type, used for deserialization of the watermark value.
+  data.DataType data_type = 2;
+  // The watermark value, there will be no record having a greater value in the watermark column.
+  data.Datum val = 3;
 }
 
 message StreamMessage {
   oneof stream_message {
     data.StreamChunk stream_chunk = 1;
     Barrier barrier = 2;
+    Watermark watermark = 3;
   }
 }
 
@@ -114,23 +117,28 @@ message ActorMapping {
   repeated uint32 data = 2;
 }
 
-message SourceNode {
-  uint32 source_id = 1; // use source_id to fetch SourceDesc from local source manager
+message StreamSource {
+  uint32 source_id = 1;
   catalog.Table state_table = 2;
   catalog.ColumnIndex row_id_index = 3;
   repeated plan_common.ColumnCatalog columns = 4;
   repeated int32 pk_column_ids = 5;
   map<string, string> properties = 6;
-  oneof info {
-    catalog.StreamSourceInfo stream_source = 7;
-    catalog.TableSourceInfo table_source = 8;
-  }
+  catalog.StreamSourceInfo info = 7;
+  string source_name = 8;
+}
+
+message SourceNode {
+  // The source node can contain either a stream source or nothing. So here we extract all
+  // information about stream source to a message, and here it will be an `Option` in Rust.
+  StreamSource source_inner = 1;
 }
 
 message SinkNode {
   uint32 table_id = 1;
-  repeated int32 column_ids = 2;
   map<string, string> properties = 3;
+  repeated plan_common.Field fields = 4;
+  repeated uint32 sink_pk = 5;
 }
 
 message ProjectNode {
@@ -155,29 +163,30 @@ message MaterializeNode {
   // Used for internal table states.
   catalog.Table table = 3;
   // Used to control whether doing sanity check, open it when upstream executor is source executor.
-  bool ignore_on_conflict = 4;
+  bool handle_pk_conflict = 4;
 }
 
 message AggCallState {
   // use the one column of stream's result table as the AggCall's state, used for count/sum/append-only extreme.
-  message AggResultState {}
+  message ResultValueState {}
 
   // use untransformed result as the AggCall's state, used for append-only approx count distinct.
-  message AggTableState {
+  message TableState {
     catalog.Table table = 1;
   }
 
   // use the some column of the Upstream's materialization as the AggCall's state, used for extreme/string_agg/array_agg.
-  message MaterializedAggInputState {
+  message MaterializedInputState {
     catalog.Table table = 1;
     // for constructing state table column mapping
-    repeated uint32 upstream_column_indices = 2;
+    repeated uint32 included_upstream_indices = 2;
+    repeated uint32 table_value_indices = 3;
   }
 
   oneof inner {
-    AggResultState result_value_state = 1;
-    AggTableState table_state = 2;
-    MaterializedAggInputState materialized_state = 3;
+    ResultValueState result_value_state = 1;
+    TableState table_state = 2;
+    MaterializedInputState materialized_input_state = 3;
   }
 }
 
@@ -207,7 +216,7 @@ message TopNNode {
   uint64 limit = 1;
   uint64 offset = 2;
   catalog.Table table = 3;
-  uint32 order_by_len = 4;
+  repeated plan_common.ColumnOrder order_by = 4;
   bool with_ties = 5;
 }
 
@@ -217,7 +226,7 @@ message GroupTopNNode {
   uint64 offset = 2;
   repeated uint32 group_key = 3;
   catalog.Table table = 4;
-  uint32 order_by_len = 5;
+  repeated plan_common.ColumnOrder order_by = 5;
   bool with_ties = 6;
 }
 
@@ -299,6 +308,19 @@ message ExchangeNode {
   DispatchStrategy strategy = 1;
 }
 
+enum ChainType {
+  CHAIN_UNSPECIFIED = 0;
+
+  // CHAIN is corresponding to the chain executor.
+  CHAIN = 1;
+
+  // REARRANGE is corresponding to the rearranged chain executor.
+  REARRANGE = 2;
+
+  // BACKFILL is corresponding to the backfill executor.
+  BACKFILL = 3;
+}
+
 // ChainNode is used for mv on mv.
 // ChainNode is like a "UNION" on mv snapshot and streaming. So it takes two inputs with fixed order:
 //   1. MergeNode (as a placeholder) for streaming read.
@@ -312,14 +334,17 @@ message ChainNode {
   // Generally, the barrier needs to be rearranged during the MV creation process, so that data can
   // be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
   // large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in ChainNode.
-  // This option is used to disable barrier rearrangement.
-  bool disable_rearrange = 4;
+  // ChainType is used to decide which implementation for the ChainNode.
+  ChainType chain_type = 4;
   // Whether to place this chain on the same worker node as upstream actors.
   bool same_worker_node = 5;
   // Whether the upstream materialize is and this chain should be a singleton.
   // FIXME: This is a workaround for fragmenter since the distribution info will be lost if there's only one
   // fragment in the downstream mview. Remove this when we refactor the fragmenter.
   bool is_singleton = 6;
+
+  // The upstream materialized view info used by backfill.
+  plan_common.StorageTableDesc table_desc = 7;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -348,7 +373,7 @@ message ArrangeNode {
   // Used for internal table states.
   catalog.Table table = 3;
   // Used to control whether doing sanity check, open it when upstream executor is source executor.
-  bool ignore_on_conflict = 4;
+  bool handle_pk_conflict = 4;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.
@@ -375,6 +400,16 @@ message LookupNode {
   catalog.Table arrangement_table = 8;
 }
 
+// WatermarkFilter needs to filter the upstream data by the water mark.
+message WatermarkFilterNode {
+  // The expression to calculate the watermark value.
+  expr.ExprNode watermark_expr = 1;
+  // The column the event time belongs.
+  uint64 event_time_col_idx = 2;
+  // The table used to persist watermark, the key is vnode.
+  catalog.Table table = 3;
+}
+
 // Acts like a merger, but on different inputs.
 message UnionNode {}
 
@@ -392,6 +427,31 @@ message ExpandNode {
 
 message ProjectSetNode {
   repeated expr.ProjectSetSelectItem select_list = 1;
+}
+
+// Sorts inputs and outputs ordered data based on watermark.
+message SortNode {
+  // Persists data above watermark.
+  catalog.Table state_table = 1;
+  // Column index of watermark to perform sorting.
+  uint32 sort_column_index = 2;
+}
+
+// Merges two streams from streaming and batch for data manipulation.
+message DmlNode {
+  // Id of the table on which DML performs.
+  uint32 table_id = 1;
+  // Column descriptions of the table.
+  repeated plan_common.ColumnDesc column_descs = 2;
+}
+
+message RowIdGenNode {
+  uint64 row_id_index = 1;
+}
+
+message NowNode {
+  // Persists emitted 'now'.
+  catalog.Table state_table = 1;
 }
 
 message StreamNode {
@@ -421,6 +481,11 @@ message StreamNode {
     DynamicFilterNode dynamic_filter = 122;
     ProjectSetNode project_set = 123;
     GroupTopNNode group_top_n = 124;
+    SortNode sort = 125;
+    WatermarkFilterNode watermark_filter = 126;
+    DmlNode dml = 127;
+    RowIdGenNode row_id_gen = 128;
+    NowNode now = 129;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -467,7 +532,9 @@ message Dispatcher {
   // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-  // - For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+  // - For dispatchers within actors, the id is the same as its downstream fragment id.
+  //   We can't use the exchange operator id directly as the dispatch id, because an exchange
+  //   could belong to more than one downstream in DAG.
   // - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
@@ -494,12 +561,13 @@ message StreamActor {
   string mview_definition = 9;
 }
 
-enum FragmentType {
+enum FragmentTypeFlag {
   FRAGMENT_UNSPECIFIED = 0;
-  OTHERS = 1;
-  SOURCE = 2;
-  // TODO: change it to MATERIALIZED_VIEW or other name, since we have sink type now.
-  SINK = 3;
+  SOURCE = 1;
+  MVIEW = 2;
+  SINK = 4;
+  NOW = 8;
+  CHAIN_NODE = 16;
 }
 
 message StreamFragmentGraph {
@@ -508,7 +576,8 @@ message StreamFragmentGraph {
     uint32 fragment_id = 1;
     // root stream node in this fragment.
     StreamNode node = 2;
-    FragmentType fragment_type = 3;
+    // Bitwise-OR of FragmentTypeFlags
+    uint32 fragment_type_mask = 3;
     // mark whether this fragment should only have one actor.
     bool is_singleton = 4;
     // Number of table ids (stateful states) for this fragment.

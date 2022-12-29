@@ -26,10 +26,11 @@ pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use crate::error::{ErrorCode, RwError};
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 use crate::session_config::visibility_mode::VisibilityMode;
+use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 11] = [
+const CONFIG_KEYS: [&str; 13] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -40,6 +41,8 @@ const CONFIG_KEYS: [&str; 11] = [
     "MAX_SPLIT_RANGE_GAP",
     "SEARCH_PATH",
     "TRANSACTION ISOLATION LEVEL",
+    "QUERY_EPOCH",
+    "RW_BATCH_ENABLE_SORT_AGG",
     "VISIBILITY_MODE",
 ];
 
@@ -55,7 +58,9 @@ const BATCH_ENABLE_LOOKUP_JOIN: usize = 6;
 const MAX_SPLIT_RANGE_GAP: usize = 7;
 const SEARCH_PATH: usize = 8;
 const TRANSACTION_ISOLATION_LEVEL: usize = 9;
-const VISIBILITY_MODE: usize = 10;
+const QUERY_EPOCH: usize = 10;
+const BATCH_ENABLE_SORT_AGG: usize = 11;
+const VISIBILITY_MODE: usize = 12;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -188,6 +193,51 @@ impl<const NAME: usize, const DEFAULT: i32> TryFrom<&[&str]> for ConfigI32<NAME,
     }
 }
 
+struct ConfigU64<const NAME: usize, const DEFAULT: u64 = 0>(u64);
+
+impl<const NAME: usize, const DEFAULT: u64> Default for ConfigU64<NAME, DEFAULT> {
+    fn default() -> Self {
+        ConfigU64(DEFAULT)
+    }
+}
+
+impl<const NAME: usize, const DEFAULT: u64> Deref for ConfigU64<NAME, DEFAULT> {
+    type Target = u64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<const NAME: usize, const DEFAULT: u64> ConfigEntry for ConfigU64<NAME, DEFAULT> {
+    fn entry_name() -> &'static str {
+        CONFIG_KEYS[NAME]
+    }
+}
+
+impl<const NAME: usize, const DEFAULT: u64> TryFrom<&[&str]> for ConfigU64<NAME, DEFAULT> {
+    type Error = RwError;
+
+    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
+        if value.len() != 1 {
+            return Err(ErrorCode::InternalError(format!(
+                "SET {} takes only one argument",
+                Self::entry_name()
+            ))
+            .into());
+        }
+
+        let s = value[0];
+        s.parse::<u64>().map(ConfigU64).map_err(|_e| {
+            ErrorCode::InvalidConfigValue {
+                config_entry: Self::entry_name().to_string(),
+                config_value: s.to_string(),
+            }
+            .into()
+        })
+    }
+}
+
 pub struct VariableInfo {
     pub name: String,
     pub setting: String,
@@ -200,8 +250,10 @@ type ApplicationName = ConfigString<APPLICATION_NAME>;
 type ExtraFloatDigit = ConfigI32<EXTRA_FLOAT_DIGITS, 1>;
 // TODO: We should use more specified type here.
 type DateStyle = ConfigString<DATE_STYLE>;
-type BatchEnableLookupJoin = ConfigBool<BATCH_ENABLE_LOOKUP_JOIN, false>;
+type BatchEnableLookupJoin = ConfigBool<BATCH_ENABLE_LOOKUP_JOIN, true>;
+type BatchEnableSortAgg = ConfigBool<BATCH_ENABLE_SORT_AGG, true>;
 type MaxSplitRangeGap = ConfigI32<MAX_SPLIT_RANGE_GAP, 8>;
+type QueryEpoch = ConfigU64<QUERY_EPOCH, 0>;
 
 #[derive(Default)]
 pub struct ConfigMap {
@@ -230,6 +282,10 @@ pub struct ConfigMap {
     /// To force the usage of lookup join instead of hash join in batch execution
     batch_enable_lookup_join: BatchEnableLookupJoin,
 
+    /// To open the usage of sortAgg instead of hash agg when order property is satisfied in batch
+    /// execution
+    batch_enable_sort_agg: BatchEnableSortAgg,
+
     /// It's the max gap allowed to transform small range scan scan into multi point lookup.
     max_split_range_gap: MaxSplitRangeGap,
 
@@ -241,6 +297,9 @@ pub struct ConfigMap {
 
     /// see <https://www.postgresql.org/docs/current/transaction-iso.html>
     transaction_isolation_level: IsolationLevel,
+
+    /// select as of specific epoch
+    query_epoch: QueryEpoch,
 }
 
 impl ConfigMap {
@@ -260,12 +319,16 @@ impl ConfigMap {
             self.date_style = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
             self.batch_enable_lookup_join = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(BatchEnableSortAgg::entry_name()) {
+            self.batch_enable_sort_agg = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(MaxSplitRangeGap::entry_name()) {
             self.max_split_range_gap = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
             self.search_path = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(VisibilityMode::entry_name()) {
             self.visibility_mode = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(QueryEpoch::entry_name()) {
+            self.query_epoch = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -288,6 +351,8 @@ impl ConfigMap {
             Ok(self.date_style.to_string())
         } else if key.eq_ignore_ascii_case(BatchEnableLookupJoin::entry_name()) {
             Ok(self.batch_enable_lookup_join.to_string())
+        } else if key.eq_ignore_ascii_case(BatchEnableSortAgg::entry_name()) {
+            Ok(self.batch_enable_sort_agg.to_string())
         } else if key.eq_ignore_ascii_case(MaxSplitRangeGap::entry_name()) {
             Ok(self.max_split_range_gap.to_string())
         } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
@@ -296,6 +361,8 @@ impl ConfigMap {
             Ok(self.visibility_mode.to_string())
         } else if key.eq_ignore_ascii_case(IsolationLevel::entry_name()) {
             Ok(self.transaction_isolation_level.to_string())
+        } else if key.eq_ignore_ascii_case(QueryEpoch::entry_name()) {
+            Ok(self.query_epoch.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -339,6 +406,11 @@ impl ConfigMap {
                 description : String::from("To enable the usage of lookup join instead of hash join when possible for local batch execution.")
             },
             VariableInfo{
+                name : BatchEnableSortAgg::entry_name().to_lowercase(),
+                setting : self.batch_enable_sort_agg.to_string(),
+                description : String::from("To enable the usage of sort agg instead of hash join when order property is satisfied for batch execution.")
+            },
+            VariableInfo{
                 name : MaxSplitRangeGap::entry_name().to_lowercase(),
                 setting : self.max_split_range_gap.to_string(),
                 description : String::from("It's the max gap allowed to transform small range scan scan into multi point lookup.")
@@ -353,6 +425,11 @@ impl ConfigMap {
                 setting : self.visibility_mode.to_string(),
                 description : String::from("If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.")
             },
+            VariableInfo {
+                name: QueryEpoch::entry_name().to_lowercase(),
+                setting : self.query_epoch.to_string(),
+                description : String::from("Sets the historical epoch for querying data. If 0, querying latest data.")
+            }
         ]
     }
 
@@ -384,6 +461,10 @@ impl ConfigMap {
         *self.batch_enable_lookup_join
     }
 
+    pub fn get_batch_enable_sort_agg(&self) -> bool {
+        *self.batch_enable_sort_agg
+    }
+
     pub fn get_max_split_range_gap(&self) -> u64 {
         if *self.max_split_range_gap < 0 {
             0
@@ -398,5 +479,12 @@ impl ConfigMap {
 
     pub fn only_checkpoint_visible(&self) -> bool {
         matches!(self.visibility_mode, VisibilityMode::Checkpoint)
+    }
+
+    pub fn get_query_epoch(&self) -> Option<Epoch> {
+        if self.query_epoch.0 != 0 {
+            return Some((self.query_epoch.0).into());
+        }
+        None
     }
 }

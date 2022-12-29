@@ -1,5 +1,6 @@
 /* eslint-disable */
-import { Database, Index, Schema, Sink, Source, StreamSourceInfo, Table } from "./catalog";
+import { MetaBackupManifestId } from "./backup_service";
+import { Database, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import {
   HostAddress,
   ParallelUnit,
@@ -12,17 +13,57 @@ import {
 } from "./common";
 import { HummockSnapshot, HummockVersion, HummockVersionDeltas } from "./hummock";
 import { ConnectorSplits } from "./source";
-import {
-  Dispatcher,
-  FragmentType,
-  fragmentTypeFromJSON,
-  fragmentTypeToJSON,
-  StreamActor,
-  StreamNode,
-} from "./stream_plan";
+import { Dispatcher, StreamActor, StreamNode } from "./stream_plan";
 import { UserInfo } from "./user";
 
 export const protobufPackage = "meta";
+
+export const SubscribeType = {
+  UNSPECIFIED: "UNSPECIFIED",
+  FRONTEND: "FRONTEND",
+  HUMMOCK: "HUMMOCK",
+  COMPACTOR: "COMPACTOR",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type SubscribeType = typeof SubscribeType[keyof typeof SubscribeType];
+
+export function subscribeTypeFromJSON(object: any): SubscribeType {
+  switch (object) {
+    case 0:
+    case "UNSPECIFIED":
+      return SubscribeType.UNSPECIFIED;
+    case 1:
+    case "FRONTEND":
+      return SubscribeType.FRONTEND;
+    case 2:
+    case "HUMMOCK":
+      return SubscribeType.HUMMOCK;
+    case 3:
+    case "COMPACTOR":
+      return SubscribeType.COMPACTOR;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return SubscribeType.UNRECOGNIZED;
+  }
+}
+
+export function subscribeTypeToJSON(object: SubscribeType): string {
+  switch (object) {
+    case SubscribeType.UNSPECIFIED:
+      return "UNSPECIFIED";
+    case SubscribeType.FRONTEND:
+      return "FRONTEND";
+    case SubscribeType.HUMMOCK:
+      return "HUMMOCK";
+    case SubscribeType.COMPACTOR:
+      return "COMPACTOR";
+    case SubscribeType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
 
 export interface HeartbeatRequest {
   nodeId: number;
@@ -38,52 +79,61 @@ export interface HeartbeatResponse {
   status: Status | undefined;
 }
 
-/** Fragments of a Materialized View */
+/** Fragments of a Streaming Job */
 export interface TableFragments {
   tableId: number;
+  state: TableFragments_State;
   fragments: { [key: number]: TableFragments_Fragment };
   actorStatus: { [key: number]: TableFragments_ActorStatus };
+  actorSplits: { [key: number]: ConnectorSplits };
 }
 
-/** Current state of actor */
-export const TableFragments_ActorState = {
+/** The state of the fragments of this table */
+export const TableFragments_State = {
   UNSPECIFIED: "UNSPECIFIED",
-  /** INACTIVE - Initial state after creation */
-  INACTIVE: "INACTIVE",
-  /** RUNNING - Running normally */
-  RUNNING: "RUNNING",
+  /** INITIAL - The streaming job is initial. */
+  INITIAL: "INITIAL",
+  /** CREATING - The streaming job is creating. */
+  CREATING: "CREATING",
+  /** CREATED - The streaming job has been created. */
+  CREATED: "CREATED",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
-export type TableFragments_ActorState = typeof TableFragments_ActorState[keyof typeof TableFragments_ActorState];
+export type TableFragments_State = typeof TableFragments_State[keyof typeof TableFragments_State];
 
-export function tableFragments_ActorStateFromJSON(object: any): TableFragments_ActorState {
+export function tableFragments_StateFromJSON(object: any): TableFragments_State {
   switch (object) {
     case 0:
     case "UNSPECIFIED":
-      return TableFragments_ActorState.UNSPECIFIED;
+      return TableFragments_State.UNSPECIFIED;
     case 1:
-    case "INACTIVE":
-      return TableFragments_ActorState.INACTIVE;
+    case "INITIAL":
+      return TableFragments_State.INITIAL;
     case 2:
-    case "RUNNING":
-      return TableFragments_ActorState.RUNNING;
+    case "CREATING":
+      return TableFragments_State.CREATING;
+    case 3:
+    case "CREATED":
+      return TableFragments_State.CREATED;
     case -1:
     case "UNRECOGNIZED":
     default:
-      return TableFragments_ActorState.UNRECOGNIZED;
+      return TableFragments_State.UNRECOGNIZED;
   }
 }
 
-export function tableFragments_ActorStateToJSON(object: TableFragments_ActorState): string {
+export function tableFragments_StateToJSON(object: TableFragments_State): string {
   switch (object) {
-    case TableFragments_ActorState.UNSPECIFIED:
+    case TableFragments_State.UNSPECIFIED:
       return "UNSPECIFIED";
-    case TableFragments_ActorState.INACTIVE:
-      return "INACTIVE";
-    case TableFragments_ActorState.RUNNING:
-      return "RUNNING";
-    case TableFragments_ActorState.UNRECOGNIZED:
+    case TableFragments_State.INITIAL:
+      return "INITIAL";
+    case TableFragments_State.CREATING:
+      return "CREATING";
+    case TableFragments_State.CREATED:
+      return "CREATED";
+    case TableFragments_State.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
   }
@@ -96,22 +146,71 @@ export interface TableFragments_ActorStatus {
     | ParallelUnit
     | undefined;
   /** Current state */
-  state: TableFragments_ActorState;
+  state: TableFragments_ActorStatus_ActorState;
+}
+
+/** Current state of actor */
+export const TableFragments_ActorStatus_ActorState = {
+  UNSPECIFIED: "UNSPECIFIED",
+  /** INACTIVE - Initial state after creation */
+  INACTIVE: "INACTIVE",
+  /** RUNNING - Running normally */
+  RUNNING: "RUNNING",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type TableFragments_ActorStatus_ActorState =
+  typeof TableFragments_ActorStatus_ActorState[keyof typeof TableFragments_ActorStatus_ActorState];
+
+export function tableFragments_ActorStatus_ActorStateFromJSON(object: any): TableFragments_ActorStatus_ActorState {
+  switch (object) {
+    case 0:
+    case "UNSPECIFIED":
+      return TableFragments_ActorStatus_ActorState.UNSPECIFIED;
+    case 1:
+    case "INACTIVE":
+      return TableFragments_ActorStatus_ActorState.INACTIVE;
+    case 2:
+    case "RUNNING":
+      return TableFragments_ActorStatus_ActorState.RUNNING;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return TableFragments_ActorStatus_ActorState.UNRECOGNIZED;
+  }
+}
+
+export function tableFragments_ActorStatus_ActorStateToJSON(object: TableFragments_ActorStatus_ActorState): string {
+  switch (object) {
+    case TableFragments_ActorStatus_ActorState.UNSPECIFIED:
+      return "UNSPECIFIED";
+    case TableFragments_ActorStatus_ActorState.INACTIVE:
+      return "INACTIVE";
+    case TableFragments_ActorStatus_ActorState.RUNNING:
+      return "RUNNING";
+    case TableFragments_ActorStatus_ActorState.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
 }
 
 export interface TableFragments_Fragment {
   fragmentId: number;
-  fragmentType: FragmentType;
+  /** Bitwise-OR of FragmentTypeFlags */
+  fragmentTypeMask: number;
   distributionType: TableFragments_Fragment_FragmentDistributionType;
   actors: StreamActor[];
-  /** Vnode mapping (which should be set in upstream dispatcher) of the fragment. */
+  /**
+   * Vnode mapping (which should be set in upstream dispatcher) of the fragment.
+   * This field is always set to `Some`. For singleton, the parallel unit for all vnodes will be the same.
+   */
   vnodeMapping: ParallelUnitMapping | undefined;
   stateTableIds: number[];
   /**
    * Note that this can be derived backwards from the upstream actors of the Actor held by the Fragment,
    * but in some scenarios (e.g. Scaling) it will lead to a lot of duplicate code,
    * so we pre-generate and store it here, this member will only be initialized when creating the Fragment
-   * and modified when and modified when creating the mv-on-mv
+   * and modified when creating the mv-on-mv
    */
   upstreamFragmentIds: number[];
 }
@@ -172,6 +271,11 @@ export interface TableFragments_FragmentsEntry {
 export interface TableFragments_ActorStatusEntry {
   key: number;
   value: TableFragments_ActorStatus | undefined;
+}
+
+export interface TableFragments_ActorSplitsEntry {
+  key: number;
+  value: ConnectorSplits | undefined;
 }
 
 /** TODO: remove this when dashboard refactored. */
@@ -257,23 +361,32 @@ export interface ListAllNodesResponse {
 
 /** Below for notification service. */
 export interface SubscribeRequest {
-  workerType: WorkerType;
+  subscribeType: SubscribeType;
   host: HostAddress | undefined;
   workerId: number;
 }
 
 export interface MetaSnapshot {
-  nodes: WorkerNode[];
   databases: Database[];
   schemas: Schema[];
   sources: Source[];
   sinks: Sink[];
   tables: Table[];
   indexes: Index[];
+  views: View[];
   users: UserInfo[];
-  hummockVersion: HummockVersion | undefined;
   parallelUnitMappings: ParallelUnitMapping[];
+  nodes: WorkerNode[];
   hummockSnapshot: HummockSnapshot | undefined;
+  hummockVersion: HummockVersion | undefined;
+  version: MetaSnapshot_SnapshotVersion | undefined;
+  metaBackupManifestId: MetaBackupManifestId | undefined;
+}
+
+export interface MetaSnapshot_SnapshotVersion {
+  catalogVersion: number;
+  parallelUnitMappingVersion: number;
+  workerNodeVersion: number;
 }
 
 export interface SubscribeResponse {
@@ -281,18 +394,20 @@ export interface SubscribeResponse {
   operation: SubscribeResponse_Operation;
   version: number;
   info?:
-    | { $case: "node"; node: WorkerNode }
     | { $case: "database"; database: Database }
     | { $case: "schema"; schema: Schema }
     | { $case: "table"; table: Table }
     | { $case: "source"; source: Source }
     | { $case: "sink"; sink: Sink }
     | { $case: "index"; index: Index }
+    | { $case: "view"; view: View }
     | { $case: "user"; user: UserInfo }
-    | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
     | { $case: "parallelUnitMapping"; parallelUnitMapping: ParallelUnitMapping }
+    | { $case: "node"; node: WorkerNode }
+    | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
     | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
-    | { $case: "snapshot"; snapshot: MetaSnapshot };
+    | { $case: "snapshot"; snapshot: MetaSnapshot }
+    | { $case: "metaBackupManifestId"; metaBackupManifestId: MetaBackupManifestId };
 }
 
 export const SubscribeResponse_Operation = {
@@ -378,7 +493,7 @@ export interface GetClusterInfoResponse {
   workerNodes: WorkerNode[];
   tableFragments: TableFragments[];
   actorSplits: { [key: number]: ConnectorSplits };
-  streamSourceInfos: { [key: number]: StreamSourceInfo };
+  sourceInfos: { [key: number]: Source };
 }
 
 export interface GetClusterInfoResponse_ActorSplitsEntry {
@@ -386,9 +501,9 @@ export interface GetClusterInfoResponse_ActorSplitsEntry {
   value: ConnectorSplits | undefined;
 }
 
-export interface GetClusterInfoResponse_StreamSourceInfosEntry {
+export interface GetClusterInfoResponse_SourceInfosEntry {
   key: number;
-  value: StreamSourceInfo | undefined;
+  value: Source | undefined;
 }
 
 export interface RescheduleRequest {
@@ -499,13 +614,14 @@ export const HeartbeatResponse = {
 };
 
 function createBaseTableFragments(): TableFragments {
-  return { tableId: 0, fragments: {}, actorStatus: {} };
+  return { tableId: 0, state: TableFragments_State.UNSPECIFIED, fragments: {}, actorStatus: {}, actorSplits: {} };
 }
 
 export const TableFragments = {
   fromJSON(object: any): TableFragments {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      state: isSet(object.state) ? tableFragments_StateFromJSON(object.state) : TableFragments_State.UNSPECIFIED,
       fragments: isObject(object.fragments)
         ? Object.entries(object.fragments).reduce<{ [key: number]: TableFragments_Fragment }>((acc, [key, value]) => {
           acc[Number(key)] = TableFragments_Fragment.fromJSON(value);
@@ -521,12 +637,19 @@ export const TableFragments = {
           {},
         )
         : {},
+      actorSplits: isObject(object.actorSplits)
+        ? Object.entries(object.actorSplits).reduce<{ [key: number]: ConnectorSplits }>((acc, [key, value]) => {
+          acc[Number(key)] = ConnectorSplits.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
     };
   },
 
   toJSON(message: TableFragments): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.state !== undefined && (obj.state = tableFragments_StateToJSON(message.state));
     obj.fragments = {};
     if (message.fragments) {
       Object.entries(message.fragments).forEach(([k, v]) => {
@@ -539,12 +662,19 @@ export const TableFragments = {
         obj.actorStatus[k] = TableFragments_ActorStatus.toJSON(v);
       });
     }
+    obj.actorSplits = {};
+    if (message.actorSplits) {
+      Object.entries(message.actorSplits).forEach(([k, v]) => {
+        obj.actorSplits[k] = ConnectorSplits.toJSON(v);
+      });
+    }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<TableFragments>, I>>(object: I): TableFragments {
     const message = createBaseTableFragments();
     message.tableId = object.tableId ?? 0;
+    message.state = object.state ?? TableFragments_State.UNSPECIFIED;
     message.fragments = Object.entries(object.fragments ?? {}).reduce<{ [key: number]: TableFragments_Fragment }>(
       (acc, [key, value]) => {
         if (value !== undefined) {
@@ -562,12 +692,21 @@ export const TableFragments = {
       }
       return acc;
     }, {});
+    message.actorSplits = Object.entries(object.actorSplits ?? {}).reduce<{ [key: number]: ConnectorSplits }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = ConnectorSplits.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
     return message;
   },
 };
 
 function createBaseTableFragments_ActorStatus(): TableFragments_ActorStatus {
-  return { parallelUnit: undefined, state: TableFragments_ActorState.UNSPECIFIED };
+  return { parallelUnit: undefined, state: TableFragments_ActorStatus_ActorState.UNSPECIFIED };
 }
 
 export const TableFragments_ActorStatus = {
@@ -575,8 +714,8 @@ export const TableFragments_ActorStatus = {
     return {
       parallelUnit: isSet(object.parallelUnit) ? ParallelUnit.fromJSON(object.parallelUnit) : undefined,
       state: isSet(object.state)
-        ? tableFragments_ActorStateFromJSON(object.state)
-        : TableFragments_ActorState.UNSPECIFIED,
+        ? tableFragments_ActorStatus_ActorStateFromJSON(object.state)
+        : TableFragments_ActorStatus_ActorState.UNSPECIFIED,
     };
   },
 
@@ -584,7 +723,7 @@ export const TableFragments_ActorStatus = {
     const obj: any = {};
     message.parallelUnit !== undefined &&
       (obj.parallelUnit = message.parallelUnit ? ParallelUnit.toJSON(message.parallelUnit) : undefined);
-    message.state !== undefined && (obj.state = tableFragments_ActorStateToJSON(message.state));
+    message.state !== undefined && (obj.state = tableFragments_ActorStatus_ActorStateToJSON(message.state));
     return obj;
   },
 
@@ -593,7 +732,7 @@ export const TableFragments_ActorStatus = {
     message.parallelUnit = (object.parallelUnit !== undefined && object.parallelUnit !== null)
       ? ParallelUnit.fromPartial(object.parallelUnit)
       : undefined;
-    message.state = object.state ?? TableFragments_ActorState.UNSPECIFIED;
+    message.state = object.state ?? TableFragments_ActorStatus_ActorState.UNSPECIFIED;
     return message;
   },
 };
@@ -601,7 +740,7 @@ export const TableFragments_ActorStatus = {
 function createBaseTableFragments_Fragment(): TableFragments_Fragment {
   return {
     fragmentId: 0,
-    fragmentType: FragmentType.FRAGMENT_UNSPECIFIED,
+    fragmentTypeMask: 0,
     distributionType: TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED,
     actors: [],
     vnodeMapping: undefined,
@@ -614,15 +753,11 @@ export const TableFragments_Fragment = {
   fromJSON(object: any): TableFragments_Fragment {
     return {
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
-      fragmentType: isSet(object.fragmentType)
-        ? fragmentTypeFromJSON(object.fragmentType)
-        : FragmentType.FRAGMENT_UNSPECIFIED,
+      fragmentTypeMask: isSet(object.fragmentTypeMask) ? Number(object.fragmentTypeMask) : 0,
       distributionType: isSet(object.distributionType)
         ? tableFragments_Fragment_FragmentDistributionTypeFromJSON(object.distributionType)
         : TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED,
-      actors: Array.isArray(object?.actors)
-        ? object.actors.map((e: any) => StreamActor.fromJSON(e))
-        : [],
+      actors: Array.isArray(object?.actors) ? object.actors.map((e: any) => StreamActor.fromJSON(e)) : [],
       vnodeMapping: isSet(object.vnodeMapping) ? ParallelUnitMapping.fromJSON(object.vnodeMapping) : undefined,
       stateTableIds: Array.isArray(object?.stateTableIds) ? object.stateTableIds.map((e: any) => Number(e)) : [],
       upstreamFragmentIds: Array.isArray(object?.upstreamFragmentIds)
@@ -634,7 +769,7 @@ export const TableFragments_Fragment = {
   toJSON(message: TableFragments_Fragment): unknown {
     const obj: any = {};
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
-    message.fragmentType !== undefined && (obj.fragmentType = fragmentTypeToJSON(message.fragmentType));
+    message.fragmentTypeMask !== undefined && (obj.fragmentTypeMask = Math.round(message.fragmentTypeMask));
     message.distributionType !== undefined &&
       (obj.distributionType = tableFragments_Fragment_FragmentDistributionTypeToJSON(message.distributionType));
     if (message.actors) {
@@ -660,7 +795,7 @@ export const TableFragments_Fragment = {
   fromPartial<I extends Exact<DeepPartial<TableFragments_Fragment>, I>>(object: I): TableFragments_Fragment {
     const message = createBaseTableFragments_Fragment();
     message.fragmentId = object.fragmentId ?? 0;
-    message.fragmentType = object.fragmentType ?? FragmentType.FRAGMENT_UNSPECIFIED;
+    message.fragmentTypeMask = object.fragmentTypeMask ?? 0;
     message.distributionType = object.distributionType ?? TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED;
     message.actors = object.actors?.map((e) => StreamActor.fromPartial(e)) || [];
     message.vnodeMapping = (object.vnodeMapping !== undefined && object.vnodeMapping !== null)
@@ -731,6 +866,37 @@ export const TableFragments_ActorStatusEntry = {
     message.key = object.key ?? 0;
     message.value = (object.value !== undefined && object.value !== null)
       ? TableFragments_ActorStatus.fromPartial(object.value)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseTableFragments_ActorSplitsEntry(): TableFragments_ActorSplitsEntry {
+  return { key: 0, value: undefined };
+}
+
+export const TableFragments_ActorSplitsEntry = {
+  fromJSON(object: any): TableFragments_ActorSplitsEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? ConnectorSplits.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: TableFragments_ActorSplitsEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = message.value ? ConnectorSplits.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<TableFragments_ActorSplitsEntry>, I>>(
+    object: I,
+  ): TableFragments_ActorSplitsEntry {
+    const message = createBaseTableFragments_ActorSplitsEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null)
+      ? ConnectorSplits.fromPartial(object.value)
       : undefined;
     return message;
   },
@@ -1251,13 +1417,15 @@ export const ListAllNodesResponse = {
 };
 
 function createBaseSubscribeRequest(): SubscribeRequest {
-  return { workerType: WorkerType.UNSPECIFIED, host: undefined, workerId: 0 };
+  return { subscribeType: SubscribeType.UNSPECIFIED, host: undefined, workerId: 0 };
 }
 
 export const SubscribeRequest = {
   fromJSON(object: any): SubscribeRequest {
     return {
-      workerType: isSet(object.workerType) ? workerTypeFromJSON(object.workerType) : WorkerType.UNSPECIFIED,
+      subscribeType: isSet(object.subscribeType)
+        ? subscribeTypeFromJSON(object.subscribeType)
+        : SubscribeType.UNSPECIFIED,
       host: isSet(object.host) ? HostAddress.fromJSON(object.host) : undefined,
       workerId: isSet(object.workerId) ? Number(object.workerId) : 0,
     };
@@ -1265,7 +1433,7 @@ export const SubscribeRequest = {
 
   toJSON(message: SubscribeRequest): unknown {
     const obj: any = {};
-    message.workerType !== undefined && (obj.workerType = workerTypeToJSON(message.workerType));
+    message.subscribeType !== undefined && (obj.subscribeType = subscribeTypeToJSON(message.subscribeType));
     message.host !== undefined && (obj.host = message.host ? HostAddress.toJSON(message.host) : undefined);
     message.workerId !== undefined && (obj.workerId = Math.round(message.workerId));
     return obj;
@@ -1273,7 +1441,7 @@ export const SubscribeRequest = {
 
   fromPartial<I extends Exact<DeepPartial<SubscribeRequest>, I>>(object: I): SubscribeRequest {
     const message = createBaseSubscribeRequest();
-    message.workerType = object.workerType ?? WorkerType.UNSPECIFIED;
+    message.subscribeType = object.subscribeType ?? SubscribeType.UNSPECIFIED;
     message.host = (object.host !== undefined && object.host !== null)
       ? HostAddress.fromPartial(object.host)
       : undefined;
@@ -1284,46 +1452,51 @@ export const SubscribeRequest = {
 
 function createBaseMetaSnapshot(): MetaSnapshot {
   return {
-    nodes: [],
     databases: [],
     schemas: [],
     sources: [],
     sinks: [],
     tables: [],
     indexes: [],
+    views: [],
     users: [],
-    hummockVersion: undefined,
     parallelUnitMappings: [],
+    nodes: [],
     hummockSnapshot: undefined,
+    hummockVersion: undefined,
+    version: undefined,
+    metaBackupManifestId: undefined,
   };
 }
 
 export const MetaSnapshot = {
   fromJSON(object: any): MetaSnapshot {
     return {
-      nodes: Array.isArray(object?.nodes) ? object.nodes.map((e: any) => WorkerNode.fromJSON(e)) : [],
       databases: Array.isArray(object?.databases) ? object.databases.map((e: any) => Database.fromJSON(e)) : [],
       schemas: Array.isArray(object?.schemas) ? object.schemas.map((e: any) => Schema.fromJSON(e)) : [],
       sources: Array.isArray(object?.sources) ? object.sources.map((e: any) => Source.fromJSON(e)) : [],
       sinks: Array.isArray(object?.sinks) ? object.sinks.map((e: any) => Sink.fromJSON(e)) : [],
       tables: Array.isArray(object?.tables) ? object.tables.map((e: any) => Table.fromJSON(e)) : [],
       indexes: Array.isArray(object?.indexes) ? object.indexes.map((e: any) => Index.fromJSON(e)) : [],
+      views: Array.isArray(object?.views) ? object.views.map((e: any) => View.fromJSON(e)) : [],
       users: Array.isArray(object?.users) ? object.users.map((e: any) => UserInfo.fromJSON(e)) : [],
-      hummockVersion: isSet(object.hummockVersion) ? HummockVersion.fromJSON(object.hummockVersion) : undefined,
       parallelUnitMappings: Array.isArray(object?.parallelUnitMappings)
         ? object.parallelUnitMappings.map((e: any) => ParallelUnitMapping.fromJSON(e))
         : [],
+      nodes: Array.isArray(object?.nodes)
+        ? object.nodes.map((e: any) => WorkerNode.fromJSON(e))
+        : [],
       hummockSnapshot: isSet(object.hummockSnapshot) ? HummockSnapshot.fromJSON(object.hummockSnapshot) : undefined,
+      hummockVersion: isSet(object.hummockVersion) ? HummockVersion.fromJSON(object.hummockVersion) : undefined,
+      version: isSet(object.version) ? MetaSnapshot_SnapshotVersion.fromJSON(object.version) : undefined,
+      metaBackupManifestId: isSet(object.metaBackupManifestId)
+        ? MetaBackupManifestId.fromJSON(object.metaBackupManifestId)
+        : undefined,
     };
   },
 
   toJSON(message: MetaSnapshot): unknown {
     const obj: any = {};
-    if (message.nodes) {
-      obj.nodes = message.nodes.map((e) => e ? WorkerNode.toJSON(e) : undefined);
-    } else {
-      obj.nodes = [];
-    }
     if (message.databases) {
       obj.databases = message.databases.map((e) => e ? Database.toJSON(e) : undefined);
     } else {
@@ -1354,40 +1527,95 @@ export const MetaSnapshot = {
     } else {
       obj.indexes = [];
     }
+    if (message.views) {
+      obj.views = message.views.map((e) => e ? View.toJSON(e) : undefined);
+    } else {
+      obj.views = [];
+    }
     if (message.users) {
       obj.users = message.users.map((e) => e ? UserInfo.toJSON(e) : undefined);
     } else {
       obj.users = [];
     }
-    message.hummockVersion !== undefined &&
-      (obj.hummockVersion = message.hummockVersion ? HummockVersion.toJSON(message.hummockVersion) : undefined);
     if (message.parallelUnitMappings) {
       obj.parallelUnitMappings = message.parallelUnitMappings.map((e) => e ? ParallelUnitMapping.toJSON(e) : undefined);
     } else {
       obj.parallelUnitMappings = [];
     }
+    if (message.nodes) {
+      obj.nodes = message.nodes.map((e) => e ? WorkerNode.toJSON(e) : undefined);
+    } else {
+      obj.nodes = [];
+    }
     message.hummockSnapshot !== undefined &&
       (obj.hummockSnapshot = message.hummockSnapshot ? HummockSnapshot.toJSON(message.hummockSnapshot) : undefined);
+    message.hummockVersion !== undefined &&
+      (obj.hummockVersion = message.hummockVersion ? HummockVersion.toJSON(message.hummockVersion) : undefined);
+    message.version !== undefined &&
+      (obj.version = message.version ? MetaSnapshot_SnapshotVersion.toJSON(message.version) : undefined);
+    message.metaBackupManifestId !== undefined && (obj.metaBackupManifestId = message.metaBackupManifestId
+      ? MetaBackupManifestId.toJSON(message.metaBackupManifestId)
+      : undefined);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<MetaSnapshot>, I>>(object: I): MetaSnapshot {
     const message = createBaseMetaSnapshot();
-    message.nodes = object.nodes?.map((e) => WorkerNode.fromPartial(e)) || [];
     message.databases = object.databases?.map((e) => Database.fromPartial(e)) || [];
     message.schemas = object.schemas?.map((e) => Schema.fromPartial(e)) || [];
     message.sources = object.sources?.map((e) => Source.fromPartial(e)) || [];
     message.sinks = object.sinks?.map((e) => Sink.fromPartial(e)) || [];
     message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
     message.indexes = object.indexes?.map((e) => Index.fromPartial(e)) || [];
+    message.views = object.views?.map((e) => View.fromPartial(e)) || [];
     message.users = object.users?.map((e) => UserInfo.fromPartial(e)) || [];
-    message.hummockVersion = (object.hummockVersion !== undefined && object.hummockVersion !== null)
-      ? HummockVersion.fromPartial(object.hummockVersion)
-      : undefined;
     message.parallelUnitMappings = object.parallelUnitMappings?.map((e) => ParallelUnitMapping.fromPartial(e)) || [];
+    message.nodes = object.nodes?.map((e) => WorkerNode.fromPartial(e)) || [];
     message.hummockSnapshot = (object.hummockSnapshot !== undefined && object.hummockSnapshot !== null)
       ? HummockSnapshot.fromPartial(object.hummockSnapshot)
       : undefined;
+    message.hummockVersion = (object.hummockVersion !== undefined && object.hummockVersion !== null)
+      ? HummockVersion.fromPartial(object.hummockVersion)
+      : undefined;
+    message.version = (object.version !== undefined && object.version !== null)
+      ? MetaSnapshot_SnapshotVersion.fromPartial(object.version)
+      : undefined;
+    message.metaBackupManifestId = (object.metaBackupManifestId !== undefined && object.metaBackupManifestId !== null)
+      ? MetaBackupManifestId.fromPartial(object.metaBackupManifestId)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseMetaSnapshot_SnapshotVersion(): MetaSnapshot_SnapshotVersion {
+  return { catalogVersion: 0, parallelUnitMappingVersion: 0, workerNodeVersion: 0 };
+}
+
+export const MetaSnapshot_SnapshotVersion = {
+  fromJSON(object: any): MetaSnapshot_SnapshotVersion {
+    return {
+      catalogVersion: isSet(object.catalogVersion) ? Number(object.catalogVersion) : 0,
+      parallelUnitMappingVersion: isSet(object.parallelUnitMappingVersion)
+        ? Number(object.parallelUnitMappingVersion)
+        : 0,
+      workerNodeVersion: isSet(object.workerNodeVersion) ? Number(object.workerNodeVersion) : 0,
+    };
+  },
+
+  toJSON(message: MetaSnapshot_SnapshotVersion): unknown {
+    const obj: any = {};
+    message.catalogVersion !== undefined && (obj.catalogVersion = Math.round(message.catalogVersion));
+    message.parallelUnitMappingVersion !== undefined &&
+      (obj.parallelUnitMappingVersion = Math.round(message.parallelUnitMappingVersion));
+    message.workerNodeVersion !== undefined && (obj.workerNodeVersion = Math.round(message.workerNodeVersion));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MetaSnapshot_SnapshotVersion>, I>>(object: I): MetaSnapshot_SnapshotVersion {
+    const message = createBaseMetaSnapshot_SnapshotVersion();
+    message.catalogVersion = object.catalogVersion ?? 0;
+    message.parallelUnitMappingVersion = object.parallelUnitMappingVersion ?? 0;
+    message.workerNodeVersion = object.workerNodeVersion ?? 0;
     return message;
   },
 };
@@ -1404,9 +1632,7 @@ export const SubscribeResponse = {
         ? subscribeResponse_OperationFromJSON(object.operation)
         : SubscribeResponse_Operation.UNSPECIFIED,
       version: isSet(object.version) ? Number(object.version) : 0,
-      info: isSet(object.node)
-        ? { $case: "node", node: WorkerNode.fromJSON(object.node) }
-        : isSet(object.database)
+      info: isSet(object.database)
         ? { $case: "database", database: Database.fromJSON(object.database) }
         : isSet(object.schema)
         ? { $case: "schema", schema: Schema.fromJSON(object.schema) }
@@ -1418,15 +1644,19 @@ export const SubscribeResponse = {
         ? { $case: "sink", sink: Sink.fromJSON(object.sink) }
         : isSet(object.index)
         ? { $case: "index", index: Index.fromJSON(object.index) }
+        : isSet(object.view)
+        ? { $case: "view", view: View.fromJSON(object.view) }
         : isSet(object.user)
         ? { $case: "user", user: UserInfo.fromJSON(object.user) }
-        : isSet(object.hummockSnapshot)
-        ? { $case: "hummockSnapshot", hummockSnapshot: HummockSnapshot.fromJSON(object.hummockSnapshot) }
         : isSet(object.parallelUnitMapping)
         ? {
           $case: "parallelUnitMapping",
           parallelUnitMapping: ParallelUnitMapping.fromJSON(object.parallelUnitMapping),
         }
+        : isSet(object.node)
+        ? { $case: "node", node: WorkerNode.fromJSON(object.node) }
+        : isSet(object.hummockSnapshot)
+        ? { $case: "hummockSnapshot", hummockSnapshot: HummockSnapshot.fromJSON(object.hummockSnapshot) }
         : isSet(object.hummockVersionDeltas)
         ? {
           $case: "hummockVersionDeltas",
@@ -1434,6 +1664,11 @@ export const SubscribeResponse = {
         }
         : isSet(object.snapshot)
         ? { $case: "snapshot", snapshot: MetaSnapshot.fromJSON(object.snapshot) }
+        : isSet(object.metaBackupManifestId)
+        ? {
+          $case: "metaBackupManifestId",
+          metaBackupManifestId: MetaBackupManifestId.fromJSON(object.metaBackupManifestId),
+        }
         : undefined,
     };
   },
@@ -1443,8 +1678,6 @@ export const SubscribeResponse = {
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.operation !== undefined && (obj.operation = subscribeResponse_OperationToJSON(message.operation));
     message.version !== undefined && (obj.version = Math.round(message.version));
-    message.info?.$case === "node" &&
-      (obj.node = message.info?.node ? WorkerNode.toJSON(message.info?.node) : undefined);
     message.info?.$case === "database" &&
       (obj.database = message.info?.database ? Database.toJSON(message.info?.database) : undefined);
     message.info?.$case === "schema" &&
@@ -1456,18 +1689,24 @@ export const SubscribeResponse = {
     message.info?.$case === "sink" && (obj.sink = message.info?.sink ? Sink.toJSON(message.info?.sink) : undefined);
     message.info?.$case === "index" &&
       (obj.index = message.info?.index ? Index.toJSON(message.info?.index) : undefined);
+    message.info?.$case === "view" && (obj.view = message.info?.view ? View.toJSON(message.info?.view) : undefined);
     message.info?.$case === "user" && (obj.user = message.info?.user ? UserInfo.toJSON(message.info?.user) : undefined);
-    message.info?.$case === "hummockSnapshot" && (obj.hummockSnapshot = message.info?.hummockSnapshot
-      ? HummockSnapshot.toJSON(message.info?.hummockSnapshot)
-      : undefined);
     message.info?.$case === "parallelUnitMapping" && (obj.parallelUnitMapping = message.info?.parallelUnitMapping
       ? ParallelUnitMapping.toJSON(message.info?.parallelUnitMapping)
+      : undefined);
+    message.info?.$case === "node" &&
+      (obj.node = message.info?.node ? WorkerNode.toJSON(message.info?.node) : undefined);
+    message.info?.$case === "hummockSnapshot" && (obj.hummockSnapshot = message.info?.hummockSnapshot
+      ? HummockSnapshot.toJSON(message.info?.hummockSnapshot)
       : undefined);
     message.info?.$case === "hummockVersionDeltas" && (obj.hummockVersionDeltas = message.info?.hummockVersionDeltas
       ? HummockVersionDeltas.toJSON(message.info?.hummockVersionDeltas)
       : undefined);
     message.info?.$case === "snapshot" &&
       (obj.snapshot = message.info?.snapshot ? MetaSnapshot.toJSON(message.info?.snapshot) : undefined);
+    message.info?.$case === "metaBackupManifestId" && (obj.metaBackupManifestId = message.info?.metaBackupManifestId
+      ? MetaBackupManifestId.toJSON(message.info?.metaBackupManifestId)
+      : undefined);
     return obj;
   },
 
@@ -1478,9 +1717,6 @@ export const SubscribeResponse = {
       : undefined;
     message.operation = object.operation ?? SubscribeResponse_Operation.UNSPECIFIED;
     message.version = object.version ?? 0;
-    if (object.info?.$case === "node" && object.info?.node !== undefined && object.info?.node !== null) {
-      message.info = { $case: "node", node: WorkerNode.fromPartial(object.info.node) };
-    }
     if (object.info?.$case === "database" && object.info?.database !== undefined && object.info?.database !== null) {
       message.info = { $case: "database", database: Database.fromPartial(object.info.database) };
     }
@@ -1499,18 +1735,11 @@ export const SubscribeResponse = {
     if (object.info?.$case === "index" && object.info?.index !== undefined && object.info?.index !== null) {
       message.info = { $case: "index", index: Index.fromPartial(object.info.index) };
     }
+    if (object.info?.$case === "view" && object.info?.view !== undefined && object.info?.view !== null) {
+      message.info = { $case: "view", view: View.fromPartial(object.info.view) };
+    }
     if (object.info?.$case === "user" && object.info?.user !== undefined && object.info?.user !== null) {
       message.info = { $case: "user", user: UserInfo.fromPartial(object.info.user) };
-    }
-    if (
-      object.info?.$case === "hummockSnapshot" &&
-      object.info?.hummockSnapshot !== undefined &&
-      object.info?.hummockSnapshot !== null
-    ) {
-      message.info = {
-        $case: "hummockSnapshot",
-        hummockSnapshot: HummockSnapshot.fromPartial(object.info.hummockSnapshot),
-      };
     }
     if (
       object.info?.$case === "parallelUnitMapping" &&
@@ -1520,6 +1749,19 @@ export const SubscribeResponse = {
       message.info = {
         $case: "parallelUnitMapping",
         parallelUnitMapping: ParallelUnitMapping.fromPartial(object.info.parallelUnitMapping),
+      };
+    }
+    if (object.info?.$case === "node" && object.info?.node !== undefined && object.info?.node !== null) {
+      message.info = { $case: "node", node: WorkerNode.fromPartial(object.info.node) };
+    }
+    if (
+      object.info?.$case === "hummockSnapshot" &&
+      object.info?.hummockSnapshot !== undefined &&
+      object.info?.hummockSnapshot !== null
+    ) {
+      message.info = {
+        $case: "hummockSnapshot",
+        hummockSnapshot: HummockSnapshot.fromPartial(object.info.hummockSnapshot),
       };
     }
     if (
@@ -1534,6 +1776,16 @@ export const SubscribeResponse = {
     }
     if (object.info?.$case === "snapshot" && object.info?.snapshot !== undefined && object.info?.snapshot !== null) {
       message.info = { $case: "snapshot", snapshot: MetaSnapshot.fromPartial(object.info.snapshot) };
+    }
+    if (
+      object.info?.$case === "metaBackupManifestId" &&
+      object.info?.metaBackupManifestId !== undefined &&
+      object.info?.metaBackupManifestId !== null
+    ) {
+      message.info = {
+        $case: "metaBackupManifestId",
+        metaBackupManifestId: MetaBackupManifestId.fromPartial(object.info.metaBackupManifestId),
+      };
     }
     return message;
   },
@@ -1699,7 +1951,7 @@ export const GetClusterInfoRequest = {
 };
 
 function createBaseGetClusterInfoResponse(): GetClusterInfoResponse {
-  return { workerNodes: [], tableFragments: [], actorSplits: {}, streamSourceInfos: {} };
+  return { workerNodes: [], tableFragments: [], actorSplits: {}, sourceInfos: {} };
 }
 
 export const GetClusterInfoResponse = {
@@ -1715,9 +1967,9 @@ export const GetClusterInfoResponse = {
           return acc;
         }, {})
         : {},
-      streamSourceInfos: isObject(object.streamSourceInfos)
-        ? Object.entries(object.streamSourceInfos).reduce<{ [key: number]: StreamSourceInfo }>((acc, [key, value]) => {
-          acc[Number(key)] = StreamSourceInfo.fromJSON(value);
+      sourceInfos: isObject(object.sourceInfos)
+        ? Object.entries(object.sourceInfos).reduce<{ [key: number]: Source }>((acc, [key, value]) => {
+          acc[Number(key)] = Source.fromJSON(value);
           return acc;
         }, {})
         : {},
@@ -1742,10 +1994,10 @@ export const GetClusterInfoResponse = {
         obj.actorSplits[k] = ConnectorSplits.toJSON(v);
       });
     }
-    obj.streamSourceInfos = {};
-    if (message.streamSourceInfos) {
-      Object.entries(message.streamSourceInfos).forEach(([k, v]) => {
-        obj.streamSourceInfos[k] = StreamSourceInfo.toJSON(v);
+    obj.sourceInfos = {};
+    if (message.sourceInfos) {
+      Object.entries(message.sourceInfos).forEach(([k, v]) => {
+        obj.sourceInfos[k] = Source.toJSON(v);
       });
     }
     return obj;
@@ -1764,14 +2016,15 @@ export const GetClusterInfoResponse = {
       },
       {},
     );
-    message.streamSourceInfos = Object.entries(object.streamSourceInfos ?? {}).reduce<
-      { [key: number]: StreamSourceInfo }
-    >((acc, [key, value]) => {
-      if (value !== undefined) {
-        acc[Number(key)] = StreamSourceInfo.fromPartial(value);
-      }
-      return acc;
-    }, {});
+    message.sourceInfos = Object.entries(object.sourceInfos ?? {}).reduce<{ [key: number]: Source }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = Source.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
     return message;
   },
 };
@@ -1807,32 +2060,32 @@ export const GetClusterInfoResponse_ActorSplitsEntry = {
   },
 };
 
-function createBaseGetClusterInfoResponse_StreamSourceInfosEntry(): GetClusterInfoResponse_StreamSourceInfosEntry {
+function createBaseGetClusterInfoResponse_SourceInfosEntry(): GetClusterInfoResponse_SourceInfosEntry {
   return { key: 0, value: undefined };
 }
 
-export const GetClusterInfoResponse_StreamSourceInfosEntry = {
-  fromJSON(object: any): GetClusterInfoResponse_StreamSourceInfosEntry {
+export const GetClusterInfoResponse_SourceInfosEntry = {
+  fromJSON(object: any): GetClusterInfoResponse_SourceInfosEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
-      value: isSet(object.value) ? StreamSourceInfo.fromJSON(object.value) : undefined,
+      value: isSet(object.value) ? Source.fromJSON(object.value) : undefined,
     };
   },
 
-  toJSON(message: GetClusterInfoResponse_StreamSourceInfosEntry): unknown {
+  toJSON(message: GetClusterInfoResponse_SourceInfosEntry): unknown {
     const obj: any = {};
     message.key !== undefined && (obj.key = Math.round(message.key));
-    message.value !== undefined && (obj.value = message.value ? StreamSourceInfo.toJSON(message.value) : undefined);
+    message.value !== undefined && (obj.value = message.value ? Source.toJSON(message.value) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<GetClusterInfoResponse_StreamSourceInfosEntry>, I>>(
+  fromPartial<I extends Exact<DeepPartial<GetClusterInfoResponse_SourceInfosEntry>, I>>(
     object: I,
-  ): GetClusterInfoResponse_StreamSourceInfosEntry {
-    const message = createBaseGetClusterInfoResponse_StreamSourceInfosEntry();
+  ): GetClusterInfoResponse_SourceInfosEntry {
+    const message = createBaseGetClusterInfoResponse_SourceInfosEntry();
     message.key = object.key ?? 0;
     message.value = (object.value !== undefined && object.value !== null)
-      ? StreamSourceInfo.fromPartial(object.value)
+      ? Source.fromPartial(object.value)
       : undefined;
     return message;
   },

@@ -17,8 +17,8 @@ use risingwave_common::catalog::Schema;
 
 use super::*;
 use crate::for_all_plan_nodes;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
-use crate::session::OptimizerContextRef;
 
 /// the common fields of all nodes, please make a field named `base` in
 /// every planNode and correctly valued it when construct the planNode.
@@ -41,7 +41,7 @@ pub struct PlanBase {
     pub functional_dependency: FunctionalDependencySet,
 }
 
-impl generic::GenericBase for PlanBase {
+impl generic::GenericPlanRef for PlanBase {
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -55,6 +55,15 @@ impl generic::GenericBase for PlanBase {
     }
 }
 
+impl stream::StreamPlanRef for PlanBase {
+    fn distribution(&self) -> &Distribution {
+        &self.dist
+    }
+
+    fn append_only(&self) -> bool {
+        self.append_only
+    }
+}
 impl PlanBase {
     pub fn new_logical(
         ctx: OptimizerContextRef,
@@ -117,7 +126,19 @@ impl PlanBase {
             functional_dependency,
         }
     }
+
+    pub fn derive_stream_plan_base(plan_node: &PlanRef) -> Self {
+        PlanBase::new_stream(
+            plan_node.ctx(),
+            plan_node.schema().clone(),
+            plan_node.logical_pk().to_vec(),
+            plan_node.functional_dependency().clone(),
+            plan_node.distribution().clone(),
+            plan_node.append_only(),
+        )
+    }
 }
+
 macro_rules! impl_base_delegate {
     ($( { $convention:ident, $name:ident }),*) => {
         $(paste! {
@@ -126,7 +147,6 @@ macro_rules! impl_base_delegate {
                     self.plan_base().id
                 }
                  pub fn ctx(&self) -> OptimizerContextRef {
-                    use super::generic::GenericBase;
                     self.plan_base().ctx()
                 }
                 pub fn schema(&self) -> &Schema {

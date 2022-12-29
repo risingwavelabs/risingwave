@@ -12,28 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(label_break_value)]
+#![feature(let_chains)]
 #![allow(clippy::derive_partial_eq_without_eq)]
+
 //! Data-driven tests.
 
 mod resolve_id;
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
 use risingwave_frontend::handler::{
-    create_index, create_mv, create_source, create_table, drop_table, variable,
+    create_index, create_mv, create_schema, create_source, create_table, drop_table, variable,
+    HandlerArgs,
 };
-use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
 use risingwave_frontend::{
-    build_graph, explain_stream_graph, Binder, FrontendOpts, PlanRef, Planner, WithOptions,
+    build_graph, explain_stream_graph, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef,
+    PlanRef, Planner, WithOptions,
 };
-use risingwave_sqlparser::ast::{ObjectName, Statement};
+use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -292,12 +294,11 @@ impl TestCase {
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
-            let context = OptimizerContext::new(
-                session.clone(),
-                Arc::from(sql),
-                WithOptions::try_from(&stmt)?,
-            );
-            context.explain_verbose.store(true, Ordering::Relaxed); // use explain verbose in planner tests
+            let handler_args = HandlerArgs {
+                session: session.clone(),
+                sql: Arc::from(sql),
+                with_options: WithOptions::try_from(&stmt)?,
+            };
             match stmt.clone() {
                 Statement::Query(_)
                 | Statement::Insert { .. }
@@ -306,6 +307,16 @@ impl TestCase {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
+                    let explain_options = ExplainOptions {
+                        verbose: true,
+                        ..Default::default()
+                    };
+                    let context = OptimizerContext::new(
+                        session.clone(),
+                        Arc::from(sql),
+                        WithOptions::try_from(&stmt)?,
+                        explain_options,
+                    );
                     let ret = self.apply_query(&stmt, context.into())?;
                     if do_check_result {
                         check_result(self, &ret)?;
@@ -316,15 +327,24 @@ impl TestCase {
                     name,
                     columns,
                     constraints,
+                    if_not_exists,
                     ..
                 } => {
-                    create_table::handle_create_table(context, name, columns, constraints).await?;
+                    create_table::handle_create_table(
+                        handler_args,
+                        name,
+                        columns,
+                        constraints,
+                        if_not_exists,
+                    )
+                    .await?;
                 }
                 Statement::CreateSource {
                     is_materialized,
                     stmt,
                 } => {
-                    create_source::handle_create_source(context, is_materialized, stmt).await?;
+                    create_source::handle_create_source(handler_args, is_materialized, stmt)
+                        .await?;
                 }
                 Statement::CreateIndex {
                     name,
@@ -332,12 +352,13 @@ impl TestCase {
                     columns,
                     include,
                     distributed_by,
+                    if_not_exists,
                     // TODO: support unique and if_not_exist in planner test
                     ..
                 } => {
                     create_index::handle_create_index(
-                        context,
-                        false,
+                        handler_args,
+                        if_not_exists,
                         name,
                         table_name,
                         columns,
@@ -354,11 +375,11 @@ impl TestCase {
                     columns,
                     ..
                 } => {
-                    create_mv::handle_create_mv(context, name, *query, columns).await?;
+                    create_mv::handle_create_mv(handler_args, name, *query, columns).await?;
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(
-                        context,
+                        handler_args,
                         drop_statement.object_name,
                         drop_statement.if_exists,
                     )
@@ -369,7 +390,7 @@ impl TestCase {
                     variable,
                     value,
                 } => {
-                    variable::handle_set(context, variable, value).unwrap();
+                    variable::handle_set(handler_args, variable, value).unwrap();
                 }
                 Statement::Explain { .. } => {
                     let explain_output = get_explain_output(sql, session.clone()).await;
@@ -385,6 +406,13 @@ impl TestCase {
                     }
                     result = Some(ret);
                 }
+                Statement::CreateSchema {
+                    schema_name,
+                    if_not_exists,
+                } => {
+                    create_schema::handle_create_schema(handler_args, schema_name, if_not_exists)
+                        .await?;
+                }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
         }
@@ -396,7 +424,7 @@ impl TestCase {
         stmt: &Statement,
         context: OptimizerContextRef,
     ) -> Result<TestCaseResult> {
-        let session = context.inner().session_ctx.clone();
+        let session = context.session_ctx().clone();
         let mut ret = TestCaseResult::default();
 
         let bound = {

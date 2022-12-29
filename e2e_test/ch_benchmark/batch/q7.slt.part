@@ -1,0 +1,86 @@
+query ITTR
+select	 su_nationkey as supp_nation,
+	 substr(c_state,1,1) as cust_nation,
+	 extract(year from o_entry_d::timestamp),
+	 round(sum(ol_amount)::decimal, 0) as revenue
+from	 supplier, stock, orderline, orders, customer, nation n1, nation n2
+where	 ol_supply_w_id = s_w_id
+	 and ol_i_id = s_i_id
+	 and (s_w_id * s_i_id)%10000 = su_suppkey
+	 and ol_w_id = o_w_id
+	 and ol_d_id = o_d_id
+	 and ol_o_id = o_id
+	 and c_id = o_c_id
+	 and c_w_id = o_w_id
+	 and c_d_id = o_d_id
+	 and su_nationkey = n1.n_nationkey
+	 and ascii(substr(c_state,1,1)) = n2.n_nationkey
+	 and (
+	    (n1.n_name = 'UNITED STATES')
+	     or
+	    (n2.n_name = 'UNITED STATES')
+	     )
+	 and ol_delivery_d between '2007-01-02 00:00:00.000000' and '2199-01-02 00:00:00.000000'
+group by su_nationkey, substr(c_state,1,1), extract(year from o_entry_d::timestamp)
+order by su_nationkey, cust_nation, extract(year from o_entry_d::timestamp);
+----
+ 49 O                2022    1487
+ 50 O                2022    6287
+ 51 O                2022    1658
+ 52 O                2022       0
+ 54 O                2022       0
+ 55 O                2022       0
+ 57 O                2022       0
+ 65 O                2022       0
+ 66 O                2022       0
+ 67 O                2022       0
+ 69 O                2022    2214
+ 72 O                2022       0
+ 76 O                2022       0
+ 79 7                2022    9943
+ 79 8                2022       0
+ 79 B                2022       0
+ 79 F                2022       0
+ 79 H                2022       0
+ 79 K                2022       0
+ 79 N                2022       0
+ 79 Q                2022       0
+ 79 R                2022    3563
+ 79 U                2022       0
+ 79 V                2022       0
+ 79 b                2022    3141
+ 79 c                2022       0
+ 79 e                2022       0
+ 79 f                2022       0
+ 79 g                2022    5956
+ 79 i                2022       0
+ 79 l                2022       0
+ 79 q                2022       0
+ 79 t                2022       0
+ 79 u                2022       0
+ 79 x                2022       0
+ 81 O                2022       0
+ 82 O                2022       0
+ 84 O                2022       0
+ 85 O                2022    8442
+ 86 O                2022       0
+ 87 O                2022       0
+ 88 O                2022       0
+ 90 O                2022       0
+ 97 O                2022       0
+ 98 O                2022       0
+100 O                2022       0
+101 O                2022       0
+102 O                2022       0
+105 O                2022    1338
+109 O                2022    8765
+111 O                2022       0
+112 O                2022       0
+113 O                2022       0
+114 O                2022       0
+115 O                2022    5267
+116 O                2022       0
+117 O                2022       0
+118 O                2022     569
+120 O                2022       0
+121 O                2022       0

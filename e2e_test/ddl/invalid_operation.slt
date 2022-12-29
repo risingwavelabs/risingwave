@@ -1,0 +1,390 @@
+# 1. drop non-existent relation
+
+statement error table not found
+drop table not_exists;
+
+statement error materialized view not found
+drop materialized view not_exists;
+
+statement error index not found
+drop index not_exists;
+
+statement error source not found
+drop source not_exists;
+
+statement error sink not found
+drop sink not_exists;
+
+statement error view not found
+drop view not_exists;
+
+statement error Use `DROP SOURCE`
+drop materialized source not_exists;
+
+# 2. drop relation in non-existent schema
+
+statement error schema not found
+drop table not_exists.not_exists;
+
+statement error schema not found
+drop materialized view not_exists.not_exists;
+
+statement error schema not found
+drop index not_exists.not_exists;
+
+statement error schema not found
+drop source not_exists.not_exists;
+
+statement error schema not found
+drop sink not_exists.not_exists;
+
+statement error schema not found
+drop view not_exists.not_exists;
+
+# 3. drop relation in another database
+
+statement error not equal to current database name
+drop table not_exists.not_exists.not_exists;
+
+statement error not equal to current database name
+drop materialized view not_exists.not_exists.not_exists;
+
+statement error not equal to current database name
+drop index not_exists.not_exists.not_exists;
+
+statement error not equal to current database name
+drop source not_exists.not_exists.not_exists;
+
+statement error not equal to current database name
+drop sink not_exists.not_exists.not_exists;
+
+statement error not equal to current database name
+drop view not_exists.not_exists.not_exists;
+
+# 4. Relation exists, but the DROP type is wrong.
+
+# 4.1. table
+statement ok
+create table t (v int);
+
+statement error Use `DROP TABLE`
+drop materialized view t;
+
+statement error Use `DROP TABLE`
+drop index t;
+
+statement error Use `DROP TABLE`
+drop source t;
+
+# FIXME: improve the error message
+statement error not found 
+drop sink t;
+
+# FIXME: improve the error message
+statement error not found
+drop view t;
+
+# 4.2 materialized view
+statement ok
+create materialized view mv as select * from t;
+
+statement error Use `DROP MATERIALIZED VIEW`
+drop table mv;
+
+statement error Use `DROP MATERIALIZED VIEW`
+drop index mv;
+
+# FIXME: improve the error message
+statement error not found
+drop source mv;
+
+# FIXME: improve the error message
+statement error not found
+drop sink mv;
+
+# FIXME: improve the error message
+statement error not found
+drop view mv;
+
+# 4.3 index
+statement ok
+create index idx on t(v);
+
+statement error Use `DROP INDEX`
+drop table idx;
+
+statement error Use `DROP INDEX`
+drop materialized view idx;
+
+# FIXME: improve the error message
+statement error not found
+drop source idx;
+
+# FIXME: improve the error message
+statement error not found
+drop sink idx;
+
+# FIXME: improve the error message
+statement error not found
+drop view idx;
+
+# 4.4 materialized source
+statement ok
+create materialized source msrc (v int) with (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end  = '10',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) row format json;
+
+statement error Use `DROP SOURCE`
+drop table msrc;
+
+statement error Use `DROP SOURCE`
+drop materialized view msrc;
+
+statement error Use `DROP SOURCE`
+drop index msrc;
+
+# FIXME: improve the error message
+statement error not found
+drop sink msrc;
+
+# FIXME: improve the error message
+statement error not found
+drop view msrc;
+
+# 4.5 non-materialized source
+statement ok
+create source src (v int) with (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end  = '10',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) row format json;
+
+# FIXME: improve the error message
+statement error not found
+drop table src;
+
+# FIXME: improve the error message
+statement error not found
+drop materialized view src;
+
+# FIXME: improve the error message
+statement error not found
+drop index src;
+
+# FIXME: improve the error message
+statement error not found
+drop sink src;
+
+# FIXME: improve the error message
+statement error not found
+drop view src;
+
+# 4.6 sink 
+statement ok
+CREATE SINK sink FROM mv WITH (connector='console', prefix='DEBUG', suffix='');
+
+# FIXME: improve the error message
+statement error not found
+drop table sink;
+
+statement error sink properties not provided
+CREATE SINK sink FROM mv;
+
+# FIXME: improve the error message
+statement error not found
+drop materialized view sink;
+
+# FIXME: improve the error message
+statement error not found
+drop index sink;
+
+# FIXME: improve the error message
+statement error not found
+drop source sink;
+
+# FIXME: improve the error message
+statement error not found
+drop view sink;
+
+# 4.7 view
+statement ok
+create view v as select 1;
+
+# FIXME: improve the error message
+statement error not found
+drop table v;
+
+# FIXME: improve the error message
+statement error not found
+drop materialized view v;
+
+# FIXME: improve the error message
+statement error not found
+drop index v;
+
+# FIXME: improve the error message
+statement error not found
+drop source v;
+
+# FIXME: improve the error message
+statement error not found
+drop sink v;
+
+# 5. query
+query I
+SELECT * from t limit 0;
+----
+
+query I
+SELECT * from mv limit 0;
+----
+
+query I
+SELECT * from idx limit 0;
+----
+
+query I
+SELECT * from msrc limit 0;
+----
+
+# FIXME: improve the error message
+query error not found
+SELECT * from sink limit 0;
+----
+
+query I
+SELECT * from v limit 0;
+----
+
+# 6. DML
+# 6.1 table
+statement ok
+insert into t values (1);
+
+statement ok
+update t set v = 2;
+
+statement ok
+delete from t;
+
+# 6.2 materialized view
+statement error cannot change materialized view
+insert into mv values (1);
+
+statement error cannot change materialized view
+update mv set v = 2;
+
+statement error cannot change materialized view
+delete from mv;
+
+# 6.3 index
+statement error cannot change index
+insert into idx values (1);
+
+statement error cannot change index
+update idx set v = 2;
+
+statement error cannot change index
+delete from idx;
+
+# 6.4 materialized source
+statement error cannot change materialized source
+insert into msrc values (1);
+
+statement error cannot change materialized source
+update msrc set v = 2;
+
+statement error cannot change materialized source
+delete from msrc;
+
+# 6.5 non-materialized source
+# FIXME: improve the error message
+statement error not found
+insert into src values (1);
+
+# FIXME: improve the error message
+statement error not found
+update src set v = 2;
+
+# FIXME: improve the error message
+statement error not found
+delete from src;
+
+# 6.6 sink
+# FIXME: improve the error message
+statement error not found
+insert into sink values (1);
+
+# FIXME: improve the error message
+statement error not found
+update sink set v = 2;
+
+# FIXME: improve the error message
+statement error not found
+delete from sink;
+
+# 6.7 view
+# FIXME: improve the error message
+statement error not found
+insert into v values (1);
+
+# FIXME: improve the error message
+statement error not found
+update v set v = 2;
+
+# FIXME: improve the error message
+statement error not found
+delete from v;
+
+# 7. create with duplicate name
+statement error table.*exists
+create table t(v int);
+
+statement error materialized view.*exists
+create table mv(v int);
+
+statement error index.*exists
+create table idx(v int);
+
+statement error source.*exists
+create table msrc(v int);
+
+statement error source.*exists
+create table src(v int);
+
+statement error sink.*exists
+create table sink(v int);
+
+statement error view.*exists
+create table v(v int);
+
+# cleanup
+
+statement ok
+drop view v;
+
+statement ok
+drop sink sink;
+
+statement ok
+drop source msrc;
+
+statement ok
+drop source src;
+
+statement ok
+drop index idx;
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;

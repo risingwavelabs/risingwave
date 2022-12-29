@@ -1,0 +1,36 @@
+# Copied from https://github.com/duckdb/duckdb (MIT licensed).
+# Copyright 2018-2022 Stichting DuckDB Foundation
+
+# name: test/sql/select/test_schema_reference.test
+# description: Test schema reference in column reference
+# group: [select]
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE SCHEMA s1;
+
+statement ok
+CREATE TABLE s1.tbl(i INTEGER)
+
+# standard schema reference
+statement ok
+SELECT s1.tbl.i FROM s1.tbl;
+
+# TODO: https://github.com/risingwavelabs/risingwave/issues/6774
+# schema mismatch
+# statement error
+# SELECT s2.tbl.i FROM s1.tbl;
+
+# TODO: https://github.com/risingwavelabs/risingwave/issues/6774
+# no schema present
+# (original query) SELECT a.tbl.i FROM range(10) tbl(i)
+# statement error
+# SELECT a.tbl.i FROM range(0, 10, 1) tbl(i)
+
+statement ok
+DROP TABLE s1.tbl;
+
+statement ok
+DROP SCHEMA s1

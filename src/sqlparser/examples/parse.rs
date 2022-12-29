@@ -15,6 +15,7 @@
 use std::io::BufRead;
 
 use risingwave_sqlparser::parser::*;
+use risingwave_sqlparser::tokenizer::Tokenizer;
 
 /// Input SQL, output AST.
 fn main() {
@@ -25,7 +26,12 @@ fn main() {
         if !sql.ends_with(';') {
             continue;
         }
+
+        let tokens = Tokenizer::new(&sql).tokenize().unwrap();
+        println!("{:?}", tokens);
         let ast = Parser::parse_sql(&sql).unwrap();
         println!("{:?}", ast);
+
+        sql = String::new();
     }
 }

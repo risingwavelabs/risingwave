@@ -52,4 +52,13 @@ pub struct KinesisProperties {
         alias = "kinesis.assumerole.external_id"
     )]
     pub assume_role_external_id: Option<String>,
+
+    #[serde(rename = "scan.startup.mode", alias = "kinesis.scan.startup.mode")]
+    // accepted values: "latest", "earliest", "sequence_number"
+    pub scan_startup_mode: Option<String>,
+    #[serde(
+        rename = "scan.startup.sequence_number",
+        alias = "kinesis.scan.startup.sequence_number"
+    )]
+    pub seq_offset: Option<String>,
 }

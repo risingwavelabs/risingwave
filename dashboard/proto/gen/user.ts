@@ -78,6 +78,8 @@ export interface GrantPrivilege {
     | { $case: "schemaId"; schemaId: number }
     | { $case: "tableId"; tableId: number }
     | { $case: "sourceId"; sourceId: number }
+    | { $case: "sinkId"; sinkId: number }
+    | { $case: "viewId"; viewId: number }
     | { $case: "allTablesSchemaId"; allTablesSchemaId: number }
     | { $case: "allSourcesSchemaId"; allSourcesSchemaId: number };
   actionWithOpts: GrantPrivilege_ActionWithGrantOption[];
@@ -384,6 +386,10 @@ export const GrantPrivilege = {
         ? { $case: "tableId", tableId: Number(object.tableId) }
         : isSet(object.sourceId)
         ? { $case: "sourceId", sourceId: Number(object.sourceId) }
+        : isSet(object.sinkId)
+        ? { $case: "sinkId", sinkId: Number(object.sinkId) }
+        : isSet(object.viewId)
+        ? { $case: "viewId", viewId: Number(object.viewId) }
         : isSet(object.allTablesSchemaId)
         ? { $case: "allTablesSchemaId", allTablesSchemaId: Number(object.allTablesSchemaId) }
         : isSet(object.allSourcesSchemaId)
@@ -401,6 +407,8 @@ export const GrantPrivilege = {
     message.object?.$case === "schemaId" && (obj.schemaId = Math.round(message.object?.schemaId));
     message.object?.$case === "tableId" && (obj.tableId = Math.round(message.object?.tableId));
     message.object?.$case === "sourceId" && (obj.sourceId = Math.round(message.object?.sourceId));
+    message.object?.$case === "sinkId" && (obj.sinkId = Math.round(message.object?.sinkId));
+    message.object?.$case === "viewId" && (obj.viewId = Math.round(message.object?.viewId));
     message.object?.$case === "allTablesSchemaId" &&
       (obj.allTablesSchemaId = Math.round(message.object?.allTablesSchemaId));
     message.object?.$case === "allSourcesSchemaId" &&
@@ -436,6 +444,12 @@ export const GrantPrivilege = {
       object.object?.$case === "sourceId" && object.object?.sourceId !== undefined && object.object?.sourceId !== null
     ) {
       message.object = { $case: "sourceId", sourceId: object.object.sourceId };
+    }
+    if (object.object?.$case === "sinkId" && object.object?.sinkId !== undefined && object.object?.sinkId !== null) {
+      message.object = { $case: "sinkId", sinkId: object.object.sinkId };
+    }
+    if (object.object?.$case === "viewId" && object.object?.viewId !== undefined && object.object?.viewId !== null) {
+      message.object = { $case: "viewId", viewId: object.object.viewId };
     }
     if (
       object.object?.$case === "allTablesSchemaId" &&

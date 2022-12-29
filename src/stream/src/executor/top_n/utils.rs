@@ -12,27 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, Row, RowDeserializer, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::CompactedRow;
-use risingwave_common::types::DataType;
+use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::OrderPair;
 
 use super::top_n_cache::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message,
-    PkIndices, PkIndicesRef,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
+    ExecutorInfo, Message, PkIndicesRef,
 };
 
 #[async_trait]
@@ -43,14 +43,22 @@ pub trait TopNExecutorBase: Send + 'static {
     /// Flush the buffered chunk to the storage backend.
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 
+    fn info(&self) -> &ExecutorInfo;
+
     /// See [`Executor::schema`].
-    fn schema(&self) -> &Schema;
+    fn schema(&self) -> &Schema {
+        &self.info().schema
+    }
 
     /// See [`Executor::pk_indices`].
-    fn pk_indices(&self) -> PkIndicesRef<'_>;
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
+        self.info().pk_indices.as_ref()
+    }
 
     /// See [`Executor::identity`].
-    fn identity(&self) -> &str;
+    fn identity(&self) -> &str {
+        &self.info().identity
+    }
 
     /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
     /// by Group Top-N since it's distributed.
@@ -58,6 +66,7 @@ pub trait TopNExecutorBase: Send + 'static {
         unreachable!()
     }
 
+    fn evict(&mut self) {}
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
 }
 
@@ -86,6 +95,10 @@ where
 
     fn identity(&self) -> &str {
         self.inner.identity()
+    }
+
+    fn info(&self) -> ExecutorInfo {
+        self.inner.info().clone()
     }
 }
 
@@ -120,7 +133,7 @@ where
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.inner.update_vnode_bitmap(vnode_bitmap);
                     }
-
+                    self.inner.evict();
                     yield Message::Barrier(barrier)
                 }
             };
@@ -137,12 +150,8 @@ pub fn generate_output(
         let mut data_chunk_builder = DataChunkBuilder::new(schema.data_types(), new_rows.len() + 1);
         let row_deserializer = RowDeserializer::new(schema.data_types());
         for compacted_row in new_rows {
-            let res = data_chunk_builder.append_one_row_from_datums(
-                row_deserializer
-                    .deserialize(compacted_row.row.as_ref())?
-                    .0
-                    .iter(),
-            );
+            let res = data_chunk_builder
+                .append_one_row(row_deserializer.deserialize(compacted_row.row.as_ref())?);
             debug_assert!(res.is_none());
         }
         // since `new_rows` is not empty, we unwrap directly
@@ -159,44 +168,66 @@ pub fn generate_output(
     }
 }
 
-pub fn generate_executor_pk_indices_info(
-    order_pairs: &[OrderPair],
-    schema: &Schema,
-) -> (PkIndices, Vec<DataType>, Vec<OrderType>) {
-    let mut internal_key_indices = vec![];
-    let mut internal_order_types = vec![];
-    for order_pair in order_pairs {
-        internal_key_indices.push(order_pair.column_idx);
-        internal_order_types.push(order_pair.order_type);
-    }
-    let internal_data_types = internal_key_indices
-        .iter()
-        .map(|idx| schema.fields()[*idx].data_type())
-        .collect();
+/// For a given pk (Row), it can be split into `order_key` and `additional_pk` according to
+/// `order_by_len`, and the two split parts are serialized separately.
+pub fn serialize_pk_to_cache_key(pk: impl Row, cache_key_serde: &CacheKeySerde) -> CacheKey {
+    // TODO(row trait): may support splitting row
+    let pk = pk.into_owned_row().into_inner();
+    let (cache_key_first, cache_key_second) = pk.split_at(cache_key_serde.2);
     (
-        internal_key_indices,
-        internal_data_types,
-        internal_order_types,
+        cache_key_first.memcmp_serialize(&cache_key_serde.0),
+        cache_key_second.memcmp_serialize(&cache_key_serde.1),
     )
 }
 
-/// For a given pk (Row), it can be split into `order_key` and `additional_pk` according to
-/// `order_by_len`, and the two split parts are serialized separately.
-pub fn serialize_pk_to_cache_key(
-    pk: Row,
-    order_by_len: usize,
-    cache_key_serde: &(OrderedRowSerde, OrderedRowSerde),
-) -> CacheKey {
-    let (cache_key_first, cache_key_second) = pk.0.split_at(order_by_len);
-    let mut cache_key_first_bytes = vec![];
-    let mut cache_key_second_bytes = vec![];
-    cache_key_serde.0.serialize(
-        &Row::new(cache_key_first.to_vec()),
-        &mut cache_key_first_bytes,
+/// See [`CacheKey`].
+///
+/// The last `usize` is the length of `order_by`, i.e., the first part of the key.
+pub type CacheKeySerde = (OrderedRowSerde, OrderedRowSerde, usize);
+
+pub fn create_cache_key_serde(
+    storage_key: &[OrderPair],
+    pk_indices: PkIndicesRef<'_>,
+    schema: &Schema,
+    order_by: &[OrderPair],
+    group_by: &[usize],
+) -> CacheKeySerde {
+    {
+        // validate storage_key = group_by + order_by + additional_pk
+        for i in 0..group_by.len() {
+            assert_eq!(storage_key[i].column_idx, group_by[i]);
+        }
+        for i in group_by.len()..(group_by.len() + order_by.len()) {
+            assert_eq!(storage_key[i], order_by[i - group_by.len()]);
+        }
+        let pk_indices = pk_indices.iter().copied().collect::<HashSet<_>>();
+        for i in (group_by.len() + order_by.len())..storage_key.len() {
+            assert!(
+                pk_indices.contains(&storage_key[i].column_idx),
+                "storage_key = {:?}, pk_indices = {:?}",
+                storage_key,
+                pk_indices
+            );
+        }
+    }
+
+    let (cache_key_data_types, cache_key_order_types): (Vec<_>, Vec<_>) = storage_key
+        [group_by.len()..]
+        .iter()
+        .map(|o| (schema[o.column_idx].data_type(), o.order_type))
+        .unzip();
+
+    let order_by_len = order_by.len();
+    let (first_key_data_types, second_key_data_types) = cache_key_data_types.split_at(order_by_len);
+    let (first_key_order_types, second_key_order_types) =
+        cache_key_order_types.split_at(order_by_len);
+    let first_key_serde = OrderedRowSerde::new(
+        first_key_data_types.to_vec(),
+        first_key_order_types.to_vec(),
     );
-    cache_key_serde.1.serialize(
-        &Row::new(cache_key_second.to_vec()),
-        &mut cache_key_second_bytes,
+    let second_key_serde = OrderedRowSerde::new(
+        second_key_data_types.to_vec(),
+        second_key_order_types.to_vec(),
     );
-    (cache_key_first_bytes, cache_key_second_bytes)
+    (first_key_serde, second_key_serde, order_by_len)
 }

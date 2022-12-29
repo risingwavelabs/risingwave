@@ -19,7 +19,7 @@ use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use risingwave_common::bail;
-use risingwave_common::types::VnodeMapping;
+use risingwave_common::hash::VnodeMapping;
 use risingwave_common::util::compress::compress_data;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -138,8 +138,8 @@ impl Scheduler {
                 .push(p);
         }
         let mut parallel_units: LinkedList<_> = parallel_units_map
-            .into_iter()
-            .map(|(_k, v)| v.into_iter())
+            .into_values()
+            .map(|v| v.into_iter())
             .collect();
 
         // Visit the parallel units in a round-robin manner on each worker.
@@ -268,12 +268,14 @@ mod test {
 
     use itertools::Itertools;
     use risingwave_common::buffer::Bitmap;
-    use risingwave_common::types::VIRTUAL_NODE_COUNT;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_pb::catalog::Table;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::stream_plan::stream_node::NodeBody;
-    use risingwave_pb::stream_plan::{MaterializeNode, StreamActor, StreamNode, TopNNode};
+    use risingwave_pb::stream_plan::{
+        FragmentTypeFlag, MaterializeNode, StreamActor, StreamNode, TopNNode,
+    };
 
     use super::*;
     use crate::manager::{ClusterManager, MetaSrvEnv};
@@ -305,7 +307,7 @@ mod test {
             .map(|id| {
                 let fragment = Fragment {
                     fragment_id: id,
-                    fragment_type: 0,
+                    fragment_type_mask: FragmentTypeFlag::FragmentUnspecified as u32,
                     distribution_type: FragmentDistributionType::Single as i32,
                     actors: vec![StreamActor {
                         actor_id,
@@ -357,7 +359,7 @@ mod test {
                 actor_id += node_count * parallel_degree as u32;
                 Fragment {
                     fragment_id,
-                    fragment_type: 0,
+                    fragment_type_mask: FragmentTypeFlag::FragmentUnspecified as u32,
                     distribution_type: FragmentDistributionType::Hash as i32,
                     actors,
                     ..Default::default()
@@ -398,9 +400,9 @@ mod test {
             assert_ne!(fragment.vnode_mapping, None,);
             let mut vnode_sum = 0;
             for actor in fragment.actors {
-                vnode_sum += Bitmap::from(actor.get_vnode_bitmap()?).num_high_bits();
+                vnode_sum += Bitmap::from(actor.get_vnode_bitmap()?).count_ones();
             }
-            assert_eq!(vnode_sum, VIRTUAL_NODE_COUNT);
+            assert_eq!(vnode_sum, VirtualNode::COUNT);
         }
 
         Ok(())

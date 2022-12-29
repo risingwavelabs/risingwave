@@ -12,23 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::error::Result;
 
+use super::generic::GenericPlanNode;
 use super::{
-    generic, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef, PredicatePushdown,
-    StreamSource, ToBatch, ToStream,
+    generic, BatchSource, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
+    PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::optimizer::plan_node::utils::TableCatalogBuilder;
+use crate::catalog::ColumnId;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::session::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition};
 use crate::TableCatalog;
 
@@ -40,24 +41,25 @@ pub struct LogicalSource {
 }
 
 impl LogicalSource {
-    pub fn new(source_catalog: Rc<SourceCatalog>, ctx: OptimizerContextRef) -> Self {
-        let mut id_to_idx = HashMap::new();
+    pub fn new(
+        source_catalog: Option<Rc<SourceCatalog>>,
+        column_descs: Vec<ColumnDesc>,
+        pk_col_ids: Vec<ColumnId>,
+        row_id_index: Option<usize>,
+        gen_row_id: bool,
+        ctx: OptimizerContextRef,
+    ) -> Self {
+        let core = generic::Source {
+            catalog: source_catalog,
+            column_descs,
+            pk_col_ids,
+            row_id_index,
+            gen_row_id,
+        };
 
-        let fields = source_catalog
-            .columns
-            .iter()
-            .enumerate()
-            .map(|(idx, c)| {
-                id_to_idx.insert(c.column_id(), idx);
-                (&c.column_desc).into()
-            })
-            .collect();
-        let pk_indices = source_catalog
-            .pk_col_ids
-            .iter()
-            .map(|c| id_to_idx.get(c).copied())
-            .collect::<Option<Vec<_>>>();
-        let schema = Schema { fields };
+        let schema = core.schema();
+        let pk_indices = core.logical_pk();
+
         let (functional_dependency, pk_indices) = match pk_indices {
             Some(pk_indices) => (
                 FunctionalDependencySet::with_key(schema.len(), &pk_indices),
@@ -65,11 +67,10 @@ impl LogicalSource {
             ),
             None => (FunctionalDependencySet::new(schema.len()), vec![]),
         };
+
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
-        LogicalSource {
-            base,
-            core: generic::Source(source_catalog),
-        }
+
+        LogicalSource { base, core }
     }
 
     pub(super) fn column_names(&self) -> Vec<String> {
@@ -80,34 +81,12 @@ impl LogicalSource {
             .collect()
     }
 
-    pub fn source_catalog(&self) -> Rc<SourceCatalog> {
-        self.core.0.clone()
+    pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
+        self.core.catalog.clone()
     }
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
-        // note that source's internal table is to store partition_id -> offset mapping and its
-        // schema is irrelevant to input schema
-        let mut builder =
-            TableCatalogBuilder::new(self.ctx().inner().with_options.internal_table_subset());
-
-        let key = Field {
-            data_type: DataType::Varchar,
-            name: "partition_id".to_string(),
-            sub_fields: vec![],
-            type_name: "".to_string(),
-        };
-        let value = Field {
-            data_type: DataType::Varchar,
-            name: "offset".to_string(),
-            sub_fields: vec![],
-            type_name: "".to_string(),
-        };
-
-        let ordered_col_idx = builder.add_column(&key);
-        builder.add_column(&value);
-        builder.add_order_column(ordered_col_idx, OrderType::Ascending);
-
-        builder.build(vec![])
+        generic::Source::infer_internal_table_catalog(&self.base)
     }
 }
 
@@ -115,43 +94,55 @@ impl_plan_tree_node_for_leaf! {LogicalSource}
 
 impl fmt::Display for LogicalSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "LogicalSource {{ source: {}, columns: [{}] }}",
-            self.source_catalog().name,
-            self.column_names().join(", ")
-        )
+        if let Some(catalog) = self.source_catalog() {
+            write!(
+                f,
+                "LogicalSource {{ source: {}, columns: [{}] }}",
+                catalog.name,
+                self.column_names().join(", ")
+            )
+        } else {
+            write!(f, "LogicalSource")
+        }
     }
 }
 
 impl ColPrunable for LogicalSource {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         LogicalProject::with_mapping(self.clone().into(), mapping).into()
     }
 }
 
 impl PredicatePushdown for LogicalSource {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        _ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }
 
 impl ToBatch for LogicalSource {
     fn to_batch(&self) -> Result<PlanRef> {
-        Err(RwError::from(ErrorCode::NotImplemented(
-            "there is no batch source operator".to_string(),
-            None.into(),
-        )))
+        Ok(BatchSource::new(self.clone()).into())
     }
 }
 
 impl ToStream for LogicalSource {
-    fn to_stream(&self) -> Result<PlanRef> {
-        Ok(StreamSource::new(self.clone()).into())
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        let mut plan: PlanRef = StreamSource::new(self.clone()).into();
+        if let Some(row_id_index) = self.core.row_id_index  && self.core.gen_row_id{
+            plan = StreamRowIdGen::new(plan, row_id_index).into();
+        }
+        Ok(plan)
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         Ok((
             self.clone().into(),
             ColIndexMapping::identity(self.schema().len()),

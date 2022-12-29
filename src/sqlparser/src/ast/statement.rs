@@ -18,12 +18,12 @@ use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::ObjectType;
+use super::{Ident, ObjectType, Query};
 use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
 };
 use crate::keywords::Keyword;
-use crate::parser::{Parser, ParserError};
+use crate::parser::{IsOptional, Parser, ParserError};
 use crate::tokenizer::Token;
 
 /// Consumes token from the parser into an AST node.
@@ -88,7 +88,9 @@ pub enum SourceSchema {
     Json,             // Keyword::JSON
     DebeziumJson,     // Keyword::DEBEZIUM_JSON
     Avro(AvroSchema), // Keyword::AVRO
-    Maxwell,
+    Maxwell,          // Keyword::MAXWELL
+    CanalJson,        // Keyword::CANAL_JSON
+    CSV(CsvInfo),     // Keyword::CSV
 }
 
 impl ParseTo for SourceSchema {
@@ -105,9 +107,14 @@ impl ParseTo for SourceSchema {
             SourceSchema::Avro(avro_schema)
         } else if p.parse_keywords(&[Keyword::MAXWELL]) {
             SourceSchema::Maxwell
+        } else if p.parse_keywords(&[Keyword::CANAL_JSON]) {
+            SourceSchema::CanalJson
+        } else if p.parse_keywords(&[Keyword::CSV]) {
+            impl_parse_to!(csv_info: CsvInfo, p);
+            SourceSchema::CSV(csv_info)
         } else {
             return Err(ParserError::ParserError(
-                "expected JSON | PROTOBUF | DEBEZIUM JSON | AVRO after ROW FORMAT".to_string(),
+                "expected JSON | PROTOBUF | DEBEZIUM_JSON | AVRO | MAXWELL | CANAL_JSON after ROW FORMAT".to_string(),
             ));
         };
         Ok(schema)
@@ -122,6 +129,8 @@ impl fmt::Display for SourceSchema {
             SourceSchema::Maxwell => write!(f, "MAXWELL"),
             SourceSchema::DebeziumJson => write!(f, "DEBEZIUM JSON"),
             SourceSchema::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
+            SourceSchema::CanalJson => write!(f, "CANAL JSON"),
+            SourceSchema::CSV(csv_ingo) => write!(f, "CSV {}", csv_ingo),
         }
     }
 }
@@ -137,6 +146,7 @@ impl fmt::Display for SourceSchema {
 pub struct ProtobufSchema {
     pub message_name: AstString,
     pub row_schema_location: AstString,
+    pub use_schema_registry: bool,
 }
 
 impl ParseTo for ProtobufSchema {
@@ -144,10 +154,12 @@ impl ParseTo for ProtobufSchema {
         impl_parse_to!([Keyword::MESSAGE], p);
         impl_parse_to!(message_name: AstString, p);
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
+        impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
         impl_parse_to!(row_schema_location: AstString, p);
         Ok(Self {
             message_name,
             row_schema_location,
+            use_schema_registry,
         })
     }
 }
@@ -158,6 +170,7 @@ impl fmt::Display for ProtobufSchema {
         impl_fmt_display!([Keyword::MESSAGE], v);
         impl_fmt_display!(message_name, v, self);
         impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
+        impl_fmt_display!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], v, self);
         impl_fmt_display!(row_schema_location, v, self);
         v.iter().join(" ").fmt(f)
     }
@@ -174,6 +187,7 @@ impl fmt::Display for ProtobufSchema {
 pub struct AvroSchema {
     pub message_name: AstString,
     pub row_schema_location: AstString,
+    pub use_schema_registry: bool,
 }
 
 impl ParseTo for AvroSchema {
@@ -181,10 +195,12 @@ impl ParseTo for AvroSchema {
         impl_parse_to!([Keyword::MESSAGE], p);
         impl_parse_to!(message_name: AstString, p);
         impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
+        impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
         impl_parse_to!(row_schema_location: AstString, p);
         Ok(Self {
             message_name,
             row_schema_location,
+            use_schema_registry,
         })
     }
 }
@@ -195,7 +211,49 @@ impl fmt::Display for AvroSchema {
         impl_fmt_display!([Keyword::MESSAGE], v);
         impl_fmt_display!(message_name, v, self);
         impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
+        impl_fmt_display!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], v, self);
         impl_fmt_display!(row_schema_location, v, self);
+        v.iter().join(" ").fmt(f)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CsvInfo {
+    pub delimiter: u8,
+    pub has_header: bool,
+}
+
+impl ParseTo for CsvInfo {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        impl_parse_to!(without_header => [Keyword::WITHOUT, Keyword::HEADER], p);
+        impl_parse_to!([Keyword::DELIMITED, Keyword::BY], p);
+        impl_parse_to!(delimiter: AstString, p);
+        let mut chars = delimiter.0.chars().collect_vec();
+        if chars.len() != 1 {
+            return Err(ParserError::ParserError(format!(
+                "The delimiter should be a char, but got {:?}",
+                chars
+            )));
+        }
+        let delimiter = chars.remove(0) as u8;
+        Ok(Self {
+            delimiter,
+            has_header: !without_header,
+        })
+    }
+}
+
+impl fmt::Display for CsvInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut v: Vec<String> = vec![];
+        if !self.has_header {
+            v.push(format!(
+                "{}",
+                AstVec([Keyword::WITHOUT, Keyword::HEADER].to_vec())
+            ));
+        }
+        impl_fmt_display!(delimiter, v, self);
         v.iter().join(" ").fmt(f)
     }
 }
@@ -234,6 +292,22 @@ impl fmt::Display for CreateSourceStatement {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CreateSink {
+    From(ObjectName),
+    AsQuery(Box<Query>),
+}
+
+impl fmt::Display for CreateSink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::From(mv) => write!(f, "FROM {}", mv),
+            Self::AsQuery(query) => write!(f, "AS {}", query),
+        }
+    }
+}
+
 // sql_grammar!(CreateSinkStatement {
 //     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
 //     sink_name: Ident,
@@ -247,7 +321,8 @@ pub struct CreateSinkStatement {
     pub if_not_exists: bool,
     pub sink_name: ObjectName,
     pub with_properties: WithProperties,
-    pub materialized_view: ObjectName,
+    pub sink_from: CreateSink,
+    pub columns: Vec<Ident>,
 }
 
 impl ParseTo for CreateSinkStatement {
@@ -255,15 +330,31 @@ impl ParseTo for CreateSinkStatement {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(sink_name: ObjectName, p);
 
-        p.expect_keyword(Keyword::FROM)?;
-        impl_parse_to!(materialized_view: ObjectName, p);
+        let columns = p.parse_parenthesized_column_list(IsOptional::Optional)?;
+
+        let sink_from = if p.parse_keyword(Keyword::FROM) {
+            impl_parse_to!(from_name: ObjectName, p);
+            CreateSink::From(from_name)
+        } else if p.parse_keyword(Keyword::AS) {
+            let query = Box::new(p.parse_query()?);
+            CreateSink::AsQuery(query)
+        } else {
+            p.expected("FROM or AS after CREATE SINK sink_name", p.peek_token())?
+        };
 
         impl_parse_to!(with_properties: WithProperties, p);
+        if with_properties.0.is_empty() {
+            return Err(ParserError::ParserError(
+                "sink properties not provided".to_string(),
+            ));
+        }
+
         Ok(Self {
             if_not_exists,
             sink_name,
             with_properties,
-            materialized_view,
+            sink_from,
+            columns,
         })
     }
 }
@@ -273,8 +364,7 @@ impl fmt::Display for CreateSinkStatement {
         let mut v: Vec<String> = vec![];
         impl_fmt_display!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], v, self);
         impl_fmt_display!(sink_name, v, self);
-        impl_fmt_display!([Keyword::FROM], v);
-        impl_fmt_display!(materialized_view, v, self);
+        impl_fmt_display!(sink_from, v, self);
         impl_fmt_display!(with_properties, v, self);
         v.iter().join(" ").fmt(f)
     }

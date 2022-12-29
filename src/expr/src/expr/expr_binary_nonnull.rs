@@ -19,21 +19,24 @@ use risingwave_common::array::{
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
 
+use super::Expression;
 use crate::expr::expr_binary_bytes::new_concat_op;
 use crate::expr::template::BinaryExpression;
-use crate::expr::BoxedExpression;
+use crate::expr::{template_fast, BoxedExpression};
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cmp::*;
+use crate::vector_op::date_trunc::{date_trunc_interval, date_trunc_timestamp};
 use crate::vector_op::extract::{
-    extract_from_date, extract_from_timestamp, extract_from_timestampz,
+    extract_from_date, extract_from_timestamp, extract_from_timestamptz,
 };
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
-use crate::vector_op::timestampz::{timestamp_at_time_zone, timestampz_at_time_zone};
+use crate::vector_op::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
+use crate::vector_op::to_timestamp::to_timestamp;
 use crate::vector_op::tumble::{
-    tumble_start_date, tumble_start_date_time, tumble_start_timestampz,
+    tumble_start_date, tumble_start_date_time, tumble_start_timestamptz,
 };
 use crate::{for_all_cmp_variants, ExprError, Result};
 
@@ -79,6 +82,31 @@ macro_rules! gen_atm_impl {
     };
 }
 
+macro_rules! gen_atm_impl_fast {
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $rt:ident, $func:ident },)*) => {
+        match ($l.return_type(), $r.return_type()) {
+            $(
+                ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
+                    template_fast::BinaryExpression::new(
+                        $l, $r, $ret,
+                        $func::<
+                            <$i1! { type_array } as Array>::OwnedItem,
+                            <$i2! { type_array } as Array>::OwnedItem,
+                            <$rt! { type_array } as Array>::OwnedItem
+                        >,
+                    ).boxed()
+                },
+            )*
+            _ => {
+                return Err(ExprError::UnsupportedFunction(format!(
+                    "{:?} atm {:?}",
+                    $l.return_type(), $r.return_type()
+                )));
+            }
+        }
+    };
+}
+
 /// This macro helps create comparison expression. Its output array is a bool array
 /// Similar to `gen_atm_impl`.
 macro_rules! gen_cmp_impl {
@@ -86,23 +114,15 @@ macro_rules! gen_cmp_impl {
         match ($l.return_type(), $r.return_type()) {
             $(
                 ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
-                    Box::new(
-                        BinaryExpression::<
-                            $i1! { type_array },
-                            $i2! { type_array },
-                            BoolArray,
-                            _
-                        >::new(
-                            $l,
-                            $r,
-                            $ret,
-                            $func::<
-                                <$i1! { type_array } as Array>::OwnedItem,
-                                <$i2! { type_array } as Array>::OwnedItem,
-                                <$cast! { type_array } as Array>::OwnedItem
-                            >,
-                        )
-                    ) as BoxedExpression
+                    template_fast::CompareExpression::new(
+                        $l,
+                        $r,
+                        $func::<
+                            <$i1! { type_array } as Array>::OwnedItem,
+                            <$i2! { type_array } as Array>::OwnedItem,
+                            <$cast! { type_array } as Array>::OwnedItem
+                        >,
+                    ).boxed()
                 }
             ),*
             _ => {
@@ -157,10 +177,20 @@ macro_rules! gen_shift_impl {
 /// * `$ret`: returned expression
 /// * `macro`: a macro helps create expression
 /// * `general_f`: generic cmp function (require a common ``TryInto`` type for two input).
+/// * `boolean_f`: boolean cmp function
 /// * `str_f`: cmp function between str
 macro_rules! gen_binary_expr_cmp {
-    ($macro:ident, $general_f:ident, $op:ident, $l:expr, $r:expr, $ret:expr) => {
+    ($macro:ident, $general_f:ident, $boolean_f:ident, $op:ident, $l:expr, $r:expr, $ret:expr) => {
         match ($l.return_type(), $r.return_type()) {
+            (DataType::Boolean, DataType::Boolean) => {
+                template_fast::BooleanBinaryExpression::new($l, $r, $boolean_f, |l, r| {
+                    match (l, r) {
+                        (Some(l), Some(r)) => Some($general_f::<bool, bool, bool>(l, r)),
+                        _ => None,
+                    }
+                })
+                .boxed()
+            }
             (DataType::Varchar, DataType::Varchar) => {
                 Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
                     $l,
@@ -279,8 +309,8 @@ macro_rules! gen_binary_expr_bitwise {
             { int32, int16, int32, $general_f },
             { int32, int32, int32, $general_f },
             { int32, int64, int64, $general_f },
-            { int64, int16,int64, $general_f },
-            { int64, int32,int64, $general_f },
+            { int64, int16, int64, $general_f },
+            { int64, int32, int64, $general_f },
             { int64, int64, int64, $general_f },
             $(
                 { $i1, $i2, $rt, $func },
@@ -339,12 +369,14 @@ fn build_extract_expr(
                 DecimalArray,
                 _,
             >::new(l, r, ret, extract_from_timestamp)),
-            DataType::Timestampz => Box::new(BinaryExpression::<
+            DataType::Timestamptz => Box::new(BinaryExpression::<
                 Utf8Array,
                 I64Array,
                 DecimalArray,
                 _,
-            >::new(l, r, ret, extract_from_timestampz)),
+            >::new(
+                l, r, ret, extract_from_timestamptz
+            )),
             _ => {
                 return Err(ExprError::UnsupportedFunction(format!(
                     "Extract ( {:?} ) is not supported yet!",
@@ -367,12 +399,12 @@ fn build_at_time_zone_expr(
             I64Array,
             _,
         >::new(l, r, ret, timestamp_at_time_zone)),
-        DataType::Timestampz => Box::new(BinaryExpression::<
+        DataType::Timestamptz => Box::new(BinaryExpression::<
             I64Array,
             Utf8Array,
             NaiveDateTimeArray,
             _,
-        >::new(l, r, ret, timestampz_at_time_zone)),
+        >::new(l, r, ret, timestamptz_at_time_zone)),
         _ => {
             return Err(ExprError::UnsupportedFunction(format!(
                 "{:?} AT TIME ZONE is not supported yet!",
@@ -381,6 +413,59 @@ fn build_at_time_zone_expr(
         }
     };
     Ok(expr)
+}
+
+pub fn new_date_trunc_expr(
+    ret: DataType,
+    field: BoxedExpression,
+    source: BoxedExpression,
+    timezone: Option<(BoxedExpression, BoxedExpression)>,
+) -> BoxedExpression {
+    match source.return_type() {
+        DataType::Timestamp => BinaryExpression::<
+            Utf8Array,
+            NaiveDateTimeArray,
+            NaiveDateTimeArray,
+            _,
+        >::new(field, source, ret, date_trunc_timestamp).boxed(),
+        DataType::Timestamptz => {
+            // timestamptz AT TIME ZONE zone -> timestamp
+            // truncate(field, timestamp) -> timestamp
+            // timestamp AT TIME ZONE zone -> timestamptz
+            let (timezone1, timezone2) = timezone
+                .expect("A time zone must be specified when processing timestamp with time zone");
+            let timestamp = BinaryExpression::<I64Array, Utf8Array, NaiveDateTimeArray, _>::new(
+                source,
+                timezone1,
+                DataType::Timestamp,
+                timestamptz_at_time_zone,
+            ).boxed();
+            let truncated = BinaryExpression::<
+                Utf8Array,
+                NaiveDateTimeArray,
+                NaiveDateTimeArray,
+                _,
+            >::new(
+                field,
+                timestamp,
+                DataType::Timestamp,
+                date_trunc_timestamp,
+            ).boxed();
+            BinaryExpression::<NaiveDateTimeArray, Utf8Array, I64Array, _>::new(
+                truncated,
+                timezone2,
+                DataType::Timestamptz,
+                timestamp_at_time_zone,
+            ).boxed()
+        }
+        DataType::Interval => BinaryExpression::<
+            Utf8Array,
+            IntervalArray,
+            IntervalArray,
+            _,
+        >::new(field, source, ret, date_trunc_interval).boxed(),
+        _ => panic!("source must be a value expression of type timestamp, timestamp with time zone, or interval."),
+    }
 }
 
 pub fn new_binary_expr(
@@ -392,22 +477,22 @@ pub fn new_binary_expr(
     use crate::expr::data_types::*;
     let expr = match expr_type {
         Type::Equal => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_eq, EQ, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_eq, boolean_eq, EQ, l, r, ret}
         }
         Type::NotEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_ne, NE, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_ne, boolean_ne, NE, l, r, ret}
         }
         Type::LessThan => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_lt, LT, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_lt, boolean_lt, LT, l, r, ret}
         }
         Type::GreaterThan => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_gt, GT, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_gt, boolean_gt, GT, l, r, ret}
         }
         Type::GreaterThanOrEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_ge, GE, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_ge, boolean_ge, GE, l, r, ret}
         }
         Type::LessThanOrEqual => {
-            gen_binary_expr_cmp! {gen_cmp_impl, general_le, LE, l, r, ret}
+            gen_binary_expr_cmp! {gen_cmp_impl, general_le, boolean_le, LE, l, r, ret}
         }
         Type::Add => {
             gen_binary_expr_atm! {
@@ -415,8 +500,8 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_add,
                 {
-                    { timestampz, interval, timestampz, timestampz_interval_add },
-                    { interval, timestampz, timestampz, interval_timestampz_add },
+                    { timestamptz, interval, timestamptz, timestamptz_interval_add },
+                    { interval, timestamptz, timestamptz, interval_timestamptz_add },
                     { timestamp, interval, timestamp, timestamp_interval_add },
                     { interval, timestamp, timestamp, interval_timestamp_add },
                     { interval, date, timestamp, interval_date_add },
@@ -437,7 +522,7 @@ pub fn new_binary_expr(
                 l, r, ret,
                 general_sub,
                 {
-                    { timestampz, interval, timestampz, timestampz_interval_sub },
+                    { timestamptz, interval, timestamptz, timestamptz_interval_sub },
                     { timestamp, timestamp, interval, timestamp_timestamp_sub },
                     { timestamp, interval, timestamp, timestamp_interval_sub },
                     { date, date, int32, date_date_sub },
@@ -518,7 +603,7 @@ pub fn new_binary_expr(
         }
         Type::BitwiseAnd => {
             gen_binary_expr_bitwise! {
-                gen_atm_impl,
+                gen_atm_impl_fast,
                 l, r, ret,
                 general_bitand,
                 {
@@ -527,7 +612,7 @@ pub fn new_binary_expr(
         }
         Type::BitwiseOr => {
             gen_binary_expr_bitwise! {
-                gen_atm_impl,
+                gen_atm_impl_fast,
                 l, r, ret,
                 general_bitor,
                 {
@@ -536,7 +621,7 @@ pub fn new_binary_expr(
         }
         Type::BitwiseXor => {
             gen_binary_expr_bitwise! {
-                gen_atm_impl,
+                gen_atm_impl_fast,
                 l, r, ret,
                 general_bitxor,
                 {
@@ -545,14 +630,12 @@ pub fn new_binary_expr(
         }
         Type::Extract => build_extract_expr(ret, l, r)?,
         Type::AtTimeZone => build_at_time_zone_expr(ret, l, r)?,
-        Type::RoundDigit => Box::new(
-            BinaryExpression::<DecimalArray, I32Array, DecimalArray, _>::new(
-                l,
-                r,
-                ret,
-                round_digits,
-            ),
-        ),
+        Type::RoundDigit => Box::new(template_fast::BinaryExpression::new(
+            l,
+            r,
+            ret,
+            round_digits::<i32>,
+        )),
         Type::Position => Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _>::new(
             l, r, ret, position,
         )),
@@ -593,12 +676,12 @@ fn new_tumble_start(
         >::new(
             expr_ia1, expr_ia2, return_type, tumble_start_date_time
         )),
-        DataType::Timestampz => Box::new(
+        DataType::Timestamptz => Box::new(
             BinaryExpression::<I64Array, IntervalArray, I64Array, _>::new(
                 expr_ia1,
                 expr_ia2,
                 return_type,
-                tumble_start_timestampz,
+                tumble_start_timestamptz,
             ),
         ),
         _ => {
@@ -624,9 +707,58 @@ pub fn new_like_default(
     ))
 }
 
+pub fn new_to_timestamp(
+    expr_ia1: BoxedExpression,
+    expr_ia2: BoxedExpression,
+    return_type: DataType,
+) -> BoxedExpression {
+    BinaryExpression::<Utf8Array, Utf8Array, NaiveDateTimeArray, _>::new(
+        expr_ia1,
+        expr_ia2,
+        return_type,
+        to_timestamp,
+    )
+    .boxed()
+}
+
+fn boolean_eq(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = !(l.data() ^ r.data());
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_ne(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = l.data() ^ r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_gt(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = l.data() & !r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_lt(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = !l.data() & r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_ge(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = l.data() | !r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
+fn boolean_le(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = !l.data() | r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
+}
+
 #[cfg(test)]
 mod tests {
-    use chrono::NaiveDate;
     use risingwave_common::array::interval_array::IntervalArray;
     use risingwave_common::array::*;
     use risingwave_common::types::{
@@ -707,8 +839,8 @@ mod tests {
             }
         }
 
-        let col1 = I32Array::from_slice(&lhs).into();
-        let col2 = I32Array::from_slice(&rhs).into();
+        let col1 = I32Array::from_iter(&lhs).into();
+        let col2 = I32Array::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Int32, TypeName::Int32], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -720,7 +852,7 @@ mod tests {
         }
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|int| int.to_scalar_value()),
                 rhs[i].map(|int| int.to_scalar_value()),
             ]);
@@ -747,18 +879,16 @@ mod tests {
                 target.push(None);
             } else {
                 rhs.push(Some(IntervalUnit::from_ymd(0, i, i)));
-                lhs.push(Some(NaiveDateWrapper::new(
-                    NaiveDate::from_num_days_from_ce(i),
-                )));
+                lhs.push(Some(NaiveDateWrapper::from_num_days_from_ce_uncheck(i)));
                 target.push(Some(f(
-                    NaiveDateWrapper::new(NaiveDate::from_num_days_from_ce(i)),
+                    NaiveDateWrapper::from_num_days_from_ce_uncheck(i),
                     IntervalUnit::from_ymd(0, i, i),
                 )));
             }
         }
 
-        let col1 = NaiveDateArray::from_slice(&lhs).into();
-        let col2 = IntervalArray::from_slice(&rhs).into();
+        let col1 = NaiveDateArray::from_iter(&lhs).into();
+        let col2 = IntervalArray::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Date, TypeName::Interval], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -770,7 +900,7 @@ mod tests {
         }
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|date| date.to_scalar_value()),
                 rhs[i].map(|date| date.to_scalar_value()),
             ]);
@@ -810,8 +940,8 @@ mod tests {
             }
         }
 
-        let col1 = DecimalArray::from_slice(&lhs).into();
-        let col2 = DecimalArray::from_slice(&rhs).into();
+        let col1 = DecimalArray::from_iter(&lhs).into();
+        let col2 = DecimalArray::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Decimal, TypeName::Decimal], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
@@ -823,7 +953,7 @@ mod tests {
         }
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|dec| dec.to_scalar_value()),
                 rhs[i].map(|dec| dec.to_scalar_value()),
             ]);

@@ -13,17 +13,24 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::fmt::Debug;
 use std::ops::Bound::*;
-use std::ops::{Bound, RangeBounds};
-use std::{ptr, u64};
+use std::ops::{Bound, Deref, DerefMut, RangeBounds};
+use std::ptr;
 
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut};
+use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::epoch::INVALID_EPOCH;
 
-use super::version_cmp::VersionedComparator;
 use crate::HummockEpoch;
 
 pub const EPOCH_LEN: usize = std::mem::size_of::<HummockEpoch>();
 pub const TABLE_PREFIX_LEN: usize = std::mem::size_of::<u32>();
+
+pub type TableKeyRange = (Bound<TableKey<Vec<u8>>>, Bound<TableKey<Vec<u8>>>);
+pub type UserKeyRange = (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>);
+pub type FullKeyRange = (Bound<FullKey<Vec<u8>>>, Bound<FullKey<Vec<u8>>>);
 
 /// Converts user key to full key by appending `epoch` to the user key.
 pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: HummockEpoch) -> Vec<u8> {
@@ -54,33 +61,31 @@ pub fn split_key_epoch(full_key: &[u8]) -> (&[u8], &[u8]) {
     full_key.split_at(pos)
 }
 
-/// Extracts epoch part from key
-#[inline(always)]
-pub fn get_epoch(full_key: &[u8]) -> HummockEpoch {
-    let mut epoch: HummockEpoch = 0;
-
-    // TODO: check whether this hack improves performance
-    unsafe {
-        let src = &full_key[full_key.len() - EPOCH_LEN..];
-        ptr::copy_nonoverlapping(src.as_ptr(), &mut epoch as *mut _ as *mut u8, EPOCH_LEN);
-    }
-    HummockEpoch::from_be(epoch)
-}
-
-/// Extract user key without epoch part
+/// Extract encoded [`UserKey`] from encoded [`FullKey`] without epoch part
 pub fn user_key(full_key: &[u8]) -> &[u8] {
     split_key_epoch(full_key).0
 }
 
-/// Extract table id in key prefix
+/// Extract table key from encoded [`UserKey`] without table id part
+pub fn table_key(user_key: &[u8]) -> &[u8] {
+    &user_key[TABLE_PREFIX_LEN..]
+}
+
+#[inline(always)]
+/// Extract encoded [`UserKey`] from encoded [`FullKey`] but allow empty slice
+pub fn get_user_key(full_key: &[u8]) -> Vec<u8> {
+    if full_key.is_empty() {
+        vec![]
+    } else {
+        user_key(full_key).to_vec()
+    }
+}
+
+/// Extract table id from encoded [`FullKey`]
 #[inline(always)]
 pub fn get_table_id(full_key: &[u8]) -> u32 {
     let mut buf = full_key;
     buf.get_u32()
-}
-
-pub fn extract_table_id_and_epoch(full_key: &[u8]) -> (u32, HummockEpoch) {
-    (get_table_id(full_key), get_epoch(full_key))
 }
 
 // Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
@@ -322,73 +327,362 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
     (start, end)
 }
 
-pub fn table_prefix(table_id: u32) -> Vec<u8> {
-    let mut buf = BytesMut::with_capacity(TABLE_PREFIX_LEN);
-    buf.put_u32(table_id);
-    buf.to_vec()
+/// [`TableKey`] is an internal concept in storage. It's a wrapper around the key directly from the
+/// user, to make the code clearer and avoid confusion with encoded [`UserKey`] and [`FullKey`].
+///
+/// Its name come from the assumption that Hummock is always accessed by a table-like structure
+/// identified by a [`TableId`].
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TableKey<T: AsRef<[u8]>>(pub T);
+
+impl<T: AsRef<[u8]>> TableKey<T> {
+    pub fn dist_key(&self) -> &[u8] {
+        &self.0.as_ref()[VirtualNode::SIZE..]
+    }
 }
 
-/// [`FullKey`] can be created on either a `Vec<u8>` or a `&[u8]`.
-///
-/// Its format is (`user_key`, `epoch`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FullKey<T: AsRef<[u8]>>(T);
-
-impl<T: AsRef<[u8]>> FullKey<T> {
-    pub fn into_inner(self) -> T {
-        self.0
+impl<T: AsRef<[u8]>> Debug for TableKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TableKey")
+            .field(
+                "table_key",
+                &String::from_utf8(self.0.as_ref().to_vec()).unwrap(),
+            )
+            .finish()
     }
+}
 
-    pub fn inner(&self) -> &T {
+impl<T: AsRef<[u8]>> Deref for TableKey<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
+impl<T: AsRef<[u8]>> DerefMut for TableKey<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+#[inline]
+pub fn map_table_key_range(range: (Bound<Vec<u8>>, Bound<Vec<u8>>)) -> TableKeyRange {
+    (range.0.map(TableKey), range.1.map(TableKey))
+}
+
+/// [`UserKey`] is is an internal concept in storage. In the storage interface, user specifies
+/// `table_key` and `table_id` (in [`ReadOptions`] or [`WriteOptions`]) as the input. The storage
+/// will group these two values into one struct for convenient filtering.
+///
+/// The encoded format is | `table_id` | `table_key` |.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct UserKey<T: AsRef<[u8]>> {
+    // When comparing `UserKey`, we first compare `table_id`, then `table_key`. So the order of
+    // declaration matters.
+    pub table_id: TableId,
+    pub table_key: TableKey<T>,
+}
+
+impl<T: AsRef<[u8]>> UserKey<T> {
+    pub fn new(table_id: TableId, table_key: TableKey<T>) -> Self {
+        Self {
+            table_id,
+            table_key,
+        }
+    }
+
+    /// Pass the inner type of `table_key` to make the code less verbose.
+    pub fn for_test(table_id: TableId, table_key: T) -> Self {
+        Self {
+            table_id,
+            table_key: TableKey(table_key),
+        }
+    }
+
+    /// Encode in to a buffer.
+    pub fn encode_into(&self, buf: &mut impl BufMut) {
+        buf.put_u32(self.table_id.table_id());
+        buf.put_slice(self.table_key.as_ref());
+    }
+
+    /// Encode in to a buffer.
+    pub fn encode_length_prefixed(&self, buf: &mut impl BufMut) {
+        buf.put_u32(self.table_id.table_id());
+        buf.put_u32(self.table_key.as_ref().len() as u32);
+        buf.put_slice(self.table_key.as_ref());
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + self.table_key.as_ref().len());
+        self.encode_into(&mut ret);
+        ret
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.table_key.as_ref().is_empty()
+    }
+
+    /// Get the length of the encoded format.
+    pub fn encoded_len(&self) -> usize {
+        self.table_key.as_ref().len() + TABLE_PREFIX_LEN
+    }
+}
+
+impl<'a> UserKey<&'a [u8]> {
+    /// Construct a [`UserKey`] from a byte slice. Its `table_key` will be a part of the input
+    /// `slice`.
+    pub fn decode(slice: &'a [u8]) -> Self {
+        let table_id: u32 = (&slice[..]).get_u32();
+
+        Self {
+            table_id: TableId::new(table_id),
+            table_key: TableKey(&slice[TABLE_PREFIX_LEN..]),
+        }
+    }
+
+    pub fn to_vec(self) -> UserKey<Vec<u8>> {
+        UserKey::new(self.table_id, TableKey(Vec::from(*self.table_key)))
+    }
+}
+
+impl<T: AsRef<[u8]>> UserKey<T> {
+    pub fn as_ref(&self) -> UserKey<&[u8]> {
+        UserKey::new(self.table_id, TableKey(self.table_key.as_ref()))
+    }
+}
+
+impl UserKey<Vec<u8>> {
+    pub fn decode_length_prefixed(buf: &mut &[u8]) -> Self {
+        let table_id = buf.get_u32();
+        let len = buf.get_u32() as usize;
+        let data = buf[..len].to_vec();
+        buf.advance(len);
+        UserKey::new(TableId::new(table_id), TableKey(data))
+    }
+
+    pub fn extend_from_other(&mut self, other: &UserKey<&[u8]>) {
+        self.table_id = other.table_id;
+        self.table_key.0.clear();
+        self.table_key.0.extend_from_slice(other.table_key.as_ref());
+    }
+
+    /// Use this method to override an old `UserKey<Vec<u8>>` with a `UserKey<&[u8]>` to own the
+    /// table key without reallocating a new `UserKey` object.
+    pub fn set(&mut self, other: UserKey<&[u8]>) {
+        self.table_id = other.table_id;
+        self.table_key.clear();
+        self.table_key.extend_from_slice(other.table_key.as_ref());
+    }
+}
+
+impl Default for UserKey<Vec<u8>> {
+    fn default() -> Self {
+        Self {
+            table_id: TableId::default(),
+            table_key: TableKey(Vec::new()),
+        }
+    }
+}
+
+/// [`FullKey`] is an internal concept in storage. It associates [`UserKey`] with an epoch.
+///
+/// The encoded format is | `user_key` | `epoch` |.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FullKey<T: AsRef<[u8]>> {
+    pub user_key: UserKey<T>,
+    pub epoch: HummockEpoch,
+}
+
+impl<T: AsRef<[u8]>> FullKey<T> {
+    pub fn new(table_id: TableId, table_key: TableKey<T>, epoch: HummockEpoch) -> Self {
+        Self {
+            user_key: UserKey::new(table_id, table_key),
+            epoch,
+        }
+    }
+
+    pub fn from_user_key(user_key: UserKey<T>, epoch: HummockEpoch) -> Self {
+        Self { user_key, epoch }
+    }
+
+    /// Pass the inner type of `table_key` to make the code less verbose.
+    pub fn for_test(table_id: TableId, table_key: T, epoch: HummockEpoch) -> Self {
+        Self {
+            user_key: UserKey::for_test(table_id, table_key),
+            epoch,
+        }
+    }
+
+    /// Encode in to a buffer.
+    pub fn encode_into(&self, buf: &mut impl BufMut) {
+        self.user_key.encode_into(buf);
+        buf.put_u64(self.epoch);
+    }
+
+    pub fn encode(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(
+            TABLE_PREFIX_LEN + self.user_key.table_key.as_ref().len() + EPOCH_LEN,
+        );
+        self.encode_into(&mut buf);
+        buf
+    }
+
+    pub fn encode_reverse_epoch(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(
+            TABLE_PREFIX_LEN + self.user_key.table_key.as_ref().len() + EPOCH_LEN,
+        );
+        self.user_key.encode_into(&mut buf);
+        buf.put_u64(u64::MAX - self.epoch);
+        buf
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.user_key.is_empty()
+    }
+
+    /// Get the length of the encoded format.
+    pub fn encoded_len(&self) -> usize {
+        self.user_key.encoded_len() + EPOCH_LEN
+    }
+}
+
 impl<'a> FullKey<&'a [u8]> {
-    pub fn from_slice(full_key: &'a [u8]) -> Self {
-        Self(full_key)
+    /// Construct a [`FullKey`] from a byte slice.
+    pub fn decode(slice: &'a [u8]) -> Self {
+        let epoch_pos = slice.len() - EPOCH_LEN;
+        let epoch = (&slice[epoch_pos..]).get_u64();
+
+        Self {
+            user_key: UserKey::decode(&slice[..epoch_pos]),
+            epoch,
+        }
+    }
+
+    /// Construct a [`FullKey`] from a byte slice.
+    pub fn decode_reverse_epoch(slice: &'a [u8]) -> Self {
+        let epoch_pos = slice.len() - EPOCH_LEN;
+        let epoch = (&slice[epoch_pos..]).get_u64();
+
+        Self {
+            user_key: UserKey::decode(&slice[..epoch_pos]),
+            epoch: u64::MAX - epoch,
+        }
+    }
+
+    pub fn to_vec(self) -> FullKey<Vec<u8>> {
+        FullKey {
+            user_key: self.user_key.to_vec(),
+            epoch: self.epoch,
+        }
+    }
+}
+
+impl<T: AsRef<[u8]>> FullKey<T> {
+    pub fn to_ref(&self) -> FullKey<&[u8]> {
+        FullKey {
+            user_key: self.user_key.as_ref(),
+            epoch: self.epoch,
+        }
     }
 }
 
 impl FullKey<Vec<u8>> {
-    pub fn from_user_key(user_key: Vec<u8>, epoch: u64) -> Self {
-        Self(key_with_epoch(user_key, epoch))
-    }
-
-    pub fn from_user_key_slice(user_key: &[u8], epoch: u64) -> Self {
-        Self(key_with_epoch(user_key.to_vec(), epoch))
-    }
-
-    pub fn to_user_key(&self) -> &[u8] {
-        user_key(self.0.as_slice())
-    }
-
-    pub fn as_slice(&self) -> FullKey<&[u8]> {
-        FullKey(self.0.as_slice())
+    /// Use this method to override an old `FullKey<Vec<u8>>` with a `FullKey<&[u8]>` to own the
+    /// table key without reallocating a new `FullKey` object.
+    pub fn set(&mut self, other: FullKey<&[u8]>) {
+        self.user_key.set(other.user_key);
+        self.epoch = other.epoch;
     }
 }
 
-impl<T: Eq + AsRef<[u8]>> Ord for FullKey<T> {
+impl Default for FullKey<Vec<u8>> {
+    // Note: Calling `is_empty` on `FullKey::default` will return `true`, so it can be used to
+    // represent unbounded range.
+    fn default() -> Self {
+        Self {
+            user_key: UserKey::default(),
+            epoch: INVALID_EPOCH,
+        }
+    }
+}
+
+impl<T: AsRef<[u8]> + Ord + Eq> Ord for FullKey<T> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        VersionedComparator::compare_key(self.0.as_ref(), other.0.as_ref())
+        // When `user_key` is the same, greater epoch comes first.
+        self.user_key
+            .cmp(&other.user_key)
+            .then_with(|| other.epoch.cmp(&self.epoch))
     }
 }
 
-impl<T: Eq + AsRef<[u8]>> PartialOrd for FullKey<T> {
+impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
+/// Bound table key range with table id to generate a new user key range.
+pub fn bound_table_key_range<T: AsRef<[u8]>>(
+    table_id: TableId,
+    table_key_range: &impl RangeBounds<TableKey<T>>,
+) -> UserKeyRange {
+    let start = match table_key_range.start_bound() {
+        Included(b) => Included(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
+        Excluded(b) => Excluded(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
+        Unbounded => Included(UserKey::new(table_id, TableKey(b"".to_vec()))),
+    };
+
+    let end = match table_key_range.end_bound() {
+        Included(b) => Included(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
+        Excluded(b) => Excluded(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
+        Unbounded => {
+            if let Some(next_table_id) = table_id.table_id().checked_add(1) {
+                Excluded(UserKey::new(next_table_id.into(), TableKey(b"".to_vec())))
+            } else {
+                Unbounded
+            }
+        }
+    };
+
+    (start, end)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
+
     use super::*;
 
     #[test]
-    fn test_key_epoch() {
-        let full_key = key_with_epoch(b"aaa".to_vec(), 233);
-        assert_eq!(get_epoch(&full_key), 233);
-        assert_eq!(user_key(&full_key), b"aaa");
+    fn test_encode_decode() {
+        let table_key = b"abc".to_vec();
+        let key = FullKey::for_test(TableId::new(0), &table_key[..], 0);
+        let buf = key.encode();
+        assert_eq!(FullKey::decode(&buf), key);
+        let key = FullKey::for_test(TableId::new(1), &table_key[..], 1);
+        let buf = key.encode();
+        assert_eq!(FullKey::decode(&buf), key);
+    }
+
+    #[test]
+    fn test_key_cmp() {
+        // 1 compared with 256 under little-endian encoding would return wrong result.
+        let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), 1);
+        let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), 1);
+        let key3 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 256);
+        let key4 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 1);
+
+        assert_eq!(key1.cmp(&key1), Ordering::Equal);
+        assert_eq!(key1.cmp(&key2), Ordering::Less);
+        assert_eq!(key2.cmp(&key3), Ordering::Less);
+        assert_eq!(key3.cmp(&key4), Ordering::Less);
     }
 
     #[test]
@@ -399,6 +693,43 @@ mod tests {
         assert_eq!(prev_key(b"\x00\x01"), b"\x00\x00");
         assert_eq!(prev_key(b"T"), b"S");
         assert_eq!(prev_key(b""), b"");
+    }
+
+    #[test]
+    fn test_bound_table_key_range() {
+        assert_eq!(
+            bound_table_key_range(
+                TableId::default(),
+                &(
+                    Included(TableKey(b"a".to_vec())),
+                    Included(TableKey(b"b".to_vec()))
+                )
+            ),
+            (
+                Included(UserKey::for_test(TableId::default(), b"a".to_vec())),
+                Included(UserKey::for_test(TableId::default(), b"b".to_vec()),)
+            )
+        );
+        assert_eq!(
+            bound_table_key_range(
+                TableId::from(1),
+                &(Included(TableKey(b"a".to_vec())), Unbounded)
+            ),
+            (
+                Included(UserKey::for_test(TableId::from(1), b"a".to_vec())),
+                Excluded(UserKey::for_test(TableId::from(2), b"".to_vec()),)
+            )
+        );
+        assert_eq!(
+            bound_table_key_range(
+                TableId::from(u32::MAX),
+                &(Included(TableKey(b"a".to_vec())), Unbounded)
+            ),
+            (
+                Included(UserKey::for_test(TableId::from(u32::MAX), b"a".to_vec())),
+                Unbounded,
+            )
+        );
     }
 
     #[test]
@@ -447,5 +778,19 @@ mod tests {
             prev_full_key(&key_with_epoch(b"\x00".to_vec(), HummockEpoch::MAX)),
             Vec::<u8>::new()
         );
+    }
+
+    #[test]
+    fn test_uesr_key_order() {
+        let a = UserKey::new(TableId::new(1), TableKey(b"aaa".to_vec()));
+        let b = UserKey::new(TableId::new(2), TableKey(b"aaa".to_vec()));
+        let c = UserKey::new(TableId::new(2), TableKey(b"bbb".to_vec()));
+        assert!(a.lt(&b));
+        assert!(b.lt(&c));
+        let a = a.encode();
+        let b = b.encode();
+        let c = c.encode();
+        assert!(a.lt(&b));
+        assert!(b.lt(&c));
     }
 }

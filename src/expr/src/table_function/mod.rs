@@ -59,9 +59,10 @@ pub fn build_from_prost(
     use risingwave_pb::expr::table_function::Type::*;
 
     match prost.get_function_type().unwrap() {
-        Generate => new_generate_series(prost, chunk_size),
+        Generate => new_generate_series::<true>(prost, chunk_size),
         Unnest => new_unnest(prost, chunk_size),
         RegexpMatches => new_regexp_matches(prost, chunk_size),
+        Range => new_generate_series::<false>(prost, chunk_size),
         Unspecified => unreachable!(),
     }
 }
@@ -91,7 +92,7 @@ pub fn repeat_tf(expr: BoxedExpression, n: usize) -> BoxedTableFunction {
             for datum_ref in array.iter() {
                 let mut builder = self.return_type().create_array_builder(self.n);
                 for _ in 0..self.n {
-                    builder.append_datum_ref(datum_ref);
+                    builder.append_datum(datum_ref);
                 }
                 res.push(Arc::new(builder.finish()));
             }

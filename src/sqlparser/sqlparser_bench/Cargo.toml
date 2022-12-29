@@ -8,7 +8,7 @@ edition = "2018"
 risingwave_sqlparser = { path = "../" }
 
 [dev-dependencies]
-criterion = "0.3"
+criterion = "0.4"
 
 [[bench]]
 name = "sqlparser_bench"

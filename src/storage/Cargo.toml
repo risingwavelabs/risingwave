@@ -1,10 +1,15 @@
 [package]
 name = "risingwave_storage"
-version = "0.2.0-alpha"
-edition = "2021"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
+arc-swap = "1"
 async-trait = "0.1"
 async_stack_trace = { path = "../utils/async_stack_trace" }
 auto_enums = { version = "0.7", features = ["futures"] }
@@ -29,10 +34,9 @@ hyper = "0.14"
 itertools = "0.10"
 libc = "0.2"
 lz4 = "1.23.1"
-memcomparable = { path = "../utils/memcomparable" }
 minitrace = "0.4"
 minstant = "0.1"
-nix = { version = "0.24.1", features = ["fs", "mman"] }
+nix = { version = "0.25", features = ["fs", "mman"] }
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -41,18 +45,21 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
 rand = "0.8"
 regex = "1"
+risingwave_backup = { path = "../storage/backup" }
 risingwave_common = { path = "../common" }
 risingwave_common_service = { path = "../common/common_service" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
+risingwave_tracing = { path = "../tracing" }
 scopeguard = "1"
 # rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = [
 #     "encryption",
 #     "static_libcpp",
 # ], optional = true }
 serde = { version = "1", features = ["derive"] }
+sled = "0.34.7"
 smallvec = "1"
 spin = "0.9"
 sync-point = { path = "../utils/sync-point" }
@@ -73,15 +80,14 @@ tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
-twox-hash = "1"
+xxhash-rust = { version = "0.8.5", features = ["xxh32", "xxh64"] }
 zstd = "0.11.2"
 
 [target.'cfg(not(madsim))'.dependencies]
-risingwave_tracing = { path = "../tracing" }
-workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-criterion = { version = "0.3", features = ["async_futures"] }
+criterion = { version = "0.4", features = ["async_futures"] }
 moka = { version = "0.9", features = ["future"] }
 risingwave_test_runner = { path = "../test_runner" }
 uuid = { version = "1", features = ["v4"] }

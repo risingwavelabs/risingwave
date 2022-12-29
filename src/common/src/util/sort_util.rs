@@ -17,9 +17,10 @@ use std::sync::Arc;
 
 use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
 
-use crate::array::{Array, ArrayImpl, DataChunk, Row};
+use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
+use crate::row::OwnedRow;
 use crate::types::ScalarImpl;
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
@@ -45,6 +46,9 @@ impl OrderType {
     }
 }
 
+/// Column index with an order type (ASC or DESC). Used to represent a sort key (`Vec<OrderPair>`).
+///
+/// Corresponds to protobuf [`ColumnOrder`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrderPair {
     pub column_idx: usize,
@@ -124,7 +128,7 @@ impl PartialEq for HeapElem {
 
 impl Eq for HeapElem {}
 
-fn compare_values<'a, T>(lhs: Option<&T>, rhs: Option<&T>, order_type: &'a OrderType) -> Ordering
+fn compare_values<T>(lhs: Option<&T>, rhs: Option<&T>, order_type: &OrderType) -> Ordering
 where
     T: Ord,
 {
@@ -142,7 +146,7 @@ where
     }
 }
 
-pub fn compare_rows(lhs: &Row, rhs: &Row, order_pairs: &[OrderPair]) -> Result<Ordering> {
+pub fn compare_rows(lhs: &OwnedRow, rhs: &OwnedRow, order_pairs: &[OrderPair]) -> Result<Ordering> {
     for order_pair in order_pairs.iter() {
         let lhs = lhs[order_pair.column_idx].as_ref();
         let rhs = rhs[order_pair.column_idx].as_ref();
@@ -176,7 +180,8 @@ pub fn compare_rows(lhs: &Row, rhs: &Row, order_pairs: &[OrderPair]) -> Result<O
                 NaiveDateTime,
                 NaiveTime,
                 Struct,
-                List
+                List,
+                Bytea
             ]
         );
 
@@ -258,21 +263,22 @@ mod tests {
     use itertools::Itertools;
 
     use super::{compare_rows, OrderPair, OrderType};
-    use crate::array::{DataChunk, ListValue, Row, StructValue};
+    use crate::array::{DataChunk, ListValue, StructValue};
+    use crate::row::{OwnedRow, Row};
     use crate::types::{DataType, ScalarImpl};
     use crate::util::sort_util::compare_rows_in_chunk;
 
     #[test]
     fn test_compare_rows() {
         let v10 = Some(ScalarImpl::Int32(42));
-        let v11 = Some(ScalarImpl::Utf8("hello".to_string()));
+        let v11 = Some(ScalarImpl::Utf8("hello".into()));
         let v12 = Some(ScalarImpl::Float32(4.0.into()));
         let v20 = Some(ScalarImpl::Int32(42));
-        let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
+        let v21 = Some(ScalarImpl::Utf8("hell".into()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
-        let row1 = Row::new(vec![v10, v11, v12]);
-        let row2 = Row::new(vec![v20, v21, v22]);
+        let row1 = OwnedRow::new(vec![v10, v11, v12]);
+        let row2 = OwnedRow::new(vec![v20, v21, v22]);
         let order_pairs = vec![
             OrderPair::new(0, OrderType::Ascending),
             OrderPair::new(1, OrderType::Descending),
@@ -291,14 +297,14 @@ mod tests {
     #[test]
     fn test_compare_rows_in_chunk() {
         let v10 = Some(ScalarImpl::Int32(42));
-        let v11 = Some(ScalarImpl::Utf8("hello".to_string()));
+        let v11 = Some(ScalarImpl::Utf8("hello".into()));
         let v12 = Some(ScalarImpl::Float32(4.0.into()));
         let v20 = Some(ScalarImpl::Int32(42));
-        let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
+        let v21 = Some(ScalarImpl::Utf8("hell".into()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
-        let row1 = Row::new(vec![v10, v11, v12]);
-        let row2 = Row::new(vec![v20, v21, v22]);
+        let row1 = OwnedRow::new(vec![v10, v11, v12]);
+        let row2 = OwnedRow::new(vec![v20, v21, v22]);
         let chunk = DataChunk::from_rows(
             &[row1, row2],
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
@@ -320,13 +326,13 @@ mod tests {
 
     #[test]
     fn test_compare_all_types() {
-        let row1 = Row::new(vec![
+        let row1 = OwnedRow::new(vec![
             Some(ScalarImpl::Int16(16)),
             Some(ScalarImpl::Int32(32)),
             Some(ScalarImpl::Int64(64)),
             Some(ScalarImpl::Float32(3.2.into())),
             Some(ScalarImpl::Float64(6.4.into())),
-            Some(ScalarImpl::Utf8("hello".to_string())),
+            Some(ScalarImpl::Utf8("hello".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Decimal(10.into())),
             Some(ScalarImpl::Interval(Default::default())),
@@ -342,13 +348,13 @@ mod tests {
                 Some(ScalarImpl::Int32(2)),
             ]))),
         ]);
-        let row2 = Row::new(vec![
+        let row2 = OwnedRow::new(vec![
             Some(ScalarImpl::Int16(16)),
             Some(ScalarImpl::Int32(32)),
             Some(ScalarImpl::Int64(64)),
             Some(ScalarImpl::Float32(3.2.into())),
             Some(ScalarImpl::Float64(6.4.into())),
-            Some(ScalarImpl::Utf8("hello".to_string())),
+            Some(ScalarImpl::Utf8("hello".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Decimal(10.into())),
             Some(ScalarImpl::Interval(Default::default())),
@@ -365,7 +371,7 @@ mod tests {
             ]))),
         ]);
 
-        let order_pairs = (0..row1.size())
+        let order_pairs = (0..row1.len())
             .map(|i| OrderPair::new(i, OrderType::Ascending))
             .collect_vec();
         assert_eq!(

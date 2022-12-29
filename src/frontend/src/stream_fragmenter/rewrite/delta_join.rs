@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::rc::Rc;
+
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::Result;
@@ -79,8 +81,8 @@ fn build_lookup_for_delta_join(
 fn build_delta_join_inner(
     state: &mut BuildFragmentGraphState,
     current_fragment: &mut StreamFragment,
-    arrange_0_frag: StreamFragment,
-    arrange_1_frag: StreamFragment,
+    arrange_0_frag: Rc<StreamFragment>,
+    arrange_1_frag: Rc<StreamFragment>,
     node: &StreamNode,
     is_local_table_id: bool,
 ) -> Result<StreamNode> {
@@ -326,8 +328,10 @@ fn infer_internal_table_catalog(
         internal_table_catalog_builder.add_order_column(
             order.index as usize,
             OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap()),
+            true,
         );
     }
 
+    // TODO: give the real look-up keys
     internal_table_catalog_builder.build(distribution_key)
 }

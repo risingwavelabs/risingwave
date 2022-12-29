@@ -16,22 +16,32 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME, RW_TABLE_FUNCTION_NAME};
+use risingwave_common::catalog::{
+    Field, TableId, DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
+};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
-use risingwave_sqlparser::ast::{FunctionArg, Ident, ObjectName, TableAlias, TableFactor};
+use risingwave_sqlparser::ast::{
+    Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
+};
 
+use self::watermark::is_watermark_func;
 use super::bind_context::ColumnBinding;
 use crate::binder::{Binder, BoundSetExpr};
-use crate::expr::{Expr, ExprImpl, TableFunction, TableFunctionType};
+use crate::catalog::system_catalog::pg_catalog::{
+    PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
+};
+use crate::expr::{Expr, ExprImpl, InputRef, TableFunction, TableFunctionType};
 
 mod join;
 mod subquery;
 mod table_or_source;
+mod watermark;
 mod window_table_function;
 
 pub use join::BoundJoin;
 pub use subquery::BoundSubquery;
-pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable, BoundTableSource};
+pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable};
+pub use watermark::BoundWatermark;
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
 use crate::expr::{CorrelatedId, Depth};
@@ -47,6 +57,7 @@ pub enum Relation {
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
     TableFunction(Box<TableFunction>),
+    Watermark(Box<BoundWatermark>),
 }
 
 impl Relation {
@@ -68,13 +79,13 @@ impl Relation {
         }
     }
 
-    pub fn is_correlated(&self) -> bool {
+    pub fn is_correlated(&self, depth: Depth) -> bool {
         match self {
-            Relation::Subquery(subquery) => subquery.query.is_correlated(),
+            Relation::Subquery(subquery) => subquery.query.is_correlated(depth),
             Relation::Join(join) => {
-                join.cond.has_correlated_input_ref_by_depth()
-                    || join.left.is_correlated()
-                    || join.right.is_correlated()
+                join.cond.has_correlated_input_ref_by_depth(depth)
+                    || join.left.is_correlated(depth)
+                    || join.right.is_correlated(depth)
             }
             _ => false,
         }
@@ -111,10 +122,10 @@ impl Relation {
 }
 
 impl Binder {
+    /// return (`schema_name`, `name`)
     pub fn resolve_schema_qualified_name(
         db_name: &str,
         name: ObjectName,
-        ident_desc: &str,
     ) -> Result<(Option<String>, String)> {
         let mut indentifiers = name.0;
 
@@ -124,10 +135,7 @@ impl Binder {
             ));
         }
 
-        let name = indentifiers
-            .pop()
-            .ok_or_else(|| ErrorCode::InternalError(format!("empty {}", ident_desc)))?
-            .real_value();
+        let name = indentifiers.pop().unwrap().real_value();
 
         let schema_name = indentifiers.pop().map(|ident| ident.real_value());
         let database_name = indentifiers.pop().map(|ident| ident.real_value());
@@ -142,14 +150,6 @@ impl Binder {
         Ok((schema_name, name))
     }
 
-    /// return the (`schema_name`, `name`)
-    pub fn resolve_table_or_source_name(
-        db_name: &str,
-        name: ObjectName,
-    ) -> Result<(Option<String>, String)> {
-        Self::resolve_schema_qualified_name(db_name, name, "table or source name")
-    }
-
     /// return first name in identifiers, must have only one name.
     fn resolve_single_name(mut identifiers: Vec<Ident>, ident_desc: &str) -> Result<String> {
         if identifiers.len() > 1 {
@@ -158,10 +158,7 @@ impl Binder {
                 ident_desc
             )));
         }
-        let name = identifiers
-            .pop()
-            .ok_or_else(|| ErrorCode::InternalError(format!("empty {}", ident_desc)))?
-            .real_value();
+        let name = identifiers.pop().unwrap().real_value();
 
         Ok(name)
     }
@@ -179,27 +176,6 @@ impl Binder {
     /// return the `index_name`
     pub fn resolve_index_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "index name")
-    }
-
-    /// return the (`schema_name`, `index_name`)
-    pub fn resolve_schema_qualified_index_name(
-        db_name: &str,
-        name: ObjectName,
-    ) -> Result<(Option<String>, String)> {
-        Self::resolve_schema_qualified_name(db_name, name, "index name")
-    }
-
-    /// return the `sink_name`
-    pub fn resolve_sink_name(name: ObjectName) -> Result<String> {
-        Self::resolve_single_name(name.0, "sink name")
-    }
-
-    /// return the (`schema_name`, `sink_name`)
-    pub fn resolve_schema_qualified_sink_name(
-        db_name: &str,
-        name: ObjectName,
-    ) -> Result<(Option<String>, String)> {
-        Self::resolve_schema_qualified_name(db_name, name, "sink name")
     }
 
     /// return the `user_name`
@@ -231,7 +207,7 @@ impl Binder {
                 true => field.name.to_string(),
                 false => alias_iter
                     .next()
-                    .map(|t| t.value)
+                    .map(|t| t.real_value())
                     .unwrap_or_else(|| field.name.to_string()),
             };
             field.name = name.clone();
@@ -270,13 +246,19 @@ impl Binder {
         }
     }
 
-    pub(super) fn bind_relation_by_name(
+    /// Binds a relation, which can be:
+    /// - a table/source/materialized view
+    /// - a reference to a CTE
+    /// - a logical view
+    pub fn bind_relation_by_name(
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
-        let (schema_name, table_name) = Self::resolve_table_or_source_name(&self.db_name, name)?;
+        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
         if schema_name.is_none() && let Some(bound_query) = self.cte_to_relation.get(&table_name) {
+            // Handles CTE
+
             let (query, mut original_alias) = bound_query.clone();
             debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.
 
@@ -302,21 +284,52 @@ impl Binder {
             )?;
             Ok(Relation::Subquery(Box::new(BoundSubquery { query })))
         } else {
-            self.bind_table_or_source(schema_name.as_deref(), &table_name, alias)
+
+            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias)
         }
     }
 
-    pub(super) fn bind_relation_by_id(
+    // Bind a relation provided a function arg.
+    fn bind_relation_by_function_arg(
         &mut self,
-        table_id: TableId,
-        schema_name: String,
-        alias: Option<TableAlias>,
-    ) -> Result<Relation> {
-        let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_table_or_source(Some(&schema_name), &table_name, alias)
+        arg: Option<FunctionArg>,
+        err_msg: &str,
+    ) -> Result<(Relation, ObjectName)> {
+        let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))) = arg else {
+            return Err(ErrorCode::BindError(err_msg.to_string()).into());
+        };
+        let table_name = match expr {
+            ParserExpr::Identifier(ident) => Ok::<_, RwError>(ObjectName(vec![ident])),
+            ParserExpr::CompoundIdentifier(idents) => Ok(ObjectName(idents)),
+            _ => Err(ErrorCode::BindError(err_msg.to_string()).into()),
+        }?;
+
+        Ok((
+            self.bind_relation_by_name(table_name.clone(), None)?,
+            table_name,
+        ))
     }
 
-    fn resolve_table_id(&self, args: Vec<FunctionArg>) -> Result<(String, TableId)> {
+    // Bind column provided a function arg.
+    fn bind_column_by_function_args(
+        &mut self,
+        arg: Option<FunctionArg>,
+        err_msg: &str,
+    ) -> Result<Box<InputRef>> {
+        if let Some(time_col_arg) = arg
+          && let Some(ExprImpl::InputRef(time_col)) = self.bind_function_arg(time_col_arg)?.into_iter().next() {
+            Ok(time_col)
+        } else {
+            Err(ErrorCode::BindError(err_msg.to_string()).into())
+        }
+    }
+
+    /// `rw_table(table_id[,schema_name])` which queries internal table
+    fn bind_internal_table(
+        &mut self,
+        args: Vec<FunctionArg>,
+        alias: Option<TableAlias>,
+    ) -> Result<Relation> {
         if args.is_empty() || args.len() > 2 {
             return Err(ErrorCode::BindError(
                 "usage: rw_table(table_id[,schema_name])".to_string(),
@@ -335,19 +348,30 @@ impl Binder {
         let schema = args
             .get(1)
             .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
-        Ok((schema, table_id))
+
+        let table_name = self.catalog.get_table_name_by_id(table_id)?;
+        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
             TableFactor::Table { name, alias } => self.bind_relation_by_name(name, alias),
             TableFactor::TableFunction { name, alias, args } => {
-                let func_name = &name.0[0].value;
-                if func_name.eq_ignore_ascii_case(RW_TABLE_FUNCTION_NAME) {
-                    let (schema, table_id) = self.resolve_table_id(args)?;
-                    return self.bind_relation_by_id(table_id, schema, alias);
-                }
-                if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
+                let func_name = &name.0[0].real_value();
+                if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
+                    self.bind_internal_table(args, alias)
+                } else if func_name.eq_ignore_ascii_case(PG_GET_KEYWORDS_FUNC_NAME)
+                    || name.real_value().eq_ignore_ascii_case(
+                        format!("{}.{}", PG_CATALOG_SCHEMA_NAME, PG_GET_KEYWORDS_FUNC_NAME)
+                            .as_str(),
+                    )
+                {
+                    self.bind_relation_by_name_inner(
+                        Some(PG_CATALOG_SCHEMA_NAME),
+                        PG_KEYWORDS_TABLE_NAME,
+                        alias,
+                    )
+                } else if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
                     let args: Vec<ExprImpl> = args
                         .into_iter()
                         .map(|arg| self.bind_function_arg(arg))
@@ -371,17 +395,22 @@ impl Binder {
                         alias,
                     )?;
 
-                    return Ok(Relation::TableFunction(Box::new(tf)));
-                }
-                let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {
-                    ErrorCode::NotImplemented(
-                        format!("unknown table function kind: {}", name.0[0].value),
+                    Ok(Relation::TableFunction(Box::new(tf)))
+                } else if let Ok(kind) = WindowTableFunctionKind::from_str(func_name) {
+                    Ok(Relation::WindowTableFunction(Box::new(
+                        self.bind_window_table_function(alias, kind, args)?,
+                    )))
+                } else if is_watermark_func(func_name) {
+                    Ok(Relation::Watermark(Box::new(
+                        self.bind_watermark(alias, args)?,
+                    )))
+                } else {
+                    Err(ErrorCode::NotImplemented(
+                        format!("unknown table function kind: {}", func_name),
                         1191.into(),
                     )
-                })?;
-                Ok(Relation::WindowTableFunction(Box::new(
-                    self.bind_window_table_function(alias, kind, args)?,
-                )))
+                    .into())
+                }
             }
             TableFactor::Derived {
                 lateral,

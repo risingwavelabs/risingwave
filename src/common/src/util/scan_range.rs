@@ -14,16 +14,17 @@
 
 use std::ops::{Bound, RangeBounds};
 
-use itertools::Itertools;
 use paste::paste;
 use risingwave_pb::batch_plan::scan_range::Bound as BoundProst;
 use risingwave_pb::batch_plan::ScanRange as ScanRangeProst;
 
-use super::value_encoding::serialize_datum_to_bytes;
-use crate::array::Row;
-use crate::types::{Datum, ScalarImpl, VirtualNode};
+use super::value_encoding::serialize_datum;
+use crate::catalog::get_dist_key_in_pk_indices;
+use crate::hash::VirtualNode;
+use crate::row::{Row, RowExt};
+use crate::types::{Datum, ScalarImpl};
 use crate::util::hash_util::Crc32FastBuilder;
-use crate::util::value_encoding::serialize_datum;
+use crate::util::value_encoding::serialize_datum_into;
 
 /// See also [`ScanRangeProst`]
 #[derive(Debug, Clone)]
@@ -35,11 +36,11 @@ pub struct ScanRange {
 fn bound_to_proto(bound: &Bound<ScalarImpl>) -> Option<BoundProst> {
     match bound {
         Bound::Included(literal) => Some(BoundProst {
-            value: serialize_datum_to_bytes(Some(literal)),
+            value: serialize_datum(Some(literal)),
             inclusive: true,
         }),
         Bound::Excluded(literal) => Some(BoundProst {
-            value: serialize_datum_to_bytes(Some(literal)),
+            value: serialize_datum(Some(literal)),
             inclusive: false,
         }),
         Bound::Unbounded => None,
@@ -54,7 +55,7 @@ impl ScanRange {
                 .iter()
                 .map(|datum| {
                     let mut encoded = vec![];
-                    serialize_datum(datum, &mut encoded);
+                    serialize_datum_into(datum, &mut encoded);
                     encoded
                 })
                 .collect(),
@@ -83,28 +84,16 @@ impl ScanRange {
             return None;
         }
 
-        let dist_key_in_pk_indices = dist_key_indices
-            .iter()
-            .map(|&di| {
-                pk_indices
-                    .iter()
-                    .position(|&pi| di == pi)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "distribution keys {:?} must be a subset of primary keys {:?}",
-                            dist_key_indices, pk_indices
-                        )
-                    })
-            })
-            .collect_vec();
+        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(dist_key_indices, pk_indices);
         let pk_prefix_len = self.eq_conds.len();
         if dist_key_in_pk_indices.iter().any(|&i| i >= pk_prefix_len) {
             return None;
         }
 
-        let pk_prefix_value = Row(self.eq_conds.clone());
+        let pk_prefix_value = &self.eq_conds;
         let vnode = pk_prefix_value
-            .hash_by_indices(&dist_key_in_pk_indices, &Crc32FastBuilder {})
+            .project(&dist_key_in_pk_indices)
+            .hash(Crc32FastBuilder)
             .to_vnode();
         Some(vnode)
     }
@@ -172,6 +161,7 @@ for_all_scalar_int_variants! { impl_split_small_range }
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::row::OwnedRow;
 
     // dist_key is prefix of pk
     #[test]
@@ -186,11 +176,12 @@ mod tests {
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(514)));
-        let vnode = Row(vec![
+        let vnode = OwnedRow::new(vec![
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
         ])
-        .hash_by_indices(&[0, 1], &Crc32FastBuilder {})
+        .project(&[0, 1])
+        .hash(Crc32FastBuilder)
         .to_vnode();
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }
@@ -211,12 +202,13 @@ mod tests {
         assert!(scan_range.try_compute_vnode(&dist_key, &pk).is_none());
 
         scan_range.eq_conds.push(Some(ScalarImpl::from(114514)));
-        let vnode = Row(vec![
+        let vnode = OwnedRow::new(vec![
             Some(ScalarImpl::from(114)),
             Some(ScalarImpl::from(514)),
             Some(ScalarImpl::from(114514)),
         ])
-        .hash_by_indices(&[2, 1], &Crc32FastBuilder {})
+        .project(&[2, 1])
+        .hash(Crc32FastBuilder)
         .to_vnode();
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }

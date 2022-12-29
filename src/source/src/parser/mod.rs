@@ -16,25 +16,35 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-pub use avro_parser::*;
+pub use avro::*;
+pub use canal::*;
+use csv_parser::CsvParser;
 pub use debezium::*;
+use enum_as_inner::EnumAsInner;
+use futures::Future;
 use itertools::Itertools;
 pub use json_parser::*;
-pub use pb_parser::*;
+pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
+use risingwave_pb::catalog::StreamSourceInfo;
 
 use crate::parser::maxwell::MaxwellParser;
 use crate::{SourceColumnDesc, SourceFormat};
 
-mod avro_parser;
+mod avro;
+mod canal;
 mod common;
+mod csv_parser;
 mod debezium;
 mod json_parser;
+mod macros;
 mod maxwell;
-mod pb_parser;
+mod protobuf;
+mod schema_registry;
+mod util;
 
 /// A builder for building a [`StreamChunk`] from [`SourceColumnDesc`].
 pub struct SourceStreamChunkBuilder {
@@ -99,7 +109,7 @@ trait OpAction {
 
     fn rollback(builder: &mut ArrayBuilderImpl);
 
-    fn finish(writer: SourceStreamChunkRowWriter<'_>);
+    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>);
 }
 
 struct OpActionInsert;
@@ -120,7 +130,7 @@ impl OpAction for OpActionInsert {
     }
 
     #[inline(always)]
-    fn finish(writer: SourceStreamChunkRowWriter<'_>) {
+    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::Insert)
     }
 }
@@ -143,7 +153,7 @@ impl OpAction for OpActionDelete {
     }
 
     #[inline(always)]
-    fn finish(writer: SourceStreamChunkRowWriter<'_>) {
+    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::Delete)
     }
 }
@@ -168,7 +178,7 @@ impl OpAction for OpActionUpdate {
     }
 
     #[inline(always)]
-    fn finish(writer: SourceStreamChunkRowWriter<'_>) {
+    fn finish(writer: &mut SourceStreamChunkRowWriter<'_>) {
         writer.op_builder.push(Op::UpdateDelete);
         writer.op_builder.push(Op::UpdateInsert);
     }
@@ -176,7 +186,7 @@ impl OpAction for OpActionUpdate {
 
 impl SourceStreamChunkRowWriter<'_> {
     fn do_action<A: OpAction>(
-        self,
+        &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> Result<A::Output>,
     ) -> Result<WriteGuard> {
         // The closure `f` may fail so that a part of builders were appended incompletely.
@@ -199,7 +209,8 @@ impl SourceStreamChunkRowWriter<'_> {
 
                 Ok(())
             })
-            .inspect_err(|_e| {
+            .inspect_err(|e| {
+                tracing::warn!("failed to parse source data: {}", e);
                 self.builders[..appended_idx]
                     .iter_mut()
                     .for_each(A::rollback);
@@ -216,7 +227,10 @@ impl SourceStreamChunkRowWriter<'_> {
     ///
     /// * `self`: Ownership is consumed so only one record can be written.
     /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
-    pub fn insert(self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<WriteGuard> {
+    pub fn insert(
+        &mut self,
+        f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
+    ) -> Result<WriteGuard> {
         self.do_action::<OpActionInsert>(f)
     }
 
@@ -226,11 +240,14 @@ impl SourceStreamChunkRowWriter<'_> {
     ///
     /// * `self`: Ownership is consumed so only one record can be written.
     /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
-    pub fn delete(self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<WriteGuard> {
+    pub fn delete(
+        &mut self,
+        f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
+    ) -> Result<WriteGuard> {
         self.do_action::<OpActionDelete>(f)
     }
 
-    /// Write a `Delete` record to the [`StreamChunk`].
+    /// Write a `Update` record to the [`StreamChunk`].
     ///
     /// # Arguments
     ///
@@ -238,18 +255,22 @@ impl SourceStreamChunkRowWriter<'_> {
     /// * `f`: A failable closure that produced two [`Datum`]s as old and new value by corresponding
     ///   [`SourceColumnDesc`].
     pub fn update(
-        self,
+        &mut self,
         f: impl FnMut(&SourceColumnDesc) -> Result<(Datum, Datum)>,
     ) -> Result<WriteGuard> {
         self.do_action::<OpActionUpdate>(f)
     }
 }
 
+pub trait ParseFuture<'a, Out> = Future<Output = Out> + Send + 'a;
+
+// TODO: use `async_fn_in_traits` to implement it
 /// `SourceParser` is the message parser, `ChunkReader` will parse the messages in `SourceReader`
 /// one by one through `SourceParser` and assemble them into `DataChunk`
 /// Note that the `skip_parse` parameter in `SourceColumnDesc`, when it is true, should skip the
 /// parse and return `Datum` of `None`
-pub trait SourceParser: Send + Sync + Debug + 'static {
+pub trait SourceParser: Send + Debug + 'static {
+    type ParseResult<'a>: ParseFuture<'a, Result<WriteGuard>>;
     /// Parse the payload and append the result to the [`StreamChunk`] directly.
     ///
     /// # Arguments
@@ -261,7 +282,14 @@ pub trait SourceParser: Send + Sync + Debug + 'static {
     /// # Returns
     ///
     /// A [`WriteGuard`] to ensure that at least one record was appended or error occurred.
-    fn parse(&self, payload: &[u8], writer: SourceStreamChunkRowWriter<'_>) -> Result<WriteGuard>;
+    fn parse<'a, 'b, 'c>(
+        &'a self,
+        payload: &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a;
 }
 
 #[derive(Debug)]
@@ -271,20 +299,22 @@ pub enum SourceParserImpl {
     DebeziumJson(DebeziumJsonParser),
     Avro(AvroParser),
     Maxwell(MaxwellParser),
+    CanalJson(CanalJsonParser),
 }
 
 impl SourceParserImpl {
-    pub fn parse(
+    pub async fn parse(
         &self,
         payload: &[u8],
         writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         match self {
-            Self::Json(parser) => parser.parse(payload, writer),
-            Self::Protobuf(parser) => parser.parse(payload, writer),
-            Self::DebeziumJson(parser) => parser.parse(payload, writer),
-            Self::Avro(avro_parser) => avro_parser.parse(payload, writer),
-            Self::Maxwell(maxwell_parser) => maxwell_parser.parse(payload, writer),
+            Self::Json(parser) => parser.parse(payload, writer).await,
+            Self::Protobuf(parser) => parser.parse(payload, writer).await,
+            Self::DebeziumJson(parser) => parser.parse(payload, writer).await,
+            Self::Avro(avro_parser) => avro_parser.parse(payload, writer).await,
+            Self::Maxwell(maxwell_parser) => maxwell_parser.parse(payload, writer).await,
+            Self::CanalJson(parser) => parser.parse(payload, writer).await,
         }
     }
 
@@ -292,26 +322,28 @@ impl SourceParserImpl {
         format: &SourceFormat,
         properties: &HashMap<String, String>,
         schema_location: &str,
+        use_schema_registry: bool,
+        proto_message_name: String,
     ) -> Result<Arc<Self>> {
         const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
+        const USE_SCHEMA_REGISTRY: &str = "use_schema_registry";
         let parser = match format {
             SourceFormat::Json => SourceParserImpl::Json(JsonParser),
-            SourceFormat::Protobuf => {
-                let message_name = properties.get(PROTOBUF_MESSAGE_KEY).ok_or_else(|| {
-                    RwError::from(ProtocolError(format!(
-                        "Must specify '{}' in WITH clause",
-                        PROTOBUF_MESSAGE_KEY
-                    )))
-                })?;
-                SourceParserImpl::Protobuf(
-                    ProtobufParser::new(schema_location, message_name, properties.clone()).await?,
+            SourceFormat::Protobuf => SourceParserImpl::Protobuf(
+                ProtobufParser::new(
+                    schema_location,
+                    &proto_message_name,
+                    use_schema_registry,
+                    properties.clone(),
                 )
-            }
+                .await?,
+            ),
             SourceFormat::DebeziumJson => SourceParserImpl::DebeziumJson(DebeziumJsonParser),
-            SourceFormat::Avro => {
-                SourceParserImpl::Avro(AvroParser::new(schema_location, properties.clone()).await?)
-            }
+            SourceFormat::Avro => SourceParserImpl::Avro(
+                AvroParser::new(schema_location, use_schema_registry, properties.clone()).await?,
+            ),
             SourceFormat::Maxwell => SourceParserImpl::Maxwell(MaxwellParser),
+            SourceFormat::CanalJson => SourceParserImpl::CanalJson(CanalJsonParser),
             _ => {
                 return Err(RwError::from(ProtocolError(
                     "format not support".to_string(),
@@ -319,5 +351,80 @@ impl SourceParserImpl {
             }
         };
         Ok(Arc::new(parser))
+    }
+}
+
+// TODO: use `async_fn_in_traits` to implement it
+/// A parser trait that parse byte stream instead of one byte chunk
+pub trait ByteStreamSourceParser: Send + Debug + 'static {
+    type ParseResult<'a>: ParseFuture<'a, Result<Option<WriteGuard>>>;
+    /// Parse the payload and append the result to the [`StreamChunk`] directly.
+    /// If the payload is not enough to parse one record, the parser will cache
+    /// the payload and wait for more byte to be passed.
+    ///
+    /// # Arguments
+    ///
+    /// - `self`: A needs to be a member method because parser need to cache some payload
+    /// - writer: Write exactly one record during a `parse` call.
+    ///
+    /// # Returns
+    ///
+    /// An [`Option<WriteGuard>`], None if the payload is not enough to parse one record, else Some
+    fn parse<'a, 'b, 'c>(
+        &'a mut self,
+        payload: &'a mut &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a;
+}
+
+#[derive(Debug)]
+pub enum ByteStreamSourceParserImpl {
+    Csv(CsvParser),
+}
+
+#[derive(Debug, Clone, EnumAsInner)]
+pub enum ParserConfig {
+    Csv(u8, bool),
+}
+
+impl ParserConfig {
+    pub fn new(format: &SourceFormat, info: &StreamSourceInfo) -> Self {
+        match format {
+            SourceFormat::Csv => Self::Csv(info.csv_delimiter as u8, info.csv_has_header),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl ByteStreamSourceParserImpl {
+    pub async fn parse(
+        &mut self,
+        payload: &mut &[u8],
+        writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<Option<WriteGuard>> {
+        match self {
+            Self::Csv(csv_parser) => csv_parser.parse(payload, writer).await,
+        }
+    }
+
+    // Keep this `async` in consideration of other parsers in the future.
+    #[allow(clippy::unused_async)]
+    pub async fn create(
+        format: &SourceFormat,
+        _properties: &HashMap<String, String>,
+        parser_config: ParserConfig,
+    ) -> Result<Self> {
+        match format {
+            SourceFormat::Csv => {
+                let (delimiter, has_header) = parser_config.into_csv().unwrap();
+                CsvParser::new(delimiter, has_header).map(Self::Csv)
+            }
+            _ => Err(RwError::from(ProtocolError(
+                "format not support".to_string(),
+            ))),
+        }
     }
 }

@@ -153,7 +153,8 @@ impl ColIndexMapping {
         Self::new(map)
     }
 
-    pub fn with_column_mapping(cols: &[usize], src_size: usize) -> Self {
+    // TODO(yuchao): isn't this the same as `with_remaining_columns`?
+    pub fn with_included_columns(cols: &[usize], src_size: usize) -> Self {
         let mut map = vec![None; src_size];
         for (tar, &src) in cols.iter().enumerate() {
             if map[src].is_none() {
@@ -188,11 +189,15 @@ impl ColIndexMapping {
     }
 
     #[must_use]
+    /// Compose column index mappings.
+    /// For example if this maps 0->5,
+    /// and `following` maps 5->1,
+    /// Then the composite has 0->5->1 => 0->1.
     pub fn composite(&self, following: &Self) -> Self {
         // debug!("composing {:?} and {:?}", self, following);
         let mut map = self.map.clone();
-        for tar in &mut map {
-            *tar = tar.and_then(|index| following.try_map(index));
+        for target in &mut map {
+            *target = target.and_then(|index| following.try_map(index));
         }
         Self::with_target_size(map, following.target_size())
     }
@@ -320,14 +325,14 @@ impl ColIndexMapping {
         let mapped_dist_key = self.rewrite_dist_key(dist.dist_column_indices());
 
         match (mapped_dist_key, dist) {
-            (None, Distribution::HashShard(_)) | (None, Distribution::UpstreamHashShard(_)) => {
+            (None, Distribution::HashShard(_)) | (None, Distribution::UpstreamHashShard(_, _)) => {
                 Distribution::SomeShard
             }
             (Some(mapped_dist_key), Distribution::HashShard(_)) => {
                 Distribution::HashShard(mapped_dist_key)
             }
-            (Some(mapped_dist_key), Distribution::UpstreamHashShard(_)) => {
-                Distribution::UpstreamHashShard(mapped_dist_key)
+            (Some(mapped_dist_key), Distribution::UpstreamHashShard(_, table_id)) => {
+                Distribution::UpstreamHashShard(mapped_dist_key, *table_id)
             }
             _ => {
                 assert!(dist.dist_column_indices().is_empty());

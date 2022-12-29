@@ -1,4 +1,7 @@
 statement ok
+DROP SOURCE nexmark;
+
+statement ok
 DROP SOURCE person;
 
 statement ok

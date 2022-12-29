@@ -48,4 +48,12 @@
   formatted_ast: |
     ShowObjects(Columns { table: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "t", quote_style: None }]) })
 
+- input: SHOW CREATE MATERIALIZED VIEW schema.mv
+  formatted_sql: SHOW CREATE MATERIALIZED VIEW schema.mv
+  formatted_ast: |
+    ShowCreateObject { create_type: MaterializedView, name: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "mv", quote_style: None }]) }
 
+- input: SHOW CREATE VIEW schema.v
+  formatted_sql: SHOW CREATE VIEW schema.v
+  formatted_ast: |
+      ShowCreateObject { create_type: View, name: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "v", quote_style: None }]) }

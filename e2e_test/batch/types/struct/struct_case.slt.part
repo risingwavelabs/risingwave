@@ -1,6 +1,9 @@
 # Copied from https://github.com/duckdb/duckdb (MIT licensed).
 # Copyright 2018-2022 Stichting DuckDB Foundation 
 
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
 # constant case
 query I
 SELECT CASE WHEN 1=1 THEN ROW(1) ELSE ROW(2) END

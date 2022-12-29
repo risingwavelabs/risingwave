@@ -12,6 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Definitions of catalog structs.
+//!
+//! The main struct is [`root_catalog::Catalog`], which is the root containing other catalog
+//! structs. It is accessed via [`catalog_service::CatalogReader`] and
+//! [`catalog_service::CatalogWriter`], which is held by [`crate::session::FrontendEnv`].
+
 use risingwave_common::catalog::{ColumnDesc, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
@@ -21,20 +27,20 @@ pub(crate) mod catalog_service;
 pub(crate) mod column_catalog;
 pub(crate) mod database_catalog;
 pub(crate) mod index_catalog;
-pub(crate) mod pg_catalog;
 pub(crate) mod root_catalog;
 pub(crate) mod schema_catalog;
 pub(crate) mod sink_catalog;
 pub(crate) mod source_catalog;
 pub(crate) mod system_catalog;
 pub(crate) mod table_catalog;
+pub(crate) mod view_catalog;
 
 pub use index_catalog::IndexCatalog;
 pub use table_catalog::TableCatalog;
 
 pub(crate) type SourceId = u32;
 pub(crate) type SinkId = u32;
-
+pub(crate) type ViewId = u32;
 pub(crate) type DatabaseId = u32;
 pub(crate) type SchemaId = u32;
 pub(crate) type TableId = risingwave_common::catalog::TableId;
@@ -87,6 +93,8 @@ pub fn row_id_column_desc(column_id: ColumnId) -> ColumnDesc {
         type_name: "".to_string(),
     }
 }
+
+pub type CatalogResult<T> = std::result::Result<T, CatalogError>;
 
 #[derive(Error, Debug)]
 pub enum CatalogError {

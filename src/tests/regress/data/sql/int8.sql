@@ -71,8 +71,8 @@ SELECT q1, q2, q1 * q2 AS multiply FROM INT8_TBL
  WHERE q1 < 1000 or (q2 > 0 and q2 < 1000);
 SELECT q1, q2, q1 / q2 AS divide, q1 % q2 AS mod FROM INT8_TBL;
 
-SELECT q1, float8(q1) FROM INT8_TBL;
-SELECT q2, float8(q2) FROM INT8_TBL;
+--@ SELECT q1, float8(q1) FROM INT8_TBL;
+--@ SELECT q2, float8(q2) FROM INT8_TBL;
 
 SELECT 37 + q1 AS plus4 FROM INT8_TBL;
 SELECT 37 - q1 AS minus4 FROM INT8_TBL;
@@ -89,44 +89,44 @@ SELECT q1 + 42::int2 AS "8plus2", q1 - 42::int2 AS "8minus2", q1 * 42::int2 AS "
 -- int2 op int8
 SELECT 246::int2 + q1 AS "2plus8", 246::int2 - q1 AS "2minus8", 246::int2 * q1 AS "2mul8", 246::int2 / q1 AS "2div8" FROM INT8_TBL;
 
-SELECT q2, abs(q2) FROM INT8_TBL;
-SELECT min(q1), min(q2) FROM INT8_TBL;
-SELECT max(q1), max(q2) FROM INT8_TBL;
+SELECT q2, abs(q2) AS abs FROM INT8_TBL;
+SELECT min(q1) AS min, min(q2) AS min FROM INT8_TBL;
+SELECT max(q1) AS max, max(q2) AS max FROM INT8_TBL;
 
 
 -- TO_CHAR()
 --
-SELECT to_char(q1, '9G999G999G999G999G999'), to_char(q2, '9,999,999,999,999,999')
-	FROM INT8_TBL;
+--@ SELECT to_char(q1, '9G999G999G999G999G999'), to_char(q2, '9,999,999,999,999,999')
+--@ 	FROM INT8_TBL;
 
-SELECT to_char(q1, '9G999G999G999G999G999D999G999'), to_char(q2, '9,999,999,999,999,999.999,999')
-	FROM INT8_TBL;
+--@ SELECT to_char(q1, '9G999G999G999G999G999D999G999'), to_char(q2, '9,999,999,999,999,999.999,999')
+--@ 	FROM INT8_TBL;
 
-SELECT to_char( (q1 * -1), '9999999999999999PR'), to_char( (q2 * -1), '9999999999999999.999PR')
-	FROM INT8_TBL;
+--@ SELECT to_char( (q1 * -1), '9999999999999999PR'), to_char( (q2 * -1), '9999999999999999.999PR')
+--@ 	FROM INT8_TBL;
 
-SELECT to_char( (q1 * -1), '9999999999999999S'), to_char( (q2 * -1), 'S9999999999999999')
-	FROM INT8_TBL;
+--@ SELECT to_char( (q1 * -1), '9999999999999999S'), to_char( (q2 * -1), 'S9999999999999999')
+--@ 	FROM INT8_TBL;
 
-SELECT to_char(q2, 'MI9999999999999999')     FROM INT8_TBL;
-SELECT to_char(q2, 'FMS9999999999999999')    FROM INT8_TBL;
-SELECT to_char(q2, 'FM9999999999999999THPR') FROM INT8_TBL;
-SELECT to_char(q2, 'SG9999999999999999th')   FROM INT8_TBL;
-SELECT to_char(q2, '0999999999999999')       FROM INT8_TBL;
-SELECT to_char(q2, 'S0999999999999999')      FROM INT8_TBL;
-SELECT to_char(q2, 'FM0999999999999999')     FROM INT8_TBL;
-SELECT to_char(q2, 'FM9999999999999999.000') FROM INT8_TBL;
-SELECT to_char(q2, 'L9999999999999999.000')  FROM INT8_TBL;
-SELECT to_char(q2, 'FM9999999999999999.999') FROM INT8_TBL;
-SELECT to_char(q2, 'S 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 . 9 9 9') FROM INT8_TBL;
-SELECT to_char(q2, E'99999 "text" 9999 "9999" 999 "\\"text between quote marks\\"" 9999') FROM INT8_TBL;
-SELECT to_char(q2, '999999SG9999999999')     FROM INT8_TBL;
+--@ SELECT to_char(q2, 'MI9999999999999999')     FROM INT8_TBL;
+--@ SELECT to_char(q2, 'FMS9999999999999999')    FROM INT8_TBL;
+--@ SELECT to_char(q2, 'FM9999999999999999THPR') FROM INT8_TBL;
+--@ SELECT to_char(q2, 'SG9999999999999999th')   FROM INT8_TBL;
+--@ SELECT to_char(q2, '0999999999999999')       FROM INT8_TBL;
+--@ SELECT to_char(q2, 'S0999999999999999')      FROM INT8_TBL;
+--@ SELECT to_char(q2, 'FM0999999999999999')     FROM INT8_TBL;
+--@ SELECT to_char(q2, 'FM9999999999999999.000') FROM INT8_TBL;
+--@ SELECT to_char(q2, 'L9999999999999999.000')  FROM INT8_TBL;
+--@ SELECT to_char(q2, 'FM9999999999999999.999') FROM INT8_TBL;
+--@ SELECT to_char(q2, 'S 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 9 . 9 9 9') FROM INT8_TBL;
+--@ SELECT to_char(q2, E'99999 "text" 9999 "9999" 999 "\\"text between quote marks\\"" 9999') FROM INT8_TBL;
+--@ SELECT to_char(q2, '999999SG9999999999')     FROM INT8_TBL;
 
 -- check min/max values and overflow behavior
 
-select '-9223372036854775808'::int8;
+select '-9223372036854775808'::int8 AS int8;
 select '-9223372036854775809'::int8;
-select '9223372036854775807'::int8;
+select '9223372036854775807'::int8 AS int8;
 select '9223372036854775808'::int8;
 
 select -('-9223372036854775807'::int8);
@@ -163,20 +163,20 @@ select '-100'::int2 - '9223372036854775800'::int8;
 select '100'::int2 * '9223372036854775800'::int8;
 select '100'::int2 / '0'::int8;
 
-SELECT CAST(q1 AS int4) FROM int8_tbl WHERE q2 = 456;
+SELECT CAST(q1 AS int4) AS q1 FROM int8_tbl WHERE q2 = 456;
 SELECT CAST(q1 AS int4) FROM int8_tbl WHERE q2 <> 456;
 
-SELECT CAST(q1 AS int2) FROM int8_tbl WHERE q2 = 456;
+SELECT CAST(q1 AS int2) AS q1 FROM int8_tbl WHERE q2 = 456;
 SELECT CAST(q1 AS int2) FROM int8_tbl WHERE q2 <> 456;
 
-SELECT CAST('42'::int2 AS int8), CAST('-37'::int2 AS int8);
+SELECT CAST('42'::int2 AS int8) AS int8, CAST('-37'::int2 AS int8) AS int8;
 
-SELECT CAST(q1 AS float4), CAST(q2 AS float8) FROM INT8_TBL;
-SELECT CAST('36854775807.0'::float4 AS int8);
+--@ SELECT CAST(q1 AS float4) AS q1, CAST(q2 AS float8) AS q2 FROM INT8_TBL;
+SELECT CAST('36854775807.0'::float4 AS int8) AS int8;
 SELECT CAST('922337203685477580700.0'::float8 AS int8);
 
 SELECT CAST(q1 AS oid) FROM INT8_TBL;
-SELECT oid::int8 FROM pg_class WHERE relname = 'pg_class';
+--@ SELECT oid::int8 FROM pg_class WHERE relname = 'pg_class';
 
 
 -- bit operations
@@ -187,34 +187,34 @@ SELECT q1, q1 << 2 AS "shl", q1 >> 3 AS "shr" FROM INT8_TBL;
 
 -- generate_series
 
-SELECT * FROM generate_series('+4567890123456789'::int8, '+4567890123456799'::int8);
+--@ SELECT * FROM generate_series('+4567890123456789'::int8, '+4567890123456799'::int8);
 SELECT * FROM generate_series('+4567890123456789'::int8, '+4567890123456799'::int8, 0);
-SELECT * FROM generate_series('+4567890123456789'::int8, '+4567890123456799'::int8, 2);
+--@ SELECT * FROM generate_series('+4567890123456789'::int8, '+4567890123456799'::int8, 2);
 
 -- corner case
-SELECT (-1::int8<<63)::text;
-SELECT ((-1::int8<<63)+1)::text;
+SELECT (-1::int8<<63)::text AS text;
+SELECT ((-1::int8<<63)+1)::text AS text;
 
 -- check sane handling of INT64_MIN overflow cases
 SELECT (-9223372036854775808)::int8 * (-1)::int8;
 SELECT (-9223372036854775808)::int8 / (-1)::int8;
-SELECT (-9223372036854775808)::int8 % (-1)::int8;
+--@ SELECT (-9223372036854775808)::int8 % (-1)::int8;
 SELECT (-9223372036854775808)::int8 * (-1)::int4;
 SELECT (-9223372036854775808)::int8 / (-1)::int4;
-SELECT (-9223372036854775808)::int8 % (-1)::int4;
+--@ SELECT (-9223372036854775808)::int8 % (-1)::int4;
 SELECT (-9223372036854775808)::int8 * (-1)::int2;
 SELECT (-9223372036854775808)::int8 / (-1)::int2;
-SELECT (-9223372036854775808)::int8 % (-1)::int2;
+--@ SELECT (-9223372036854775808)::int8 % (-1)::int2;
 
 -- check rounding when casting from float
-SELECT x, x::int8 AS int8_value
-FROM (VALUES (-2.5::float8),
-             (-1.5::float8),
-             (-0.5::float8),
-             (0.0::float8),
-             (0.5::float8),
-             (1.5::float8),
-             (2.5::float8)) t(x);
+--@ SELECT x, x::int8 AS int8_value
+--@ FROM (VALUES (-2.5::float8),
+--@              (-1.5::float8),
+--@              (-0.5::float8),
+--@              (0.0::float8),
+--@              (0.5::float8),
+--@              (1.5::float8),
+--@              (2.5::float8)) t(x);
 
 -- check rounding when casting from numeric
 SELECT x, x::int8 AS int8_value
@@ -227,26 +227,28 @@ FROM (VALUES (-2.5::numeric),
              (2.5::numeric)) t(x);
 
 -- test gcd()
-SELECT a, b, gcd(a, b), gcd(a, -b), gcd(b, a), gcd(-b, a)
-FROM (VALUES (0::int8, 0::int8),
-             (0::int8, 29893644334::int8),
-             (288484263558::int8, 29893644334::int8),
-             (-288484263558::int8, 29893644334::int8),
-             ((-9223372036854775808)::int8, 1::int8),
-             ((-9223372036854775808)::int8, 9223372036854775807::int8),
-             ((-9223372036854775808)::int8, 4611686018427387904::int8)) AS v(a, b);
+--@ SELECT a, b, gcd(a, b), gcd(a, -b), gcd(b, a), gcd(-b, a)
+--@ FROM (VALUES (0::int8, 0::int8),
+--@              (0::int8, 29893644334::int8),
+--@              (288484263558::int8, 29893644334::int8),
+--@              (-288484263558::int8, 29893644334::int8),
+--@              ((-9223372036854775808)::int8, 1::int8),
+--@              ((-9223372036854775808)::int8, 9223372036854775807::int8),
+--@              ((-9223372036854775808)::int8, 4611686018427387904::int8)) AS v(a, b);
 
 SELECT gcd((-9223372036854775808)::int8, 0::int8); -- overflow
 SELECT gcd((-9223372036854775808)::int8, (-9223372036854775808)::int8); -- overflow
 
 -- test lcm()
-SELECT a, b, lcm(a, b), lcm(a, -b), lcm(b, a), lcm(-b, a)
-FROM (VALUES (0::int8, 0::int8),
-             (0::int8, 29893644334::int8),
-             (29893644334::int8, 29893644334::int8),
-             (288484263558::int8, 29893644334::int8),
-             (-288484263558::int8, 29893644334::int8),
-             ((-9223372036854775808)::int8, 0::int8)) AS v(a, b);
+--@ SELECT a, b, lcm(a, b), lcm(a, -b), lcm(b, a), lcm(-b, a)
+--@ FROM (VALUES (0::int8, 0::int8),
+--@              (0::int8, 29893644334::int8),
+--@              (29893644334::int8, 29893644334::int8),
+--@              (288484263558::int8, 29893644334::int8),
+--@              (-288484263558::int8, 29893644334::int8),
+--@              ((-9223372036854775808)::int8, 0::int8)) AS v(a, b);
 
 SELECT lcm((-9223372036854775808)::int8, 1::int8); -- overflow
 SELECT lcm(9223372036854775807::int8, 9223372036854775806::int8); -- overflow
+
+DROP TABLE INT8_TBL;

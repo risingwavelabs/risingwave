@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::config::constant::hummock::CompactionFilterFlag;
+use risingwave_common::constants::hummock::CompactionFilterFlag;
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::CompactionConfig;
 
@@ -21,10 +21,11 @@ const DEFAULT_MIN_COMPACTION_BYTES: u64 = 256 * 1024 * 1024; // 256MB
 const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
 
 // decrease this configure when the generation of checkpoint barrier is not frequent.
-const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 8;
+const DEFAULT_TIER_COMPACT_TRIGGER_NUMBER: u64 = 6;
 const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
 const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
 const MAX_LEVEL: u64 = 6;
+const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
 
 pub struct CompactionConfigBuilder {
     config: CompactionConfig,
@@ -35,11 +36,10 @@ impl CompactionConfigBuilder {
         Self {
             config: CompactionConfig {
                 max_bytes_for_level_base: DEFAULT_MAX_BYTES_FOR_LEVEL_BASE,
-                max_bytes_for_level_multiplier: 10,
+                max_bytes_for_level_multiplier: DEFAULT_LEVEL_MULTIPLIER,
                 max_level: MAX_LEVEL,
                 max_compaction_bytes: DEFAULT_MAX_COMPACTION_BYTES,
                 sub_level_max_compaction_bytes: DEFAULT_MIN_COMPACTION_BYTES,
-                level0_trigger_file_number: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER * 2,
                 level0_tier_compact_file_number: DEFAULT_TIER_COMPACT_TRIGGER_NUMBER,
                 target_file_size_base: DEFAULT_TARGET_FILE_SIZE_BASE,
                 compaction_mode: CompactionMode::Range as i32,
@@ -97,7 +97,6 @@ builder_field! {
     max_level: u64,
     max_compaction_bytes: u64,
     sub_level_max_compaction_bytes: u64,
-    level0_trigger_file_number: u64,
     level0_tier_compact_file_number: u64,
     compaction_mode: i32,
     compression_algorithm: Vec<String>,

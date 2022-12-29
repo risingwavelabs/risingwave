@@ -17,7 +17,8 @@ use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef,
 };
 use risingwave_common::bail;
-use risingwave_common::types::{DataType, Scalar};
+use risingwave_common::row::{Row, RowExt};
+use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::OrderedRow;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 
@@ -103,7 +104,7 @@ impl Aggregator for StringAggUnordered {
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::Utf8(builder) = builder {
             let res = self.get_result_and_reset();
-            builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
+            builder.append(res.as_deref());
             Ok(())
         } else {
             bail!("Builder fail to match {}.", stringify!(Utf8))
@@ -143,7 +144,7 @@ impl StringAggOrdered {
 
     fn push_row(&mut self, value: &str, delim: &str, row: RowRef<'_>) {
         let key = OrderedRow::new(
-            row.row_by_indices(&self.order_col_indices),
+            row.project(&self.order_col_indices).into_owned_row(),
             &self.order_types,
         );
         self.unordered_values.push((
@@ -225,7 +226,7 @@ impl Aggregator for StringAggOrdered {
     fn output(&mut self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         if let ArrayBuilderImpl::Utf8(builder) = builder {
             let res = self.get_result_and_reset();
-            builder.append(res.as_ref().map(|x| x.as_scalar_ref()));
+            builder.append(res.as_deref());
             Ok(())
         } else {
             bail!("Builder fail to match {}.", stringify!(Utf8))

@@ -16,12 +16,11 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
-use super::utils::{IndicesDisplay, TableCatalogBuilder};
-use crate::catalog::TableCatalog;
+use super::generic;
+use super::utils::IndicesDisplay;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
@@ -31,12 +30,7 @@ use crate::utils::{Condition, ConditionDisplay};
 #[derive(Clone, Debug)]
 pub struct StreamDynamicFilter {
     pub base: PlanBase,
-    /// The predicate (formed with exactly one of < , <=, >, >=)
-    predicate: Condition,
-    // dist_key_l: Distribution,
-    left_index: usize,
-    left: PlanRef,
-    right: PlanRef,
+    core: generic::DynamicFilter<PlanRef>,
 }
 
 impl StreamDynamicFilter {
@@ -51,13 +45,13 @@ impl StreamDynamicFilter {
             false, /* we can have a new abstraction for append only and monotonically increasing
                     * in the future */
         );
-        Self {
-            base,
+        let core = generic::DynamicFilter {
             predicate,
             left_index,
             left,
             right,
-        }
+        };
+        Self { base, core }
     }
 }
 
@@ -72,13 +66,10 @@ impl fmt::Display for StreamDynamicFilter {
 
         builder.field(
             "predicate",
-            &format_args!(
-                "{}",
-                ConditionDisplay {
-                    condition: &self.predicate,
-                    input_schema: &concat_schema
-                }
-            ),
+            &ConditionDisplay {
+                condition: &self.core.predicate,
+                input_schema: &concat_schema,
+            },
         );
 
         if verbose {
@@ -98,15 +89,20 @@ impl fmt::Display for StreamDynamicFilter {
 
 impl PlanTreeNodeBinary for StreamDynamicFilter {
     fn left(&self) -> PlanRef {
-        self.left.clone()
+        self.core.left.clone()
     }
 
     fn right(&self) -> PlanRef {
-        self.right.clone()
+        self.core.right.clone()
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(self.left_index, self.predicate.clone(), left, right)
+        Self::new(
+            self.core.left_index,
+            self.core.predicate.clone(),
+            left,
+            right,
+        )
     }
 }
 
@@ -114,65 +110,23 @@ impl_plan_tree_node_for_binary! { StreamDynamicFilter }
 
 impl StreamNode for StreamDynamicFilter {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
+        use generic::dynamic_filter::*;
         let condition = self
+            .core
             .predicate
             .as_expr_unless_true()
             .map(|x| x.to_expr_proto());
-        let left_table = infer_left_internal_table_catalog(self.clone().into(), self.left_index)
+        let left_index = self.core.left_index;
+        let left_table = infer_left_internal_table_catalog(&self.base, left_index)
             .with_id(state.gen_table_id_wrapped());
-        let right_table = infer_right_internal_table_catalog(self.right.clone())
+        let right = self.right();
+        let right_table = infer_right_internal_table_catalog(right.plan_base())
             .with_id(state.gen_table_id_wrapped());
         NodeBody::DynamicFilter(DynamicFilterNode {
-            left_key: self.left_index as u32,
+            left_key: left_index as u32,
             condition,
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
         })
     }
-}
-
-fn infer_left_internal_table_catalog(input: PlanRef, left_key_index: usize) -> TableCatalog {
-    let base = input.plan_base();
-    let schema = &base.schema;
-
-    let dist_keys = base.dist.dist_column_indices().to_vec();
-
-    // The pk of dynamic filter internal table should be left_key + input_pk.
-    let mut pk_indices = vec![left_key_index];
-    // TODO(yuhao): dedup the dist key and pk.
-    pk_indices.extend(&base.logical_pk);
-
-    let mut internal_table_catalog_builder =
-        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
-
-    schema.fields().iter().for_each(|field| {
-        internal_table_catalog_builder.add_column(field);
-    });
-
-    pk_indices.iter().for_each(|idx| {
-        internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
-    });
-
-    internal_table_catalog_builder.build(dist_keys)
-}
-
-fn infer_right_internal_table_catalog(input: PlanRef) -> TableCatalog {
-    let base = input.plan_base();
-    let schema = &base.schema;
-
-    // We require that the right table has distribution `Single`
-    assert_eq!(
-        base.dist.dist_column_indices().to_vec(),
-        Vec::<usize>::new()
-    );
-
-    let mut internal_table_catalog_builder =
-        TableCatalogBuilder::new(base.ctx.inner().with_options.internal_table_subset());
-
-    schema.fields().iter().for_each(|field| {
-        internal_table_catalog_builder.add_column(field);
-    });
-
-    // No distribution keys
-    internal_table_catalog_builder.build(vec![])
 }

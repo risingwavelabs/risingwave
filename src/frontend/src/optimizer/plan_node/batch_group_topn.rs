@@ -77,12 +77,13 @@ impl ToDistributedBatch for BatchGroupTopN {
 
 impl ToBatchProst for BatchGroupTopN {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let column_orders = self.logical.topn_order().to_protobuf(&self.base.schema);
+        let column_orders = self.logical.topn_order().to_protobuf();
         NodeBody::GroupTopN(GroupTopNNode {
-            limit: self.logical.limit() as u64,
-            offset: self.logical.offset() as u64,
+            limit: self.logical.limit(),
+            offset: self.logical.offset(),
             column_orders,
             group_key: self.group_key().iter().map(|c| *c as u32).collect(),
+            with_ties: self.logical.with_ties(),
         })
     }
 }

@@ -14,17 +14,20 @@
 
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_pb::stream_plan::stream_node;
+use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::*;
 use crate::executor::HopWindowExecutor;
 
 pub struct HopWindowExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for HopWindowExecutorBuilder {
-    fn new_boxed_executor(
+    type Node = HopWindowNode;
+
+    async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
@@ -38,9 +41,6 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
 
         let input = input.into_iter().next().unwrap();
         // TODO: reuse the schema derivation with frontend.
-        let Some(stream_node::NodeBody::HopWindow(node)) = &node.node_body else {
-            unreachable!();
-        };
         let output_indices = node
             .get_output_indices()
             .iter()

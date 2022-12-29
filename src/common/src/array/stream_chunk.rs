@@ -19,8 +19,10 @@ use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
 use super::{ArrayResult, DataChunkTestExt};
 use crate::array::column::Column;
-use crate::array::{DataChunk, Row, Vis};
+use crate::array::{DataChunk, Vis};
 use crate::buffer::Bitmap;
+use crate::row::{OwnedRow, Row};
+use crate::types::to_text::ToText;
 use crate::types::DataType;
 
 /// `Op` represents three operations in `StreamChunk`.
@@ -99,7 +101,7 @@ impl StreamChunk {
 
     /// Build a `StreamChunk` from rows.
     // TODO: introducing something like `StreamChunkBuilder` maybe better.
-    pub fn from_rows(rows: &[(Op, Row)], data_types: &[DataType]) -> Self {
+    pub fn from_rows(rows: &[(Op, OwnedRow)], data_types: &[DataType]) -> Self {
         let mut array_builders = data_types
             .iter()
             .map(|data_type| data_type.create_array_builder(rows.len()))
@@ -108,7 +110,7 @@ impl StreamChunk {
 
         for (op, row) in rows {
             ops.push(*op);
-            for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
+            for (datum, builder) in row.iter().zip_eq(array_builders.iter_mut()) {
                 builder.append_datum(datum);
             }
         }
@@ -177,19 +179,12 @@ impl StreamChunk {
 
     pub fn from_parts(ops: Vec<Op>, data_chunk: DataChunk) -> Self {
         let (columns, vis) = data_chunk.into_parts();
-        let visibility = match vis {
-            Vis::Bitmap(b) => Some(b),
-            Vis::Compact(_) => None,
-        };
-        Self::new(ops, columns, visibility)
+        Self::new(ops, columns, vis.into_visibility())
     }
 
     pub fn into_inner(self) -> (Vec<Op>, Vec<Column>, Option<Bitmap>) {
         let (columns, vis) = self.data.into_parts();
-        let visibility = match vis {
-            Vis::Bitmap(b) => Some(b),
-            Vis::Compact(_) => None,
-        };
+        let visibility = vis.into_visibility();
         (self.ops, columns, visibility)
     }
 
@@ -229,7 +224,7 @@ impl StreamChunk {
         let mut table = Table::new();
         table.load_preset("||--+-++|    ++++++");
         for (op, row_ref) in self.rows() {
-            let mut cells = Vec::with_capacity(row_ref.size() + 1);
+            let mut cells = Vec::with_capacity(row_ref.len() + 1);
             cells.push(
                 Cell::new(match op {
                     Op::Insert => "+",
@@ -239,12 +234,12 @@ impl StreamChunk {
                 })
                 .set_alignment(CellAlignment::Right),
             );
-            for datum in row_ref.values() {
+            for datum in row_ref.iter() {
                 let str = match datum {
                     None => "".to_owned(), // NULL
-                    Some(scalar) => scalar.to_string(),
+                    Some(scalar) => scalar.to_text(),
                 };
-                cells.push(Cell::new(&str));
+                cells.push(Cell::new(str));
             }
             table.add_row(cells);
         }
@@ -274,13 +269,20 @@ impl StreamChunk {
 
 impl fmt::Debug for StreamChunk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "StreamChunk {{ cardinality = {}, capacity = {}, data = \n{} }}",
-            self.cardinality(),
-            self.capacity(),
-            self.to_pretty_string()
-        )
+        if f.alternate() {
+            write!(
+                f,
+                "StreamChunk {{ cardinality: {}, capacity: {}, data: \n{}\n }}",
+                self.cardinality(),
+                self.capacity(),
+                self.to_pretty_string()
+            )
+        } else {
+            f.debug_struct("StreamChunk")
+                .field("cardinality", &self.cardinality())
+                .field("capacity", &self.capacity())
+                .finish_non_exhaustive()
+        }
     }
 }
 

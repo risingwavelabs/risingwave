@@ -18,15 +18,16 @@ pub mod streaming_table;
 use std::sync::{Arc, LazyLock};
 
 use itertools::Itertools;
-use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_COUNT};
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 
 use crate::error::StorageResult;
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
-pub const DEFAULT_VNODE: VirtualNode = 0;
+pub const DEFAULT_VNODE: VirtualNode = VirtualNode::ZERO;
 
 /// Represents the distribution for a specific table instance.
 #[derive(Debug)]
@@ -43,8 +44,8 @@ impl Distribution {
     pub fn fallback() -> Self {
         /// A bitmap that only the default vnode is set.
         static FALLBACK_VNODES: LazyLock<Arc<Bitmap>> = LazyLock::new(|| {
-            let mut vnodes = BitmapBuilder::zeroed(VIRTUAL_NODE_COUNT);
-            vnodes.set(DEFAULT_VNODE as _, true);
+            let mut vnodes = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            vnodes.set(DEFAULT_VNODE.to_index(), true);
             vnodes.finish().into()
         });
         Self {
@@ -57,7 +58,7 @@ impl Distribution {
     pub fn all_vnodes(dist_key_indices: Vec<usize>) -> Self {
         /// A bitmap that all vnodes are set.
         static ALL_VNODES: LazyLock<Arc<Bitmap>> =
-            LazyLock::new(|| Bitmap::all_high_bits(VIRTUAL_NODE_COUNT).into());
+            LazyLock::new(|| Bitmap::ones(VirtualNode::COUNT).into());
         Self {
             dist_key_indices,
             vnodes: ALL_VNODES.clone(),
@@ -68,7 +69,7 @@ impl Distribution {
 // TODO: GAT-ify this trait or remove this trait
 #[async_trait::async_trait]
 pub trait TableIter: Send {
-    async fn next_row(&mut self) -> StorageResult<Option<Row>>;
+    async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;
 
     async fn collect_data_chunk(
         &mut self,
@@ -81,8 +82,8 @@ pub trait TableIter: Send {
         for _ in 0..chunk_size.unwrap_or(usize::MAX) {
             match self.next_row().await? {
                 Some(row) => {
-                    for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
-                        builder.append_datum(&datum);
+                    for (datum, builder) in row.iter().zip_eq(builders.iter_mut()) {
+                        builder.append_datum(datum);
                     }
                     row_count += 1;
                 }
@@ -107,13 +108,11 @@ pub trait TableIter: Send {
 }
 
 /// Get vnode value with `indices` on the given `row`.
-fn compute_vnode(row: &Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
+pub fn compute_vnode(row: impl Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
     let vnode = if indices.is_empty() {
         DEFAULT_VNODE
     } else {
-        let vnode = row
-            .hash_by_indices(indices, &Crc32FastBuilder {})
-            .to_vnode();
+        let vnode = (&row).project(indices).hash(Crc32FastBuilder).to_vnode();
         check_vnode_is_set(vnode, vnodes);
         vnode
     };
@@ -124,12 +123,16 @@ fn compute_vnode(row: &Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
 }
 
 /// Get vnode values with `indices` on the given `chunk`.
-fn compute_chunk_vnode(chunk: &DataChunk, indices: &[usize], vnodes: &Bitmap) -> Vec<VirtualNode> {
+pub fn compute_chunk_vnode(
+    chunk: &DataChunk,
+    indices: &[usize],
+    vnodes: &Bitmap,
+) -> Vec<VirtualNode> {
     if indices.is_empty() {
         vec![DEFAULT_VNODE; chunk.capacity()]
     } else {
         chunk
-            .get_hash_values(indices, Crc32FastBuilder {})
+            .get_hash_values(indices, Crc32FastBuilder)
             .into_iter()
             .zip_eq(chunk.vis().iter())
             .map(|(h, vis)| {
@@ -146,7 +149,7 @@ fn compute_chunk_vnode(chunk: &DataChunk, indices: &[usize], vnodes: &Bitmap) ->
 
 /// Check whether the given `vnode` is set in the `vnodes` of this table.
 fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
-    let is_set = vnodes.is_set(vnode as usize);
+    let is_set = vnodes.is_set(vnode.to_index());
     assert!(
         is_set,
         "vnode {} should not be accessed by this table",
