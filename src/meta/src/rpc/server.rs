@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
-use std::process;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -132,7 +131,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     // print current leader/follower status of this node
     tokio::spawn(async move {
         let _ = tracing::span!(tracing::Level::INFO, "node_status").enter();
-        let mut was_leader = false;
         loop {
             if note_status_leader_rx.changed().await.is_err() {
                 tracing::error!("Leader sender dropped");
@@ -141,17 +139,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
             let (leader_info, is_leader) = note_status_leader_rx.borrow().clone();
             let leader_addr = leader_info_to_host_addr(leader_info);
-
-            // Implementation of naive fencing mechanism:
-            // leader nodes should panic if they loose their leader position
-            // Current implementation panics, if leader looses lease.
-            // Alternative implementation that panics only if leader is unable to re-acquire lease:
-            // if was_leader && !is_leader {
-            if was_leader {
-                tracing::error!("This node lost its leadership. Exiting node");
-                process::exit(0);
-            }
-            was_leader = is_leader;
 
             tracing::info!(
                 "This node currently is a {} at {}:{}",
@@ -211,11 +198,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 }
             }
         }
-
-        // TODO: Enabling this causes the recovery test to fail
-        // See https://buildkite.com/risingwavelabs/pull-request/builds/14686#01855869-b9d7-432b-9ea8-b835830f1a8e
-        // tracing::info!("Waiting, to give former leaders fencing mechanism time to trigger");
-        // sleep(Duration::from_millis(lease_interval_secs * 1000 + 500));
 
         // shut down follower svc if node used to be follower
         if let Some(handle) = follower_handle {

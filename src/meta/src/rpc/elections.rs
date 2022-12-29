@@ -15,8 +15,8 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{process, thread};
 
 use prost::Message;
 use rand::rngs::StdRng;
@@ -397,10 +397,8 @@ pub async fn run_elections<S: MetaStore>(
                         manage_term(is_leader, &leader_info, lease_time_sec, &meta_store).await && !leader_alive {
                             // Leader lost leadership. Trigger fencing
                             if is_leader {
-                                leader_tx.send((MetaLeaderInfo{
-                                    node_address: "".to_owned(), 
-                                    lease_id: 0
-                                }, false)).expect("Leader receiver dropped");
+                                tracing::error!("This node lost its leadership. Exiting node");
+                                process::exit(0);
                             }
                             // leader failed. Elect new leader
                             continue 'election;
