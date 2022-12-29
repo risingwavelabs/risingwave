@@ -70,6 +70,12 @@ sqllogictest -p 4566 -d dev -e postgres-extended './e2e_test/extended_query/**/*
 echo "--- Kill cluster"
 cargo make ci-kill
 
+echo "--- e2e, jdbc, ci-3cn-1fe, streaming"
+EXTERNAL_ENGINE_COMMAND_TEMPLATE="java -cp sqllogictest-jdbc-runner.jar com.risingwave.sqllogictest.App jdbc:postgresql://{host}:{port}/{db} {user}" sqllogictest -- --engine=external -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}"
+
+echo "--- e2e, jdbc, ci-3cn-1fe, batch"
+EXTERNAL_ENGINE_COMMAND_TEMPLATE="java -cp sqllogictest-jdbc-runner.jar com.risingwave.sqllogictest.App jdbc:postgresql://{host}:{port}/{db} {user}" sqllogictest -- --engine=external -p 4566 -d dev './e2e_test/batch/**/*.slt' --junit "batch-${profile}"
+
 if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     echo "--- e2e, ci-meta-backup-test"
     buildkite-agent artifact download backup-restore-"$profile" target/debug/
