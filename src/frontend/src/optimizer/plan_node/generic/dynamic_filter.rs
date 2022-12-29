@@ -50,7 +50,7 @@ pub fn infer_left_internal_table_catalog(
     });
 
     pk_indices.iter().for_each(|idx| {
-        internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending, true)
+        internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
     });
 
     internal_table_catalog_builder.build(dist_keys)
