@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::future::try_join_all;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -126,14 +127,18 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
         let prost_sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
         let source_creators =
             vec![DefaultCreateSource::new(source.context().client_pool()); prost_sources.len()];
-        let mut sources: Vec<ExchangeSourceImpl> = vec![];
 
-        for (prost_source, source_creator) in prost_sources.iter().zip_eq(source_creators) {
-            let source = source_creator
-                .create_source(source.context.clone(), prost_source)
-                .await?;
-            sources.push(source);
-        }
+        let futures = prost_sources
+            .iter()
+            .zip_eq(source_creators)
+            .map(|(prost_source, source_creator)| async move {
+                source_creator
+                    .create_source(source.context.clone(), prost_source)
+                    .await
+            })
+            .collect_vec();
+
+        let sources: Vec<ExchangeSourceImpl> = try_join_all(futures).await?;
 
         let input_schema: Vec<NodeField> = node.get_input_schema().to_vec();
         let fields = input_schema.iter().map(Field::from).collect::<Vec<Field>>();
