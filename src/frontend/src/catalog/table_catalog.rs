@@ -58,7 +58,8 @@ use crate::WithOptions;
 ///
 /// - **Distribution Key**: the columns used to partition the data. It must be a subset of the order
 ///   key.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(Default, PartialEq))]
 pub struct TableCatalog {
     pub id: TableId,
 
@@ -126,6 +127,7 @@ pub enum TableType {
     Internal,
 }
 
+#[cfg(test)]
 impl Default for TableType {
     fn default() -> Self {
         Self::Table
