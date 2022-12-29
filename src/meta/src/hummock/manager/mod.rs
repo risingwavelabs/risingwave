@@ -1252,7 +1252,7 @@ where
         );
 
         if !deterministic_mode {
-            self.try_send_compaction_request(compact_task.compaction_group_id)?;
+            self.try_send_compaction_request(compact_task.compaction_group_id);
         }
 
         #[cfg(test)]
@@ -1701,7 +1701,7 @@ where
         if !self.env.opts.compaction_deterministic_test {
             // commit_epoch may contains SSTs from any compaction group
             for id in modified_compaction_groups {
-                self.try_send_compaction_request(id)?;
+                self.try_send_compaction_request(id);
             }
         }
         #[cfg(test)]
@@ -1974,7 +1974,7 @@ where
             return Ok(());
         }
         for compaction_group in compaction_groups {
-            self.try_send_compaction_request(compaction_group)?;
+            self.try_send_compaction_request(compaction_group);
         }
         Ok(())
     }
@@ -2023,13 +2023,22 @@ where
     }
 
     /// Sends a compaction request to compaction scheduler.
-    pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> Result<bool> {
+    pub fn try_send_compaction_request(&self, compaction_group: CompactionGroupId) -> bool {
         if let Some(sender) = self.compaction_request_channel.read().as_ref() {
-            sender
-                .try_sched_compaction(compaction_group)
-                .map_err(|e| Error::Internal(anyhow::anyhow!(e.to_string())))
+            match sender.try_sched_compaction(compaction_group) {
+                Ok(_) => true,
+                Err(e) => {
+                    tracing::error!(
+                        "failed to send compaction request for compaction group {}. {}",
+                        compaction_group,
+                        e
+                    );
+                    false
+                }
+            }
         } else {
-            Ok(false) // maybe this should be an Err, but we need this to be Ok for tests.
+            tracing::warn!("compaction_request_channel is not initialized");
+            false
         }
     }
 
