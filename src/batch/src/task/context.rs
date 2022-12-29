@@ -72,8 +72,10 @@ pub struct ComputeNodeContext {
     // None: Local mode don't record metrics.
     task_metrics: Option<BatchTaskMetricsWithTaskLabels>,
 
+    // Last mem usage value.
+    last_mem_val: Arc<AtomicUsize>,
     // Record how many memory bytes have been used in this task,
-    mem_usage_value: Arc<AtomicUsize>,
+    cur_mem_val: Arc<AtomicUsize>,
 }
 
 impl BatchTaskContext for ComputeNodeContext {
@@ -116,11 +118,19 @@ impl BatchTaskContext for ComputeNodeContext {
     }
 
     fn record_mem_usage(&self, val: usize) {
-        self.mem_usage_value.store(val, Ordering::Relaxed);
+        // Record the last mem val.
+        // Calculate the difference between old val and new value, and apply the diff to total
+        // memory usage value.
+        let old_value = self.cur_mem_val.load(Ordering::Relaxed);
+        self.last_mem_val.store(old_value, Ordering::Relaxed);
+        let diff = val as i64 - old_value as i64;
+        self.env.task_manager().apply_mem_diff(diff);
+
+        self.cur_mem_val.store(val, Ordering::Relaxed);
     }
 
     fn get_mem_usage(&self) -> usize {
-        self.mem_usage_value.load(Ordering::Relaxed)
+        self.cur_mem_val.load(Ordering::Relaxed)
     }
 }
 
@@ -130,7 +140,8 @@ impl ComputeNodeContext {
         Self {
             env: BatchEnvironment::for_test(),
             task_metrics: None,
-            mem_usage_value: Arc::new(0.into()),
+            cur_mem_val: Arc::new(0.into()),
+            last_mem_val: Arc::new(0.into()),
         }
     }
 
@@ -139,7 +150,8 @@ impl ComputeNodeContext {
         Self {
             env,
             task_metrics: Some(task_metrics),
-            mem_usage_value: Arc::new(0.into()),
+            cur_mem_val: Arc::new(0.into()),
+            last_mem_val: Arc::new(0.into()),
         }
     }
 
@@ -147,11 +159,12 @@ impl ComputeNodeContext {
         Self {
             env,
             task_metrics: None,
-            mem_usage_value: Arc::new(0.into()),
+            cur_mem_val: Arc::new(0.into()),
+            last_mem_val: Arc::new(0.into()),
         }
     }
 
     pub fn mem_usage(&self) -> usize {
-        self.mem_usage_value.load(Ordering::Relaxed)
+        self.cur_mem_val.load(Ordering::Relaxed)
     }
 }

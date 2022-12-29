@@ -16,6 +16,7 @@ use std::collections::{hash_map, HashMap};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use hytra::TrAdder;
 use parking_lot::Mutex;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
@@ -45,8 +46,9 @@ pub struct BatchManager {
     /// Batch configuration
     config: BatchConfig,
 
-    /// Highest task id that use memory. Can be find quickly.
-    max_mem_task: Arc<Mutex<Option<TaskId>>>,
+    /// Total batch mem usage.
+    /// When each task context report their own usage, it will apply the diff into this total mem value for all tasks.
+    mem_val: Arc<TrAdder<i64>>,
 }
 
 impl BatchManager {
@@ -68,8 +70,8 @@ impl BatchManager {
             // TODO: may manually shutdown the runtime after we implement graceful shutdown for
             // stream manager.
             runtime: Box::leak(Box::new(runtime)),
-            max_mem_task: Arc::new(Mutex::new(None)),
             config,
+            mem_val: TrAdder::new().into(),
         }
     }
 
@@ -210,33 +212,32 @@ impl BatchManager {
     /// Kill batch queries with larges memory consumption per task. Required to maintain task level
     /// memory usage in the struct. Will be called by global memory manager.
     pub fn kill_queries(&self) {
-        todo!()
-    }
-
-    /// Called by global memory manager for total usage of batch tasks. This variable should be
-    /// maintained by Batch Manager.
-    pub fn get_all_memory_usage(&self) -> usize {
-        let mut all = 0;
         let mut max_mem_task_id = None;
         let mut max_mem = usize::MIN;
         let guard = self.tasks.lock();
-        for (k, v) in guard.iter() {
+        for (t_id, t) in guard.iter() {
             // If the task has been stopped, we should not count this.
             // Alternatively, we can use a bool flag to indicate end of execution.
             // Now we use only store 0 bytes in Context after execution ends.
-            let mem_usage = v.report_mem_usage();
+            let mem_usage = t.get_mem_usage();
             if mem_usage > max_mem {
                 max_mem = mem_usage;
-                max_mem_task_id = Some(k.clone());
+                max_mem_task_id = Some(t_id.clone());
             }
-            all += mem_usage;
         }
+        if let Some(id) = max_mem_task_id {
+            let t = guard.get(&id).unwrap();
+            t.abort_task();
+        }
+    }
 
-        // Store the max memory task for future potential kill queries.
-        let mut guard = self.max_mem_task.lock();
-        *guard = max_mem_task_id;
+    /// Called by global memory manager for total usage of batch tasks. This op is designed to be light-weight
+    pub fn get_all_memory_usage(&self) -> usize {
+        self.mem_val.get() as usize
+    }
 
-        all
+    pub fn apply_mem_diff(&self, diff: i64) {
+        self.mem_val.inc(diff)
     }
 }
 

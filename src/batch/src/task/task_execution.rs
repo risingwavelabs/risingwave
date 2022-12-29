@@ -593,7 +593,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             .expect("The state receivers must have been inited!")
     }
 
-    pub fn report_mem_usage(&self) -> usize {
+    pub fn get_mem_usage(&self) -> usize {
         self.context.get_mem_usage()
     }
 }
