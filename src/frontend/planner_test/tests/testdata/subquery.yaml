@@ -348,3 +348,10 @@
   planner_error: |-
     Feature is not yet implemented: Subquery in join on condition is unsupported
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- sql: |
+    create table auction (date_time date);
+    select * from auction AS hop_1
+    where EXISTS (select hop_1.date_time from auction group by hop_1.date_time );
+  stream_error: |-
+    Feature is not yet implemented: stream nested-loop join
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
