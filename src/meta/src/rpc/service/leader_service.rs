@@ -30,9 +30,6 @@ impl LeaderServiceImpl {
     }
 }
 
-//  expected struct `risingwave_pb::meta::LeaderRequest`, found struct
-// `risingwave_pb::leader::LeaderRequest`
-
 #[async_trait::async_trait]
 impl LeaderService for LeaderServiceImpl {
     #[cfg_attr(coverage, no_coverage)]
