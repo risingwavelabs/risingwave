@@ -158,11 +158,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     let table_col_idx =
                         internal_table_catalog_builder.add_column(&in_fields[upstream_idx]);
                     if let Some(order_type) = order_type {
-                        internal_table_catalog_builder.add_order_column(
-                            table_col_idx,
-                            order_type,
-                            false,
-                        );
+                        internal_table_catalog_builder.add_order_column(table_col_idx, order_type);
                     }
                     included_upstream_indices.push(upstream_idx);
                     table_col_idx
@@ -215,11 +211,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             let mut included_upstream_indices = vec![];
             for &idx in &self.group_key {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
-                internal_table_catalog_builder.add_order_column(
-                    tb_column_idx,
-                    OrderType::Ascending,
-                    true,
-                );
+                internal_table_catalog_builder
+                    .add_order_column(tb_column_idx, OrderType::Ascending);
                 included_upstream_indices.push(idx);
             }
 
@@ -342,11 +335,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         for field in out_fields.iter() {
             let tb_column_idx = internal_table_catalog_builder.add_column(field);
             if tb_column_idx < self.group_key.len() {
-                internal_table_catalog_builder.add_order_column(
-                    tb_column_idx,
-                    OrderType::Ascending,
-                    true,
-                );
+                internal_table_catalog_builder
+                    .add_order_column(tb_column_idx, OrderType::Ascending);
             }
         }
         internal_table_catalog_builder.set_read_prefix_len_hint(self.group_key.len());
