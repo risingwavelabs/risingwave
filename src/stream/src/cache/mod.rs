@@ -19,9 +19,7 @@ use std::ops::{Deref, DerefMut};
 use itertools::Itertools;
 use lru::{DefaultHasher, LruCache};
 
-mod evictable;
 mod managed_lru;
-pub use evictable::*;
 pub use managed_lru::*;
 use risingwave_common::buffer::Bitmap;
 
