@@ -154,21 +154,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         }
     });
 
-    // separate fencing logic from the fencing logic introduced in elections.rs
-    // Will be triggered if leader looses leadership during election re-run
-    let fencing_leader_rx = leader_rx.clone();
-    tokio::spawn(async move {
-        let mut was_leader = false;
-        loop {
-            let (_, is_leader) = fencing_leader_rx.borrow().clone();
-            if was_leader {
-                tracing::error!("This node lost its leadership. Exiting node");
-                process::exit(0);
-            }
-            was_leader = is_leader;
-        }
-    });
-
     let (svc_shutdown_tx, mut svc_shutdown_rx) = WatchChannel(());
 
     let join_handle = tokio::spawn(async move {
