@@ -26,7 +26,9 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
-use risingwave_pb::hummock::{CompactionConfig, HummockVersion, KeyRange, SstableInfo};
+use risingwave_pb::hummock::{
+    CompactionConfig, HummockSnapshot, HummockVersion, KeyRange, SstableInfo,
+};
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::TableOption;
@@ -333,7 +335,7 @@ pub async fn commit_from_meta_node<S>(
     hummock_manager_ref: &HummockManager<S>,
     epoch: HummockEpoch,
     ssts: Vec<LocalSstableInfo>,
-) -> crate::hummock::error::Result<()>
+) -> crate::hummock::error::Result<Option<HummockSnapshot>>
 where
     S: MetaStore,
 {
