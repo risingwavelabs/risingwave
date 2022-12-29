@@ -37,7 +37,7 @@
       └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), sum0(count)] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, count] }
-            └─StreamAppendOnlyHashJoin { type: Inner, predicate: id = id, append_only: true, output: [_row_id, id, _row_id, id] }
+            └─StreamAppendOnlyHashJoin { type: Inner, predicate: id = id, output: [_row_id, id, _row_id, id] }
               ├─StreamExchange { dist: HashShard(id) }
               | └─StreamProject { exprs: [id, _row_id] }
               |   └─StreamShare { id = 206 }
