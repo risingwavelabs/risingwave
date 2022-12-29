@@ -132,10 +132,15 @@ impl KafkaSplitEnumerator {
         // watermark as the start and end offset if the timestamp is provided, we will use
         // the watermark to narrow down the range
         let mut expect_start_offset = if let Some(ts) = expect_start_timestamp_millis {
-            Some(
-                self.fetch_offset_for_time(topic_partitions.as_ref(), ts)
-                    .await?,
-            )
+            let mut start_offset = self
+                .fetch_offset_for_time(topic_partitions.as_ref(), ts)
+                .await?;
+            start_offset.iter_mut().for_each(|(_, offset)| {
+                if let Some(v) = offset.as_mut() {
+                    *v -= 1;
+                }
+            });
+            Some(start_offset)
         } else {
             None
         };
