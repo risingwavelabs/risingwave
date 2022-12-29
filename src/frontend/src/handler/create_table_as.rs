@@ -96,7 +96,7 @@ pub async fn handle_create_as(
 
     if columns.len() > column_descs.len() {
         return Err(ErrorCode::InvalidInputSyntax(
-            " too many column names were specified".to_string(),
+            "too many column names were specified".to_string(),
         )
         .into());
     }
