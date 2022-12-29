@@ -29,7 +29,7 @@ fn lookup_time_zone(time_zone: &str) -> Result<Tz> {
 }
 
 #[inline(always)]
-pub fn f64_sec_to_timestampz(elem: OrderedF64) -> Result<i64> {
+pub fn f64_sec_to_timestamptz(elem: OrderedF64) -> Result<i64> {
     // TODO(#4515): handle +/- infinity
     (elem * 1e6)
         .round() // TODO(#5576): should round to even
@@ -63,7 +63,7 @@ pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> R
 }
 
 #[inline(always)]
-pub fn timestampz_at_time_zone(input: i64, time_zone: &str) -> Result<NaiveDateTimeWrapper> {
+pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<NaiveDateTimeWrapper> {
     let time_zone = lookup_time_zone(time_zone)?;
     let secs = input.div_euclid(1_000_000);
     let nsecs = input.rem_euclid(1_000_000) * 1000;
@@ -80,7 +80,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::vector_op::cast::{str_to_timestamp, str_to_timestampz};
+    use crate::vector_op::cast::{str_to_timestamp, str_to_timestamptz};
 
     #[test]
     fn test_time_zone_conversion() {
@@ -105,11 +105,11 @@ mod tests {
             ["2022-11-06 10:00:00Z", "2022-11-06 02:00:00", "2022-11-06 18:00:00", "2022-11-06 11:00:00"],
         ];
         for case in test_cases {
-            let usecs = str_to_timestampz(case[0]).unwrap();
+            let usecs = str_to_timestamptz(case[0]).unwrap();
             case.iter().skip(1).zip_eq(zones).for_each(|(local, zone)| {
                 let local = str_to_timestamp(local).unwrap();
 
-                let actual = timestampz_at_time_zone(usecs, zone).unwrap();
+                let actual = timestamptz_at_time_zone(usecs, zone).unwrap();
                 assert_eq!(local, actual);
 
                 let actual = timestamp_at_time_zone(local, zone).unwrap();
@@ -147,10 +147,10 @@ mod tests {
             ("2022-11-06 09:59:00Z", "2022-11-06 01:59:00", "US/Pacific", true),
         ];
         for (instant, local, zone, preferred) in test_cases {
-            let usecs = str_to_timestampz(instant).unwrap();
+            let usecs = str_to_timestamptz(instant).unwrap();
             let local = str_to_timestamp(local).unwrap();
 
-            let actual = timestampz_at_time_zone(usecs, zone).unwrap();
+            let actual = timestamptz_at_time_zone(usecs, zone).unwrap();
             assert_eq!(local, actual);
 
             if preferred {

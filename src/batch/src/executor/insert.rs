@@ -17,7 +17,6 @@ use std::iter::repeat;
 use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{
     ArrayBuilder, DataChunk, I64Array, Op, PrimitiveArrayBuilder, StreamChunk,
 };
@@ -26,7 +25,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_source::TableSourceManagerRef;
+use risingwave_source::dml_manager::DmlManagerRef;
 
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
@@ -37,34 +36,38 @@ use crate::task::BatchTaskContext;
 pub struct InsertExecutor {
     /// Target table id.
     table_id: TableId,
-    source_manager: TableSourceManagerRef,
+    dml_manager: DmlManagerRef,
 
     child: BoxedExecutor,
     chunk_size: usize,
     schema: Schema,
     identity: String,
-    column_idxs: Vec<usize>,
+    column_indices: Vec<usize>,
+
+    row_id_index: Option<usize>,
 }
 
 impl InsertExecutor {
     pub fn new(
         table_id: TableId,
-        source_manager: TableSourceManagerRef,
+        dml_manager: DmlManagerRef,
         child: BoxedExecutor,
         chunk_size: usize,
         identity: String,
-        column_idxs: Vec<usize>,
+        column_indices: Vec<usize>,
+        row_id_index: Option<usize>,
     ) -> Self {
         Self {
             table_id,
-            source_manager,
+            dml_manager,
             child,
             chunk_size,
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
             },
             identity,
-            column_idxs,
+            column_indices,
+            row_id_index,
         }
     }
 }
@@ -86,10 +89,6 @@ impl Executor for InsertExecutor {
 impl InsertExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-        let source_desc = self.source_manager.get_source(&self.table_id)?;
-        let source = source_desc.source.as_table().expect("not table source");
-        let row_id_index = source_desc.row_id_index;
-
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types, 1024);
 
@@ -100,26 +99,26 @@ impl InsertExecutor {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
 
-            // No need to check for duplicate columns. This is already validated in binder
-            if !&self.column_idxs.is_sorted() {
+            // No need to check for duplicate columns. This is already validated in binder.
+            if !&self.column_indices.is_sorted() {
                 let mut ordered_cols = columns.clone();
-                for (i, idx) in self.column_idxs.iter().enumerate() {
+                for (i, idx) in self.column_indices.iter().enumerate() {
                     ordered_cols[*idx] = columns[i].clone()
                 }
                 columns = ordered_cols
             }
 
-            // If user did not specify the primary key, then we need to add a column for placeholder
-            // of generating row IDs.
-            if let Some(row_id_index) = row_id_index {
-                let array: I64Array = repeat(None).take(cap).collect();
-                columns.insert(row_id_index, Column::from(array));
+            // If the user does not specify the primary key, then we need to add a column as the
+            // primary key.
+            if let Some(row_id_index) = self.row_id_index {
+                let row_id_col = I64Array::from_iter(repeat(None).take(cap));
+                columns.insert(row_id_index, row_id_col.into())
             }
 
             let stream_chunk =
                 StreamChunk::new(vec![Op::Insert; cap], columns, vis.into_visibility());
 
-            let notifier = source.write_chunk(stream_chunk)?;
+            let notifier = self.dml_manager.write_chunk(&self.table_id, stream_chunk)?;
             notifiers.push(notifier);
 
             Ok(())
@@ -170,20 +169,24 @@ impl BoxedExecutorBuilder for InsertExecutor {
             NodeBody::Insert
         )?;
 
-        let table_id = TableId::new(insert_node.table_source_id);
-        let column_idxs = insert_node
-            .column_idxs
+        let table_id = TableId::new(insert_node.table_id);
+        let column_indices = insert_node
+            .column_indices
             .iter()
             .map(|&i| i as usize)
             .collect();
 
         Ok(Box::new(Self::new(
             table_id,
-            source.context().source_manager(),
+            source.context().dml_manager(),
             child,
             source.context.get_config().developer.batch_chunk_size,
             source.plan_node().get_identity().clone(),
-            column_idxs,
+            column_indices,
+            insert_node
+                .row_id_index
+                .as_ref()
+                .map(|index| index.index as _),
         )))
     }
 }
@@ -194,12 +197,12 @@ mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
+    use itertools::Itertools;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
-    use risingwave_common::catalog::schema_test_utils;
+    use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
-    use risingwave_source::table_test_utils::create_table_source_desc_builder;
-    use risingwave_source::{TableSourceManager, TableSourceManagerRef};
+    use risingwave_source::dml_manager::DmlManager;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
 
@@ -209,7 +212,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_executor() -> Result<()> {
-        let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
+        let dml_manager = Arc::new(DmlManager::default());
         let store = MemoryStateStore::new();
 
         // Make struct field
@@ -227,6 +230,8 @@ mod tests {
         let mut schema = schema_test_utils::ii();
         schema.fields.push(struct_field);
         schema.fields.push(Field::unnamed(DataType::Int64)); // row_id column
+
+        let row_id_index = Some(3);
 
         let col1 = column_nonnull! { I32Array, [1, 3, 5, 7, 9] };
         let col2 = column_nonnull! { I32Array, [2, 4, 6, 8, 10] };
@@ -247,28 +252,28 @@ mod tests {
         let table_id = TableId::new(0);
 
         // Create reader
-        let source_builder = create_table_source_desc_builder(
-            &schema,
-            table_id,
-            Some(3),
-            vec![3],
-            source_manager.clone(),
-        );
-        let source_desc = source_builder.build().await?;
-        let source = source_desc.source.as_table().unwrap();
-        let mut reader = source
-            .stream_reader(vec![0.into(), 1.into(), 2.into()])
-            .await?
-            .into_stream();
+        let column_descs = schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, field)| ColumnDesc::unnamed(ColumnId::new(i as _), field.data_type.clone()))
+            .collect_vec();
+        // We must create a variable to hold this `Arc<TableSource>` here, or it will be dropped due
+        // to the `Weak` reference in `DmlManager`.
+        let reader = dml_manager
+            .register_reader(table_id, &column_descs)
+            .unwrap();
+        let mut reader = reader.stream_reader_v2().into_stream_v2();
 
         // Insert
         let insert_executor = Box::new(InsertExecutor::new(
             table_id,
-            source_manager.clone(),
+            dml_manager,
             Box::new(mock_executor),
             1024,
             "InsertExecutor".to_string(),
             vec![], // Ignoring insertion order
+            row_id_index,
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();
@@ -286,7 +291,7 @@ mod tests {
         });
 
         // Read
-        let chunk = reader.next().await.unwrap()?.chunk;
+        let chunk = reader.next().await.unwrap()?;
 
         assert_eq!(
             chunk.columns()[0]
@@ -318,8 +323,6 @@ mod tests {
         .into();
         assert_eq!(*chunk.columns()[2].array(), array);
 
-        // There's nothing in store since `TableSource` has no side effect.
-        // Data will be materialized in associated streaming task.
         let epoch = u64::MAX;
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
         let store_content = store

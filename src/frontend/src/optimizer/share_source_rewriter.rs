@@ -64,7 +64,12 @@ impl ShareSourceRewriter {
 
 impl PlanRewriter for ShareSourceRewriter {
     fn rewrite_logical_source(&mut self, source: &LogicalSource) -> PlanRef {
-        let source_id = source.core.catalog.id;
+        let source_id = match &source.core.catalog {
+            Some(s) => s.id,
+            None => {
+                return source.clone().into();
+            }
+        };
         if !self.share_ids.contains(&source_id) {
             let source_ref = source.clone().into();
             return source_ref;
@@ -108,9 +113,11 @@ impl PlanVisitor<()> for SourceCounter {
     fn merge(_: (), _: ()) {}
 
     fn visit_logical_source(&mut self, source: &LogicalSource) {
-        self.source_counter
-            .entry(source.core.catalog.id)
-            .and_modify(|count| *count += 1)
-            .or_insert(1);
+        if let Some(source) = &source.core.catalog {
+            self.source_counter
+                .entry(source.id)
+                .and_modify(|count| *count += 1)
+                .or_insert(1);
+        }
     }
 }

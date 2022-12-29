@@ -21,7 +21,7 @@ use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_rpc_client::ComputeClientPoolRef;
-use risingwave_source::TableSourceManagerRef;
+use risingwave_source::monitor::SourceMetrics;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::session::{AuthContext, FrontendEnv};
@@ -58,10 +58,6 @@ impl BatchTaskContext for FrontendBatchTaskContext {
         is_local_address(self.env.server_address(), peer_addr)
     }
 
-    fn source_manager(&self) -> TableSourceManagerRef {
-        unimplemented!("not supported in local mode")
-    }
-
     fn state_store(&self) -> risingwave_storage::store_impl::StateStoreImpl {
         unimplemented!("not supported in local mode")
     }
@@ -76,5 +72,13 @@ impl BatchTaskContext for FrontendBatchTaskContext {
 
     fn get_config(&self) -> &BatchConfig {
         self.env.batch_config()
+    }
+
+    fn dml_manager(&self) -> risingwave_source::dml_manager::DmlManagerRef {
+        unimplemented!("not supported in local mode")
+    }
+
+    fn source_metrics(&self) -> Arc<SourceMetrics> {
+        self.env.source_metrics()
     }
 }

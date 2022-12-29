@@ -37,8 +37,8 @@ use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{
-    BatchProject, Convention, LogicalProject, LogicalSource, StreamDml, StreamMaterialize,
-    StreamRowIdGen, StreamSink,
+    BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamRowIdGen,
+    StreamSink,
 };
 use self::plan_visitor::{
     has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_logical_apply,
@@ -47,6 +47,7 @@ use self::plan_visitor::{
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::TableType;
+use crate::handler::create_table::DmlFlag;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{
     BatchExchange, ColumnPruningContext, PlanNodeType, PredicatePushdownContext,
@@ -190,6 +191,15 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
+        // Replace source to share source.
+        // Perform share source at the beginning so that we can benefit from predicate pushdown and
+        // column pruning for the share operator.
+        plan = ShareSourceRewriter::share_source(plan);
+        if explain_trace {
+            ctx.trace("Share Source:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
         // Simple Unnesting.
         plan = self.optimize_by_rules(
             plan,
@@ -309,12 +319,24 @@ impl PlanRoot {
         // visibility of these expressions. To avoid these expressions being pruned, we can't use
         // `self.out_fields` as `required_cols` here.
         let required_cols = (0..self.plan.schema().len()).collect_vec();
-        plan = plan.prune_col(&required_cols, &mut ColumnPruningContext::new(plan.clone()));
+        let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
+        plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
         // Column pruning may introduce additional projects, and filter can be pushed again.
         if explain_trace {
             ctx.trace("Prune Columns:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
+
+        if column_pruning_ctx.need_second_round() {
+            // Second round of column pruning and reuse the column pruning context.
+            // Try to replace original share operator with the new one.
+            plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
+            if explain_trace {
+                ctx.trace("Prune Columns (For DAG):");
+                ctx.trace(plan.explain_to_string().unwrap());
+            }
+        }
+
         plan = plan.predicate_pushdown(
             Condition::true_cond(),
             &mut PredicatePushdownContext::new(plan.clone()),
@@ -493,13 +515,6 @@ impl PlanRoot {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan()?;
 
-                // Replace source to share source.
-                let plan = ShareSourceRewriter::share_source(plan);
-                if explain_trace {
-                    ctx.trace("Reuse Source:");
-                    ctx.trace(plan.explain_to_string().unwrap());
-                }
-
                 let (plan, out_col_change) =
                     plan.logical_rewrite_for_stream(&mut Default::default())?;
 
@@ -545,8 +560,8 @@ impl PlanRoot {
         definition: String,
         col_names: Option<Vec<String>>,
         handle_pk_conflict: bool,
-        enable_dml: bool,
         row_id_index: Option<usize>,
+        dml_flag: DmlFlag,
         table_type: TableType,
     ) -> Result<StreamMaterialize> {
         let out_names = if let Some(col_names) = col_names {
@@ -554,25 +569,41 @@ impl PlanRoot {
         } else {
             self.out_names.clone()
         };
-        let mut stream_plan = self.gen_stream_plan()?;
-        if enable_dml {
-            // Insert a dml executor after the previous exector.
-            // FIXME: Store `Field` or `Schema` in `TableSource` to avoid downcasting in the future.
-            // Or do we have a better solution to this?
-            let logical_source = self.plan.downcast_ref::<LogicalSource>().unwrap();
-            let column_descs = logical_source
-                .core
-                .catalog
-                .columns
-                .iter()
-                .map(|column_catalog| column_catalog.column_desc.clone())
-                .collect_vec();
-            stream_plan = StreamDml::new(stream_plan, column_descs).into();
+        let stream_plan = self.gen_stream_plan()?;
+        let materialize = StreamMaterialize::create(
+            stream_plan.clone(),
+            mv_name.clone(),
+            self.required_dist.clone(),
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            out_names.clone(),
+            false,
+            definition.clone(),
+            handle_pk_conflict,
+            row_id_index,
+            table_type,
+        )?;
+
+        if dml_flag == DmlFlag::Disable {
+            return Ok(materialize);
         }
-        if let Some(row_id_index) = row_id_index {
-            // Insert a row id gen eexecutor after the previous executor.
-            stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
-        }
+
+        let table = materialize.table();
+
+        // NOTE(stonepage): we can not use this the plan's input append-only
+        // property here
+        // table.append_only,
+        let stream_plan = StreamDml::new(
+            stream_plan,
+            dml_flag == DmlFlag::AppendOnly,
+            table.table_desc().columns,
+        )
+        .into();
+
+        let stream_plan = match row_id_index {
+            Some(row_id_index) => StreamRowIdGen::new(stream_plan, row_id_index).into(),
+            None => stream_plan,
+        };
 
         StreamMaterialize::create(
             stream_plan,
