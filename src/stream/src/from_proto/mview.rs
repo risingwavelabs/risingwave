@@ -51,7 +51,6 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             params.vnode_bitmap.map(Arc::new),
             table,
             stream.get_watermark_epoch(),
-            1 << 16,
             handle_pk_conflict,
         )
         .await;
@@ -96,7 +95,6 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             vnodes,
             table,
             stream.get_watermark_epoch(),
-            1 << 16,
             handle_pk_conflict,
         )
         .await;
