@@ -14,6 +14,7 @@ jobs:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         version-prefix: 'release-'
         version-separator: '.'
+        overwrite: false
     - name: Add issue to project
       uses: actions/add-to-project@v0.3.0
       with:
