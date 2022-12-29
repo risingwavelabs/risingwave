@@ -117,7 +117,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, WatchSender<()>)> {
-    // Initialize managers.
+    // Initialize managers
     let (_, election_handle, election_shutdown, mut leader_rx) = run_elections(
         address_info.listen_addr.clone().to_string(),
         meta_store.clone(),
@@ -127,9 +127,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let mut services_leader_rx = leader_rx.clone();
     let mut note_status_leader_rx = leader_rx.clone();
-
-    // FIXME: add fencing mechanism
-    // https://github.com/risingwavelabs/risingwave/issues/6786
 
     // print current leader/follower status of this node
     tokio::spawn(async move {
@@ -252,10 +249,13 @@ mod tests {
 
     /// Start `n` meta nodes on localhost. First node will be started at `meta_port`, 2nd node on
     /// `meta_port + 1`, ...
-    async fn setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
+    /// Call this, if you need more control over your `meta_store` in your test
+    async fn setup_n_nodes_inner(
+        n: u16,
+        meta_port: u16,
+        meta_store: &Arc<MemStore>,
+    ) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
         use std::net::{IpAddr, Ipv4Addr};
-
-        let meta_store = Arc::new(MemStore::default());
 
         let mut node_controllers: Vec<(JoinHandle<()>, WatchSender<()>)> = vec![];
         for i in 0..n {
@@ -283,6 +283,12 @@ mod tests {
         }
         sleep(WAIT_INTERVAL).await;
         node_controllers
+    }
+
+    /// wrapper for `setup_n_nodes_inner`
+    async fn setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
+        let meta_store = Arc::new(MemStore::default());
+        setup_n_nodes_inner(n, meta_port, &meta_store).await
     }
 
     /// Get a Channel to a meat node without re-trying the connection.
@@ -585,5 +591,58 @@ mod tests {
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
+    }
+
+    /// Creates `number_of_nodes` meta nodes
+    /// Deletes leader and or lease `number_of_nodes` times
+    /// After each deletion asserts that we have the correct number of leader nodes
+    #[tokio::test]
+    async fn test_fencing() {
+        let meta_port = 1600;
+        let compute_port = 1700;
+        let number_of_nodes = 4;
+        use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
+        use crate::storage::Transaction;
+
+        let meta_store = Arc::new(MemStore::default());
+        let vec_meta_handlers = setup_n_nodes_inner(number_of_nodes, meta_port, &meta_store).await;
+
+        // we should have 1 leader on startup
+        let leader_count = number_of_leaders(number_of_nodes, meta_port, compute_port).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader at beginning, instead got {} leaders",
+            leader_count
+        );
+
+        let del = vec![(true, true), (true, false), (false, true)];
+
+        for (delete_leader, delete_lease) in del {
+            // delete leader/lease info in meta store
+            let mut txn = Transaction::default();
+            if delete_leader {
+                txn.delete(
+                    META_CF_NAME.to_string(),
+                    META_LEADER_KEY.as_bytes().to_vec(),
+                );
+            }
+            if delete_lease {
+                txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
+            }
+            meta_store.txn(txn).await.unwrap();
+            sleep(WAIT_INTERVAL).await;
+
+            // assert that we still have 1 leader
+            let leader_count = number_of_leaders(number_of_nodes, meta_port, compute_port).await;
+            assert_eq!(
+                leader_count, 1,
+                "Expected to have 1 leader, instead got {} leaders",
+                leader_count
+            );
+        }
+
+        for ele in vec_meta_handlers {
+            ele.0.abort();
+        }
     }
 }
