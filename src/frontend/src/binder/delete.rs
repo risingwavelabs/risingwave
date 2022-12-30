@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Expr, ObjectName, SelectItem};
 
-use super::{Binder, BoundBaseTable, BoundTableSource};
+use super::{Binder, BoundBaseTable};
+use crate::catalog::TableId;
 use crate::expr::ExprImpl;
+use crate::user::UserId;
 
 #[derive(Debug)]
 pub struct BoundDelete {

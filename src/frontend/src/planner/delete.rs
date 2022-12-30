@@ -30,7 +30,9 @@ impl Planner {
             scan
         };
         let returning = !delete.returning_list.is_empty();
-        let mut plan: PlanRef = LogicalDelete::create(input, delete.table_name.clone(), delete.table_id, returning)?.into();
+        let mut plan: PlanRef =
+            LogicalDelete::create(input, delete.table_name.clone(), delete.table_id, returning)?
+                .into();
 
         if returning {
             plan = LogicalProject::create(plan, delete.returning_list);

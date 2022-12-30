@@ -43,7 +43,7 @@ pub struct LogicalDelete {
 
 impl LogicalDelete {
     /// Create a [`LogicalDelete`] node. Used internally by optimizer.
-    pub fn new(input: PlanRef, table_name: String, table_id: TableId, returning: bool,) -> Self {
+    pub fn new(input: PlanRef, table_name: String, table_id: TableId, returning: bool) -> Self {
         let ctx = input.ctx();
         // TODO: support `RETURNING`.
         let schema = if returning {
@@ -63,8 +63,13 @@ impl LogicalDelete {
     }
 
     /// Create a [`LogicalDelete`] node. Used by planner.
-    pub fn create(input: PlanRef, table_name: String, table_id: TableId,returning: bool) -> Result<Self> {
-        Ok(Self::new(input, table_name, table_id,returning))
+    pub fn create(
+        input: PlanRef,
+        table_name: String,
+        table_id: TableId,
+        returning: bool,
+    ) -> Result<Self> {
+        Ok(Self::new(input, table_name, table_id, returning))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
@@ -87,7 +92,12 @@ impl PlanTreeNodeUnary for LogicalDelete {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.table_name.clone(), self.table_id, self.returning)
+        Self::new(
+            input,
+            self.table_name.clone(),
+            self.table_id,
+            self.returning,
+        )
     }
 }
 

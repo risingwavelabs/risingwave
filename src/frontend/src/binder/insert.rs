@@ -19,9 +19,9 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem, SetExpr};
 
 use super::{BoundQuery, BoundSetExpr};
+use crate::binder::Binder;
 use crate::catalog::TableId;
-use crate::binder::{Binder, BoundTableSource};
-use crate::expr::{ExprImpl, InputRef, Expr};
+use crate::expr::{ExprImpl, InputRef};
 use crate::user::UserId;
 
 #[derive(Debug)]
@@ -67,9 +67,8 @@ impl Binder {
         source: Query,
         returning_items: Vec<SelectItem>,
     ) -> Result<BoundInsert> {
-        let (schema_name, table_name) =
-            Self::resolve_schema_qualified_name(&self.db_name, name)?;
-        let table_source = self.bind_table_source(schema_name.as_deref(), &table_name)?;
+        let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
+        // let table_source = self.bind_table_source(schema_name.as_deref(), &table_name)?;
         self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, true)?;

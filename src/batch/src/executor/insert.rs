@@ -294,7 +294,7 @@ mod tests {
             "InsertExecutor".to_string(),
             vec![], // Ignoring insertion order
             row_id_index,
-            false
+            false,
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();

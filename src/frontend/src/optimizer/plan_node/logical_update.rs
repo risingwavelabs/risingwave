@@ -79,7 +79,13 @@ impl LogicalUpdate {
         exprs: Vec<ExprImpl>,
         returning: bool,
     ) -> Result<Self> {
-        Ok(Self::new(input, table_source_name, table_id, exprs,  returning,))
+        Ok(Self::new(
+            input,
+            table_source_name,
+            table_id,
+            exprs,
+            returning,
+        ))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
