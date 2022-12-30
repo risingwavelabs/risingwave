@@ -22,6 +22,8 @@ use std::time::Duration;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::try_join_all;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStore};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use risingwave_storage::hummock::value::HummockValue;
@@ -32,7 +34,7 @@ use risingwave_storage::hummock::{
 };
 use risingwave_storage::monitor::ObjectStoreMetrics;
 
-const RANGE: Range<u64> = 0..2500000;
+const RANGE: Range<u64> = 0..1500000;
 const VALUE: &[u8] = &[0; 400];
 const SAMPLE_COUNT: usize = 10;
 const ESTIMATED_MEASUREMENT_TIME: Duration = Duration::from_secs(60);
@@ -63,7 +65,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
 
     async fn open_builder(&self) -> HummockResult<SstableBuilder<Self::Writer>> {
         let id = self.next_id.fetch_add(1, SeqCst);
-        let tracker = self.limiter.require_memory(1).await.unwrap();
+        let tracker = self.limiter.require_memory(1).await;
         let writer_options = SstableWriterOptions {
             capacity_hint: Some(self.options.capacity),
             tracker: Some(tracker),
@@ -89,12 +91,20 @@ fn get_builder_options(capacity_mb: usize) -> SstableBuilderOptions {
     }
 }
 
+fn test_user_key_of(idx: u64) -> UserKey<Vec<u8>> {
+    UserKey::for_test(TableId::default(), idx.to_be_bytes().to_vec())
+}
+
 async fn build_tables<F: SstableWriterFactory>(
     mut builder: CapacitySplitTableBuilder<LocalTableBuilderFactory<F>>,
 ) {
     for i in RANGE {
         builder
-            .add_user_key(i.to_be_bytes().to_vec(), HummockValue::put(VALUE), 1)
+            .add_full_key(
+                &FullKey::from_user_key(test_user_key_of(i).as_ref(), 1),
+                HummockValue::put(VALUE),
+                true,
+            )
             .await
             .unwrap();
     }

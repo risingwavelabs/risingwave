@@ -21,7 +21,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
 use crate::planner::Planner;
 
-pub const LIMIT_ALL_COUNT: usize = usize::MAX / 2;
+pub const LIMIT_ALL_COUNT: u64 = u64::MAX / 2;
 
 impl Planner {
     /// Plan a [`BoundQuery`]. Need to bind before planning.
@@ -37,7 +37,7 @@ impl Planner {
         } = query;
 
         let extra_order_exprs_len = extra_order_exprs.len();
-        let mut plan = self.plan_set_expr(body, extra_order_exprs)?;
+        let mut plan = self.plan_set_expr(body, extra_order_exprs, &order)?;
         let order = Order { field_order: order };
         if limit.is_some() || offset.is_some() {
             let limit = limit.unwrap_or(LIMIT_ALL_COUNT);
@@ -54,7 +54,7 @@ impl Planner {
         }
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..plan.schema().len() - extra_order_exprs_len);
-        if plan.as_logical_project_set().is_some() {
+        if let Some(field) = plan.schema().fields.get(0) && field.name == "projected_row_id"  {
             // Do not output projected_row_id hidden column.
             out_fields.set(0, false);
         }

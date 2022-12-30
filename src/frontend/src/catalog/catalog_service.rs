@@ -21,7 +21,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable,
+    Source as ProstSource, Table as ProstTable, View as ProstView,
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
@@ -46,9 +46,10 @@ impl CatalogReader {
     }
 }
 
-///  [`CatalogWriter`] is for DDL (create table/schema/database), it will only send rpc to meta and
-/// get the catalog version as response. then it will wait the local catalog to update to sync with
-/// the version.
+/// [`CatalogWriter`] initiate DDL operations (create table/schema/database).
+/// It will only send rpc to meta and get the catalog version as response.
+/// Then it will wait for the local catalog to be synced to the version, which is performed by
+/// [observer](`crate::observer::FrontendObserverNode`).
 #[async_trait::async_trait]
 pub trait CatalogWriter: Send + Sync {
     async fn create_database(&self, db_name: &str, owner: UserId) -> Result<()>;
@@ -60,15 +61,17 @@ pub trait CatalogWriter: Send + Sync {
         owner: UserId,
     ) -> Result<()>;
 
+    async fn create_view(&self, view: ProstView) -> Result<()>;
+
     async fn create_materialized_view(
         &self,
         table: ProstTable,
         graph: StreamFragmentGraph,
     ) -> Result<()>;
 
-    async fn create_materialized_source(
+    async fn create_table(
         &self,
-        source: ProstSource,
+        source: Option<ProstSource>,
         table: ProstTable,
         graph: StreamFragmentGraph,
     ) -> Result<()>;
@@ -84,18 +87,11 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()>;
 
-    async fn drop_materialized_source(
-        &self,
-        source_id: u32,
-        table_id: TableId,
-        indexes_id: Vec<IndexId>,
-    ) -> Result<()>;
+    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()>;
 
-    async fn drop_materialized_view(
-        &self,
-        table_id: TableId,
-        indexes_id: Vec<IndexId>,
-    ) -> Result<()>;
+    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()>;
+
+    async fn drop_view(&self, view_id: u32) -> Result<()>;
 
     async fn drop_source(&self, source_id: u32) -> Result<()>;
 
@@ -159,6 +155,11 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    async fn create_view(&self, view: ProstView) -> Result<()> {
+        let (_, version) = self.meta_client.create_view(view).await?;
+        self.wait_version(version).await
+    }
+
     async fn create_index(
         &self,
         index: ProstIndex,
@@ -169,16 +170,13 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn create_materialized_source(
+    async fn create_table(
         &self,
-        source: ProstSource,
+        source: Option<ProstSource>,
         table: ProstTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
-        let (_, _, version) = self
-            .meta_client
-            .create_materialized_source(source, table, graph)
-            .await?;
+        let (_, version) = self.meta_client.create_table(source, table, graph).await?;
         self.wait_version(version).await
     }
 
@@ -192,28 +190,18 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_materialized_source(
-        &self,
-        source_id: u32,
-        table_id: TableId,
-        index_ids: Vec<IndexId>,
-    ) -> Result<()> {
-        let version = self
-            .meta_client
-            .drop_materialized_source(source_id, table_id, index_ids)
-            .await?;
+    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
+        let version = self.meta_client.drop_table(source_id, table_id).await?;
         self.wait_version(version).await
     }
 
-    async fn drop_materialized_view(
-        &self,
-        table_id: TableId,
-        index_ids: Vec<IndexId>,
-    ) -> Result<()> {
-        let version = self
-            .meta_client
-            .drop_materialized_view(table_id, index_ids)
-            .await?;
+    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
+        let version = self.meta_client.drop_materialized_view(table_id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn drop_view(&self, view_id: u32) -> Result<()> {
+        let version = self.meta_client.drop_view(view_id).await?;
         self.wait_version(version).await
     }
 

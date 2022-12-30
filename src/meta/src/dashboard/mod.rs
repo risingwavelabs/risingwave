@@ -12,15 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod prometheus;
+mod proxy;
+
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
+use axum::body::Body;
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
-use axum::response::{Html, IntoResponse};
+use axum::response::IntoResponse;
 use axum::routing::{get, get_service};
 use axum::Router;
+use hyper::Request;
+use parking_lot::Mutex;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
@@ -32,6 +39,8 @@ use crate::storage::MetaStore;
 #[derive(Clone)]
 pub struct DashboardService<S: MetaStore> {
     pub dashboard_addr: SocketAddr,
+    pub prometheus_endpoint: Option<String>,
+    pub prometheus_client: Option<prometheus_http_query::Client>,
     pub cluster_manager: ClusterManagerRef<S>,
     pub fragment_manager: FragmentManagerRef<S>,
 
@@ -41,10 +50,10 @@ pub struct DashboardService<S: MetaStore> {
 
 pub type Service<S> = Arc<DashboardService<S>>;
 
-mod handlers {
+pub(super) mod handlers {
     use axum::Json;
     use itertools::Itertools;
-    use risingwave_pb::catalog::{Source, Table};
+    use risingwave_pb::catalog::{Sink, Source, Table};
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::meta::{ActorLocation, TableFragments as ProstTableFragments};
     use risingwave_pb::stream_plan::StreamActor;
@@ -58,7 +67,7 @@ mod handlers {
     type TableId = i32;
     type TableActors = (TableId, Vec<StreamActor>);
 
-    fn err(err: impl Into<anyhow::Error>) -> DashboardError {
+    pub fn err(err: impl Into<anyhow::Error>) -> DashboardError {
         DashboardError(err.into())
     }
 
@@ -107,6 +116,15 @@ mod handlers {
 
         let sources = Source::list(&*srv.meta_store).await.map_err(err)?;
         Ok(Json(sources))
+    }
+
+    pub async fn list_sinks<S: MetaStore>(
+        Extension(srv): Extension<Service<S>>,
+    ) -> Result<Json<Vec<Sink>>> {
+        use crate::model::MetadataModel;
+
+        let sinks = Sink::list(&*srv.meta_store).await.map_err(err)?;
+        Ok(Json(sinks))
     }
 
     pub async fn list_actors<S: MetaStore>(
@@ -168,6 +186,10 @@ where
         use handlers::*;
         let srv = Arc::new(self);
 
+        let cors_layer = CorsLayer::new()
+            .allow_origin(cors::Any)
+            .allow_methods(vec![Method::GET]);
+
         let api_router = Router::new()
             .route("/clusters/:ty", get(list_clusters::<S>))
             .route("/actors", get(list_actors::<S>))
@@ -175,23 +197,20 @@ where
             .route("/fragments2", get(list_fragments::<S>))
             .route("/materialized_views", get(list_materialized_views::<S>))
             .route("/sources", get(list_sources::<S>))
+            .route("/sinks", get(list_sinks::<S>))
+            .route(
+                "/metrics/cluster",
+                get(prometheus::list_prometheus_cluster::<S>),
+            )
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))
                     .into_inner(),
             )
-            .layer(
-                // TODO: allow wildcard CORS is dangerous! Should remove this in production.
-                CorsLayer::new().allow_origin(cors::Any).allow_methods(vec![
-                    Method::GET,
-                    Method::POST,
-                    Method::PUT,
-                    Method::DELETE,
-                ]),
-            );
+            .layer(cors_layer);
 
         let app = if let Some(ui_path) = ui_path {
-            let static_file_router = Router::new().nest(
+            let static_file_router = Router::new().nest_service(
                 "/",
                 get_service(ServeDir::new(ui_path)).handle_error(
                     |error: std::io::Error| async move {
@@ -203,14 +222,24 @@ where
                 ),
             );
             Router::new()
-                .fallback(static_file_router)
+                .fallback_service(static_file_router)
                 .nest("/api", api_router)
         } else {
+            let cache = Arc::new(Mutex::new(HashMap::new()));
+            let service = tower::service_fn(move |req: Request<Body>| {
+                let cache = cache.clone();
+                async move {
+                    proxy::proxy(req, cache).await.or_else(|err| {
+                        Ok((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Unhandled internal error: {}", err),
+                        )
+                            .into_response())
+                    })
+                }
+            });
             Router::new()
-                .route(
-                    "/",
-                    get(|| async { Html::from(include_str!("index.html")) }),
-                )
+                .fallback_service(service)
                 .nest("/api", api_router)
         };
 

@@ -94,9 +94,13 @@ impl PinnedVersion {
         }
     }
 
+    pub(crate) fn compaction_group_index(&self) -> Arc<HashMap<TableId, CompactionGroupId>> {
+        self.compaction_group_index.clone()
+    }
+
     pub(crate) fn new_pin_version(&self, version: HummockVersion) -> Self {
         assert!(
-            version.id > self.version.id,
+            version.id >= self.version.id,
             "pinning a older version {}. Current is {}",
             version.id,
             self.version.id
@@ -146,10 +150,6 @@ impl PinnedVersion {
     }
 
     pub fn levels(&self, table_id: TableId) -> Vec<&Level> {
-        #[cfg(any(test, feature = "test"))]
-        if table_id.table_id() == 0 {
-            return self.version.get_combined_levels();
-        }
         match self.compaction_group_index.get(&table_id) {
             Some(compaction_group_id) => self.levels_by_compaction_groups_id(*compaction_group_id),
             None => vec![],

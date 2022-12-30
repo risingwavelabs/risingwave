@@ -15,6 +15,7 @@
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
 mod bool_array;
+pub mod bytes_array;
 mod chrono_array;
 pub mod column;
 mod column_proto_readers;
@@ -32,22 +33,24 @@ mod stream_chunk_iter;
 pub mod struct_array;
 mod utf8_array;
 mod value_reader;
+mod vis;
 
 use std::convert::From;
-use std::hash::Hasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 pub use bool_array::{BoolArray, BoolArrayBuilder};
+pub use bytes_array::*;
 pub use chrono_array::{
     NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
     NaiveTimeArray, NaiveTimeArrayBuilder,
 };
 pub use column_proto_readers::*;
-pub use data_chunk::{DataChunk, DataChunkTestExt, Vis};
-pub use data_chunk_iter::{Row, RowDeserializer, RowRef};
+pub use data_chunk::{DataChunk, DataChunkTestExt};
+pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
-pub use iterator::{ArrayImplIterator, ArrayIterator};
+pub use iterator::ArrayIterator;
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
@@ -55,6 +58,7 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType};
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
+pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
 use crate::buffer::Bitmap;
@@ -74,7 +78,7 @@ pub type F64ArrayBuilder = PrimitiveArrayBuilder<OrderedF64>;
 pub type F32ArrayBuilder = PrimitiveArrayBuilder<OrderedF32>;
 
 /// The hash source for `None` values when hashing an item.
-pub(crate) static NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
+pub(crate) const NULL_VAL_FOR_HASH: u32 = 0xfffffff0;
 
 /// A trait over all array builders.
 ///
@@ -100,8 +104,15 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     /// Panics if `meta`'s type mismatches with the array type.
     fn with_meta(capacity: usize, meta: ArrayMeta) -> Self;
 
+    /// Append a value multiple times.
+    ///
+    /// This should be more efficient than calling `append` multiple times.
+    fn append_n(&mut self, n: usize, value: Option<<Self::ArrayType as Array>::RefItem<'_>>);
+
     /// Append a value to builder.
-    fn append(&mut self, value: Option<<<Self as ArrayBuilder>::ArrayType as Array>::RefItem<'_>>);
+    fn append(&mut self, value: Option<<Self::ArrayType as Array>::RefItem<'_>>) {
+        self.append_n(1, value);
+    }
 
     fn append_null(&mut self) {
         self.append(None)
@@ -154,24 +165,54 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     /// Corresponding builder of this array, which is reciprocal to `Array`.
     type Builder: ArrayBuilder<ArrayType = Self>;
 
-    /// Iterator type of this array.
-    type Iter<'a>: Iterator<Item = Option<Self::RefItem<'a>>>
-    where
-        Self: 'a;
+    /// Retrieve a reference to value regardless of whether it is null
+    /// without checking the index boundary.
+    ///
+    /// The returned value for NULL values is the default value.
+    ///
+    /// # Safety
+    ///
+    /// Index must be within the bounds.
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_>;
 
     /// Retrieve a reference to value.
-    fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>>;
+    #[inline]
+    fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>> {
+        if !self.is_null(idx) {
+            // Safety: the above `is_null` check ensures that the index is valid.
+            Some(unsafe { self.raw_value_at_unchecked(idx) })
+        } else {
+            None
+        }
+    }
 
     /// # Safety
     ///
     /// Retrieve a reference to value without checking the index boundary.
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>>;
+    #[inline]
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>> {
+        if !self.is_null_unchecked(idx) {
+            Some(self.raw_value_at_unchecked(idx))
+        } else {
+            None
+        }
+    }
 
     /// Number of items of array.
     fn len(&self) -> usize;
 
     /// Get iterator of current array.
-    fn iter(&self) -> Self::Iter<'_>;
+    fn iter(&self) -> ArrayIterator<'_, Self> {
+        ArrayIterator::new(self)
+    }
+
+    /// Get raw iterator of current array.
+    ///
+    /// The raw iterator simply iterates values without checking the null bitmap.
+    /// The returned value for NULL values is undefined.
+    fn raw_iter(&self) -> impl DoubleEndedIterator<Item = Self::RefItem<'_>> {
+        (0..self.len()).map(|i| unsafe { self.raw_value_at_unchecked(i) })
+    }
 
     /// Serialize to protobuf
     fn to_protobuf(&self) -> ProstArray;
@@ -197,7 +238,17 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 
     fn set_bitmap(&mut self, bitmap: Bitmap);
 
-    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H);
+    /// Feed the value at `idx` into the given [`Hasher`].
+    #[inline(always)]
+    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
+        // We use a default implementation for all arrays for now, as retrieving the reference
+        // should be lightweight.
+        if let Some(value) = self.value_at(idx) {
+            value.hash_scalar(state);
+        } else {
+            NULL_VAL_FOR_HASH.hash(state);
+        }
+    }
 
     fn hash_vec<H: Hasher>(&self, hashers: &mut [H]) {
         assert_eq!(hashers.len(), self.len());
@@ -286,7 +337,8 @@ macro_rules! for_all_variants {
             { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
             { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
             { Struct, struct, StructArray, StructArrayBuilder },
-            { List, list, ListArray, ListArrayBuilder }
+            { List, list, ListArray, ListArrayBuilder },
+            { Bytea, bytea, BytesArray, BytesArrayBuilder}
         }
     };
 }
@@ -316,12 +368,6 @@ impl From<BoolArray> for ArrayImpl {
     }
 }
 
-impl From<DecimalArray> for ArrayImpl {
-    fn from(arr: DecimalArray) -> Self {
-        Self::Decimal(arr)
-    }
-}
-
 impl From<Utf8Array> for ArrayImpl {
     fn from(arr: Utf8Array) -> Self {
         Self::Utf8(arr)
@@ -337,6 +383,12 @@ impl From<StructArray> for ArrayImpl {
 impl From<ListArray> for ArrayImpl {
     fn from(arr: ListArray) -> Self {
         Self::List(arr)
+    }
+}
+
+impl From<BytesArray> for ArrayImpl {
+    fn from(arr: BytesArray) -> Self {
+        Self::Bytea(arr)
     }
 }
 
@@ -425,30 +477,26 @@ macro_rules! impl_array_builder {
                 }
             }
 
-            /// Append a datum, return error while type not match.
-            pub fn append_datum(&mut self, datum: &Datum) {
-                match datum {
-                    None => self.append_null(),
-                    Some(ref scalar) => match (self, scalar) {
-                        $( (Self::$variant_name(inner), ScalarImpl::$variant_name(v)) => inner.append(Some(v.as_scalar_ref())), )*
-                        _ => panic!("Invalid datum type"),
-                    },
-                }
-            }
-
-            /// Append a datum ref, return error while type not match.
-            pub fn append_datum_ref(&mut self, datum_ref: DatumRef<'_>) {
-                match datum_ref {
-                    None => self.append_null(),
+            /// Append a [`Datum`] or [`DatumRef`] multiple times, return error while type not match.
+            pub fn append_datum_n(&mut self, n: usize, datum: impl ToDatumRef) {
+                match datum.to_datum_ref() {
+                    None => match self {
+                        $( Self::$variant_name(inner) => inner.append_n(n, None), )*
+                    }
                     Some(scalar_ref) => match (self, scalar_ref) {
-                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
+                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append_n(n, Some(v)), )*
                         (this_builder, this_scalar_ref) => panic!(
-                            "Failed to append datum, array builder type: {}, scalar ref type: {}",
+                            "Failed to append datum, array builder type: {}, scalar type: {}",
                             this_builder.get_ident(),
                             this_scalar_ref.get_ident()
                         ),
                     },
                 }
+            }
+
+            /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
+            pub fn append_datum(&mut self, datum: impl ToDatumRef) {
+                self.append_datum_n(1, datum);
             }
 
             pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {
@@ -591,8 +639,8 @@ macro_rules! impl_array {
 for_all_variants! { impl_array }
 
 impl ArrayImpl {
-    pub fn iter(&self) -> ArrayImplIterator<'_> {
-        ArrayImplIterator::new(self)
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> {
+        (0..self.len()).map(|i| self.value_at(i))
     }
 
     pub fn from_protobuf(array: &ProstArray, cardinality: usize) -> ArrayResult<Self> {
@@ -613,7 +661,7 @@ impl ArrayImpl {
                 read_string_array::<Utf8ArrayBuilder, Utf8ValueReader>(array, cardinality)?
             }
             ProstArrayType::Decimal => {
-                read_string_array::<DecimalArrayBuilder, DecimalValueReader>(array, cardinality)?
+                read_numeric_array::<Decimal, DecimalValueReader>(array, cardinality)?
             }
             ProstArrayType::Date => read_naive_date_array(array, cardinality)?,
             ProstArrayType::Time => read_naive_time_array(array, cardinality)?,
@@ -622,6 +670,9 @@ impl ArrayImpl {
             ProstArrayType::Struct => StructArray::from_protobuf(array)?,
             ProstArrayType::List => ListArray::from_protobuf(array)?,
             ProstArrayType::Unspecified => unreachable!(),
+            ProstArrayType::Bytea => {
+                read_string_array::<BytesArrayBuilder, BytesValueReader>(array, cardinality)?
+            }
         };
         Ok(array)
     }

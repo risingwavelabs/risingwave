@@ -12,123 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{Hash, Hasher};
-use std::iter;
-use std::mem::size_of;
+use std::fmt::{Display, Write};
 
-use itertools::Itertools;
-use risingwave_pb::common::buffer::CompressionType;
-use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, ArrayResult, NULL_VAL_FOR_HASH};
+use super::bytes_array::{BytesWriter, PartialBytesWriter};
+use super::{Array, ArrayBuilder, ArrayMeta, BytesArray, BytesArrayBuilder};
 use crate::array::ArrayBuilderImpl;
-use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::buffer::Bitmap;
 
-/// `Utf8Array` is a collection of Rust Utf8 `String`s.
+/// `Utf8Array` is a collection of Rust Utf8 `str`s. It's a wrapper of `BytesArray`.
 #[derive(Debug, Clone)]
 pub struct Utf8Array {
-    offset: Vec<usize>,
-    bitmap: Bitmap,
-    data: Vec<u8>,
+    bytes: BytesArray,
 }
 
 impl Array for Utf8Array {
     type Builder = Utf8ArrayBuilder;
-    type Iter<'a> = ArrayIterator<'a, Self>;
-    type OwnedItem = String;
+    type OwnedItem = Box<str>;
     type RefItem<'a> = &'a str;
 
-    fn value_at(&self, idx: usize) -> Option<&str> {
-        if !self.is_null(idx) {
-            let data_slice = &self.data[self.offset[idx]..self.offset[idx + 1]];
-            Some(unsafe { std::str::from_utf8_unchecked(data_slice) })
-        } else {
-            None
-        }
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
+        let bytes = self.bytes.raw_value_at_unchecked(idx);
+        std::str::from_utf8_unchecked(bytes)
     }
 
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<&str> {
-        if !self.is_null_unchecked(idx) {
-            let data_slice = &self.data[self.offset[idx]..self.offset[idx + 1]];
-            Some(std::str::from_utf8_unchecked(data_slice))
-        } else {
-            None
-        }
-    }
-
+    #[inline]
     fn len(&self) -> usize {
-        self.offset.len() - 1
+        self.bytes.len()
     }
 
-    fn iter(&self) -> ArrayIterator<'_, Self> {
-        ArrayIterator::new(self)
-    }
-
+    #[inline]
     fn to_protobuf(&self) -> ProstArray {
-        let offset_buffer = self
-            .offset
-            .iter()
-            // length of offset is n + 1 while the length
-            // of null_bitmap is n, chain iterator of null_bitmap
-            // with one single true here to push the end of offset
-            // to offset_buffer
-            .zip_eq(self.null_bitmap().iter().chain(iter::once(true)))
-            .fold(
-                Vec::<u8>::with_capacity(self.offset.len() * size_of::<usize>()),
-                |mut buffer, (offset, not_null)| {
-                    // TODO: force convert usize to u64, frontend will treat this offset buffer as
-                    // u64
-                    if not_null {
-                        let offset = *offset as u64;
-                        buffer.extend_from_slice(&offset.to_be_bytes());
-                    }
-                    buffer
-                },
-            );
-
-        let data_buffer = self.data.clone();
-
-        let values = vec![
-            Buffer {
-                compression: CompressionType::None as i32,
-                body: offset_buffer,
-            },
-            Buffer {
-                compression: CompressionType::None as i32,
-                body: data_buffer,
-            },
-        ];
-        let null_bitmap = self.null_bitmap().to_protobuf();
         ProstArray {
-            null_bitmap: Some(null_bitmap),
-            values,
             array_type: ArrayType::Utf8 as i32,
-            struct_array_data: None,
-            list_array_data: None,
+            ..self.bytes.to_protobuf()
         }
     }
 
     fn null_bitmap(&self) -> &Bitmap {
-        &self.bitmap
+        self.bytes.null_bitmap()
     }
 
     fn into_null_bitmap(self) -> Bitmap {
-        self.bitmap
+        self.bytes.into_null_bitmap()
     }
 
     fn set_bitmap(&mut self, bitmap: Bitmap) {
-        self.bitmap = bitmap;
-    }
-
-    #[inline(always)]
-    fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H) {
-        if !self.is_null(idx) {
-            let data_slice = &self.data[self.offset[idx]..self.offset[idx + 1]];
-            state.write(data_slice);
-        } else {
-            NULL_VAL_FOR_HASH.hash(state);
-        }
+        self.bytes.set_bitmap(bitmap);
     }
 
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
@@ -137,193 +68,135 @@ impl Array for Utf8Array {
     }
 }
 
-impl Utf8Array {
-    pub fn from_slice(data: &[Option<&str>]) -> Self {
-        let mut builder = <Self as Array>::Builder::new(data.len());
-        for i in data {
-            builder.append(*i);
+impl<'a> FromIterator<Option<&'a str>> for Utf8Array {
+    fn from_iter<I: IntoIterator<Item = Option<&'a str>>>(iter: I) -> Self {
+        Self {
+            bytes: iter.into_iter().map(|s| s.map(|s| s.as_bytes())).collect(),
         }
-        builder.finish()
+    }
+}
+
+impl<'a> FromIterator<&'a Option<&'a str>> for Utf8Array {
+    fn from_iter<I: IntoIterator<Item = &'a Option<&'a str>>>(iter: I) -> Self {
+        iter.into_iter().cloned().collect()
+    }
+}
+
+impl<'a> FromIterator<&'a str> for Utf8Array {
+    fn from_iter<I: IntoIterator<Item = &'a str>>(iter: I) -> Self {
+        iter.into_iter().map(Some).collect()
+    }
+}
+
+impl Utf8Array {
+    pub fn into_bytes_array(self) -> BytesArray {
+        self.bytes
     }
 
-    /// Retrieve the ownership of the single string value. Panics if there're multiple or no values.
-    pub fn into_single_value(self) -> Option<String> {
-        assert_eq!(self.len(), 1);
-        if !self.is_null(0) {
-            Some(unsafe { String::from_utf8_unchecked(self.data) })
-        } else {
-            None
+    pub fn from_iter_display(iter: impl IntoIterator<Item = Option<impl Display>>) -> Self {
+        let iter = iter.into_iter();
+        let mut builder = Utf8ArrayBuilder::new(iter.size_hint().0);
+        for e in iter {
+            if let Some(s) = e {
+                let mut writer = builder.writer().begin();
+                write!(writer, "{}", s).unwrap();
+                writer.finish();
+            } else {
+                builder.append_null();
+            }
         }
+        builder.finish()
     }
 }
 
 /// `Utf8ArrayBuilder` use `&str` to build an `Utf8Array`.
 #[derive(Debug)]
 pub struct Utf8ArrayBuilder {
-    offset: Vec<usize>,
-    bitmap: BitmapBuilder,
-    data: Vec<u8>,
+    bytes: BytesArrayBuilder,
 }
 
 impl ArrayBuilder for Utf8ArrayBuilder {
     type ArrayType = Utf8Array;
 
-    fn with_meta(capacity: usize, _meta: ArrayMeta) -> Self {
-        let mut offset = Vec::with_capacity(capacity + 1);
-        offset.push(0);
+    fn with_meta(capacity: usize, meta: ArrayMeta) -> Self {
         Self {
-            offset,
-            data: Vec::with_capacity(capacity),
-            bitmap: BitmapBuilder::with_capacity(capacity),
+            bytes: BytesArrayBuilder::with_meta(capacity, meta),
         }
     }
 
-    fn append<'a>(&'a mut self, value: Option<&'a str>) {
-        match value {
-            Some(x) => {
-                self.bitmap.append(true);
-                self.data.extend_from_slice(x.as_bytes());
-                self.offset.push(self.data.len())
-            }
-            None => {
-                self.bitmap.append(false);
-                self.offset.push(self.data.len())
-            }
-        }
+    #[inline]
+    fn append_n<'a>(&'a mut self, n: usize, value: Option<&'a str>) {
+        self.bytes.append_n(n, value.map(|v| v.as_bytes()));
     }
 
+    #[inline]
     fn append_array(&mut self, other: &Utf8Array) {
-        for bit in other.bitmap.iter() {
-            self.bitmap.append(bit);
-        }
-        self.data.extend_from_slice(&other.data);
-        let start = *self.offset.last().unwrap();
-        for other_offset in &other.offset[1..] {
-            self.offset.push(*other_offset + start);
-        }
+        self.bytes.append_array(&other.bytes);
     }
 
+    #[inline]
     fn pop(&mut self) -> Option<()> {
-        if self.bitmap.pop().is_some() {
-            self.offset.pop().unwrap();
-            let end = self.offset.last().unwrap();
-            self.data.truncate(*end);
-            Some(())
-        } else {
-            None
-        }
+        self.bytes.pop()
     }
 
     fn finish(self) -> Utf8Array {
         Utf8Array {
-            bitmap: (self.bitmap).finish(),
-            data: self.data,
-            offset: self.offset,
+            bytes: self.bytes.finish(),
         }
     }
 }
 
 impl Utf8ArrayBuilder {
-    pub fn writer(self) -> BytesWriter {
-        BytesWriter { builder: self }
-    }
-
-    /// `append_partial` will add a partial dirty data of the new record.
-    /// The partial data will keep untracked until `finish_partial` was called.
-    unsafe fn append_partial(&mut self, x: &str) -> ArrayResult<()> {
-        self.data.extend_from_slice(x.as_bytes());
-        Ok(())
-    }
-
-    /// `finish_partial` will create a new record based on the current dirty data.
-    /// `finish_partial` was safe even if we don't call `append_partial`, which
-    /// is equivalent to appending an empty string.
-    fn finish_partial(&mut self) -> ArrayResult<()> {
-        self.offset.push(self.data.len());
-        self.bitmap.append(true);
-        Ok(())
-    }
-}
-
-/// `BytesWriter` has the ownership of the right to append only one record.
-pub struct BytesWriter {
-    builder: Utf8ArrayBuilder,
-}
-
-impl BytesWriter {
-    /// `write_ref` will consume `BytesWriter` and pass the ownership of `builder` to `BytesGuard`.
-    pub fn write_ref(mut self, value: &str) -> ArrayResult<BytesGuard> {
-        self.builder.append(Some(value));
-        Ok(BytesGuard {
-            builder: self.builder,
-        })
-    }
-
-    /// `write_from_char_iter` will consume `BytesWriter` and write the characters from the `iter`.
-    ///
-    /// Prefer [`BytesWriter::begin`] for writing multiple string pieces.
-    pub fn write_from_char_iter(self, iter: impl Iterator<Item = char>) -> ArrayResult<BytesGuard> {
-        let mut writer = self.begin();
-        for c in iter {
-            let mut buf = [0; 4];
-            let result = c.encode_utf8(&mut buf);
-            writer.write_ref(result)?;
+    pub fn writer(&mut self) -> StringWriter<'_> {
+        StringWriter {
+            bytes: self.bytes.writer(),
         }
-        writer.finish()
     }
+}
 
-    /// `begin` will create a `PartialBytesWriter`, which allow multiple appendings to create a new
+pub struct StringWriter<'a> {
+    bytes: BytesWriter<'a>,
+}
+
+impl<'a> StringWriter<'a> {
+    /// `begin` will create a `PartialStringWriter`, which allow multiple appendings to create a new
     /// record.
-    pub fn begin(self) -> PartialBytesWriter {
-        PartialBytesWriter {
-            builder: self.builder,
+    pub fn begin(self) -> PartialStringWriter<'a> {
+        PartialStringWriter {
+            bytes: self.bytes.begin(),
         }
     }
 }
 
-pub struct PartialBytesWriter {
-    builder: Utf8ArrayBuilder,
+// Note: dropping an unfinished `PartialStringWriter` will rollback the partial data, which is the
+// behavior of the inner `PartialBytesWriter`.
+pub struct PartialStringWriter<'a> {
+    bytes: PartialBytesWriter<'a>,
 }
 
-impl PartialBytesWriter {
-    /// `write_ref` will append partial dirty data to `builder`.
-    /// `PartialBytesWriter::write_ref` is different from `BytesWriter::write_ref`
-    /// in that it allows us to call it multiple times.
-    pub fn write_ref(&mut self, value: &str) -> ArrayResult<()> {
-        // SAFETY: The dirty `builder` is owned by `PartialBytesWriter`.
-        // We can't access it until `finish` was called.
-        unsafe { self.builder.append_partial(value) }
-    }
-
+impl<'a> PartialStringWriter<'a> {
     /// `finish` will be called while the entire record is written.
-    /// Exactly one new record was appended and the `builder` can be safely used,
-    /// so we move the builder to `BytesGuard`.
-    pub fn finish(mut self) -> ArrayResult<BytesGuard> {
-        self.builder.finish_partial()?;
-        Ok(BytesGuard {
-            builder: self.builder,
-        })
+    /// Exactly one new record was appended and the `builder` can be safely used.
+    pub fn finish(self) {
+        self.bytes.finish()
     }
 }
 
-/// `BytesGuard` guarded that exactly one record was appendded.
-/// `BytesGuard` will be produced iff the `BytesWriter` was consumed.
-pub struct BytesGuard {
-    builder: Utf8ArrayBuilder,
-}
-
-impl BytesGuard {
-    pub fn into_inner(self) -> Utf8ArrayBuilder {
-        self.builder
+impl Write for PartialStringWriter<'_> {
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        self.bytes.write_ref(s.as_bytes());
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::hash::Hash;
+
     use itertools::Itertools;
 
     use super::*;
-    use crate::error::Result;
+    use crate::array::NULL_VAL_FOR_HASH;
 
     #[test]
     fn test_utf8_builder() {
@@ -339,21 +212,57 @@ mod tests {
     }
 
     #[test]
-    fn test_utf8_partial_writer() -> Result<()> {
-        let builder = Utf8ArrayBuilder::new(0);
-        let writer = builder.writer();
-        let mut partial_writer = writer.begin();
-        for _ in 0..2 {
-            partial_writer.write_ref("ran")?;
-        }
-        let guard = partial_writer.finish()?;
-        let builder = guard.into_inner();
+    fn test_utf8_partial_writer() {
+        let mut builder = Utf8ArrayBuilder::new(0);
+        {
+            let writer = builder.writer();
+            let mut partial_writer = writer.begin();
+            for _ in 0..2 {
+                partial_writer.write_str("ran").unwrap();
+            }
+            partial_writer.finish()
+        };
         let array = builder.finish();
         assert_eq!(array.len(), 1);
         assert_eq!(array.value_at(0), Some("ranran"));
         assert_eq!(unsafe { array.value_at_unchecked(0) }, Some("ranran"));
+    }
 
-        Ok(())
+    #[test]
+    fn test_utf8_partial_writer_failed() {
+        let mut builder = Utf8ArrayBuilder::new(0);
+        // Write a record.
+        {
+            let writer = builder.writer();
+            let mut partial_writer = writer.begin();
+            partial_writer.write_str("Dia").unwrap();
+            partial_writer.write_str("na").unwrap();
+            partial_writer.finish()
+        };
+
+        // Write a record failed.
+        {
+            let writer = builder.writer();
+            let mut partial_writer = writer.begin();
+            partial_writer.write_str("Ca").unwrap();
+            partial_writer.write_str("rol").unwrap();
+            // We don't finish here.
+        };
+
+        // Write a record.
+        {
+            let writer = builder.writer();
+            let mut partial_writer = writer.begin();
+            partial_writer.write_str("Ki").unwrap();
+            partial_writer.write_str("ra").unwrap();
+            partial_writer.finish()
+        };
+
+        // Verify only two valid records.
+        let array = builder.finish();
+        assert_eq!(array.len(), 2);
+        assert_eq!(array.value_at(0), Some("Diana"));
+        assert_eq!(array.value_at(1), Some("Kira"));
     }
 
     #[test]
@@ -367,11 +276,11 @@ mod tests {
             Some("666666"),
         ];
 
-        let array = Utf8Array::from_slice(&input);
+        let array = Utf8Array::from_iter(&input);
         assert_eq!(array.len(), input.len());
 
         assert_eq!(
-            array.data.len(),
+            array.bytes.data().len(),
             input.iter().map(|s| s.unwrap_or("").len()).sum::<usize>()
         );
 
@@ -389,7 +298,7 @@ mod tests {
             Some("666666"),
         ];
 
-        let array = Utf8Array::from_slice(&input);
+        let array = Utf8Array::from_iter(&input);
         let buffers = array.to_protobuf().values;
         assert!(buffers.len() >= 2);
     }
@@ -432,7 +341,7 @@ mod tests {
                 .collect_vec(),
         ];
 
-        let arrs = vecs.iter().map(|v| Utf8Array::from_slice(v)).collect_vec();
+        let arrs = vecs.iter().map(Utf8Array::from_iter).collect_vec();
 
         let hasher_builder = RandomXxHashBuilder64::default();
         let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];

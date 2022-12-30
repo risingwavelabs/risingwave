@@ -22,12 +22,13 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
 use crate::expr::{
     factorization_expr, fold_boolean_constant, push_down_not, to_conjunctions,
     try_get_bool_constant, ExprDisplay, ExprImpl, ExprMutator, ExprRewriter, ExprType, ExprVisitor,
-    InputRef,
+    FunctionCall, InputRef,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -87,7 +88,8 @@ impl Condition {
 
     pub fn always_false(&self) -> bool {
         static FALSE: LazyLock<ExprImpl> = LazyLock::new(|| ExprImpl::literal_bool(false));
-        !self.conjunctions.is_empty() && self.conjunctions.iter().all(|e| *e == *FALSE)
+        // There is at least one conjunction that is false.
+        !self.conjunctions.is_empty() && self.conjunctions.iter().any(|e| *e == *FALSE)
     }
 
     /// Convert condition to an expression. If always true, return `None`.
@@ -103,6 +105,20 @@ impl Condition {
     pub fn and(self, other: Self) -> Self {
         let mut ret = self;
         ret.conjunctions.extend(other.conjunctions);
+        ret.simplify()
+    }
+
+    #[must_use]
+    pub fn or(self, other: Self) -> Self {
+        let or_expr = ExprImpl::FunctionCall(
+            FunctionCall::new_unchecked(
+                ExprType::Or,
+                vec![self.into(), other.into()],
+                DataType::Boolean,
+            )
+            .into(),
+        );
+        let ret = Self::with_expr(or_expr);
         ret.simplify()
     }
 

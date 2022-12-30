@@ -6,6 +6,16 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
+    Share Source:
+
+    LogicalProject { exprs: [1:Int32] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+
+    Predicate Push Down:
+
+    LogicalProject { exprs: [1:Int32] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+
     Predicate Push Down:
 
     LogicalProject { exprs: [1:Int32] }
@@ -41,7 +51,7 @@
       "stages": {
         "0": {
           "root": {
-            "plan_node_id": 22,
+            "plan_node_id": 27,
             "plan_node_type": "BatchProject",
             "schema": [
               {
@@ -54,7 +64,7 @@
             ],
             "children": [
               {
-                "plan_node_id": 20,
+                "plan_node_id": 25,
                 "plan_node_type": "BatchValues",
                 "schema": [],
                 "children": [],

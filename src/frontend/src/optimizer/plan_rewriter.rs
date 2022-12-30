@@ -18,6 +18,31 @@ use paste::paste;
 use crate::for_all_plan_nodes;
 use crate::optimizer::plan_node::*;
 
+macro_rules! def_rewrite {
+    ( $convention:ident, Share ) => {
+        paste! {
+            /// When we use the plan rewriter, we need to take care of the share operator,
+            /// because our plan is a DAG rather than a tree.
+            /// Make sure this method can keep the shape of DAG.
+            fn [<rewrite_ $convention:snake _ share>](&mut self, plan: &[<$convention Share>]) -> PlanRef;
+        }
+    };
+
+    ( $convention:ident, $name:ident ) => {
+        paste! {
+            #[doc = "Visit [`" [<$convention $name>] "`] , the function should rewrite the inputs."]
+            fn [<rewrite_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> PlanRef {
+                let new_inputs = plan
+                    .inputs()
+                    .into_iter()
+                    .map(|input| self.rewrite(input.clone()))
+                    .collect_vec();
+                plan.clone_with_inputs(&new_inputs)
+            }
+        }
+    };
+}
+
 /// Define `PlanRewriter` trait.
 macro_rules! def_rewriter {
     ($({ $convention:ident, $name:ident }),*) => {
@@ -37,18 +62,10 @@ macro_rules! def_rewriter {
                 }
 
                 $(
-                    #[doc = "Visit [`" [<$convention $name>] "`] , the function should rewrite the inputs."]
-                    fn [<rewrite_ $convention:snake _ $name:snake>](&mut self, plan: &[<$convention $name>]) -> PlanRef {
-                        let new_inputs = plan
-                            .inputs()
-                            .into_iter()
-                            .map(|input| self.rewrite(input.clone()))
-                            .collect_vec();
-                        plan.clone_with_inputs(&new_inputs)
-                    }
+                    def_rewrite! {$convention, $name}
                 )*
             }
         }
-    }
+    };
 }
 for_all_plan_nodes! { def_rewriter }

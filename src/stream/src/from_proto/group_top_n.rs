@@ -14,58 +14,106 @@
 
 use std::sync::Arc;
 
+use risingwave_common::hash::{HashKey, HashKeyDispatcher};
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_pb::stream_plan::GroupTopNNode;
 
 use super::*;
-use crate::executor::GroupTopNExecutor;
+use crate::common::table::state_table::StateTable;
+use crate::executor::{ActorContextRef, GroupTopNExecutor};
+use crate::task::AtomicU64Ref;
 
 pub struct GroupTopNExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for GroupTopNExecutorBuilder {
-    fn new_boxed_executor(
-        mut params: ExecutorParams,
-        node: &StreamNode,
+    type Node = GroupTopNNode;
+
+    async fn new_boxed_executor(
+        params: ExecutorParams,
+        node: &Self::Node,
         store: impl StateStore,
-        _stream: &mut LocalStreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::GroupTopN)?;
-        let group_by = node
+        let group_by: Vec<usize> = node
             .get_group_key()
             .iter()
             .map(|idx| *idx as usize)
             .collect();
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let state_table = StateTable::from_table_catalog(table, store, vnodes);
-        let order_pairs = table.get_pk().iter().map(OrderPair::from_prost).collect();
+        let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
+        let storage_key = table.get_pk().iter().map(OrderPair::from_prost).collect();
+        let [input]: [_; 1] = params.input.try_into().unwrap();
+        let group_key_types = input.schema().data_types()[..group_by.len()].to_vec();
+        let order_by = node.order_by.iter().map(OrderPair::from_prost).collect();
 
-        if node.with_ties {
-            Ok(GroupTopNExecutor::new_with_ties(
-                params.input.remove(0),
-                params.actor_context,
-                order_pairs,
-                (node.offset as usize, node.limit as usize),
-                node.order_by_len as usize,
-                params.pk_indices,
-                params.executor_id,
-                group_by,
-                state_table,
+        assert_eq!(&params.pk_indices, input.pk_indices());
+        let args = GroupTopNExecutorDispatcherArgs {
+            input,
+            ctx: params.actor_context,
+            storage_key,
+            offset_and_limit: (node.offset as usize, node.limit as usize),
+            order_by,
+            executor_id: params.executor_id,
+            group_by,
+            state_table,
+            watermark_epoch: stream.get_watermark_epoch(),
+            with_ties: node.with_ties,
+            group_key_types,
+        };
+        args.dispatch()
+    }
+}
+
+struct GroupTopNExecutorDispatcherArgs<S: StateStore> {
+    input: BoxedExecutor,
+    ctx: ActorContextRef,
+    storage_key: Vec<OrderPair>,
+    offset_and_limit: (usize, usize),
+    order_by: Vec<OrderPair>,
+    executor_id: u64,
+    group_by: Vec<usize>,
+    state_table: StateTable<S>,
+    watermark_epoch: AtomicU64Ref,
+    with_ties: bool,
+    group_key_types: Vec<DataType>,
+}
+
+impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
+    type Output = StreamResult<BoxedExecutor>;
+
+    fn dispatch_impl<K: HashKey>(self) -> Self::Output {
+        match self.with_ties {
+            true => Ok(GroupTopNExecutor::<K, S, true>::new(
+                self.input,
+                self.ctx,
+                self.storage_key,
+                self.offset_and_limit,
+                self.order_by,
+                self.executor_id,
+                self.group_by,
+                self.state_table,
+                self.watermark_epoch,
             )?
-            .boxed())
-        } else {
-            Ok(GroupTopNExecutor::new_without_ties(
-                params.input.remove(0),
-                params.actor_context,
-                order_pairs,
-                (node.offset as usize, node.limit as usize),
-                node.order_by_len as usize,
-                params.pk_indices,
-                params.executor_id,
-                group_by,
-                state_table,
+            .boxed()),
+            false => Ok(GroupTopNExecutor::<K, S, false>::new(
+                self.input,
+                self.ctx,
+                self.storage_key,
+                self.offset_and_limit,
+                self.order_by,
+                self.executor_id,
+                self.group_by,
+                self.state_table,
+                self.watermark_epoch,
             )?
-            .boxed())
+            .boxed()),
         }
+    }
+
+    fn data_types(&self) -> &[DataType] {
+        &self.group_key_types
     }
 }

@@ -14,23 +14,27 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_pb::stream_plan::LookupNode;
 
 use super::*;
+use crate::common::table::state_table::StateTable;
 use crate::executor::{LookupExecutor, LookupExecutorParams};
 
 pub struct LookupExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for LookupExecutorBuilder {
-    fn new_boxed_executor(
+    type Node = LookupNode;
+
+    async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         stream_manager: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let lookup = try_match_expand!(node.get_node_body().unwrap(), NodeBody::Lookup)?;
+        let lookup = node;
 
         let [stream, arrangement]: [_; 2] = params.input.try_into().unwrap();
 
@@ -51,10 +55,11 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             lookup.arrangement_table.as_ref().unwrap(),
             store,
             params.vnode_bitmap.map(Arc::new),
-        );
+        )
+        .await;
 
         Ok(Box::new(LookupExecutor::new(LookupExecutorParams {
-            schema: Schema::new(node.fields.iter().map(Field::from).collect()),
+            schema: params.schema,
             arrangement,
             stream,
             arrangement_col_descs,
@@ -65,11 +70,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
             state_table,
-            lru_manager: stream_manager.context.lru_manager.clone(),
-            cache_size: stream_manager
-                .config
-                .developer
-                .unsafe_stream_join_cache_size,
+            watermark_epoch: stream_manager.get_watermark_epoch(),
             chunk_size: params.env.config().developer.stream_chunk_size,
         })))
     }

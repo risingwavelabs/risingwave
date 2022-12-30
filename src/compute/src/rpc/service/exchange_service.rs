@@ -16,18 +16,19 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use futures::Stream;
+use either::Either;
+use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_batch::task::BatchManager;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
 };
+use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Permits, Receiver};
 use risingwave_stream::executor::Message;
 use risingwave_stream::task::LocalStreamManager;
-use tokio::sync::mpsc::Receiver;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Request, Response, Status};
+use tonic::{Request, Response, Status, Streaming};
 
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 
@@ -72,20 +73,43 @@ impl ExchangeService for ExchangeServiceImpl {
 
     async fn get_stream(
         &self,
-        request: Request<GetStreamRequest>,
+        request: Request<Streaming<GetStreamRequest>>,
     ) -> std::result::Result<Response<Self::GetStreamStream>, Status> {
+        use risingwave_pb::task_service::get_stream_request::*;
+
         let peer_addr = request
             .remote_addr()
             .ok_or_else(|| Status::unavailable("get_stream connection unestablished"))?;
-        let req = request.into_inner();
-        let up_down_actor_ids = (req.up_actor_id, req.down_actor_id);
-        let up_down_fragment_ids = (req.up_fragment_id, req.down_fragment_id);
-        let receiver = self.stream_mgr.take_receiver(up_down_actor_ids)?;
+
+        let mut request_stream = request.into_inner();
+
+        // Extract the first `Get` request from the stream.
+        let get_req = {
+            let req = request_stream
+                .next()
+                .await
+                .ok_or_else(|| Status::invalid_argument("get_stream request is empty"))??;
+            match req.value.unwrap() {
+                Value::Get(get) => get,
+                Value::AddPermits(_) => unreachable!("the first message must be `Get`"),
+            }
+        };
+
+        let up_down_actor_ids = (get_req.up_actor_id, get_req.down_actor_id);
+        let up_down_fragment_ids = (get_req.up_fragment_id, get_req.down_fragment_id);
+        let receiver = self.stream_mgr.take_receiver(up_down_actor_ids).await?;
+
+        // Map the remaining stream to add-permits.
+        let add_permits_stream = request_stream.map_ok(|req| match req.value.unwrap() {
+            Value::Get(_) => unreachable!("the following messages must be `AddPermits`"),
+            Value::AddPermits(add_permits) => add_permits.permits,
+        });
 
         Ok(Response::new(Self::get_stream_impl(
             self.metrics.clone(),
             peer_addr,
             receiver,
+            add_permits_stream,
             up_down_actor_ids,
             up_down_fragment_ids,
         )))
@@ -109,7 +133,8 @@ impl ExchangeServiceImpl {
     async fn get_stream_impl(
         metrics: Arc<ExchangeServiceMetrics>,
         peer_addr: SocketAddr,
-        mut receiver: Receiver<Message>,
+        mut receiver: Receiver,
+        add_permits_stream: impl Stream<Item = std::result::Result<Permits, tonic::Status>>,
         up_down_actor_ids: (u32, u32),
         up_down_fragment_ids: (u32, u32),
     ) {
@@ -119,39 +144,61 @@ impl ExchangeServiceImpl {
         let up_fragment_id = up_down_fragment_ids.0.to_string();
         let down_fragment_id = up_down_fragment_ids.1.to_string();
 
+        let permits = receiver.permits();
+
+        // Select from the permits back from the downstream and the upstream receiver.
+        let select_stream = futures::stream::select(
+            add_permits_stream.map_ok(Either::Left),
+            #[try_stream]
+            async move {
+                while let Some(m) = receiver.recv_raw().await {
+                    yield Either::Right(m);
+                }
+            },
+        );
+        pin_mut!(select_stream);
+
         let mut rr = 0;
         const SAMPLING_FREQUENCY: u64 = 100;
 
-        while let Some(msg) = receiver.recv().await {
-            // add serialization duration metric with given sampling frequency
-            let proto = if rr % SAMPLING_FREQUENCY == 0 {
-                let start_time = Instant::now();
-                let proto = msg.to_protobuf();
-                metrics
-                    .actor_sampled_serialize_duration_ns
-                    .with_label_values(&[&up_actor_id])
-                    .inc_by(start_time.elapsed().as_nanos() as u64);
-                proto
-            } else {
-                msg.to_protobuf()
-            }?;
-            rr += 1;
+        while let Some(r) = select_stream.try_next().await? {
+            match r {
+                Either::Left(permits_to_add) => {
+                    permits.add_permits(permits_to_add as usize);
+                }
+                Either::Right(MessageWithPermits { message, permits }) => {
+                    // add serialization duration metric with given sampling frequency
+                    let proto = if rr % SAMPLING_FREQUENCY == 0 {
+                        let start_time = Instant::now();
+                        let proto = message.to_protobuf();
+                        metrics
+                            .actor_sampled_serialize_duration_ns
+                            .with_label_values(&[&up_actor_id])
+                            .inc_by(start_time.elapsed().as_nanos() as u64);
+                        proto
+                    } else {
+                        message.to_protobuf()
+                    };
+                    rr += 1;
 
-            let message = GetStreamResponse {
-                message: Some(proto),
-            };
-            let bytes = Message::get_encoded_len(&message);
+                    let response = GetStreamResponse {
+                        message: Some(proto),
+                        permits, // forward the acquired permit to the downstream
+                    };
+                    let bytes = Message::get_encoded_len(&response);
 
-            yield message;
+                    yield response;
 
-            metrics
-                .stream_exchange_bytes
-                .with_label_values(&[&up_actor_id, &down_actor_id])
-                .inc_by(bytes as u64);
-            metrics
-                .stream_fragment_exchange_bytes
-                .with_label_values(&[&up_fragment_id, &down_fragment_id])
-                .inc_by(bytes as u64);
+                    metrics
+                        .stream_exchange_bytes
+                        .with_label_values(&[&up_actor_id, &down_actor_id])
+                        .inc_by(bytes as u64);
+                    metrics
+                        .stream_fragment_exchange_bytes
+                        .with_label_values(&[&up_fragment_id, &down_fragment_id])
+                        .inc_by(bytes as u64);
+                }
+            }
         }
     }
 }

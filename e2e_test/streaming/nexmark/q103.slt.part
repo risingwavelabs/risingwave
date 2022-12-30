@@ -1,0 +1,4 @@
+query IT rowsort
+select * from nexmark_q103;
+----
+1000 mksxmeugsicmeb

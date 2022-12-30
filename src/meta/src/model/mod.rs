@@ -35,7 +35,7 @@ use prost::Message;
 pub use stream::*;
 pub use user::*;
 
-use crate::storage::{MetaStore, MetaStoreError, Transaction};
+use crate::storage::{MetaStore, MetaStoreError, Snapshot, Transaction};
 
 /// A global, unique identifier of an actor
 pub type ActorId = u32;
@@ -86,6 +86,21 @@ pub trait MetadataModel: std::fmt::Debug + Sized {
             .iter()
             .map(|bytes| {
                 Self::ProstType::decode(bytes.as_slice())
+                    .map(Self::from_protobuf)
+                    .map_err(Into::into)
+            })
+            .collect()
+    }
+
+    async fn list_at_snapshot<S>(snapshot: &S::Snapshot) -> MetadataModelResult<Vec<Self>>
+    where
+        S: MetaStore,
+    {
+        let bytes_vec = snapshot.list_cf(&Self::cf_name()).await?;
+        bytes_vec
+            .iter()
+            .map(|(_k, v)| {
+                Self::ProstType::decode(v.as_slice())
                     .map(Self::from_protobuf)
                     .map_err(Into::into)
             })
@@ -408,6 +423,10 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapTransaction<'a, K, V> {
             .or_else(|| self.tree_ref.get(key))
     }
 
+    pub fn contains_key(&self, key: &K) -> bool {
+        self.get(key).is_some()
+    }
+
     /// This method serves the same semantic to the `get_mut` of `BTreeMap`.
     ///
     /// It return a `BTreeMapTransactionValueGuard` of the corresponding key for mutable access to
@@ -507,8 +526,8 @@ impl<'a, K: Ord + Debug, V: Transactional + Clone> ValTransaction
 /// Transaction wrapper for a `BTreeMap` entry value of given `key`
 pub struct BTreeMapEntryTransaction<'a, K, V> {
     tree_ref: &'a mut BTreeMap<K, V>,
-    key: K,
-    new_value: V,
+    pub key: K,
+    pub new_value: V,
 }
 
 impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransaction<'a, K, V> {

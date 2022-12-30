@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use std::fmt::Write;
 
 use crate::Result;
 
@@ -23,8 +22,8 @@ pub fn translate(
     s: &str,
     match_str: &str,
     replace_str: &str,
-    writer: BytesWriter,
-) -> Result<BytesGuard> {
+    writer: &mut dyn Write,
+) -> Result<()> {
     let mut char_map = HashMap::new();
     let mut match_chars = match_str.chars();
     let mut replace_chars = replace_str.chars();
@@ -44,14 +43,14 @@ pub fn translate(
         Some(None) => None,
         None => Some(c),
     });
-
-    writer.write_from_char_iter(iter).map_err(Into::into)
+    for c in iter {
+        writer.write_char(c).unwrap();
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-
     use super::*;
 
     #[test]
@@ -73,14 +72,10 @@ mod tests {
         ];
 
         for (s, match_str, replace_str, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let guard = translate(s, match_str, replace_str, writer)?;
-            let array = guard.into_inner().finish();
-            let v = array.value_at(0).unwrap();
-            assert_eq!(v, expected);
+            let mut writer = String::new();
+            translate(s, match_str, replace_str, &mut writer)?;
+            assert_eq!(writer, expected);
         }
-
         Ok(())
     }
 }

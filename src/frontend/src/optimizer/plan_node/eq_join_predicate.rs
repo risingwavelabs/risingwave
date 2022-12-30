@@ -200,6 +200,22 @@ impl EqJoinPredicate {
         }
         ColIndexMapping::new(map)
     }
+
+    /// Reorder the `eq_keys` according to the `reorder_idx`.
+    pub fn reorder(self, reorder_idx: &[usize]) -> Self {
+        assert!(reorder_idx.len() <= self.eq_keys.len());
+        let mut new_eq_keys = Vec::with_capacity(self.eq_keys.len());
+        for idx in reorder_idx {
+            new_eq_keys.push(self.eq_keys[*idx].clone());
+        }
+        for idx in 0..self.eq_keys.len() {
+            if !reorder_idx.contains(&idx) {
+                new_eq_keys.push(self.eq_keys[idx].clone());
+            }
+        }
+
+        Self::new(self.other_cond, new_eq_keys, self.left_cols_num)
+    }
 }
 
 pub struct EqJoinPredicateDisplay<'a> {

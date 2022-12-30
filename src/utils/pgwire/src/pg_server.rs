@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::io;
 use std::result::Result;
 use std::sync::Arc;
 
 use futures::Stream;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
+use tracing::debug;
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_protocol::{PgProtocol, TlsConfig};
@@ -97,7 +100,7 @@ pub async fn pg_serve<VS>(
     ssl_config: Option<TlsConfig>,
 ) -> io::Result<()>
 where
-    VS: Stream<Item = RowSetResult> + Unpin + Send,
+    VS: Stream<Item = RowSetResult> + Unpin + Send + 'static,
 {
     let listener = TcpListener::bind(addr).await.unwrap();
     // accept connections and process them, spawning a new thread for each one
@@ -110,16 +113,40 @@ where
                 tracing::info!("New connection: {}", peer_addr);
                 stream.set_nodelay(true)?;
                 let ssl_config = ssl_config.clone();
-                tokio::spawn(async move {
-                    // connection succeeded
-                    let mut pg_proto = PgProtocol::new(stream, session_mgr, ssl_config);
-                    while !pg_proto.process().await {}
-                    tracing::info!("Connection {} closed", peer_addr);
+                let fut = handle_connection(stream, session_mgr, ssl_config);
+                tokio::spawn(async {
+                    if let Err(e) = fut.await {
+                        debug!("error handling connection : {}", e);
+                    }
                 });
             }
 
             Err(e) => {
                 tracing::error!("Connection failure: {}", e);
+            }
+        }
+    }
+}
+
+#[tracing::instrument(level = "debug", skip_all)]
+pub fn handle_connection<S, SM, VS>(
+    stream: S,
+    session_mgr: Arc<SM>,
+    tls_config: Option<TlsConfig>,
+) -> impl Future<Output = Result<(), anyhow::Error>>
+where
+    S: AsyncWrite + AsyncRead + Unpin,
+    SM: SessionManager<VS>,
+    VS: Stream<Item = RowSetResult> + Unpin + Send + 'static,
+{
+    let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config);
+    async {
+        loop {
+            let msg = pg_proto.read_message().await?;
+            tracing::trace!("Received message: {:?}", msg);
+            let ret = pg_proto.process(msg).await;
+            if ret {
+                return Ok(());
             }
         }
     }
@@ -136,7 +163,7 @@ mod tests {
     use tokio_postgres::types::*;
     use tokio_postgres::NoTls;
 
-    use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+    use crate::pg_field_descriptor::PgFieldDescriptor;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{pg_serve, Session, SessionId, SessionManager, UserAuthenticator};
     use crate::types::Row;
@@ -192,8 +219,12 @@ mod tests {
                 StatementType::SELECT,
                 Some(1),
                 futures::stream::iter(vec![Ok(vec![Row::new(res)])]).boxed(),
-                // NOTE: Extended mode don't need.
-                vec![PgFieldDescriptor::new("".to_string(), TypeOid::Varchar); len],
+                vec![
+                    // 1043 is the oid of varchar type.
+                    // -1 is the type len of varchar type.
+                    PgFieldDescriptor::new("".to_string(), 1043, -1);
+                    len
+                ],
             ))
         }
 
@@ -207,7 +238,13 @@ mod tests {
         ) -> Result<Vec<PgFieldDescriptor>, super::BoxedError> {
             let count = sql.split(&[' ', ',', ';']).skip(1).count();
             Ok(vec![
-                PgFieldDescriptor::new("".to_string(), TypeOid::Varchar,);
+                // 1043 is the oid of varchar type.
+                // -1 is the type len of varchar type.
+                PgFieldDescriptor::new(
+                    "".to_string(),
+                    1043,
+                    -1
+                );
                 count
             ])
         }

@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use itertools::Itertools;
-use risingwave_pb::catalog::source::Info::StreamSource;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::reschedule_request::Reschedule;
 use risingwave_pb::meta::scale_service_server::ScaleService;
@@ -116,20 +113,15 @@ where
             })
             .collect();
 
-        let sources = self.catalog_manager.list_sources().await?;
+        let sources = self.catalog_manager.list_sources().await;
 
-        let mut stream_source_infos = HashMap::new();
-        for source in sources {
-            if let Some(StreamSource(info)) = source.info {
-                stream_source_infos.insert(source.id, info);
-            }
-        }
+        let source_infos = sources.into_iter().map(|s| (s.id, s)).collect();
 
         Ok(Response::new(GetClusterInfoResponse {
             worker_nodes,
             table_fragments,
             actor_splits,
-            stream_source_infos,
+            source_infos,
         }))
     }
 

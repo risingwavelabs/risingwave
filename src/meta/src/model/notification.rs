@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::storage::{MetaStore, MetaStoreError, MetaStoreResult, DEFAULT_COLUMN_FAMILY};
+use crate::storage::{MetaStore, MetaStoreError, DEFAULT_COLUMN_FAMILY};
 
 /// `NotificationVersion` records the last sent notification version, this will be stored
 /// persistently to meta store.
@@ -29,27 +29,24 @@ impl NotificationVersion {
             .get_cf(DEFAULT_COLUMN_FAMILY, NOTIFICATION_VERSION_KEY)
             .await
         {
-            Ok(byte_vec) => u64::from_be_bytes(byte_vec.as_slice().try_into().unwrap()),
+            Ok(byte_vec) => memcomparable::from_slice(&byte_vec).unwrap(),
             Err(MetaStoreError::ItemNotFound(_)) => 0,
             Err(e) => panic!("{:?}", e),
         };
         Self(version)
     }
 
-    pub async fn increase_version<S>(&mut self, store: &S) -> MetaStoreResult<()>
-    where
-        S: MetaStore,
-    {
+    pub async fn increase_version<S: MetaStore>(&mut self, store: &S) {
         let version = self.0 + 1;
         store
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
                 NOTIFICATION_VERSION_KEY.to_vec(),
-                version.to_be_bytes().to_vec(),
+                memcomparable::to_vec(&version).unwrap(),
             )
-            .await?;
+            .await
+            .unwrap();
         self.0 = version;
-        Ok(())
     }
 
     pub fn version(&self) -> u64 {

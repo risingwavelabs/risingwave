@@ -12,20 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod config;
 pub mod enumerator;
 pub mod source;
 pub mod split;
-mod utils;
 
 use std::collections::HashMap;
 
 pub use enumerator::*;
+use nexmark::config::{NexmarkConfig, RateShape};
+use nexmark::event::EventType;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 pub use split::*;
-
-const NEXMARK_BASE_TIME: usize = 1_436_918_400_000;
 
 pub const NEXMARK_CONNECTOR: &str = "nexmark";
 
@@ -53,10 +51,10 @@ pub struct NexmarkPropertiesInner {
     /// The total event count of Bid + Auction + Person
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "nexmark.event.num", default = "default_event_num")]
-    pub event_num: i64,
+    pub event_num: u64,
 
-    #[serde(rename = "nexmark.table.type", default)]
-    pub table_type: String,
+    #[serde(rename = "nexmark.table.type", default = "none")]
+    pub table_type: Option<EventType>,
 
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "nexmark.max.chunk.size", default = "identity_u64::<1024>")]
@@ -117,7 +115,7 @@ pub struct NexmarkPropertiesInner {
 
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[serde(rename = "nexmark.first.event.id", default = "none")]
-    pub hot_first_event_id: Option<usize>,
+    pub first_event_id: Option<usize>,
 
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[serde(rename = "nexmark.first.event.number", default = "none")]
@@ -177,7 +175,7 @@ pub struct NexmarkPropertiesInner {
 
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[serde(rename = "nexmark.base.time", default = "none")]
-    pub base_time: Option<usize>,
+    pub base_time: Option<u64>,
 
     #[serde(rename = "nexmark.us.states")]
     pub us_states: Option<String>,
@@ -192,7 +190,7 @@ pub struct NexmarkPropertiesInner {
     pub last_names: Option<String>,
 
     #[serde(rename = "nexmark.rate.shape")]
-    pub rate_shape: Option<String>,
+    pub rate_shape: Option<RateShape>,
 
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[serde(rename = "nexmark.rate.period", default = "none")]
@@ -219,8 +217,8 @@ pub struct NexmarkPropertiesInner {
     pub threads: Option<usize>,
 }
 
-fn default_event_num() -> i64 {
-    -1
+fn default_event_num() -> u64 {
+    u64::MAX
 }
 
 impl Default for NexmarkPropertiesInner {
@@ -228,4 +226,78 @@ impl Default for NexmarkPropertiesInner {
         let v = serde_json::to_value(HashMap::<String, String>::new()).unwrap();
         NexmarkPropertiesInner::deserialize(v).unwrap()
     }
+}
+
+impl From<&NexmarkPropertiesInner> for NexmarkConfig {
+    fn from(value: &NexmarkPropertiesInner) -> Self {
+        // 2015-07-15 00:00:00
+        pub const BASE_TIME: u64 = 1_436_918_400_000;
+
+        let mut cfg = match value.table_type {
+            // This is the old way
+            Some(_) => NexmarkConfig {
+                base_time: BASE_TIME,
+                ..Default::default()
+            },
+            // By using default, it will choose the default proportion of three different events.
+            None => NexmarkConfig::default(),
+        };
+
+        macro_rules! set {
+            ($name:ident) => {
+                set!($name, $name);
+            };
+            ($cfg_name:ident, $prop_name:ident) => {
+                if let Some(v) = value.$prop_name {
+                    cfg.$cfg_name = v;
+                }
+            };
+            ($name:ident @ $map:ident) => {
+                if let Some(v) = &value.$name {
+                    cfg.$name = $map(v);
+                }
+            };
+        }
+        set!(active_people);
+        set!(in_flight_auctions);
+        set!(out_of_order_group_size);
+        set!(avg_person_byte_size);
+        set!(avg_auction_byte_size);
+        set!(avg_bid_byte_size);
+        set!(hot_seller_ratio);
+        set!(hot_auction_ratio);
+        set!(hot_bidder_ratio);
+        set!(hot_channel_ratio);
+        set!(first_event_id);
+        set!(first_event_number);
+        set!(base_time);
+        set!(num_categories);
+        set!(auction_id_lead);
+        set!(hot_seller_ratio_2);
+        set!(hot_auction_ratio_2);
+        set!(hot_bidder_ratio_2);
+        set!(person_proportion);
+        set!(auction_proportion);
+        set!(bid_proportion);
+        set!(first_auction_id);
+        set!(first_person_id);
+        set!(first_category_id);
+        set!(person_id_lead);
+        set!(sine_approx_steps);
+        set!(us_states @ split_str);
+        set!(us_cities @ split_str);
+        set!(first_names @ split_str);
+        set!(last_names @ split_str);
+        set!(num_event_generators, threads);
+        set!(rate_shape);
+        set!(rate_period);
+        set!(first_rate, first_event_rate);
+        set!(next_rate, first_event_rate);
+        set!(us_per_unit);
+        cfg
+    }
+}
+
+fn split_str(string: &str) -> Vec<String> {
+    string.split(',').map(String::from).collect()
 }

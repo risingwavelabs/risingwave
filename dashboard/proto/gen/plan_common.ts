@@ -131,6 +131,9 @@ export const RowFormatType = {
   PROTOBUF: "PROTOBUF",
   DEBEZIUM_JSON: "DEBEZIUM_JSON",
   AVRO: "AVRO",
+  MAXWELL: "MAXWELL",
+  CANAL_JSON: "CANAL_JSON",
+  CSV: "CSV",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -153,6 +156,15 @@ export function rowFormatTypeFromJSON(object: any): RowFormatType {
     case 4:
     case "AVRO":
       return RowFormatType.AVRO;
+    case 5:
+    case "MAXWELL":
+      return RowFormatType.MAXWELL;
+    case 6:
+    case "CANAL_JSON":
+      return RowFormatType.CANAL_JSON;
+    case 7:
+    case "CSV":
+      return RowFormatType.CSV;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -172,6 +184,12 @@ export function rowFormatTypeToJSON(object: RowFormatType): string {
       return "DEBEZIUM_JSON";
     case RowFormatType.AVRO:
       return "AVRO";
+    case RowFormatType.MAXWELL:
+      return "MAXWELL";
+    case RowFormatType.CANAL_JSON:
+      return "CANAL_JSON";
+    case RowFormatType.CSV:
+      return "CSV";
     case RowFormatType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -187,7 +205,10 @@ export interface Field {
 export interface ColumnDesc {
   columnType: DataType | undefined;
   columnId: number;
-  /** we store the column name in column desc now just for debug, but in future we should store it in ColumnCatalog but not here */
+  /**
+   * we store the column name in column desc now just for debug, but in future
+   * we should store it in ColumnCatalog but not here
+   */
   name: string;
   /** For STRUCT type. */
   fieldDescs: ColumnDesc[];
@@ -212,8 +233,10 @@ export interface StorageTableDesc {
   distKeyIndices: number[];
   retentionSeconds: number;
   valueIndices: number[];
+  readPrefixLenHint: number;
 }
 
+/** Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`). */
 export interface ColumnOrder {
   /** maybe other name */
   orderType: OrderType;
@@ -323,7 +346,15 @@ export const ColumnCatalog = {
 };
 
 function createBaseStorageTableDesc(): StorageTableDesc {
-  return { tableId: 0, columns: [], pk: [], distKeyIndices: [], retentionSeconds: 0, valueIndices: [] };
+  return {
+    tableId: 0,
+    columns: [],
+    pk: [],
+    distKeyIndices: [],
+    retentionSeconds: 0,
+    valueIndices: [],
+    readPrefixLenHint: 0,
+  };
 }
 
 export const StorageTableDesc = {
@@ -335,6 +366,7 @@ export const StorageTableDesc = {
       distKeyIndices: Array.isArray(object?.distKeyIndices) ? object.distKeyIndices.map((e: any) => Number(e)) : [],
       retentionSeconds: isSet(object.retentionSeconds) ? Number(object.retentionSeconds) : 0,
       valueIndices: Array.isArray(object?.valueIndices) ? object.valueIndices.map((e: any) => Number(e)) : [],
+      readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
     };
   },
 
@@ -362,6 +394,7 @@ export const StorageTableDesc = {
     } else {
       obj.valueIndices = [];
     }
+    message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
     return obj;
   },
 
@@ -373,6 +406,7 @@ export const StorageTableDesc = {
     message.distKeyIndices = object.distKeyIndices?.map((e) => e) || [];
     message.retentionSeconds = object.retentionSeconds ?? 0;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
+    message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
     return message;
   },
 };

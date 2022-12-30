@@ -15,8 +15,9 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::array::{ArrayRef, DataChunk, ListValue, Row};
-use risingwave_common::types::{to_datum_ref, DataType, Datum, DatumRef, ScalarRefImpl};
+use risingwave_common::array::{ArrayRef, DataChunk, ListValue};
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, Datum, DatumRef, ScalarRefImpl, ToDatumRef};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -337,10 +338,10 @@ impl Expression for ArrayConcatExpression {
         Ok(Arc::new(builder.finish()))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let left_data = self.left.eval_row(input)?;
         let right_data = self.right.eval_row(input)?;
-        Ok(self.evaluate(to_datum_ref(&left_data), to_datum_ref(&right_data)))
+        Ok(self.evaluate(left_data.to_datum_ref(), right_data.to_datum_ref()))
     }
 }
 
@@ -383,8 +384,9 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayConcatExpression {
 mod tests {
     use risingwave_common::array::DataChunk;
     use risingwave_common::types::ScalarImpl;
+    use risingwave_pb::data::Datum as ProstDatum;
     use risingwave_pb::expr::expr_node::{RexNode, Type as ProstType};
-    use risingwave_pb::expr::{ConstantValue, ExprNode, FunctionCall};
+    use risingwave_pb::expr::{ExprNode, FunctionCall};
 
     use super::*;
     use crate::expr::{Expression, LiteralExpression};
@@ -393,7 +395,7 @@ mod tests {
         ExprNode {
             expr_type: ProstType::ConstantValue as i32,
             return_type: Some(DataType::Int64.to_protobuf()),
-            rex_node: Some(RexNode::Constant(ConstantValue {
+            rex_node: Some(RexNode::Constant(ProstDatum {
                 body: value.to_be_bytes().to_vec(),
             })),
         }

@@ -14,39 +14,40 @@
 
 use std::collections::BTreeSet;
 
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 
-use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::cache::{new_unbounded, ExecutorCache};
+use crate::task::AtomicU64Ref;
 
 /// A cache for lookup's arrangement side.
 pub struct LookupCache {
-    data: ExecutorCache<Row, BTreeSet<Row>>,
+    data: ExecutorCache<OwnedRow, BTreeSet<OwnedRow>>,
 }
 
 impl LookupCache {
     /// Lookup a row in cache. If not found, return `None`.
-    pub fn lookup(&mut self, key: &Row) -> Option<&BTreeSet<Row>> {
+    pub fn lookup(&mut self, key: &OwnedRow) -> Option<&BTreeSet<OwnedRow>> {
         self.data.get(key)
     }
 
     /// Update a key after lookup cache misses.
-    pub fn batch_update(&mut self, key: Row, value: impl Iterator<Item = Row>) {
+    pub fn batch_update(&mut self, key: OwnedRow, value: impl Iterator<Item = OwnedRow>) {
         self.data.push(key, value.collect());
     }
 
     /// Apply a batch from the arrangement side
     pub fn apply_batch(&mut self, chunk: StreamChunk, arrange_join_keys: &[usize]) {
         for (op, row) in chunk.rows() {
-            let key = row.row_by_indices(arrange_join_keys);
+            let key = row.project(arrange_join_keys).into_owned_row();
             if let Some(values) = self.data.get_mut(&key) {
                 // the item is in cache, update it
-                let value = row.to_owned_row();
                 match op {
                     Op::Insert | Op::UpdateInsert => {
-                        values.insert(value);
+                        values.insert(row.into_owned_row());
                     }
                     Op::Delete | Op::UpdateDelete => {
-                        values.remove(&value);
+                        values.remove(&row.into_owned_row());
                     }
                 }
             }
@@ -63,12 +64,8 @@ impl LookupCache {
         self.data.update_epoch(epoch);
     }
 
-    pub fn new(lru_manager: Option<LruManagerRef>, cache_size: usize) -> Self {
-        let cache = if let Some(lru_manager) = lru_manager {
-            ExecutorCache::Managed(lru_manager.create_cache())
-        } else {
-            ExecutorCache::Local(EvictableHashMap::new(cache_size))
-        };
+    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
+        let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
         Self { data: cache }
     }
 }

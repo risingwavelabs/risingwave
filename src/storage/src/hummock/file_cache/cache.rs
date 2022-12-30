@@ -24,7 +24,7 @@ use super::buffer::TwoLevelBuffer;
 use super::error::Result;
 use super::meta::SlotId;
 use super::metrics::FileCacheMetricsRef;
-use super::store::{Store, StoreOptions, StoreRef};
+use super::store::{FsType, Store, StoreOptions, StoreRef};
 use super::{utils, LRU_SHARD_BITS};
 use crate::hummock::{HashBuilder, TieredCacheEntryHolder, TieredCacheKey, TieredCacheValue};
 
@@ -290,6 +290,10 @@ where
         timer.observe_duration();
 
         Ok(())
+    }
+
+    pub fn fs_type(&self) -> FsType {
+        self.store.fs_type()
     }
 }
 

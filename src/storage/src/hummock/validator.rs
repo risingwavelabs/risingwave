@@ -17,7 +17,7 @@ use std::cmp;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_pb::hummock::ValidationTask;
 
 use crate::hummock::iterator::HummockIterator;
@@ -60,7 +60,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
         );
-        let mut previous_key: Option<Vec<u8>> = None;
+        let mut previous_key: Option<FullKey<Vec<u8>>> = None;
         if let Err(err) = iter.rewind().await {
             tracing::warn!("Skip sanity check for SST {}. {}", sst.id, err);
         }
@@ -81,7 +81,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             visited_keys.insert(current_key.to_owned(), (sst.id, worker_id));
             // Ordered and Locally unique
             if let Some(previous_key) = previous_key.take() {
-                let cmp = VersionedComparator::compare_key(&previous_key, &current_key);
+                let cmp = previous_key.cmp(&current_key);
                 if cmp != cmp::Ordering::Less {
                     panic!(
                         "SST sanity check failed: For SST {}, expect {:x?} < {:x?}, got {:#?}",

@@ -17,7 +17,7 @@ use std::io::{Read, Write};
 use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use risingwave_hummock_sdk::VersionedComparator;
+use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
 
 use super::utils::{bytes_diff, xxhash64_verify, CompressionAlgorithm};
@@ -259,7 +259,7 @@ impl BlockBuilder {
         if self.entry_count > 0 {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(
-                VersionedComparator::compare_key(&self.last_key[..], key),
+                KeyComparator::compare_encoded_full_key(&self.last_key[..], key),
                 Ordering::Less
             );
         }

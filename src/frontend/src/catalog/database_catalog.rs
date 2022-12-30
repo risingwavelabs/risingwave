@@ -32,10 +32,10 @@ pub struct DatabaseCatalog {
 }
 
 impl DatabaseCatalog {
-    pub fn create_schema(&mut self, proto: ProstSchema) {
+    pub fn create_schema(&mut self, proto: &ProstSchema) {
         let name = proto.name.clone();
         let id = proto.id;
-        let schema = (&proto).into();
+        let schema = proto.into();
         self.schema_by_name
             .try_insert(name.clone(), schema)
             .unwrap();

@@ -64,7 +64,9 @@ impl MinioService {
                     format!("http://{}:{}", prometheus.address, prometheus.port),
                 );
             }
-            other_length => return Err(anyhow!("expected 0 or 1 promethus, get {}", other_length)),
+            other_length => {
+                return Err(anyhow!("expected 0 or 1 prometheus, get {}", other_length))
+            }
         }
 
         Ok(())

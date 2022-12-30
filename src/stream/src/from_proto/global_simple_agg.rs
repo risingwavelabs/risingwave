@@ -14,39 +14,43 @@
 
 //! Streaming Aggregators
 
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_pb::stream_plan::SimpleAggNode;
 
-use super::agg_common::{build_agg_call_from_prost, build_agg_state_tables_from_proto};
+use super::agg_common::{build_agg_call_from_prost, build_agg_state_storages_from_proto};
 use super::*;
+use crate::common::table::state_table::StateTable;
 use crate::executor::aggregation::AggCall;
 use crate::executor::GlobalSimpleAggExecutor;
 
 pub struct GlobalSimpleAggExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
-    fn new_boxed_executor(
+    type Node = SimpleAggNode;
+
+    async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let node = try_match_expand!(node.get_node_body().unwrap(), NodeBody::GlobalSimpleAgg)?;
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()
             .iter()
             .map(|agg_call| build_agg_call_from_prost(node.is_append_only, agg_call))
             .try_collect()?;
-        let agg_state_tables =
-            build_agg_state_tables_from_proto(node.get_agg_call_states(), store.clone(), None);
+        let storages =
+            build_agg_state_storages_from_proto(node.get_agg_call_states(), store.clone(), None)
+                .await;
         let result_table =
-            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, None);
+            StateTable::from_table_catalog(node.get_result_table().unwrap(), store, None).await;
 
         Ok(GlobalSimpleAggExecutor::new(
             params.actor_context,
             input,
             agg_calls,
-            agg_state_tables,
+            storages,
             result_table,
             params.pk_indices,
             params.executor_id,

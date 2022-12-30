@@ -2,7 +2,7 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 # Refer to the blog:
-# https://www.risingwave.dev/docs/latest/perform-real-time-ad-performance-analysis/
+# https://www.risingwave.dev/docs/current/real-time-ad-performance-analysis/
 
 statement ok
 CREATE TABLE ad_impression (
@@ -106,6 +106,9 @@ SELECT ad_id, ROUND(ctr, 2), window_end FROM ad_ctr_5min;
 ----
 7  0.33      2022-06-10 12:21:00
 8  1         2022-06-10 12:21:00
+
+statement ok
+delete from ad_impression;
 
 statement ok
 DROP MATERIALIZED VIEW ad_ctr;

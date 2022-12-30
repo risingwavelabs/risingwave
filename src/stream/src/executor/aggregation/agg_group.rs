@@ -16,31 +16,29 @@ use std::fmt::Debug;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, Op, Row};
+use risingwave_common::array::{ArrayBuilderImpl, Op};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::Datum;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_common::must_match;
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_storage::StateStore;
 
-use super::agg_state::AggState;
-use super::{AggCall, AggStateTable};
+use super::agg_state::{AggState, AggStateStorage};
+use super::AggCall;
+use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
 /// [`AggGroup`] manages agg states of all agg calls for one `group_key`.
 pub struct AggGroup<S: StateStore> {
     /// Group key.
-    group_key: Option<Row>,
+    group_key: Option<OwnedRow>,
 
     /// Current managed states for all [`AggCall`]s.
     states: Vec<AggState<S>>,
 
     /// Previous outputs of managed states. Initializing with `None`.
-    ///
-    /// We use `Vec<Datum>` instead of `Row` here to avoid unnecessary memory
-    /// usage for group key prefix and unnecessary construction of `Row` struct.
-    prev_outputs: Option<Vec<Datum>>,
+    prev_outputs: Option<OwnedRow>,
 }
 
 impl<S: StateStore> Debug for AggGroup<S> {
@@ -60,28 +58,25 @@ pub struct AggChangesInfo {
     /// The number of rows and corresponding ops in the changes.
     pub n_appended_ops: usize,
     /// The result row containing group key prefix. To be inserted into result table.
-    pub result_row: Row,
+    pub result_row: OwnedRow,
     /// The previous outputs of all agg calls recorded in the `AggState`.
-    pub prev_outputs: Option<Vec<Datum>>,
+    pub prev_outputs: Option<OwnedRow>,
 }
 
 impl<S: StateStore> AggGroup<S> {
     /// Create [`AggGroup`] for the given [`AggCall`]s and `group_key`.
     /// For [`crate::executor::GlobalSimpleAggExecutor`], the `group_key` should be `None`.
     pub async fn create(
-        group_key: Option<Row>,
+        group_key: Option<OwnedRow>,
         agg_calls: &[AggCall],
-        agg_state_tables: &[Option<AggStateTable<S>>],
+        storages: &[AggStateStorage<S>],
         result_table: &StateTable<S>,
         pk_indices: &PkIndices,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<AggGroup<S>> {
-        let prev_result: Option<Row> = result_table
-            .get_row(group_key.as_ref().unwrap_or_else(Row::empty))
-            .await?;
-        let prev_outputs: Option<Vec<_>> = prev_result.map(|row| row.0);
-        if let Some(prev_outputs) = prev_outputs.as_ref() {
+        let prev_outputs: Option<OwnedRow> = result_table.get_row(&group_key).await?;
+        if let Some(prev_outputs) = &prev_outputs {
             assert_eq!(prev_outputs.len(), agg_calls.len());
         }
 
@@ -94,13 +89,11 @@ impl<S: StateStore> AggGroup<S> {
             })
             .unwrap_or(0);
 
-        let states = agg_calls
-            .iter()
-            .enumerate()
-            .map(|(idx, agg_call)| {
+        let states =
+            futures::future::try_join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
                 AggState::create(
                     agg_call,
-                    agg_state_tables[idx].as_ref(),
+                    &storages[idx],
                     row_count,
                     prev_outputs.as_ref().map(|outputs| &outputs[idx]),
                     pk_indices,
@@ -108,8 +101,8 @@ impl<S: StateStore> AggGroup<S> {
                     extreme_cache_size,
                     input_schema,
                 )
-            })
-            .try_collect()?;
+            }))
+            .await?;
 
         Ok(Self {
             group_key,
@@ -118,7 +111,7 @@ impl<S: StateStore> AggGroup<S> {
         })
     }
 
-    pub fn group_key(&self) -> Option<&Row> {
+    pub fn group_key(&self) -> Option<&OwnedRow> {
         self.group_key.as_ref()
     }
 
@@ -133,45 +126,63 @@ impl<S: StateStore> AggGroup<S> {
     }
 
     /// Apply input chunk to all managed agg states.
-    pub async fn apply_chunk(
+    /// `visibilities` contains the row visibility of the input chunk for each agg call.
+    pub fn apply_chunk(
         &mut self,
-        agg_state_tables: &mut [Option<AggStateTable<S>>],
+        storages: &mut [AggStateStorage<S>],
         ops: &[Op],
         columns: &[Column],
-        visibilities: &[Option<Bitmap>],
+        visibilities: Vec<Option<Bitmap>>,
     ) -> StreamExecutorResult<()> {
-        // TODO(yuchao): may directly pass `&[Column]` to managed states.
-        let column_refs = columns.iter().map(|col| col.array_ref()).collect_vec();
-        for ((state, agg_state_table), visibility) in self
-            .states
-            .iter_mut()
-            .zip_eq(agg_state_tables)
-            .zip_eq(visibilities)
+        let columns = columns.iter().map(|col| col.array_ref()).collect_vec();
+        for ((state, storage), visibility) in
+            self.states.iter_mut().zip_eq(storages).zip_eq(visibilities)
         {
-            state
-                .apply_chunk(
-                    ops,
-                    visibility.as_ref(),
-                    &column_refs,
-                    agg_state_table.as_mut(),
-                )
-                .await?;
+            state.apply_chunk(ops, visibility.as_ref(), &columns, storage)?;
         }
         Ok(())
     }
 
+    /// Flush in-memory state into state table if needed.
+    /// The calling order of this method and `get_outputs` doesn't matter, but this method
+    /// must be called before committing state tables.
+    pub async fn flush_state_if_needed(
+        &self,
+        storages: &mut [AggStateStorage<S>],
+    ) -> StreamExecutorResult<()> {
+        futures::future::try_join_all(self.states.iter().zip_eq(storages).filter_map(
+            |(state, storage)| match state {
+                AggState::Table(state) => Some(state.flush_state_if_needed(
+                    must_match!(storage, AggStateStorage::Table { table } => table),
+                    self.group_key(),
+                )),
+                _ => None,
+            },
+        ))
+        .await?;
+        Ok(())
+    }
+
     /// Get the outputs of all managed agg states.
+    /// Possibly need to read/sync from state table if the state not cached in memory.
     async fn get_outputs(
         &mut self,
-        agg_state_tables: &[Option<AggStateTable<S>>],
-    ) -> StreamExecutorResult<Vec<Datum>> {
+        storages: &[AggStateStorage<S>],
+    ) -> StreamExecutorResult<OwnedRow> {
         futures::future::try_join_all(
             self.states
                 .iter_mut()
-                .zip_eq(agg_state_tables)
-                .map(|(state, agg_state_table)| state.get_output(agg_state_table.as_ref())),
+                .zip_eq(storages)
+                .map(|(state, storage)| state.get_output(storage, self.group_key.as_ref())),
         )
         .await
+        .map(OwnedRow::new)
+    }
+
+    /// Reset all in-memory states to their initial state, i.e. to reset all agg state structs to
+    /// the status as if they are just created, no input applied and no row in state table.
+    fn reset(&mut self) {
+        self.states.iter_mut().for_each(|state| state.reset());
     }
 
     /// Build changes into `builders` and `new_ops`, according to previous and current agg outputs.
@@ -184,9 +195,9 @@ impl<S: StateStore> AggGroup<S> {
         &mut self,
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
-        agg_state_tables: &[Option<AggStateTable<S>>],
+        storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<AggChangesInfo> {
-        let curr_outputs: Vec<Datum> = self.get_outputs(agg_state_tables).await?;
+        let curr_outputs: OwnedRow = self.get_outputs(storages).await?;
 
         let row_count = curr_outputs[ROW_COUNT_COLUMN]
             .as_ref()
@@ -200,17 +211,29 @@ impl<S: StateStore> AggGroup<S> {
             row_count
         );
 
-        let n_appended_ops = match (prev_row_count, row_count) {
-            (0, 0) => {
-                // previous state is empty, current state is also empty.
+        let curr_outputs = if row_count == 0 && self.group_key().is_none() {
+            self.reset();
+            self.get_outputs(storages).await?
+        } else {
+            curr_outputs
+        };
+
+        let n_appended_ops = match (
+            prev_row_count,
+            row_count,
+            self.group_key().is_some(),
+            self.prev_outputs.is_some(),
+        ) {
+            (0, 0, _, _) => {
+                // Previous state is empty, current state is also empty.
                 // FIXME: for `SimpleAgg`, should we still build some changes when `row_count` is 0
-                // while other aggs may not be `0`?
+                // While other aggs may not be `0`?
 
                 0
             }
 
-            (0, _) => {
-                // previous state is empty, current state is not empty, insert one `Insert` op.
+            (0, _, true, _) | (0, _, _, false) => {
+                // Previous state is empty, current state is not empty, insert one `Insert` op.
                 new_ops.push(Op::Insert);
 
                 for (builder, new_value) in builders.iter_mut().zip_eq(curr_outputs.iter()) {
@@ -221,8 +244,8 @@ impl<S: StateStore> AggGroup<S> {
                 1
             }
 
-            (_, 0) => {
-                // previous state is not empty, current state is empty, insert one `Delete` op.
+            (_, 0, true, _) => {
+                // Previous state is not empty, current state is empty, insert one `Delete` op.
                 new_ops.push(Op::Delete);
 
                 for (builder, old_value) in builders
@@ -237,7 +260,15 @@ impl<S: StateStore> AggGroup<S> {
             }
 
             _ => {
-                // previous state is not empty, current state is not empty, insert two `Update` op.
+                // 1. Previous state is not empty and current state is not empty.
+                //
+                // 2. Previous state is not empty and current state is empty and there is no group
+                // by keys.
+                //
+                // 3. Previous state is empty and current state is not empty and there is no group
+                // by keys and prev_outputs is not none.
+                //
+                // Insert two `Update` op.
                 new_ops.push(Op::UpdateDelete);
                 new_ops.push(Op::UpdateInsert);
 
@@ -260,12 +291,13 @@ impl<S: StateStore> AggGroup<S> {
             }
         };
 
-        let result_row = self
-            .group_key
-            .as_ref()
-            .unwrap_or_else(Row::empty)
-            .concat(curr_outputs.iter().cloned());
-        let prev_outputs = std::mem::replace(&mut self.prev_outputs, Some(curr_outputs));
+        let result_row = self.group_key().chain(&curr_outputs).into_owned_row();
+
+        let prev_outputs = if n_appended_ops == 0 {
+            self.prev_outputs.clone()
+        } else {
+            std::mem::replace(&mut self.prev_outputs, Some(curr_outputs))
+        };
 
         Ok(AggChangesInfo {
             n_appended_ops,

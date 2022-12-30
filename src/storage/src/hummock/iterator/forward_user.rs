@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound::{self, *};
+use std::ops::Bound::*;
 
-use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key};
+use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 use crate::hummock::iterator::{
-    DirectedUserIterator, DirectedUserIteratorBuilder, Forward, ForwardUserIteratorType,
-    HummockIterator, UserIteratorPayloadType,
+    DirectedUserIterator, DirectedUserIteratorBuilder, Forward, ForwardMergeRangeIterator,
+    ForwardUserIteratorType, HummockIterator, UserIteratorPayloadType,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SstableIterator};
+use crate::hummock::{DeleteRangeAggregator, HummockResult, SstableIterator};
 use crate::monitor::StoreLocalStatistic;
 
 /// [`UserIterator`] can be used by user directly.
@@ -32,8 +32,8 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     /// Inner table iterator.
     iterator: I,
 
-    /// Last user key
-    last_key: Vec<u8>,
+    /// Last full key.
+    last_key: FullKey<Vec<u8>>,
 
     /// Last user value
     last_val: Vec<u8>,
@@ -42,7 +42,7 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     out_of_range: bool,
 
     /// Start and end bounds of user key.
-    key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+    key_range: UserKeyRange,
 
     /// Only reads values if `ts <= self.read_epoch`.
     read_epoch: HummockEpoch,
@@ -54,6 +54,8 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     _version: Option<PinnedVersion>,
 
     stats: StoreLocalStatistic,
+
+    delete_range_aggregator: DeleteRangeAggregator<ForwardMergeRangeIterator>,
 }
 
 // TODO: decide whether this should also impl `HummockIterator`
@@ -61,20 +63,22 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Create [`UserIterator`] with given `read_epoch`.
     pub(crate) fn new(
         iterator: I,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: UserKeyRange,
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
+        delete_range_aggregator: DeleteRangeAggregator<ForwardMergeRangeIterator>,
     ) -> Self {
         Self {
             iterator,
             out_of_range: false,
             key_range,
-            last_key: Vec::new(),
+            last_key: FullKey::default(),
             last_val: Vec::new(),
             read_epoch,
             min_epoch,
             stats: StoreLocalStatistic::default(),
+            delete_range_aggregator,
             _version: version,
         }
     }
@@ -88,8 +92,8 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     pub async fn next(&mut self) -> HummockResult<()> {
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
-            let epoch = get_epoch(full_key);
-            let key = to_user_key(full_key);
+            let epoch = full_key.epoch;
+            let key = &full_key.user_key;
 
             // handle multi-version
             if epoch <= self.min_epoch || epoch > self.read_epoch {
@@ -97,25 +101,30 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 continue;
             }
 
-            if self.last_key.as_slice() != key {
-                self.last_key.clear();
-                self.last_key.extend_from_slice(key);
-
+            if &self.last_key.user_key.as_ref() != key {
+                self.last_key.set(full_key);
                 // handle delete operation
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
-                        self.last_val.clear();
-                        self.last_val.extend_from_slice(val);
+                        if self.delete_range_aggregator.should_delete(key, epoch) {
+                            self.stats.skip_delete_key_count += 1;
+                        } else {
+                            self.last_val.clear();
+                            self.last_val.extend_from_slice(val);
 
-                        // handle range scan
-                        match &self.key_range.1 {
-                            Included(end_key) => self.out_of_range = key > end_key.as_slice(),
-                            Excluded(end_key) => self.out_of_range = key >= end_key.as_slice(),
-                            Unbounded => {}
-                        };
-
-                        self.stats.processed_key_count += 1;
-                        return Ok(());
+                            // handle range scan
+                            match &self.key_range.1 {
+                                Included(end_key) => {
+                                    self.out_of_range = key > &end_key.as_ref();
+                                }
+                                Excluded(end_key) => {
+                                    self.out_of_range = key >= &end_key.as_ref();
+                                }
+                                Unbounded => {}
+                            };
+                            self.stats.processed_key_count += 1;
+                            return Ok(());
+                        }
                     }
                     // It means that the key is deleted from the storage.
                     // Deleted kv and the previous versions (if any) of the key should not be
@@ -141,9 +150,10 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// `rewind` or `seek` methods are called.
     ///
     /// Note: before call the function you need to ensure that the iterator is valid.
-    pub fn key(&self) -> &[u8] {
+    // TODO: return `&FullKey<Vec<u8>>` or `FullKey<&[u8]>`?
+    pub fn key(&self) -> &FullKey<Vec<u8>> {
         assert!(self.is_valid());
-        self.last_key.as_slice()
+        &self.last_key
     }
 
     /// The returned value is in the form of user value.
@@ -159,39 +169,51 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         // Handle range scan
         match &self.key_range.0 {
             Included(begin_key) => {
-                let full_key = &key_with_epoch(begin_key.clone(), self.read_epoch);
-                self.iterator.seek(full_key).await?;
+                let full_key = FullKey {
+                    user_key: begin_key.clone(),
+                    epoch: self.read_epoch,
+                };
+                self.iterator.seek(full_key.to_ref()).await?;
+                self.delete_range_aggregator.seek(begin_key.as_ref());
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
-            Unbounded => self.iterator.rewind().await?,
+            Unbounded => {
+                self.iterator.rewind().await?;
+                self.delete_range_aggregator.rewind();
+            }
         };
 
         // Handle multi-version
-        self.last_key.clear();
+        self.last_key = FullKey::default();
         // Handles range scan when key > end_key
         self.next().await
     }
 
     /// Resets the iterating position to the first position where the key >= provided key.
-    pub async fn seek(&mut self, user_key: &[u8]) -> HummockResult<()> {
+    pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
         // Handle range scan when key < begin_key
         let user_key = match &self.key_range.0 {
             Included(begin_key) => {
-                if begin_key.as_slice() > user_key {
-                    begin_key.clone()
+                let begin_key = begin_key.as_ref();
+                if begin_key > user_key {
+                    begin_key
                 } else {
-                    Vec::from(user_key)
+                    user_key
                 }
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
-            Unbounded => Vec::from(user_key),
+            Unbounded => user_key,
         };
 
-        let full_key = &key_with_epoch(user_key, self.read_epoch);
+        let full_key = FullKey {
+            user_key,
+            epoch: self.read_epoch,
+        };
         self.iterator.seek(full_key).await?;
+        self.delete_range_aggregator.seek(full_key.user_key);
 
         // Handle multi-version
-        self.last_key.clear();
+        self.last_key = FullKey::default();
         // Handle range scan when key > end_key
 
         self.next().await
@@ -213,20 +235,31 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 #[cfg(test)]
 impl UserIterator<ForwardUserIteratorType> {
     /// Create [`UserIterator`] with maximum epoch.
-    pub(crate) fn for_test(
-        iterator: ForwardUserIteratorType,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-    ) -> Self {
-        Self::new(iterator, key_range, HummockEpoch::MAX, 0, None)
+    pub(crate) fn for_test(iterator: ForwardUserIteratorType, key_range: UserKeyRange) -> Self {
+        Self::new(
+            iterator,
+            key_range,
+            HummockEpoch::MAX,
+            0,
+            None,
+            DeleteRangeAggregator::new(ForwardMergeRangeIterator::default(), HummockEpoch::MAX),
+        )
     }
 
     pub(crate) fn for_test_with_epoch(
         iterator: ForwardUserIteratorType,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: UserKeyRange,
         read_epoch: u64,
         min_epoch: u64,
     ) -> Self {
-        Self::new(iterator, key_range, read_epoch, min_epoch, None)
+        Self::new(
+            iterator,
+            key_range,
+            read_epoch,
+            min_epoch,
+            None,
+            DeleteRangeAggregator::new(ForwardMergeRangeIterator::default(), read_epoch),
+        )
     }
 }
 
@@ -235,15 +268,22 @@ impl DirectedUserIteratorBuilder for UserIterator<ForwardUserIteratorType> {
     type SstableIteratorType = SstableIterator;
 
     fn create(
-        iterator_iter: impl IntoIterator<Item = UserIteratorPayloadType<Forward, SstableIterator>>,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        iterator_iter: Vec<UserIteratorPayloadType<Forward, SstableIterator>>,
+        key_range: UserKeyRange,
         read_epoch: u64,
         min_epoch: u64,
         version: Option<PinnedVersion>,
+        // TODO: replace it with direction.
+        delete_range_iter: DeleteRangeAggregator<ForwardMergeRangeIterator>,
     ) -> DirectedUserIterator {
-        let iterator = UnorderedMergeIteratorInner::new(iterator_iter);
+        let iterator = UnorderedMergeIteratorInner::new(iterator_iter.into_iter());
         DirectedUserIterator::Forward(Self::new(
-            iterator, key_range, read_epoch, min_epoch, version,
+            iterator,
+            key_range,
+            read_epoch,
+            min_epoch,
+            version,
+            delete_range_iter,
         ))
     }
 }
@@ -253,21 +293,22 @@ mod tests {
     use std::ops::Bound::*;
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::key::user_key;
-
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
-        iterator_test_key_of, iterator_test_key_of_epoch, iterator_test_value_of,
+        gen_iterator_test_sstable_with_range_tombstones, iterator_test_key_of,
+        iterator_test_key_of_epoch, iterator_test_user_key_of, iterator_test_value_of,
         mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::HummockIteratorUnion;
     use crate::hummock::sstable::{
         SstableIterator, SstableIteratorReadOptions, SstableIteratorType,
     };
+    use crate::hummock::sstable_store::SstableStoreRef;
     use crate::hummock::test_utils::create_small_table_cache;
     use crate::hummock::value::HummockValue;
+    use crate::hummock::{Sstable, SstableDeleteRangeIterator};
 
     #[tokio::test]
     async fn test_basic() {
@@ -324,7 +365,7 @@ mod tests {
         while ui.is_valid() {
             let key = ui.key();
             let val = ui.value();
-            assert_eq!(key, user_key(iterator_test_key_of(i).as_slice()));
+            assert_eq!(key, &iterator_test_key_of(i));
             assert_eq!(val, iterator_test_value_of(i).as_slice());
             i += 1;
             ui.next().await.unwrap();
@@ -387,50 +428,38 @@ mod tests {
         let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
 
         // right edge case
-        ui.seek(user_key(
-            iterator_test_key_of(3 * TEST_KEYS_COUNT).as_slice(),
-        ))
-        .await
-        .unwrap();
+        ui.seek(iterator_test_user_key_of(3 * TEST_KEYS_COUNT).as_ref())
+            .await
+            .unwrap();
         assert!(!ui.is_valid());
 
         // normal case
-        ui.seek(user_key(
-            iterator_test_key_of(TEST_KEYS_COUNT + 5).as_slice(),
-        ))
-        .await
-        .unwrap();
+        ui.seek(iterator_test_user_key_of(TEST_KEYS_COUNT + 5).as_ref())
+            .await
+            .unwrap();
         let k = ui.key();
         let v = ui.value();
         assert_eq!(v, iterator_test_value_of(TEST_KEYS_COUNT + 5).as_slice());
-        assert_eq!(
-            k,
-            user_key(iterator_test_key_of(TEST_KEYS_COUNT + 5).as_slice())
-        );
-        ui.seek(user_key(
-            iterator_test_key_of(2 * TEST_KEYS_COUNT + 5).as_slice(),
-        ))
-        .await
-        .unwrap();
+        assert_eq!(k, &iterator_test_key_of(TEST_KEYS_COUNT + 5));
+        ui.seek(iterator_test_user_key_of(2 * TEST_KEYS_COUNT + 5).as_ref())
+            .await
+            .unwrap();
         let k = ui.key();
         let v = ui.value();
         assert_eq!(
             v,
             iterator_test_value_of(2 * TEST_KEYS_COUNT + 5).as_slice()
         );
-        assert_eq!(
-            k,
-            user_key(iterator_test_key_of(2 * TEST_KEYS_COUNT + 5).as_slice())
-        );
+        assert_eq!(k, &iterator_test_key_of(2 * TEST_KEYS_COUNT + 5));
 
         // left edge case
-        ui.seek(user_key(iterator_test_key_of(0).as_slice()))
+        ui.seek(iterator_test_user_key_of(0).as_ref())
             .await
             .unwrap();
         let k = ui.key();
         let v = ui.value();
         assert_eq!(v, iterator_test_value_of(0).as_slice());
-        assert_eq!(k, user_key(iterator_test_key_of(0).as_slice()));
+        assert_eq!(k, &iterator_test_key_of(0));
     }
 
     #[tokio::test]
@@ -474,7 +503,7 @@ mod tests {
         // verify
         let k = ui.key();
         let v = ui.value();
-        assert_eq!(k, user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(k, &iterator_test_key_of_epoch(2, 400));
         assert_eq!(v, iterator_test_value_of(2));
 
         // only one valid kv pair
@@ -482,11 +511,10 @@ mod tests {
         assert!(!ui.is_valid());
     }
 
-    // left..=end
-    #[tokio::test]
-    async fn test_range_inclusive() {
-        let sstable_store = mock_sstable_store();
-        // key=[idx, epoch], value
+    async fn generate_test_data(
+        sstable_store: SstableStoreRef,
+        range_tombstones: Vec<(usize, usize, u64)>,
+    ) -> Sstable {
         let kv_pairs = vec![
             (0, 200, HummockValue::delete()),
             (0, 100, HummockValue::put(iterator_test_value_of(0))),
@@ -503,8 +531,21 @@ mod tests {
             (7, 100, HummockValue::put(iterator_test_value_of(7))),
             (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
-        let table =
-            gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
+        gen_iterator_test_sstable_with_range_tombstones(
+            0,
+            kv_pairs,
+            range_tombstones,
+            sstable_store,
+        )
+        .await
+    }
+
+    // left..=end
+    #[tokio::test]
+    async fn test_range_inclusive() {
+        let sstable_store = mock_sstable_store();
+        // key=[idx, epoch], value
+        let table = generate_test_data(sstable_store.clone(), vec![]).await;
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
@@ -514,53 +555,53 @@ mod tests {
         ))];
         let mi = UnorderedMergeIteratorInner::new(iters);
 
-        let begin_key = Included(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
-        let end_key = Included(user_key(iterator_test_key_of_epoch(7, 0).as_slice()).to_vec());
+        let begin_key = Included(iterator_test_user_key_of(2));
+        let end_key = Included(iterator_test_user_key_of(7));
 
         let mut ui = UserIterator::for_test(mi, (begin_key, end_key));
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
         // ----- before-begin-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(1).as_slice()))
+        ui.seek(iterator_test_user_key_of(1).as_ref())
             .await
             .unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
         // ----- begin-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(2).as_slice()))
+        ui.seek(iterator_test_user_key_of(2).as_ref())
             .await
             .unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
         // ----- end-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(7).as_slice()))
+        ui.seek(iterator_test_user_key_of(7).as_ref())
             .await
             .unwrap();
         assert!(!ui.is_valid());
 
         // ----- after-end-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(8).as_slice()))
+        ui.seek(iterator_test_user_key_of(8).as_ref())
             .await
             .unwrap();
         assert!(!ui.is_valid());
@@ -597,53 +638,53 @@ mod tests {
         ))];
         let mi = UnorderedMergeIteratorInner::new(iters);
 
-        let begin_key = Included(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
-        let end_key = Excluded(user_key(iterator_test_key_of_epoch(7, 0).as_slice()).to_vec());
+        let begin_key = Included(iterator_test_user_key_of(2));
+        let end_key = Excluded(iterator_test_user_key_of(7));
 
         let mut ui = UserIterator::for_test(mi, (begin_key, end_key));
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
         // ----- before-begin-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(1).as_slice()))
+        ui.seek(iterator_test_user_key_of(1).as_ref())
             .await
             .unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
         // ----- begin-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(2).as_slice()))
+        ui.seek(iterator_test_user_key_of(2).as_ref())
             .await
             .unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
         // ----- end-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(7).as_slice()))
+        ui.seek(iterator_test_user_key_of(7).as_ref())
             .await
             .unwrap();
         assert!(!ui.is_valid());
 
         // ----- after-end-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(8).as_slice()))
+        ui.seek(iterator_test_user_key_of(8).as_ref())
             .await
             .unwrap();
         assert!(!ui.is_valid());
@@ -654,24 +695,8 @@ mod tests {
     async fn test_range_to_inclusive() {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
-        let kv_pairs = vec![
-            (0, 200, HummockValue::delete()),
-            (0, 100, HummockValue::put(iterator_test_value_of(0))),
-            (1, 200, HummockValue::put(iterator_test_value_of(1))),
-            (1, 100, HummockValue::delete()),
-            (2, 300, HummockValue::put(iterator_test_value_of(2))),
-            (2, 200, HummockValue::delete()),
-            (2, 100, HummockValue::delete()),
-            (3, 100, HummockValue::put(iterator_test_value_of(3))),
-            (5, 200, HummockValue::delete()),
-            (5, 100, HummockValue::put(iterator_test_value_of(5))),
-            (6, 100, HummockValue::put(iterator_test_value_of(6))),
-            (7, 200, HummockValue::delete()),
-            (7, 100, HummockValue::put(iterator_test_value_of(7))),
-            (8, 100, HummockValue::put(iterator_test_value_of(8))),
-        ];
-        let table =
-            gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
+
+        let table = generate_test_data(sstable_store.clone(), vec![]).await;
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
@@ -680,56 +705,56 @@ mod tests {
             read_options,
         ))];
         let mi = UnorderedMergeIteratorInner::new(iters);
-        let end_key = Included(user_key(iterator_test_key_of_epoch(7, 0).as_slice()).to_vec());
+        let end_key = Included(iterator_test_user_key_of(7));
 
         let mut ui = UserIterator::for_test(mi, (Unbounded, end_key));
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(1).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(1, 200));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
         // ----- begin-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(0).as_slice()))
+        ui.seek(iterator_test_user_key_of(0).as_ref())
             .await
             .unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(1).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(1, 200));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
         // ----- in-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(2).as_slice()))
+        ui.seek(iterator_test_user_key_of(2).as_ref())
             .await
             .unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
         // ----- end-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(7).as_slice()))
+        ui.seek(iterator_test_user_key_of(7).as_ref())
             .await
             .unwrap();
         assert!(!ui.is_valid());
 
         // ----- after-end-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(8).as_slice()))
+        ui.seek(iterator_test_user_key_of(8).as_ref())
             .await
             .unwrap();
         assert!(!ui.is_valid());
@@ -740,24 +765,7 @@ mod tests {
     async fn test_range_from() {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
-        let kv_pairs = vec![
-            (0, 200, HummockValue::delete()),
-            (0, 100, HummockValue::put(iterator_test_value_of(0))),
-            (1, 200, HummockValue::put(iterator_test_value_of(1))),
-            (1, 100, HummockValue::delete()),
-            (2, 300, HummockValue::put(iterator_test_value_of(2))),
-            (2, 200, HummockValue::delete()),
-            (2, 100, HummockValue::delete()),
-            (3, 100, HummockValue::put(iterator_test_value_of(3))),
-            (5, 200, HummockValue::delete()),
-            (5, 100, HummockValue::put(iterator_test_value_of(5))),
-            (6, 100, HummockValue::put(iterator_test_value_of(6))),
-            (7, 200, HummockValue::delete()),
-            (7, 100, HummockValue::put(iterator_test_value_of(7))),
-            (8, 100, HummockValue::put(iterator_test_value_of(8))),
-        ];
-        let table =
-            gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
+        let table = generate_test_data(sstable_store.clone(), vec![]).await;
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
@@ -766,60 +774,60 @@ mod tests {
             read_options,
         ))];
         let mi = UnorderedMergeIteratorInner::new(iters);
-        let begin_key = Included(user_key(iterator_test_key_of_epoch(2, 0).as_slice()).to_vec());
+        let begin_key = Included(iterator_test_user_key_of(2));
 
         let mut ui = UserIterator::for_test(mi, (begin_key, Unbounded));
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(8).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(8, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
         // ----- begin-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(1).as_slice()))
+        ui.seek(iterator_test_user_key_of(1).as_ref())
             .await
             .unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(8).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(8, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
         // ----- in-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(2).as_slice()))
+        ui.seek(iterator_test_user_key_of(2).as_ref())
             .await
             .unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(2).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(2, 300));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(3).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(3, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(6).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(6, 100));
         ui.next().await.unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(8).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(8, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
         // ----- end-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(8).as_slice()))
+        ui.seek(iterator_test_user_key_of(8).as_ref())
             .await
             .unwrap();
-        assert_eq!(ui.key(), user_key(iterator_test_key_of(8).as_slice()));
+        assert_eq!(ui.key(), &iterator_test_key_of_epoch(8, 100));
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
         // ----- after-end-range iterate -----
-        ui.seek(user_key(iterator_test_key_of(9).as_slice()))
+        ui.seek(iterator_test_user_key_of(9).as_ref())
             .await
             .unwrap();
         assert!(!ui.is_valid());
@@ -854,7 +862,7 @@ mod tests {
         let mut i = 0;
         while ui.is_valid() {
             let key = ui.key();
-            let key_epoch = get_epoch(key);
+            let key_epoch = key.epoch;
             assert!(key_epoch > min_epoch);
 
             i += 1;
@@ -863,5 +871,71 @@ mod tests {
 
         let expect_count = TEST_KEYS_COUNT - min_epoch as usize;
         assert_eq!(i, expect_count);
+    }
+
+    #[tokio::test]
+    async fn test_delete_range() {
+        let sstable_store = mock_sstable_store();
+        // key=[idx, epoch], value
+        let table = generate_test_data(
+            sstable_store.clone(),
+            vec![(0, 2, 300), (1, 4, 150), (3, 6, 50), (5, 8, 150)],
+        )
+        .await;
+        let cache = create_small_table_cache();
+        let read_options = Arc::new(SstableIteratorReadOptions::default());
+        let table_id = table.id;
+        let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
+            cache.insert(table.id, table.id, 1, Box::new(table)),
+            sstable_store.clone(),
+            read_options.clone(),
+        ))];
+        let mi = UnorderedMergeIteratorInner::new(iters);
+
+        let mut del_iter = ForwardMergeRangeIterator::default();
+        del_iter.add_sst_iter(SstableDeleteRangeIterator::new(
+            cache.lookup(table_id, &table_id).unwrap(),
+        ));
+        let del_agg = DeleteRangeAggregator::new(del_iter, 150);
+        let mut ui: UserIterator<ForwardUserIteratorType> =
+            UserIterator::new(mi, (Unbounded, Unbounded), 150, 0, None, del_agg);
+
+        // ----- basic iterate -----
+        ui.rewind().await.unwrap();
+        assert!(ui.is_valid());
+        assert_eq!(ui.key().user_key, iterator_test_user_key_of(0));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key().user_key, iterator_test_user_key_of(8));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
+
+        // ----- before-begin-range iterate -----
+        ui.seek(iterator_test_user_key_of(1).as_ref())
+            .await
+            .unwrap();
+        assert_eq!(ui.key().user_key, iterator_test_user_key_of(8));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
+
+        let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
+            cache.lookup(table_id, &table_id).unwrap(),
+            sstable_store,
+            read_options,
+        ))];
+        let mut del_iter = ForwardMergeRangeIterator::default();
+        del_iter.add_sst_iter(SstableDeleteRangeIterator::new(
+            cache.lookup(table_id, &table_id).unwrap(),
+        ));
+        let del_agg = DeleteRangeAggregator::new(del_iter, 300);
+        let mi = UnorderedMergeIteratorInner::new(iters);
+        let mut ui: UserIterator<ForwardUserIteratorType> =
+            UserIterator::new(mi, (Unbounded, Unbounded), 300, 0, None, del_agg);
+        ui.rewind().await.unwrap();
+        assert!(ui.is_valid());
+        assert_eq!(ui.key().user_key, iterator_test_user_key_of(2));
+        ui.next().await.unwrap();
+        assert_eq!(ui.key().user_key, iterator_test_user_key_of(8));
+        ui.next().await.unwrap();
+        assert!(!ui.is_valid());
     }
 }

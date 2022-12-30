@@ -1,0 +1,8 @@
+include ./aggregate/*.slt.part
+include ./aggregate/*/*.slt.part
+include ./join/*.slt.part
+include ./join/*/*.slt.part
+include ./conjunction/*.slt.part
+include ./conjunction/*/*.slt.part
+include ./limit/*.slt.part
+include ./select/*.slt.part

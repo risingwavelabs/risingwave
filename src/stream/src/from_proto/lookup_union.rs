@@ -12,22 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::stream_plan::LookupUnionNode;
+
 use super::*;
 use crate::executor::LookupUnionExecutor;
 
 pub struct LookupUnionExecutorBuilder;
 
+#[async_trait::async_trait]
 impl ExecutorBuilder for LookupUnionExecutorBuilder {
-    fn new_boxed_executor(
+    type Node = LookupUnionNode;
+
+    async fn new_boxed_executor(
         params: ExecutorParams,
-        node: &StreamNode,
+        node: &Self::Node,
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let lookup_union = try_match_expand!(node.get_node_body().unwrap(), NodeBody::LookupUnion)?;
-        Ok(
-            LookupUnionExecutor::new(params.pk_indices, params.input, lookup_union.order.clone())
-                .boxed(),
-        )
+        Ok(LookupUnionExecutor::new(params.pk_indices, params.input, node.order.clone()).boxed())
     }
 }

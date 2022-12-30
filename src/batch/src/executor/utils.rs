@@ -76,3 +76,26 @@ impl BufferChunkExecutor {
         }
     }
 }
+
+pub struct DummyExecutor {
+    pub schema: Schema,
+}
+
+impl Executor for DummyExecutor {
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn identity(&self) -> &str {
+        "dummy"
+    }
+
+    fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+        DummyExecutor::do_nothing()
+    }
+}
+
+impl DummyExecutor {
+    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    async fn do_nothing() {}
+}

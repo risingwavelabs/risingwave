@@ -91,12 +91,12 @@ fn parse_update() {
     let sql = "UPDATE t SET a = 1, b = 2, c = 3 WHERE d";
     match verified_stmt(sql) {
         Statement::Update {
-            table,
+            table_name,
             assignments,
             selection,
             ..
         } => {
-            assert_eq!(table.to_string(), "t".to_string());
+            assert_eq!(table_name.to_string(), "t".to_string());
             assert_eq!(
                 assignments,
                 vec![
@@ -134,53 +134,6 @@ fn parse_update() {
         ParserError::ParserError("Expected end of statement, found: extrabadstuff".to_string()),
         res.unwrap_err()
     );
-}
-
-#[test]
-fn parse_update_with_table_alias() {
-    let sql = "UPDATE users AS u SET u.username = 'new_user' WHERE u.username = 'old_user'";
-    match verified_stmt(sql) {
-        Statement::Update {
-            table,
-            assignments,
-            selection,
-        } => {
-            assert_eq!(
-                TableWithJoins {
-                    relation: TableFactor::Table {
-                        name: ObjectName(vec![Ident::new("users")]),
-                        alias: Some(TableAlias {
-                            name: Ident::new("u"),
-                            columns: vec![]
-                        }),
-                    },
-                    joins: vec![]
-                },
-                table
-            );
-            assert_eq!(
-                vec![Assignment {
-                    id: vec![Ident::new("u"), Ident::new("username")],
-                    value: Expr::Value(Value::SingleQuotedString("new_user".to_string()))
-                }],
-                assignments
-            );
-            assert_eq!(
-                Some(Expr::BinaryOp {
-                    left: Box::new(Expr::CompoundIdentifier(vec![
-                        Ident::new("u"),
-                        Ident::new("username")
-                    ])),
-                    op: BinaryOperator::Eq,
-                    right: Box::new(Expr::Value(Value::SingleQuotedString(
-                        "old_user".to_string()
-                    )))
-                }),
-                selection
-            );
-        }
-        _ => unreachable!(),
-    }
 }
 
 #[test]
@@ -468,10 +421,7 @@ fn parse_select_with_date_column_name() {
     let sql = "SELECT date";
     let select = verified_only_select(sql);
     assert_eq!(
-        &Expr::Identifier(Ident {
-            value: "date".into(),
-            quote_style: None
-        }),
+        &Expr::Identifier(Ident::new("date")),
         expr_from_projection(only(&select.projection)),
     );
 }
@@ -1203,7 +1153,7 @@ fn parse_extract() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::Extract {
-            field: DateTimeField::Year,
+            field: "YEAR".to_string(),
             expr: Box::new(Expr::Identifier(Ident::new("d"))),
         },
         expr_from_projection(only(&select.projection)),
@@ -1217,9 +1167,9 @@ fn parse_extract() {
     verified_stmt("SELECT EXTRACT(MINUTE FROM d)");
     verified_stmt("SELECT EXTRACT(SECOND FROM d)");
 
-    let res = parse_sql_statements("SELECT EXTRACT(MILLISECOND FROM d)");
+    let res = parse_sql_statements("SELECT EXTRACT(0 FROM d)");
     assert_eq!(
-        ParserError::ParserError("Expected date/time field, found: MILLISECOND".to_string()),
+        ParserError::ParserError("Expected date/time field, found: 0".to_string()),
         res.unwrap_err()
     );
 }
@@ -1525,7 +1475,7 @@ fn parse_alter_table() {
         } => {
             assert_eq!("tab", name.to_string());
             assert_eq!("foo", column_def.name.to_string());
-            assert_eq!("TEXT", column_def.data_type.to_string());
+            assert_eq!("TEXT", column_def.data_type.unwrap().to_string());
         }
         _ => unreachable!(),
     };
@@ -1839,6 +1789,30 @@ fn parse_explain_analyze_with_simple_select() {
             verbose: true,
             explain_type: ExplainType::DistSql,
         },
+    );
+}
+
+#[test]
+fn parse_explain_with_invalid_options() {
+    let res = parse_sql_statements("EXPLAIN (V) SELECT sqrt(id) FROM foo");
+    assert!(res.is_err());
+
+    let res = parse_sql_statements("EXPLAIN (VERBOSE TRACE) SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError("Expected ), found: TRACE".to_string()),
+        res.unwrap_err()
+    );
+
+    let res = parse_sql_statements("EXPLAIN () SELECT sqrt(id) FROM foo");
+    assert!(res.is_err());
+
+    let res = parse_sql_statements("EXPLAIN (VERBOSE, ) SELECT sqrt(id) FROM foo");
+    assert_eq!(
+        ParserError::ParserError(
+            "Expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: )"
+                .to_string()
+        ),
+        res.unwrap_err()
     );
 }
 
@@ -2665,14 +2639,8 @@ fn parse_recursive_cte() {
     assert_eq!(with.cte_tables.len(), 1);
     let expected = Cte {
         alias: TableAlias {
-            name: Ident {
-                value: "nums".to_string(),
-                quote_style: None,
-            },
-            columns: vec![Ident {
-                value: "val".to_string(),
-                quote_style: None,
-            }],
+            name: Ident::new("nums"),
+            columns: vec![Ident::new("val")],
         },
         query: cte_query,
         from: None,
@@ -3528,16 +3496,7 @@ fn parse_grant() {
                         Action::Select { columns: None },
                         Action::Insert { columns: None },
                         Action::Update {
-                            columns: Some(vec![
-                                Ident {
-                                    value: "shape".into(),
-                                    quote_style: None
-                                },
-                                Ident {
-                                    value: "size".into(),
-                                    quote_style: None
-                                }
-                            ])
+                            columns: Some(vec![Ident::new("shape"), Ident::new("size")])
                         },
                         Action::Usage,
                         Action::Delete,

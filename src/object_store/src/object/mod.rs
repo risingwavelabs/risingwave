@@ -15,7 +15,8 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use tokio::io::AsyncRead;
+use prometheus::HistogramTimer;
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 pub mod mem;
 pub use mem::*;
@@ -184,6 +185,7 @@ pub enum ObjectStoreImpl {
     InMem(MonitoredObjectStore<InMemObjectStore>),
     Disk(MonitoredObjectStore<DiskObjectStore>),
     S3(MonitoredObjectStore<S3ObjectStore>),
+    S3Compatible(MonitoredObjectStore<S3ObjectStore>),
     Hybrid {
         local: Box<ObjectStoreImpl>,
         remote: Box<ObjectStoreImpl>,
@@ -234,6 +236,10 @@ macro_rules! object_store_impl_method_body {
                     assert!(path.is_remote(), "get local path in pure s3 object store: {:?}", $path);
                     $dispatch_macro!(s3, $method_name, path.as_str() $(, $args)*)
                 },
+                ObjectStoreImpl::S3Compatible(s3) => {
+                    assert!(path.is_remote(), "get local path in pure s3 compatible object store: {:?}", $path);
+                    $dispatch_macro!(s3, $method_name, path.as_str() $(, $args)*)
+                },
                 ObjectStoreImpl::Hybrid {
                     local: local,
                     remote: remote,
@@ -243,12 +249,14 @@ macro_rules! object_store_impl_method_body {
                             ObjectStoreImpl::InMem(in_mem) => $dispatch_macro!(in_mem, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::Disk(disk) => $dispatch_macro!(disk, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::S3(_) => unreachable!("S3 cannot be used as local object store"),
+                            ObjectStoreImpl::S3Compatible(_) => unreachable!("S3 compatible cannot be used as local object store"),
                             ObjectStoreImpl::Hybrid {..} => unreachable!("local object store of hybrid object store cannot be hybrid")
                         },
                         ObjectStorePath::Remote(_) => match remote.as_ref() {
                             ObjectStoreImpl::InMem(in_mem) => $dispatch_macro!(in_mem, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::Disk(disk) => $dispatch_macro!(disk, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::S3(s3) => $dispatch_macro!(s3, $method_name, path.as_str() $(, $args)*),
+                            ObjectStoreImpl::S3Compatible(s3_compatible) => $dispatch_macro!(s3_compatible, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::Hybrid {..} => unreachable!("remote object store of hybrid object store cannot be hybrid")
                         },
                     }
@@ -282,6 +290,10 @@ macro_rules! object_store_impl_method_body_slice {
                     assert!(paths_loc.is_empty(), "get local path in pure s3 object store: {:?}", $paths);
                     $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
                 },
+                ObjectStoreImpl::S3Compatible(s3) => {
+                    assert!(paths_loc.is_empty(), "get local path in pure s3 compatible object store: {:?}", $paths);
+                    $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*)
+                },
                 ObjectStoreImpl::Hybrid {
                     local: local,
                     remote: remote,
@@ -291,6 +303,7 @@ macro_rules! object_store_impl_method_body_slice {
                         ObjectStoreImpl::InMem(in_mem) =>  $dispatch_macro!(in_mem, $method_name, &paths_loc $(, $args)*),
                         ObjectStoreImpl::Disk(disk) =>  $dispatch_macro!(disk, $method_name, &paths_loc $(, $args)*),
                         ObjectStoreImpl::S3(_) => unreachable!("S3 cannot be used as local object store"),
+                        ObjectStoreImpl::S3Compatible(_) => unreachable!("S3 cannot be used as local object store"),
                         ObjectStoreImpl::Hybrid {..} => unreachable!("local object store of hybrid object store cannot be hybrid")
                     }?;
 
@@ -299,6 +312,7 @@ macro_rules! object_store_impl_method_body_slice {
                         ObjectStoreImpl::InMem(in_mem) =>  $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*),
                         ObjectStoreImpl::Disk(disk) =>  $dispatch_macro!(disk, $method_name, &paths_rem $(, $args)*),
                         ObjectStoreImpl::S3(s3) =>  $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*),
+                        ObjectStoreImpl::S3Compatible(s3) =>  $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*),
                         ObjectStoreImpl::Hybrid {..} => unreachable!("remote object store of hybrid object store cannot be hybrid")
                     }
                 }
@@ -339,7 +353,7 @@ impl ObjectStoreImpl {
         &self,
         path: &str,
         start_loc: Option<usize>,
-    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+    ) -> ObjectResult<MonitoredStreamingReader> {
         object_store_impl_method_body!(self, streaming_read, dispatch_async, path, start_loc)
     }
 
@@ -368,6 +382,7 @@ impl ObjectStoreImpl {
             ObjectStoreImpl::InMem(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::Disk(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
+            ObjectStoreImpl::S3Compatible(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::Hybrid { local, remote } => {
                 if is_remote {
                     remote.get_object_prefix(obj_id, true)
@@ -473,6 +488,69 @@ impl MonitoredStreamingUploader {
     }
 }
 
+type BoxedStreamingReader = Box<dyn AsyncRead + Unpin + Send + Sync>;
+pub struct MonitoredStreamingReader {
+    inner: BoxedStreamingReader,
+    object_store_metrics: Arc<ObjectStoreMetrics>,
+    operation_size: usize,
+    media_type: &'static str,
+    timer: Option<HistogramTimer>,
+}
+
+impl MonitoredStreamingReader {
+    pub fn new(
+        media_type: &'static str,
+        handle: BoxedStreamingReader,
+        object_store_metrics: Arc<ObjectStoreMetrics>,
+    ) -> Self {
+        let operation_type = "streaming_read";
+        let timer = object_store_metrics
+            .operation_latency
+            .with_label_values(&[media_type, operation_type])
+            .start_timer();
+        Self {
+            inner: handle,
+            object_store_metrics,
+            operation_size: 0,
+            media_type,
+            timer: Some(timer),
+        }
+    }
+
+    pub async fn read_bytes(&mut self, buf: &mut [u8]) -> ObjectResult<usize> {
+        let operation_type = "streaming_read_read_bytes";
+        let data_len = buf.len();
+        self.object_store_metrics.read_bytes.inc_by(data_len as u64);
+        self.object_store_metrics
+            .operation_size
+            .with_label_values(&[operation_type])
+            .observe(data_len as f64);
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&[self.media_type, operation_type])
+            .start_timer();
+        self.operation_size += data_len;
+        let ret =
+            self.inner.read_exact(buf).await.map_err(|err| {
+                ObjectError::internal(format!("read_bytes failed, error: {:?}", err))
+            });
+        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
+        ret
+    }
+}
+
+impl Drop for MonitoredStreamingReader {
+    fn drop(&mut self) {
+        let operation_type = "streaming_read";
+        self.object_store_metrics
+            .operation_size
+            .with_label_values(&[operation_type])
+            .observe(self.operation_size as f64);
+        self.timer.take().unwrap().observe_duration();
+    }
+}
+
 pub struct MonitoredObjectStore<OS: ObjectStore> {
     inner: OS,
     object_store_metrics: Arc<ObjectStoreMetrics>,
@@ -524,7 +602,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .upload(path, obj)
-            .stack_trace("object_store_upload")
+            .verbose_stack_trace("object_store_upload")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
@@ -561,7 +639,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let res = self
             .inner
             .read(path, block_loc)
-            .stack_trace("object_store_read")
+            .verbose_stack_trace("object_store_read")
             .await
             .map_err(|err| {
                 ObjectError::internal(format!(
@@ -598,7 +676,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let res = self
             .inner
             .readv(path, block_locs)
-            .stack_trace("object_store_readv")
+            .verbose_stack_trace("object_store_readv")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
@@ -620,9 +698,21 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         &self,
         path: &str,
         start_pos: Option<usize>,
-    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
-        // TODO: add metrics
-        self.inner.streaming_read(path, start_pos).await
+    ) -> ObjectResult<MonitoredStreamingReader> {
+        let operation_type = "streaming_read_start";
+        let media_type = self.media_type();
+        let _timer = self
+            .object_store_metrics
+            .operation_latency
+            .with_label_values(&[media_type, operation_type])
+            .start_timer();
+        let ret = self.inner.streaming_read(path, start_pos).await;
+        try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
+        Ok(MonitoredStreamingReader::new(
+            media_type,
+            ret?,
+            self.object_store_metrics.clone(),
+        ))
     }
 
     pub async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -636,7 +726,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .metadata(path)
-            .stack_trace("object_store_metadata")
+            .verbose_stack_trace("object_store_metadata")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
@@ -654,7 +744,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .delete(path)
-            .stack_trace("object_store_delete")
+            .verbose_stack_trace("object_store_delete")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
@@ -672,7 +762,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .delete_objects(paths)
-            .stack_trace("object_store_delete_objects")
+            .verbose_stack_trace("object_store_delete_objects")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
@@ -690,7 +780,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .list(prefix)
-            .stack_trace("object_store_list")
+            .verbose_stack_trace("object_store_list")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
@@ -701,6 +791,8 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 pub async fn parse_remote_object_store(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
+    object_store_use_batch_delete: bool,
+    ident: &str,
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
@@ -711,6 +803,20 @@ pub async fn parse_remote_object_store(
             .await
             .monitored(metrics),
         ),
+        s3_compatible if s3_compatible.starts_with("s3-compatible://") => {
+            ObjectStoreImpl::S3Compatible(
+                S3ObjectStore::new_s3_compatible(
+                    s3_compatible
+                        .strip_prefix("s3-compatible://")
+                        .unwrap()
+                        .to_string(),
+                    metrics.clone(),
+                    object_store_use_batch_delete,
+                )
+                .await
+                .monitored(metrics),
+            )
+        }
         minio if minio.starts_with("minio://") => ObjectStoreImpl::S3(
             S3ObjectStore::with_minio(minio, metrics.clone())
                 .await
@@ -720,16 +826,16 @@ pub async fn parse_remote_object_store(
             DiskObjectStore::new(disk.strip_prefix("disk://").unwrap()).monitored(metrics),
         ),
         "memory" => {
-            tracing::warn!("You're using Hummock in-memory remote object store. This should never be used in benchmarks and production environment.");
+            tracing::warn!("You're using in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
             ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
         }
         "memory-shared" => {
-            tracing::warn!("You're using Hummock shared in-memory remote object store. This should never be used in benchmarks and production environment.");
+            tracing::warn!("You're using shared in-memory remote object store for {}. This should never be used in benchmarks and production environment.", ident);
             ObjectStoreImpl::InMem(InMemObjectStore::shared().monitored(metrics))
         }
         other => {
             unimplemented!(
-                "{} hummock remote object store only supports s3, minio, disk, memory, and memory-shared for now.",
+                "{} remote object store only supports s3, minio, disk, memory, and memory-shared for now.",
                 other
             )
         }

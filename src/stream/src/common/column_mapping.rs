@@ -14,24 +14,28 @@
 
 use std::collections::HashMap;
 
-#[derive(Clone)]
 pub struct StateTableColumnMapping {
     /// index: state table column index, value: upstream column index
-    upstream_columns: Vec<usize>,
-    /// key: upstream column index, value: state table column index
+    included_upstream_indices: Vec<usize>,
+    /// key: upstream column index, value: state table value index
     mapping: HashMap<usize, usize>,
 }
 
 impl StateTableColumnMapping {
     /// Creates a new column mapping with the upstream columns included in state table.
-    pub fn new(upstream_columns: Vec<usize>) -> Self {
-        let mapping = upstream_columns
-            .iter()
+    pub fn new(
+        included_upstream_indices: Vec<usize>,
+        table_value_indices: Option<Vec<usize>>,
+    ) -> Self {
+        let mapping = table_value_indices
+            .unwrap_or_else(|| (0..included_upstream_indices.len()).collect())
+            .into_iter()
+            .map(|value_idx| included_upstream_indices[value_idx])
             .enumerate()
-            .map(|(i, col_idx)| (*col_idx, i))
+            .map(|(i, upstream_idx)| (upstream_idx, i))
             .collect();
         Self {
-            upstream_columns,
+            included_upstream_indices,
             mapping,
         }
     }
@@ -41,14 +45,9 @@ impl StateTableColumnMapping {
         self.mapping.get(&idx).copied()
     }
 
-    /// Return the number of columns in the mapping.
-    pub fn len(&self) -> usize {
-        self.upstream_columns.len()
-    }
-
     /// Return slice of all upstream columns.
     pub fn upstream_columns(&self) -> &[usize] {
-        &self.upstream_columns
+        &self.included_upstream_indices
     }
 }
 
@@ -58,13 +57,23 @@ mod tests {
 
     #[test]
     fn test_column_mapping() {
-        let mapping = StateTableColumnMapping::new(vec![2, 3, 0, 1]);
+        let mapping = StateTableColumnMapping::new(vec![2, 3, 0, 1], None);
         assert_eq!(mapping.upstream_to_state_table(2), Some(0));
         assert_eq!(mapping.upstream_to_state_table(3), Some(1));
         assert_eq!(mapping.upstream_to_state_table(0), Some(2));
         assert_eq!(mapping.upstream_to_state_table(1), Some(3));
         assert_eq!(mapping.upstream_to_state_table(4), None);
-        assert_eq!(mapping.len(), 4);
+        assert_eq!(mapping.upstream_columns(), &[2, 3, 0, 1]);
+    }
+
+    #[test]
+    fn test_column_mapping_with_value_indices() {
+        let mapping = StateTableColumnMapping::new(vec![2, 3, 0, 1], Some(vec![0, 1, 3]));
+        assert_eq!(mapping.upstream_to_state_table(2), Some(0));
+        assert_eq!(mapping.upstream_to_state_table(3), Some(1));
+        assert_eq!(mapping.upstream_to_state_table(0), None); // not in value indices
+        assert_eq!(mapping.upstream_to_state_table(1), Some(2));
+        assert_eq!(mapping.upstream_to_state_table(4), None);
         assert_eq!(mapping.upstream_columns(), &[2, 3, 0, 1]);
     }
 }

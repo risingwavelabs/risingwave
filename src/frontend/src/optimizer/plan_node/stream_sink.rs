@@ -14,47 +14,40 @@
 
 use std::fmt;
 
-use risingwave_common::error::Result;
+use risingwave_common::catalog::Field;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::WithOptions;
+use crate::TableCatalog;
 
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone)]
 pub struct StreamSink {
     pub base: PlanBase,
     input: PlanRef,
-    properties: WithOptions,
+    // TODO(yuhao): Maybe use a real `SinkCatalog` here. @st1page
+    sink_catalog: TableCatalog,
 }
 
 impl StreamSink {
-    fn derive_plan_base(input: &PlanRef) -> Result<PlanBase> {
-        let ctx = input.ctx();
-
-        let schema = input.schema().clone();
-        let pk_indices = input.logical_pk();
-
-        Ok(PlanBase::new_stream(
-            ctx,
-            schema,
-            pk_indices.to_vec(),
-            input.functional_dependency().clone(),
-            input.distribution().clone(),
-            input.append_only(),
-        ))
+    #[must_use]
+    pub fn new(input: PlanRef, sink_catalog: TableCatalog) -> Self {
+        let base = PlanBase::derive_stream_plan_base(&input);
+        Self::with_base(input, sink_catalog, base)
     }
 
-    #[must_use]
-    pub fn new(input: PlanRef, properties: WithOptions) -> Self {
-        let base = Self::derive_plan_base(&input).unwrap();
+    pub fn with_base(input: PlanRef, sink_catalog: TableCatalog, base: PlanBase) -> Self {
         Self {
             base,
             input,
-            properties,
+            sink_catalog,
         }
+    }
+
+    pub fn sink_catalog(&self) -> &TableCatalog {
+        &self.sink_catalog
     }
 }
 
@@ -64,7 +57,7 @@ impl PlanTreeNodeUnary for StreamSink {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.properties.clone())
+        Self::new(input, self.sink_catalog.clone())
         // TODO(nanderstabel): Add assertions (assert_eq!)
     }
 }
@@ -82,14 +75,21 @@ impl StreamNode for StreamSink {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
-        let input = self.input.clone();
-        let table = input.as_stream_table_scan().unwrap();
-        let table_desc = table.logical().table_desc();
-
         ProstStreamNode::Sink(SinkNode {
-            table_id: table_desc.table_id.table_id(),
-            column_ids: vec![], // TODO(nanderstabel): fix empty Vector
-            properties: self.properties.inner().clone(),
+            table_id: self.sink_catalog.id().into(),
+            fields: self
+                .sink_catalog
+                .columns()
+                .iter()
+                .map(|c| Field::from(c.column_desc.clone()).to_prost())
+                .collect(),
+            sink_pk: self
+                .sink_catalog
+                .pk()
+                .iter()
+                .map(|c| c.index as u32)
+                .collect(),
+            properties: self.sink_catalog.properties.inner().clone(),
         })
     }
 }

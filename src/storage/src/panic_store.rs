@@ -13,29 +13,33 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::RangeBounds;
+use std::ops::Bound;
 
 use bytes::Bytes;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
+use crate::{
+    define_state_store_associated_type, define_state_store_read_associated_type,
+    define_state_store_write_associated_type,
+};
 
 /// A panic state store. If a workload is fully in-memory, we can use this state store to
 /// ensure that no data is stored in the state store and no serialization will happen.
 #[derive(Clone, Default)]
 pub struct PanicStateStore;
 
-impl StateStore for PanicStateStore {
-    type Iter = PanicStateStoreIter;
+impl StateStoreRead for PanicStateStore {
+    type IterStream = StreamTypeOfIter<PanicStateStoreIter>;
 
-    define_state_store_associated_type!();
+    define_state_store_read_associated_type!();
 
     fn get<'a>(
         &'a self,
         _key: &'a [u8],
-        _check_bloom_filter: bool,
+        _epoch: u64,
         _read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
         async move {
@@ -43,75 +47,41 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn scan<R, B>(
+    fn iter(
         &self,
-        _prefix_hint: Option<Vec<u8>>,
-        _key_range: R,
-        _limit: Option<usize>,
+        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _epoch: u64,
         _read_options: ReadOptions,
-    ) -> Self::ScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> Self::IterFuture<'_> {
         async move {
-            panic!("should not scan from the state store!");
+            panic!("should not read from the state store!");
         }
     }
+}
 
-    fn backward_scan<R, B>(
-        &self,
-        _key_range: R,
-        _limit: Option<usize>,
-        _read_options: ReadOptions,
-    ) -> Self::BackwardScanFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
-        async move {
-            panic!("should not backward scan from the state store!");
-        }
-    }
+impl StateStoreWrite for PanicStateStore {
+    define_state_store_write_associated_type!();
 
     fn ingest_batch(
         &self,
         _kv_pairs: Vec<(Bytes, StorageValue)>,
+        _delete_ranges: Vec<(Bytes, Bytes)>,
         _write_options: WriteOptions,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            panic!("should not write the state store!");
+            panic!("should not read from the state store!");
         }
     }
+}
 
-    fn iter<R, B>(
-        &self,
-        _prefix_hint: Option<Vec<u8>>,
-        _key_range: R,
-        _read_options: ReadOptions,
-    ) -> Self::IterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
-        async move {
-            panic!("should not create iter from the state store!");
-        }
-    }
+impl LocalStateStore for PanicStateStore {}
 
-    fn backward_iter<R, B>(
-        &self,
-        _key_range: R,
-        _read_options: ReadOptions,
-    ) -> Self::BackwardIterFuture<'_, R, B>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
-        async move {
-            panic!("should not create backward iter from the panic state store!");
-        }
-    }
+impl StateStore for PanicStateStore {
+    type Local = Self;
+
+    type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
+
+    define_state_store_associated_type!();
 
     fn try_wait_epoch(&self, _epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
@@ -134,15 +104,20 @@ impl StateStore for PanicStateStore {
             panic!("should not clear shared buffer from the panic state store!");
         }
     }
+
+    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
+        async {
+            panic!("should not call new local from the panic state store");
+        }
+    }
 }
 
 pub struct PanicStateStoreIter {}
 
 impl StateStoreIter for PanicStateStoreIter {
-    type Item = (Bytes, Bytes);
+    type Item = StateStoreIterItem;
 
-    type NextFuture<'a> =
-        impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> + Send;
+    type NextFuture<'a> = impl StateStoreIterNextFutureTrait<'a>;
 
     fn next(&'_ mut self) -> Self::NextFuture<'_> {
         async move { unreachable!() }

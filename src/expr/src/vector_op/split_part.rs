@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use std::fmt::Write;
 
 use crate::{ExprError, Result};
 
@@ -21,8 +21,8 @@ pub fn split_part(
     string_expr: &str,
     delimiter_expr: &str,
     nth_expr: i32,
-    writer: BytesWriter,
-) -> Result<BytesGuard> {
+    writer: &mut dyn Write,
+) -> Result<()> {
     if nth_expr == 0 {
         return Err(ExprError::InvalidParam {
             name: "data",
@@ -61,14 +61,12 @@ pub fn split_part(
             }
         }
     };
-
-    writer.write_ref(nth_val).map_err(Into::into)
+    writer.write_str(nth_val).unwrap();
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-
     use super::split_part;
 
     #[test]
@@ -101,23 +99,12 @@ mod tests {
         for (i, case @ (string_expr, delimiter_expr, nth_expr, expected)) in
             cases.iter().enumerate()
         {
-            let builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let actual = split_part(string_expr, delimiter_expr, *nth_expr, writer);
-
-            match actual {
-                Ok(guard) => {
-                    let expected = expected.unwrap();
-
-                    let array = guard.into_inner().finish();
-                    let actual = array.value_at(0).unwrap();
-
-                    assert_eq!(expected, actual, "\nat case {i}: {:?}\n", case)
-                }
-                Err(_err) => {
-                    assert!(expected.is_none());
-                }
+            let mut writer = String::new();
+            let actual = match split_part(string_expr, delimiter_expr, *nth_expr, &mut writer) {
+                Ok(_) => Some(writer.as_str()),
+                Err(_) => None,
             };
+            assert_eq!(&actual, expected, "\nat case {i}: {:?}\n", case);
         }
     }
 }

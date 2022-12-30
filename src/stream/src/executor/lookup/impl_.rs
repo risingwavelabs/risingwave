@@ -15,21 +15,22 @@
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Row, RowRef};
+use risingwave_common::array::RowRef;
 use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
-use crate::cache::LruManagerRef;
+use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::{Barrier, Executor, Message, PkIndices};
+use crate::task::AtomicU64Ref;
 
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
@@ -103,9 +104,7 @@ pub struct LookupExecutorParams<S: StateStore> {
 
     pub state_table: StateTable<S>,
 
-    pub lru_manager: Option<LruManagerRef>,
-
-    pub cache_size: usize,
+    pub watermark_epoch: AtomicU64Ref,
 
     pub chunk_size: usize,
 }
@@ -124,8 +123,7 @@ impl<S: StateStore> LookupExecutor<S> {
             schema: output_schema,
             column_mapping,
             state_table,
-            lru_manager,
-            cache_size,
+            watermark_epoch,
             chunk_size,
         } = params;
 
@@ -222,7 +220,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(lru_manager, cache_size),
+            lookup_cache: LookupCache::new(watermark_epoch),
             chunk_size,
         }
     }
@@ -247,6 +245,12 @@ impl<S: StateStore> LookupExecutor<S> {
             )
             .boxed()
         };
+
+        let (stream_to_output, arrange_to_output) = StreamChunkBuilder::get_i2o_mapping(
+            self.column_mapping.iter().cloned(),
+            self.stream.col_types.len(),
+            self.arrangement.col_types.len(),
+        );
 
         #[for_await]
         for msg in input {
@@ -297,23 +301,23 @@ impl<S: StateStore> LookupExecutor<S> {
                     let mut builder = StreamChunkBuilder::new(
                         self.chunk_size,
                         &self.chunk_data_types,
-                        0,
-                        self.stream.col_types.len(),
-                    )?;
+                        stream_to_output.clone(),
+                        arrange_to_output.clone(),
+                    );
 
                     for (op, row) in ops.iter().zip_eq(chunk.rows()) {
                         for matched_row in self.lookup_one_row(&row).await? {
                             tracing::trace!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 
-                            if let Some(chunk) = builder.append_row(*op, &row, &matched_row)? {
-                                yield Message::Chunk(chunk.reorder_columns(&self.column_mapping));
+                            if let Some(chunk) = builder.append_row(*op, row, &matched_row) {
+                                yield Message::Chunk(chunk);
                             }
                         }
                         // TODO: support outer join (return null if no rows are matched)
                     }
 
-                    if let Some(chunk) = builder.take()? {
-                        yield Message::Chunk(chunk.reorder_columns(&self.column_mapping));
+                    if let Some(chunk) = builder.take() {
+                        yield Message::Chunk(chunk);
                     }
                 }
             }
@@ -366,7 +370,10 @@ impl<S: StateStore> LookupExecutor<S> {
     }
 
     /// Lookup all rows corresponding to a join key in shared buffer.
-    async fn lookup_one_row(&mut self, stream_row: &RowRef<'_>) -> StreamExecutorResult<Vec<Row>> {
+    async fn lookup_one_row(
+        &mut self,
+        stream_row: &RowRef<'_>,
+    ) -> StreamExecutorResult<Vec<OwnedRow>> {
         // fast-path for empty look-ups.
         if self.arrangement.state_table.epoch() == 0 {
             return Ok(vec![]);
@@ -374,7 +381,9 @@ impl<S: StateStore> LookupExecutor<S> {
 
         // stream_row is the row from stream side, we need to transform into the correct order of
         // the arrangement side.
-        let lookup_row = stream_row.row_by_indices(&self.key_indices_mapping);
+        let lookup_row = stream_row
+            .project(&self.key_indices_mapping)
+            .into_owned_row();
         if let Some(result) = self.lookup_cache.lookup(&lookup_row) {
             return Ok(result.iter().cloned().collect_vec());
         }

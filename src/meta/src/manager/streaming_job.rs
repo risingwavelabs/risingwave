@@ -22,7 +22,7 @@ use risingwave_pb::catalog::{Index, Sink, Source, Table};
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink),
-    MaterializedSource(Source, Table),
+    Table(Option<Source>, Table),
     Index(Index, Table),
 }
 
@@ -31,7 +31,7 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.id = id,
             Self::Sink(sink) => sink.id = id,
-            Self::MaterializedSource(_, table) => table.id = id,
+            Self::Table(_, table) => table.id = id,
             Self::Index(index, index_table) => {
                 index.id = id;
                 index.index_table_id = id;
@@ -44,7 +44,7 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.id,
             Self::Sink(sink) => sink.id,
-            Self::MaterializedSource(_, table) => table.id,
+            Self::Table(_, table) => table.id,
             Self::Index(index, _) => index.id,
         }
     }
@@ -62,7 +62,7 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.schema_id,
             Self::Sink(sink) => sink.schema_id,
-            Self::MaterializedSource(_, table) => table.schema_id,
+            Self::Table(_, table) => table.schema_id,
             Self::Index(index, _) => index.schema_id,
         }
     }
@@ -71,7 +71,7 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.database_id,
             Self::Sink(sink) => sink.database_id,
-            Self::MaterializedSource(_, table) => table.database_id,
+            Self::Table(_, table) => table.database_id,
             Self::Index(index, _) => index.database_id,
         }
     }
@@ -80,8 +80,16 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.name.clone(),
             Self::Sink(sink) => sink.name.clone(),
-            Self::MaterializedSource(_, table) => table.name.clone(),
+            Self::Table(_, table) => table.name.clone(),
             Self::Index(index, _) => index.name.clone(),
+        }
+    }
+
+    pub fn mview_definition(&self) -> String {
+        match self {
+            Self::MaterializedView(table) => table.definition.clone(),
+            Self::Table(_, table) => table.definition.clone(),
+            _ => "".to_owned(),
         }
     }
 
@@ -89,7 +97,7 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.properties.clone(),
             Self::Sink(sink) => sink.properties.clone(),
-            Self::MaterializedSource(_, table) => table.properties.clone(),
+            Self::Table(_, table) => table.properties.clone(),
             Self::Index(_, index_table) => index_table.properties.clone(),
         }
     }

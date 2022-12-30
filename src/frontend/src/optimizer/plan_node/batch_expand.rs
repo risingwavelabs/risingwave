@@ -39,7 +39,7 @@ impl BatchExpand {
             Distribution::Single => Distribution::Single,
             Distribution::SomeShard
             | Distribution::HashShard(_)
-            | Distribution::UpstreamHashShard(_) => Distribution::SomeShard,
+            | Distribution::UpstreamHashShard(_, _) => Distribution::SomeShard,
             Distribution::Broadcast => unreachable!(),
         };
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());

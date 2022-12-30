@@ -1,0 +1,38 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (a int, b int);
+
+statement ok
+create table t2 (c int, d int);
+
+statement ok
+create index idx on t2(d) include (c);
+
+statement ok
+create index idx2 on t2(c, d);
+
+statement ok
+insert into t values(1, 111), (2, 222);
+
+statement ok
+insert into t2 values(1, 111), (2, 222);
+
+query IIII rowsort
+select * from t join t2 on t.b = t2.d;
+----
+1 111 1 111
+2 222 2 222
+
+query IIII rowsort
+select * from t join t2 on t.a = t2.c and t.b = t2.d;
+----
+1 111 1 111
+2 222 2 222
+
+statement ok
+drop table t;
+
+statement ok
+drop table t2;

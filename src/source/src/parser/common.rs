@@ -18,8 +18,15 @@ use num_traits::FromPrimitive;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_expr::vector_op::cast::{
-    str_to_date, str_to_time, str_to_timestamp, str_to_timestampz,
+    i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
+    str_to_timestamptz,
 };
+#[cfg(not(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+)))]
 use serde_json::Value;
 #[cfg(any(
     target_feature = "sse4.2",
@@ -29,35 +36,16 @@ use serde_json::Value;
 ))]
 use simd_json::{value::StaticNode, BorrowedValue, ValueAccess};
 
-macro_rules! ensure_float {
-    ($v:ident, $t:ty) => {
-        $v.as_f64()
-            .ok_or_else(|| anyhow!(concat!("expect ", stringify!($t), ", but found {}"), $v))?
-    };
-}
+use crate::{ensure_int, ensure_str};
 
-macro_rules! simd_json_ensure_float {
-    ($v:ident, $t:ty) => {
-        $v.cast_f64()
-            .ok_or_else(|| anyhow!(concat!("expect ", stringify!($t), ", but found {}"), $v))?
-    };
-}
-
-macro_rules! ensure_int {
-    ($v:ident, $t:ty) => {
-        $v.as_i64()
-            .ok_or_else(|| anyhow!(concat!("expect ", stringify!($t), ", but found {}"), $v))?
-    };
-}
-
-macro_rules! ensure_str {
-    ($v:ident, $t:literal) => {
-        $v.as_str()
-            .ok_or_else(|| anyhow!(concat!("expect ", $t, ", but found {}"), $v))?
-    };
-}
-
+#[cfg(not(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+)))]
 fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
+    use crate::ensure_float;
     let v = match dtype {
         DataType::Boolean => v.as_bool().ok_or_else(|| anyhow!("expect bool"))?.into(),
         DataType::Int16 => ScalarImpl::Int16(
@@ -77,11 +65,20 @@ fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
         DataType::Decimal => Decimal::from_f64(ensure_float!(v, Decimal))
             .ok_or_else(|| anyhow!("expect decimal"))?
             .into(),
+        DataType::Bytea => ensure_str!(v, "bytea").to_string().into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
         DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
         DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
-        DataType::Timestamp => str_to_timestamp(ensure_str!(v, "timestamp"))?.into(),
-        DataType::Timestampz => str_to_timestampz(ensure_str!(v, "timestampz"))?.into(),
+        DataType::Timestamp => match v {
+            Value::String(s) => str_to_timestamp(s)?.into(),
+            Value::Number(_n) => i64_to_timestamp(ensure_int!(v, i64))?.into(),
+            _ => anyhow::bail!("expect timestamp, but found {v}"),
+        },
+        DataType::Timestamptz => match v {
+            Value::String(s) => str_to_timestamptz(s)?.into(),
+            Value::Number(_n) => i64_to_timestamptz(ensure_int!(v, i64))?.into(),
+            _ => anyhow::bail!("expect timestamptz, but found {v}"),
+        },
         DataType::Struct(struct_type_info) => {
             let fields = struct_type_info
                 .field_names
@@ -113,6 +110,12 @@ fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
     Ok(v)
 }
 
+#[cfg(not(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+)))]
 #[inline]
 pub(crate) fn json_parse_value(dtype: &DataType, value: Option<&Value>) -> Result<Datum> {
     match value {
@@ -130,6 +133,8 @@ pub(crate) fn json_parse_value(dtype: &DataType, value: Option<&Value>) -> Resul
     target_feature = "simd128"
 ))]
 fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<ScalarImpl> {
+    use crate::simd_json_ensure_float;
+
     let v = match dtype {
         DataType::Boolean => v.as_bool().ok_or_else(|| anyhow!("expect bool"))?.into(),
         DataType::Int16 => ScalarImpl::Int16(
@@ -150,10 +155,19 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
             .ok_or_else(|| anyhow!("expect decimal"))?
             .into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
+        DataType::Bytea => ensure_str!(v, "bytea").to_string().into(),
         DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
         DataType::Time => str_to_time(ensure_str!(v, "time"))?.into(),
-        DataType::Timestamp => str_to_timestamp(ensure_str!(v, "timestamp"))?.into(),
-        DataType::Timestampz => str_to_timestampz(ensure_str!(v, "timestampz"))?.into(),
+        DataType::Timestamp => match v {
+            BorrowedValue::String(s) => str_to_timestamp(s)?.into(),
+            BorrowedValue::Static(_) => i64_to_timestamp(ensure_int!(v, i64))?.into(),
+            _ => anyhow::bail!("expect timestamp, but found {v}"),
+        },
+        DataType::Timestamptz => match v {
+            BorrowedValue::String(s) => str_to_timestamptz(s)?.into(),
+            BorrowedValue::Static(_) => i64_to_timestamptz(ensure_int!(v, i64))?.into(),
+            _ => anyhow::bail!("expect timestamptz, but found {v}"),
+        },
         DataType::Struct(struct_type_info) => {
             let fields = struct_type_info
                 .field_names

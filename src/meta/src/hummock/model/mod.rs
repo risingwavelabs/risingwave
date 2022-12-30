@@ -17,6 +17,7 @@ mod pinned_snapshot;
 mod pinned_version;
 mod version;
 mod version_delta;
+mod version_stats;
 
 pub use pinned_snapshot::*;
 pub use pinned_version::*;

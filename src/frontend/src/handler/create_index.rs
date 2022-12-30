@@ -18,7 +18,7 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{IndexId, TableDesc, TableId, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -26,14 +26,14 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::check_schema_writable;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
+use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
-use crate::optimizer::{PlanRef, PlanRoot};
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn gen_create_index_plan(
@@ -47,13 +47,11 @@ pub(crate) fn gen_create_index_plan(
 ) -> Result<(PlanRef, ProstTable, ProstIndex)> {
     let columns = check_columns(columns)?;
     let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, table_name)?;
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let search_path = session.config().get_search_path();
     let user_name = &session.auth_context().user_name;
-    let schema_path = match schema_name.as_deref() {
-        Some(schema_name) => SchemaPath::Name(schema_name),
-        None => SchemaPath::Path(&search_path, user_name),
-    };
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
     let index_table_name = Binder::resolve_index_name(index_name)?;
 
     let catalog_reader = session.env().catalog_reader();
@@ -64,7 +62,7 @@ pub(crate) fn gen_create_index_plan(
         (table.clone(), schema_name.to_string())
     };
 
-    if table.is_index {
+    if table.is_index() {
         return Err(
             ErrorCode::InvalidInputSyntax(format!("\"{}\" is an index", table.name)).into(),
         );
@@ -88,7 +86,7 @@ pub(crate) fn gen_create_index_plan(
         .collect::<HashMap<_, _>>();
 
     let to_column_indices = |ident: &Ident| {
-        let x = ident.to_string();
+        let x = ident.real_value();
         table_desc_map
             .get(&x)
             .cloned()
@@ -100,10 +98,21 @@ pub(crate) fn gen_create_index_plan(
         .map(to_column_indices)
         .try_collect::<_, Vec<_>, RwError>()?;
 
-    let mut include_columns = include
-        .iter()
-        .map(to_column_indices)
-        .try_collect::<_, Vec<_>, RwError>()?;
+    let mut include_columns = if include.is_empty() {
+        // Create index to include all (non-hidden) columns by default.
+        table
+            .columns()
+            .iter()
+            .enumerate()
+            .filter(|(_, column)| !column.is_hidden)
+            .map(|(x, _)| x)
+            .collect_vec()
+    } else {
+        include
+            .iter()
+            .map(to_column_indices)
+            .try_collect::<_, Vec<_>, RwError>()?
+    };
 
     let distributed_by_columns = distributed_by
         .iter()
@@ -150,27 +159,8 @@ pub(crate) fn gen_create_index_plan(
         },
     )?;
 
-    let (index_database_id, index_schema_id) = {
-        let catalog_reader = session.env().catalog_reader().read_guard();
-
-        let schema = catalog_reader.get_schema_by_name(db_name, &schema_name)?;
-
-        check_schema_writable(&schema_name)?;
-        if schema_name != DEFAULT_SCHEMA_NAME {
-            check_privileges(
-                session,
-                &vec![ObjectCheckItem::new(
-                    schema.owner(),
-                    Action::Create,
-                    Object::SchemaId(schema.id()),
-                )],
-            )?;
-        }
-
-        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
-
-        (db_id, schema.id())
-    };
+    let (index_database_id, index_schema_id) =
+        session.get_database_and_schema_id_for_create(Some(schema_name))?;
 
     let index_table = materialize.table();
     let mut index_table_prost = index_table.to_prost(index_schema_id, index_database_id);
@@ -187,6 +177,11 @@ pub(crate) fn gen_create_index_plan(
         index_item: build_index_item(index_table.table_desc().into(), table.name(), table_desc)
             .iter()
             .map(InputRef::to_expr_proto)
+            .collect_vec(),
+        original_columns: index_columns
+            .iter()
+            .chain(include_columns.iter())
+            .map(|index| *index as i32)
             .collect_vec(),
     };
 
@@ -297,7 +292,7 @@ fn assemble_materialize(
         project_required_cols,
         out_names,
     )
-    .gen_create_index_plan(index_name)
+    .gen_index_plan(index_name)
 }
 
 fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<Ident>> {
@@ -334,45 +329,23 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<Ident>> {
 }
 
 pub async fn handle_create_index(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     if_not_exists: bool,
-    name: ObjectName,
+    index_name: ObjectName,
     table_name: ObjectName,
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
     distributed_by: Vec<Ident>,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx.clone();
+    let session = handler_args.session.clone();
 
     let (graph, index_table, index) = {
         {
-            // Here is some duplicate code because we need to check name duplicated outside of
-            // `gen_xxx_plan` to avoid `explain` reporting the error.
-            let db_name = session.database();
-            let (schema_name, table_name) =
-                Binder::resolve_table_or_source_name(db_name, table_name.clone())?;
-            let search_path = session.config().get_search_path();
-            let user_name = &session.auth_context().user_name;
-            let schema_path = match schema_name.as_deref() {
-                Some(schema_name) => SchemaPath::Name(schema_name),
-                None => SchemaPath::Path(&search_path, user_name),
-            };
-            let index_name = Binder::resolve_index_name(name.clone())?;
-
-            let catalog_reader = session.env().catalog_reader().read_guard();
-            let (_, schema_name) =
-                catalog_reader.get_table_by_name(db_name, schema_path, &table_name)?;
-
-            if let Err(e) =
-                catalog_reader.check_relation_name_duplicated(db_name, schema_name, &index_name)
-            {
+            if let Err(e) = session.check_relation_name_duplicated(index_name.clone()) {
                 if if_not_exists {
                     return Ok(PgResponse::empty_result_with_notice(
                         StatementType::CREATE_INDEX,
-                        format!(
-                            "NOTICE:  relation \"{}\" already exists, skipping",
-                            index_name
-                        ),
+                        format!("relation \"{}\" already exists, skipping", index_name),
                     ));
                 } else {
                     return Err(e);
@@ -380,10 +353,11 @@ pub async fn handle_create_index(
             }
         }
 
+        let context = OptimizerContext::new_with_handler_args(handler_args);
         let (plan, index_table, index) = gen_create_index_plan(
             &session,
             context.into(),
-            name.clone(),
+            index_name.clone(),
             table_name,
             columns,
             include,
@@ -396,7 +370,7 @@ pub async fn handle_create_index(
 
     tracing::trace!(
         "name={}, graph=\n{}",
-        name,
+        index_name,
         serde_json::to_string_pretty(&graph).unwrap()
     );
 

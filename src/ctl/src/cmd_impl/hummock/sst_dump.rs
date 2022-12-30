@@ -15,11 +15,12 @@
 use std::collections::HashMap;
 
 use bytes::{Buf, Bytes};
-use risingwave_common::types::DataType;
-use risingwave_common::util::value_encoding::deserialize_cell;
+use itertools::Itertools;
+use risingwave_common::row::{Row, RowDeserializer};
+use risingwave_common::types::to_text::ToText;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::key::{get_epoch, get_table_id, user_key};
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::BlockLocation;
 use risingwave_rpc_client::MetaClient;
@@ -28,20 +29,16 @@ use risingwave_storage::hummock::{
     Block, BlockHolder, BlockIterator, CompressionAlgorithm, SstableMeta, SstableStore,
 };
 use risingwave_storage::monitor::StoreLocalStatistic;
-use risingwave_storage::row_serde::row_serde_util::deserialize_column_id;
 
 use crate::common::HummockServiceOpts;
 
-type TableData = HashMap<u32, (String, Vec<(DataType, String, bool)>)>;
+type TableData = HashMap<u32, TableCatalog>;
 
 pub async fn sst_dump() -> anyhow::Result<()> {
     // Retrieves the Sstable store so we can access the SstableMeta
     let mut hummock_opts = HummockServiceOpts::from_env()?;
     let (meta_client, hummock) = hummock_opts.create_hummock_store().await?;
-    let version = hummock
-        .local_version_manager()
-        .get_pinned_version()
-        .version();
+    let version = hummock.inner().get_pinned_version().version();
 
     let table_data = load_table_schemas(&meta_client).await?;
     let sstable_store = &*hummock.sstable_store();
@@ -63,8 +60,8 @@ pub async fn sst_dump() -> anyhow::Result<()> {
             if let Some(key_range) = sstable_info.key_range.as_ref() {
                 println!("Key Range:");
                 println!(
-                    "\tleft:\t{:?}\n\tright:\t{:?}\n\tinf:\t{:?}",
-                    key_range.left, key_range.right, key_range.inf
+                    "\tleft:\t{:?}\n\tright:\t{:?}\n\t",
+                    key_range.left, key_range.right,
                 );
             } else {
                 println!("Key Range: None");
@@ -85,22 +82,14 @@ pub async fn sst_dump() -> anyhow::Result<()> {
 /// Determine all database tables and adds their information into a hash table with the table-ID as
 /// key.
 async fn load_table_schemas(meta_client: &MetaClient) -> anyhow::Result<TableData> {
-    let mut column_table = HashMap::new();
+    let mut tables = HashMap::new();
 
     let mvs = meta_client.risectl_list_state_tables().await?;
     mvs.iter().for_each(|tbl| {
-        let mut col_list = vec![];
-        TableCatalog::from(tbl).columns.iter().for_each(|clm| {
-            col_list.push((
-                clm.data_type().clone(),
-                String::from(clm.name()),
-                clm.is_hidden(),
-            ));
-        });
-        column_table.insert(tbl.id, (tbl.name.clone(), col_list));
+        tables.insert(tbl.id, tbl.into());
     });
 
-    Ok(column_table)
+    Ok(tables)
 }
 
 /// Prints all blocks of a given SST including all contained KV-pairs.
@@ -159,8 +148,9 @@ fn print_kv_pairs(
     block_iter.seek_to_first();
 
     while block_iter.is_valid() {
-        let full_key = block_iter.key();
-        let user_key = user_key(full_key);
+        let raw_full_key = block_iter.key();
+        let full_key = FullKey::decode(block_iter.key());
+        let raw_user_key = full_key.user_key.encode();
 
         let full_val = block_iter.value();
         let humm_val = HummockValue::from_slice(block_iter.value())?;
@@ -169,11 +159,11 @@ fn print_kv_pairs(
             HummockValue::Delete => (false, &[] as &[u8]),
         };
 
-        let epoch = get_epoch(full_key);
+        let epoch = full_key.epoch;
 
-        println!("\t\t  full key: {:02x?}", full_key);
+        println!("\t\t  full key: {:02x?}", raw_full_key);
         println!("\t\tfull value: {:02x?}", full_val);
-        println!("\t\t  user key: {:02x?}", user_key);
+        println!("\t\t  user key: {:02x?}", raw_user_key);
         println!("\t\tuser value: {:02x?}", user_val);
         println!("\t\t     epoch: {}", epoch);
         println!("\t\t      type: {}", if is_put { "Put" } else { "Delete" });
@@ -190,42 +180,41 @@ fn print_kv_pairs(
 
 /// If possible, prints information about the table, column, and stored value.
 fn print_table_column(
-    full_key: &[u8],
+    full_key: FullKey<&[u8]>,
     user_val: &[u8],
     table_data: &TableData,
     is_put: bool,
 ) -> anyhow::Result<()> {
-    let user_key = user_key(full_key);
-
-    let table_id = match get_table_id(full_key) {
-        None => return Ok(()),
-        Some(table_id) => table_id,
-    };
+    let table_id = full_key.user_key.table_id.table_id();
 
     print!("\t\t     table: {} - ", table_id);
-    let (table_name, columns) = match table_data.get(&table_id) {
+    let table_catalog = match table_data.get(&table_id) {
         None => {
+            // Table may have been dropped.
             println!("(unknown)");
             return Ok(());
         }
-        Some((table_name, columns)) => (table_name, columns),
+        Some(table) => table,
     };
-    println!("{}", table_name);
+    println!("{}", table_catalog.name);
+    if !is_put {
+        return Ok(());
+    }
 
-    // Print stored value.
-    let column_idx = deserialize_column_id(&user_key[user_key.len() - 4..])?.get_id();
-    if is_put && !user_val.is_empty() && column_idx >= 0 && (column_idx as usize) < columns.len() {
-        let (data_type, name, is_hidden) = &columns[column_idx as usize];
-        let datum = match deserialize_cell(user_val, data_type)? {
-            None => return Ok(()),
-            Some(datum) => datum,
-        };
-        println!(
-            "\t\t    column: {} {}",
-            name,
-            if *is_hidden { "(hidden)" } else { "" }
-        );
-        println!("\t\t     datum: {:?}", datum);
+    let column_desc = table_catalog
+        .value_indices
+        .iter()
+        .map(|idx| table_catalog.columns[*idx].column_desc.name.clone())
+        .collect_vec();
+    let data_types = table_catalog
+        .value_indices
+        .iter()
+        .map(|idx| table_catalog.columns[*idx].data_type().clone())
+        .collect_vec();
+    let row_deserializer = RowDeserializer::new(data_types);
+    let row = row_deserializer.deserialize(user_val)?;
+    for (c, v) in column_desc.iter().zip_eq(row.iter()) {
+        println!("\t\t    column: {} {}", c, v.to_text());
     }
 
     Ok(())

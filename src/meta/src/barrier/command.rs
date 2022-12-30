@@ -25,8 +25,8 @@ use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    ActorMapping, AddMutation, Dispatcher, PauseMutation, ResumeMutation, StopMutation,
-    UpdateMutation,
+    ActorMapping, AddMutation, Dispatcher, PauseMutation, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
 use risingwave_rpc_client::StreamClientPoolRef;
@@ -38,7 +38,7 @@ use crate::barrier::CommandChanges;
 use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::SourceManagerRef;
+use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -59,7 +59,7 @@ pub struct Reschedule {
     pub upstream_dispatcher_mapping: Option<ActorMapping>,
 
     /// The downstream fragments of this fragment.
-    pub downstream_fragment_id: Option<FragmentId>,
+    pub downstream_fragment_ids: Vec<FragmentId>,
 
     /// Reassigned splits for source actors
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
@@ -76,29 +76,29 @@ pub enum Command {
     /// After the barrier is collected, it does nothing.
     Plain(Option<Mutation>),
 
-    /// `DropMaterializedView` command generates a `Stop` barrier by the given [`TableId`]. The
-    /// catalog has ensured that this materialized view is safe to be dropped by reference counts
-    /// before.
+    /// `DropStreamingJobs` command generates a `Stop` barrier by the given
+    /// [`HashSet<TableId>`]. The catalog has ensured that these streaming jobs are safe to be
+    /// dropped by reference counts before.
     ///
     /// Barriers from the actors to be dropped will STILL be collected.
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the table fragments info from meta store.
-    DropMaterializedView(TableId),
+    DropStreamingJobs(HashSet<TableId>),
 
-    /// `CreateMaterializedView` command generates a `Add` barrier by given info.
+    /// `CreateStreamingJob` command generates a `Add` barrier by given info.
     ///
     /// Barriers from the actors to be created, which is marked as `Inactive` at first, will STILL
-    /// be collected since the barrier should be passthroughed.
+    /// be collected since the barrier should be passthrough.
     ///
     /// After the barrier is collected, these newly created actors will be marked as `Running`. And
     /// it adds the table fragments info to meta store. However, the creating progress will **last
     /// for a while** until the `finish` channel is signaled, then the state of `TableFragments`
     /// will be set to `Created`.
-    CreateMaterializedView {
+    CreateStreamingJob {
         table_fragments: TableFragments,
-        table_sink_map: HashMap<TableId, Vec<ActorId>>,
+        table_mview_map: HashMap<TableId, Vec<ActorId>>,
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
-        source_state: HashMap<ActorId, Vec<SplitImpl>>,
+        init_split_assignment: SplitAssignment,
     },
 
     /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
@@ -107,6 +107,10 @@ pub enum Command {
     /// Barriers from which actors should be collected, and the post behavior of this command are
     /// very similar to `Create` and `Drop` commands, for added and removed actors, respectively.
     RescheduleFragment(HashMap<FragmentId, Reschedule>),
+
+    /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
+    /// newly added splits.
+    SourceSplitAssignment(SplitAssignment),
 }
 
 impl Command {
@@ -126,10 +130,10 @@ impl Command {
     pub fn changes(&self) -> CommandChanges {
         match self {
             Command::Plain(_) => CommandChanges::None,
-            Command::CreateMaterializedView {
+            Command::CreateStreamingJob {
                 table_fragments, ..
             } => CommandChanges::CreateTable(table_fragments.table_id()),
-            Command::DropMaterializedView(table_id) => CommandChanges::DropTable(*table_id),
+            Command::DropStreamingJobs(table_ids) => CommandChanges::DropTables(table_ids.clone()),
             Command::RescheduleFragment(reschedules) => {
                 let to_add = reschedules
                     .values()
@@ -141,6 +145,7 @@ impl Command {
                     .collect();
                 CommandChanges::Actor { to_add, to_remove }
             }
+            Command::SourceSplitAssignment(_) => CommandChanges::None,
         }
     }
 
@@ -219,14 +224,26 @@ where
         let mutation = match &self.command {
             Command::Plain(mutation) => mutation.clone(),
 
-            Command::DropMaterializedView(table_id) => {
-                let actors = self.fragment_manager.get_table_actor_ids(table_id).await?;
+            Command::SourceSplitAssignment(change) => {
+                let mut diff = HashMap::new();
+
+                for actor_splits in change.values() {
+                    diff.extend(actor_splits.clone());
+                }
+
+                Some(Mutation::Splits(SourceChangeSplitMutation {
+                    actor_splits: build_actor_connector_splits(&diff),
+                }))
+            }
+
+            Command::DropStreamingJobs(table_ids) => {
+                let actors = self.fragment_manager.get_table_actor_ids(table_ids).await?;
                 Some(Mutation::Stop(StopMutation { actors }))
             }
 
-            Command::CreateMaterializedView {
+            Command::CreateStreamingJob {
                 dispatchers,
-                source_state,
+                init_split_assignment: split_assignment,
                 ..
             } => {
                 let actor_dispatchers = dispatchers
@@ -240,19 +257,10 @@ where
                         )
                     })
                     .collect();
-                let actor_splits = source_state
-                    .iter()
-                    .filter(|(_, splits)| !splits.is_empty())
-                    .map(|(actor_id, splits)| {
-                        (
-                            *actor_id,
-                            ConnectorSplits {
-                                splits: splits.iter().map(ConnectorSplit::from).collect(),
-                            },
-                        )
-                    })
+                let actor_splits = split_assignment
+                    .values()
+                    .flat_map(build_actor_connector_splits)
                     .collect();
-
                 Some(Mutation::Add(AddMutation {
                     actor_dispatchers,
                     actor_splits,
@@ -296,8 +304,8 @@ where
                 let dispatcher_update = dispatcher_update.into_values().collect();
 
                 let mut merge_update = HashMap::new();
-                for (&fragment_id, reschedule) in reschedules.iter() {
-                    if let Some(downstream_fragment_id) = reschedule.downstream_fragment_id {
+                for (&fragment_id, reschedule) in reschedules {
+                    for &downstream_fragment_id in &reschedule.downstream_fragment_ids {
                         // Find the actors of the downstream fragment.
                         let downstream_actor_ids = self
                             .fragment_manager
@@ -387,11 +395,11 @@ where
         Ok(mutation)
     }
 
-    /// For `CreateMaterializedView`, returns the actors of the `Chain` nodes. For other commands,
+    /// For `CreateStreamingJob`, returns the actors of the `Chain` nodes. For other commands,
     /// returns an empty set.
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {
-            Command::CreateMaterializedView { dispatchers, .. } => dispatchers
+            Command::CreateStreamingJob { dispatchers, .. } => dispatchers
                 .values()
                 .flatten()
                 .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
@@ -422,12 +430,22 @@ where
 
                     try_join_all(futures).await?;
                 }
+
                 _ => {}
             },
 
-            Command::DropMaterializedView(table_id) => {
+            Command::SourceSplitAssignment(split_assignment) => {
+                self.fragment_manager
+                    .update_actor_splits_by_split_assignment(split_assignment)
+                    .await?;
+                self.source_manager
+                    .apply_source_change(None, Some(split_assignment.clone()), None)
+                    .await;
+            }
+
+            Command::DropStreamingJobs(table_ids) => {
                 // Tell compute nodes to drop actors.
-                let node_actors = self.fragment_manager.table_node_actors(table_id).await?;
+                let node_actors = self.fragment_manager.table_node_actors(table_ids).await?;
                 let futures = node_actors.iter().map(|(node_id, actors)| {
                     let node = self.info.node_map.get(node_id).unwrap();
                     let request_id = Uuid::new_v4().to_string();
@@ -445,17 +463,19 @@ where
                 try_join_all(futures).await?;
 
                 // Drop fragment info in meta store.
-                self.fragment_manager.drop_table_fragments(table_id).await?;
+                self.fragment_manager
+                    .drop_table_fragments_vec(table_ids)
+                    .await?;
             }
 
-            Command::CreateMaterializedView {
+            Command::CreateStreamingJob {
                 table_fragments,
                 dispatchers,
-                table_sink_map,
-                source_state: init_split_assignment,
+                table_mview_map,
+                init_split_assignment,
             } => {
-                let mut dependent_table_actors = Vec::with_capacity(table_sink_map.len());
-                for (table_id, actors) in table_sink_map {
+                let mut dependent_table_actors = Vec::with_capacity(table_mview_map.len());
+                for (table_id, actors) in table_mview_map {
                     let downstream_actors = dispatchers
                         .iter()
                         .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
@@ -467,6 +487,7 @@ where
                     .post_create_table_fragments(
                         &table_fragments.table_id(),
                         dependent_table_actors,
+                        init_split_assignment.clone(),
                     )
                     .await?;
 
@@ -476,15 +497,15 @@ where
                 self.snapshot_manager.pin(self.prev_epoch).await?;
 
                 // Extract the fragments that include source operators.
-                let source_fragments = table_fragments.source_fragments();
+                let source_fragments = table_fragments.stream_source_fragments();
 
                 self.source_manager
-                    .patch_update(
+                    .apply_source_change(
                         Some(source_fragments),
                         Some(init_split_assignment.clone()),
                         None,
                     )
-                    .await?;
+                    .await;
             }
 
             Command::RescheduleFragment(reschedules) => {
@@ -535,22 +556,22 @@ where
                 let mut stream_source_actor_splits = HashMap::new();
                 let mut stream_source_dropped_actors = HashSet::new();
 
-                for reschedule in reschedules.values() {
+                for (fragment_id, reschedule) in reschedules {
                     if !reschedule.actor_splits.is_empty() {
-                        stream_source_actor_splits.extend(reschedule.actor_splits.clone());
+                        stream_source_actor_splits
+                            .insert(*fragment_id as FragmentId, reschedule.actor_splits.clone());
                         stream_source_dropped_actors.extend(reschedule.removed_actors.clone());
                     }
                 }
 
-                // fixme: two step transaction, may cause inconsistency
                 if !stream_source_actor_splits.is_empty() {
                     self.source_manager
-                        .patch_update(
+                        .apply_source_change(
                             None,
                             Some(stream_source_actor_splits),
                             Some(stream_source_dropped_actors),
                         )
-                        .await?;
+                        .await;
                 }
             }
         }
@@ -558,11 +579,11 @@ where
         Ok(())
     }
 
-    /// Do some stuffs before the barrier is `finish`ed. Only used for `CreateMaterializedView`.
+    /// Do some stuffs before the barrier is `finish`ed. Only used for `CreateStreamingJob`.
     pub async fn pre_finish(&self) -> MetaResult<()> {
         #[allow(clippy::single_match)]
         match &self.command {
-            Command::CreateMaterializedView {
+            Command::CreateStreamingJob {
                 table_fragments, ..
             } => {
                 // Update the state of the table fragments from `Creating` to `Created`, so that the

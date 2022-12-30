@@ -17,14 +17,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use risingwave_common::config::StorageConfig;
+use risingwave_common::config::{RwConfig, StorageConfig};
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
     HummockMetrics, MonitoredStateStore, ObjectStoreMetrics, StateStoreMetrics,
 };
-use risingwave_storage::StateStoreImpl;
+use risingwave_storage::{StateStore, StateStoreImpl};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
@@ -61,14 +61,15 @@ impl HummockServiceOpts {
             Err(_) => {
                 const MESSAGE: &str = "env variable `RW_HUMMOCK_URL` not found.
 
-For `./risedev d` use cases, please do the following:
-* use `./risedev d for-ctl` to start the cluster.
+For `./risedev d` use cases, please do the following.
+* start the cluster with shared storage:
+  - consider adding `use: minio` in the risedev config,
+  - or directly use `./risedev d for-ctl` to start the cluster.
 * use `./risedev ctl` to use risectl.
 
 For `./risedev apply-compose-deploy` users,
 * `RW_HUMMOCK_URL` will be printed out when deploying. Please copy the bash exports to your console.
-
-risectl requires a full persistent cluster to operate. Please make sure you're not running in minimum mode.";
+";
                 bail!(MESSAGE);
             }
         };
@@ -88,6 +89,7 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
         let (heartbeat_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(1000),
+            Duration::from_secs(600),
             vec![],
         );
         self.heartbeat_handle = Some(heartbeat_handle);
@@ -96,6 +98,10 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
         // FIXME: allow specify custom config
         let config = StorageConfig {
             share_buffer_compaction_worker_threads_number: 0,
+            ..Default::default()
+        };
+        let rw_config = RwConfig {
+            storage: config.clone(),
             ..Default::default()
         };
 
@@ -110,7 +116,7 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
         let state_store_impl = StateStoreImpl::new(
             &self.hummock_url,
             "",
-            Arc::new(config),
+            &rw_config,
             Arc::new(MonitoredHummockMetaClient::new(
                 meta_client.clone(),
                 metrics.hummock_metrics.clone(),
@@ -118,11 +124,18 @@ risectl requires a full persistent cluster to operate. Please make sure you're n
             metrics.state_store_metrics.clone(),
             metrics.object_store_metrics.clone(),
             TieredCacheMetricsBuilder::unused(),
+            Arc::new(risingwave_tracing::RwTracingService::disabled()),
         )
         .await?;
 
-        if let StateStoreImpl::HummockStateStore(hummock_state_store) = state_store_impl {
-            Ok((meta_client, hummock_state_store, metrics))
+        if let Some(hummock_state_store) = state_store_impl.as_hummock() {
+            Ok((
+                meta_client,
+                hummock_state_store
+                    .clone()
+                    .monitored(metrics.state_store_metrics.clone()),
+                metrics,
+            ))
         } else {
             Err(anyhow!("only Hummock state store is supported in risectl"))
         }

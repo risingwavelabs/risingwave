@@ -14,9 +14,10 @@
 
 use itertools::Itertools;
 
-use crate::array::{ArrayImpl, DataChunk, Row};
+use crate::array::{ArrayImpl, DataChunk};
 use crate::error::Result;
-use crate::types::{serialize_datum_ref_into, DataType, ScalarRefImpl};
+use crate::row::OwnedRow;
+use crate::types::{memcmp_serialize_datum_into, DataType, ScalarRefImpl};
 use crate::util::sort_util::{OrderPair, OrderType};
 
 /// This function is used to check whether we can perform encoding on this type.
@@ -37,7 +38,7 @@ pub fn is_type_encodable(t: DataType) -> bool {
 fn encode_value(value: Option<ScalarRefImpl<'_>>, order: &OrderType) -> Result<Vec<u8>> {
     let mut serializer = memcomparable::Serializer::new(vec![]);
     serializer.set_reverse(order == &OrderType::Descending);
-    serialize_datum_ref_into(&value, &mut serializer)?;
+    memcmp_serialize_datum_into(value, &mut serializer)?;
     Ok(serializer.into_inner())
 }
 
@@ -70,7 +71,7 @@ pub fn encode_chunk(chunk: &DataChunk, order_pairs: &[OrderPair]) -> Vec<Vec<u8>
     encoded_chunk
 }
 
-pub fn encode_row(row: &Row, order_pairs: &[OrderPair]) -> Vec<u8> {
+pub fn encode_row(row: &OwnedRow, order_pairs: &[OrderPair]) -> Vec<u8> {
     let mut encoded_row = vec![];
     order_pairs.iter().for_each(|o| {
         let value = row[o.column_idx].as_ref();
@@ -85,7 +86,8 @@ mod tests {
     use itertools::Itertools;
 
     use super::{encode_chunk, encode_row, encode_value};
-    use crate::array::{DataChunk, Row};
+    use crate::array::DataChunk;
+    use crate::row::OwnedRow;
     use crate::types::{DataType, ScalarImpl};
     use crate::util::sort_util::{OrderPair, OrderType};
 
@@ -93,15 +95,15 @@ mod tests {
     fn test_encode_row() {
         let v10 = Some(ScalarImpl::Int32(42));
         let v10_cloned = v10.clone();
-        let v11 = Some(ScalarImpl::Utf8("hello".to_string()));
+        let v11 = Some(ScalarImpl::Utf8("hello".into()));
         let v11_cloned = v11.clone();
         let v12 = Some(ScalarImpl::Float32(4.0.into()));
         let v20 = Some(ScalarImpl::Int32(42));
-        let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
+        let v21 = Some(ScalarImpl::Utf8("hell".into()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
-        let row1 = Row::new(vec![v10, v11, v12]);
-        let row2 = Row::new(vec![v20, v21, v22]);
+        let row1 = OwnedRow::new(vec![v10, v11, v12]);
+        let row2 = OwnedRow::new(vec![v20, v21, v22]);
         let order_pairs = vec![
             OrderPair::new(0, OrderType::Ascending),
             OrderPair::new(1, OrderType::Descending),
@@ -131,14 +133,14 @@ mod tests {
     #[test]
     fn test_encode_chunk() {
         let v10 = Some(ScalarImpl::Int32(42));
-        let v11 = Some(ScalarImpl::Utf8("hello".to_string()));
+        let v11 = Some(ScalarImpl::Utf8("hello".into()));
         let v12 = Some(ScalarImpl::Float32(4.0.into()));
         let v20 = Some(ScalarImpl::Int32(42));
-        let v21 = Some(ScalarImpl::Utf8("hell".to_string()));
+        let v21 = Some(ScalarImpl::Utf8("hell".into()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
-        let row1 = Row::new(vec![v10, v11, v12]);
-        let row2 = Row::new(vec![v20, v21, v22]);
+        let row1 = OwnedRow::new(vec![v10, v11, v12]);
+        let row2 = OwnedRow::new(vec![v20, v21, v22]);
         let chunk = DataChunk::from_rows(
             &[row1.clone(), row2.clone()],
             &[DataType::Int32, DataType::Varchar, DataType::Float32],

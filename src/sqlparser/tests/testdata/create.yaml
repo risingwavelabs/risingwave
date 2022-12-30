@@ -34,7 +34,12 @@
 - input: CREATE SOURCE IF NOT EXISTS src WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE 'Foo' ROW SCHEMA LOCATION 'file://'
   formatted_sql: CREATE SOURCE IF NOT EXISTS src WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE 'Foo' ROW SCHEMA LOCATION 'file://'
   formatted_ast: |
-    CreateSource { is_materialized: false, stmt: CreateSourceStatement { if_not_exists: true, columns: [], constraints: [], source_name: ObjectName([Ident { value: "src", quote_style: None }]), with_properties: WithProperties([SqlOption { name: ObjectName([Ident { value: "kafka", quote_style: None }, Ident { value: "topic", quote_style: None }]), value: SingleQuotedString("abc") }, SqlOption { name: ObjectName([Ident { value: "kafka", quote_style: None }, Ident { value: "servers", quote_style: None }]), value: SingleQuotedString("localhost:1001") }]), source_schema: Protobuf(ProtobufSchema { message_name: AstString("Foo"), row_schema_location: AstString("file://") }) } }
+    CreateSource { is_materialized: false, stmt: CreateSourceStatement { if_not_exists: true, columns: [], constraints: [], source_name: ObjectName([Ident { value: "src", quote_style: None }]), with_properties: WithProperties([SqlOption { name: ObjectName([Ident { value: "kafka", quote_style: None }, Ident { value: "topic", quote_style: None }]), value: SingleQuotedString("abc") }, SqlOption { name: ObjectName([Ident { value: "kafka", quote_style: None }, Ident { value: "servers", quote_style: None }]), value: SingleQuotedString("localhost:1001") }]), source_schema: Protobuf(ProtobufSchema { message_name: AstString("Foo"), row_schema_location: AstString("file://"), use_schema_registry: false }) } }
+
+- input: CREATE SOURCE IF NOT EXISTS src WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE 'Foo' ROW SCHEMA LOCATION CONFLUENT SCHEMA REGISTRY 'http://'
+  formatted_sql: CREATE SOURCE IF NOT EXISTS src WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE 'Foo' ROW SCHEMA LOCATION CONFLUENT SCHEMA REGISTRY 'http://'
+  formatted_ast: |
+    CreateSource { is_materialized: false, stmt: CreateSourceStatement { if_not_exists: true, columns: [], constraints: [], source_name: ObjectName([Ident { value: "src", quote_style: None }]), with_properties: WithProperties([SqlOption { name: ObjectName([Ident { value: "kafka", quote_style: None }, Ident { value: "topic", quote_style: None }]), value: SingleQuotedString("abc") }, SqlOption { name: ObjectName([Ident { value: "kafka", quote_style: None }, Ident { value: "servers", quote_style: None }]), value: SingleQuotedString("localhost:1001") }]), source_schema: Protobuf(ProtobufSchema { message_name: AstString("Foo"), row_schema_location: AstString("http://"), use_schema_registry: true }) } }
 
 - input: CREATE TABLE T (v1 INT, v2 STRUCT<v1 INT, v2 INT>)
   formatted_sql: CREATE TABLE T (v1 INT, v2 STRUCT<v1 INT, v2 INT>)
@@ -63,7 +68,30 @@
 
 - input: CREATE SINK snk
   error_msg: |
-    sql parser error: Expected FROM, found: EOF
+    sql parser error: Expected FROM or AS after CREATE SINK sink_name, found: EOF
 
 - input: CREATE SINK IF NOT EXISTS snk FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
   formatted_sql: CREATE SINK IF NOT EXISTS snk FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
+
+- input: CREATE SINK IF NOT EXISTS snk AS SELECT count(*) AS cnt FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
+  formatted_sql: CREATE SINK IF NOT EXISTS snk AS SELECT count(*) AS cnt FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
+
+- input: create user tmp createdb nocreatedb
+  error_msg: |
+    sql parser error: conflicting or redundant options
+
+- input: create user tmp createdb createdb
+  error_msg: |
+    sql parser error: conflicting or redundant options
+
+- input: create user tmp with password '123' password null
+  error_msg: |
+    sql parser error: conflicting or redundant options
+
+- input: create user tmp with encrypted password '' password null
+  error_msg: |
+    sql parser error: conflicting or redundant options
+
+- input: create user tmp with encrypted password null
+  error_msg: |
+    sql parser error: Expected literal string, found: null

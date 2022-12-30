@@ -14,7 +14,8 @@
 
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::FullKey;
 
 use crate::assert_bytes_eq;
 use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -57,22 +58,23 @@ async fn test_failpoints_table_read() {
     );
     sstable_iter.rewind().await.unwrap();
 
-    sstable_iter.seek(&test_key_of(500)).await.unwrap();
-    assert_eq!(sstable_iter.key(), test_key_of(500));
+    sstable_iter.seek(test_key_of(500).to_ref()).await.unwrap();
+    assert_eq!(sstable_iter.key(), test_key_of(500).to_ref());
     // Injection failure to read object_store
     fail::cfg(mem_read_err_fp, "return").unwrap();
 
-    let seek_key = key_with_epoch(
+    let seek_key = FullKey::for_test(
+        TableId::default(),
         format!("key_test_{:05}", 600 * 2 - 1).as_bytes().to_vec(),
         0,
     );
-    let result = sstable_iter.seek(&seek_key).await;
+    let result = sstable_iter.seek(seek_key.to_ref()).await;
     assert!(result.is_err());
 
-    assert_eq!(sstable_iter.key(), test_key_of(500));
+    assert_eq!(sstable_iter.key(), test_key_of(500).to_ref());
     fail::remove(mem_read_err_fp);
-    sstable_iter.seek(&seek_key).await.unwrap();
-    assert_eq!(sstable_iter.key(), test_key_of(600));
+    sstable_iter.seek(seek_key.to_ref()).await.unwrap();
+    assert_eq!(sstable_iter.key(), test_key_of(600).to_ref());
 }
 
 #[tokio::test]
@@ -131,7 +133,7 @@ async fn test_failpoints_vacuum_and_metadata() {
     while sstable_iter.is_valid() {
         let key = sstable_iter.key();
         let value = sstable_iter.value();
-        assert_bytes_eq!(key, test_key_of(cnt));
+        assert_eq!(key, test_key_of(cnt).to_ref());
         assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
         cnt += 1;
         sstable_iter.next().await.unwrap();

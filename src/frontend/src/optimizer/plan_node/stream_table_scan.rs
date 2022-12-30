@@ -50,7 +50,8 @@ impl StreamTableScan {
             if distribution_key.is_empty() {
                 Distribution::Single
             } else {
-                Distribution::UpstreamHashShard(distribution_key)
+                // See also `BatchSeqScan::clone_with_dist`.
+                Distribution::UpstreamHashShard(distribution_key, logical.table_desc().table_id)
             }
         };
         let base = PlanBase::new_stream(
@@ -59,7 +60,7 @@ impl StreamTableScan {
             logical.base.logical_pk.clone(),
             logical.functional_dependency().clone(),
             distribution,
-            logical.table_desc().appendonly,
+            logical.table_desc().append_only,
         );
         Self {
             base,
@@ -97,19 +98,14 @@ impl fmt::Display for StreamTableScan {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut builder = f.debug_struct("StreamTableScan");
 
+        let v = match verbose {
+            false => self.logical.column_names(),
+            true => self.logical.column_names_with_table_prefix(),
+        }
+        .join(", ");
         builder
             .field("table", &format_args!("{}", self.logical.table_name()))
-            .field(
-                "columns",
-                &format_args!(
-                    "[{}]",
-                    match verbose {
-                        false => self.logical.column_names(),
-                        true => self.logical.column_names_with_table_prefix(),
-                    }
-                    .join(", ")
-                ),
-            );
+            .field("columns", &format_args!("[{}]", v));
 
         if verbose {
             builder.field(
@@ -191,7 +187,7 @@ impl StreamTableScan {
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
                 same_worker_node: false,
-                disable_rearrange: false,
+                chain_type: ChainType::Backfill as i32,
                 // The fields from upstream
                 upstream_fields: self
                     .logical
@@ -211,6 +207,8 @@ impl StreamTableScan {
                     .map(|&i| i as _)
                     .collect(),
                 is_singleton: *self.distribution() == Distribution::Single,
+                // The table desc used by backfill executor
+                table_desc: Some(self.logical.table_desc().to_protobuf()),
             })),
             stream_key,
             operator_id: self.base.id.0 as u64,

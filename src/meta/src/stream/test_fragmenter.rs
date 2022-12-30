@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::vec;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
@@ -28,14 +29,14 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFr
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     agg_call_state, AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode,
-    FragmentType, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph,
-    StreamNode,
+    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph,
+    StreamNode, StreamSource,
 };
 
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
-use crate::stream::CreateMaterializedViewContext;
+use crate::stream::CreateStreamingJobContext;
 use crate::MetaResult;
 
 fn make_inputref(idx: i32) -> ExprNode {
@@ -72,7 +73,7 @@ fn make_sum_aggcall(idx: i32) -> AggCall {
 fn make_agg_call_result_state() -> AggCallState {
     AggCallState {
         inner: Some(agg_call_state::Inner::ResultValueState(
-            agg_call_state::AggResultState {},
+            agg_call_state::ResultValueState {},
         )),
     }
 }
@@ -168,12 +169,25 @@ fn make_empty_table(id: u32) -> ProstTable {
 fn make_stream_fragments() -> Vec<StreamFragment> {
     let mut fragments = vec![];
     // table source node
+    let column_ids = vec![1, 2, 0];
+    let columns = column_ids
+        .iter()
+        .map(|column_id| ColumnCatalog {
+            column_desc: Some(ColumnDesc {
+                column_id: *column_id,
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+        .collect_vec();
     let source_node = StreamNode {
         node_body: Some(NodeBody::Source(SourceNode {
-            source_id: 1,
-            column_ids: vec![1, 2, 0],
-            state_table: Some(make_source_internal_table(1)),
-            info: None,
+            source_inner: Some(StreamSource {
+                source_id: 1,
+                state_table: Some(make_source_internal_table(1)),
+                columns,
+                ..Default::default()
+            }),
         })),
         stream_key: vec![2],
         ..Default::default()
@@ -181,7 +195,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     fragments.push(StreamFragment {
         fragment_id: 2,
         node: Some(source_node),
-        fragment_type: FragmentType::Source as i32,
+        fragment_type_mask: FragmentTypeFlag::Source as u32,
         is_singleton: false,
         table_ids_cnt: 0,
         upstream_table_ids: vec![],
@@ -250,7 +264,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     fragments.push(StreamFragment {
         fragment_id: 1,
         node: Some(simple_agg_node),
-        fragment_type: FragmentType::Others as i32,
+        fragment_type_mask: FragmentTypeFlag::FragmentUnspecified as u32,
         is_singleton: false,
         table_ids_cnt: 0,
         upstream_table_ids: vec![],
@@ -324,6 +338,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             table_id: 1,
             table: Some(make_internal_table(4, true)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
+            handle_pk_conflict: false,
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
@@ -334,7 +349,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     fragments.push(StreamFragment {
         fragment_id: 0,
         node: Some(mview_node),
-        fragment_type: FragmentType::Sink as i32,
+        fragment_type_mask: FragmentTypeFlag::Mview as u32,
         is_singleton: true,
         table_ids_cnt: 0,
         upstream_table_ids: vec![],
@@ -383,7 +398,7 @@ fn make_stream_graph() -> StreamFragmentGraph {
 async fn test_fragmenter() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
-    let mut ctx = CreateMaterializedViewContext::default();
+    let mut ctx = CreateStreamingJobContext::default();
     let graph = make_stream_graph();
 
     let actor_graph_builder =
@@ -395,11 +410,11 @@ async fn test_fragmenter() -> MetaResult<()> {
 
     let table_fragments = TableFragments::new(TableId::default(), graph);
     let actors = table_fragments.actors();
-    let source_actor_ids = table_fragments.source_actor_ids();
-    let sink_actor_ids = table_fragments.sink_actor_ids();
+    let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
+    let sink_actor_ids = table_fragments.mview_actor_ids();
     let internal_table_ids = ctx.internal_table_ids();
     assert_eq!(actors.len(), 9);
-    assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
+    assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
     assert_eq!(2, internal_table_ids.len());
 

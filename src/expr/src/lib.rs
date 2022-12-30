@@ -14,21 +14,22 @@
 
 #![allow(rustdoc::private_intra_doc_links)]
 #![feature(trait_alias)]
-#![feature(generic_associated_types)]
+#![feature(let_chains)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(binary_heap_into_iter_sorted)]
 #![feature(is_sorted)]
-#![feature(backtrace)]
 #![feature(fn_traits)]
 #![feature(assert_matches)]
-#![feature(let_else)]
 #![feature(lint_reasons)]
 #![feature(type_alias_impl_trait)]
 #![feature(generators)]
 #![feature(iterator_try_collect)]
+#![feature(exclusive_range_pattern)]
+#![feature(once_cell)]
 
 pub mod error;
 pub mod expr;
+pub mod sig;
 pub mod table_function;
 pub mod vector_op;
 

@@ -227,7 +227,9 @@ impl Debug for RwError {
             "{}\n{}",
             self.inner,
             // Use inner error's backtrace by default, otherwise use the generated one in `From`.
-            self.inner.backtrace().unwrap_or(&*self.backtrace)
+            (&self.inner as &dyn std::error::Error)
+                .request_ref::<Backtrace>()
+                .unwrap_or(&*self.backtrace)
         )
     }
 }
@@ -241,9 +243,7 @@ impl PartialEq for RwError {
 impl PartialEq for ErrorCode {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (&ErrorCode::InternalError(ref msg), &ErrorCode::InternalError(ref msg2)) => {
-                msg == msg2
-            }
+            (ErrorCode::InternalError(msg), ErrorCode::InternalError(msg2)) => msg == msg2,
             (_, _) => false,
         }
     }

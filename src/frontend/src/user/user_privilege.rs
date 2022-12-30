@@ -32,6 +32,8 @@ static AVAILABLE_ACTION_ON_SOURCE: &[Action] = &[
     Action::Delete,
 ];
 static AVAILABLE_ACTION_ON_MVIEW: &[Action] = &[Action::Select { columns: None }];
+static AVAILABLE_ACTION_ON_VIEW: &[Action] = AVAILABLE_ACTION_ON_MVIEW;
+static AVAILABLE_ACTION_ON_SINK: &[Action] = &[];
 
 pub fn check_privilege_type(privilege: &Privileges, objects: &GrantObjects) -> Result<()> {
     match privilege {
@@ -50,7 +52,13 @@ pub fn check_privilege_type(privilege: &Privileges, objects: &GrantObjects) -> R
                 GrantObjects::Mviews(_) | GrantObjects::AllMviewsInSchema { .. } => actions
                     .iter()
                     .all(|action| AVAILABLE_ACTION_ON_MVIEW.contains(action)),
-                _ => true,
+                GrantObjects::Sinks(_) => actions
+                    .iter()
+                    .all(|action| AVAILABLE_ACTION_ON_SINK.contains(action)),
+                GrantObjects::Sequences(_)
+                | GrantObjects::AllSequencesInSchema { .. }
+                | GrantObjects::Tables(_)
+                | GrantObjects::AllTablesInSchema { .. } => true,
             };
             if !valid {
                 return Err(ErrorCode::BindError(
@@ -103,6 +111,8 @@ pub fn available_prost_privilege(object: ProstObject) -> ProstPrivilege {
         ProstObject::TableId(_) | ProstObject::AllTablesSchemaId { .. } => {
             AVAILABLE_ACTION_ON_MVIEW.to_vec()
         }
+        ProstObject::ViewId(_) => AVAILABLE_ACTION_ON_VIEW.to_vec(),
+        ProstObject::SinkId(_) => AVAILABLE_ACTION_ON_SINK.to_vec(),
     };
     let actions = actions
         .iter()

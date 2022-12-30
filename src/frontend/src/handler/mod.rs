@@ -27,18 +27,20 @@ use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
 
 use self::util::DataChunkToRowSetAdapter;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
-use crate::session::{OptimizerContext, SessionImpl};
+use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
 pub mod alter_user;
 mod create_database;
 pub mod create_index;
 pub mod create_mv;
-mod create_schema;
+pub mod create_schema;
 pub mod create_sink;
 pub mod create_source;
 pub mod create_table;
+pub mod create_table_as;
 pub mod create_user;
+mod create_view;
 mod describe;
 mod drop_database;
 mod drop_index;
@@ -48,6 +50,7 @@ pub mod drop_sink;
 pub mod drop_source;
 pub mod drop_table;
 pub mod drop_user;
+mod drop_view;
 mod explain;
 mod flush;
 pub mod handle_privilege;
@@ -84,39 +87,46 @@ impl From<Vec<Row>> for PgResponseStream {
     }
 }
 
+#[derive(Clone)]
+pub struct HandlerArgs {
+    pub session: Arc<SessionImpl>,
+    pub sql: Arc<str>,
+    pub with_options: WithOptions,
+}
+
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
     sql: &str,
     format: bool,
 ) -> Result<RwPgResponse> {
-    let context = OptimizerContext::new(
-        session.clone(),
-        Arc::from(sql),
-        WithOptions::try_from(&stmt)?,
-    );
+    let handler_args = HandlerArgs {
+        session,
+        sql: sql.into(),
+        with_options: WithOptions::try_from(&stmt)?,
+    };
     match stmt {
         Statement::Explain {
             statement,
             analyze,
             options,
-        } => explain::handle_explain(context, *statement, options, analyze),
+        } => explain::handle_explain(handler_args, *statement, options, analyze),
         Statement::CreateSource {
             is_materialized,
             stmt,
-        } => create_source::handle_create_source(context, is_materialized, stmt).await,
-        Statement::CreateSink { stmt } => create_sink::handle_create_sink(context, stmt).await,
+        } => create_source::handle_create_source(handler_args, is_materialized, stmt).await,
+        Statement::CreateSink { stmt } => create_sink::handle_create_sink(handler_args, stmt).await,
         Statement::CreateTable {
             name,
             columns,
             constraints,
-            with_options: _, // It is put in OptimizerContext
+            query,
 
+            with_options: _, // It is put in OptimizerContext
             // Not supported things
             or_replace,
             temporary,
             if_not_exists,
-            query,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
@@ -132,32 +142,46 @@ pub async fn handle(
                 )
                 .into());
             }
-            if if_not_exists {
-                return Err(ErrorCode::NotImplemented(
-                    "CREATE TABLE IF NOT EXISTS".to_string(),
-                    None.into(),
+            if let Some(query) = query {
+                return create_table_as::handle_create_as(
+                    handler_args,
+                    name,
+                    if_not_exists,
+                    query,
+                    columns,
                 )
-                .into());
+                .await;
             }
-            if query.is_some() {
-                return Err(ErrorCode::NotImplemented("CREATE AS".to_string(), None.into()).into());
-            }
-            create_table::handle_create_table(context, name, columns, constraints).await
+            create_table::handle_create_table(
+                handler_args,
+                name,
+                columns,
+                constraints,
+                if_not_exists,
+            )
+            .await
         }
         Statement::CreateDatabase {
             db_name,
             if_not_exists,
-        } => create_database::handle_create_database(context, db_name, if_not_exists).await,
+        } => create_database::handle_create_database(handler_args, db_name, if_not_exists).await,
         Statement::CreateSchema {
             schema_name,
             if_not_exists,
-        } => create_schema::handle_create_schema(context, schema_name, if_not_exists).await,
-        Statement::CreateUser(stmt) => create_user::handle_create_user(context, stmt).await,
-        Statement::AlterUser(stmt) => alter_user::handle_alter_user(context, stmt).await,
-        Statement::Grant { .. } => handle_privilege::handle_grant_privilege(context, stmt).await,
-        Statement::Revoke { .. } => handle_privilege::handle_revoke_privilege(context, stmt).await,
-        Statement::Describe { name } => describe::handle_describe(context, name),
-        Statement::ShowObjects(show_object) => show::handle_show_object(context, show_object),
+        } => create_schema::handle_create_schema(handler_args, schema_name, if_not_exists).await,
+        Statement::CreateUser(stmt) => create_user::handle_create_user(handler_args, stmt).await,
+        Statement::AlterUser(stmt) => alter_user::handle_alter_user(handler_args, stmt).await,
+        Statement::Grant { .. } => {
+            handle_privilege::handle_grant_privilege(handler_args, stmt).await
+        }
+        Statement::Revoke { .. } => {
+            handle_privilege::handle_revoke_privilege(handler_args, stmt).await
+        }
+        Statement::Describe { name } => describe::handle_describe(handler_args, name),
+        Statement::ShowObjects(show_object) => show::handle_show_object(handler_args, show_object),
+        Statement::ShowCreateObject { create_type, name } => {
+            show::handle_show_create_object(handler_args, create_type, name)
+        }
         Statement::Drop(DropStatement {
             object_type,
             object_name,
@@ -165,21 +189,23 @@ pub async fn handle(
             drop_mode,
         }) => match object_type {
             ObjectType::Table => {
-                drop_table::handle_drop_table(context, object_name, if_exists).await
+                drop_table::handle_drop_table(handler_args, object_name, if_exists).await
             }
             ObjectType::MaterializedView => {
-                drop_mv::handle_drop_mv(context, object_name, if_exists).await
+                drop_mv::handle_drop_mv(handler_args, object_name, if_exists).await
             }
             ObjectType::Index => {
-                drop_index::handle_drop_index(context, object_name, if_exists).await
+                drop_index::handle_drop_index(handler_args, object_name, if_exists).await
             }
             ObjectType::Source => {
-                drop_source::handle_drop_source(context, object_name, if_exists).await
+                drop_source::handle_drop_source(handler_args, object_name, if_exists).await
             }
-            ObjectType::Sink => drop_sink::handle_drop_sink(context, object_name, if_exists).await,
+            ObjectType::Sink => {
+                drop_sink::handle_drop_sink(handler_args, object_name, if_exists).await
+            }
             ObjectType::Database => {
                 drop_database::handle_drop_database(
-                    context,
+                    handler_args,
                     object_name,
                     if_exists,
                     drop_mode.into(),
@@ -187,35 +213,59 @@ pub async fn handle(
                 .await
             }
             ObjectType::Schema => {
-                drop_schema::handle_drop_schema(context, object_name, if_exists, drop_mode.into())
-                    .await
+                drop_schema::handle_drop_schema(
+                    handler_args,
+                    object_name,
+                    if_exists,
+                    drop_mode.into(),
+                )
+                .await
             }
             ObjectType::User => {
-                drop_user::handle_drop_user(context, object_name, if_exists, drop_mode.into()).await
+                drop_user::handle_drop_user(handler_args, object_name, if_exists, drop_mode.into())
+                    .await
             }
-            _ => Err(
-                ErrorCode::InvalidInputSyntax(format!("DROP {} is unsupported", object_type))
-                    .into(),
-            ),
+            ObjectType::View => {
+                drop_view::handle_drop_view(handler_args, object_name, if_exists).await
+            }
+            ObjectType::MaterializedSource => Err((ErrorCode::InvalidInputSyntax(
+                "Use `DROP SOURCE` to drop a materialized source.".to_owned(),
+            ))
+            .into()),
         },
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => query::handle_query(context, stmt, format).await,
+        | Statement::Update { .. } => query::handle_query(handler_args, stmt, format).await,
         Statement::CreateView {
-            materialized: true,
-            or_replace: false,
+            materialized,
             name,
+            columns,
             query,
-            ..
-        } => create_mv::handle_create_mv(context, name, *query).await,
-        Statement::Flush => flush::handle_flush(context).await,
+
+            with_options: _, // It is put in OptimizerContext
+            or_replace,      // not supported
+        } => {
+            if or_replace {
+                return Err(ErrorCode::NotImplemented(
+                    "CREATE OR REPLACE VIEW".to_string(),
+                    None.into(),
+                )
+                .into());
+            }
+            if materialized {
+                create_mv::handle_create_mv(handler_args, name, *query, columns).await
+            } else {
+                create_view::handle_create_view(handler_args, name, columns, *query).await
+            }
+        }
+        Statement::Flush => flush::handle_flush(handler_args).await,
         Statement::SetVariable {
             local: _,
             variable,
             value,
-        } => variable::handle_set(context, variable, value),
-        Statement::ShowVariable { variable } => variable::handle_show(context, variable),
+        } => variable::handle_set(handler_args, variable, value),
+        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
         Statement::CreateIndex {
             name,
             table_name,
@@ -232,7 +282,7 @@ pub async fn handle(
             }
 
             create_index::handle_create_index(
-                context,
+                handler_args,
                 if_not_exists,
                 name,
                 table_name,
@@ -267,8 +317,8 @@ pub async fn handle(
             ROLLBACK,
             "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
-        _ => {
-            Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())
-        }
+        _ => Err(
+            ErrorCode::NotImplemented(format!("Unhandled statement: {}", stmt), None.into()).into(),
+        ),
     }
 }

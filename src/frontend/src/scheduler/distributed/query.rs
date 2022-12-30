@@ -36,8 +36,7 @@ use crate::scheduler::distributed::StageExecution;
 use crate::scheduler::plan_fragmenter::{Query, StageId, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    ExecutionContextRef, HummockSnapshotManagerRef, PinnedHummockSnapshot, SchedulerError,
-    SchedulerResult,
+    ExecutionContextRef, PinnedHummockSnapshot, SchedulerError, SchedulerResult,
 };
 
 /// Message sent to a `QueryRunner` to control its execution.
@@ -115,18 +114,13 @@ impl QueryExecution {
         &self,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeManagerRef,
-        hummock_snapshot_manager: HummockSnapshotManagerRef,
+        pinned_snapshot: PinnedHummockSnapshot,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
     ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
-
-        // Acquired a pinned `HummockSnapshot`.
-        let pinned_snapshot = hummock_snapshot_manager
-            .acquire(&self.query.query_id)
-            .await?;
 
         // Because the snapshot may be released before all stages are scheduled, we only pass a
         // reference of `pinned_snapshot`. Its ownership will be moved into `QueryRunner` so that it
@@ -213,7 +207,8 @@ impl QueryExecution {
                 .collect::<Vec<Arc<StageExecution>>>();
 
             let stage_exec = Arc::new(StageExecution::new(
-                pinned_snapshot.snapshot.committed_epoch,
+                // TODO: Add support to use current epoch when needed
+                pinned_snapshot.get_batch_query_epoch(),
                 self.query.stage_graph.stages[&stage_id].clone(),
                 worker_node_manager.clone(),
                 self.shutdown_tx.clone(),
@@ -241,6 +236,7 @@ impl QueryRunner {
             );
         }
         let mut stages_with_table_scan = self.query.stages_with_table_scan();
+        let has_lookup_join_stage = self.query.has_lookup_join_stage();
         // To convince the compiler that `pinned_snapshot` will only be dropped once.
         let mut pinned_snapshot_to_drop = Some(pinned_snapshot);
         while let Some(msg_inner) = self.msg_receiver.recv().await {
@@ -253,17 +249,14 @@ impl QueryRunner {
                     );
                     self.scheduled_stages_count += 1;
                     stages_with_table_scan.remove(&stage_id);
-                    if stages_with_table_scan.is_empty() {
+                    // If query contains lookup join we need to delay epoch unpin util the end of
+                    // the query.
+                    if !has_lookup_join_stage && stages_with_table_scan.is_empty() {
                         // We can be sure here that all the Hummock iterators have been created,
                         // thus they all successfully pinned a HummockVersion.
                         // So we can now unpin their epoch.
                         tracing::trace!("Query {:?} has scheduled all of its stages that have table scan (iterator creation).", self.query.query_id);
-                        if let Some(pinned_snapshot) = pinned_snapshot_to_drop {
-                            drop(pinned_snapshot);
-                            pinned_snapshot_to_drop = None;
-                        } else {
-                            tracing::error!("Pinned snapshot is dropped twice");
-                        }
+                        pinned_snapshot_to_drop.take();
                     }
 
                     // For root stage, we execute in frontend local. We will pass the root fragment
@@ -383,13 +376,13 @@ impl QueryRunner {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::collections::HashMap;
     use std::rc::Rc;
     use std::sync::{Arc, RwLock};
 
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
-    use risingwave_common::config::constant::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+    use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::types::DataType;
     use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
     use risingwave_pb::plan_common::JoinType;
@@ -399,15 +392,16 @@ mod tests {
     use crate::catalog::root_catalog::Catalog;
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, EqJoinPredicate, LogicalJoin, LogicalScan, ToBatch,
+        BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalFilter, LogicalJoin,
+        LogicalScan, ToBatch,
     };
     use crate::optimizer::property::{Distribution, Order};
-    use crate::optimizer::PlanRef;
+    use crate::optimizer::{OptimizerContext, PlanRef};
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
     use crate::scheduler::{ExecutionContext, HummockSnapshotManager, QueryExecutionInfo};
-    use crate::session::{OptimizerContext, SessionImpl};
+    use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
 
@@ -422,15 +416,17 @@ mod tests {
             CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
         let query = create_query().await;
         let query_id = query.query_id().clone();
+        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await.unwrap();
         let query_execution = Arc::new(QueryExecution::new(query, (0, 0)));
         let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
             HashMap::from([(query_id, query_execution.clone())]),
         )));
+
         assert!(query_execution
             .start(
                 ExecutionContext::new(SessionImpl::mock().into()).into(),
                 worker_node_manager,
-                hummock_snapshot_manager,
+                pinned_snapshot.into(),
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,
@@ -439,7 +435,7 @@ mod tests {
             .is_err());
     }
 
-    async fn create_query() -> Query {
+    pub async fn create_query() -> Query {
         // Construct a Hash Join with Exchange node.
         // Logical plan:
         //
@@ -471,11 +467,19 @@ mod tests {
                         type_name: String::new(),
                         field_descs: vec![],
                     },
+                    ColumnDesc {
+                        data_type: DataType::Int64,
+                        column_id: 2.into(),
+                        name: "_row_id".to_string(),
+                        type_name: String::new(),
+                        field_descs: vec![],
+                    },
                 ],
-                distribution_key: vec![],
-                appendonly: false,
+                distribution_key: vec![2],
+                append_only: false,
                 retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
-                value_indices: vec![0, 1],
+                value_indices: vec![0, 1, 2],
+                read_prefix_len_hint: 0,
             }),
             vec![],
             ctx,
@@ -484,6 +488,13 @@ mod tests {
         .unwrap()
         .to_distributed()
         .unwrap();
+        let batch_filter = BatchFilter::new(LogicalFilter::new(
+            batch_plan_node.clone(),
+            Condition {
+                conjunctions: vec![],
+            },
+        ))
+        .into();
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
@@ -491,7 +502,7 @@ mod tests {
         )
         .into();
         let batch_exchange_node2: PlanRef = BatchExchange::new(
-            batch_plan_node.clone(),
+            batch_filter,
             Order::default(),
             Distribution::HashShard(vec![0, 1]),
         )

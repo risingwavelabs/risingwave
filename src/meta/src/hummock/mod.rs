@@ -31,7 +31,6 @@ pub mod test_utils;
 mod utils;
 mod vacuum;
 
-use std::sync::Arc;
 use std::time::Duration;
 
 pub use compaction_scheduler::CompactionScheduler;
@@ -41,110 +40,32 @@ pub use mock_hummock_meta_client::MockHummockMetaClient;
 use sync_point::sync_point;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
 pub use vacuum::*;
 
 pub use crate::hummock::compaction_scheduler::{
     CompactionRequestChannelRef, CompactionSchedulerRef,
 };
-use crate::hummock::utils::RetryableError;
-use crate::manager::{LocalNotification, NotificationManagerRef};
 use crate::storage::MetaStore;
 use crate::MetaOpts;
 
 /// Start hummock's asynchronous tasks.
-pub async fn start_hummock_workers<S>(
-    hummock_manager: HummockManagerRef<S>,
-    compactor_manager: CompactorManagerRef,
+pub fn start_hummock_workers<S>(
     vacuum_manager: VacuumManagerRef<S>,
-    notification_manager: NotificationManagerRef<S>,
     compaction_scheduler: CompactionSchedulerRef<S>,
     meta_opts: &MetaOpts,
 ) -> Vec<(JoinHandle<()>, Sender<()>)>
 where
     S: MetaStore,
 {
-    let mut workers = vec![
-        start_compaction_scheduler(compaction_scheduler),
-        start_local_notification_receiver(hummock_manager, compactor_manager, notification_manager)
-            .await,
-    ];
+    let mut workers = vec![start_compaction_scheduler(compaction_scheduler)];
     // Start vacuum in non-deterministic compaction test
     if !meta_opts.compaction_deterministic_test {
         workers.push(start_vacuum_scheduler(
-            vacuum_manager.clone(),
+            vacuum_manager,
             Duration::from_secs(meta_opts.vacuum_interval_sec),
         ));
     }
     workers
-}
-
-/// Starts a task to handle meta local notification.
-pub async fn start_local_notification_receiver<S>(
-    hummock_manager: Arc<HummockManager<S>>,
-    compactor_manager: CompactorManagerRef,
-    notification_manager: NotificationManagerRef<S>,
-) -> (JoinHandle<()>, Sender<()>)
-where
-    S: MetaStore,
-{
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    notification_manager.insert_local_sender(tx).await;
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-    let join_handle = tokio::spawn(async move {
-        let retry_strategy = ExponentialBackoff::from_millis(10)
-            .max_delay(Duration::from_secs(60))
-            .map(jitter);
-        loop {
-            tokio::select! {
-                notification = rx.recv() => {
-                    match notification {
-                        None => {
-                            return;
-                        },
-                        Some(LocalNotification::WorkerNodeIsDeleted(worker_node)) => {
-                            compactor_manager.remove_compactor(worker_node.id);
-                            tokio_retry::RetryIf::spawn(
-                                retry_strategy.clone(),
-                                || async {
-                                    if let Err(err) = hummock_manager.release_contexts(vec![worker_node.id]).await {
-                                        tracing::warn!("Failed to release hummock context {}. {}. Will retry.", worker_node.id, err);
-                                        return Err(err);
-                                    }
-                                    Ok(())
-                                }, RetryableError::default())
-                                .await
-                                .expect("retry until success");
-                            tracing::info!("Released hummock context {}", worker_node.id);
-                            sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
-                        },
-                        Some(LocalNotification::CompactionTaskNeedCancel(compact_task)) => {
-                            let task_id = compact_task.task_id;
-                            tokio_retry::RetryIf::spawn(
-                                retry_strategy.clone(),
-                                || async {
-                                    let mut compact_task_mut = compact_task.clone();
-                                    if let Err(err) = hummock_manager.cancel_compact_task_impl(&mut compact_task_mut).await {
-                                        tracing::warn!("Failed to cancel compaction task {}. {}. Will retry.", compact_task.task_id, err);
-                                        return Err(err);
-                                    }
-                                    Ok(())
-                                }, RetryableError::default())
-                                .await
-                                .expect("retry until success");
-                            tracing::info!("Cancelled compaction task {}", task_id);
-                            sync_point!("AFTER_CANCEL_COMPACTION_TASK_ASYNC");
-                        }
-                    }
-                }
-                _ = &mut shutdown_rx => {
-                    tracing::info!("Hummock local notification receiver is stopped");
-                    return;
-                }
-            };
-        }
-    });
-    (join_handle, shutdown_tx)
 }
 
 /// Starts a task to accept compaction request.

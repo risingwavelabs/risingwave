@@ -14,42 +14,40 @@
 
 //! For expression that only accept two nullable arguments as input.
 
+use std::sync::Arc;
+
 use risingwave_common::array::*;
-use risingwave_common::types::DataType;
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_pb::expr::expr_node::Type;
 
-use super::BoxedExpression;
+use super::{BoxedExpression, Expression};
 use crate::expr::template::BinaryNullableExpression;
+use crate::expr::template_fast;
 use crate::vector_op::array_access::array_access;
 use crate::vector_op::cmp::{
-    general_is_distinct_from, general_is_not_distinct_from, str_is_distinct_from,
+    general_is_distinct_from, general_is_not_distinct_from, general_ne, str_is_distinct_from,
     str_is_not_distinct_from,
 };
 use crate::vector_op::conjunction::{and, or};
 use crate::{for_all_cmp_variants, ExprError, Result};
 
-macro_rules! gen_nullable_cmp_impl {
+macro_rules! gen_is_distinct_from_impl {
     ([$l:expr, $r:expr, $ret:expr], $( { $i1:ident, $i2:ident, $cast:ident, $func:ident} ),* $(,)?) => {
         match ($l.return_type(), $r.return_type()) {
             $(
                 ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
-                    Box::new(
-                        BinaryNullableExpression::<
-                            $i1! { type_array },
-                            $i2! { type_array },
-                            BoolArray,
-                            _
-                        >::new(
-                            $l,
-                            $r,
-                            $ret,
-                            $func::<
-                                <$i1! { type_array } as Array>::OwnedItem,
-                                <$i2! { type_array } as Array>::OwnedItem,
-                                <$cast! { type_array } as Array>::OwnedItem
-                            >,
-                        )
-                    )
+                    template_fast::IsDistinctFromExpression::new(
+                        $l,
+                        $r,
+                        general_ne::<
+                            <$i1! { type_array } as Array>::OwnedItem,
+                            <$i2! { type_array } as Array>::OwnedItem,
+                            <$cast! { type_array } as Array>::OwnedItem
+                        >,
+                        $func,
+                    ).boxed()
                 }
             ),*
             _ => {
@@ -62,6 +60,98 @@ macro_rules! gen_nullable_cmp_impl {
     };
 }
 
+pub struct BinaryShortCircuitExpression {
+    expr_ia1: BoxedExpression,
+    expr_ia2: BoxedExpression,
+    expr_type: Type,
+}
+
+impl std::fmt::Debug for BinaryShortCircuitExpression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BinaryShortCircuitExpression")
+            .field("expr_ia1", &self.expr_ia1)
+            .field("expr_ia2", &self.expr_ia2)
+            .field("expr_type", &self.expr_type)
+            .finish()
+    }
+}
+
+impl Expression for BinaryShortCircuitExpression {
+    fn return_type(&self) -> DataType {
+        DataType::Boolean
+    }
+
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let left = self.expr_ia1.eval_checked(input)?;
+        let left = left.as_bool();
+
+        let res_vis: Vis = match self.expr_type {
+            // For `Or` operator, if res of left part is not null and is true, we do not want to
+            // calculate right part because the result must be true.
+            Type::Or => (!left.to_bitmap()).into(),
+            // For `And` operator, If res of left part is not null and is false, we do not want
+            // to calculate right part because the result must be false.
+            Type::And => (left.data() | !left.null_bitmap()).into(),
+            _ => unimplemented!(),
+        };
+        let new_vis = input.vis() & res_vis;
+        let mut input1 = input.clone();
+        input1.set_vis(new_vis);
+
+        let right = self.expr_ia2.eval_checked(&input1)?;
+        let right = right.as_bool();
+        assert_eq!(left.len(), right.len());
+
+        let mut bitmap = match input.visibility() {
+            Some(vis) => vis.clone(),
+            None => Bitmap::ones(input.capacity()),
+        };
+        bitmap &= left.null_bitmap();
+        bitmap &= right.null_bitmap();
+
+        let c = match self.expr_type {
+            Type::Or => {
+                let data = left.to_bitmap() | right.to_bitmap();
+                bitmap |= &data; // is_true || is_true
+                BoolArray::new(data, bitmap)
+            }
+            Type::And => {
+                let data = left.to_bitmap() & right.to_bitmap();
+                bitmap |= !left.data() & left.null_bitmap(); // is_false
+                bitmap |= !right.data() & right.null_bitmap(); // is_false
+                BoolArray::new(data, bitmap)
+            }
+            _ => unimplemented!(),
+        };
+        Ok(Arc::new(c.into()))
+    }
+
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let ret_ia1 = self.expr_ia1.eval_row(input)?.map(|x| x.into_bool());
+        match self.expr_type {
+            Type::Or if ret_ia1 == Some(true) => return Ok(Some(true.to_scalar_value())),
+            Type::And if ret_ia1 == Some(false) => return Ok(Some(false.to_scalar_value())),
+            _ => {}
+        }
+        let ret_ia2 = self.expr_ia2.eval_row(input)?.map(|x| x.into_bool());
+        match self.expr_type {
+            Type::Or => Ok(or(ret_ia1, ret_ia2)?.map(|x| x.to_scalar_value())),
+            Type::And => Ok(and(ret_ia1, ret_ia2)?.map(|x| x.to_scalar_value())),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl BinaryShortCircuitExpression {
+    pub fn new(expr_ia1: BoxedExpression, expr_ia2: BoxedExpression, expr_type: Type) -> Self {
+        Self {
+            expr_ia1,
+            expr_ia2,
+            expr_type,
+        }
+    }
+}
+
 pub fn new_nullable_binary_expr(
     expr_type: Type,
     ret: DataType,
@@ -70,12 +160,8 @@ pub fn new_nullable_binary_expr(
 ) -> Result<BoxedExpression> {
     let expr = match expr_type {
         Type::ArrayAccess => build_array_access_expr(ret, l, r),
-        Type::And => Box::new(
-            BinaryNullableExpression::<BoolArray, BoolArray, BoolArray, _>::new(l, r, ret, and),
-        ),
-        Type::Or => Box::new(
-            BinaryNullableExpression::<BoolArray, BoolArray, BoolArray, _>::new(l, r, ret, or),
-        ),
+        Type::And => Box::new(BinaryShortCircuitExpression::new(l, r, expr_type)),
+        Type::Or => Box::new(BinaryShortCircuitExpression::new(l, r, expr_type)),
         Type::IsDistinctFrom => new_distinct_from_expr(l, r, ret)?,
         Type::IsNotDistinctFrom => new_not_distinct_from_expr(l, r, ret)?,
         tp => {
@@ -118,9 +204,10 @@ fn build_array_access_expr(
         DataType::Decimal => array_access_expression!(DecimalArray),
         DataType::Date => array_access_expression!(NaiveDateArray),
         DataType::Varchar => array_access_expression!(Utf8Array),
+        DataType::Bytea => array_access_expression!(BytesArray),
         DataType::Time => array_access_expression!(NaiveTimeArray),
         DataType::Timestamp => array_access_expression!(NaiveDateTimeArray),
-        DataType::Timestampz => array_access_expression!(PrimitiveArray::<i64>),
+        DataType::Timestamptz => array_access_expression!(PrimitiveArray::<i64>),
         DataType::Interval => array_access_expression!(IntervalArray),
         DataType::Struct { .. } => array_access_expression!(StructArray),
         DataType::List { .. } => array_access_expression!(ListArray),
@@ -135,6 +222,17 @@ pub fn new_distinct_from_expr(
     use crate::expr::data_types::*;
 
     let expr: BoxedExpression = match (l.return_type(), r.return_type()) {
+        (DataType::Boolean, DataType::Boolean) => template_fast::BooleanBinaryExpression::new(
+            l,
+            r,
+            |l, r| {
+                let data = ((l.data() ^ r.data()) & (l.null_bitmap() & r.null_bitmap()))
+                    | (l.null_bitmap() ^ r.null_bitmap());
+                BoolArray::new(data, Bitmap::ones(l.len()))
+            },
+            |l, r| Some(general_is_distinct_from::<bool, bool, bool>(l, r)),
+        )
+        .boxed(),
         (DataType::Varchar, DataType::Varchar) => Box::new(BinaryNullableExpression::<
             Utf8Array,
             Utf8Array,
@@ -144,7 +242,7 @@ pub fn new_distinct_from_expr(
             l, r, ret, str_is_distinct_from
         )),
         _ => {
-            for_all_cmp_variants! {gen_nullable_cmp_impl, l, r, ret, general_is_distinct_from}
+            for_all_cmp_variants! { gen_is_distinct_from_impl, l, r, ret, false }
         }
     };
     Ok(expr)
@@ -158,6 +256,17 @@ pub fn new_not_distinct_from_expr(
     use crate::expr::data_types::*;
 
     let expr: BoxedExpression = match (l.return_type(), r.return_type()) {
+        (DataType::Boolean, DataType::Boolean) => template_fast::BooleanBinaryExpression::new(
+            l,
+            r,
+            |l, r| {
+                let data = !(((l.data() ^ r.data()) & (l.null_bitmap() & r.null_bitmap()))
+                    | (l.null_bitmap() ^ r.null_bitmap()));
+                BoolArray::new(data, Bitmap::ones(l.len()))
+            },
+            |l, r| Some(general_is_not_distinct_from::<bool, bool, bool>(l, r)),
+        )
+        .boxed(),
         (DataType::Varchar, DataType::Varchar) => Box::new(BinaryNullableExpression::<
             Utf8Array,
             Utf8Array,
@@ -167,7 +276,7 @@ pub fn new_not_distinct_from_expr(
             l, r, ret, str_is_not_distinct_from
         )),
         _ => {
-            for_all_cmp_variants! {gen_nullable_cmp_impl, l, r, ret, general_is_not_distinct_from}
+            for_all_cmp_variants! { gen_is_distinct_from_impl, l, r, ret, true }
         }
     };
     Ok(expr)
@@ -175,7 +284,7 @@ pub fn new_not_distinct_from_expr(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::Scalar;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type;
@@ -223,7 +332,7 @@ mod tests {
         let vec_executor = build_from_prost(&expr).unwrap();
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);
@@ -273,7 +382,7 @@ mod tests {
         let vec_executor = build_from_prost(&expr).unwrap();
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);
@@ -297,7 +406,7 @@ mod tests {
         let vec_executor = build_from_prost(&expr).unwrap();
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);
@@ -327,7 +436,7 @@ mod tests {
         let vec_executor = build_from_prost(&expr).unwrap();
 
         for i in 0..lhs.len() {
-            let row = Row::new(vec![
+            let row = OwnedRow::new(vec![
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);

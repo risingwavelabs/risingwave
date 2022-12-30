@@ -13,46 +13,36 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::{Ident, ObjectName, ShowObject};
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::DataType;
+use risingwave_sqlparser::ast::{Ident, ObjectName, ShowCreateType, ShowObject};
 
 use super::RwPgResponse;
-use crate::binder::Binder;
-use crate::catalog::root_catalog::SchemaPath;
+use crate::binder::{Binder, Relation};
 use crate::catalog::CatalogError;
 use crate::handler::util::col_descs_to_rows;
-use crate::session::{OptimizerContext, SessionImpl};
+use crate::handler::HandlerArgs;
+use crate::session::SessionImpl;
 
 pub fn get_columns_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
 ) -> Result<Vec<ColumnDesc>> {
-    let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, table_name)?;
-    let search_path = session.config().get_search_path();
-    let user_name = &session.auth_context().user_name;
-
-    let schema_path = match schema_name.as_deref() {
-        Some(schema_name) => SchemaPath::Name(schema_name),
-        None => SchemaPath::Path(&search_path, user_name),
+    let mut binder = Binder::new(session);
+    let relation = binder.bind_relation_by_name(table_name.clone(), None)?;
+    let catalogs = match relation {
+        Relation::Source(s) => s.catalog.columns,
+        Relation::BaseTable(t) => t.table_catalog.columns,
+        Relation::SystemTable(t) => t.sys_table_catalog.columns,
+        _ => {
+            return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
+        }
     };
 
-    let catalog_reader = session.env().catalog_reader().read_guard();
-    let catalogs = match catalog_reader.get_table_by_name(db_name, schema_path, &table_name) {
-        Ok((table, _)) => table.columns(),
-        Err(_) => match catalog_reader.get_source_by_name(db_name, schema_path, &table_name) {
-            Ok((source, _)) => &source.columns,
-            Err(_) => {
-                return Err(
-                    CatalogError::NotFound("table or source", table_name.to_string()).into(),
-                );
-            }
-        },
-    };
     Ok(catalogs
         .iter()
         .filter(|c| !c.is_hidden)
@@ -66,8 +56,8 @@ fn schema_or_default(schema: &Option<Ident>) -> String {
         .map_or_else(|| DEFAULT_SCHEMA_NAME.to_string(), |s| s.real_value())
 }
 
-pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Result<RwPgResponse> {
+    let session = handler_args.session;
     let catalog_reader = session.env().catalog_reader().read_guard();
 
     let names = match command {
@@ -109,8 +99,16 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
                 Some(rows.len() as i32),
                 rows.into(),
                 vec![
-                    PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar),
-                    PgFieldDescriptor::new("Type".to_owned(), TypeOid::Varchar),
+                    PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Type".to_owned(),
+                        DataType::VARCHAR.to_oid(),
+                        DataType::VARCHAR.type_len(),
+                    ),
                 ],
             ));
         }
@@ -125,7 +123,73 @@ pub fn handle_show_object(context: OptimizerContext, command: ShowObject) -> Res
         StatementType::SHOW_COMMAND,
         Some(rows.len() as i32),
         rows.into(),
-        vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)],
+        vec![PgFieldDescriptor::new(
+            "Name".to_owned(),
+            DataType::VARCHAR.to_oid(),
+            DataType::VARCHAR.type_len(),
+        )],
+    ))
+}
+
+pub fn handle_show_create_object(
+    handle_args: HandlerArgs,
+    show_create_type: ShowCreateType,
+    name: ObjectName,
+) -> Result<RwPgResponse> {
+    let session = handle_args.session;
+    let catalog_reader = session.env().catalog_reader().read_guard();
+    let (schema_name, object_name) =
+        Binder::resolve_schema_qualified_name(session.database(), name.clone())?;
+    let schema_name = schema_name.unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
+    let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+    let sql = match show_create_type {
+        ShowCreateType::MaterializedView => {
+            let table = schema.get_table_by_name(&object_name).ok_or_else(|| {
+                RwError::from(CatalogError::NotFound(
+                    "materialized view",
+                    name.to_string(),
+                ))
+            })?;
+            if !table.is_mview() {
+                return Err(CatalogError::NotFound("materialized view", name.to_string()).into());
+            }
+            format!(
+                "CREATE MATERIALIZED VIEW {} AS {}",
+                table.name, table.definition
+            )
+        }
+        ShowCreateType::View => {
+            let view = schema
+                .get_view_by_name(&object_name)
+                .ok_or_else(|| RwError::from(CatalogError::NotFound("view", name.to_string())))?;
+            format!("CREATE VIEW {} AS {}", view.name, view.sql)
+        }
+        _ => {
+            return Err(ErrorCode::NotImplemented(
+                format!("show create on: {}", show_create_type),
+                None.into(),
+            )
+            .into());
+        }
+    };
+    let name = format!("{}.{}", schema_name, object_name);
+
+    Ok(PgResponse::new_for_stream(
+        StatementType::SHOW_COMMAND,
+        Some(1),
+        vec![Row::new(vec![Some(name.into()), Some(sql.into())])].into(),
+        vec![
+            PgFieldDescriptor::new(
+                "Name".to_owned(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Create Sql".to_owned(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
+        ],
     ))
 }
 

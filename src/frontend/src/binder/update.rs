@@ -16,17 +16,24 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::ensure;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{Assignment, Expr, TableFactor, TableWithJoins};
+use risingwave_sqlparser::ast::{Assignment, Expr, ObjectName};
 
-use super::{Binder, BoundTableSource, Relation};
+use super::{Binder, Relation};
+use crate::catalog::TableId;
 use crate::expr::{Expr as _, ExprImpl};
+use crate::user::UserId;
 
 #[derive(Debug)]
 pub struct BoundUpdate {
-    /// Used for injecting new chunks to the source.
-    pub table_source: BoundTableSource,
+    /// Id of the table to perform updating.
+    pub table_id: TableId,
+
+    /// Name of the table to perform updating.
+    pub table_name: String,
+
+    /// Owner of the table to perform updating.
+    pub owner: UserId,
 
     /// Used for scanning the records to update with the `selection`.
     pub table: Relation,
@@ -41,28 +48,18 @@ pub struct BoundUpdate {
 impl Binder {
     pub(super) fn bind_update(
         &mut self,
-        table: TableWithJoins,
+        name: ObjectName,
         assignments: Vec<Assignment>,
         selection: Option<Expr>,
     ) -> Result<BoundUpdate> {
-        let table_source = {
-            ensure!(table.joins.is_empty());
-            let name = match &table.relation {
-                TableFactor::Table { name, .. } => name.clone(),
-                _ => unreachable!(),
-            };
-            let (schema_name, name) = Self::resolve_table_or_source_name(&self.db_name, name)?;
-            self.bind_table_source(schema_name.as_deref(), &name)?
-        };
+        let (schema_name, table_name) =
+            Self::resolve_schema_qualified_name(&self.db_name, name.clone())?;
 
-        if table_source.append_only {
-            return Err(ErrorCode::BindError(
-                "Append-only table source doesn't support update".to_string(),
-            )
-            .into());
-        }
+        let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, false)?;
+        let table_id = table_catalog.id;
+        let owner = table_catalog.owner;
 
-        let table = self.bind_vec_table_with_joins(vec![table])?.unwrap();
+        let table = self.bind_relation_by_name(name, None)?;
 
         let selection = selection.map(|expr| self.bind_expr(expr)).transpose()?;
 
@@ -121,7 +118,9 @@ impl Binder {
             .collect_vec();
 
         Ok(BoundUpdate {
-            table_source,
+            table_id,
+            table_name,
+            owner,
             table,
             selection,
             exprs,

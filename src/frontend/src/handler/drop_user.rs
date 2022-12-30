@@ -19,15 +19,15 @@ use risingwave_sqlparser::ast::{DropMode, ObjectName};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_user(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     user_name: ObjectName,
     if_exists: bool,
     mode: Option<DropMode>,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     if mode.is_some() {
         return Err(ErrorCode::BindError("Drop user not support drop mode".to_string()).into());
     }
@@ -47,7 +47,7 @@ pub async fn handle_drop_user(
             return if if_exists {
                 Ok(PgResponse::empty_result_with_notice(
                     StatementType::DROP_USER,
-                    format!("NOTICE: user {} does not exist, skipping", user_name),
+                    format!("user \"{}\" does not exist, skipping", user_name),
                 ))
             } else {
                 Err(CatalogError::NotFound("user", user_name).into())

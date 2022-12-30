@@ -6,6 +6,7 @@ SET QUERY_MODE TO local;
 
 include ./basic/*.slt.part
 include ./basic/local/*.slt.part
+include ./duckdb/all.slt.part
 include ./order/*.slt.part
 include ./join/*.slt.part
 include ./join/*/*.slt.part

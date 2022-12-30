@@ -168,6 +168,18 @@ macro_rules! varchar {
 pub(crate) use varchar;
 
 #[macro_export]
+macro_rules! bytea {
+    ($macro:ident) => {
+        $macro! {
+            risingwave_common::types::DataType::Bytea,
+            risingwave_common::array::BytesArray
+        }
+    };
+}
+
+pub(crate) use bytea;
+
+#[macro_export]
 macro_rules! time {
     ($macro:ident) => {
         $macro! {
@@ -192,16 +204,16 @@ macro_rules! timestamp {
 pub(crate) use timestamp;
 
 #[macro_export]
-macro_rules! timestampz {
+macro_rules! timestamptz {
     ($macro:ident) => {
         $macro! {
-            risingwave_common::types::DataType::Timestampz,
+            risingwave_common::types::DataType::Timestamptz,
             risingwave_common::array::I64Array
         }
     };
 }
 
-pub(crate) use timestampz;
+pub(crate) use timestamptz;
 
 #[macro_export]
 macro_rules! interval {

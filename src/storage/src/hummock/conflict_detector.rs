@@ -40,7 +40,7 @@ impl Default for ConflictDetector {
 }
 
 impl ConflictDetector {
-    pub fn new_from_config(options: Arc<StorageConfig>) -> Option<Arc<ConflictDetector>> {
+    pub fn new_from_config(options: &StorageConfig) -> Option<Arc<ConflictDetector>> {
         if options.write_conflict_detection_enabled {
             Some(Arc::new(ConflictDetector::default()))
         } else {

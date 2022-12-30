@@ -34,7 +34,7 @@ impl StreamExpand {
             Distribution::Single => Distribution::Single,
             Distribution::SomeShard
             | Distribution::HashShard(_)
-            | Distribution::UpstreamHashShard(_) => Distribution::SomeShard,
+            | Distribution::UpstreamHashShard(_, _) => Distribution::SomeShard,
             Distribution::Broadcast => unreachable!(),
         };
 

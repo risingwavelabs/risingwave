@@ -12,17 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::sync::LazyLock;
-
-use itertools::{iproduct, Itertools as _};
+use itertools::Itertools as _;
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{DataType, DataTypeName};
+pub use risingwave_expr::sig::func::*;
 
 use super::{align_types, cast_ok_base, CastContext};
 use crate::expr::type_inference::cast::align_array_and_element;
-use crate::expr::{Expr as _, ExprImpl, ExprType};
+use crate::expr::{cast_ok, is_row_function, Expr as _, ExprImpl, ExprType, FunctionCall};
 
 /// Infers the return type of a function. Returns `Err` if the function with specified data types
 /// is not supported on backend.
@@ -92,6 +91,128 @@ macro_rules! ensure_arity {
     };
 }
 
+/// An intermediate representation of struct type when resolving the type to cast.
+#[derive(Debug)]
+pub enum NestedType {
+    /// A type that can should inferred (will never be struct).
+    Infer(DataType),
+    /// A concrete data type.
+    Type(DataType),
+    /// A struct type.
+    Struct(Vec<NestedType>),
+}
+
+/// Convert struct type to a nested type
+fn extract_struct_nested_type(ty: &StructType) -> Result<NestedType> {
+    let fields = ty
+        .fields
+        .iter()
+        .map(|f| match f {
+            DataType::Struct(s) => extract_struct_nested_type(s),
+            _ => Ok(NestedType::Type(f.clone())),
+        })
+        .try_collect()?;
+    Ok(NestedType::Struct(fields))
+}
+
+/// Decompose expression into a nested type to be inferred.
+fn extract_expr_nested_type(expr: &ExprImpl) -> Result<NestedType> {
+    if expr.is_unknown() {
+        Ok(NestedType::Infer(expr.return_type()))
+    } else if is_row_function(expr) {
+        // For row function, recursively get the type requirement of each field.
+        let func = expr.as_function_call().unwrap();
+        let ret = func
+            .inputs()
+            .iter()
+            .map(extract_expr_nested_type)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(NestedType::Struct(ret))
+    } else {
+        match expr.return_type() {
+            DataType::Struct(ty) => extract_struct_nested_type(&ty),
+            ty => Ok(NestedType::Type(ty)),
+        }
+    }
+}
+
+/// Handle struct comparisons for [`infer_type_for_special`].
+fn infer_struct_cast_target_type(
+    func_type: ExprType,
+    lexpr: NestedType,
+    rexpr: NestedType,
+) -> Result<(bool, bool, DataType)> {
+    match (lexpr, rexpr) {
+        (NestedType::Struct(lty), NestedType::Struct(rty)) => {
+            // If both sides are structs, resolve the final data type recursively.
+            if lty.len() != rty.len() {
+                return Err(ErrorCode::BindError(format!(
+                    "cannot infer type because of different number of fields: left={:?} right={:?}",
+                    lty, rty
+                ))
+                .into());
+            }
+            let mut tys = vec![];
+            let mut lcasts = false;
+            let mut rcasts = false;
+            tys.reserve(lty.len());
+            for (lf, rf) in lty.into_iter().zip_eq(rty) {
+                let (lcast, rcast, ty) = infer_struct_cast_target_type(func_type, lf, rf)?;
+                lcasts |= lcast;
+                rcasts |= rcast;
+                tys.push((ty, "".to_string())); // TODO(chi): generate field name
+            }
+            Ok((
+                lcasts,
+                rcasts,
+                DataType::Struct(StructType::new(tys).into()),
+            ))
+        }
+        (l, r @ NestedType::Struct(_)) | (l @ NestedType::Struct(_), r) => {
+            // If only one side is nested type, these two types can never be casted.
+            return Err(ErrorCode::BindError(format!(
+                "cannot infer type because unmatched types: left={:?} right={:?}",
+                l, r
+            ))
+            .into());
+        }
+        (NestedType::Type(l), NestedType::Type(r)) => {
+            // If both sides are concrete types, try cast in either direction.
+            if l == r {
+                Ok((false, false, r))
+            } else if cast_ok(&l, &r, CastContext::Implicit) {
+                Ok((true, false, r))
+            } else if cast_ok(&r, &l, CastContext::Implicit) {
+                Ok((false, true, l))
+            } else {
+                return Err(ErrorCode::BindError(format!(
+                    "cannot cast {} to {} or {} to {}",
+                    l, r, r, l
+                ))
+                .into());
+            }
+        }
+        (NestedType::Type(ty), NestedType::Infer(ity)) => {
+            // If one side is *unknown*, cast to another type.
+            Ok((false, ity != ty, ty))
+        }
+        (NestedType::Infer(ity), NestedType::Type(ty)) => {
+            // If one side is *unknown*, cast to another type.
+            Ok((ity != ty, false, ty))
+        }
+        (NestedType::Infer(l), NestedType::Infer(r)) => {
+            // Both sides are *unknown*, using the sig_map to infer the return type.
+            let actuals = vec![None, None];
+            let sig = infer_type_name(&FUNC_SIG_MAP, func_type, &actuals)?;
+            Ok((
+                sig.ret_type != l.into(),
+                sig.ret_type != r.into(),
+                sig.ret_type.into(),
+            ))
+        }
+    }
+}
+
 /// Special exprs that cannot be handled by [`infer_type_name`] and [`FuncSigMap`] are handled here.
 /// These include variadic functions, list and struct type, as well as non-implicit cast.
 ///
@@ -118,6 +239,7 @@ fn infer_type_for_special(
                 }
             }))
             .map(Some)
+            .map_err(Into::into)
         }
         ExprType::In => {
             align_types(inputs.iter_mut())?;
@@ -125,7 +247,7 @@ fn infer_type_for_special(
         }
         ExprType::Coalesce => {
             ensure_arity!("coalesce", 1 <= | inputs |);
-            align_types(inputs.iter_mut()).map(Some)
+            align_types(inputs.iter_mut()).map(Some).map_err(Into::into)
         }
         ExprType::ConcatWs => {
             ensure_arity!("concat_ws", 2 <= | inputs |);
@@ -192,11 +314,29 @@ fn infer_type_for_special(
                 (false, false) => {}
             }
             let ok = match (inputs[0].return_type(), inputs[1].return_type()) {
-                // TODO(#3692): handle `Struct`
-                // It should tolerate field name differences and allow castable types.
-                // `row(int, date) = row(bigint, timestamp)`
-
-                // Unlink auto-cast in struct, PostgreSQL disallows `int[] = bigint[]` for array.
+                // Cast each field of the struct to their corresponding field in the other struct.
+                (DataType::Struct(_), DataType::Struct(_)) => {
+                    let (lcast, rcast, ret) = infer_struct_cast_target_type(
+                        func_type,
+                        extract_expr_nested_type(&inputs[0])?,
+                        extract_expr_nested_type(&inputs[1])?,
+                    )?;
+                    if lcast {
+                        let owned0 =
+                            std::mem::replace(&mut inputs[0], ExprImpl::literal_bool(true));
+                        inputs[0] =
+                            FunctionCall::new_unchecked(ExprType::Cast, vec![owned0], ret.clone())
+                                .into();
+                    }
+                    if rcast {
+                        let owned1 =
+                            std::mem::replace(&mut inputs[1], ExprImpl::literal_bool(true));
+                        inputs[1] =
+                            FunctionCall::new_unchecked(ExprType::Cast, vec![owned1], ret).into();
+                    }
+                    true
+                }
+                // Unlike auto-cast in struct, PostgreSQL disallows `int[] = bigint[]` for array.
                 // They have to match exactly.
                 (l @ DataType::List { .. }, r @ DataType::List { .. }) => l == r,
                 // use general rule unless `struct = struct` or `array = array`
@@ -293,6 +433,10 @@ fn infer_type_for_special(
             ensure_arity!("vnode", 1 <= | inputs |);
             Ok(Some(DataType::Int16))
         }
+        ExprType::Now => {
+            ensure_arity!("now", | inputs | == 0);
+            Ok(Some(DataType::Timestamp))
+        }
         _ => Ok(None),
     }
 }
@@ -316,13 +460,12 @@ fn infer_type_for_special(
 ///    4e in `PostgreSQL`. See [`narrow_category`] for details.
 /// 5. Attempt to narrow down candidates by assuming all arguments are same type. This covers Rule
 ///    4f in `PostgreSQL`. See [`narrow_same_type`] for details.
-fn infer_type_name<'a, 'b>(
+fn infer_type_name<'a>(
     sig_map: &'a FuncSigMap,
     func_type: ExprType,
-    inputs: &'b [Option<DataTypeName>],
+    inputs: &[Option<DataTypeName>],
 ) -> Result<&'a FuncSign> {
     let candidates = sig_map
-        .0
         .get(&(func_type, inputs.len()))
         .map(std::ops::Deref::deref)
         .unwrap_or_default();
@@ -382,7 +525,7 @@ fn is_preferred(t: DataTypeName) -> bool {
     use DataTypeName as T;
     matches!(
         t,
-        T::Float64 | T::Boolean | T::Varchar | T::Timestampz | T::Interval
+        T::Float64 | T::Boolean | T::Varchar | T::Timestamptz | T::Interval
     )
 }
 
@@ -422,9 +565,9 @@ fn implicit_ok(source: DataTypeName, target: DataTypeName, eq_ok: bool) -> bool 
 /// [rule 4a src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L907-L947
 /// [rule 4c src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1062-L1104
 /// [rule 4d src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1106-L1153
-fn top_matches<'a, 'b>(
+fn top_matches<'a>(
     candidates: &'a [FuncSign],
-    inputs: &'b [Option<DataTypeName>],
+    inputs: &[Option<DataTypeName>],
 ) -> Vec<&'a FuncSign> {
     let mut best_exact = 0;
     let mut best_preferred = 0;
@@ -482,9 +625,9 @@ fn top_matches<'a, 'b>(
 ///   src]
 ///
 /// [rule 4e src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1164-L1298
-fn narrow_category<'a, 'b>(
+fn narrow_category<'a>(
     candidates: Vec<&'a FuncSign>,
-    inputs: &'b [Option<DataTypeName>],
+    inputs: &[Option<DataTypeName>],
 ) -> Vec<&'a FuncSign> {
     const BIASED_TYPE: DataTypeName = DataTypeName::Varchar;
     let Ok(categories) = inputs.iter().enumerate().map(|(i, actual)| {
@@ -564,9 +707,9 @@ fn narrow_category<'a, 'b>(
 ///
 /// [rule 4f src]: https://github.com/postgres/postgres/blob/86a4dc1e6f29d1992a2afa3fac1a0b0a6e84568c/src/backend/parser/parse_func.c#L1300-L1355
 /// [Rule 2]: https://www.postgresql.org/docs/current/typeconv-oper.html#:~:text=then%20assume%20it%20is%20the%20same%20type%20as%20the%20other%20argument%20for%20this%20check
-fn narrow_same_type<'a, 'b>(
+fn narrow_same_type<'a>(
     candidates: Vec<&'a FuncSign>,
-    inputs: &'b [Option<DataTypeName>],
+    inputs: &[Option<DataTypeName>],
 ) -> Vec<&'a FuncSign> {
     let Ok(Some(same_type)) = inputs.iter().try_fold(None, |acc, cur| match (acc, cur) {
         (None, t) => Ok(*t),
@@ -601,268 +744,10 @@ impl<'a> std::fmt::Debug for TypeDebug<'a> {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
-pub struct FuncSign {
-    pub func: ExprType,
-    pub inputs_type: Vec<DataTypeName>,
-    pub ret_type: DataTypeName,
-}
-
-#[derive(Default)]
-pub struct FuncSigMap(HashMap<(ExprType, usize), Vec<FuncSign>>);
-impl FuncSigMap {
-    fn insert(&mut self, func: ExprType, param_types: Vec<DataTypeName>, ret_type: DataTypeName) {
-        let arity = param_types.len();
-        let inputs_type = param_types.into_iter().map(Into::into).collect();
-        let sig = FuncSign {
-            func,
-            inputs_type,
-            ret_type,
-        };
-        self.0.entry((func, arity)).or_default().push(sig)
-    }
-}
-
-fn build_binary_cmp_funcs(map: &mut FuncSigMap, exprs: &[ExprType], args: &[DataTypeName]) {
-    for (e, lt, rt) in iproduct!(exprs, args, args) {
-        map.insert(*e, vec![*lt, *rt], DataTypeName::Boolean);
-    }
-}
-
-fn build_binary_atm_funcs(map: &mut FuncSigMap, exprs: &[ExprType], args: &[DataTypeName]) {
-    for e in exprs {
-        for (li, lt) in args.iter().enumerate() {
-            for (ri, rt) in args.iter().enumerate() {
-                let ret = if li <= ri { rt } else { lt };
-                map.insert(*e, vec![*lt, *rt], *ret);
-            }
-        }
-    }
-}
-
-fn build_unary_atm_funcs(map: &mut FuncSigMap, exprs: &[ExprType], args: &[DataTypeName]) {
-    for (e, arg) in iproduct!(exprs, args) {
-        map.insert(*e, vec![*arg], *arg);
-    }
-}
-
-fn build_commutative_funcs(
-    map: &mut FuncSigMap,
-    expr: ExprType,
-    arg0: DataTypeName,
-    arg1: DataTypeName,
-    ret: DataTypeName,
-) {
-    map.insert(expr, vec![arg0, arg1], ret);
-    map.insert(expr, vec![arg1, arg0], ret);
-}
-
-fn build_round_funcs(map: &mut FuncSigMap, expr: ExprType) {
-    map.insert(expr, vec![DataTypeName::Float64], DataTypeName::Float64);
-    map.insert(expr, vec![DataTypeName::Decimal], DataTypeName::Decimal);
-}
-
-/// This function builds type derived map for all built-in functions that take a fixed number
-/// of arguments.  They can be determined to have one or more type signatures since some are
-/// compatible with more than one type.
-/// Type signatures and arities of variadic functions are checked
-/// [elsewhere](crate::expr::FunctionCall::new).
-fn build_type_derive_map() -> FuncSigMap {
-    use {DataTypeName as T, ExprType as E};
-    let mut map = FuncSigMap::default();
-    let all_types = [
-        T::Boolean,
-        T::Int16,
-        T::Int32,
-        T::Int64,
-        T::Decimal,
-        T::Float32,
-        T::Float64,
-        T::Varchar,
-        T::Date,
-        T::Timestamp,
-        T::Timestampz,
-        T::Time,
-        T::Interval,
-    ];
-    let num_types = [
-        T::Int16,
-        T::Int32,
-        T::Int64,
-        T::Decimal,
-        T::Float32,
-        T::Float64,
-    ];
-
-    // logical expressions
-    for e in [E::Not, E::IsTrue, E::IsNotTrue, E::IsFalse, E::IsNotFalse] {
-        map.insert(e, vec![T::Boolean], T::Boolean);
-    }
-    for e in [E::And, E::Or] {
-        map.insert(e, vec![T::Boolean, T::Boolean], T::Boolean);
-    }
-    map.insert(E::BoolOut, vec![T::Boolean], T::Varchar);
-
-    // comparison expressions
-    for e in [E::IsNull, E::IsNotNull] {
-        for t in all_types {
-            map.insert(e, vec![t], T::Boolean);
-        }
-    }
-    let cmp_exprs = &[
-        E::Equal,
-        E::NotEqual,
-        E::LessThan,
-        E::LessThanOrEqual,
-        E::GreaterThan,
-        E::GreaterThanOrEqual,
-        E::IsDistinctFrom,
-        E::IsNotDistinctFrom,
-    ];
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &num_types);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct]);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Date, T::Timestamp, T::Timestampz]);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time, T::Interval]);
-    for e in cmp_exprs {
-        for t in [T::Boolean, T::Varchar] {
-            map.insert(*e, vec![t, t], T::Boolean);
-        }
-    }
-
-    let unary_atm_exprs = &[E::Abs, E::Neg];
-
-    build_unary_atm_funcs(&mut map, unary_atm_exprs, &num_types);
-    build_binary_atm_funcs(
-        &mut map,
-        &[E::Add, E::Subtract, E::Multiply, E::Divide],
-        &num_types,
-    );
-    build_binary_atm_funcs(
-        &mut map,
-        &[E::Modulus],
-        &[T::Int16, T::Int32, T::Int64, T::Decimal],
-    );
-    map.insert(E::RoundDigit, vec![T::Decimal, T::Int32], T::Decimal);
-
-    // build bitwise operator
-    // bitwise operator
-    let integral_types = [T::Int16, T::Int32, T::Int64]; // reusable for and/or/xor/not
-
-    build_binary_atm_funcs(
-        &mut map,
-        &[E::BitwiseAnd, E::BitwiseOr, E::BitwiseXor],
-        &integral_types,
-    );
-
-    // Shift Operator is not using `build_binary_atm_funcs` because
-    // allowed rhs is different from allowed lhs
-    // return type is lhs rather than larger of the two
-    for (e, lt, rt) in iproduct!(
-        &[E::BitwiseShiftLeft, E::BitwiseShiftRight],
-        &integral_types,
-        &[T::Int16, T::Int32]
-    ) {
-        map.insert(*e, vec![*lt, *rt], *lt);
-    }
-
-    build_unary_atm_funcs(&mut map, &[E::BitwiseNot], &[T::Int16, T::Int32, T::Int64]);
-
-    build_round_funcs(&mut map, E::Round);
-    build_round_funcs(&mut map, E::Ceil);
-    build_round_funcs(&mut map, E::Floor);
-
-    // temporal expressions
-    for (base, delta) in [
-        (T::Date, T::Int32),
-        (T::Timestamp, T::Interval),
-        (T::Timestampz, T::Interval),
-        (T::Time, T::Interval),
-    ] {
-        build_commutative_funcs(&mut map, E::Add, base, delta, base);
-        map.insert(E::Subtract, vec![base, delta], base);
-        map.insert(E::Subtract, vec![base, base], delta);
-    }
-    map.insert(E::Add, vec![T::Interval, T::Interval], T::Interval);
-    map.insert(E::Subtract, vec![T::Interval, T::Interval], T::Interval);
-
-    // date + interval = timestamp, date - interval = timestamp
-    build_commutative_funcs(&mut map, E::Add, T::Date, T::Interval, T::Timestamp);
-    map.insert(E::Subtract, vec![T::Date, T::Interval], T::Timestamp);
-    // date + time = timestamp
-    build_commutative_funcs(&mut map, E::Add, T::Date, T::Time, T::Timestamp);
-    // interval * float8 = interval, interval / float8 = interval
-    for t in num_types {
-        build_commutative_funcs(&mut map, E::Multiply, T::Interval, t, T::Interval);
-        map.insert(E::Divide, vec![T::Interval, t], T::Interval);
-    }
-
-    for t in [T::Timestamp, T::Time, T::Date] {
-        map.insert(E::Extract, vec![T::Varchar, t], T::Decimal);
-    }
-    for t in [T::Timestamp, T::Date] {
-        map.insert(E::TumbleStart, vec![t, T::Interval], T::Timestamp);
-    }
-    map.insert(
-        E::TumbleStart,
-        vec![T::Timestampz, T::Interval],
-        T::Timestampz,
-    );
-
-    // string expressions
-    for e in [E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper, E::Md5] {
-        map.insert(e, vec![T::Varchar], T::Varchar);
-    }
-    for e in [E::Trim, E::Ltrim, E::Rtrim] {
-        map.insert(e, vec![T::Varchar, T::Varchar], T::Varchar);
-    }
-    for e in [E::Repeat, E::Substr] {
-        map.insert(e, vec![T::Varchar, T::Int32], T::Varchar);
-    }
-    map.insert(E::Substr, vec![T::Varchar, T::Int32, T::Int32], T::Varchar);
-    for e in [E::Replace, E::Translate] {
-        map.insert(e, vec![T::Varchar, T::Varchar, T::Varchar], T::Varchar);
-    }
-    map.insert(
-        E::Overlay,
-        vec![T::Varchar, T::Varchar, T::Int32],
-        T::Varchar,
-    );
-    map.insert(
-        E::Overlay,
-        vec![T::Varchar, T::Varchar, T::Int32, T::Int32],
-        T::Varchar,
-    );
-    for e in [
-        E::Length,
-        E::Ascii,
-        E::CharLength,
-        E::OctetLength,
-        E::BitLength,
-    ] {
-        map.insert(e, vec![T::Varchar], T::Int32);
-    }
-    map.insert(E::Position, vec![T::Varchar, T::Varchar], T::Int32);
-    map.insert(E::Like, vec![T::Varchar, T::Varchar], T::Boolean);
-    map.insert(
-        E::SplitPart,
-        vec![T::Varchar, T::Varchar, T::Int32],
-        T::Varchar,
-    );
-    // TODO: Support more `to_char` types.
-    map.insert(E::ToChar, vec![T::Timestamp, T::Varchar], T::Varchar);
-
-    map
-}
-
-static FUNC_SIG_MAP: LazyLock<FuncSigMap> = LazyLock::new(build_type_derive_map);
-
-/// The table of function signatures.
-pub fn func_sigs() -> impl Iterator<Item = &'static FuncSign> {
-    FUNC_SIG_MAP.0.values().flatten()
-}
-
 #[cfg(test)]
 mod tests {
+    use itertools::iproduct;
+
     use super::*;
 
     fn infer_type_v0(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
@@ -916,30 +801,30 @@ mod tests {
             (Int16, Int32, Int32),
             (Int16, Int64, Int64),
             (Int16, Decimal, Decimal),
-            (Int16, Float32, Float32),
+            (Int16, Float32, Float64),
             (Int16, Float64, Float64),
             (Int32, Int16, Int32),
             (Int32, Int32, Int32),
             (Int32, Int64, Int64),
             (Int32, Decimal, Decimal),
-            (Int32, Float32, Float32),
+            (Int32, Float32, Float64),
             (Int32, Float64, Float64),
             (Int64, Int16, Int64),
             (Int64, Int32, Int64),
             (Int64, Int64, Int64),
             (Int64, Decimal, Decimal),
-            (Int64, Float32, Float32),
+            (Int64, Float32, Float64),
             (Int64, Float64, Float64),
             (Decimal, Int16, Decimal),
             (Decimal, Int32, Decimal),
             (Decimal, Int64, Decimal),
             (Decimal, Decimal, Decimal),
-            (Decimal, Float32, Float32),
+            (Decimal, Float32, Float64),
             (Decimal, Float64, Float64),
-            (Float32, Int16, Float32),
-            (Float32, Int32, Float32),
-            (Float32, Int64, Float32),
-            (Float32, Decimal, Float32),
+            (Float32, Int16, Float64),
+            (Float32, Int32, Float64),
+            (Float32, Int64, Float64),
+            (Float32, Decimal, Float64),
             (Float32, Float32, Float32),
             (Float32, Float64, Float64),
             (Float64, Int16, Float64),
@@ -1071,15 +956,15 @@ mod tests {
             (
                 "`top_matches` ranks by exact count then preferred count",
                 vec![
-                    vec![T::Float64, T::Float64, T::Float64, T::Timestampz], // 0 exact 3 preferred
-                    vec![T::Float64, T::Int32, T::Float32, T::Timestamp],    // 1 exact 1 preferred
-                    vec![T::Float32, T::Float32, T::Int32, T::Timestampz],   // 1 exact 0 preferred
-                    vec![T::Int32, T::Float64, T::Float32, T::Timestampz],   // 1 exact 1 preferred
-                    vec![T::Int32, T::Int16, T::Int32, T::Timestampz], // 2 exact 1 non-castable
-                    vec![T::Int32, T::Float64, T::Float32, T::Date],   // 1 exact 1 preferred
+                    vec![T::Float64, T::Float64, T::Float64, T::Timestamptz], /* 0 exact 3 preferred */
+                    vec![T::Float64, T::Int32, T::Float32, T::Timestamp], // 1 exact 1 preferred
+                    vec![T::Float32, T::Float32, T::Int32, T::Timestamptz], // 1 exact 0 preferred
+                    vec![T::Int32, T::Float64, T::Float32, T::Timestamptz], // 1 exact 1 preferred
+                    vec![T::Int32, T::Int16, T::Int32, T::Timestamptz],   // 2 exact 1 non-castable
+                    vec![T::Int32, T::Float64, T::Float32, T::Date],      // 1 exact 1 preferred
                 ],
                 &[Some(T::Int32), Some(T::Int32), Some(T::Int32), None] as &[_],
-                Ok(&[T::Int32, T::Float64, T::Float32, T::Timestampz] as &[_]),
+                Ok(&[T::Int32, T::Float64, T::Float32, T::Timestamptz] as &[_]),
             ),
             (
                 "Rule 4e fails and Rule 4f unique.",

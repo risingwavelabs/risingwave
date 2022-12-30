@@ -1,67 +1,32 @@
-# Remove "-Ctarget-feature=+avx2" if your x86_64 target does not support AVX2 vector extensions
+# Remove this if your x86_64 target does not support AVX2 vector extensions. #5367
 [target.x86_64-unknown-linux-gnu]
-rustflags = [
-    "-Clink-arg=-fuse-ld=lld",
-    "-Clink-arg=-Wl,--no-rosegment",
-    "-Ctarget-feature=+avx2",
-    "--cfg",
-    "tokio_unstable",
-    # lints
-    # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
-    "-Funused_must_use",
-    "-Wclippy::dbg_macro",
-    "-Wclippy::disallowed_methods",
-    "-Wclippy::disallowed_types",
-    "-Wclippy::doc_markdown",
-    "-Wclippy::explicit_into_iter_loop",
-    "-Wclippy::explicit_iter_loop",
-    "-Wclippy::inconsistent_struct_constructor",
-    "-Wclippy::unused_async",
-    "-Wclippy::map_flatten",
-    "-Wclippy::no_effect_underscore_binding",
-    "-Wclippy::await_holding_lock",
-    "-Wrustdoc::broken_intra_doc_links",
-    "-Wfuture_incompatible",
-    "-Wnonstandard_style",
-    "-Wrust_2018_idioms",
-]
+rustflags = ["-Ctarget-feature=+avx2"]
 
-# Remove "-Ctarget-feature=+neon" if your aarch64 target does not support NEON vector extensions
+# Remove this if your aarch64 target does not support NEON vector extensions. #5367
 [target.aarch64-unknown-linux-gnu]
+rustflags = ["-Ctarget-feature=+neon"]
+
+# Extra flags for Linux targets.
+[target.'cfg(target_os = "linux")']
 rustflags = [
-    "-Clink-arg=-fuse-ld=lld",
-    "-Clink-arg=-Wl,--no-rosegment",
-    "-Ctarget-feature=+neon",
-    "--cfg",
-    "tokio_unstable",
-    # lints
-    # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
-    "-Funused_must_use",
-    "-Wclippy::dbg_macro",
-    "-Wclippy::disallowed_methods",
-    "-Wclippy::disallowed_types",
-    "-Wclippy::doc_markdown",
-    "-Wclippy::explicit_into_iter_loop",
-    "-Wclippy::explicit_iter_loop",
-    "-Wclippy::inconsistent_struct_constructor",
-    "-Wclippy::unused_async",
-    "-Wclippy::map_flatten",
-    "-Wclippy::no_effect_underscore_binding",
-    "-Wclippy::await_holding_lock",
-    "-Wrustdoc::broken_intra_doc_links",
-    "-Wfuture_incompatible",
-    "-Wnonstandard_style",
-    "-Wrust_2018_idioms",
+    "-Clink-arg=-fuse-ld=lld",       #2781
+    "-Clink-arg=-Wl,--no-rosegment", #4574
 ]
 
-[build]
+[target.aarch64-apple-darwin]
 rustflags = [
-    "-Ctarget-cpu=native",
+    "-Clink-arg=-fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld"
+]
+
+# Flags for all targets.
+[target.'cfg(all())']
+rustflags = [
     "--cfg",
     "tokio_unstable",
     # lints
     # TODO: use lint configuration in cargo https://github.com/rust-lang/cargo/issues/5034
     "-Funused_must_use",
+    "-Aclippy::uninlined_format_args",
     "-Wclippy::dbg_macro",
     "-Wclippy::disallowed_methods",
     "-Wclippy::disallowed_types",

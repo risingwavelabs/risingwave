@@ -149,33 +149,27 @@ impl BlockCache {
         &self,
         sst_id: HummockSstableId,
         block_idx: u64,
-        f: F,
+        mut fetch_block: F,
     ) -> HummockResult<BlockHolder>
     where
-        F: FnOnce() -> Fut,
+        F: FnMut() -> Fut,
         Fut: Future<Output = HummockResult<Box<Block>>> + Send + 'static,
     {
         let h = Self::hash(sst_id, block_idx);
         let key = (sst_id, block_idx);
-        let entry = self
+        let block = self
             .inner
             .lookup_with_request_dedup::<_, HummockError, _>(h, key, || {
-                let f = f();
+                let f = fetch_block();
                 async move {
                     let block = f.await?;
                     let len = block.capacity();
                     Ok((block, len))
                 }
             })
-            .stack_trace("block_cache_lookup")
-            .await
-            .map_err(|e| {
-                HummockError::other(format!(
-                    "block cache lookup request dedup get cancel: {:?}",
-                    e,
-                ))
-            })??;
-        Ok(BlockHolder::from_cached_block(entry))
+            .verbose_stack_trace("block_cache_lookup")
+            .await?;
+        Ok(BlockHolder::from_cached_block(block))
     }
 
     fn hash(sst_id: HummockSstableId, block_idx: u64) -> u64 {

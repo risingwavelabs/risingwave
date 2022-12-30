@@ -1,5 +1,7 @@
 /* eslint-disable */
+import { Table } from "./catalog";
 import { Status, WorkerNode } from "./common";
+import { CompactorRuntimeConfig } from "./compactor";
 
 export const protobufPackage = "hummock";
 
@@ -52,6 +54,8 @@ export interface SstableInfo {
   metaOffset: number;
   staleKeyCount: number;
   totalKeyCount: number;
+  /** When a SST is divided, its divide_version will increase one. */
+  divideVersion: number;
 }
 
 export interface OverlappingLevel {
@@ -73,11 +77,30 @@ export interface InputLevel {
   tableInfos: SstableInfo[];
 }
 
-export interface LevelDelta {
+export interface IntraLevelDelta {
   levelIdx: number;
   l0SubLevelId: number;
   removedTableIds: number[];
   insertedTableInfos: SstableInfo[];
+}
+
+export interface GroupConstruct {
+  groupConfig:
+    | CompactionConfig
+    | undefined;
+  /** If `parent_group_id` is not 0, it means `parent_group_id` splits into `parent_group_id` and this group, so this group is not empty initially. */
+  parentGroupId: number;
+  tableIds: number[];
+}
+
+export interface GroupDestroy {
+}
+
+export interface GroupDelta {
+  deltaType?: { $case: "intraLevel"; intraLevel: IntraLevelDelta } | {
+    $case: "groupConstruct";
+    groupConstruct: GroupConstruct;
+  } | { $case: "groupDestroy"; groupDestroy: GroupDestroy };
 }
 
 export interface UncommittedEpoch {
@@ -111,7 +134,7 @@ export interface HummockVersionDelta {
   id: number;
   prevId: number;
   /** Levels of each compaction group */
-  levelDeltas: { [key: number]: HummockVersionDelta_LevelDeltas };
+  groupDeltas: { [key: number]: HummockVersionDelta_GroupDeltas };
   maxCommittedEpoch: number;
   /**
    * Snapshots with epoch less than the safe epoch have been GCed.
@@ -119,15 +142,16 @@ export interface HummockVersionDelta {
    */
   safeEpoch: number;
   trivialMove: boolean;
+  gcSstIds: number[];
 }
 
-export interface HummockVersionDelta_LevelDeltas {
-  levelDeltas: LevelDelta[];
+export interface HummockVersionDelta_GroupDeltas {
+  groupDeltas: GroupDelta[];
 }
 
-export interface HummockVersionDelta_LevelDeltasEntry {
+export interface HummockVersionDelta_GroupDeltasEntry {
   key: number;
-  value: HummockVersionDelta_LevelDeltas | undefined;
+  value: HummockVersionDelta_GroupDeltas | undefined;
 }
 
 export interface HummockVersionDeltas {
@@ -149,14 +173,10 @@ export interface PinVersionRequest {
 
 export interface PinVersionResponse {
   status: Status | undefined;
-  payload?: { $case: "versionDeltas"; versionDeltas: PinVersionResponse_HummockVersionDeltas } | {
+  payload?: { $case: "versionDeltas"; versionDeltas: HummockVersionDeltas } | {
     $case: "pinnedVersion";
     pinnedVersion: HummockVersion;
   };
-}
-
-export interface PinVersionResponse_HummockVersionDeltas {
-  delta: HummockVersionDelta[];
 }
 
 export interface UnpinVersionBeforeRequest {
@@ -186,6 +206,18 @@ export interface UnpinVersionResponse {
 
 export interface PinSnapshotRequest {
   contextId: number;
+}
+
+export interface PinSpecificSnapshotRequest {
+  contextId: number;
+  epoch: number;
+}
+
+export interface GetAssignedCompactTaskNumRequest {
+}
+
+export interface GetAssignedCompactTaskNumResponse {
+  numTasks: number;
 }
 
 export interface PinSnapshotResponse {
@@ -218,10 +250,14 @@ export interface UnpinSnapshotBeforeResponse {
   status: Status | undefined;
 }
 
+/**
+ * When `right_exclusive=false`, it represents [left, right], of which both boundary are open. When `right_exclusive=true`,
+ * it represents [left, right), of which right is exclusive.
+ */
 export interface KeyRange {
   left: Uint8Array;
   right: Uint8Array;
-  inf: boolean;
+  rightExclusive: boolean;
 }
 
 export interface TableOption {
@@ -267,6 +303,7 @@ export const CompactTask_TaskStatus = {
   ASSIGN_FAIL_CANCELED: "ASSIGN_FAIL_CANCELED",
   SEND_FAIL_CANCELED: "SEND_FAIL_CANCELED",
   MANUAL_CANCELED: "MANUAL_CANCELED",
+  INVALID_GROUP_CANCELED: "INVALID_GROUP_CANCELED",
   EXECUTE_FAILED: "EXECUTE_FAILED",
   JOIN_HANDLE_FAILED: "JOIN_HANDLE_FAILED",
   TRACK_SST_ID_FAILED: "TRACK_SST_ID_FAILED",
@@ -302,12 +339,15 @@ export function compactTask_TaskStatusFromJSON(object: any): CompactTask_TaskSta
     case "MANUAL_CANCELED":
       return CompactTask_TaskStatus.MANUAL_CANCELED;
     case 8:
+    case "INVALID_GROUP_CANCELED":
+      return CompactTask_TaskStatus.INVALID_GROUP_CANCELED;
+    case 9:
     case "EXECUTE_FAILED":
       return CompactTask_TaskStatus.EXECUTE_FAILED;
-    case 9:
+    case 10:
     case "JOIN_HANDLE_FAILED":
       return CompactTask_TaskStatus.JOIN_HANDLE_FAILED;
-    case 10:
+    case 11:
     case "TRACK_SST_ID_FAILED":
       return CompactTask_TaskStatus.TRACK_SST_ID_FAILED;
     case -1:
@@ -335,6 +375,8 @@ export function compactTask_TaskStatusToJSON(object: CompactTask_TaskStatus): st
       return "SEND_FAIL_CANCELED";
     case CompactTask_TaskStatus.MANUAL_CANCELED:
       return "MANUAL_CANCELED";
+    case CompactTask_TaskStatus.INVALID_GROUP_CANCELED:
+      return "INVALID_GROUP_CANCELED";
     case CompactTask_TaskStatus.EXECUTE_FAILED:
       return "EXECUTE_FAILED";
     case CompactTask_TaskStatus.JOIN_HANDLE_FAILED:
@@ -371,6 +413,7 @@ export interface CompactStatus {
 
 export interface CompactionGroup {
   id: number;
+  parentId: number;
   memberTableIds: number[];
   compactionConfig: CompactionConfig | undefined;
   tableIdToOptions: { [key: number]: TableOption };
@@ -397,6 +440,12 @@ export interface GetCompactionTasksResponse {
 export interface ReportCompactionTasksRequest {
   contextId: number;
   compactTask: CompactTask | undefined;
+  tableStatsChange: { [key: number]: TableStats };
+}
+
+export interface ReportCompactionTasksRequest_TableStatsChangeEntry {
+  key: number;
+  value: TableStats | undefined;
 }
 
 export interface ReportCompactionTasksResponse {
@@ -532,12 +581,13 @@ export interface TriggerFullGCResponse {
   status: Status | undefined;
 }
 
-export interface GetVersionDeltasRequest {
+export interface ListVersionDeltasRequest {
   startId: number;
-  numEpochs: number;
+  numLimit: number;
+  committedEpochLimit: number;
 }
 
-export interface GetVersionDeltasResponse {
+export interface ListVersionDeltasResponse {
   versionDeltas: HummockVersionDeltas | undefined;
 }
 
@@ -575,13 +625,88 @@ export interface RiseCtlGetPinnedSnapshotsSummaryResponse {
   summary: PinnedSnapshotsSummary | undefined;
 }
 
+export interface ResetCurrentVersionRequest {
+}
+
+export interface ResetCurrentVersionResponse {
+  oldVersion: HummockVersion | undefined;
+}
+
+export interface InitMetadataForReplayRequest {
+  tables: Table[];
+  compactionGroups: CompactionGroup[];
+}
+
+export interface InitMetadataForReplayResponse {
+}
+
+export interface ReplayVersionDeltaRequest {
+  versionDelta: HummockVersionDelta | undefined;
+}
+
+export interface ReplayVersionDeltaResponse {
+  version: HummockVersion | undefined;
+  modifiedCompactionGroups: number[];
+}
+
+export interface TriggerCompactionDeterministicRequest {
+  versionId: number;
+  compactionGroups: number[];
+}
+
+export interface TriggerCompactionDeterministicResponse {
+}
+
+export interface DisableCommitEpochRequest {
+}
+
+export interface DisableCommitEpochResponse {
+  currentVersion: HummockVersion | undefined;
+}
+
+export interface RiseCtlListCompactionGroupRequest {
+}
+
+export interface RiseCtlListCompactionGroupResponse {
+  status: Status | undefined;
+  compactionGroups: CompactionGroup[];
+}
+
+export interface RiseCtlUpdateCompactionConfigRequest {
+  compactionGroupIds: number[];
+  configs: RiseCtlUpdateCompactionConfigRequest_MutableConfig[];
+}
+
+export interface RiseCtlUpdateCompactionConfigRequest_MutableConfig {
+  mutableConfig?:
+    | { $case: "maxBytesForLevelBase"; maxBytesForLevelBase: number }
+    | { $case: "maxBytesForLevelMultiplier"; maxBytesForLevelMultiplier: number }
+    | { $case: "maxCompactionBytes"; maxCompactionBytes: number }
+    | { $case: "subLevelMaxCompactionBytes"; subLevelMaxCompactionBytes: number }
+    | { $case: "level0TierCompactFileNumber"; level0TierCompactFileNumber: number }
+    | { $case: "targetFileSizeBase"; targetFileSizeBase: number }
+    | { $case: "compactionFilterMask"; compactionFilterMask: number }
+    | { $case: "maxSubCompaction"; maxSubCompaction: number };
+}
+
+export interface RiseCtlUpdateCompactionConfigResponse {
+  status: Status | undefined;
+}
+
+export interface SetCompactorRuntimeConfigRequest {
+  contextId: number;
+  config: CompactorRuntimeConfig | undefined;
+}
+
+export interface SetCompactorRuntimeConfigResponse {
+}
+
 export interface CompactionConfig {
   maxBytesForLevelBase: number;
   maxLevel: number;
   maxBytesForLevelMultiplier: number;
   maxCompactionBytes: number;
   subLevelMaxCompactionBytes: number;
-  level0TriggerFileNumber: number;
   level0TierCompactFileNumber: number;
   compactionMode: CompactionConfig_CompactionMode;
   compressionAlgorithm: string[];
@@ -626,8 +751,33 @@ export function compactionConfig_CompactionModeToJSON(object: CompactionConfig_C
   }
 }
 
+export interface TableStats {
+  totalKeySize: number;
+  totalValueSize: number;
+  totalKeyCount: number;
+}
+
+export interface HummockVersionStats {
+  hummockVersionId: number;
+  tableStats: { [key: number]: TableStats };
+}
+
+export interface HummockVersionStats_TableStatsEntry {
+  key: number;
+  value: TableStats | undefined;
+}
+
 function createBaseSstableInfo(): SstableInfo {
-  return { id: 0, keyRange: undefined, fileSize: 0, tableIds: [], metaOffset: 0, staleKeyCount: 0, totalKeyCount: 0 };
+  return {
+    id: 0,
+    keyRange: undefined,
+    fileSize: 0,
+    tableIds: [],
+    metaOffset: 0,
+    staleKeyCount: 0,
+    totalKeyCount: 0,
+    divideVersion: 0,
+  };
 }
 
 export const SstableInfo = {
@@ -640,6 +790,7 @@ export const SstableInfo = {
       metaOffset: isSet(object.metaOffset) ? Number(object.metaOffset) : 0,
       staleKeyCount: isSet(object.staleKeyCount) ? Number(object.staleKeyCount) : 0,
       totalKeyCount: isSet(object.totalKeyCount) ? Number(object.totalKeyCount) : 0,
+      divideVersion: isSet(object.divideVersion) ? Number(object.divideVersion) : 0,
     };
   },
 
@@ -656,6 +807,7 @@ export const SstableInfo = {
     message.metaOffset !== undefined && (obj.metaOffset = Math.round(message.metaOffset));
     message.staleKeyCount !== undefined && (obj.staleKeyCount = Math.round(message.staleKeyCount));
     message.totalKeyCount !== undefined && (obj.totalKeyCount = Math.round(message.totalKeyCount));
+    message.divideVersion !== undefined && (obj.divideVersion = Math.round(message.divideVersion));
     return obj;
   },
 
@@ -670,6 +822,7 @@ export const SstableInfo = {
     message.metaOffset = object.metaOffset ?? 0;
     message.staleKeyCount = object.staleKeyCount ?? 0;
     message.totalKeyCount = object.totalKeyCount ?? 0;
+    message.divideVersion = object.divideVersion ?? 0;
     return message;
   },
 };
@@ -779,12 +932,12 @@ export const InputLevel = {
   },
 };
 
-function createBaseLevelDelta(): LevelDelta {
+function createBaseIntraLevelDelta(): IntraLevelDelta {
   return { levelIdx: 0, l0SubLevelId: 0, removedTableIds: [], insertedTableInfos: [] };
 }
 
-export const LevelDelta = {
-  fromJSON(object: any): LevelDelta {
+export const IntraLevelDelta = {
+  fromJSON(object: any): IntraLevelDelta {
     return {
       levelIdx: isSet(object.levelIdx) ? Number(object.levelIdx) : 0,
       l0SubLevelId: isSet(object.l0SubLevelId) ? Number(object.l0SubLevelId) : 0,
@@ -795,7 +948,7 @@ export const LevelDelta = {
     };
   },
 
-  toJSON(message: LevelDelta): unknown {
+  toJSON(message: IntraLevelDelta): unknown {
     const obj: any = {};
     message.levelIdx !== undefined && (obj.levelIdx = Math.round(message.levelIdx));
     message.l0SubLevelId !== undefined && (obj.l0SubLevelId = Math.round(message.l0SubLevelId));
@@ -812,12 +965,133 @@ export const LevelDelta = {
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<LevelDelta>, I>>(object: I): LevelDelta {
-    const message = createBaseLevelDelta();
+  fromPartial<I extends Exact<DeepPartial<IntraLevelDelta>, I>>(object: I): IntraLevelDelta {
+    const message = createBaseIntraLevelDelta();
     message.levelIdx = object.levelIdx ?? 0;
     message.l0SubLevelId = object.l0SubLevelId ?? 0;
     message.removedTableIds = object.removedTableIds?.map((e) => e) || [];
     message.insertedTableInfos = object.insertedTableInfos?.map((e) => SstableInfo.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseGroupConstruct(): GroupConstruct {
+  return { groupConfig: undefined, parentGroupId: 0, tableIds: [] };
+}
+
+export const GroupConstruct = {
+  fromJSON(object: any): GroupConstruct {
+    return {
+      groupConfig: isSet(object.groupConfig) ? CompactionConfig.fromJSON(object.groupConfig) : undefined,
+      parentGroupId: isSet(object.parentGroupId) ? Number(object.parentGroupId) : 0,
+      tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
+    };
+  },
+
+  toJSON(message: GroupConstruct): unknown {
+    const obj: any = {};
+    message.groupConfig !== undefined &&
+      (obj.groupConfig = message.groupConfig ? CompactionConfig.toJSON(message.groupConfig) : undefined);
+    message.parentGroupId !== undefined && (obj.parentGroupId = Math.round(message.parentGroupId));
+    if (message.tableIds) {
+      obj.tableIds = message.tableIds.map((e) => Math.round(e));
+    } else {
+      obj.tableIds = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GroupConstruct>, I>>(object: I): GroupConstruct {
+    const message = createBaseGroupConstruct();
+    message.groupConfig = (object.groupConfig !== undefined && object.groupConfig !== null)
+      ? CompactionConfig.fromPartial(object.groupConfig)
+      : undefined;
+    message.parentGroupId = object.parentGroupId ?? 0;
+    message.tableIds = object.tableIds?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseGroupDestroy(): GroupDestroy {
+  return {};
+}
+
+export const GroupDestroy = {
+  fromJSON(_: any): GroupDestroy {
+    return {};
+  },
+
+  toJSON(_: GroupDestroy): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GroupDestroy>, I>>(_: I): GroupDestroy {
+    const message = createBaseGroupDestroy();
+    return message;
+  },
+};
+
+function createBaseGroupDelta(): GroupDelta {
+  return { deltaType: undefined };
+}
+
+export const GroupDelta = {
+  fromJSON(object: any): GroupDelta {
+    return {
+      deltaType: isSet(object.intraLevel)
+        ? { $case: "intraLevel", intraLevel: IntraLevelDelta.fromJSON(object.intraLevel) }
+        : isSet(object.groupConstruct)
+        ? { $case: "groupConstruct", groupConstruct: GroupConstruct.fromJSON(object.groupConstruct) }
+        : isSet(object.groupDestroy)
+        ? { $case: "groupDestroy", groupDestroy: GroupDestroy.fromJSON(object.groupDestroy) }
+        : undefined,
+    };
+  },
+
+  toJSON(message: GroupDelta): unknown {
+    const obj: any = {};
+    message.deltaType?.$case === "intraLevel" && (obj.intraLevel = message.deltaType?.intraLevel
+      ? IntraLevelDelta.toJSON(message.deltaType?.intraLevel)
+      : undefined);
+    message.deltaType?.$case === "groupConstruct" && (obj.groupConstruct = message.deltaType?.groupConstruct
+      ? GroupConstruct.toJSON(message.deltaType?.groupConstruct)
+      : undefined);
+    message.deltaType?.$case === "groupDestroy" && (obj.groupDestroy = message.deltaType?.groupDestroy
+      ? GroupDestroy.toJSON(message.deltaType?.groupDestroy)
+      : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GroupDelta>, I>>(object: I): GroupDelta {
+    const message = createBaseGroupDelta();
+    if (
+      object.deltaType?.$case === "intraLevel" &&
+      object.deltaType?.intraLevel !== undefined &&
+      object.deltaType?.intraLevel !== null
+    ) {
+      message.deltaType = { $case: "intraLevel", intraLevel: IntraLevelDelta.fromPartial(object.deltaType.intraLevel) };
+    }
+    if (
+      object.deltaType?.$case === "groupConstruct" &&
+      object.deltaType?.groupConstruct !== undefined &&
+      object.deltaType?.groupConstruct !== null
+    ) {
+      message.deltaType = {
+        $case: "groupConstruct",
+        groupConstruct: GroupConstruct.fromPartial(object.deltaType.groupConstruct),
+      };
+    }
+    if (
+      object.deltaType?.$case === "groupDestroy" &&
+      object.deltaType?.groupDestroy !== undefined &&
+      object.deltaType?.groupDestroy !== null
+    ) {
+      message.deltaType = {
+        $case: "groupDestroy",
+        groupDestroy: GroupDestroy.fromPartial(object.deltaType.groupDestroy),
+      };
+    }
     return message;
   },
 };
@@ -966,7 +1240,7 @@ export const HummockVersion_LevelsEntry = {
 };
 
 function createBaseHummockVersionDelta(): HummockVersionDelta {
-  return { id: 0, prevId: 0, levelDeltas: {}, maxCommittedEpoch: 0, safeEpoch: 0, trivialMove: false };
+  return { id: 0, prevId: 0, groupDeltas: {}, maxCommittedEpoch: 0, safeEpoch: 0, trivialMove: false, gcSstIds: [] };
 }
 
 export const HummockVersionDelta = {
@@ -974,10 +1248,10 @@ export const HummockVersionDelta = {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
       prevId: isSet(object.prevId) ? Number(object.prevId) : 0,
-      levelDeltas: isObject(object.levelDeltas)
-        ? Object.entries(object.levelDeltas).reduce<{ [key: number]: HummockVersionDelta_LevelDeltas }>(
+      groupDeltas: isObject(object.groupDeltas)
+        ? Object.entries(object.groupDeltas).reduce<{ [key: number]: HummockVersionDelta_GroupDeltas }>(
           (acc, [key, value]) => {
-            acc[Number(key)] = HummockVersionDelta_LevelDeltas.fromJSON(value);
+            acc[Number(key)] = HummockVersionDelta_GroupDeltas.fromJSON(value);
             return acc;
           },
           {},
@@ -986,6 +1260,9 @@ export const HummockVersionDelta = {
       maxCommittedEpoch: isSet(object.maxCommittedEpoch) ? Number(object.maxCommittedEpoch) : 0,
       safeEpoch: isSet(object.safeEpoch) ? Number(object.safeEpoch) : 0,
       trivialMove: isSet(object.trivialMove) ? Boolean(object.trivialMove) : false,
+      gcSstIds: Array.isArray(object?.gcSstIds)
+        ? object.gcSstIds.map((e: any) => Number(e))
+        : [],
     };
   },
 
@@ -993,15 +1270,20 @@ export const HummockVersionDelta = {
     const obj: any = {};
     message.id !== undefined && (obj.id = Math.round(message.id));
     message.prevId !== undefined && (obj.prevId = Math.round(message.prevId));
-    obj.levelDeltas = {};
-    if (message.levelDeltas) {
-      Object.entries(message.levelDeltas).forEach(([k, v]) => {
-        obj.levelDeltas[k] = HummockVersionDelta_LevelDeltas.toJSON(v);
+    obj.groupDeltas = {};
+    if (message.groupDeltas) {
+      Object.entries(message.groupDeltas).forEach(([k, v]) => {
+        obj.groupDeltas[k] = HummockVersionDelta_GroupDeltas.toJSON(v);
       });
     }
     message.maxCommittedEpoch !== undefined && (obj.maxCommittedEpoch = Math.round(message.maxCommittedEpoch));
     message.safeEpoch !== undefined && (obj.safeEpoch = Math.round(message.safeEpoch));
     message.trivialMove !== undefined && (obj.trivialMove = message.trivialMove);
+    if (message.gcSstIds) {
+      obj.gcSstIds = message.gcSstIds.map((e) => Math.round(e));
+    } else {
+      obj.gcSstIds = [];
+    }
     return obj;
   },
 
@@ -1009,78 +1291,79 @@ export const HummockVersionDelta = {
     const message = createBaseHummockVersionDelta();
     message.id = object.id ?? 0;
     message.prevId = object.prevId ?? 0;
-    message.levelDeltas = Object.entries(object.levelDeltas ?? {}).reduce<
-      { [key: number]: HummockVersionDelta_LevelDeltas }
+    message.groupDeltas = Object.entries(object.groupDeltas ?? {}).reduce<
+      { [key: number]: HummockVersionDelta_GroupDeltas }
     >((acc, [key, value]) => {
       if (value !== undefined) {
-        acc[Number(key)] = HummockVersionDelta_LevelDeltas.fromPartial(value);
+        acc[Number(key)] = HummockVersionDelta_GroupDeltas.fromPartial(value);
       }
       return acc;
     }, {});
     message.maxCommittedEpoch = object.maxCommittedEpoch ?? 0;
     message.safeEpoch = object.safeEpoch ?? 0;
     message.trivialMove = object.trivialMove ?? false;
+    message.gcSstIds = object.gcSstIds?.map((e) => e) || [];
     return message;
   },
 };
 
-function createBaseHummockVersionDelta_LevelDeltas(): HummockVersionDelta_LevelDeltas {
-  return { levelDeltas: [] };
+function createBaseHummockVersionDelta_GroupDeltas(): HummockVersionDelta_GroupDeltas {
+  return { groupDeltas: [] };
 }
 
-export const HummockVersionDelta_LevelDeltas = {
-  fromJSON(object: any): HummockVersionDelta_LevelDeltas {
+export const HummockVersionDelta_GroupDeltas = {
+  fromJSON(object: any): HummockVersionDelta_GroupDeltas {
     return {
-      levelDeltas: Array.isArray(object?.levelDeltas) ? object.levelDeltas.map((e: any) => LevelDelta.fromJSON(e)) : [],
+      groupDeltas: Array.isArray(object?.groupDeltas) ? object.groupDeltas.map((e: any) => GroupDelta.fromJSON(e)) : [],
     };
   },
 
-  toJSON(message: HummockVersionDelta_LevelDeltas): unknown {
+  toJSON(message: HummockVersionDelta_GroupDeltas): unknown {
     const obj: any = {};
-    if (message.levelDeltas) {
-      obj.levelDeltas = message.levelDeltas.map((e) => e ? LevelDelta.toJSON(e) : undefined);
+    if (message.groupDeltas) {
+      obj.groupDeltas = message.groupDeltas.map((e) => e ? GroupDelta.toJSON(e) : undefined);
     } else {
-      obj.levelDeltas = [];
+      obj.groupDeltas = [];
     }
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<HummockVersionDelta_LevelDeltas>, I>>(
+  fromPartial<I extends Exact<DeepPartial<HummockVersionDelta_GroupDeltas>, I>>(
     object: I,
-  ): HummockVersionDelta_LevelDeltas {
-    const message = createBaseHummockVersionDelta_LevelDeltas();
-    message.levelDeltas = object.levelDeltas?.map((e) => LevelDelta.fromPartial(e)) || [];
+  ): HummockVersionDelta_GroupDeltas {
+    const message = createBaseHummockVersionDelta_GroupDeltas();
+    message.groupDeltas = object.groupDeltas?.map((e) => GroupDelta.fromPartial(e)) || [];
     return message;
   },
 };
 
-function createBaseHummockVersionDelta_LevelDeltasEntry(): HummockVersionDelta_LevelDeltasEntry {
+function createBaseHummockVersionDelta_GroupDeltasEntry(): HummockVersionDelta_GroupDeltasEntry {
   return { key: 0, value: undefined };
 }
 
-export const HummockVersionDelta_LevelDeltasEntry = {
-  fromJSON(object: any): HummockVersionDelta_LevelDeltasEntry {
+export const HummockVersionDelta_GroupDeltasEntry = {
+  fromJSON(object: any): HummockVersionDelta_GroupDeltasEntry {
     return {
       key: isSet(object.key) ? Number(object.key) : 0,
-      value: isSet(object.value) ? HummockVersionDelta_LevelDeltas.fromJSON(object.value) : undefined,
+      value: isSet(object.value) ? HummockVersionDelta_GroupDeltas.fromJSON(object.value) : undefined,
     };
   },
 
-  toJSON(message: HummockVersionDelta_LevelDeltasEntry): unknown {
+  toJSON(message: HummockVersionDelta_GroupDeltasEntry): unknown {
     const obj: any = {};
     message.key !== undefined && (obj.key = Math.round(message.key));
     message.value !== undefined &&
-      (obj.value = message.value ? HummockVersionDelta_LevelDeltas.toJSON(message.value) : undefined);
+      (obj.value = message.value ? HummockVersionDelta_GroupDeltas.toJSON(message.value) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<HummockVersionDelta_LevelDeltasEntry>, I>>(
+  fromPartial<I extends Exact<DeepPartial<HummockVersionDelta_GroupDeltasEntry>, I>>(
     object: I,
-  ): HummockVersionDelta_LevelDeltasEntry {
-    const message = createBaseHummockVersionDelta_LevelDeltasEntry();
+  ): HummockVersionDelta_GroupDeltasEntry {
+    const message = createBaseHummockVersionDelta_GroupDeltasEntry();
     message.key = object.key ?? 0;
     message.value = (object.value !== undefined && object.value !== null)
-      ? HummockVersionDelta_LevelDeltas.fromPartial(object.value)
+      ? HummockVersionDelta_GroupDeltas.fromPartial(object.value)
       : undefined;
     return message;
   },
@@ -1179,10 +1462,7 @@ export const PinVersionResponse = {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
       payload: isSet(object.versionDeltas)
-        ? {
-          $case: "versionDeltas",
-          versionDeltas: PinVersionResponse_HummockVersionDeltas.fromJSON(object.versionDeltas),
-        }
+        ? { $case: "versionDeltas", versionDeltas: HummockVersionDeltas.fromJSON(object.versionDeltas) }
         : isSet(object.pinnedVersion)
         ? { $case: "pinnedVersion", pinnedVersion: HummockVersion.fromJSON(object.pinnedVersion) }
         : undefined,
@@ -1193,7 +1473,7 @@ export const PinVersionResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.payload?.$case === "versionDeltas" && (obj.versionDeltas = message.payload?.versionDeltas
-      ? PinVersionResponse_HummockVersionDeltas.toJSON(message.payload?.versionDeltas)
+      ? HummockVersionDeltas.toJSON(message.payload?.versionDeltas)
       : undefined);
     message.payload?.$case === "pinnedVersion" && (obj.pinnedVersion = message.payload?.pinnedVersion
       ? HummockVersion.toJSON(message.payload?.pinnedVersion)
@@ -1213,7 +1493,7 @@ export const PinVersionResponse = {
     ) {
       message.payload = {
         $case: "versionDeltas",
-        versionDeltas: PinVersionResponse_HummockVersionDeltas.fromPartial(object.payload.versionDeltas),
+        versionDeltas: HummockVersionDeltas.fromPartial(object.payload.versionDeltas),
       };
     }
     if (
@@ -1226,34 +1506,6 @@ export const PinVersionResponse = {
         pinnedVersion: HummockVersion.fromPartial(object.payload.pinnedVersion),
       };
     }
-    return message;
-  },
-};
-
-function createBasePinVersionResponse_HummockVersionDeltas(): PinVersionResponse_HummockVersionDeltas {
-  return { delta: [] };
-}
-
-export const PinVersionResponse_HummockVersionDeltas = {
-  fromJSON(object: any): PinVersionResponse_HummockVersionDeltas {
-    return { delta: Array.isArray(object?.delta) ? object.delta.map((e: any) => HummockVersionDelta.fromJSON(e)) : [] };
-  },
-
-  toJSON(message: PinVersionResponse_HummockVersionDeltas): unknown {
-    const obj: any = {};
-    if (message.delta) {
-      obj.delta = message.delta.map((e) => e ? HummockVersionDelta.toJSON(e) : undefined);
-    } else {
-      obj.delta = [];
-    }
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<PinVersionResponse_HummockVersionDeltas>, I>>(
-    object: I,
-  ): PinVersionResponse_HummockVersionDeltas {
-    const message = createBasePinVersionResponse_HummockVersionDeltas();
-    message.delta = object.delta?.map((e) => HummockVersionDelta.fromPartial(e)) || [];
     return message;
   },
 };
@@ -1425,6 +1677,79 @@ export const PinSnapshotRequest = {
   fromPartial<I extends Exact<DeepPartial<PinSnapshotRequest>, I>>(object: I): PinSnapshotRequest {
     const message = createBasePinSnapshotRequest();
     message.contextId = object.contextId ?? 0;
+    return message;
+  },
+};
+
+function createBasePinSpecificSnapshotRequest(): PinSpecificSnapshotRequest {
+  return { contextId: 0, epoch: 0 };
+}
+
+export const PinSpecificSnapshotRequest = {
+  fromJSON(object: any): PinSpecificSnapshotRequest {
+    return {
+      contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
+      epoch: isSet(object.epoch) ? Number(object.epoch) : 0,
+    };
+  },
+
+  toJSON(message: PinSpecificSnapshotRequest): unknown {
+    const obj: any = {};
+    message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
+    message.epoch !== undefined && (obj.epoch = Math.round(message.epoch));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<PinSpecificSnapshotRequest>, I>>(object: I): PinSpecificSnapshotRequest {
+    const message = createBasePinSpecificSnapshotRequest();
+    message.contextId = object.contextId ?? 0;
+    message.epoch = object.epoch ?? 0;
+    return message;
+  },
+};
+
+function createBaseGetAssignedCompactTaskNumRequest(): GetAssignedCompactTaskNumRequest {
+  return {};
+}
+
+export const GetAssignedCompactTaskNumRequest = {
+  fromJSON(_: any): GetAssignedCompactTaskNumRequest {
+    return {};
+  },
+
+  toJSON(_: GetAssignedCompactTaskNumRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetAssignedCompactTaskNumRequest>, I>>(
+    _: I,
+  ): GetAssignedCompactTaskNumRequest {
+    const message = createBaseGetAssignedCompactTaskNumRequest();
+    return message;
+  },
+};
+
+function createBaseGetAssignedCompactTaskNumResponse(): GetAssignedCompactTaskNumResponse {
+  return { numTasks: 0 };
+}
+
+export const GetAssignedCompactTaskNumResponse = {
+  fromJSON(object: any): GetAssignedCompactTaskNumResponse {
+    return { numTasks: isSet(object.numTasks) ? Number(object.numTasks) : 0 };
+  },
+
+  toJSON(message: GetAssignedCompactTaskNumResponse): unknown {
+    const obj: any = {};
+    message.numTasks !== undefined && (obj.numTasks = Math.round(message.numTasks));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetAssignedCompactTaskNumResponse>, I>>(
+    object: I,
+  ): GetAssignedCompactTaskNumResponse {
+    const message = createBaseGetAssignedCompactTaskNumResponse();
+    message.numTasks = object.numTasks ?? 0;
     return message;
   },
 };
@@ -1614,7 +1939,7 @@ export const UnpinSnapshotBeforeResponse = {
 };
 
 function createBaseKeyRange(): KeyRange {
-  return { left: new Uint8Array(), right: new Uint8Array(), inf: false };
+  return { left: new Uint8Array(), right: new Uint8Array(), rightExclusive: false };
 }
 
 export const KeyRange = {
@@ -1622,7 +1947,7 @@ export const KeyRange = {
     return {
       left: isSet(object.left) ? bytesFromBase64(object.left) : new Uint8Array(),
       right: isSet(object.right) ? bytesFromBase64(object.right) : new Uint8Array(),
-      inf: isSet(object.inf) ? Boolean(object.inf) : false,
+      rightExclusive: isSet(object.rightExclusive) ? Boolean(object.rightExclusive) : false,
     };
   },
 
@@ -1632,7 +1957,7 @@ export const KeyRange = {
       (obj.left = base64FromBytes(message.left !== undefined ? message.left : new Uint8Array()));
     message.right !== undefined &&
       (obj.right = base64FromBytes(message.right !== undefined ? message.right : new Uint8Array()));
-    message.inf !== undefined && (obj.inf = message.inf);
+    message.rightExclusive !== undefined && (obj.rightExclusive = message.rightExclusive);
     return obj;
   },
 
@@ -1640,7 +1965,7 @@ export const KeyRange = {
     const message = createBaseKeyRange();
     message.left = object.left ?? new Uint8Array();
     message.right = object.right ?? new Uint8Array();
-    message.inf = object.inf ?? false;
+    message.rightExclusive = object.rightExclusive ?? false;
     return message;
   },
 };
@@ -1930,13 +2255,14 @@ export const CompactStatus = {
 };
 
 function createBaseCompactionGroup(): CompactionGroup {
-  return { id: 0, memberTableIds: [], compactionConfig: undefined, tableIdToOptions: {} };
+  return { id: 0, parentId: 0, memberTableIds: [], compactionConfig: undefined, tableIdToOptions: {} };
 }
 
 export const CompactionGroup = {
   fromJSON(object: any): CompactionGroup {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
+      parentId: isSet(object.parentId) ? Number(object.parentId) : 0,
       memberTableIds: Array.isArray(object?.memberTableIds) ? object.memberTableIds.map((e: any) => Number(e)) : [],
       compactionConfig: isSet(object.compactionConfig) ? CompactionConfig.fromJSON(object.compactionConfig) : undefined,
       tableIdToOptions: isObject(object.tableIdToOptions)
@@ -1951,6 +2277,7 @@ export const CompactionGroup = {
   toJSON(message: CompactionGroup): unknown {
     const obj: any = {};
     message.id !== undefined && (obj.id = Math.round(message.id));
+    message.parentId !== undefined && (obj.parentId = Math.round(message.parentId));
     if (message.memberTableIds) {
       obj.memberTableIds = message.memberTableIds.map((e) => Math.round(e));
     } else {
@@ -1970,6 +2297,7 @@ export const CompactionGroup = {
   fromPartial<I extends Exact<DeepPartial<CompactionGroup>, I>>(object: I): CompactionGroup {
     const message = createBaseCompactionGroup();
     message.id = object.id ?? 0;
+    message.parentId = object.parentId ?? 0;
     message.memberTableIds = object.memberTableIds?.map((e) => e) || [];
     message.compactionConfig = (object.compactionConfig !== undefined && object.compactionConfig !== null)
       ? CompactionConfig.fromPartial(object.compactionConfig)
@@ -2101,7 +2429,7 @@ export const GetCompactionTasksResponse = {
 };
 
 function createBaseReportCompactionTasksRequest(): ReportCompactionTasksRequest {
-  return { contextId: 0, compactTask: undefined };
+  return { contextId: 0, compactTask: undefined, tableStatsChange: {} };
 }
 
 export const ReportCompactionTasksRequest = {
@@ -2109,6 +2437,12 @@ export const ReportCompactionTasksRequest = {
     return {
       contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
       compactTask: isSet(object.compactTask) ? CompactTask.fromJSON(object.compactTask) : undefined,
+      tableStatsChange: isObject(object.tableStatsChange)
+        ? Object.entries(object.tableStatsChange).reduce<{ [key: number]: TableStats }>((acc, [key, value]) => {
+          acc[Number(key)] = TableStats.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
     };
   },
 
@@ -2117,6 +2451,12 @@ export const ReportCompactionTasksRequest = {
     message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
     message.compactTask !== undefined &&
       (obj.compactTask = message.compactTask ? CompactTask.toJSON(message.compactTask) : undefined);
+    obj.tableStatsChange = {};
+    if (message.tableStatsChange) {
+      Object.entries(message.tableStatsChange).forEach(([k, v]) => {
+        obj.tableStatsChange[k] = TableStats.toJSON(v);
+      });
+    }
     return obj;
   },
 
@@ -2125,6 +2465,46 @@ export const ReportCompactionTasksRequest = {
     message.contextId = object.contextId ?? 0;
     message.compactTask = (object.compactTask !== undefined && object.compactTask !== null)
       ? CompactTask.fromPartial(object.compactTask)
+      : undefined;
+    message.tableStatsChange = Object.entries(object.tableStatsChange ?? {}).reduce<{ [key: number]: TableStats }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = TableStats.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseReportCompactionTasksRequest_TableStatsChangeEntry(): ReportCompactionTasksRequest_TableStatsChangeEntry {
+  return { key: 0, value: undefined };
+}
+
+export const ReportCompactionTasksRequest_TableStatsChangeEntry = {
+  fromJSON(object: any): ReportCompactionTasksRequest_TableStatsChangeEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? TableStats.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: ReportCompactionTasksRequest_TableStatsChangeEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = message.value ? TableStats.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ReportCompactionTasksRequest_TableStatsChangeEntry>, I>>(
+    object: I,
+  ): ReportCompactionTasksRequest_TableStatsChangeEntry {
+    const message = createBaseReportCompactionTasksRequest_TableStatsChangeEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null)
+      ? TableStats.fromPartial(object.value)
       : undefined;
     return message;
   },
@@ -2890,53 +3270,56 @@ export const TriggerFullGCResponse = {
   },
 };
 
-function createBaseGetVersionDeltasRequest(): GetVersionDeltasRequest {
-  return { startId: 0, numEpochs: 0 };
+function createBaseListVersionDeltasRequest(): ListVersionDeltasRequest {
+  return { startId: 0, numLimit: 0, committedEpochLimit: 0 };
 }
 
-export const GetVersionDeltasRequest = {
-  fromJSON(object: any): GetVersionDeltasRequest {
+export const ListVersionDeltasRequest = {
+  fromJSON(object: any): ListVersionDeltasRequest {
     return {
       startId: isSet(object.startId) ? Number(object.startId) : 0,
-      numEpochs: isSet(object.numEpochs) ? Number(object.numEpochs) : 0,
+      numLimit: isSet(object.numLimit) ? Number(object.numLimit) : 0,
+      committedEpochLimit: isSet(object.committedEpochLimit) ? Number(object.committedEpochLimit) : 0,
     };
   },
 
-  toJSON(message: GetVersionDeltasRequest): unknown {
+  toJSON(message: ListVersionDeltasRequest): unknown {
     const obj: any = {};
     message.startId !== undefined && (obj.startId = Math.round(message.startId));
-    message.numEpochs !== undefined && (obj.numEpochs = Math.round(message.numEpochs));
+    message.numLimit !== undefined && (obj.numLimit = Math.round(message.numLimit));
+    message.committedEpochLimit !== undefined && (obj.committedEpochLimit = Math.round(message.committedEpochLimit));
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<GetVersionDeltasRequest>, I>>(object: I): GetVersionDeltasRequest {
-    const message = createBaseGetVersionDeltasRequest();
+  fromPartial<I extends Exact<DeepPartial<ListVersionDeltasRequest>, I>>(object: I): ListVersionDeltasRequest {
+    const message = createBaseListVersionDeltasRequest();
     message.startId = object.startId ?? 0;
-    message.numEpochs = object.numEpochs ?? 0;
+    message.numLimit = object.numLimit ?? 0;
+    message.committedEpochLimit = object.committedEpochLimit ?? 0;
     return message;
   },
 };
 
-function createBaseGetVersionDeltasResponse(): GetVersionDeltasResponse {
+function createBaseListVersionDeltasResponse(): ListVersionDeltasResponse {
   return { versionDeltas: undefined };
 }
 
-export const GetVersionDeltasResponse = {
-  fromJSON(object: any): GetVersionDeltasResponse {
+export const ListVersionDeltasResponse = {
+  fromJSON(object: any): ListVersionDeltasResponse {
     return {
       versionDeltas: isSet(object.versionDeltas) ? HummockVersionDeltas.fromJSON(object.versionDeltas) : undefined,
     };
   },
 
-  toJSON(message: GetVersionDeltasResponse): unknown {
+  toJSON(message: ListVersionDeltasResponse): unknown {
     const obj: any = {};
     message.versionDeltas !== undefined &&
       (obj.versionDeltas = message.versionDeltas ? HummockVersionDeltas.toJSON(message.versionDeltas) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<GetVersionDeltasResponse>, I>>(object: I): GetVersionDeltasResponse {
-    const message = createBaseGetVersionDeltasResponse();
+  fromPartial<I extends Exact<DeepPartial<ListVersionDeltasResponse>, I>>(object: I): ListVersionDeltasResponse {
+    const message = createBaseListVersionDeltasResponse();
     message.versionDeltas = (object.versionDeltas !== undefined && object.versionDeltas !== null)
       ? HummockVersionDeltas.fromPartial(object.versionDeltas)
       : undefined;
@@ -3206,6 +3589,592 @@ export const RiseCtlGetPinnedSnapshotsSummaryResponse = {
   },
 };
 
+function createBaseResetCurrentVersionRequest(): ResetCurrentVersionRequest {
+  return {};
+}
+
+export const ResetCurrentVersionRequest = {
+  fromJSON(_: any): ResetCurrentVersionRequest {
+    return {};
+  },
+
+  toJSON(_: ResetCurrentVersionRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ResetCurrentVersionRequest>, I>>(_: I): ResetCurrentVersionRequest {
+    const message = createBaseResetCurrentVersionRequest();
+    return message;
+  },
+};
+
+function createBaseResetCurrentVersionResponse(): ResetCurrentVersionResponse {
+  return { oldVersion: undefined };
+}
+
+export const ResetCurrentVersionResponse = {
+  fromJSON(object: any): ResetCurrentVersionResponse {
+    return { oldVersion: isSet(object.oldVersion) ? HummockVersion.fromJSON(object.oldVersion) : undefined };
+  },
+
+  toJSON(message: ResetCurrentVersionResponse): unknown {
+    const obj: any = {};
+    message.oldVersion !== undefined &&
+      (obj.oldVersion = message.oldVersion ? HummockVersion.toJSON(message.oldVersion) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ResetCurrentVersionResponse>, I>>(object: I): ResetCurrentVersionResponse {
+    const message = createBaseResetCurrentVersionResponse();
+    message.oldVersion = (object.oldVersion !== undefined && object.oldVersion !== null)
+      ? HummockVersion.fromPartial(object.oldVersion)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseInitMetadataForReplayRequest(): InitMetadataForReplayRequest {
+  return { tables: [], compactionGroups: [] };
+}
+
+export const InitMetadataForReplayRequest = {
+  fromJSON(object: any): InitMetadataForReplayRequest {
+    return {
+      tables: Array.isArray(object?.tables) ? object.tables.map((e: any) => Table.fromJSON(e)) : [],
+      compactionGroups: Array.isArray(object?.compactionGroups)
+        ? object.compactionGroups.map((e: any) => CompactionGroup.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: InitMetadataForReplayRequest): unknown {
+    const obj: any = {};
+    if (message.tables) {
+      obj.tables = message.tables.map((e) => e ? Table.toJSON(e) : undefined);
+    } else {
+      obj.tables = [];
+    }
+    if (message.compactionGroups) {
+      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroup.toJSON(e) : undefined);
+    } else {
+      obj.compactionGroups = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<InitMetadataForReplayRequest>, I>>(object: I): InitMetadataForReplayRequest {
+    const message = createBaseInitMetadataForReplayRequest();
+    message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
+    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroup.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseInitMetadataForReplayResponse(): InitMetadataForReplayResponse {
+  return {};
+}
+
+export const InitMetadataForReplayResponse = {
+  fromJSON(_: any): InitMetadataForReplayResponse {
+    return {};
+  },
+
+  toJSON(_: InitMetadataForReplayResponse): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<InitMetadataForReplayResponse>, I>>(_: I): InitMetadataForReplayResponse {
+    const message = createBaseInitMetadataForReplayResponse();
+    return message;
+  },
+};
+
+function createBaseReplayVersionDeltaRequest(): ReplayVersionDeltaRequest {
+  return { versionDelta: undefined };
+}
+
+export const ReplayVersionDeltaRequest = {
+  fromJSON(object: any): ReplayVersionDeltaRequest {
+    return { versionDelta: isSet(object.versionDelta) ? HummockVersionDelta.fromJSON(object.versionDelta) : undefined };
+  },
+
+  toJSON(message: ReplayVersionDeltaRequest): unknown {
+    const obj: any = {};
+    message.versionDelta !== undefined &&
+      (obj.versionDelta = message.versionDelta ? HummockVersionDelta.toJSON(message.versionDelta) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ReplayVersionDeltaRequest>, I>>(object: I): ReplayVersionDeltaRequest {
+    const message = createBaseReplayVersionDeltaRequest();
+    message.versionDelta = (object.versionDelta !== undefined && object.versionDelta !== null)
+      ? HummockVersionDelta.fromPartial(object.versionDelta)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseReplayVersionDeltaResponse(): ReplayVersionDeltaResponse {
+  return { version: undefined, modifiedCompactionGroups: [] };
+}
+
+export const ReplayVersionDeltaResponse = {
+  fromJSON(object: any): ReplayVersionDeltaResponse {
+    return {
+      version: isSet(object.version) ? HummockVersion.fromJSON(object.version) : undefined,
+      modifiedCompactionGroups: Array.isArray(object?.modifiedCompactionGroups)
+        ? object.modifiedCompactionGroups.map((e: any) => Number(e))
+        : [],
+    };
+  },
+
+  toJSON(message: ReplayVersionDeltaResponse): unknown {
+    const obj: any = {};
+    message.version !== undefined &&
+      (obj.version = message.version ? HummockVersion.toJSON(message.version) : undefined);
+    if (message.modifiedCompactionGroups) {
+      obj.modifiedCompactionGroups = message.modifiedCompactionGroups.map((e) => Math.round(e));
+    } else {
+      obj.modifiedCompactionGroups = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ReplayVersionDeltaResponse>, I>>(object: I): ReplayVersionDeltaResponse {
+    const message = createBaseReplayVersionDeltaResponse();
+    message.version = (object.version !== undefined && object.version !== null)
+      ? HummockVersion.fromPartial(object.version)
+      : undefined;
+    message.modifiedCompactionGroups = object.modifiedCompactionGroups?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseTriggerCompactionDeterministicRequest(): TriggerCompactionDeterministicRequest {
+  return { versionId: 0, compactionGroups: [] };
+}
+
+export const TriggerCompactionDeterministicRequest = {
+  fromJSON(object: any): TriggerCompactionDeterministicRequest {
+    return {
+      versionId: isSet(object.versionId) ? Number(object.versionId) : 0,
+      compactionGroups: Array.isArray(object?.compactionGroups)
+        ? object.compactionGroups.map((e: any) => Number(e))
+        : [],
+    };
+  },
+
+  toJSON(message: TriggerCompactionDeterministicRequest): unknown {
+    const obj: any = {};
+    message.versionId !== undefined && (obj.versionId = Math.round(message.versionId));
+    if (message.compactionGroups) {
+      obj.compactionGroups = message.compactionGroups.map((e) => Math.round(e));
+    } else {
+      obj.compactionGroups = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<TriggerCompactionDeterministicRequest>, I>>(
+    object: I,
+  ): TriggerCompactionDeterministicRequest {
+    const message = createBaseTriggerCompactionDeterministicRequest();
+    message.versionId = object.versionId ?? 0;
+    message.compactionGroups = object.compactionGroups?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseTriggerCompactionDeterministicResponse(): TriggerCompactionDeterministicResponse {
+  return {};
+}
+
+export const TriggerCompactionDeterministicResponse = {
+  fromJSON(_: any): TriggerCompactionDeterministicResponse {
+    return {};
+  },
+
+  toJSON(_: TriggerCompactionDeterministicResponse): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<TriggerCompactionDeterministicResponse>, I>>(
+    _: I,
+  ): TriggerCompactionDeterministicResponse {
+    const message = createBaseTriggerCompactionDeterministicResponse();
+    return message;
+  },
+};
+
+function createBaseDisableCommitEpochRequest(): DisableCommitEpochRequest {
+  return {};
+}
+
+export const DisableCommitEpochRequest = {
+  fromJSON(_: any): DisableCommitEpochRequest {
+    return {};
+  },
+
+  toJSON(_: DisableCommitEpochRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DisableCommitEpochRequest>, I>>(_: I): DisableCommitEpochRequest {
+    const message = createBaseDisableCommitEpochRequest();
+    return message;
+  },
+};
+
+function createBaseDisableCommitEpochResponse(): DisableCommitEpochResponse {
+  return { currentVersion: undefined };
+}
+
+export const DisableCommitEpochResponse = {
+  fromJSON(object: any): DisableCommitEpochResponse {
+    return {
+      currentVersion: isSet(object.currentVersion) ? HummockVersion.fromJSON(object.currentVersion) : undefined,
+    };
+  },
+
+  toJSON(message: DisableCommitEpochResponse): unknown {
+    const obj: any = {};
+    message.currentVersion !== undefined &&
+      (obj.currentVersion = message.currentVersion ? HummockVersion.toJSON(message.currentVersion) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DisableCommitEpochResponse>, I>>(object: I): DisableCommitEpochResponse {
+    const message = createBaseDisableCommitEpochResponse();
+    message.currentVersion = (object.currentVersion !== undefined && object.currentVersion !== null)
+      ? HummockVersion.fromPartial(object.currentVersion)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseRiseCtlListCompactionGroupRequest(): RiseCtlListCompactionGroupRequest {
+  return {};
+}
+
+export const RiseCtlListCompactionGroupRequest = {
+  fromJSON(_: any): RiseCtlListCompactionGroupRequest {
+    return {};
+  },
+
+  toJSON(_: RiseCtlListCompactionGroupRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RiseCtlListCompactionGroupRequest>, I>>(
+    _: I,
+  ): RiseCtlListCompactionGroupRequest {
+    const message = createBaseRiseCtlListCompactionGroupRequest();
+    return message;
+  },
+};
+
+function createBaseRiseCtlListCompactionGroupResponse(): RiseCtlListCompactionGroupResponse {
+  return { status: undefined, compactionGroups: [] };
+}
+
+export const RiseCtlListCompactionGroupResponse = {
+  fromJSON(object: any): RiseCtlListCompactionGroupResponse {
+    return {
+      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
+      compactionGroups: Array.isArray(object?.compactionGroups)
+        ? object.compactionGroups.map((e: any) => CompactionGroup.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: RiseCtlListCompactionGroupResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    if (message.compactionGroups) {
+      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroup.toJSON(e) : undefined);
+    } else {
+      obj.compactionGroups = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RiseCtlListCompactionGroupResponse>, I>>(
+    object: I,
+  ): RiseCtlListCompactionGroupResponse {
+    const message = createBaseRiseCtlListCompactionGroupResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroup.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseRiseCtlUpdateCompactionConfigRequest(): RiseCtlUpdateCompactionConfigRequest {
+  return { compactionGroupIds: [], configs: [] };
+}
+
+export const RiseCtlUpdateCompactionConfigRequest = {
+  fromJSON(object: any): RiseCtlUpdateCompactionConfigRequest {
+    return {
+      compactionGroupIds: Array.isArray(object?.compactionGroupIds)
+        ? object.compactionGroupIds.map((e: any) => Number(e))
+        : [],
+      configs: Array.isArray(object?.configs)
+        ? object.configs.map((e: any) => RiseCtlUpdateCompactionConfigRequest_MutableConfig.fromJSON(e))
+        : [],
+    };
+  },
+
+  toJSON(message: RiseCtlUpdateCompactionConfigRequest): unknown {
+    const obj: any = {};
+    if (message.compactionGroupIds) {
+      obj.compactionGroupIds = message.compactionGroupIds.map((e) => Math.round(e));
+    } else {
+      obj.compactionGroupIds = [];
+    }
+    if (message.configs) {
+      obj.configs = message.configs.map((e) =>
+        e ? RiseCtlUpdateCompactionConfigRequest_MutableConfig.toJSON(e) : undefined
+      );
+    } else {
+      obj.configs = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RiseCtlUpdateCompactionConfigRequest>, I>>(
+    object: I,
+  ): RiseCtlUpdateCompactionConfigRequest {
+    const message = createBaseRiseCtlUpdateCompactionConfigRequest();
+    message.compactionGroupIds = object.compactionGroupIds?.map((e) => e) || [];
+    message.configs = object.configs?.map((e) => RiseCtlUpdateCompactionConfigRequest_MutableConfig.fromPartial(e)) ||
+      [];
+    return message;
+  },
+};
+
+function createBaseRiseCtlUpdateCompactionConfigRequest_MutableConfig(): RiseCtlUpdateCompactionConfigRequest_MutableConfig {
+  return { mutableConfig: undefined };
+}
+
+export const RiseCtlUpdateCompactionConfigRequest_MutableConfig = {
+  fromJSON(object: any): RiseCtlUpdateCompactionConfigRequest_MutableConfig {
+    return {
+      mutableConfig: isSet(object.maxBytesForLevelBase)
+        ? { $case: "maxBytesForLevelBase", maxBytesForLevelBase: Number(object.maxBytesForLevelBase) }
+        : isSet(object.maxBytesForLevelMultiplier)
+        ? { $case: "maxBytesForLevelMultiplier", maxBytesForLevelMultiplier: Number(object.maxBytesForLevelMultiplier) }
+        : isSet(object.maxCompactionBytes)
+        ? { $case: "maxCompactionBytes", maxCompactionBytes: Number(object.maxCompactionBytes) }
+        : isSet(object.subLevelMaxCompactionBytes)
+        ? { $case: "subLevelMaxCompactionBytes", subLevelMaxCompactionBytes: Number(object.subLevelMaxCompactionBytes) }
+        : isSet(object.level0TierCompactFileNumber)
+        ? {
+          $case: "level0TierCompactFileNumber",
+          level0TierCompactFileNumber: Number(object.level0TierCompactFileNumber),
+        }
+        : isSet(object.targetFileSizeBase)
+        ? { $case: "targetFileSizeBase", targetFileSizeBase: Number(object.targetFileSizeBase) }
+        : isSet(object.compactionFilterMask)
+        ? { $case: "compactionFilterMask", compactionFilterMask: Number(object.compactionFilterMask) }
+        : isSet(object.maxSubCompaction)
+        ? { $case: "maxSubCompaction", maxSubCompaction: Number(object.maxSubCompaction) }
+        : undefined,
+    };
+  },
+
+  toJSON(message: RiseCtlUpdateCompactionConfigRequest_MutableConfig): unknown {
+    const obj: any = {};
+    message.mutableConfig?.$case === "maxBytesForLevelBase" &&
+      (obj.maxBytesForLevelBase = Math.round(message.mutableConfig?.maxBytesForLevelBase));
+    message.mutableConfig?.$case === "maxBytesForLevelMultiplier" &&
+      (obj.maxBytesForLevelMultiplier = Math.round(message.mutableConfig?.maxBytesForLevelMultiplier));
+    message.mutableConfig?.$case === "maxCompactionBytes" &&
+      (obj.maxCompactionBytes = Math.round(message.mutableConfig?.maxCompactionBytes));
+    message.mutableConfig?.$case === "subLevelMaxCompactionBytes" &&
+      (obj.subLevelMaxCompactionBytes = Math.round(message.mutableConfig?.subLevelMaxCompactionBytes));
+    message.mutableConfig?.$case === "level0TierCompactFileNumber" &&
+      (obj.level0TierCompactFileNumber = Math.round(message.mutableConfig?.level0TierCompactFileNumber));
+    message.mutableConfig?.$case === "targetFileSizeBase" &&
+      (obj.targetFileSizeBase = Math.round(message.mutableConfig?.targetFileSizeBase));
+    message.mutableConfig?.$case === "compactionFilterMask" &&
+      (obj.compactionFilterMask = Math.round(message.mutableConfig?.compactionFilterMask));
+    message.mutableConfig?.$case === "maxSubCompaction" &&
+      (obj.maxSubCompaction = Math.round(message.mutableConfig?.maxSubCompaction));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RiseCtlUpdateCompactionConfigRequest_MutableConfig>, I>>(
+    object: I,
+  ): RiseCtlUpdateCompactionConfigRequest_MutableConfig {
+    const message = createBaseRiseCtlUpdateCompactionConfigRequest_MutableConfig();
+    if (
+      object.mutableConfig?.$case === "maxBytesForLevelBase" &&
+      object.mutableConfig?.maxBytesForLevelBase !== undefined &&
+      object.mutableConfig?.maxBytesForLevelBase !== null
+    ) {
+      message.mutableConfig = {
+        $case: "maxBytesForLevelBase",
+        maxBytesForLevelBase: object.mutableConfig.maxBytesForLevelBase,
+      };
+    }
+    if (
+      object.mutableConfig?.$case === "maxBytesForLevelMultiplier" &&
+      object.mutableConfig?.maxBytesForLevelMultiplier !== undefined &&
+      object.mutableConfig?.maxBytesForLevelMultiplier !== null
+    ) {
+      message.mutableConfig = {
+        $case: "maxBytesForLevelMultiplier",
+        maxBytesForLevelMultiplier: object.mutableConfig.maxBytesForLevelMultiplier,
+      };
+    }
+    if (
+      object.mutableConfig?.$case === "maxCompactionBytes" &&
+      object.mutableConfig?.maxCompactionBytes !== undefined &&
+      object.mutableConfig?.maxCompactionBytes !== null
+    ) {
+      message.mutableConfig = {
+        $case: "maxCompactionBytes",
+        maxCompactionBytes: object.mutableConfig.maxCompactionBytes,
+      };
+    }
+    if (
+      object.mutableConfig?.$case === "subLevelMaxCompactionBytes" &&
+      object.mutableConfig?.subLevelMaxCompactionBytes !== undefined &&
+      object.mutableConfig?.subLevelMaxCompactionBytes !== null
+    ) {
+      message.mutableConfig = {
+        $case: "subLevelMaxCompactionBytes",
+        subLevelMaxCompactionBytes: object.mutableConfig.subLevelMaxCompactionBytes,
+      };
+    }
+    if (
+      object.mutableConfig?.$case === "level0TierCompactFileNumber" &&
+      object.mutableConfig?.level0TierCompactFileNumber !== undefined &&
+      object.mutableConfig?.level0TierCompactFileNumber !== null
+    ) {
+      message.mutableConfig = {
+        $case: "level0TierCompactFileNumber",
+        level0TierCompactFileNumber: object.mutableConfig.level0TierCompactFileNumber,
+      };
+    }
+    if (
+      object.mutableConfig?.$case === "targetFileSizeBase" &&
+      object.mutableConfig?.targetFileSizeBase !== undefined &&
+      object.mutableConfig?.targetFileSizeBase !== null
+    ) {
+      message.mutableConfig = {
+        $case: "targetFileSizeBase",
+        targetFileSizeBase: object.mutableConfig.targetFileSizeBase,
+      };
+    }
+    if (
+      object.mutableConfig?.$case === "compactionFilterMask" &&
+      object.mutableConfig?.compactionFilterMask !== undefined &&
+      object.mutableConfig?.compactionFilterMask !== null
+    ) {
+      message.mutableConfig = {
+        $case: "compactionFilterMask",
+        compactionFilterMask: object.mutableConfig.compactionFilterMask,
+      };
+    }
+    if (
+      object.mutableConfig?.$case === "maxSubCompaction" &&
+      object.mutableConfig?.maxSubCompaction !== undefined &&
+      object.mutableConfig?.maxSubCompaction !== null
+    ) {
+      message.mutableConfig = { $case: "maxSubCompaction", maxSubCompaction: object.mutableConfig.maxSubCompaction };
+    }
+    return message;
+  },
+};
+
+function createBaseRiseCtlUpdateCompactionConfigResponse(): RiseCtlUpdateCompactionConfigResponse {
+  return { status: undefined };
+}
+
+export const RiseCtlUpdateCompactionConfigResponse = {
+  fromJSON(object: any): RiseCtlUpdateCompactionConfigResponse {
+    return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
+  },
+
+  toJSON(message: RiseCtlUpdateCompactionConfigResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RiseCtlUpdateCompactionConfigResponse>, I>>(
+    object: I,
+  ): RiseCtlUpdateCompactionConfigResponse {
+    const message = createBaseRiseCtlUpdateCompactionConfigResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseSetCompactorRuntimeConfigRequest(): SetCompactorRuntimeConfigRequest {
+  return { contextId: 0, config: undefined };
+}
+
+export const SetCompactorRuntimeConfigRequest = {
+  fromJSON(object: any): SetCompactorRuntimeConfigRequest {
+    return {
+      contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
+      config: isSet(object.config) ? CompactorRuntimeConfig.fromJSON(object.config) : undefined,
+    };
+  },
+
+  toJSON(message: SetCompactorRuntimeConfigRequest): unknown {
+    const obj: any = {};
+    message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
+    message.config !== undefined &&
+      (obj.config = message.config ? CompactorRuntimeConfig.toJSON(message.config) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SetCompactorRuntimeConfigRequest>, I>>(
+    object: I,
+  ): SetCompactorRuntimeConfigRequest {
+    const message = createBaseSetCompactorRuntimeConfigRequest();
+    message.contextId = object.contextId ?? 0;
+    message.config = (object.config !== undefined && object.config !== null)
+      ? CompactorRuntimeConfig.fromPartial(object.config)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseSetCompactorRuntimeConfigResponse(): SetCompactorRuntimeConfigResponse {
+  return {};
+}
+
+export const SetCompactorRuntimeConfigResponse = {
+  fromJSON(_: any): SetCompactorRuntimeConfigResponse {
+    return {};
+  },
+
+  toJSON(_: SetCompactorRuntimeConfigResponse): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SetCompactorRuntimeConfigResponse>, I>>(
+    _: I,
+  ): SetCompactorRuntimeConfigResponse {
+    const message = createBaseSetCompactorRuntimeConfigResponse();
+    return message;
+  },
+};
+
 function createBaseCompactionConfig(): CompactionConfig {
   return {
     maxBytesForLevelBase: 0,
@@ -3213,7 +4182,6 @@ function createBaseCompactionConfig(): CompactionConfig {
     maxBytesForLevelMultiplier: 0,
     maxCompactionBytes: 0,
     subLevelMaxCompactionBytes: 0,
-    level0TriggerFileNumber: 0,
     level0TierCompactFileNumber: 0,
     compactionMode: CompactionConfig_CompactionMode.UNSPECIFIED,
     compressionAlgorithm: [],
@@ -3235,7 +4203,6 @@ export const CompactionConfig = {
       subLevelMaxCompactionBytes: isSet(object.subLevelMaxCompactionBytes)
         ? Number(object.subLevelMaxCompactionBytes)
         : 0,
-      level0TriggerFileNumber: isSet(object.level0TriggerFileNumber) ? Number(object.level0TriggerFileNumber) : 0,
       level0TierCompactFileNumber: isSet(object.level0TierCompactFileNumber)
         ? Number(object.level0TierCompactFileNumber)
         : 0,
@@ -3260,8 +4227,6 @@ export const CompactionConfig = {
     message.maxCompactionBytes !== undefined && (obj.maxCompactionBytes = Math.round(message.maxCompactionBytes));
     message.subLevelMaxCompactionBytes !== undefined &&
       (obj.subLevelMaxCompactionBytes = Math.round(message.subLevelMaxCompactionBytes));
-    message.level0TriggerFileNumber !== undefined &&
-      (obj.level0TriggerFileNumber = Math.round(message.level0TriggerFileNumber));
     message.level0TierCompactFileNumber !== undefined &&
       (obj.level0TierCompactFileNumber = Math.round(message.level0TierCompactFileNumber));
     message.compactionMode !== undefined &&
@@ -3284,13 +4249,118 @@ export const CompactionConfig = {
     message.maxBytesForLevelMultiplier = object.maxBytesForLevelMultiplier ?? 0;
     message.maxCompactionBytes = object.maxCompactionBytes ?? 0;
     message.subLevelMaxCompactionBytes = object.subLevelMaxCompactionBytes ?? 0;
-    message.level0TriggerFileNumber = object.level0TriggerFileNumber ?? 0;
     message.level0TierCompactFileNumber = object.level0TierCompactFileNumber ?? 0;
     message.compactionMode = object.compactionMode ?? CompactionConfig_CompactionMode.UNSPECIFIED;
     message.compressionAlgorithm = object.compressionAlgorithm?.map((e) => e) || [];
     message.targetFileSizeBase = object.targetFileSizeBase ?? 0;
     message.compactionFilterMask = object.compactionFilterMask ?? 0;
     message.maxSubCompaction = object.maxSubCompaction ?? 0;
+    return message;
+  },
+};
+
+function createBaseTableStats(): TableStats {
+  return { totalKeySize: 0, totalValueSize: 0, totalKeyCount: 0 };
+}
+
+export const TableStats = {
+  fromJSON(object: any): TableStats {
+    return {
+      totalKeySize: isSet(object.totalKeySize) ? Number(object.totalKeySize) : 0,
+      totalValueSize: isSet(object.totalValueSize) ? Number(object.totalValueSize) : 0,
+      totalKeyCount: isSet(object.totalKeyCount) ? Number(object.totalKeyCount) : 0,
+    };
+  },
+
+  toJSON(message: TableStats): unknown {
+    const obj: any = {};
+    message.totalKeySize !== undefined && (obj.totalKeySize = Math.round(message.totalKeySize));
+    message.totalValueSize !== undefined && (obj.totalValueSize = Math.round(message.totalValueSize));
+    message.totalKeyCount !== undefined && (obj.totalKeyCount = Math.round(message.totalKeyCount));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<TableStats>, I>>(object: I): TableStats {
+    const message = createBaseTableStats();
+    message.totalKeySize = object.totalKeySize ?? 0;
+    message.totalValueSize = object.totalValueSize ?? 0;
+    message.totalKeyCount = object.totalKeyCount ?? 0;
+    return message;
+  },
+};
+
+function createBaseHummockVersionStats(): HummockVersionStats {
+  return { hummockVersionId: 0, tableStats: {} };
+}
+
+export const HummockVersionStats = {
+  fromJSON(object: any): HummockVersionStats {
+    return {
+      hummockVersionId: isSet(object.hummockVersionId) ? Number(object.hummockVersionId) : 0,
+      tableStats: isObject(object.tableStats)
+        ? Object.entries(object.tableStats).reduce<{ [key: number]: TableStats }>((acc, [key, value]) => {
+          acc[Number(key)] = TableStats.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
+    };
+  },
+
+  toJSON(message: HummockVersionStats): unknown {
+    const obj: any = {};
+    message.hummockVersionId !== undefined && (obj.hummockVersionId = Math.round(message.hummockVersionId));
+    obj.tableStats = {};
+    if (message.tableStats) {
+      Object.entries(message.tableStats).forEach(([k, v]) => {
+        obj.tableStats[k] = TableStats.toJSON(v);
+      });
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<HummockVersionStats>, I>>(object: I): HummockVersionStats {
+    const message = createBaseHummockVersionStats();
+    message.hummockVersionId = object.hummockVersionId ?? 0;
+    message.tableStats = Object.entries(object.tableStats ?? {}).reduce<{ [key: number]: TableStats }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = TableStats.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseHummockVersionStats_TableStatsEntry(): HummockVersionStats_TableStatsEntry {
+  return { key: 0, value: undefined };
+}
+
+export const HummockVersionStats_TableStatsEntry = {
+  fromJSON(object: any): HummockVersionStats_TableStatsEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? TableStats.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: HummockVersionStats_TableStatsEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = message.value ? TableStats.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<HummockVersionStats_TableStatsEntry>, I>>(
+    object: I,
+  ): HummockVersionStats_TableStatsEntry {
+    const message = createBaseHummockVersionStats_TableStatsEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null)
+      ? TableStats.fromPartial(object.value)
+      : undefined;
     return message;
   },
 };

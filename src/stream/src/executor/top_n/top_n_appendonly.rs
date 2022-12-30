@@ -12,56 +12,51 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
 use async_trait::async_trait;
-use risingwave_common::array::{Op, RowDeserializer, StreamChunk};
-use risingwave_common::catalog::Schema;
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::ordered::{OrderedRow, OrderedRowSerde};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_storage::table::streaming_table::state_table::StateTable;
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::StateStore;
 
+use super::top_n_cache::AppendOnlyTopNCacheTrait;
 use super::utils::*;
 use super::TopNCache;
+use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::executor::managed_state::top_n::{ManagedTopNState, NO_GROUP_KEY};
+use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
 /// to keep all the data records/rows that have been seen. As long as a record
 /// is no longer being in the result set, it can be deleted.
 /// TODO: Optimization: primary key may contain several columns and is used to determine
 /// the order, therefore the value part should not contain the same columns to save space.
-pub type AppendOnlyTopNExecutor<S> = TopNExecutorWrapper<InnerAppendOnlyTopNExecutor<S>>;
+pub type AppendOnlyTopNExecutor<S, const WITH_TIES: bool> =
+    TopNExecutorWrapper<InnerAppendOnlyTopNExecutor<S, WITH_TIES>>;
 
-impl<S: StateStore> AppendOnlyTopNExecutor<S> {
+impl<S: StateStore> AppendOnlyTopNExecutor<S, false> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub fn new_without_ties(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        order_pairs: Vec<OrderPair>,
+        storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
-        order_by_len: usize,
-        pk_indices: PkIndices,
+        order_by: Vec<OrderPair>,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
         let info = input.info();
-        let schema = input.schema().clone();
 
         Ok(TopNExecutorWrapper {
             input,
             ctx,
             inner: InnerAppendOnlyTopNExecutor::new(
                 info,
-                schema,
-                order_pairs,
+                storage_key,
                 offset_and_limit,
-                order_by_len,
-                pk_indices,
+                order_by,
                 executor_id,
                 state_table,
             )?,
@@ -69,75 +64,92 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
     }
 }
 
-pub struct InnerAppendOnlyTopNExecutor<S: StateStore> {
+impl<S: StateStore> AppendOnlyTopNExecutor<S, true> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_ties(
+        input: Box<dyn Executor>,
+        ctx: ActorContextRef,
+        storage_key: Vec<OrderPair>,
+        offset_and_limit: (usize, usize),
+        order_by: Vec<OrderPair>,
+        executor_id: u64,
+        state_table: StateTable<S>,
+    ) -> StreamResult<Self> {
+        let info = input.info();
+
+        Ok(TopNExecutorWrapper {
+            input,
+            ctx,
+            inner: InnerAppendOnlyTopNExecutor::new(
+                info,
+                storage_key,
+                offset_and_limit,
+                order_by,
+                executor_id,
+                state_table,
+            )?,
+        })
+    }
+}
+
+pub struct InnerAppendOnlyTopNExecutor<S: StateStore, const WITH_TIES: bool> {
     info: ExecutorInfo,
 
-    /// Schema of the executor.
-    schema: Schema,
-
-    /// The primary key indices of the `AppendOnlyTopNExecutor`
-    pk_indices: PkIndices,
-
-    /// The internal key indices of the `TopNExecutor`
-    internal_key_indices: PkIndices,
-
-    /// The order of internal keys of the `TopNExecutor`
-    internal_key_order_types: Vec<OrderType>,
+    /// The storage key indices of the `TopNExecutor`
+    storage_key_indices: PkIndices,
 
     /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNState<S>,
 
     /// In-memory cache of top (N + N * `TOPN_CACHE_HIGH_CAPACITY_FACTOR`) rows
     /// TODO: support WITH TIES
-    cache: TopNCache<false>,
+    cache: TopNCache<WITH_TIES>,
+
+    /// Used for serializing pk into CacheKey.
+    cache_key_serde: CacheKeySerde,
 }
 
-impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
+impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
-        schema: Schema,
-        order_pairs: Vec<OrderPair>,
+        storage_key: Vec<OrderPair>,
         offset_and_limit: (usize, usize),
-        order_by_len: usize,
-        pk_indices: PkIndices,
+        order_by: Vec<OrderPair>,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
-        // order_pairs is superset of pk
-        assert!(order_pairs
-            .iter()
-            .map(|x| x.column_idx)
-            .collect::<HashSet<_>>()
-            .is_superset(&pk_indices.iter().copied().collect::<HashSet<_>>()));
-        let (internal_key_indices, internal_key_data_types, internal_key_order_types) =
-            generate_executor_pk_indices_info(&order_pairs, &schema);
-
-        let ordered_row_deserializer =
-            OrderedRowSerde::new(internal_key_data_types, internal_key_order_types.clone());
+        let ExecutorInfo {
+            pk_indices, schema, ..
+        } = input_info;
 
         let num_offset = offset_and_limit.0;
         let num_limit = offset_and_limit.1;
-        let managed_state = ManagedTopNState::<S>::new(state_table, ordered_row_deserializer);
+
+        let cache_key_serde =
+            create_cache_key_serde(&storage_key, &pk_indices, &schema, &order_by, &[]);
+        let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
         Ok(Self {
             info: ExecutorInfo {
-                schema: input_info.schema,
-                pk_indices: input_info.pk_indices,
+                schema,
+                pk_indices,
                 identity: format!("AppendOnlyTopNExecutor {:X}", executor_id),
             },
-            schema,
             managed_state,
-            pk_indices,
-            internal_key_indices,
-            internal_key_order_types,
-            cache: TopNCache::new(num_offset, num_limit, order_by_len),
+            storage_key_indices: storage_key.into_iter().map(|op| op.column_idx).collect(),
+            cache: TopNCache::new(num_offset, num_limit),
+            cache_key_serde,
         })
     }
 }
 
 #[async_trait]
-impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
+impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase
+    for InnerAppendOnlyTopNExecutor<S, WITH_TIES>
+where
+    TopNCache<WITH_TIES>: AppendOnlyTopNCacheTrait,
+{
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.cache.limit);
         let mut res_rows = Vec::with_capacity(self.cache.limit);
@@ -146,86 +158,33 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
             debug_assert_eq!(op, Op::Insert);
-            let pk_row = row_ref.row_by_indices(&self.internal_key_indices);
-            let ordered_pk_row = OrderedRow::new(pk_row, &self.internal_key_order_types);
-            let row = row_ref.to_owned_row();
-
-            if self.cache.is_middle_cache_full()
-                && ordered_pk_row >= *self.cache.middle.last_key_value().unwrap().0
-            {
-                continue;
-            }
-            self.managed_state.insert(row.clone());
-
-            // Then insert input row to corresponding cache range according to its order key
-            if !self.cache.is_low_cache_full() {
-                self.cache.low.insert(ordered_pk_row, (&row).into());
-                continue;
-            }
-
-            let elem_to_insert_into_middle =
-            if let Some(low_last) = self.cache.low.last_entry()
-                && ordered_pk_row <= *low_last.key() {
-                // Take the last element of `cache.low` and insert input row to it.
-                let low_last = low_last.remove_entry();
-                self.cache.low.insert(ordered_pk_row, (&row).into());
-                low_last
-            } else {
-                (ordered_pk_row, (&row).into())
-            };
-
-            if !self.cache.is_middle_cache_full() {
-                self.cache.middle.insert(
-                    elem_to_insert_into_middle.0,
-                    elem_to_insert_into_middle.1.clone(),
-                );
-                res_ops.push(Op::Insert);
-                res_rows.push(elem_to_insert_into_middle.1);
-                continue;
-            }
-
-            // The row must be in the range of [offset, offset+limit).
-            // the largest row in `cache.middle` needs to be removed.
-            let middle_last = self.cache.middle.pop_last().unwrap();
-            debug_assert!(elem_to_insert_into_middle.0 < middle_last.0);
-
-            res_ops.push(Op::Delete);
-            res_rows.push(middle_last.1.clone());
-            self.managed_state
-                .delete(row_deserializer.deserialize(middle_last.1.row.as_ref())?);
-
-            res_ops.push(Op::Insert);
-            res_rows.push(elem_to_insert_into_middle.1.clone());
-            self.cache
-                .middle
-                .insert(elem_to_insert_into_middle.0, elem_to_insert_into_middle.1);
-
-            // Unlike normal topN, append only topN does not use the high part of the cache.
+            let pk_row = row_ref.project(&self.storage_key_indices);
+            let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
+            self.cache.insert(
+                cache_key,
+                row_ref,
+                &mut res_ops,
+                &mut res_rows,
+                &mut self.managed_state,
+                &row_deserializer,
+            )?;
         }
 
-        generate_output(res_rows, res_ops, &self.schema)
+        generate_output(res_rows, res_ops, self.schema())
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.flush(epoch).await
     }
 
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
+    fn info(&self) -> &ExecutorInfo {
+        &self.info
     }
 
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         self.managed_state
-            .init_topn_cache(None, &mut self.cache)
+            .init_topn_cache(NO_GROUP_KEY, &mut self.cache)
             .await
     }
 }
@@ -282,11 +241,19 @@ mod tests {
         }
     }
 
-    fn create_order_pairs() -> Vec<OrderPair> {
+    fn storage_key() -> Vec<OrderPair> {
+        order_by()
+    }
+
+    fn order_by() -> Vec<OrderPair> {
         vec![
             OrderPair::new(0, OrderType::Ascending),
             OrderPair::new(1, OrderType::Ascending),
         ]
+    }
+
+    fn pk_indices() -> PkIndices {
+        vec![0, 1]
     }
 
     fn create_source() -> Box<MockSource> {
@@ -294,7 +261,7 @@ mod tests {
         let schema = create_schema();
         Box::new(MockSource::with_messages(
             schema,
-            PkIndices::new(),
+            pk_indices(),
             vec![
                 Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(std::mem::take(&mut chunks[0])),
@@ -308,22 +275,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_only_top_n_executor_with_limit() {
-        let order_pairs = create_order_pairs();
+        let storage_key = storage_key();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64],
             &[OrderType::Ascending, OrderType::Ascending],
-            &[0, 1],
-        );
+            &pk_indices(),
+        )
+        .await;
 
         let top_n_executor = Box::new(
-            AppendOnlyTopNExecutor::new(
+            AppendOnlyTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
-                order_pairs,
+                storage_key,
                 (0, 5),
-                2,
-                vec![0, 1],
+                order_by(),
                 1,
                 state_table,
             )
@@ -391,22 +358,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_only_top_n_executor_with_offset_and_limit() {
-        let order_pairs = create_order_pairs();
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64],
             &[OrderType::Ascending, OrderType::Ascending],
-            &[0, 1],
-        );
+            &pk_indices(),
+        )
+        .await;
 
         let top_n_executor = Box::new(
-            AppendOnlyTopNExecutor::new(
+            AppendOnlyTopNExecutor::new_without_ties(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
-                order_pairs,
+                storage_key(),
                 (3, 4),
-                2,
-                vec![0, 1],
+                order_by(),
                 1,
                 state_table,
             )

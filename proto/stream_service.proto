@@ -86,6 +86,7 @@ message BarrierCompleteResponse {
   message GroupedSstableInfo {
     uint64 compaction_group_id = 1;
     hummock.SstableInfo sst = 2;
+    map<uint32, hummock.TableStats> table_stats_map = 3;
   }
   repeated GroupedSstableInfo synced_sstables = 4;
   uint32 worker_id = 5;
@@ -93,14 +94,6 @@ message BarrierCompleteResponse {
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.
 message BroadcastActorInfoTableResponse {
-  common.Status status = 1;
-}
-
-message DropSourceRequest {
-  uint32 source_id = 1;
-}
-
-message DropSourceResponse {
   common.Status status = 1;
 }
 
@@ -119,7 +112,6 @@ service StreamService {
   rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
   rpc ForceStopActors(ForceStopActorsRequest) returns (ForceStopActorsResponse);
   rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
-  rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
   rpc BarrierComplete(BarrierCompleteRequest) returns (BarrierCompleteResponse);
   rpc WaitEpochCommit(WaitEpochCommitRequest) returns (WaitEpochCommitResponse);
 }

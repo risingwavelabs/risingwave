@@ -1,0 +1,30 @@
+# the sink requires a primary index for efficient execution
+# which will be enforced by schema precheck in the future
+
+statement ok
+CREATE TABLE t4 (v1 int primary key, v2 int);
+
+statement ok
+CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM t4;
+
+statement ok
+CREATE SINK s4 AS select mv4.v1 as v1, mv4.v2 as v2 from mv4 WITH (
+    connector = 'jdbc',
+    jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    table.name = 't4'
+);
+
+statement ok
+INSERT INTO t4 VALUES (1, 2), (2, 2), (3, 2), (5, 2), (8, 2), (13, 2), (21, 2);
+
+statement ok
+DROP SINK s4;
+
+statement ok
+DROP MATERIALIZED VIEW mv4;
+
+statement ok
+DROP TABLE t4;
+
+statement ok
+FLUSH;

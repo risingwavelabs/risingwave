@@ -52,7 +52,7 @@ impl Debug for LocalExchangeSource {
 }
 
 impl ExchangeSource for LocalExchangeSource {
-    type TakeDataFuture<'a> = impl Future<Output = Result<Option<DataChunk>>>;
+    type TakeDataFuture<'a> = impl Future<Output = Result<Option<DataChunk>>> + 'a;
 
     fn take_data(&mut self) -> Self::TakeDataFuture<'_> {
         async {
@@ -95,7 +95,7 @@ mod tests {
     use risingwave_rpc_client::ComputeClient;
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
-    use tonic::{Request, Response, Status};
+    use tonic::{Request, Response, Status, Streaming};
 
     use crate::exchange_source::ExchangeSource;
     use crate::execution::grpc_exchange::GrpcExchangeSource;
@@ -128,7 +128,7 @@ mod tests {
 
         async fn get_stream(
             &self,
-            _request: Request<GetStreamRequest>,
+            _request: Request<Streaming<GetStreamRequest>>,
         ) -> Result<Response<Self::GetStreamStream>, Status> {
             unimplemented!()
         }

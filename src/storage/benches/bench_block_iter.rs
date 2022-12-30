@@ -116,7 +116,6 @@ fn build_block_data(t: u32, i: u64) -> Bytes {
 
 fn key(t: u32, i: u64) -> Bytes {
     let mut buf = BytesMut::new();
-    buf.put_u8(b't');
     buf.put_u32(t);
     buf.put_u64(i);
     buf.freeze()

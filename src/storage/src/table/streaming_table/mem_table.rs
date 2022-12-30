@@ -15,7 +15,7 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::ops::RangeBounds;
 
-use risingwave_common::array::RowDeserializer;
+use risingwave_common::row::RowDeserializer;
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
@@ -43,7 +43,7 @@ pub enum MemTableError {
     },
 }
 
-type Result<T> = std::result::Result<T, MemTableError>;
+type Result<T> = std::result::Result<T, Box<MemTableError>>;
 
 impl Default for MemTable {
     fn default() -> Self {
@@ -85,7 +85,8 @@ impl MemTable {
                     key: e.key().clone(),
                     prev: e.get().clone(),
                     new: RowOp::Insert(value),
-                }),
+                }
+                .into()),
             },
         }
     }
@@ -107,7 +108,8 @@ impl MemTable {
                     key: e.key().clone(),
                     prev: e.get().clone(),
                     new: RowOp::Delete(old_value),
-                }),
+                }
+                .into()),
                 RowOp::Update(value) => {
                     let (original_old_value, original_new_value) = std::mem::take(value);
                     debug_assert_eq!(original_new_value, old_value);
@@ -135,7 +137,8 @@ impl MemTable {
                     key: e.key().clone(),
                     prev: e.get().clone(),
                     new: RowOp::Update((old_value, new_value)),
-                }),
+                }
+                .into()),
                 RowOp::Update(value) => {
                     let (original_old_value, original_new_value) = std::mem::take(value);
                     debug_assert_eq!(original_new_value, old_value);

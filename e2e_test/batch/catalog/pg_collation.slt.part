@@ -1,0 +1,15 @@
+query ITIIIBITTTT
+SELECT
+    oid,
+    collname,
+    collnamespace,
+    collowner,
+    collprovider,
+    collisdeterministic,
+    collencoding,
+    collcollate,
+    collctype,
+    colliculocale,
+    collversion
+FROM pg_catalog.pg_collation;
+----

@@ -23,17 +23,34 @@ use serde_json::{json, Value};
 use super::DEFAULT_MAX_PAST;
 use crate::types::{Datum, NaiveDateTimeWrapper, Scalar};
 
+enum LocalNow {
+    Relative,
+    Absolute(NaiveDateTime),
+}
+
 pub struct TimestampField {
     max_past: Duration,
-    local_now: NaiveDateTime,
+    local_now: LocalNow,
     seed: u64,
 }
 
 impl TimestampField {
-    pub fn new(max_past_option: Option<String>, seed: u64) -> Result<Self> {
-        let mut local_now = Local::now().naive_local();
-        local_now = local_now.duration_round(Duration::microseconds(1))?; // round to 1 us
-                                                                          // std duration
+    pub fn new(
+        max_past_option: Option<String>,
+        max_past_mode: Option<String>,
+        seed: u64,
+    ) -> Result<Self> {
+        let local_now = match max_past_mode.as_deref() {
+            Some("relative") => LocalNow::Relative,
+            _ => {
+                LocalNow::Absolute(
+                    Local::now()
+                        .naive_local()
+                        .duration_round(Duration::microseconds(1))?,
+                ) // round to 1 us std duration
+            }
+        };
+
         let max_past = if let Some(max_past_option) = max_past_option {
             parse_duration(&max_past_option)?
         } else {
@@ -52,7 +69,14 @@ impl TimestampField {
         let milliseconds = self.max_past.num_milliseconds();
         let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
         let max_milliseconds = rng.gen_range(0..=milliseconds);
-        self.local_now - Duration::milliseconds(max_milliseconds)
+        let now = match self.local_now {
+            LocalNow::Relative => Local::now()
+                .naive_local()
+                .duration_round(Duration::microseconds(1))
+                .unwrap(),
+            LocalNow::Absolute(now) => now,
+        };
+        now - Duration::milliseconds(max_milliseconds)
     }
 
     pub fn generate(&mut self, offset: u64) -> Value {

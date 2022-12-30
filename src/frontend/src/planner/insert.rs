@@ -27,12 +27,12 @@ impl Planner {
         if !insert.cast_exprs.is_empty() {
             input = LogicalProject::create(input, insert.cast_exprs);
         }
-        // `columns` not used by backend yet.
         let plan: PlanRef = LogicalInsert::create(
             input,
-            insert.table_source.name,
-            insert.table_source.source_id,
-            insert.table_source.associated_mview_id,
+            insert.table_name.clone(),
+            insert.table_id,
+            insert.column_indices,
+            insert.row_id_index,
         )?
         .into();
         // For insert, frontend will only schedule one task so do not need this to be single.

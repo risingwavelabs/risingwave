@@ -21,11 +21,11 @@ use std::sync::Arc;
 use lru::{DefaultHasher, LruCache};
 
 /// The managed cache is a lru cache that bounds the memory usage by epoch.
-/// Should be used with `LruManager`.
+/// Should be used with `GlobalMemoryManager`.
 pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
     pub(super) inner: LruCache<K, V, S, A>,
     /// The entry with epoch less than water should be evicted.
-    /// Should only be updated by the `LruManager`.
+    /// Should only be updated by the `GlobalMemoryManager`.
     pub(super) watermark_epoch: Arc<AtomicU64>,
 }
 
@@ -60,5 +60,33 @@ impl<K, V, S, A: Clone + Allocator> Deref for ManagedLruCache<K, V, S, A> {
 impl<K, V, S, A: Clone + Allocator> DerefMut for ManagedLruCache<K, V, S, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
+    }
+}
+
+pub fn new_unbounded<K: Hash + Eq, V>(watermark_epoch: Arc<AtomicU64>) -> ManagedLruCache<K, V> {
+    ManagedLruCache {
+        inner: LruCache::unbounded(),
+        watermark_epoch,
+    }
+}
+
+pub fn new_with_hasher_in<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator>(
+    watermark_epoch: Arc<AtomicU64>,
+    hasher: S,
+    alloc: A,
+) -> ManagedLruCache<K, V, S, A> {
+    ManagedLruCache {
+        inner: LruCache::unbounded_with_hasher_in(hasher, alloc),
+        watermark_epoch,
+    }
+}
+
+pub fn new_with_hasher<K: Hash + Eq, V, S: BuildHasher>(
+    watermark_epoch: Arc<AtomicU64>,
+    hasher: S,
+) -> ManagedLruCache<K, V, S> {
+    ManagedLruCache {
+        inner: LruCache::unbounded_with_hasher(hasher),
+        watermark_epoch,
     }
 }

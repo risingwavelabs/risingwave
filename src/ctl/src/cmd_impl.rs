@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod bench;
+pub mod compute;
 pub mod hummock;
 pub mod meta;
 pub mod profile;

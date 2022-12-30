@@ -19,6 +19,7 @@ pub use task_manager::*;
 
 mod broadcast_channel;
 mod channel;
+mod consistent_hash_shuffle_channel;
 mod context;
 mod data_chunk_in_channel;
 mod env;

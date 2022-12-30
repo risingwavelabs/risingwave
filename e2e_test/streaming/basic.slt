@@ -83,9 +83,9 @@ select sum_v1, min_v1, max_v1, v3 from mv3 order by sum_v1;
 query IR rowsort
 select * from mv4
 ----
-1 NaN
-1 +Inf
-1 -Inf
+1	-Infinity
+1	Infinity
+1	NaN
 
 statement ok
 drop materialized view mv1
@@ -113,3 +113,21 @@ drop table t4
 
 statement ok
 drop table t5
+
+statement ok
+create table t (v1 int, v2 int);
+
+statement error
+create materialized view mv(a) as select * from t;
+
+statement error
+create materialized view mv(a,b,c) as select * from t;
+
+statement ok
+create materialized view mv(a,b) as select * from t;
+
+statement ok
+drop materialized view mv 
+
+statement ok
+drop table t 

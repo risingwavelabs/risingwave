@@ -16,15 +16,15 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 
 use super::RwPgResponse;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
-pub(super) async fn handle_flush(context: OptimizerContext) -> Result<RwPgResponse> {
-    let client = context.session_ctx.env().meta_client();
+pub(super) async fn handle_flush(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    let client = handler_args.session.env().meta_client();
     // The returned epoch >= epoch for flush, but it is okay.
     let snapshot = client.flush(true).await?;
     // Update max epoch to ensure read-after-write correctness.
-    context
-        .session_ctx
+    handler_args
+        .session
         .env()
         .hummock_snapshot_manager()
         .update_epoch(snapshot);

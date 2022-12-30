@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod manager;
-
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 pub use risingwave_common::catalog::TableOption;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 
@@ -27,10 +25,11 @@ use crate::model::{MetadataModel, MetadataModelResult};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompactionGroup {
-    group_id: CompactionGroupId,
-    member_table_ids: HashSet<StateTableId>,
-    pub compaction_config: CompactionConfig,
-    table_id_to_options: HashMap<StateTableId, TableOption>,
+    pub(crate) group_id: CompactionGroupId,
+    pub(crate) parent_group_id: CompactionGroupId,
+    pub(crate) member_table_ids: HashSet<StateTableId>,
+    pub(crate) compaction_config: CompactionConfig,
+    pub(crate) table_id_to_options: HashMap<StateTableId, TableOption>,
 }
 
 impl CompactionGroup {
@@ -40,6 +39,7 @@ impl CompactionGroup {
             member_table_ids: Default::default(),
             compaction_config,
             table_id_to_options: HashMap::default(),
+            parent_group_id: StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId,
         }
     }
 
@@ -64,6 +64,7 @@ impl From<&risingwave_pb::hummock::CompactionGroup> for CompactionGroup {
     fn from(compaction_group: &risingwave_pb::hummock::CompactionGroup) -> Self {
         Self {
             group_id: compaction_group.id,
+            parent_group_id: compaction_group.parent_id,
             member_table_ids: compaction_group.member_table_ids.iter().cloned().collect(),
             compaction_config: compaction_group
                 .compaction_config
@@ -83,6 +84,7 @@ impl From<&CompactionGroup> for risingwave_pb::hummock::CompactionGroup {
     fn from(compaction_group: &CompactionGroup) -> Self {
         Self {
             id: compaction_group.group_id,
+            parent_id: compaction_group.parent_group_id,
             member_table_ids: compaction_group
                 .member_table_ids
                 .iter()

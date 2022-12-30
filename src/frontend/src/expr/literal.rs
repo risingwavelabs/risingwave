@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::array::list_array::display_for_explain;
+use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{literal_type_match, DataType, Datum, ScalarImpl};
+use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::Expr;
@@ -36,7 +39,9 @@ impl std::fmt::Debug for Literal {
                 // Add single quotation marks for string and interval literals
                 Some(ScalarImpl::Utf8(v)) => write!(f, "'{}'", v),
                 Some(ScalarImpl::Interval(v)) => write!(f, "'{}'", v),
-                Some(v) => write!(f, "{}", v),
+                Some(ScalarImpl::Bool(v)) => write!(f, "{}", v),
+                Some(ScalarImpl::List(v)) => write!(f, "{}", display_for_explain(v)),
+                Some(v) => write!(f, "{}", v.as_scalar_ref_impl().to_text()),
             }?;
             write!(f, ":{:?}", self.data_type)
         }
@@ -68,65 +73,71 @@ impl Expr for Literal {
         ExprNode {
             expr_type: self.get_expr_type() as i32,
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: literal_to_protobuf(self.get_data()),
+            rex_node: literal_to_value_encoding(self.get_data()),
         }
     }
 }
 
 /// Convert a literal value (datum) into protobuf.
-fn literal_to_protobuf(d: &Datum) -> Option<RexNode> {
-    let Some(d) = d.as_ref() else {
+fn literal_to_value_encoding(d: &Datum) -> Option<RexNode> {
+    if d.is_none() {
         return None;
-    };
-    use risingwave_pb::expr::*;
-    let body = d.to_protobuf();
-    Some(RexNode::Constant(ConstantValue { body }))
+    }
+    use risingwave_pb::data::Datum as ProstDatum;
+
+    let body = serialize_datum(d.as_ref());
+    Some(RexNode::Constant(ProstDatum { body }))
 }
 
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{ListValue, StructValue};
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::value_encoding::deserialize_datum;
     use risingwave_pb::expr::expr_node::RexNode;
 
-    use crate::expr::literal::literal_to_protobuf;
+    use crate::expr::literal::literal_to_value_encoding;
 
     #[test]
-    fn test_struct_to_protobuf() {
+    fn test_struct_to_value_encoding() {
         let value = StructValue::new(vec![
-            Some(ScalarImpl::Utf8("12222".to_string())),
+            Some(ScalarImpl::Utf8("".into())),
             Some(2.into()),
             Some(3.into()),
         ]);
         let data = Some(ScalarImpl::Struct(value.clone()));
-        let node = literal_to_protobuf(&data);
+        let node = literal_to_value_encoding(&data);
         if let RexNode::Constant(prost) = node.as_ref().unwrap() {
-            let data2 = ScalarImpl::from_proto_bytes(
-                prost.get_body(),
+            let data2 = deserialize_datum(
+                prost.get_body().as_slice(),
                 &DataType::new_struct(
                     vec![DataType::Varchar, DataType::Int32, DataType::Int32],
                     vec![],
-                )
-                .to_protobuf(),
+                ),
             )
+            .unwrap()
             .unwrap();
             assert_eq!(ScalarImpl::Struct(value), data2);
         }
     }
 
     #[test]
-    fn test_list_to_protobuf() {
-        let value = ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]);
+    fn test_list_to_value_encoding() {
+        let value = ListValue::new(vec![
+            Some(ScalarImpl::Utf8("1".into())),
+            Some(ScalarImpl::Utf8("2".into())),
+            Some(ScalarImpl::Utf8("".into())),
+        ]);
         let data = Some(ScalarImpl::List(value.clone()));
-        let node = literal_to_protobuf(&data);
+        let node = literal_to_value_encoding(&data);
         if let RexNode::Constant(prost) = node.as_ref().unwrap() {
-            let data2 = ScalarImpl::from_proto_bytes(
-                prost.get_body(),
+            let data2 = deserialize_datum(
+                prost.get_body().as_slice(),
                 &DataType::List {
-                    datatype: Box::new(DataType::Int32),
-                }
-                .to_protobuf(),
+                    datatype: Box::new(DataType::Varchar),
+                },
             )
+            .unwrap()
             .unwrap();
             assert_eq!(ScalarImpl::List(value), data2);
         }

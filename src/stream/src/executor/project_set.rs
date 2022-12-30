@@ -107,6 +107,10 @@ impl ProjectSetExecutor {
         for msg in input {
             let msg = msg?;
             match msg {
+                Message::Watermark(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
+
                 Message::Chunk(chunk) => {
                     let chunk = chunk.compact();
 
@@ -172,7 +176,7 @@ impl ProjectSetExecutor {
                                 }
                                 Either::Right(datum_ref) => {
                                     for _ in 0..max_tf_len {
-                                        builder.append_datum_ref(datum_ref);
+                                        builder.append_datum(datum_ref);
                                     }
                                 }
                             }

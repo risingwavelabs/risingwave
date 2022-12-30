@@ -20,6 +20,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::table_catalog::TableType;
 use crate::catalog::{FragmentId, TableCatalog, TableId};
 use crate::optimizer::property::{Direction, FieldOrder};
 use crate::utils::WithOptions;
@@ -33,6 +34,7 @@ pub struct TableCatalogBuilder {
     value_indices: Option<Vec<usize>>,
     vnode_col_idx: Option<usize>,
     column_names: HashMap<String, i32>,
+    read_prefix_len_hint: usize,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -76,6 +78,10 @@ impl TableCatalogBuilder {
         });
     }
 
+    pub fn set_read_prefix_len_hint(&mut self, read_prefix_len_hint: usize) {
+        self.read_prefix_len_hint = read_prefix_len_hint;
+    }
+
     pub fn set_vnode_col_idx(&mut self, vnode_col_idx: usize) {
         self.vnode_col_idx = Some(vnode_col_idx);
     }
@@ -87,17 +93,24 @@ impl TableCatalogBuilder {
     /// Check the column name whether exist before. if true, record occurrence and change the name
     /// to avoid duplicate.
     fn avoid_duplicate_col_name(&mut self, column_desc: &mut ColumnDesc) {
-        let column_name = column_desc.name.clone();
-        if let Some(occurrence) = self.column_names.get_mut(&column_name) {
-            column_desc.name = format!("{}_{}", column_name, occurrence);
-            *occurrence += 1;
-        } else {
-            self.column_names.insert(column_name, 0);
+        if let Some(old_identity) = self.column_names.get(&column_desc.name) {
+            let column_name = column_desc.name.clone();
+            let mut identity = *old_identity;
+            loop {
+                column_desc.name = format!("{}_{}", column_name, identity);
+                identity += 1;
+                if !self.column_names.contains_key(&column_desc.name) {
+                    break;
+                }
+            }
+            *self.column_names.get_mut(&column_name).unwrap() = identity;
         }
+        self.column_names.insert(column_desc.name.clone(), 0);
     }
 
     /// Consume builder and create `TableCatalog` (for proto).
     pub fn build(self, distribution_key: Vec<usize>) -> TableCatalog {
+        assert!(self.read_prefix_len_hint <= self.pk.len());
         TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -106,17 +119,22 @@ impl TableCatalogBuilder {
             pk: self.pk,
             stream_key: vec![],
             distribution_key,
-            is_index: false,
-            appendonly: false,
+            // NOTE: This should be altered if `TableCatalogBuilder` is used to build something
+            // other than internal tables.
+            table_type: TableType::Internal,
+            append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties: self.properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
-            vnode_col_idx: self.vnode_col_idx,
+            vnode_col_index: self.vnode_col_idx,
+            row_id_index: None,
             value_indices: self
                 .value_indices
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
+            handle_pk_conflict: false,
+            read_prefix_len_hint: self.read_prefix_len_hint,
         }
     }
 
@@ -141,10 +159,8 @@ impl fmt::Debug for IndicesDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut f = f.debug_list();
         for i in self.indices {
-            f.entry(&format_args!(
-                "{}",
-                self.input_schema.fields.get(*i).unwrap().name
-            ));
+            let name = &self.input_schema.fields.get(*i).unwrap().name;
+            f.entry(&format_args!("{}", name));
         }
         f.finish()
     }

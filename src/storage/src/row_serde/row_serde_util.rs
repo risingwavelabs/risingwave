@@ -12,45 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use memcomparable::from_slice;
-use risingwave_common::array::Row;
-use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
-use risingwave_common::types::{VirtualNode, VIRTUAL_NODE_SIZE};
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::ordered::OrderedRowSerde;
 
-pub fn serialize_pk(pk: &Row, serializer: &OrderedRowSerde) -> Vec<u8> {
-    let mut result = vec![];
-    serializer.serialize(pk, &mut result);
-    result
+pub fn serialize_pk(pk: impl Row, serializer: &OrderedRowSerde) -> Vec<u8> {
+    pk.memcmp_serialize(serializer)
 }
 
 pub fn serialize_pk_with_vnode(
-    pk: &Row,
+    pk: impl Row,
     serializer: &OrderedRowSerde,
     vnode: VirtualNode,
 ) -> Vec<u8> {
-    let pk_bytes = serialize_pk(pk, serializer);
-    [&vnode.to_be_bytes(), pk_bytes.as_slice()].concat()
+    let mut result = vnode.to_be_bytes().to_vec();
+    pk.memcmp_serialize_into(serializer, &mut result);
+    result
 }
 
 // NOTE: Only for debug purpose now
 pub fn deserialize_pk_with_vnode(
     key: &[u8],
     deserializer: &OrderedRowSerde,
-) -> Result<(VirtualNode, Row)> {
-    let vnode = VirtualNode::from_be_bytes(key[0..VIRTUAL_NODE_SIZE].try_into().unwrap());
-    let pk = deserializer.deserialize(&key[VIRTUAL_NODE_SIZE..])?;
+) -> Result<(VirtualNode, OwnedRow)> {
+    let vnode = VirtualNode::from_be_bytes(key[0..VirtualNode::SIZE].try_into().unwrap());
+    let pk = deserializer.deserialize(&key[VirtualNode::SIZE..])?;
     Ok((vnode, pk))
 }
 
-pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {
-    let column_id = from_slice::<u32>(bytes)? ^ (1 << 31);
-    Ok((column_id as i32).into())
-}
-
 pub fn parse_raw_key_to_vnode_and_key(raw_key: &[u8]) -> (VirtualNode, &[u8]) {
-    let (vnode_bytes, key_bytes) = raw_key.split_at(VIRTUAL_NODE_SIZE);
+    let (vnode_bytes, key_bytes) = raw_key.split_at(VirtualNode::SIZE);
     let vnode = VirtualNode::from_be_bytes(vnode_bytes.try_into().unwrap());
     (vnode, key_bytes)
 }

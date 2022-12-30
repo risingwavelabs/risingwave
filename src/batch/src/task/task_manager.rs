@@ -17,11 +17,13 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use risingwave_common::config::BatchConfig;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstTaskOutputId,
 };
+use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::GetDataResponse;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Sender;
@@ -39,13 +41,16 @@ pub struct BatchManager {
 
     /// Runtime for the batch manager.
     runtime: &'static Runtime,
+
+    /// Batch configuration
+    config: BatchConfig,
 }
 
 impl BatchManager {
-    pub fn new(worker_threads_num: Option<usize>) -> Self {
+    pub fn new(config: BatchConfig) -> Self {
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
-            if let Some(worker_threads_num) = worker_threads_num {
+            if let Some(worker_threads_num) = config.worker_threads_num {
                 builder.worker_threads(worker_threads_num);
             }
             builder
@@ -60,6 +65,7 @@ impl BatchManager {
             // TODO: may manually shutdown the runtime after we implement graceful shutdown for
             // stream manager.
             runtime: Box::leak(Box::new(runtime)),
+            config,
         }
     }
 
@@ -67,7 +73,7 @@ impl BatchManager {
         &self,
         tid: &ProstTaskId,
         plan: PlanFragment,
-        epoch: u64,
+        epoch: BatchQueryEpoch,
         context: ComputeNodeContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
@@ -192,18 +198,36 @@ impl BatchManager {
     pub fn runtime(&self) -> &'static Runtime {
         self.runtime
     }
+
+    pub fn config(&self) -> &BatchConfig {
+        &self.config
+    }
+
+    /// Kill batch queries with larges memory consumption per task. Required to maintain task level
+    /// memory usage in the struct. Will be called by global memory manager.
+    pub fn kill_queries(&self) {
+        todo!()
+    }
+
+    /// Called by global memory manager for total usage of batch tasks. This variable should be
+    /// maintained by Batch Manager.
+    pub fn get_all_memory_usage(&self) -> usize {
+        todo!()
+    }
 }
 
 impl Default for BatchManager {
     fn default() -> Self {
-        BatchManager::new(None)
+        BatchManager::new(BatchConfig::default())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::config::BatchConfig;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::make_i32_literal;
+    use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::batch_plan::{
@@ -219,7 +243,7 @@ mod tests {
     #[test]
     fn test_task_not_found() {
         use tonic::Status;
-        let manager = BatchManager::new(None);
+        let manager = BatchManager::new(BatchConfig::default());
         let task_id = TaskId {
             task_id: 0,
             stage_id: 0,
@@ -247,7 +271,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_id_conflict() {
-        let manager = BatchManager::new(None);
+        let manager = BatchManager::new(BatchConfig::default());
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
@@ -269,11 +293,16 @@ mod tests {
             task_id: 0,
         };
         manager
-            .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .fire_task(
+                &task_id,
+                plan.clone(),
+                to_committed_batch_query_epoch(0),
+                context.clone(),
+            )
             .await
             .unwrap();
         let err = manager
-            .fire_task(&task_id, plan, 0, context)
+            .fire_task(&task_id, plan, to_committed_batch_query_epoch(0), context)
             .await
             .unwrap_err();
         assert!(err
@@ -283,7 +312,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_aborted() {
-        let manager = BatchManager::new(None);
+        let manager = BatchManager::new(BatchConfig::default());
         let plan = PlanFragment {
             root: Some(PlanNode {
                 children: vec![],
@@ -314,7 +343,12 @@ mod tests {
             task_id: 0,
         };
         manager
-            .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .fire_task(
+                &task_id,
+                plan.clone(),
+                to_committed_batch_query_epoch(0),
+                context.clone(),
+            )
             .await
             .unwrap();
         manager.abort_task(&task_id);

@@ -42,11 +42,6 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
     );
 
     let buf = array.get_values()[0].get_body().as_slice();
-    let value_size = std::mem::size_of::<T>();
-    ensure!(
-        buf.len() % value_size == 0,
-        "Unexpected memory layout of numeric array"
-    );
 
     let mut builder = PrimitiveArrayBuilder::<T>::new(cardinality);
     let bitmap: Bitmap = array.get_null_bitmap()?.into();
@@ -72,7 +67,7 @@ pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> ArrayResult<Ar
     let data = (&array.get_values()[0]).into();
     let bitmap: Bitmap = array.get_null_bitmap()?.into();
 
-    let arr = BoolArray::new(bitmap, data);
+    let arr = BoolArray::new(data, bitmap);
     assert_eq!(arr.len(), cardinality);
 
     Ok(arr.into())

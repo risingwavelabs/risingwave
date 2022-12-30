@@ -13,17 +13,18 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
 use super::RwPgResponse;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
 pub fn handle_set(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     name: Ident,
     value: Vec<SetVariableValue>,
 ) -> Result<RwPgResponse> {
@@ -32,26 +33,21 @@ pub fn handle_set(
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
     // We remark that the name of session parameter is always case-insensitive.
-    context
-        .session_ctx
-        .set_config(&name.value.to_lowercase(), string_vals)?;
+    handler_args
+        .session
+        .set_config(&name.real_value().to_lowercase(), string_vals)?;
 
     Ok(PgResponse::empty_result(StatementType::SET_OPTION))
 }
 
-pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Result<RwPgResponse> {
-    let config_reader = context.session_ctx.config();
-    if variable.len() != 1 {
-        return Err(
-            ErrorCode::InvalidInputSyntax("only one variable or ALL required".to_string()).into(),
-        );
-    }
+pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Result<RwPgResponse> {
+    let config_reader = handler_args.session.config();
     // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
-    let name = &variable[0].value.to_lowercase();
+    let name = variable.iter().map(|e| e.real_value()).join(" ");
     if name.eq_ignore_ascii_case("ALL") {
-        return handle_show_all(&context);
+        return handle_show_all(handler_args.clone());
     }
-    let row = Row::new(vec![Some(config_reader.get(name)?.into())]);
+    let row = Row::new(vec![Some(config_reader.get(&name)?.into())]);
 
     Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
@@ -59,13 +55,14 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
         vec![row].into(),
         vec![PgFieldDescriptor::new(
             name.to_ascii_lowercase(),
-            TypeOid::Varchar,
+            DataType::VARCHAR.to_oid(),
+            DataType::VARCHAR.type_len(),
         )],
     ))
 }
 
-pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<RwPgResponse> {
-    let config_reader = context.session_ctx.config();
+pub(super) fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    let config_reader = handler_args.session.config();
 
     let all_variables = config_reader.get_all();
 
@@ -85,9 +82,21 @@ pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<RwPgResponse
         Some(all_variables.len() as i32),
         rows.into(),
         vec![
-            PgFieldDescriptor::new("Name".to_string(), TypeOid::Varchar),
-            PgFieldDescriptor::new("Setting".to_string(), TypeOid::Varchar),
-            PgFieldDescriptor::new("Description".to_string(), TypeOid::Varchar),
+            PgFieldDescriptor::new(
+                "Name".to_string(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Setting".to_string(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Description".to_string(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
         ],
     ))
 }

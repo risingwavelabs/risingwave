@@ -98,7 +98,6 @@ message CreateMaterializedViewResponse {
 
 message DropMaterializedViewRequest {
   uint32 table_id = 1;
-  repeated uint32 index_ids = 3;
 }
 
 message DropMaterializedViewResponse {
@@ -106,26 +105,47 @@ message DropMaterializedViewResponse {
   uint64 version = 2;
 }
 
-message CreateMaterializedSourceRequest {
+message CreateViewRequest {
+  catalog.View view = 1;
+}
+
+message CreateViewResponse {
+  common.Status status = 1;
+  uint32 view_id = 2;
+  uint64 version = 3;
+}
+
+message DropViewRequest {
+  uint32 view_id = 1;
+}
+
+message DropViewResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message CreateTableRequest {
+  // An optional field and will be `Some` for tables with an external connector. If so, the table
+  // will subscribe to the changes of the external connector and materialize the data.
   catalog.Source source = 1;
   catalog.Table materialized_view = 2;
   stream_plan.StreamFragmentGraph fragment_graph = 3;
 }
 
-message CreateMaterializedSourceResponse {
+message CreateTableResponse {
   common.Status status = 1;
-  uint32 source_id = 2;
-  uint32 table_id = 3;
-  uint64 version = 4;
-}
-
-message DropMaterializedSourceRequest {
-  uint32 source_id = 1;
   uint32 table_id = 2;
-  repeated uint32 index_ids = 3;
+  uint64 version = 3;
 }
 
-message DropMaterializedSourceResponse {
+message DropTableRequest {
+  oneof source_id {
+    uint32 id = 1;
+  }
+  uint32 table_id = 2;
+}
+
+message DropTableResponse {
   common.Status status = 1;
   uint64 version = 2;
 }
@@ -170,9 +190,11 @@ service DdlService {
   rpc DropSink(DropSinkRequest) returns (DropSinkResponse);
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
-  rpc CreateMaterializedSource(CreateMaterializedSourceRequest) returns (CreateMaterializedSourceResponse);
-  rpc DropMaterializedSource(DropMaterializedSourceRequest) returns (DropMaterializedSourceResponse);
+  rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
+  rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
+  rpc CreateView(CreateViewRequest) returns (CreateViewResponse);
+  rpc DropView(DropViewRequest) returns (DropViewResponse);
   rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);
   rpc DropIndex(DropIndexRequest) returns (DropIndexResponse);
 }

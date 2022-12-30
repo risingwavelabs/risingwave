@@ -14,7 +14,10 @@
 
 use std::time::Duration;
 
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail;
+use risingwave_common::error::Result;
+use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
+use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
@@ -61,7 +64,7 @@ pub trait ObserverState: Send + 'static {
     fn handle_notification(&mut self, resp: SubscribeResponse);
 
     /// Initialize data from the meta. It will be called at start or resubscribe
-    fn handle_initialization_notification(&mut self, resp: SubscribeResponse) -> Result<()>;
+    fn handle_initialization_notification(&mut self, resp: SubscribeResponse);
 }
 
 impl<S: ObserverState> ObserverManager<RpcNotificationClient, S> {
@@ -88,18 +91,67 @@ where
         }
     }
 
+    async fn wait_init_notification(&mut self) -> Result<()> {
+        let mut notification_vec = Vec::new();
+        let init_notification = loop {
+            // notification before init notification must be received successfully.
+            let Ok(Some(notification)) = self.rx.message().await else {
+                bail!("receives meta's notification err");
+            };
+            if !matches!(notification.info.as_ref().unwrap(), &Info::Snapshot(_)) {
+                notification_vec.push(notification);
+            } else {
+                break notification;
+            }
+        };
+
+        let Info::Snapshot(info) = init_notification.info.as_ref().unwrap() else {
+            unreachable!();
+        };
+
+        let SnapshotVersion {
+            catalog_version,
+            parallel_unit_mapping_version,
+            worker_node_version,
+        } = info.version.clone().unwrap();
+
+        notification_vec.retain_mut(|notification| match notification.info.as_ref().unwrap() {
+            Info::Database(_)
+            | Info::Schema(_)
+            | Info::Table(_)
+            | Info::Source(_)
+            | Info::Sink(_)
+            | Info::Index(_)
+            | Info::View(_)
+            | Info::User(_) => notification.version > catalog_version,
+            Info::ParallelUnitMapping(_) => notification.version > parallel_unit_mapping_version,
+            Info::Node(_) => notification.version > worker_node_version,
+            Info::HummockVersionDeltas(version_delta) => {
+                version_delta.version_deltas[0].id > info.hummock_version.as_ref().unwrap().id
+            }
+            Info::HummockSnapshot(_) => true,
+            Info::MetaBackupManifestId(_) => true,
+            Info::Snapshot(_) => unreachable!(),
+        });
+
+        self.observer_states
+            .handle_initialization_notification(init_notification);
+
+        for notification in notification_vec {
+            self.observer_states.handle_notification(notification);
+        }
+
+        Ok(())
+    }
+
     /// `start` is used to spawn a new asynchronous task which receives meta's notification and
     /// call the `handle_initialization_notification` and `handle_notification` to update node data.
-    pub async fn start(mut self) -> Result<JoinHandle<()>> {
-        let first_resp = self.rx.message().await?.ok_or_else(|| {
-            ErrorCode::InternalError(
-                "ObserverManager start failed, Stream of notification terminated at the start."
-                    .to_string(),
-            )
-        })?;
-        self.observer_states
-            .handle_initialization_notification(first_resp)?;
-        let handle = tokio::spawn(async move {
+    pub async fn start(mut self) -> JoinHandle<()> {
+        if matches!(self.wait_init_notification().await, Err(_)) {
+            self.re_subscribe().await;
+        }
+
+        tokio::spawn(async move {
             loop {
                 match self.rx.message().await {
                     Ok(resp) => {
@@ -116,8 +168,7 @@ where
                     }
                 }
             }
-        });
-        Ok(handle)
+        })
     }
 
     /// `re_subscribe` is used to re-subscribe to the meta's notification.
@@ -131,10 +182,7 @@ where
                 Ok(rx) => {
                     tracing::debug!("re-subscribe success");
                     self.rx = rx;
-                    if let Ok(Some(snapshot_resp)) = self.rx.message().await {
-                        self.observer_states
-                            .handle_initialization_notification(snapshot_resp)
-                            .expect("handle snapshot notification failed after re-subscribe");
+                    if !matches!(self.wait_init_notification().await, Err(_)) {
                         break;
                     }
                 }

@@ -34,8 +34,10 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, InputLevel, KeyRange, LevelType};
 
 use crate::hummock::compaction::level_selector::{DynamicLevelSelector, LevelSelector};
+use crate::hummock::compaction::manual_compaction_picker::ManualCompactionSelector;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::level_handler::LevelHandler;
+use crate::rpc::metrics::MetaMetrics;
 
 pub struct CompactStatus {
     compaction_group_id: CompactionGroupId,
@@ -117,6 +119,7 @@ impl CompactStatus {
         compaction_group_id: CompactionGroupId,
         manual_compaction_option: Option<ManualCompactionOption>,
         compaction_config: CompactionConfig,
+        stats: &mut LocalSelectorStatistic,
     ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
@@ -128,12 +131,12 @@ impl CompactStatus {
                 task_id,
                 manual_compaction_option,
                 compaction_config,
+                stats,
             )?
         } else {
-            self.pick_compaction(levels, task_id, compaction_config)?
+            self.pick_compaction(levels, task_id, compaction_config, stats)?
         };
 
-        let select_level_id = ret.input.input_levels[0].level_idx;
         let target_level_id = ret.input.target_level;
 
         let compression_algorithm = match ret.compression_algorithm.as_str() {
@@ -151,7 +154,7 @@ impl CompactStatus {
             target_level: target_level_id as u32,
             // only gc delete keys in last level because there may be older version in more bottom
             // level.
-            gc_delete_keys: target_level_id == self.level_handlers.len() - 1 && select_level_id > 0,
+            gc_delete_keys: target_level_id == self.level_handlers.len() - 1,
             task_status: TaskStatus::Pending as i32,
             compaction_group_id,
             existing_table_ids: vec![],
@@ -193,9 +196,10 @@ impl CompactStatus {
         levels: &Levels,
         task_id: HummockCompactionTaskId,
         compaction_config: CompactionConfig,
+        stats: &mut LocalSelectorStatistic,
     ) -> Option<CompactionTask> {
         self.create_level_selector(compaction_config)
-            .pick_compaction(task_id, levels, &mut self.level_handlers)
+            .pick_compaction(task_id, levels, &mut self.level_handlers, stats)
     }
 
     fn manual_pick_compaction(
@@ -204,16 +208,17 @@ impl CompactStatus {
         task_id: HummockCompactionTaskId,
         manual_compaction_option: ManualCompactionOption,
         compaction_config: CompactionConfig,
+        stats: &mut LocalSelectorStatistic,
     ) -> Option<CompactionTask> {
         // manual_compaction no need to select level
         // level determined by option
-        self.create_level_selector(compaction_config)
-            .manual_pick_compaction(
-                task_id,
-                levels,
-                &mut self.level_handlers,
-                manual_compaction_option,
-            )
+        let overlap_strategy = create_overlap_strategy(compaction_config.compaction_mode());
+        ManualCompactionSelector::new(
+            Arc::new(compaction_config),
+            overlap_strategy,
+            manual_compaction_option,
+        )
+        .pick_compaction(task_id, levels, &mut self.level_handlers, stats)
     }
 
     /// Declares a task as either succeeded, failed or canceled.
@@ -255,9 +260,13 @@ impl CompactStatus {
 
 #[derive(Clone, Debug)]
 pub struct ManualCompactionOption {
+    /// Filters out SSTs to pick. Has no effect if empty.
     pub sst_ids: Vec<u64>,
+    /// Filters out SSTs to pick.
     pub key_range: KeyRange,
+    /// Filters out SSTs to pick. Has no effect if empty.
     pub internal_table_id: HashSet<u32>,
+    /// Input level.
     pub level: usize,
 }
 
@@ -268,10 +277,59 @@ impl Default for ManualCompactionOption {
             key_range: KeyRange {
                 left: vec![],
                 right: vec![],
-                inf: true,
+                right_exclusive: false,
             },
             internal_table_id: HashSet::default(),
             level: 1,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct LocalPickerStatistic {
+    skip_by_write_amp_limit: u64,
+    skip_by_count_limit: u64,
+    skip_by_pending_files: u64,
+    skip_by_overlapping: u64,
+}
+
+#[derive(Default)]
+pub struct LocalSelectorStatistic {
+    skip_picker: Vec<(usize, usize, LocalPickerStatistic)>,
+}
+
+impl LocalSelectorStatistic {
+    pub fn report_to_metrics(&self, group_id: u64, metrics: &MetaMetrics) {
+        for (start_level, target_level, stats) in &self.skip_picker {
+            let level_label = format!("cg{}-{}-to-{}", group_id, start_level, target_level);
+            if stats.skip_by_count_limit > 0 {
+                metrics
+                    .compact_skip_frequency
+                    .with_label_values(&[level_label.as_str(), "write-amp"])
+                    .inc_by(stats.skip_by_write_amp_limit);
+            }
+            if stats.skip_by_write_amp_limit > 0 {
+                metrics
+                    .compact_skip_frequency
+                    .with_label_values(&[level_label.as_str(), "count"])
+                    .inc_by(stats.skip_by_count_limit);
+            }
+            if stats.skip_by_pending_files > 0 {
+                metrics
+                    .compact_skip_frequency
+                    .with_label_values(&[level_label.as_str(), "pending-files"])
+                    .inc_by(stats.skip_by_pending_files);
+            }
+            if stats.skip_by_overlapping > 0 {
+                metrics
+                    .compact_skip_frequency
+                    .with_label_values(&[level_label.as_str(), "overlapping"])
+                    .inc_by(stats.skip_by_overlapping);
+            }
+            metrics
+                .compact_skip_frequency
+                .with_label_values(&[level_label.as_str(), "picker"])
+                .inc();
         }
     }
 }
@@ -281,5 +339,6 @@ pub trait CompactionPicker {
         &self,
         levels: &Levels,
         level_handlers: &[LevelHandler],
+        stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput>;
 }

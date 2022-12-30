@@ -15,7 +15,7 @@
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use paste::paste;
-use risingwave_common::array::{ListValue, Row};
+use risingwave_common::array::ListValue;
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_expr::expr::{build_from_prost, AggKind};
@@ -41,7 +41,7 @@ mod utils;
 
 pub use agg_call::AggCall;
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
-pub use function_call::{FunctionCall, FunctionCallDisplay};
+pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
 pub use subquery::{Subquery, SubqueryKind};
@@ -111,7 +111,7 @@ impl ExprImpl {
     /// A literal varchar value.
     #[inline(always)]
     pub fn literal_varchar(v: String) -> Self {
-        Literal::new(Some(v.to_scalar_value()), DataType::Varchar).into()
+        Literal::new(Some(v.into()), DataType::Varchar).into()
     }
 
     /// A literal null value.
@@ -154,6 +154,12 @@ impl ExprImpl {
         let mut visitor = CollectInputRef::with_capacity(input_col_num);
         visitor.visit_expr(self);
         visitor.into()
+    }
+
+    /// Count `Now`s in the expression.
+    pub fn count_nows(&self) -> usize {
+        let mut visitor = CountNow::default();
+        visitor.visit_expr(self)
     }
 
     /// Check whether self is literal NULL.
@@ -204,7 +210,7 @@ impl ExprImpl {
     ///
     /// TODO: This is a naive implementation. We should avoid proto ser/de.
     /// Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let backend_expr = build_from_prost(&self.to_expr_proto())?;
         backend_expr.eval_row(input).map_err(Into::into)
     }
@@ -212,7 +218,7 @@ impl ExprImpl {
     /// Evaluate a constant expression.
     pub fn eval_row_const(&self) -> Result<Datum> {
         assert!(self.is_const());
-        self.eval_row(Row::empty())
+        self.eval_row(OwnedRow::empty())
     }
 }
 
@@ -270,7 +276,7 @@ impl ExprImpl {
     /// This is the core logic that supports [`crate::binder::BoundQuery::is_correlated`]. Check the
     /// doc of it for examples of `depth` being equal, less or greater.
     // We need to traverse inside subqueries.
-    pub fn has_correlated_input_ref_by_depth(&self) -> bool {
+    pub fn has_correlated_input_ref_by_depth(&self, depth: Depth) -> bool {
         struct Has {
             depth: usize,
         }
@@ -284,29 +290,47 @@ impl ExprImpl {
                 &mut self,
                 correlated_input_ref: &CorrelatedInputRef,
             ) -> bool {
-                correlated_input_ref.depth() >= self.depth
+                correlated_input_ref.depth() == self.depth
             }
 
             fn visit_subquery(&mut self, subquery: &Subquery) -> bool {
-                use crate::binder::BoundSetExpr;
-
-                let mut has = false;
                 self.depth += 1;
-                match &subquery.query.body {
-                    BoundSetExpr::Select(select) => {
-                        select.exprs().for_each(|expr| has |= self.visit_expr(expr))
-                    }
-                    BoundSetExpr::Values(values) => {
-                        values.exprs().for_each(|expr| has |= self.visit_expr(expr))
-                    }
-                }
+                let has = self.visit_bound_set_expr(&subquery.query.body);
                 self.depth -= 1;
 
                 has
             }
         }
 
-        let mut visitor = Has { depth: 1 };
+        impl Has {
+            fn visit_bound_set_expr(&mut self, set_expr: &BoundSetExpr) -> bool {
+                let mut has = false;
+                match set_expr {
+                    BoundSetExpr::Select(select) => {
+                        select.exprs().for_each(|expr| has |= self.visit_expr(expr));
+                        has |= match select.from.as_ref() {
+                            Some(from) => from.is_correlated(self.depth),
+                            None => false,
+                        };
+                    }
+                    BoundSetExpr::Values(values) => {
+                        values.exprs().for_each(|expr| has |= self.visit_expr(expr))
+                    }
+                    BoundSetExpr::Query(query) => {
+                        self.depth += 1;
+                        has = self.visit_bound_set_expr(&query.body);
+                        self.depth -= 1;
+                    }
+                    BoundSetExpr::SetOperation { left, right, .. } => {
+                        has |= self.visit_bound_set_expr(left);
+                        has |= self.visit_bound_set_expr(right);
+                    }
+                };
+                has
+            }
+        }
+
+        let mut visitor = Has { depth };
         visitor.visit_expr(self)
     }
 
@@ -328,8 +352,13 @@ impl ExprImpl {
             }
 
             fn visit_subquery(&mut self, subquery: &Subquery) -> bool {
-                use crate::binder::BoundSetExpr;
-                match &subquery.query.body {
+                self.visit_bound_set_expr(&subquery.query.body)
+            }
+        }
+
+        impl Has {
+            fn visit_bound_set_expr(&mut self, set_expr: &BoundSetExpr) -> bool {
+                match set_expr {
                     BoundSetExpr::Select(select) => select
                         .exprs()
                         .map(|expr| self.visit_expr(expr))
@@ -340,6 +369,10 @@ impl ExprImpl {
                         .map(|expr| self.visit_expr(expr))
                         .reduce(Self::merge)
                         .unwrap_or_default(),
+                    BoundSetExpr::Query(query) => self.visit_bound_set_expr(&query.body),
+                    BoundSetExpr::SetOperation { left, right, .. } => {
+                        self.visit_bound_set_expr(left) | self.visit_bound_set_expr(right)
+                    }
                 }
             }
         }
@@ -373,18 +406,39 @@ impl ExprImpl {
             }
 
             fn visit_subquery(&mut self, subquery: &mut Subquery) {
-                use crate::binder::BoundSetExpr;
-
                 self.depth += 1;
-                match &mut subquery.query.body {
+                self.visit_bound_set_expr(&mut subquery.query.body);
+                self.depth -= 1;
+            }
+        }
+
+        impl Collector {
+            fn visit_bound_set_expr(&mut self, set_expr: &mut BoundSetExpr) {
+                match set_expr {
                     BoundSetExpr::Select(select) => {
-                        select.exprs_mut().for_each(|expr| self.visit_expr(expr))
+                        select.exprs_mut().for_each(|expr| self.visit_expr(expr));
+                        if let Some(from) = select.from.as_mut() {
+                            self.correlated_indices.extend(
+                                from.collect_correlated_indices_by_depth_and_assign_id(
+                                    self.depth,
+                                    self.correlated_id,
+                                ),
+                            );
+                        };
                     }
                     BoundSetExpr::Values(values) => {
                         values.exprs_mut().for_each(|expr| self.visit_expr(expr))
                     }
+                    BoundSetExpr::Query(query) => {
+                        self.depth += 1;
+                        self.visit_bound_set_expr(&mut query.body);
+                        self.depth -= 1;
+                    }
+                    BoundSetExpr::SetOperation { left, right, .. } => {
+                        self.visit_bound_set_expr(&mut *left);
+                        self.visit_bound_set_expr(&mut *right);
+                    }
                 }
-                self.depth -= 1;
             }
         }
 
@@ -734,7 +788,9 @@ macro_rules! assert_eq_input_ref {
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::OwnedRow;
 
+use crate::binder::BoundSetExpr;
 use crate::utils::Condition;
 
 #[cfg(test)]

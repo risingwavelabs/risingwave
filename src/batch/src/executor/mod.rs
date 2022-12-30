@@ -29,6 +29,7 @@ mod project;
 mod project_set;
 mod row_seq_scan;
 mod sort_agg;
+mod source;
 mod sys_row_seq_scan;
 mod table_function;
 pub mod test_utils;
@@ -61,8 +62,10 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
+use risingwave_pb::common::BatchQueryEpoch;
 pub use row_seq_scan::*;
 pub use sort_agg::*;
+pub use source::*;
 pub use table_function::*;
 pub use top_n::TopNExecutor;
 pub use trace::*;
@@ -118,7 +121,7 @@ pub struct ExecutorBuilder<'a, C> {
     pub plan_node: &'a PlanNode,
     pub task_id: &'a TaskId,
     context: C,
-    epoch: u64,
+    epoch: BatchQueryEpoch,
 }
 
 macro_rules! build_executor {
@@ -134,7 +137,12 @@ macro_rules! build_executor {
 }
 
 impl<'a, C: Clone> ExecutorBuilder<'a, C> {
-    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, context: C, epoch: u64) -> Self {
+    pub fn new(
+        plan_node: &'a PlanNode,
+        task_id: &'a TaskId,
+        context: C,
+        epoch: BatchQueryEpoch,
+    ) -> Self {
         Self {
             plan_node,
             task_id,
@@ -145,7 +153,12 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
 
     #[must_use]
     pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
-        ExecutorBuilder::new(plan_node, self.task_id, self.context.clone(), self.epoch)
+        ExecutorBuilder::new(
+            plan_node,
+            self.task_id,
+            self.context.clone(),
+            self.epoch.clone(),
+        )
     }
 
     pub fn plan_node(&self) -> &PlanNode {
@@ -156,20 +169,18 @@ impl<'a, C: Clone> ExecutorBuilder<'a, C> {
         &self.context
     }
 
-    pub fn epoch(&self) -> u64 {
-        self.epoch
+    pub fn epoch(&self) -> BatchQueryEpoch {
+        self.epoch.clone()
     }
 }
 
 impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
     pub async fn build(&self) -> Result<BoxedExecutor> {
         self.try_build().await.map_err(|e| {
-            anyhow!(format!(
-                "[PlanNode: {:?}] Failed to build executor: {}",
-                self.plan_node.get_node_body(),
-                e,
-            ))
-            .into()
+            let err_msg = format!("Failed to build executor: {e}");
+            let plan_node_body = self.plan_node.get_node_body();
+            error!("{err_msg}, plan node is: \n {plan_node_body:?}");
+            anyhow!(err_msg).into()
         })
     }
 
@@ -190,7 +201,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Filter => FilterExecutor,
             NodeBody::Project => ProjectExecutor,
             NodeBody::SortAgg => SortAggExecutor,
-            NodeBody::OrderBy => OrderByExecutor,
+            NodeBody::Sort => SortExecutor,
             NodeBody::TopN => TopNExecutor,
             NodeBody::GroupTopN => GroupTopNExecutorBuilder,
             NodeBody::Limit => LimitExecutor,
@@ -204,9 +215,11 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::HopWindow => HopWindowExecutor,
             NodeBody::SysRowSeqScan => SysRowSeqScanExecutorBuilder,
             NodeBody::Expand => ExpandExecutor,
-            NodeBody::LookupJoin => LookupJoinExecutorBuilder,
+            NodeBody::LocalLookupJoin => LocalLookupJoinExecutorBuilder,
+            NodeBody::DistributedLookupJoin => DistributedLookupJoinExecutorBuilder,
             NodeBody::ProjectSet => ProjectSetExecutor,
             NodeBody::Union => UnionExecutor,
+            NodeBody::Source => SourceExecutor,
         }
         .await?;
         let input_desc = real_executor.identity().to_string();
@@ -216,7 +229,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
 
 #[cfg(test)]
 mod tests {
-
+    use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::PlanNode;
 
     use crate::executor::ExecutorBuilder;
@@ -236,7 +249,7 @@ mod tests {
             &plan_node,
             task_id,
             ComputeNodeContext::for_test(),
-            u64::MAX,
+            to_committed_batch_query_epoch(u64::MAX),
         );
         let child_plan = &PlanNode {
             ..Default::default()

@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::array::{ArrayRef, DataChunk, Row};
-use risingwave_common::types::{DataType, Datum, ScalarImpl, ScalarRefImpl, ToOwnedDatum};
+use std::sync::Arc;
+
+use risingwave_common::array::{ArrayRef, DataChunk, Vis};
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -61,71 +63,52 @@ impl Expression for CaseExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let vis = input.vis();
-        let mut els = self
-            .else_clause
-            .as_deref()
-            .map(|else_clause| else_clause.eval_checked(input).unwrap());
-        let when_thens = self
-            .when_clauses
-            .iter()
-            .map(|when_clause| {
-                (
-                    when_clause.when.eval_checked(input).unwrap(),
-                    when_clause.then.eval_checked(input).unwrap(),
-                )
-            })
-            .collect_vec();
-        let mut output_array = self.return_type().create_array_builder(input.capacity());
-        for idx in 0..input.capacity() {
-            if vis.is_set(idx) {
-                if let Some((_, t)) = when_thens
-                    .iter()
-                    .map(|(w, t)| (w.value_at(idx), t.value_at(idx)))
-                    .find(|(w, _)| {
-                        *w.unwrap_or(ScalarRefImpl::Bool(false))
-                            .into_scalar_impl()
-                            .as_bool()
-                    })
-                {
-                    output_array.append_datum(&t.to_owned_datum());
-                } else if let Some(els) = els.as_mut() {
-                    let t = els.datum_at(idx);
-                    output_array.append_datum(&t);
-                } else {
-                    output_array.append_null();
-                };
+        let mut input = input.clone();
+        let input_len = input.capacity();
+        let mut selection = vec![None; input_len];
+        let when_len = self.when_clauses.len();
+        let mut result_array = Vec::with_capacity(when_len + 1);
+        for (when_idx, WhenClause { when, then }) in self.when_clauses.iter().enumerate() {
+            let calc_then_vis: Vis = when.eval_checked(&input)?.as_bool().to_bitmap().into();
+            let input_vis = input.vis().clone();
+            input.set_vis(calc_then_vis.clone());
+            let then_res = then.eval_checked(&input)?;
+            calc_then_vis
+                .iter_ones()
+                .for_each(|pos| selection[pos] = Some(when_idx));
+            input.set_vis(&input_vis & (!&calc_then_vis));
+            result_array.push(then_res);
+        }
+        if let Some(ref else_expr) = self.else_clause {
+            let else_res = else_expr.eval_checked(&input)?;
+            input
+                .vis()
+                .iter_ones()
+                .for_each(|pos| selection[pos] = Some(when_len));
+            result_array.push(else_res);
+        }
+        let mut builder = self.return_type().create_array_builder(input.capacity());
+        for (i, sel) in selection.into_iter().enumerate() {
+            if let Some(when_idx) = sel {
+                builder.append_datum(result_array[when_idx].value_at(i));
             } else {
-                output_array.append_null();
+                builder.append_null();
             }
         }
-        let output_array = output_array.finish().into();
-        Ok(output_array)
+        Ok(Arc::new(builder.finish()))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
-        let els = self
-            .else_clause
-            .as_deref()
-            .map(|else_clause| else_clause.eval_row(input).unwrap());
-        let when_then_first = self
-            .when_clauses
-            .iter()
-            .map(|when_clause| {
-                (
-                    when_clause.when.eval_row(input).unwrap(),
-                    when_clause.then.eval_row(input).unwrap(),
-                )
-            })
-            .find(|(w, _)| *(w.as_ref().unwrap_or(&ScalarImpl::Bool(false)).as_bool()));
-
-        let ret = if let Some((_, t)) = when_then_first {
-            t
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        for WhenClause { when, then } in &self.when_clauses {
+            if when.eval_row(input)?.map_or(false, |w| w.into_bool()) {
+                return then.eval_row(input);
+            }
+        }
+        if let Some(ref else_expr) = self.else_clause {
+            else_expr.eval_row(input)
         } else {
-            els.unwrap_or(None)
-        };
-
-        Ok(ret)
+            Ok(None)
+        }
     }
 }
 
@@ -218,7 +201,7 @@ mod tests {
 
     fn test_eval_row(expr: CaseExpression, row_inputs: Vec<i32>, expected: Vec<Option<f32>>) {
         for (i, row_input) in row_inputs.iter().enumerate() {
-            let row = Row::new(vec![Some(row_input.to_scalar_value())]);
+            let row = OwnedRow::new(vec![Some(row_input.to_scalar_value())]);
             let datum = expr.eval_row(&row).unwrap();
             let expected = expected[i].map(|f| f.into());
             assert_eq!(datum, expected)

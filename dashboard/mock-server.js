@@ -38,6 +38,14 @@ app.get("/materialized_views", (req, res, next) => {
   res.json(require("./mock/materialized_views.json"))
 })
 
+app.get("/sinks", (req, res, next) => {
+  res.json(require("./mock/sinks.json"))
+})
+
+app.get("/sources", (req, res, next) => {
+  res.json(require("./mock/sources.json"))
+})
+
 app.get("/clusters/0", (req, res, next) => {
   res.json(require("./mock/cluster_0.json"))
 })
@@ -50,6 +58,6 @@ app.get("/clusters/2", (req, res, next) => {
   res.json(require("./mock/cluster_2.json"))
 })
 
-app.get("/sources/", (req, res, next) => {
-  res.json(require("./mock/sources.json"))
+app.get("/metrics/cluster", (req, res, next) => {
+  res.json(require("./mock/metrics_cluster.json"))
 })

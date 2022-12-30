@@ -114,8 +114,7 @@ where
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> CompactionConfig {
-        self.compaction_group_manager
-            .compaction_group(compaction_group_id)
+        self.compaction_group(compaction_group_id)
             .await
             .expect("compaction group exists")
             .compaction_config()

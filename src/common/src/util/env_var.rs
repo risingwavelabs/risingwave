@@ -15,6 +15,7 @@
 use std::env;
 use std::ffi::OsStr;
 
+/// Returns whether the environment variable `key` is set to `true` or `1`.
 pub fn env_var_is_true(key: impl AsRef<OsStr>) -> bool {
     env::var(key)
         .map(|value| {
@@ -22,4 +23,9 @@ pub fn env_var_is_true(key: impl AsRef<OsStr>) -> bool {
             value == "1" || value == "true"
         })
         .unwrap_or(false)
+}
+
+/// Returns whether the environment variable indicating that we're running in CI is set.
+pub fn is_ci() -> bool {
+    env_var_is_true("RISINGWAVE_CI")
 }

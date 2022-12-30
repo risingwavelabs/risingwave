@@ -19,7 +19,7 @@
       ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamProject { exprs: [max(max(t2.v2))] }
-          └─StreamGlobalSimpleAgg { aggs: [sum(count), max(max(t2.v2))] }
+          └─StreamGlobalSimpleAgg { aggs: [sum0(count), max(max(t2.v2))] }
             └─StreamExchange { dist: Single }
               └─StreamHashAgg { group_key: [Vnode(t2._row_id)], aggs: [count, max(t2.v2)] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id)] }
@@ -62,7 +62,7 @@
         | └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamProject { exprs: [max(max(t2.v2))] }
-            └─StreamGlobalSimpleAgg { aggs: [sum(count), max(max(t2.v2))] }
+            └─StreamGlobalSimpleAgg { aggs: [sum0(count), max(max(t2.v2))] }
               └─StreamExchange { dist: Single }
                 └─StreamHashAgg { group_key: [Vnode(t2._row_id)], aggs: [count, max(t2.v2)] }
                   └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id)] }
@@ -112,7 +112,7 @@
       | └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: HashShard(max(max(t2.v2))) }
         └─StreamProject { exprs: [max(max(t2.v2))] }
-          └─StreamGlobalSimpleAgg { aggs: [sum(count), max(max(t2.v2))] }
+          └─StreamGlobalSimpleAgg { aggs: [sum0(count), max(max(t2.v2))] }
             └─StreamExchange { dist: Single }
               └─StreamHashAgg { group_key: [Vnode(t2._row_id)], aggs: [count, max(t2.v2)] }
                 └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id)] }

@@ -23,9 +23,9 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
+use risingwave_stream::common::table::state_table::StateTable;
 
 use crate::common::HummockServiceOpts;
 
@@ -53,7 +53,7 @@ pub fn print_table_catalog(table: &TableCatalog) {
     println!("{:#?}", table);
 }
 
-pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StateTable<S> {
+pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StateTable<S> {
     StateTable::new_with_distribution(
         hummock,
         table.id,
@@ -65,8 +65,9 @@ pub fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -> Stat
         table.pk().iter().map(|x| x.direct.to_order()).collect(),
         table.pk().iter().map(|x| x.index).collect(),
         Distribution::all_vnodes(table.distribution_key().to_vec()), // scan all vnodes
-        table.value_indices.clone(),
+        Some(table.value_indices.clone()),
     )
+    .await
 }
 
 pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> StorageTable<S> {
@@ -88,6 +89,7 @@ pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> St
         Distribution::all_vnodes(table.distribution_key().to_vec()),
         TableOption::build_table_option(&HashMap::new()),
         (0..table.columns().len()).collect(),
+        table.read_prefix_len_hint,
     )
 }
 
@@ -113,13 +115,10 @@ async fn do_scan(
     print_table_catalog(&table);
 
     println!("Rows:");
-    let read_epoch = hummock
-        .local_version_manager()
-        .get_pinned_version()
-        .max_committed_epoch();
+    let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
     let storage_table = make_storage_table(hummock, &table);
     let stream = storage_table
-        .batch_iter(HummockReadEpoch::Committed(read_epoch))
+        .batch_iter(HummockReadEpoch::Committed(read_epoch), true)
         .await?;
     pin_mut!(stream);
     while let Some(item) = stream.next().await {

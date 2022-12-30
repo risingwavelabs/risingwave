@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::mem::swap;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -21,16 +21,16 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
-use rdkafka::{ClientConfig, Offset, TopicPartitionList};
+use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 
 use crate::source::base::{SourceMessage, SplitReader, MAX_CHUNK_SIZE};
-use crate::source::kafka::split::KafkaSplit;
 use crate::source::kafka::KafkaProperties;
 use crate::source::{BoxSourceStream, Column, ConnectorState, SplitImpl};
 
 pub struct KafkaSplitReader {
     consumer: StreamConsumer<DefaultConsumerContext>,
-    assigned_splits: HashMap<String, Vec<KafkaSplit>>,
+    stop_offset: Option<i64>,
+    bytes_per_second: usize,
 }
 
 #[async_trait]
@@ -73,7 +73,9 @@ impl SplitReader for KafkaSplitReader {
             .await
             .context("failed to create kafka consumer")?;
 
+        let mut stop_offset = None;
         if let Some(splits) = state {
+            assert_eq!(splits.len(), 1);
             let mut tpl = TopicPartitionList::with_capacity(splits.len());
 
             for split in &splits {
@@ -87,15 +89,24 @@ impl SplitReader for KafkaSplitReader {
                     } else {
                         tpl.add_partition(k.topic.as_str(), k.partition);
                     }
+                    stop_offset = k.stop_offset;
                 }
             }
 
             consumer.assign(&tpl)?;
         }
 
+        let bytes_per_second = match properties.bytes_per_second {
+            None => usize::MAX,
+            Some(number) => number
+                .parse::<usize>()
+                .expect("bytes.per.second expect usize"),
+        };
+
         Ok(Self {
             consumer,
-            assigned_splits: HashMap::new(),
+            stop_offset,
+            bytes_per_second,
         })
     }
 
@@ -107,13 +118,52 @@ impl SplitReader for KafkaSplitReader {
 impl KafkaSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(self) {
+        if let Some(stop_offset) = self.stop_offset && stop_offset == 0{
+            yield Vec::new();
+            return Ok(());
+        }
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        interval.tick().await;
+        let mut bytes_current_second = 0;
+        let mut res = Vec::with_capacity(MAX_CHUNK_SIZE);
         #[for_await]
-        for msgs in self.consumer.stream().ready_chunks(MAX_CHUNK_SIZE) {
-            let mut res = Vec::with_capacity(msgs.len());
+        'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(MAX_CHUNK_SIZE) {
             for msg in msgs {
-                res.push(SourceMessage::from(msg?));
+                let msg = msg?;
+                let cur_offset = msg.offset();
+                bytes_current_second += match &msg.payload() {
+                    None => 0,
+                    Some(payload) => payload.len(),
+                };
+                res.push(SourceMessage::from(msg));
+                if let Some(stop_offset) = self.stop_offset {
+                    if cur_offset == stop_offset - 1 {
+                        tracing::debug!(
+                            "stop offset reached, stop reading, offset: {}, stop offset: {}",
+                            cur_offset,
+                            stop_offset
+                        );
+                        yield res;
+                        break 'for_outer_loop;
+                    }
+                }
+                // This judgement has to be put in the inner loop as `msgs` can be multiple ones.
+                if bytes_current_second > self.bytes_per_second {
+                    // swap to make compiler happy
+                    let mut cur = Vec::with_capacity(res.capacity());
+                    swap(&mut cur, &mut res);
+                    yield cur;
+                    interval.tick().await;
+                    bytes_current_second = 0;
+                    res.clear();
+                }
             }
-            yield res;
+            let mut cur = Vec::with_capacity(res.capacity());
+            swap(&mut cur, &mut res);
+            yield cur;
+            // don't clear `bytes_current_second` here as it is only related to `.tick()`.
+            // yield in the outer loop so that we can always guarantee that some messages are read
+            // every `MAX_CHUNK_SIZE`.
         }
     }
 }

@@ -27,6 +27,7 @@ use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::error::RwError;
+use risingwave_connector::source::SplitMetaData;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -41,7 +42,7 @@ use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::SchedulerResult;
+use crate::scheduler::{PinnedHummockSnapshot, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
 pub struct LocalQueryStream {
@@ -69,8 +70,8 @@ pub struct LocalQueryExecution {
     sql: String,
     query: Query,
     front_env: FrontendEnv,
-    epoch: u64,
-
+    // The snapshot will be released when LocalQueryExecution is dropped.
+    snapshot: PinnedHummockSnapshot,
     auth_context: Arc<AuthContext>,
 }
 
@@ -79,14 +80,14 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        epoch: u64,
+        snapshot: PinnedHummockSnapshot,
         auth_context: Arc<AuthContext>,
     ) -> Self {
         Self {
             sql: sql.into(),
             query,
             front_env,
-            epoch,
+            snapshot,
             auth_context,
         }
     }
@@ -109,7 +110,13 @@ impl LocalQueryExecution {
 
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
-        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, self.epoch);
+        let executor = ExecutorBuilder::new(
+            &plan_node,
+            &task_id,
+            context,
+            // TODO: Add support to use current epoch when needed
+            self.snapshot.get_batch_query_epoch(),
+        );
         let executor = executor.build().await?;
 
         #[for_await]
@@ -213,12 +220,12 @@ impl LocalQueryExecution {
                 };
                 assert!(sources.is_empty());
 
-                if let Some(table_scan_info) = second_stage.table_scan_info.clone() && let Some(vnode_bitmaps) = table_scan_info.partitions {
+                if let Some(table_scan_info) = second_stage.table_scan_info.clone() && let Some(vnode_bitmaps) = table_scan_info.partitions() {
                     // Similar to the distributed case (StageRunner::schedule_tasks).
                     // Set `vnode_ranges` of the scan node in `local_execute_plan` of each
                     // `exchange_source`.
                     let (parallel_unit_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
-                        vnode_bitmaps.into_iter().unzip();
+                        vnode_bitmaps.clone().into_iter().unzip();
                     let workers = self.front_env.worker_node_manager().get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
 
                     for (idx, (worker_node, partition)) in
@@ -227,7 +234,7 @@ impl LocalQueryExecution {
                         let second_stage_plan_node = self.convert_plan_node(
                             &second_stage.root,
                             &mut None,
-                            Some(partition),
+                            Some(PartitionInfo::Table(partition)),
                         )?;
                         let second_stage_plan_fragment = PlanFragment {
                             root: Some(second_stage_plan_node),
@@ -236,10 +243,11 @@ impl LocalQueryExecution {
                                 ..Default::default()
                             }),
                         };
-                        let local_execute_plan =  LocalExecutePlan {
+                        let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            epoch: self.epoch,
-                            };
+                            // TODO: Add support to use current epoch when needed
+                            epoch: Some(self.snapshot.get_batch_query_epoch()),
+                        };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
                                 task_id: Some(ProstTaskId {
@@ -254,7 +262,43 @@ impl LocalQueryExecution {
                         };
                         sources.push(exchange_source);
                     }
-                } else {
+                } else if let Some(source_info) = &second_stage.source_info {
+                    for (id,split) in source_info.split_info().iter().enumerate() {
+                        let second_stage_plan_node = self.convert_plan_node(
+                            &second_stage.root,
+                            &mut None,
+                            Some(PartitionInfo::Source(split.clone())),
+                        )?;
+                        let second_stage_plan_fragment = PlanFragment {
+                            root: Some(second_stage_plan_node),
+                            exchange_info: Some(ExchangeInfo {
+                                mode: DistributionMode::Single as i32,
+                                ..Default::default()
+                            }),
+                        };
+                        let local_execute_plan = LocalExecutePlan {
+                            plan: Some(second_stage_plan_fragment),
+                            // TODO: Add support to use current epoch when needed
+                            epoch: Some(self.snapshot.get_batch_query_epoch()),
+                        };
+                        // NOTE: select a random work node here.
+                        let worker_node = self.front_env.worker_node_manager().next_random()?;
+                        let exchange_source = ExchangeSource {
+                            task_output_id: Some(TaskOutputId {
+                                task_id: Some(ProstTaskId {
+                                    task_id: id as u32,
+                                    stage_id: exchange_source_stage_id,
+                                    query_id: self.query.query_id.id.clone(),
+                                }),
+                                output_id: 0,
+                            }),
+                            host: Some(worker_node.host.as_ref().unwrap().clone()),
+                            local_execute_plan: Some(Plan(local_execute_plan)),
+                        };
+                        sources.push(exchange_source);
+                    }
+                }
+                else {
                     let second_stage_plan_node =
                         self.convert_plan_node(&second_stage.root, &mut None, None)?;
                     let second_stage_plan_fragment = PlanFragment {
@@ -266,8 +310,9 @@ impl LocalQueryExecution {
                     };
 
                     let local_execute_plan = LocalExecutePlan {
-                    plan: Some(second_stage_plan_fragment),
-                    epoch: self.epoch,
+                        plan: Some(second_stage_plan_fragment),
+                        // TODO: Add support to use current epoch when needed
+                        epoch: Some(self.snapshot.get_batch_query_epoch()),
                     };
 
                     let workers = if second_stage.parallelism == 1 {
@@ -309,6 +354,9 @@ impl LocalQueryExecution {
                 match &mut node_body {
                     NodeBody::RowSeqScan(ref mut scan_node) => {
                         if let Some(partition) = partition {
+                            let partition = partition
+                                .into_table()
+                                .expect("PartitionInfo should be TablePartitionInfo here");
                             scan_node.vnode_bitmap = Some(partition.vnode_bitmap);
                             scan_node.scan_ranges = partition.scan_ranges;
                         }
@@ -324,10 +372,31 @@ impl LocalQueryExecution {
                     node_body: Some(node_body),
                 })
             }
+            PlanNodeType::BatchSource => {
+                let mut node_body = execution_plan_node.node.clone();
+                match &mut node_body {
+                    NodeBody::Source(ref mut source_node) => {
+                        if let Some(partition) = partition {
+                            let partition = partition
+                                .into_source()
+                                .expect("PartitionInfo should be SourcePartitionInfo here");
+                            source_node.split = partition.encode_to_bytes().into();
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+
+                Ok(PlanNodeProst {
+                    children: vec![],
+                    // TODO: Generate meaningful identify
+                    identity: Uuid::new_v4().to_string(),
+                    node_body: Some(node_body),
+                })
+            }
             PlanNodeType::BatchLookupJoin => {
                 let mut node_body = execution_plan_node.node.clone();
                 match &mut node_body {
-                    NodeBody::LookupJoin(node) => {
+                    NodeBody::LocalLookupJoin(node) => {
                         let side_table_desc = node
                             .inner_side_table_desc
                             .as_ref()

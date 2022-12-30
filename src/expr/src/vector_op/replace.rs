@@ -12,35 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{BytesGuard, BytesWriter};
+use std::fmt::Write;
 
 use crate::Result;
 
 #[inline(always)]
-pub fn replace(s: &str, from_str: &str, to_str: &str, writer: BytesWriter) -> Result<BytesGuard> {
+pub fn replace(s: &str, from_str: &str, to_str: &str, writer: &mut dyn Write) -> Result<()> {
     if from_str.is_empty() {
-        return writer.write_ref(s).map_err(Into::into);
+        writer.write_str(s).unwrap();
+        return Ok(());
     }
     let mut last = 0;
-    let mut writer = writer.begin();
     while let Some(mut start) = s[last..].find(from_str) {
         start += last;
-        writer.write_ref(&s[last..start])?;
-        writer.write_ref(to_str)?;
+        writer.write_str(&s[last..start]).unwrap();
+        writer.write_str(to_str).unwrap();
         last = start + from_str.len();
     }
-    writer.write_ref(&s[last..])?;
-    writer.finish().map_err(Into::into)
+    writer.write_str(&s[last..]).unwrap();
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-
     use super::*;
 
     #[test]
-    fn test_replace() {
+    fn test_replace() -> Result<()> {
         let cases = vec![
             ("hello, word", "我的", "world", "hello, word"),
             ("hello, word", "", "world", "hello, word"),
@@ -51,12 +49,10 @@ mod tests {
         ];
 
         for (s, from_str, to_str, expected) in cases {
-            let builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let guard = replace(s, from_str, to_str, writer).unwrap();
-            let array = guard.into_inner().finish();
-            let v = array.value_at(0).unwrap();
-            assert_eq!(v, expected);
+            let mut writer = String::new();
+            replace(s, from_str, to_str, &mut writer)?;
+            assert_eq!(writer, expected);
         }
+        Ok(())
     }
 }

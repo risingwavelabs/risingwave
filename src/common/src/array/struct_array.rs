@@ -14,27 +14,21 @@
 
 use core::fmt;
 use std::cmp::Ordering;
-use std::fmt::{Debug, Display};
-use std::hash::{Hash, Hasher};
+use std::fmt::Debug;
+use std::hash::Hash;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
-use prost::Message;
-use risingwave_pb::data::{
-    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, StructArrayData,
-};
-use risingwave_pb::expr::StructValue as ProstStructValue;
+use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
 
-use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
-    NULL_VAL_FOR_HASH,
-};
+use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult};
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, display_datum_ref, serialize_datum_ref_into, to_datum_ref, DataType,
-    Datum, DatumRef, Scalar, ScalarImpl, ScalarRefImpl, ToOwnedDatum,
+    hash_datum, memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum,
+    DatumRef, Scalar, ScalarRefImpl, ToDatumRef,
 };
 
 #[derive(Debug)]
@@ -80,24 +74,24 @@ impl ArrayBuilder for StructArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<StructRef<'_>>) {
+    fn append_n(&mut self, n: usize, value: Option<StructRef<'_>>) {
         match value {
             None => {
-                self.bitmap.append(false);
+                self.bitmap.append_n(n, false);
                 for child in &mut self.children_array {
-                    child.append_datum_ref(None);
+                    child.append_datum_n(n, Datum::None);
                 }
             }
             Some(v) => {
-                self.bitmap.append(true);
+                self.bitmap.append_n(n, true);
                 let fields = v.fields_ref();
                 assert_eq!(fields.len(), self.children_array.len());
-                for (field_idx, f) in fields.into_iter().enumerate() {
-                    self.children_array[field_idx].append_datum_ref(f);
+                for (child, f) in self.children_array.iter_mut().zip_eq(fields) {
+                    child.append_datum_n(n, f);
                 }
             }
         }
-        self.len += 1;
+        self.len += n;
     }
 
     fn append_array(&mut self, other: &StructArray) {
@@ -158,32 +152,15 @@ impl StructArrayBuilder {
 
 impl Array for StructArray {
     type Builder = StructArrayBuilder;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = StructValue;
     type RefItem<'a> = StructRef<'a>;
 
-    fn value_at(&self, idx: usize) -> Option<StructRef<'_>> {
-        if !self.is_null(idx) {
-            Some(StructRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
-    }
-
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<StructRef<'_>> {
-        if !self.is_null_unchecked(idx) {
-            Some(StructRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> StructRef<'_> {
+        StructRef::Indexed { arr: self, idx }
     }
 
     fn len(&self) -> usize {
         self.len
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        ArrayIterator::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -211,14 +188,6 @@ impl Array for StructArray {
 
     fn set_bitmap(&mut self, bitmap: Bitmap) {
         self.bitmap = bitmap;
-    }
-
-    fn hash_at<H: std::hash::Hasher>(&self, idx: usize, state: &mut H) {
-        if !self.is_null(idx) {
-            self.children.iter().for_each(|a| a.hash_at(idx, state))
-        } else {
-            NULL_VAL_FOR_HASH.hash(state);
-        }
     }
 
     fn create_builder(&self, capacity: usize) -> ArrayBuilderImpl {
@@ -306,19 +275,6 @@ pub struct StructValue {
     fields: Box<[Datum]>,
 }
 
-impl fmt::Display for StructValue {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut f = f.debug_tuple("");
-        for field in self.fields.iter() {
-            match field {
-                Some(field) => f.field(&format_args!("{}", field)),
-                None => f.field(&" "),
-            };
-        }
-        f.finish()
-    }
-}
-
 impl PartialOrd for StructValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
@@ -342,34 +298,13 @@ impl StructValue {
         &self.fields
     }
 
-    pub fn to_protobuf_owned(&self) -> Vec<u8> {
-        self.as_scalar_ref().to_protobuf_owned()
-    }
-
-    pub fn from_protobuf_bytes(data_type: ProstDataType, b: &Vec<u8>) -> ArrayResult<Self> {
-        let struct_value: ProstStructValue = Message::decode(b.as_slice())?;
-        let fields: Vec<Datum> = struct_value
-            .fields
-            .iter()
-            .zip_eq(data_type.field_type.iter())
-            .map(|(b, d)| {
-                if b.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(ScalarImpl::from_proto_bytes(b, d)?))
-                }
-            })
-            .collect::<ArrayResult<Vec<Datum>>>()?;
-        Ok(StructValue::new(fields))
-    }
-
-    pub fn deserialize(
+    pub fn memcmp_deserialize(
         fields: &[DataType],
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
         fields
             .iter()
-            .map(|field| deserialize_datum_from(field, deserializer))
+            .map(|field| memcmp_deserialize_datum_from(field, deserializer))
             .try_collect()
             .map(Self::new)
     }
@@ -381,6 +316,7 @@ pub enum StructRef<'a> {
     ValueRef { val: &'a StructValue },
 }
 
+#[macro_export]
 macro_rules! iter_fields_ref {
     ($self:ident, $it:ident, { $($body:tt)* }) => {
         match $self {
@@ -389,25 +325,7 @@ macro_rules! iter_fields_ref {
                 $($body)*
             }
             StructRef::ValueRef { val } => {
-                let $it = val.fields.iter().map(to_datum_ref);
-                $($body)*
-            }
-        }
-    };
-}
-
-macro_rules! iter_fields {
-    ($self:ident, $it:ident, { $($body:tt)* }) => {
-        match &$self {
-            StructRef::Indexed { arr, idx } => {
-                let $it = arr
-                    .children
-                    .iter()
-                    .map(|a| a.value_at(*idx).to_owned_datum());
-                $($body)*
-            }
-            StructRef::ValueRef { val } => {
-                let $it = val.fields.iter();
+                let $it = val.fields.iter().map(ToDatumRef::to_datum_ref);
                 $($body)*
             }
         }
@@ -419,38 +337,24 @@ impl<'a> StructRef<'a> {
         iter_fields_ref!(self, it, { it.collect() })
     }
 
-    pub fn to_protobuf_owned(self) -> Vec<u8> {
-        let fields = iter_fields!(self, it, {
-            it.map(|f| match f {
-                None => {
-                    vec![]
-                }
-                Some(s) => s.to_protobuf(),
-            })
-            .collect_vec()
-        });
-        ProstStructValue { fields }.encode_to_vec()
-    }
-
-    pub fn serialize(
+    pub fn memcmp_serialize(
         &self,
         serializer: &mut memcomparable::Serializer<impl BufMut>,
     ) -> memcomparable::Result<()> {
         iter_fields_ref!(self, it, {
             for datum_ref in it {
-                serialize_datum_ref_into(&datum_ref, serializer)?
+                memcmp_serialize_datum_into(datum_ref, serializer)?
             }
             Ok(())
         })
     }
-}
 
-impl Hash for StructRef<'_> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        match self {
-            StructRef::Indexed { arr, idx } => arr.hash_at(*idx, state),
-            StructRef::ValueRef { val } => val.hash(state),
-        }
+    pub fn hash_scalar_inner<H: std::hash::Hasher>(&self, state: &mut H) {
+        iter_fields_ref!(self, it, {
+            for datum_ref in it {
+                hash_datum(datum_ref, state);
+            }
+        })
     }
 }
 
@@ -494,20 +398,43 @@ fn cmp_struct_field(l: &Option<ScalarRefImpl<'_>>, r: &Option<ScalarRefImpl<'_>>
 
 impl Debug for StructRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut is_first = true;
         iter_fields_ref!(self, it, {
             for v in it {
-                v.fmt(f)?;
+                if is_first {
+                    write!(f, "{:?}", v)?;
+                    is_first = false;
+                } else {
+                    write!(f, ", {:?}", v)?;
+                }
             }
             Ok(())
         })
     }
 }
 
-impl Display for StructRef<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToText for StructRef<'_> {
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         iter_fields_ref!(self, it, {
-            write!(f, "({})", it.map(display_datum_ref).join(","))
+            write!(f, "(")?;
+            let mut is_first = true;
+            for x in it {
+                if is_first {
+                    is_first = false;
+                } else {
+                    write!(f, ",")?;
+                }
+                ToText::write(&x, f)?;
+            }
+            write!(f, ")")
         })
+    }
+
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
+        match ty {
+            DataType::Struct(_) => self.write(f),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -624,42 +551,21 @@ mod tests {
     }
 
     #[test]
-    fn test_to_protobuf_owned() {
-        use crate::array::*;
-        let arr = StructArray::from_slices(
-            &[true],
-            vec![
-                array! { I32Array, [Some(1)] }.into(),
-                array! { F32Array, [Some(2.0)] }.into(),
-            ],
-            vec![DataType::Int32, DataType::Float32],
-        );
-        let struct_ref = arr.value_at(0).unwrap();
-        let output = struct_ref.to_protobuf_owned();
-        let expect = StructValue::new(vec![
-            Some(1i32.to_scalar_value()),
-            Some(OrderedF32::from(2.0f32).to_scalar_value()),
-        ])
-        .to_protobuf_owned();
-        assert_eq!(output, expect);
-    }
-
-    #[test]
     fn test_serialize_deserialize() {
         let value = StructValue::new(vec![
             Some(OrderedF32::from(3.2).to_scalar_value()),
-            Some("abcde".to_string().to_scalar_value()),
+            Some("abcde".into()),
             Some(
                 StructValue::new(vec![
                     Some(OrderedF64::from(1.3).to_scalar_value()),
-                    Some("a".to_string().to_scalar_value()),
+                    Some("a".into()),
                     None,
                     Some(StructValue::new(vec![]).to_scalar_value()),
                 ])
                 .to_scalar_value(),
             ),
             None,
-            Some("".to_string().to_scalar_value()),
+            Some("".into()),
             None,
             Some(StructValue::new(vec![]).to_scalar_value()),
             Some(12345.to_scalar_value()),
@@ -684,11 +590,11 @@ mod tests {
         ];
         let struct_ref = StructRef::ValueRef { val: &value };
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        struct_ref.serialize(&mut serializer).unwrap();
+        struct_ref.memcmp_serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         assert_eq!(
-            StructValue::deserialize(&fields, &mut deserializer).unwrap(),
+            StructValue::memcmp_deserialize(&fields, &mut deserializer).unwrap(),
             value
         );
 
@@ -702,11 +608,11 @@ mod tests {
         let array = builder.finish();
         let struct_ref = array.value_at(0).unwrap();
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        struct_ref.serialize(&mut serializer).unwrap();
+        struct_ref.memcmp_serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         assert_eq!(
-            StructValue::deserialize(&fields, &mut deserializer).unwrap(),
+            StructValue::memcmp_deserialize(&fields, &mut deserializer).unwrap(),
             value
         );
     }
@@ -739,19 +645,16 @@ mod tests {
                 Ordering::Greater,
             ),
             (
-                StructValue::new(vec![Some("".to_string().to_scalar_value())]),
+                StructValue::new(vec![Some("".into())]),
                 StructValue::new(vec![None]),
                 vec![DataType::Varchar],
                 Ordering::Less,
             ),
             (
-                StructValue::new(vec![Some("abcd".to_string().to_scalar_value()), None]),
+                StructValue::new(vec![Some("abcd".into()), None]),
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 vec![
                     DataType::Varchar,
@@ -761,18 +664,12 @@ mod tests {
             ),
             (
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 StructValue::new(vec![
-                    Some("abcd".to_string().to_scalar_value()),
-                    Some(
-                        StructValue::new(vec![Some("abcdef".to_string().to_scalar_value())])
-                            .to_scalar_value(),
-                    ),
+                    Some("abcd".into()),
+                    Some(StructValue::new(vec![Some("abcdef".into())]).to_scalar_value()),
                 ]),
                 vec![
                     DataType::Varchar,
@@ -786,14 +683,14 @@ mod tests {
             let lhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 StructRef::ValueRef { val: &lhs }
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
             let rhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 StructRef::ValueRef { val: &rhs }
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -813,7 +710,7 @@ mod tests {
                 array
                     .value_at(0)
                     .unwrap()
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -822,7 +719,7 @@ mod tests {
                 array
                     .value_at(1)
                     .unwrap()
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };

@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_rpc_client::HummockMetaClient;
 
@@ -53,8 +54,69 @@ pub struct Context {
     pub task_progress_manager: TaskProgressManagerRef,
 }
 
+impl Context {
+    pub fn new_local_compact_context(
+        options: Arc<StorageConfig>,
+        sstable_store: SstableStoreRef,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        stats: Arc<StateStoreMetrics>,
+        sstable_id_manager: SstableIdManagerRef,
+        filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+    ) -> Self {
+        let compaction_executor = if options.share_buffer_compaction_worker_threads_number == 0 {
+            Arc::new(CompactionExecutor::new(None))
+        } else {
+            Arc::new(CompactionExecutor::new(Some(
+                options.share_buffer_compaction_worker_threads_number as usize,
+            )))
+        };
+        // not limit memory for local compact
+        let memory_limiter = MemoryLimiter::unlimit();
+        Context {
+            options,
+            hummock_meta_client,
+            sstable_store,
+            stats,
+            is_share_buffer_compact: true,
+            compaction_executor,
+            filter_key_extractor_manager,
+            read_memory_limiter: memory_limiter,
+            sstable_id_manager,
+            task_progress_manager: Default::default(),
+        }
+    }
+}
 #[derive(Clone)]
 pub struct CompactorContext {
     pub context: Arc<Context>,
     pub sstable_store: CompactorSstableStoreRef,
+    config: Arc<tokio::sync::Mutex<CompactorRuntimeConfig>>,
+}
+
+impl CompactorContext {
+    pub fn new(context: Arc<Context>, sstable_store: CompactorSstableStoreRef) -> Self {
+        Self::with_config(
+            context,
+            sstable_store,
+            CompactorRuntimeConfig {
+                max_concurrent_task_number: u64::MAX,
+            },
+        )
+    }
+
+    pub fn with_config(
+        context: Arc<Context>,
+        sstable_store: CompactorSstableStoreRef,
+        config: CompactorRuntimeConfig,
+    ) -> Self {
+        Self {
+            context,
+            sstable_store,
+            config: Arc::new(tokio::sync::Mutex::new(config)),
+        }
+    }
+
+    pub async fn lock_config(&self) -> tokio::sync::MutexGuard<'_, CompactorRuntimeConfig> {
+        self.config.lock().await
+    }
 }

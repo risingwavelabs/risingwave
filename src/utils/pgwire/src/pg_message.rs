@@ -21,12 +21,14 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-use crate::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
+use crate::error_or_notice::ErrorOrNoticeMessage;
+use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_response::StatementType;
 use crate::pg_server::BoxedError;
 use crate::types::Row;
 
 /// Messages that can be sent from pg client to server. Implement `read`.
+#[derive(Debug)]
 pub enum FeMessage {
     Ssl,
     Startup(FeStartupMessage),
@@ -43,6 +45,7 @@ pub enum FeMessage {
     Flush,
 }
 
+#[derive(Debug)]
 pub struct FeStartupMessage {
     pub config: HashMap<String, String>,
 }
@@ -72,6 +75,7 @@ impl FeStartupMessage {
 }
 
 /// Query message contains the string sql.
+#[derive(Debug)]
 pub struct FeQueryMessage {
     pub sql_bytes: Bytes,
 }
@@ -124,6 +128,7 @@ pub struct FeCloseMessage {
     pub name: Bytes,
 }
 
+#[derive(Debug)]
 pub struct FeCancelMessage {
     pub target_process_id: i32,
     pub target_secret_key: i32,
@@ -194,16 +199,30 @@ impl FeBindMessage {
                 buf.copy_to_bytes(val_len as usize)
             })
             .collect();
-        // Read ResultFormatCode
-        let len = buf.get_i16();
 
-        assert!(len==0||len==1,"Only support default result format(len==0) or uniform result format(len==1), can't support mix format now.");
+        // Read ResultFormatCode
+        // result format code depend on following rule:
+        // - If the length is 0, format is false(text).
+        // - If the length is 1, format is decide by format_codes[0].
+        // - If the length > 1, each column can have their own format and it depend on according
+        //   format code. But RisingWave can't support return col with different format now, when
+        //   length>1, we guarantee all format code is the same (0,0,0..) or (1,1,1,...).
+        let len = buf.get_i16();
+        let format_codes = (0..len).map(|_| buf.get_i16()).collect::<Vec<_>>();
+        let all_elements_are_equal = format_codes.iter().all(|&x| x == format_codes[0]);
+
+        if !all_elements_are_equal {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Only support uniform result format (TEXT or BINARY), can't support mix format now.",
+            ));
+        }
 
         let result_format_code = if len == 0 {
             // default format:text
             false
         } else {
-            buf.get_i16() == 1
+            format_codes[0] == 1
         };
 
         Ok(FeMessage::Bind(FeBindMessage {
@@ -365,13 +384,16 @@ pub enum BeMessage<'a> {
     AuthenticationCleartextPassword,
     AuthenticationMd5Password(&'a [u8; 4]),
     CommandComplete(BeCommandCompleteMessage),
+    NoticeResponse(&'a str),
     // Single byte - used in response to SSLRequest/GSSENCRequest.
-    EncryptionResponse,
+    EncryptionResponseYes,
+    EncryptionResponseNo,
     EmptyQueryResponse,
     ParseComplete,
     BindComplete,
     PortalSuspended,
-    ParameterDescription(&'a [TypeOid]),
+    // array of parameter oid(i32)
+    ParameterDescription(&'a [i32]),
     NoData,
     DataRow(&'a Row),
     ParameterStatus(BeParameterStatusMessage<'a>),
@@ -394,7 +416,6 @@ pub enum BeParameterStatusMessage<'a> {
 #[derive(Debug)]
 pub struct BeCommandCompleteMessage {
     pub stmt_type: StatementType,
-    pub notice: Option<String>,
     pub rows_cnt: i32,
 }
 
@@ -487,10 +508,6 @@ impl<'a> BeMessage<'a> {
                 let rows_cnt = cmd.rows_cnt;
                 let stmt_type = cmd.stmt_type;
                 let mut tag = "".to_owned();
-                if let Some(notice) = &cmd.notice {
-                    tag.push_str(notice);
-                    tag.push('\n');
-                }
                 tag.push_str(&stmt_type.to_string());
                 if stmt_type == StatementType::INSERT {
                     tag.push_str(" 0");
@@ -504,6 +521,17 @@ impl<'a> BeMessage<'a> {
                     write_cstr(buf, tag.as_bytes())?;
                     Ok(())
                 })?;
+            }
+
+            // NoticeResponse
+            // +-----+-----------+------------------+------------------+
+            // | 'N' | int32 len | byte1 field type | str field value  |
+            // +-----+-----------+------------------+-+----------------+
+            // description of the fields can be found here:
+            // https://www.postgresql.org/docs/current/protocol-error-fields.html
+            BeMessage::NoticeResponse(notice) => {
+                buf.put_u8(b'N');
+                write_err_or_notice(buf, &ErrorOrNoticeMessage::notice(notice));
             }
 
             // DataRow
@@ -552,7 +580,7 @@ impl<'a> BeMessage<'a> {
                         write_cstr(buf, pg_field.get_name().as_bytes())?;
                         buf.put_i32(pg_field.get_table_oid()); // table oid
                         buf.put_i16(pg_field.get_col_attr_num()); // attnum
-                        buf.put_i32(pg_field.get_type_oid().as_number());
+                        buf.put_i32(pg_field.get_type_oid());
                         buf.put_i16(pg_field.get_type_len());
                         buf.put_i32(pg_field.get_type_modifier()); // typmod
                         buf.put_i16(pg_field.get_format_code()); // format code
@@ -599,7 +627,7 @@ impl<'a> BeMessage<'a> {
                 write_body(buf, |buf| {
                     buf.put_i16(para_descs.len() as i16);
                     for oid in para_descs.iter() {
-                        buf.put_i32(oid.as_number());
+                        buf.put_i32(*oid);
                     }
                     Ok(())
                 })?;
@@ -610,9 +638,12 @@ impl<'a> BeMessage<'a> {
                 write_body(buf, |_| Ok(())).unwrap();
             }
 
-            BeMessage::EncryptionResponse => {
-                // Now we support simple ssl, so say yes.
+            BeMessage::EncryptionResponseYes => {
                 buf.put_u8(b'S');
+            }
+
+            BeMessage::EncryptionResponseNo => {
+                buf.put_u8(b'N');
             }
 
             // EmptyQueryResponse
@@ -630,20 +661,8 @@ impl<'a> BeMessage<'a> {
 
                 // 'E' signalizes ErrorResponse messages
                 buf.put_u8(b'E');
-                write_body(buf, |buf| {
-                    buf.put_u8(b'S'); // severity
-                    write_cstr(buf, &Bytes::from("ERROR"))?;
-
-                    buf.put_u8(b'C'); // SQLSTATE error code
-                    write_cstr(buf, &Bytes::from("XX000"))?;
-
-                    buf.put_u8(b'M'); // the message
-                    write_cstr(buf, error.to_string().as_bytes())?;
-
-                    buf.put_u8(0); // terminator
-                    Ok(())
-                })
-                .unwrap();
+                let msg = error.to_string();
+                write_err_or_notice(buf, &ErrorOrNoticeMessage::internal_error(&msg));
             }
 
             BeMessage::BackendKeyData((process_id, secret_key)) => {
@@ -710,6 +729,24 @@ fn write_cstr(buf: &mut BytesMut, s: &[u8]) -> Result<()> {
     buf.put_slice(s);
     buf.put_u8(0);
     Ok(())
+}
+
+/// Safe write error or notice message.
+fn write_err_or_notice(buf: &mut BytesMut, msg: &ErrorOrNoticeMessage<'_>) {
+    write_body(buf, |buf| {
+        buf.put_u8(b'S'); // severity
+        write_cstr(buf, msg.severity.as_str().as_bytes())?;
+
+        buf.put_u8(b'C'); // SQLSTATE error code
+        write_cstr(buf, msg.state.code().as_bytes())?;
+
+        buf.put_u8(b'M'); // the message
+        write_cstr(buf, msg.message.as_bytes())?;
+
+        buf.put_u8(0); // terminator
+        Ok(())
+    })
+    .unwrap();
 }
 
 #[cfg(test)]

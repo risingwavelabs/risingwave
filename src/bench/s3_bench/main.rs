@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aws_sdk_s3::model::{CompletedMultipartUpload, CompletedPart};
-use aws_sdk_s3::Client;
+use aws_sdk_s3::{Client, Credentials, Endpoint};
 use aws_smithy_http::body::SdkBody;
 use bytesize::ByteSize;
 use clap::Parser;
@@ -158,6 +158,10 @@ pub struct Config {
     /// Concurrent get and put
     #[clap(short, long)]
     multithread: bool,
+
+    /// If 'virtual_hosted' is true, that means using other s3 compatible object store.
+    #[clap(short, long)]
+    virtual_hosted: bool,
 }
 
 fn read_cases(cfg: Arc<Config>) -> Vec<Case> {
@@ -621,15 +625,43 @@ struct Analysis {
     ttfbs: Durations,
     part_rtts: Durations,
 }
-
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
 
     let cfg = Arc::new(Config::parse());
-    let shared_config = aws_config::load_from_env().await;
-    let client = Arc::new(Client::new(&shared_config));
 
+    let shared_config = match cfg.virtual_hosted {
+        true => {
+            // using s3 compatible object store, need to get region and some other information.
+            // load from env
+            let _region = std::env::var("S3_COMPATIBLE_REGION").unwrap_or_else(|_| {
+                panic!("S3_COMPATIBLE_REGION not found from environment variables")
+            });
+            let endpoint = std::env::var("S3_COMPATIBLE_ENDPOINT").unwrap_or_else(|_| {
+                panic!("S3_COMPATIBLE_ENDPOINT not found from environment variables")
+            });
+            let access_key_id = std::env::var("S3_COMPATIBLE_ACCESS_KEY_ID").unwrap_or_else(|_| {
+                panic!("S3_COMPATIBLE_ACCESS_KEY_ID not found from environment variables")
+            });
+            let access_key_secret = std::env::var("S3_COMPATIBLE_SECRET_ACCESS_KEY")
+                .unwrap_or_else(|_| {
+                    panic!("S3_COMPATIBLE_SECRET_ACCESS_KEY not found from environment variables")
+                });
+
+            aws_config::from_env()
+                .credentials_provider(Credentials::from_keys(
+                    access_key_id,
+                    access_key_secret,
+                    None,
+                ))
+                .endpoint_resolver(Endpoint::immutable(endpoint.parse().expect("valid URI")))
+                .load()
+                .await
+        }
+        false => aws_config::load_from_env().await,
+    };
+    let client = Arc::new(Client::new(&shared_config));
     let objs = Arc::new(RwLock::new(ObjPool::default()));
 
     let mut cases = read_cases(cfg.clone());

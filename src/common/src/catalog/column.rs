@@ -54,6 +54,12 @@ impl From<ColumnId> for i32 {
     }
 }
 
+impl From<&ColumnId> for i32 {
+    fn from(id: &ColumnId) -> i32 {
+        id.0
+    }
+}
+
 impl std::fmt::Display for ColumnId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
@@ -64,7 +70,7 @@ impl std::fmt::Display for ColumnId {
 pub struct ColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
-    pub name: String, // for debugging
+    pub name: String,
     pub field_descs: Vec<ColumnDesc>,
     pub type_name: String,
 }

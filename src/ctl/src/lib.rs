@@ -40,6 +40,9 @@ pub struct CliOpts {
 #[derive(Subcommand)]
 #[clap(infer_subcommands = true)]
 enum Commands {
+    /// Commands for Compute
+    #[clap(subcommand)]
+    Compute(ComputeCommands),
     /// Commands for Hummock
     #[clap(subcommand)]
     Hummock(HummockCommands),
@@ -60,6 +63,12 @@ enum Commands {
         #[clap(short, long = "sleep")]
         sleep: u64,
     },
+}
+
+#[derive(Subcommand)]
+enum ComputeCommands {
+    /// Show all the configuration parameters on compute node
+    ShowConfig { host: String },
 }
 
 #[derive(Subcommand)]
@@ -122,8 +131,6 @@ enum HummockCommands {
         #[clap(long)]
         sub_level_max_compaction_bytes: Option<u64>,
         #[clap(long)]
-        level0_trigger_file_number: Option<u64>,
-        #[clap(long)]
         level0_tier_compact_file_number: Option<u64>,
         #[clap(long)]
         target_file_size_base: Option<u64>,
@@ -181,10 +188,17 @@ enum MetaCommands {
         #[clap(long)]
         dry_run: bool,
     },
+    /// backup meta by taking a meta snapshot
+    BackupMeta,
+    /// delete meta snapshots
+    DeleteMetaSnapshots { snapshot_ids: Vec<u64> },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
     match opts.command {
+        Commands::Compute(ComputeCommands::ShowConfig { host }) => {
+            cmd_impl::compute::show_config(&host).await?
+        }
         Commands::Hummock(HummockCommands::DisableCommitEpoch) => {
             cmd_impl::hummock::disable_commit_epoch().await?
         }
@@ -225,7 +239,6 @@ pub async fn start(opts: CliOpts) -> Result<()> {
             max_bytes_for_level_multiplier,
             max_compaction_bytes,
             sub_level_max_compaction_bytes,
-            level0_trigger_file_number,
             level0_tier_compact_file_number,
             target_file_size_base,
             compaction_filter_mask,
@@ -238,7 +251,6 @@ pub async fn start(opts: CliOpts) -> Result<()> {
                     max_bytes_for_level_multiplier,
                     max_compaction_bytes,
                     sub_level_max_compaction_bytes,
-                    level0_trigger_file_number,
                     level0_tier_compact_file_number,
                     target_file_size_base,
                     compaction_filter_mask,
@@ -258,6 +270,10 @@ pub async fn start(opts: CliOpts) -> Result<()> {
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info().await?,
         Commands::Meta(MetaCommands::Reschedule { plan, dry_run }) => {
             cmd_impl::meta::reschedule(plan, dry_run).await?
+        }
+        Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta().await?,
+        Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
+            cmd_impl::meta::delete_meta_snapshots(&snapshot_ids).await?
         }
         Commands::Trace => cmd_impl::trace::trace().await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(sleep).await?,

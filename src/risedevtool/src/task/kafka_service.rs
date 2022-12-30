@@ -67,7 +67,7 @@ impl Task for KafkaService {
         let config_path = Path::new(&prefix_config).join(format!("{}.properties", self.id()));
         std::fs::write(
             &config_path,
-            &KafkaGen.gen_server_properties(&self.config, &path.to_string_lossy()),
+            KafkaGen.gen_server_properties(&self.config, &path.to_string_lossy()),
         )?;
 
         let mut cmd = self.kafka()?;

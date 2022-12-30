@@ -11,12 +11,19 @@ in rust.
   expected output. For example, for a test case named `boolean`, here is its [input file](data/sql/boolean.sql)
   and [expected out](data/expected/boolean.out).
 
-# How to add a new test
+# How to enable a new test file
 
 Just add another line in your schedule file with your test cast name.
 ```
-tests: boolean
+test: boolean
 ```
+
+# How to edit a test file
+
+If you want to ignore a certain test query from an input sql file, comment it out with `--@ `. Note the extra `@` after `--`.
+
+Except for the `--@ ` syntax above, all other edits to the input sql file must be applied to the expected output file as well, including extra normal comments `-- `.
+In general, these files are not meant to be modified a lot. The test runner has some assumptions over the format and would misbehave otherwise.
 
 # How to run
 

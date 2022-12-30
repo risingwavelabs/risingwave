@@ -26,10 +26,11 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 use risingwave_connector::source::SplitImpl;
-use risingwave_pb::data::Epoch as ProstEpoch;
+use risingwave_pb::data::{Datum as ProstDatum, Epoch as ProstEpoch};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation as ProstMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
@@ -37,7 +38,7 @@ use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate}
 use risingwave_pb::stream_plan::{
     AddMutation, Barrier as ProstBarrier, Dispatcher as ProstDispatcher, PauseMutation,
     ResumeMutation, SourceChangeSplitMutation, StopMutation, StreamMessage as ProstStreamMessage,
-    UpdateMutation,
+    UpdateMutation, Watermark as ProstWatermark,
 };
 use smallvec::SmallVec;
 
@@ -53,6 +54,7 @@ pub mod aggregation;
 mod batch_query;
 mod chain;
 mod dispatch;
+pub mod dml;
 mod dynamic_filter;
 mod error;
 mod expand;
@@ -67,18 +69,23 @@ mod lookup_union;
 mod managed_state;
 mod merge;
 mod mview;
+mod now;
 mod project;
 mod project_set;
 mod rearranged_chain;
 mod receiver;
+pub mod row_id_gen;
 mod simple;
 mod sink;
+mod sort;
 pub mod source;
 pub mod subtask;
 mod top_n;
 mod union;
+mod watermark_filter;
 mod wrapper;
 
+mod backfill;
 #[cfg(test)]
 mod integration_tests;
 #[cfg(test)]
@@ -86,6 +93,7 @@ mod test_utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
+pub use backfill::*;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
@@ -100,9 +108,9 @@ pub use hop_window::HopWindowExecutor;
 pub use local_simple_agg::LocalSimpleAggExecutor;
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
-pub use managed_state::join::JoinManagedCache;
 pub use merge::MergeExecutor;
 pub use mview::*;
+pub use now::NowExecutor;
 pub use project::ProjectExecutor;
 pub use project_set::*;
 pub use rearranged_chain::RearrangedChainExecutor;
@@ -110,9 +118,11 @@ pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use sink::SinkExecutor;
+pub use sort::SortExecutor;
 pub use source::*;
 pub use top_n::{AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor};
 pub use union::UnionExecutor;
+pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
 
 use self::barrier_align::AlignedMessageStream;
@@ -124,7 +134,7 @@ pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
 /// Static information of an executor.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ExecutorInfo {
     /// See [`Executor::schema`].
     pub schema: Schema,
@@ -227,6 +237,15 @@ impl Barrier {
         }
     }
 
+    pub fn with_prev_epoch_for_test(epoch: u64, prev_epoch: u64) -> Self {
+        Self {
+            epoch: EpochPair::new(epoch, prev_epoch),
+            checkpoint: true,
+            mutation: Default::default(),
+            passed_actors: Default::default(),
+        }
+    }
+
     #[must_use]
     pub fn with_mutation(self, mutation: Mutation) -> Self {
         Self {
@@ -271,9 +290,20 @@ impl Barrier {
         )
     }
 
+    /// Whether this barrier is for pause.
+    pub fn is_pause(&self) -> bool {
+        matches!(self.mutation.as_deref(), Some(Mutation::Pause))
+    }
+
     /// Whether this barrier is for configuration change. Used for source executor initialization.
     pub fn is_update(&self) -> bool {
         matches!(self.mutation.as_deref(), Some(Mutation::Update { .. }))
+    }
+
+    /// Whether this barrier is for resume. Used for now executor to determine whether to yield a
+    /// chunk and a watermark before this barrier.
+    pub fn is_resume(&self) -> bool {
+        matches!(self.mutation.as_deref(), Some(Mutation::Resume))
     }
 
     /// Returns the [`MergeUpdate`] if this barrier is to update the merge executors for the actor
@@ -390,7 +420,7 @@ impl Mutation {
         }
     }
 
-    fn from_protobuf(prost: &ProstMutation) -> StreamResult<Self> {
+    fn from_protobuf(prost: &ProstMutation) -> StreamExecutorResult<Self> {
         let mutation = match prost {
             ProstMutation::Stop(stop) => {
                 Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
@@ -498,14 +528,14 @@ impl Barrier {
         }
     }
 
-    pub fn from_protobuf(prost: &ProstBarrier) -> StreamResult<Self> {
+    pub fn from_protobuf(prost: &ProstBarrier) -> StreamExecutorResult<Self> {
         let mutation = prost
             .mutation
             .as_ref()
             .map(Mutation::from_protobuf)
             .transpose()?
             .map(Arc::new);
-        let epoch = prost.get_epoch().unwrap();
+        let epoch = prost.get_epoch()?;
         Ok(Barrier {
             checkpoint: prost.checkpoint,
             epoch: EpochPair::new(epoch.curr, epoch.prev),
@@ -515,10 +545,66 @@ impl Barrier {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Watermark {
+    col_idx: usize,
+    data_type: DataType,
+    val: ScalarImpl,
+}
+
+impl PartialOrd for Watermark {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        if self.col_idx == other.col_idx {
+            self.val.partial_cmp(&other.val)
+        } else {
+            None
+        }
+    }
+}
+
+impl Ord for Watermark {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other)
+            .unwrap_or_else(|| panic!("cannot compare {self:?} with {other:?}"))
+    }
+}
+
+impl Watermark {
+    pub fn new(col_idx: usize, data_type: DataType, val: ScalarImpl) -> Self {
+        Self {
+            col_idx,
+            data_type,
+            val,
+        }
+    }
+
+    pub fn to_protobuf(&self) -> ProstWatermark {
+        ProstWatermark {
+            col_idx: self.col_idx as _,
+            data_type: Some(self.data_type.to_protobuf()),
+            val: Some(ProstDatum {
+                body: serialize_datum(Some(&self.val)),
+            }),
+        }
+    }
+
+    pub fn from_protobuf(prost: &ProstWatermark) -> StreamExecutorResult<Self> {
+        let data_type = DataType::from(prost.get_data_type()?);
+        let val = deserialize_datum(prost.get_val()?.get_body().as_slice(), &data_type)?
+            .expect("watermark value cannot be null");
+        Ok(Watermark {
+            col_idx: prost.col_idx as _,
+            data_type,
+            val,
+        })
+    }
+}
+
 #[derive(Debug, EnumAsInner, PartialEq)]
 pub enum Message {
     Chunk(StreamChunk),
     Barrier(Barrier),
+    Watermark(Watermark),
 }
 
 impl<'a> TryFrom<&'a Message> for &'a Barrier {
@@ -528,6 +614,7 @@ impl<'a> TryFrom<&'a Message> for &'a Barrier {
         match m {
             Message::Chunk(_) => Err(()),
             Message::Barrier(b) => Ok(b),
+            Message::Watermark(_) => Err(()),
         }
     }
 }
@@ -548,27 +635,26 @@ impl Message {
         )
     }
 
-    pub fn to_protobuf(&self) -> StreamResult<ProstStreamMessage> {
+    pub fn to_protobuf(&self) -> ProstStreamMessage {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
                 let prost_stream_chunk = stream_chunk.to_protobuf();
                 StreamMessage::StreamChunk(prost_stream_chunk)
             }
             Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone().to_protobuf()),
+            Self::Watermark(watermark) => StreamMessage::Watermark(watermark.to_protobuf()),
         };
-        let prost_stream_msg = ProstStreamMessage {
+        ProstStreamMessage {
             stream_message: Some(prost),
-        };
-        Ok(prost_stream_msg)
+        }
     }
 
-    pub fn from_protobuf(prost: &ProstStreamMessage) -> StreamResult<Self> {
+    pub fn from_protobuf(prost: &ProstStreamMessage) -> StreamExecutorResult<Self> {
         let res = match prost.get_stream_message()? {
-            StreamMessage::StreamChunk(ref stream_chunk) => {
-                Message::Chunk(StreamChunk::from_protobuf(stream_chunk)?)
-            }
-            StreamMessage::Barrier(ref barrier) => {
-                Message::Barrier(Barrier::from_protobuf(barrier)?)
+            StreamMessage::StreamChunk(chunk) => Message::Chunk(StreamChunk::from_protobuf(chunk)?),
+            StreamMessage::Barrier(barrier) => Message::Barrier(Barrier::from_protobuf(barrier)?),
+            StreamMessage::Watermark(watermark) => {
+                Message::Watermark(Watermark::from_protobuf(watermark)?)
             }
         };
         Ok(res)
@@ -584,7 +670,6 @@ pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
 /// Expect the first message of the given `stream` as a barrier.
-#[track_caller]
 pub async fn expect_first_barrier(
     stream: &mut (impl MessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {
@@ -600,7 +685,6 @@ pub async fn expect_first_barrier(
 }
 
 /// Expect the first message of the given `stream` as a barrier.
-#[track_caller]
 pub async fn expect_first_barrier_from_aligned_stream(
     stream: &mut (impl AlignedMessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {

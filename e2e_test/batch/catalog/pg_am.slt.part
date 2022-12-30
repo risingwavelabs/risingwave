@@ -1,0 +1,8 @@
+query ITIT
+SELECT
+    oid,
+    amname,
+    amhandler,
+    amtype
+FROM pg_catalog.pg_am;
+----

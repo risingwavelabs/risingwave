@@ -70,6 +70,11 @@ impl ValueState {
             .get_output()
             .expect("agg call throw an error in streamAgg")
     }
+
+    /// Reset to initial state
+    pub fn reset(&mut self) {
+        self.inner.reset();
+    }
 }
 
 #[cfg(test)]
@@ -101,7 +106,7 @@ mod tests {
             .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Insert, Op::Insert],
                 None,
-                &[&I64Array::from_slice(&[Some(0), Some(1), Some(2), None]).into()],
+                &[&I64Array::from_iter([Some(0), Some(1), Some(2), None]).into()],
             )
             .unwrap();
 
@@ -116,7 +121,7 @@ mod tests {
             .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Delete, Op::Insert],
                 None,
-                &[&I64Array::from_slice(&[Some(42), None, Some(2), Some(8)]).into()],
+                &[&I64Array::from_iter([Some(42), None, Some(2), Some(8)]).into()],
             )
             .unwrap();
         assert_eq!(state.get_output(), Some(ScalarImpl::Int64(4)));
@@ -143,7 +148,7 @@ mod tests {
             .apply_chunk(
                 &[Op::Insert, Op::Insert, Op::Insert, Op::Insert, Op::Insert],
                 None,
-                &[&I64Array::from_slice(&[Some(-1), Some(0), Some(2), Some(1), None]).into()],
+                &[&I64Array::from_iter([Some(-1), Some(0), Some(2), Some(1), None]).into()],
             )
             .unwrap();
 

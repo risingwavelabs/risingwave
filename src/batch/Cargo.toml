@@ -1,7 +1,11 @@
 [package]
-edition = "2021"
 name = "risingwave_batch"
-version = "0.2.0-alpha"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
@@ -19,7 +23,6 @@ fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 itertools = "0.10"
-memcomparable = { path = "../utils/memcomparable" }
 minitrace = "0.4"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
@@ -60,10 +63,10 @@ url = "2"
 uuid = "1"
 
 [target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { version = "0.2.0-alpha", path = "../workspace-hack" }
+workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
-criterion = { version = "0.3.5", features = ["async_tokio", "async"] }
+criterion = { version = "0.4", features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
 tikv-jemallocator = "0.5"
@@ -85,7 +88,7 @@ name = "hash_join"
 harness = false
 
 [[bench]]
-name = "order_by"
+name = "sort"
 harness = false
 
 [[bench]]

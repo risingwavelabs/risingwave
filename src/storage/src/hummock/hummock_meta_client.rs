@@ -15,14 +15,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::stream::BoxStream;
+use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo, SstIdRange};
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
-    SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion, VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
-use risingwave_rpc_client::{HummockMetaClient, MetaClient};
-use tonic::Streaming;
+use risingwave_rpc_client::{CompactTaskItem, HummockMetaClient, MetaClient};
 
 use crate::hummock::{HummockEpoch, HummockVersionId};
 use crate::monitor::HummockMetrics;
@@ -96,10 +96,17 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
+    async fn report_compaction_task(
+        &self,
+        compact_task: CompactTask,
+        table_stats_change: TableStatsMap,
+    ) -> Result<()> {
         self.stats.report_compaction_task_counts.inc();
         let timer = self.stats.report_compaction_task_latency.start_timer();
-        let res = self.meta_client.report_compaction_task(compact_task).await;
+        let res = self
+            .meta_client
+            .report_compaction_task(compact_task, table_stats_change)
+            .await;
         timer.observe_duration();
         res
     }
@@ -115,7 +122,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     async fn subscribe_compact_tasks(
         &self,
         max_concurrent_task_number: u64,
-    ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+    ) -> Result<BoxStream<'static, CompactTaskItem>> {
         self.meta_client
             .subscribe_compact_tasks(max_concurrent_task_number)
             .await
@@ -157,5 +164,9 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client
             .trigger_full_gc(sst_retention_time_sec)
             .await
+    }
+
+    async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
+        self.meta_client.update_current_epoch(epoch).await
     }
 }

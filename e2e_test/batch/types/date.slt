@@ -43,7 +43,7 @@ INSERT INTO dates VALUES ('02-02-1992');
 statement error
 INSERT INTO dates VALUES ('1900a01a01');
 
-# this works in postgres but we don't support it for now 
+# this works in postgres but we don't support it for now
 # for reasons of performance and maintainability in datetime parsing libraries.
 # in particular, the use of speedate. see https://github.com/risingwavelabs/risingwave/pull/5367
 statement error

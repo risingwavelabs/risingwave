@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use anyhow::Context;
 use futures_async_stream::try_stream;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
@@ -23,6 +25,8 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::StreamChunkWithState;
+
+pub type TableSourceRef = Arc<TableSource>;
 
 #[derive(Debug)]
 struct TableSourceCore {
@@ -141,6 +145,15 @@ impl TableStreamReader {
             yield chunk.into();
         }
     }
+
+    #[try_stream(boxed, ok = StreamChunk, error = RwError)]
+    pub async fn into_stream_v2(mut self) {
+        while let Some((chunk, notifier)) = self.rx.recv().await {
+            // Notify about that we've taken the chunk.
+            _ = notifier.send(chunk.cardinality());
+            yield chunk;
+        }
+    }
 }
 
 impl TableSource {
@@ -163,42 +176,16 @@ impl TableSource {
 
         Ok(TableStreamReader { rx, column_indices })
     }
-}
 
-pub mod test_utils {
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
-    use risingwave_pb::catalog::{ColumnIndex, TableSourceInfo};
-    use risingwave_pb::plan_common::ColumnCatalog;
-    use risingwave_pb::stream_plan::source_node::Info as ProstSourceInfo;
+    pub fn stream_reader_v2(&self) -> TableStreamReader {
+        let mut core = self.core.write();
+        let (tx, rx) = mpsc::unbounded_channel();
+        core.changes_txs.push(tx);
 
-    pub fn create_table_info(
-        schema: &Schema,
-        row_id_index: Option<u64>,
-        pk_column_ids: Vec<i32>,
-    ) -> ProstSourceInfo {
-        ProstSourceInfo::TableSource(TableSourceInfo {
-            row_id_index: row_id_index.map(|index| ColumnIndex { index }),
-            columns: schema
-                .fields
-                .iter()
-                .enumerate()
-                .map(|(i, f)| ColumnCatalog {
-                    column_desc: Some(
-                        ColumnDesc {
-                            data_type: f.data_type.clone(),
-                            column_id: ColumnId::from(i as i32), // use column index as column id
-                            name: f.name.clone(),
-                            field_descs: vec![],
-                            type_name: "".to_string(),
-                        }
-                        .to_protobuf(),
-                    ),
-                    is_hidden: false,
-                })
-                .collect(),
-            pk_column_ids,
-            properties: Default::default(),
-        })
+        TableStreamReader {
+            rx,
+            column_indices: Default::default(),
+        }
     }
 }
 
@@ -212,15 +199,10 @@ mod tests {
     use risingwave_common::array::{Array, I64Array, Op};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
-    use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::Keyspace;
 
     use super::*;
 
     fn new_source() -> TableSource {
-        let store = MemoryStateStore::new();
-        let _keyspace = Keyspace::table_root(store, &Default::default());
-
         TableSource::new(vec![ColumnDesc::unnamed(
             ColumnId::from(0),
             DataType::Int64,

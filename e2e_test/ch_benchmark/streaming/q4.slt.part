@@ -1,0 +1,15 @@
+query II
+select * from ch_benchmark_q4
+order by o_ol_cnt;
+----
+        5          36
+        6          29
+        7          28
+        8          20
+        9          28
+       10          18
+       11          28
+       12          20
+       13          28
+       14          29
+       15          36

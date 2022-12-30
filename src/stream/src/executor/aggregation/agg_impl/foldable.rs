@@ -127,6 +127,31 @@ where
     }
 }
 
+/// `I64Sum0` sums two i64 by `accumulate` and `retract` functions.
+/// It is initialized with 0.
+#[derive(Debug)]
+pub struct I64Sum0 {}
+
+impl StreamingFoldable<i64, i64> for I64Sum0 {
+    fn accumulate(
+        result: Option<&i64>,
+        input: Option<<i64 as Scalar>::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<i64>> {
+        PrimitiveSummable::<i64, i64>::accumulate(result, input)
+    }
+
+    fn retract(
+        result: Option<&i64>,
+        input: Option<<i64 as Scalar>::ScalarRefType<'_>>,
+    ) -> StreamExecutorResult<Option<i64>> {
+        PrimitiveSummable::<i64, i64>::retract(result, input)
+    }
+
+    fn initial() -> Option<i64> {
+        Some(0)
+    }
+}
+
 /// `Countable` do counts. The behavior of `Countable` is somehow counterintuitive.
 /// In SQL logic, if there is no item in aggregation, count will return `null`.
 /// However, this `Countable` will always return 0 if there is no item.
@@ -389,6 +414,7 @@ impl_fold_agg! { F32Array, Float32, F32Array }
 impl_fold_agg! { F64Array, Float64, F64Array }
 impl_fold_agg! { DecimalArray, Decimal, DecimalArray }
 impl_fold_agg! { Utf8Array, Utf8, Utf8Array }
+impl_fold_agg! { BytesArray, Bytea, BytesArray }
 impl_fold_agg! { StructArray, Struct, StructArray }
 impl_fold_agg! { IntervalArray, Interval, IntervalArray }
 impl_fold_agg! { NaiveTimeArray, NaiveTime, NaiveTimeArray }
@@ -483,7 +509,7 @@ mod tests {
             agg.apply_batch(
                 &ops,
                 None,
-                &[&ArrayImpl::Float64(F64Array::from_slice(&data))],
+                &[&ArrayImpl::Float64(F64Array::from_iter(&data))],
             )
             .unwrap();
             assert_eq!(

@@ -147,10 +147,7 @@ pub struct FunctionalDependencySet {
 impl fmt::Display for FunctionalDependencySet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("{")?;
-        self.strict
-            .iter()
-            .format_with(", ", |fd, f| f(&format_args!("{}", fd)))
-            .fmt(f)?;
+        self.strict.iter().format(", ").fmt(f)?;
         f.write_str("}")
     }
 }

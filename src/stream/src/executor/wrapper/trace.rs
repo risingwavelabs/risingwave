@@ -96,6 +96,15 @@ pub async fn metrics(
     }
 }
 
+fn pretty_identity(identity: &str, actor_id: ActorId, executor_id: u64) -> String {
+    format!(
+        "{} (actor {}, executor {})",
+        identity,
+        actor_id,
+        executor_id as u32 // Use the lower 32 bit to match the dashboard.
+    )
+}
+
 /// Streams wrapped by `stack_trace` will print the async stack trace of the executors.
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn stack_trace(
@@ -106,13 +115,7 @@ pub async fn stack_trace(
 ) {
     pin_mut!(input);
 
-    let span: SpanValue = format!(
-        "{} (actor {}, executor {})",
-        info.identity,
-        actor_id,
-        executor_id as u32 // Use the lower 32 bit to match the dashboard.
-    )
-    .into();
+    let span: SpanValue = pretty_identity(&info.identity, actor_id, executor_id).into();
 
     while let Some(message) = input.next().stack_trace(span.clone()).await.transpose()? {
         yield message;

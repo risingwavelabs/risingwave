@@ -15,14 +15,14 @@
 use std::env;
 use std::sync::Arc;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{
-    deserialize_datum_from, serialize_datum_into, DataType, Datum, IntervalUnit,
+    memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum, IntervalUnit,
     NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, ScalarImpl,
 };
-use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
+use risingwave_common::util::value_encoding;
 
 const ENV_BENCH_SER: &str = "BENCH_SER";
 const ENV_BENCH_DE: &str = "BENCH_DE";
@@ -46,23 +46,23 @@ impl Case {
 
 fn key_serialization(datum: &Datum) -> Vec<u8> {
     let mut serializer = memcomparable::Serializer::new(vec![]);
-    serialize_datum_into(datum, &mut serializer).unwrap();
-    serializer.into_inner()
+    memcmp_serialize_datum_into(datum, &mut serializer).unwrap();
+    black_box(serializer.into_inner())
 }
 
 fn value_serialization(datum: &Datum) -> Vec<u8> {
-    let mut buf = vec![];
-    serialize_datum(datum, &mut buf);
-    buf
+    black_box(value_encoding::serialize_datum(datum))
 }
 
 fn key_deserialization(ty: &DataType, datum: &[u8]) {
     let mut deserializer = memcomparable::Deserializer::new(datum);
-    let _ = deserialize_datum_from(ty, &mut deserializer);
+    let result = memcmp_deserialize_datum_from(ty, &mut deserializer);
+    let _ = black_box(result);
 }
 
 fn value_deserialization(ty: &DataType, datum: &[u8]) {
-    let _ = deserialize_datum(datum, ty);
+    let result = value_encoding::deserialize_datum(datum, ty);
+    let _ = black_box(result);
 }
 
 fn bench_encoding(c: &mut Criterion) {
@@ -109,17 +109,17 @@ fn bench_encoding(c: &mut Criterion) {
         Case::new(
             "Utf8 (len = 10)",
             DataType::Varchar,
-            ScalarImpl::Utf8(String::from_iter(vec!['a'; 10])),
+            ScalarImpl::Utf8("a".repeat(10).into()),
         ),
         Case::new(
             "Utf8 (len = 1000)",
             DataType::Varchar,
-            ScalarImpl::Utf8(String::from_iter(vec!['a'; 1000])),
+            ScalarImpl::Utf8("a".repeat(1000).into()),
         ),
         Case::new(
-            "Utf8 (len = 10000)",
+            "Utf8 (len = 100000)",
             DataType::Varchar,
-            ScalarImpl::Utf8(String::from_iter(vec!['a'; 100000])),
+            ScalarImpl::Utf8("a".repeat(100000).into()),
         ),
         // Use bool as the inner elem/field type to eliminate the performance gap in elem/field
         // encoding.

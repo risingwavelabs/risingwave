@@ -52,61 +52,41 @@ impl MetaNodeService {
                 config.listen_address, config.dashboard_port
             ));
 
-        cmd.arg("--prometheus-host").arg(format!(
-            "{}:{}",
-            config.listen_address, config.exporter_port
-        ));
+        cmd.arg("--prometheus-host")
+            .arg(format!(
+                "{}:{}",
+                config.listen_address, config.exporter_port
+            ))
+            .arg("--connector-rpc-endpoint")
+            .arg(&config.connector_rpc_endpoint);
 
-        match config.provide_etcd_backend.as_ref().map(|v| &v[..]) {
-            Some([]) => {
-                cmd.arg("--backend").arg("mem");
-            }
-            Some([etcd]) => {
-                cmd.arg("--backend")
-                    .arg("etcd")
-                    .arg("--etcd-endpoints")
-                    .arg(format!("{}:{}", etcd.address, etcd.port));
+        match config.provide_prometheus.as_ref().unwrap().as_slice() {
+            [] => {}
+            [prometheus] => {
+                cmd.arg("--prometheus-endpoint")
+                    .arg(format!("http://{}:{}", prometheus.address, prometheus.port));
             }
             _ => {
                 return Err(anyhow!(
-                    "unexpected etcd config {:?}",
-                    config.provide_etcd_backend
+                    "unexpected prometheus config {:?}, only 1 instance is supported",
+                    config.provide_prometheus
                 ))
             }
         }
 
-        if config.enable_dashboard_v2 {
-            cmd.arg("--dashboard-ui-path")
-                .arg(env::var("PREFIX_UI").unwrap_or_else(|_| ".risingwave/ui".to_owned()));
-        }
-
-        if config.unsafe_disable_recovery {
-            cmd.arg("--disable-recovery");
-        }
-
-        if let Some(sec) = config.max_idle_secs_to_exit {
-            if sec > 0 {
-                cmd.arg("--dangerous-max-idle-secs").arg(format!("{}", sec));
+        match config.provide_etcd_backend.as_ref().unwrap().as_slice() {
+            [] => {
+                cmd.arg("--backend").arg("mem");
             }
-        }
-
-        cmd.arg("--vacuum-interval-sec")
-            .arg(format!("{}", config.vacuum_interval_sec))
-            .arg("--max-heartbeat-interval-secs")
-            .arg(format!("{}", config.max_heartbeat_interval_secs))
-            .arg("--collect-gc-watermark-spin-interval-sec")
-            .arg(format!("{}", config.collect_gc_watermark_spin_interval_sec))
-            .arg("--min-sst-retention-time-sec")
-            .arg(format!("{}", config.min_sst_retention_time_sec))
-            .arg("--periodic-compaction-interval-sec")
-            .arg(format!("{}", config.periodic_compaction_interval_sec));
-
-        if config.enable_compaction_deterministic {
-            cmd.arg("--enable-compaction-deterministic");
-        }
-
-        if config.enable_committed_sst_sanity_check {
-            cmd.arg("--enable-committed-sst-sanity-check");
+            etcds => {
+                cmd.arg("--backend")
+                    .arg("etcd")
+                    .arg("--etcd-endpoints")
+                    .arg(format!("{}:{}", etcds[0].address, etcds[0].port));
+                if etcds.len() > 1 {
+                    eprintln!("WARN: more than 1 etcd instance is detected, only using the first one for meta node.");
+                }
+            }
         }
 
         Ok(())
@@ -142,6 +122,9 @@ impl Task for MetaNodeService {
         let prefix_config = env::var("PREFIX_CONFIG")?;
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
+
+        cmd.arg("--dashboard-ui-path")
+            .arg(env::var("PREFIX_UI").unwrap_or_else(|_| ".risingwave/ui".to_owned()));
 
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;

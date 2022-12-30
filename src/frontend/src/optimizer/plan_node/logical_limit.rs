@@ -20,6 +20,9 @@ use super::{
     gen_filter_and_pushdown, BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
 };
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
@@ -27,12 +30,12 @@ use crate::utils::{ColIndexMapping, Condition};
 pub struct LogicalLimit {
     pub base: PlanBase,
     input: PlanRef,
-    pub(super) limit: usize,
-    pub(super) offset: usize,
+    pub(super) limit: u64,
+    pub(super) offset: u64,
 }
 
 impl LogicalLimit {
-    pub fn new(input: PlanRef, limit: usize, offset: usize) -> Self {
+    pub fn new(input: PlanRef, limit: u64, offset: u64) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
         let pk_indices = input.logical_pk().to_vec();
@@ -47,15 +50,15 @@ impl LogicalLimit {
     }
 
     /// the function will check if the cond is bool expression
-    pub fn create(input: PlanRef, limit: usize, offset: usize) -> PlanRef {
+    pub fn create(input: PlanRef, limit: u64, offset: u64) -> PlanRef {
         Self::new(input, limit, offset).into()
     }
 
-    pub fn limit(&self) -> usize {
+    pub fn limit(&self) -> u64 {
         self.limit
     }
 
-    pub fn offset(&self) -> usize {
+    pub fn offset(&self) -> u64 {
         self.offset
     }
 }
@@ -90,15 +93,20 @@ impl fmt::Display for LogicalLimit {
 }
 
 impl ColPrunable for LogicalLimit {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
-        let new_input = self.input.prune_col(required_cols);
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        let new_input = self.input.prune_col(required_cols, ctx);
         self.clone_with_input(new_input).into()
     }
 }
 
 impl PredicatePushdown for LogicalLimit {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        // filter can not transpose limit
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
 
@@ -111,15 +119,18 @@ impl ToBatch for LogicalLimit {
 }
 
 impl ToStream for LogicalLimit {
-    fn to_stream(&self) -> Result<PlanRef> {
-        Err(RwError::from(ErrorCode::NotImplemented(
-            "there is no limit stream operator".to_string(),
-            None.into(),
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        Err(RwError::from(ErrorCode::InvalidInputSyntax(
+            "The LIMIT clause can not appear alone in a streaming query. Please add an ORDER BY clause before the LIMIT"
+                .to_string(),
         )))
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input.logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream(ctx)?;
         let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((filter.into(), out_col_change))
     }

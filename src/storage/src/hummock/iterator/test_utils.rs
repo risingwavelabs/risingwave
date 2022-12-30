@@ -15,7 +15,9 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::key_with_epoch;
+use itertools::Itertools;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
@@ -24,10 +26,12 @@ use risingwave_object_store::object::{
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStore;
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
-use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
+use crate::hummock::test_utils::{
+    create_small_table_cache, gen_test_sstable, gen_test_sstable_with_range_tombstone,
+};
 use crate::hummock::{
-    HummockValue, Sstable, SstableBuilderOptions, SstableIterator, SstableIteratorType,
-    SstableStoreRef, TieredCache,
+    DeleteRangeTombstone, HummockValue, Sstable, SstableBuilderOptions, SstableIterator,
+    SstableIteratorType, SstableStoreRef, TieredCache,
 };
 use crate::monitor::ObjectStoreMetrics;
 
@@ -67,14 +71,28 @@ pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableSto
     ))
 }
 
-/// Generates keys like `key_test_00002` with epoch 233.
-pub fn iterator_test_key_of(idx: usize) -> Vec<u8> {
-    key_with_epoch(format!("key_test_{:05}", idx).as_bytes().to_vec(), 233)
+pub fn iterator_test_table_key_of(idx: usize) -> Vec<u8> {
+    format!("key_test_{:05}", idx).as_bytes().to_vec()
 }
 
-/// Generates keys like `key_test_00002` with epoch `epoch` .
-pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> Vec<u8> {
-    key_with_epoch(format!("key_test_{:05}", idx).as_bytes().to_vec(), epoch)
+pub fn iterator_test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
+    UserKey::for_test(TableId::default(), iterator_test_table_key_of(idx))
+}
+
+/// Generates keys like `{table_id=0}key_test_00002` with epoch 233.
+pub fn iterator_test_key_of(idx: usize) -> FullKey<Vec<u8>> {
+    FullKey {
+        user_key: iterator_test_user_key_of(idx),
+        epoch: 233,
+    }
+}
+
+/// Generates keys like `{table_id=0}key_test_00002` with epoch `epoch` .
+pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Vec<u8>> {
+    FullKey {
+        user_key: iterator_test_user_key_of(idx),
+        epoch,
+    }
 }
 
 /// The value of an index, like `value_test_00002` without value meta
@@ -118,6 +136,36 @@ pub async fn gen_iterator_test_sstable_from_kv_pair(
         kv_pairs
             .into_iter()
             .map(|kv| (iterator_test_key_of_epoch(kv.0, kv.1), kv.2)),
+        sstable_store,
+    )
+    .await
+}
+
+// key=[idx, epoch], value
+pub async fn gen_iterator_test_sstable_with_range_tombstones(
+    sst_id: HummockSstableId,
+    kv_pairs: Vec<(usize, u64, HummockValue<Vec<u8>>)>,
+    delete_ranges: Vec<(usize, usize, u64)>,
+    sstable_store: SstableStoreRef,
+) -> Sstable {
+    let range_tombstones = delete_ranges
+        .into_iter()
+        .map(|(start, end, epoch)| {
+            DeleteRangeTombstone::new(
+                TableId::default(),
+                iterator_test_table_key_of(start),
+                iterator_test_table_key_of(end),
+                epoch,
+            )
+        })
+        .collect_vec();
+    gen_test_sstable_with_range_tombstone(
+        default_builder_opt_for_test(),
+        sst_id,
+        kv_pairs
+            .into_iter()
+            .map(|kv| (iterator_test_key_of_epoch(kv.0, kv.1), kv.2)),
+        range_tombstones,
         sstable_store,
     )
     .await

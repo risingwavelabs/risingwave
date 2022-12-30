@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
+use risingwave_common::types::{DataType, ScalarImpl};
 use tokio::sync::mpsc;
 
 use super::error::StreamExecutorError;
-use super::{Barrier, Executor, Message, PkIndices, StreamChunk};
+use super::{
+    Barrier, BoxedMessageStream, Executor, Message, MessageStream, PkIndices, StreamChunk,
+    StreamExecutorResult, Watermark,
+};
 
 pub struct MockSource {
     schema: Schema,
@@ -45,6 +49,22 @@ impl MessageSender {
             barrier = barrier.with_stop();
         }
         self.0.send(Message::Barrier(barrier)).unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub fn push_watermark(&mut self, col_idx: usize, data_type: DataType, val: ScalarImpl) {
+        self.0
+            .send(Message::Watermark(Watermark {
+                col_idx,
+                data_type,
+                val,
+            }))
+            .unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub fn push_int64_watermark(&mut self, col_idx: usize, val: i64) {
+        self.push_watermark(col_idx, DataType::Int64, ScalarImpl::Int64(val));
     }
 }
 
@@ -129,43 +149,87 @@ impl Executor for MockSource {
     }
 }
 
-/// `row_nonnull` builds a `Row` with concrete values.
+/// `row_nonnull` builds a `OwnedRow` with concrete values.
 /// TODO: add macro row!, which requires a new trait `ToScalarValue`.
 #[macro_export]
 macro_rules! row_nonnull {
     [$( $value:expr ),*] => {
         {
-            use risingwave_common::types::Scalar;
-            use risingwave_common::array::Row;
-            Row(vec![$(Some($value.to_scalar_value()), )*])
+            risingwave_common::row::OwnedRow::new(vec![$(Some($value.into()), )*])
         }
     };
 }
+
+/// Trait for testing `StreamExecutor` more easily.
+///
+/// With `next_unwrap_ready`, we can retrieve the next message from the executor without `await`ing,
+/// so that we can immediately panic if the executor is not ready instead of getting stuck. This is
+/// useful for testing.
+pub trait StreamExecutorTestExt: MessageStream + Unpin {
+    /// Asserts that the executor is pending (not ready) now.
+    ///
+    /// Panics if it is ready.
+    fn next_unwrap_pending(&mut self) {
+        if let Some(r) = self.try_next().now_or_never() {
+            panic!("expect pending stream, but got `{:?}`", r);
+        }
+    }
+
+    /// Asserts that the executor is ready now, returning the next message.
+    ///
+    /// Panics if it is pending.
+    fn next_unwrap_ready(&mut self) -> StreamExecutorResult<Message> {
+        match self.next().now_or_never() {
+            Some(Some(r)) => r,
+            Some(None) => panic!("expect ready stream, but got terminated"),
+            None => panic!("expect ready stream, but got pending"),
+        }
+    }
+
+    /// Asserts that the executor is ready on a [`StreamChunk`] now, returning the next chunk.
+    ///
+    /// Panics if it is pending or the next message is not a [`StreamChunk`].
+    fn next_unwrap_ready_chunk(&mut self) -> StreamExecutorResult<StreamChunk> {
+        self.next_unwrap_ready()
+            .map(|msg| msg.into_chunk().expect("expect chunk"))
+    }
+
+    /// Asserts that the executor is ready on a [`Barrier`] now, returning the next barrier.
+    ///
+    /// Panics if it is pending or the next message is not a [`Barrier`].
+    fn next_unwrap_ready_barrier(&mut self) -> StreamExecutorResult<Barrier> {
+        self.next_unwrap_ready()
+            .map(|msg| msg.into_barrier().expect("expect barrier"))
+    }
+}
+
+// FIXME: implement on any `impl MessageStream` if the analyzer works well.
+impl StreamExecutorTestExt for BoxedMessageStream {}
 
 pub mod agg_executor {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::AggKind;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
     use risingwave_storage::StateStore;
 
+    use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
-    use crate::executor::aggregation::{AggCall, AggStateTable};
+    use crate::executor::aggregation::{AggCall, AggStateStorage};
     use crate::executor::{
         ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices,
     };
 
     /// Create state table for the given agg call.
     /// Should infer the schema in the same way as `LogicalAgg::infer_stream_agg_state`.
-    pub fn create_agg_state_table<S: StateStore>(
+    pub async fn create_agg_state_table<S: StateStore>(
         store: S,
         table_id: TableId,
         agg_call: &AggCall,
         group_key_indices: &[usize],
         pk_indices: &[usize],
         input_ref: &dyn Executor,
-    ) -> Option<AggStateTable<S>> {
+    ) -> AggStateStorage<S> {
         match agg_call.kind {
             AggKind::Min | AggKind::Max if !agg_call.append_only => {
                 let input_fields = input_ref.schema().fields();
@@ -205,9 +269,9 @@ pub mod agg_executor {
                     column_descs,
                     order_types.clone(),
                     (0..order_types.len()).collect(),
-                );
+                ).await;
 
-                Some(AggStateTable { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns) })
+                AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns, None) }
             }
             AggKind::Min /* append only */
             | AggKind::Max /* append only */
@@ -215,7 +279,7 @@ pub mod agg_executor {
             | AggKind::Count
             | AggKind::Avg
             | AggKind::ApproxCountDistinct => {
-                None
+                AggStateStorage::ResultValue
             }
             _ => {
                 panic!("no need to mock other agg kinds here");
@@ -224,7 +288,7 @@ pub mod agg_executor {
     }
 
     /// Create result state table for agg executor.
-    pub fn create_result_table<S: StateStore>(
+    pub async fn create_result_table<S: StateStore>(
         store: S,
         table_id: TableId,
         agg_calls: &[AggCall],
@@ -261,9 +325,10 @@ pub mod agg_executor {
             order_types,
             (0..group_key_indices.len()).collect(),
         )
+        .await
     }
 
-    pub fn new_boxed_simple_agg_executor<S: StateStore>(
+    pub async fn new_boxed_simple_agg_executor<S: StateStore>(
         ctx: ActorContextRef,
         store: S,
         input: BoxedExecutor,
@@ -271,10 +336,9 @@ pub mod agg_executor {
         pk_indices: PkIndices,
         executor_id: u64,
     ) -> Box<dyn Executor> {
-        let agg_state_tables = agg_calls
-            .iter()
-            .enumerate()
-            .map(|(idx, agg_call)| {
+        let mut agg_state_tables = Vec::with_capacity(agg_calls.iter().len());
+        for (idx, agg_call) in agg_calls.iter().enumerate() {
+            agg_state_tables.push(
                 create_agg_state_table(
                     store.clone(),
                     TableId::new(idx as u32),
@@ -283,15 +347,18 @@ pub mod agg_executor {
                     &pk_indices,
                     input.as_ref(),
                 )
-            })
-            .collect();
+                .await,
+            )
+        }
+
         let result_table = create_result_table(
             store,
             TableId::new(agg_calls.len() as u32),
             &agg_calls,
             &[],
             input.as_ref(),
-        );
+        )
+        .await;
 
         Box::new(
             GlobalSimpleAggExecutor::new(
@@ -315,9 +382,9 @@ pub mod top_n_executor {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::streaming_table::state_table::StateTable;
 
-    pub fn create_in_memory_state_table(
+    use crate::common::table::state_table::StateTable;
+    pub async fn create_in_memory_state_table(
         data_types: &[DataType],
         order_types: &[OrderType],
         pk_indices: &[usize],
@@ -334,5 +401,6 @@ pub mod top_n_executor {
             order_types.to_vec(),
             pk_indices.to_vec(),
         )
+        .await
     }
 }

@@ -13,68 +13,41 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::user::grant_privilege::{Action, Object};
-use risingwave_sqlparser::ast::{ObjectName, Query};
+use risingwave_pb::user::grant_privilege::Action;
+use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
 use super::privilege::{check_privileges, resolve_relation_privileges};
 use super::RwPgResponse;
-use crate::binder::{Binder, BoundSetExpr};
-use crate::catalog::check_schema_writable;
-use crate::handler::privilege::ObjectCheckItem;
-use crate::optimizer::PlanRef;
+use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::handler::HandlerArgs;
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
 use crate::planner::Planner;
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
-/// Generate create MV plan, return plan and mv table info.
-pub fn gen_create_mv_plan(
+pub(super) fn get_column_names(
+    bound: &BoundQuery,
     session: &SessionImpl,
-    context: OptimizerContextRef,
-    query: Query,
-    name: ObjectName,
-) -> Result<(PlanRef, ProstTable)> {
-    let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_table_or_source_name(db_name, name)?;
-    let search_path = session.config().get_search_path();
-    let user_name = &session.auth_context().user_name;
-
-    let (database_id, schema_id) = {
-        let catalog_reader = session.env().catalog_reader().read_guard();
-        let schema = match schema_name {
-            Some(schema_name) => catalog_reader.get_schema_by_name(db_name, &schema_name)?,
-            None => catalog_reader.first_valid_schema(db_name, &search_path, user_name)?,
-        };
-
-        check_schema_writable(&schema.name())?;
-        if schema.name() != DEFAULT_SCHEMA_NAME {
-            check_privileges(
-                session,
-                &vec![ObjectCheckItem::new(
-                    schema.owner(),
-                    Action::Create,
-                    Object::SchemaId(schema.id()),
-                )],
-            )?;
-        }
-
-        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
-        (db_id, schema.id())
-    };
-
-    let definition = format!("{}", query);
-
-    let bound = {
-        let mut binder = Binder::new(session);
-        binder.bind_query(query)?
+    columns: Vec<Ident>,
+) -> Result<Option<Vec<String>>> {
+    // If columns is empty, it means that the user did not specify the column names.
+    // In this case, we extract the column names from the query.
+    // If columns is not empty, it means that user specify the column names and the user
+    // should guarantee that the column names number are consistent with the query.
+    let col_names: Option<Vec<String>> = if columns.is_empty() {
+        None
+    } else {
+        Some(columns.iter().map(|v| v.real_value()).collect())
     };
 
     if let BoundSetExpr::Select(select) = &bound.body {
         // `InputRef`'s alias will be implicitly assigned in `bind_project`.
-        // For other expressions, we require the user to explicitly assign an alias.
-        if select.aliases.iter().any(Option::is_none) {
+        // If user provide columns name (col_names.is_some()), we don't need alias.
+        // For other expressions (col_names.is_none()), we require the user to explicitly assign an
+        // alias.
+        if col_names.is_none() && select.aliases.iter().any(Option::is_none) {
             return Err(ErrorCode::BindError(
                 "An alias must be specified for an expression".to_string(),
             )
@@ -87,8 +60,36 @@ pub fn gen_create_mv_plan(
         }
     }
 
+    Ok(col_names)
+}
+
+/// Generate create MV plan, return plan and mv table info.
+pub fn gen_create_mv_plan(
+    session: &SessionImpl,
+    context: OptimizerContextRef,
+    query: Query,
+    name: ObjectName,
+    columns: Vec<Ident>,
+) -> Result<(PlanRef, ProstTable)> {
+    let db_name = session.database();
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+
+    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+
+    let definition = query.to_string();
+
+    let bound = {
+        let mut binder = Binder::new(session);
+        binder.bind_query(query)?
+    };
+
+    let col_names = get_column_names(&bound, session, columns)?;
+
     let mut plan_root = Planner::new(context).plan_query(bound)?;
-    let materialize = plan_root.gen_create_mv_plan(table_name, definition)?;
+    if let Some(col_names) = col_names {
+        plan_root.set_out_names(col_names)?;
+    }
+    let materialize = plan_root.gen_materialize_plan(table_name, definition)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
     if session.config().get_create_compaction_group_for_mv() {
         table.properties.insert(
@@ -110,35 +111,20 @@ pub fn gen_create_mv_plan(
 }
 
 pub async fn handle_create_mv(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     name: ObjectName,
     query: Query,
+    columns: Vec<Ident>,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx.clone();
+    let session = handler_args.session.clone();
+
+    let has_order_by = !query.order_by.is_empty();
+
+    session.check_relation_name_duplicated(name.clone())?;
 
     let (table, graph) = {
-        {
-            // Here is some duplicate code because we need to check name duplicated outside of
-            // `gen_xxx_plan` to avoid `explain` reporting the error.
-            let db_name = session.database();
-            let catalog_reader = session.env().catalog_reader().read_guard();
-            let (schema_name, table_name) = {
-                let (schema_name, table_name) =
-                    Binder::resolve_table_or_source_name(db_name, name.clone())?;
-                let search_path = session.config().get_search_path();
-                let user_name = &session.auth_context().user_name;
-                let schema_name = match schema_name {
-                    Some(schema_name) => schema_name,
-                    None => catalog_reader
-                        .first_valid_schema(db_name, &search_path, user_name)?
-                        .name(),
-                };
-                (schema_name, table_name)
-            };
-            catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &table_name)?;
-        }
-
-        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
+        let context = OptimizerContext::new_with_handler_args(handler_args);
+        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
         let graph = build_graph(plan);
 
         (table, graph)
@@ -149,15 +135,26 @@ pub async fn handle_create_mv(
         .create_materialized_view(table, graph)
         .await?;
 
-    Ok(PgResponse::empty_result(
-        StatementType::CREATE_MATERIALIZED_VIEW,
-    ))
+    if has_order_by {
+        let notice = r#"
+The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
+It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view."#;
+        Ok(PgResponse::empty_result_with_notice(
+            StatementType::CREATE_MATERIALIZED_VIEW,
+            notice.to_string(),
+        ))
+    } else {
+        Ok(PgResponse::empty_result(
+            StatementType::CREATE_MATERIALIZED_VIEW,
+        ))
+    }
 }
 
 #[cfg(test)]
 pub mod tests {
     use std::collections::HashMap;
 
+    use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
@@ -247,6 +244,33 @@ pub mod tests {
         assert_eq!(
             err.to_string(),
             "Bind error: An alias must be specified for an expression"
+        );
+    }
+
+    /// Creating MV with order by returns a special notice
+    #[tokio::test]
+    async fn test_create_mv_with_order_by() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        let sql = "create table t(x varchar)";
+        frontend.run_sql(sql).await.unwrap();
+
+        // Without order by
+        let sql = "create materialized view mv1 as select * from t";
+        let response = frontend.run_sql(sql).await.unwrap();
+        assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
+        assert_eq!(response.get_notice(), None);
+
+        // With order by
+        let sql = "create materialized view mv2 as select * from t order by x";
+        let response = frontend.run_sql(sql).await.unwrap();
+        assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
+        assert_eq!(
+            response.get_notice().unwrap(),
+r#"
+The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
+It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view."#
+                .to_string()
         );
     }
 }

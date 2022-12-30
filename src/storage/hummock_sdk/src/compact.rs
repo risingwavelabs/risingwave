@@ -20,8 +20,8 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     let mut s = String::new();
     writeln!(
         s,
-        "Compaction task id: {:?}, target level: {:?}",
-        compact_task.task_id, compact_task.target_level
+        "Compaction task id: {:?}, group-id: {:?}, target level: {:?}",
+        compact_task.task_id, compact_task.compaction_group_id, compact_task.target_level
     )
     .unwrap();
     writeln!(s, "Compaction watermark: {:?} ", compact_task.watermark).unwrap();
@@ -32,7 +32,12 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     )
     .unwrap();
     writeln!(s, "Compaction # splits: {:?} ", compact_task.splits.len()).unwrap();
-    writeln!(s, "Compaction task status: {:?} ", compact_task.task_status).unwrap();
+    writeln!(
+        s,
+        "Compaction task status: {:?} ",
+        compact_task.task_status()
+    )
+    .unwrap();
     s.push_str("Compaction Sstables structure: \n");
     for level_entry in &compact_task.input_ssts {
         let tables: Vec<String> = level_entry
@@ -53,22 +58,25 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     use std::fmt::Write;
 
     let key_range = sstable_info.key_range.as_ref().unwrap();
-    let key_range_str = if key_range.inf {
-        "(-inf, +inf)".to_owned()
+    let left_str = if key_range.left.is_empty() {
+        "-inf".to_string()
     } else {
-        format!(
-            "[{}, {}]",
-            hex::encode(key_range.left.as_slice()),
-            hex::encode(key_range.right.as_slice())
-        )
+        hex::encode(key_range.left.as_slice())
     };
+    let right_str = if key_range.right.is_empty() {
+        "+inf".to_string()
+    } else {
+        hex::encode(key_range.right.as_slice())
+    };
+
     if sstable_info.stale_key_count > 0 {
         let ratio = sstable_info.stale_key_count * 100 / sstable_info.total_key_count;
         writeln!(
             s,
-            "SstableInfo: id={:?}, KeyRange={:?}, size={:?}KB, delete_ratio={:?}%",
+            "SstableInfo: id={:?}, KeyRange=[{:?},{:?}], size={:?}KB, delete_ratio={:?}%",
             sstable_info.id,
-            key_range_str,
+            left_str,
+            right_str,
             sstable_info.file_size / 1024,
             ratio,
         )
@@ -76,11 +84,46 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     } else {
         writeln!(
             s,
-            "SstableInfo: id={:?}, KeyRange={:?}, size={:?}KB",
+            "SstableInfo: id={:?}, KeyRange=[{:?},{:?}], size={:?}KB",
             sstable_info.id,
-            key_range_str,
+            left_str,
+            right_str,
             sstable_info.file_size / 1024,
         )
         .unwrap();
+    }
+}
+
+/// Config that is updatable when compactor is running.
+#[derive(Clone)]
+pub struct CompactorRuntimeConfig {
+    pub max_concurrent_task_number: u64,
+}
+
+impl From<risingwave_pb::compactor::CompactorRuntimeConfig> for CompactorRuntimeConfig {
+    fn from(value: risingwave_pb::compactor::CompactorRuntimeConfig) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<&risingwave_pb::compactor::CompactorRuntimeConfig> for CompactorRuntimeConfig {
+    fn from(value: &risingwave_pb::compactor::CompactorRuntimeConfig) -> Self {
+        Self {
+            max_concurrent_task_number: value.max_concurrent_task_number,
+        }
+    }
+}
+
+impl From<CompactorRuntimeConfig> for risingwave_pb::compactor::CompactorRuntimeConfig {
+    fn from(value: CompactorRuntimeConfig) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<&CompactorRuntimeConfig> for risingwave_pb::compactor::CompactorRuntimeConfig {
+    fn from(value: &CompactorRuntimeConfig) -> Self {
+        risingwave_pb::compactor::CompactorRuntimeConfig {
+            max_concurrent_task_number: value.max_concurrent_task_number,
+        }
     }
 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_stack_trace::StackTrace;
 use futures::{Future, StreamExt};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
@@ -45,6 +46,10 @@ impl Executor for SubtaskRxExecutor {
 
     fn identity(&self) -> &str {
         &self.info.identity
+    }
+
+    fn info(&self) -> ExecutorInfo {
+        self.info.clone()
     }
 }
 
@@ -80,7 +85,8 @@ pub fn wrap(input: BoxedExecutor) -> (SubtaskHandle, SubtaskRxExecutor) {
                 break;
             }
         }
-    };
+    }
+    .stack_trace("Subtask");
 
     (handle, rx_executor)
 }

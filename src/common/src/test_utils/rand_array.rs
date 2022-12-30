@@ -18,7 +18,7 @@
 
 use std::sync::Arc;
 
-use chrono::{Datelike, NaiveTime};
+use chrono::Datelike;
 use num_traits::FromPrimitive;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
@@ -45,11 +45,25 @@ where
     }
 }
 
-impl RandValue for String {
+impl RandValue for Box<str> {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         let len = rand.gen_range(1..=10);
         // `rand.gen:::<char>` create a random Unicode scalar value.
-        (0..len).map(|_| rand.gen::<char>()).collect()
+        (0..len)
+            .map(|_| rand.gen::<char>())
+            .collect::<String>()
+            .into_boxed_str()
+    }
+}
+
+impl RandValue for Box<[u8]> {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        let len = rand.gen_range(1..=10);
+        (0..len)
+            .map(|_| rand.gen::<char>())
+            .collect::<String>()
+            .into_bytes()
+            .into()
     }
 }
 
@@ -70,8 +84,8 @@ impl RandValue for IntervalUnit {
 
 impl RandValue for NaiveDateWrapper {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
-        let max_day = chrono::Date::<chrono::Utc>::MAX_UTC.num_days_from_ce();
-        let min_day = chrono::Date::<chrono::Utc>::MIN_UTC.num_days_from_ce();
+        let max_day = chrono::NaiveDate::MAX.num_days_from_ce();
+        let min_day = chrono::NaiveDate::MIN.num_days_from_ce();
         let days = rand.gen_range(min_day..=max_day);
         NaiveDateWrapper::with_days(days).unwrap()
     }
@@ -83,7 +97,7 @@ impl RandValue for NaiveTimeWrapper {
         let min = rand.gen_range(0..60);
         let sec = rand.gen_range(0..60);
         let nano = rand.gen_range(0..1_000_000_000);
-        NaiveTimeWrapper::new(NaiveTime::from_hms_nano(hour, min, sec, nano))
+        NaiveTimeWrapper::from_hms_nano_uncheck(hour, min, sec, nano)
     }
 }
 

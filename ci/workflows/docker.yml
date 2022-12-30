@@ -1,14 +1,3 @@
-projects:
-  - label: docker-pr
-    path: docker/
-    skip:
-      - docker-build-push*
-      - multi-arch-image-create-push
-  - label: docker-schedule-ui
-    path: .
-    skip:
-      - docker-build-pr
-
 auto-retry: &auto-retry
   automatic:
     - exit_status: -1  # Agent was lost
@@ -17,55 +6,47 @@ auto-retry: &auto-retry
       limit: 2
 
 steps:
-  - label: "docker-build-pr"
-    command: "ci/scripts/docker.sh"
-    if: build.source != "schedule"
-    env:
-      BUILDPIPE_SCOPE: project
-      PUSH_GHCR: false
-    retry: *auto-retry
-
   - label: "docker-build-push: amd64"
     command: "ci/scripts/docker.sh"
     key: "build-amd64"
-    if: build.source == "schedule" || build.source == "ui"
-    env:
-      BUILDPIPE_SCOPE: project
-      PUSH_GHCR: true
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     retry: *auto-retry
 
   - label: "docker-build-push: aarch64"
     command: "ci/scripts/docker.sh"
     key: "build-aarch64"
-    if: build.source == "schedule" || build.source == "ui"
-    env:
-      BUILDPIPE_SCOPE: project
-      PUSH_GHCR: true
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
     retry: *auto-retry
     agents:
       queue: "linux-arm64"
 
   - label: "multi-arch-image-create-push"
     command: "ci/scripts/multi-arch-docker.sh"
-    if: build.source == "schedule" || build.source == "ui"
     depends_on:
       - "build-amd64"
       - "build-aarch64"
-    env:
-      BUILDPIPE_SCOPE: project
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
+    retry: *auto-retry
+
+  - label: "pre build binary"
+    command: "ci/scripts/release.sh"
+    plugins:
+      - docker-compose#v4.9.0:
+          run: release-env
+          config: ci/docker-compose.yml
     retry: *auto-retry

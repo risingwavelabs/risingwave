@@ -16,56 +16,55 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::types::ParallelUnitId;
+use risingwave_common::hash::ParallelUnitId;
 use risingwave_common::{bail, try_match_expand};
+use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping, WorkerNode};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, State};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{Dispatcher, FragmentType, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{
+    Dispatcher, DispatcherType, FragmentTypeFlag, StreamActor, StreamNode,
+};
 use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
 use crate::manager::cluster::WorkerId;
-use crate::manager::MetaSrvEnv;
-use crate::model::{ActorId, FragmentId, MetadataModel, TableFragments, Transactional};
+use crate::manager::{commit_meta, MetaSrvEnv};
+use crate::model::{
+    ActorId, BTreeMapTransaction, FragmentId, MetadataModel, TableFragments, ValTransaction,
+};
 use crate::storage::{MetaStore, Transaction};
-use crate::stream::actor_mapping_to_parallel_unit_mapping;
+use crate::stream::{actor_mapping_to_parallel_unit_mapping, SplitAssignment};
 use crate::MetaResult;
 
 pub struct FragmentManagerCore {
-    table_fragments: HashMap<TableId, TableFragments>,
+    table_fragments: BTreeMap<TableId, TableFragments>,
 }
 
 impl FragmentManagerCore {
-    /// List all fragment vnode mapping info.
-    pub fn all_fragment_mappings(&self) -> impl Iterator<Item = ParallelUnitMapping> + '_ {
-        self.table_fragments.values().flat_map(|table_fragments| {
-            table_fragments.fragments.values().map(|fragment| {
-                let parallel_unit_mapping = fragment
-                    .vnode_mapping
-                    .as_ref()
-                    .expect("no data distribution found");
-                ParallelUnitMapping {
-                    fragment_id: fragment.fragment_id,
-                    original_indices: parallel_unit_mapping.original_indices.clone(),
-                    data: parallel_unit_mapping.data.clone(),
-                }
+    /// List all fragment vnode mapping info that not in `State::Initial`.
+    pub fn all_running_fragment_mappings(&self) -> impl Iterator<Item = ParallelUnitMapping> + '_ {
+        self.table_fragments
+            .values()
+            .filter(|tf| tf.state() != State::Initial)
+            .flat_map(|table_fragments| {
+                table_fragments.fragments.values().map(|fragment| {
+                    let parallel_unit_mapping = fragment
+                        .vnode_mapping
+                        .as_ref()
+                        .expect("no data distribution found");
+                    ParallelUnitMapping {
+                        fragment_id: fragment.fragment_id,
+                        original_indices: parallel_unit_mapping.original_indices.clone(),
+                        data: parallel_unit_mapping.data.clone(),
+                    }
+                })
             })
-        })
-    }
-
-    pub fn all_internal_tables(&self) -> impl Iterator<Item = &u32> + '_ {
-        self.table_fragments.values().flat_map(|table_fragments| {
-            table_fragments
-                .fragments
-                .values()
-                .flat_map(|fragment| fragment.state_table_ids.iter())
-        })
     }
 }
 
@@ -80,8 +79,8 @@ pub struct ActorInfos {
     /// node_id => actor_ids
     pub actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 
-    /// all reachable source actors
-    pub source_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
+    /// all reachable barrier inject actors
+    pub barrier_inject_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 }
 
 pub struct FragmentVNodeInfo {
@@ -94,7 +93,7 @@ pub struct FragmentVNodeInfo {
 
 #[derive(Default)]
 pub struct BuildGraphInfo {
-    pub table_sink_actor_ids: HashMap<TableId, Vec<ActorId>>,
+    pub table_mview_actor_ids: HashMap<TableId, Vec<ActorId>>,
 }
 
 pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
@@ -131,24 +130,29 @@ where
         Ok(map.values().cloned().collect())
     }
 
+    pub async fn has_any_table_fragments(&self) -> bool {
+        !self.core.read().await.table_fragments.is_empty()
+    }
+
     pub async fn batch_update_table_fragments(
         &self,
         table_fragments: &[TableFragments],
     ) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
-
-        let mut transaction = Transaction::default();
-        for table_fragment in table_fragments {
-            if map.contains_key(&table_fragment.table_id()) {
-                table_fragment.upsert_in_transaction(&mut transaction)?;
-            } else {
-                bail!("table_fragment not exist: id={}", table_fragment.table_id());
-            }
+        if table_fragments
+            .iter()
+            .any(|tf| !map.contains_key(&tf.table_id()))
+        {
+            bail!("update table fragments fail, table not found");
         }
 
-        self.env.meta_store().txn(transaction).await?;
+        let mut table_fragments_txn = BTreeMapTransaction::new(map);
+        table_fragments.iter().for_each(|tf| {
+            table_fragments_txn.insert(tf.table_id(), tf.clone());
+        });
+        commit_meta!(self, table_fragments_txn)?;
+
         for table_fragment in table_fragments {
-            map.insert(table_fragment.table_id(), table_fragment.clone());
             self.notify_fragment_mapping(table_fragment, Operation::Update)
                 .await;
         }
@@ -176,170 +180,157 @@ where
         table_id: &TableId,
     ) -> MetaResult<TableFragments> {
         let map = &self.core.read().await.table_fragments;
-        if let Some(table_fragments) = map.get(table_id) {
-            Ok(table_fragments.clone())
-        } else {
-            bail!("table_fragment not exist: id={}", table_id);
+        Ok(map
+            .get(table_id)
+            .cloned()
+            .context(format!("table_fragment not exist: id={}", table_id))?)
+    }
+
+    pub async fn select_table_fragments_by_ids(
+        &self,
+        table_ids: &[TableId],
+    ) -> MetaResult<Vec<TableFragments>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut table_fragments = Vec::with_capacity(table_ids.len());
+        for table_id in table_ids {
+            table_fragments.push(
+                map.get(table_id)
+                    .cloned()
+                    .context(format!("table_fragment not exist: id={}", table_id))?,
+            );
         }
+        Ok(table_fragments)
     }
 
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
-    /// state is `ActorState::Inactive` and the table fragments' state is `State::Creating`.
+    /// state is `ActorState::Inactive` and the table fragments' state is `State::Initial`.
     pub async fn start_create_table_fragments(
         &self,
         table_fragment: TableFragments,
     ) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
-
-        match map.entry(table_fragment.table_id()) {
-            Entry::Occupied(_) => bail!(
-                "table_fragment already exist: id={}",
-                table_fragment.table_id()
-            ),
-            Entry::Vacant(v) => {
-                table_fragment.insert(self.env.meta_store()).await?;
-                v.insert(table_fragment);
-                Ok(())
-            }
-        }
-    }
-
-    /// Cancel creation of a new `TableFragments` and delete it from meta store.
-    pub async fn cancel_create_table_fragments(&self, table_id: &TableId) -> MetaResult<()> {
-        let map = &mut self.core.write().await.table_fragments;
-
-        if let Entry::Occupied(o) = map.entry(*table_id) {
-            TableFragments::delete(self.env.meta_store(), &table_id.table_id).await?;
-            o.remove();
-        } else {
-            tracing::warn!("table_fragment cleaned: id={}", table_id);
+        let table_id = table_fragment.table_id();
+        if map.contains_key(&table_id) {
+            bail!("table_fragment already exist: id={}", table_id);
         }
 
-        Ok(())
+        let mut table_fragments = BTreeMapTransaction::new(map);
+        table_fragments.insert(table_id, table_fragment);
+        commit_meta!(self, table_fragments)
     }
 
-    /// Called after the barrier collection of `CreateMaterializedView` command, which updates the
+    /// Called after the barrier collection of `CreateStreamingJob` command, which updates the
+    /// streaming job's state from `State::Initial` to `State::Creating`, updates the
     /// actors' state to `ActorState::Running`, besides also updates all dependent tables'
     /// downstream actors info.
     ///
     /// Note that the table fragments' state will be kept `Creating`, which is only updated when the
-    /// materialized view is completely created.
+    /// streaming job is completely created.
     pub async fn post_create_table_fragments(
         &self,
         table_id: &TableId,
         dependent_table_actors: Vec<(TableId, HashMap<ActorId, Vec<Dispatcher>>)>,
+        split_assignment: SplitAssignment,
     ) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
 
-        if let Some(table_fragments) = map.get(table_id) {
-            assert_eq!(table_fragments.state(), State::Creating);
+        let mut table_fragments = BTreeMapTransaction::new(map);
+        let mut table_fragment = table_fragments
+            .get_mut(*table_id)
+            .context(format!("table_fragment not exist: id={}", table_id))?;
 
-            let mut transaction = Transaction::default();
+        assert_eq!(table_fragment.state(), State::Initial);
+        table_fragment.set_state(State::Creating);
+        table_fragment.update_actors_state(ActorState::Running);
+        table_fragment.set_actor_splits_by_split_assignment(split_assignment);
+        let table_fragment = table_fragment.clone();
 
-            let mut table_fragments = table_fragments.clone();
-            table_fragments.update_actors_state(ActorState::Running);
-            table_fragments.upsert_in_transaction(&mut transaction)?;
-
-            let mut dependent_tables = Vec::with_capacity(dependent_table_actors.len());
-            for (dependent_table_id, mut new_dispatchers) in dependent_table_actors {
-                let mut dependent_table = map
-                    .get(&dependent_table_id)
-                    .ok_or_else(|| anyhow!("table_fragment not exist: id={}", dependent_table_id))?
-                    .clone();
-                for fragment in dependent_table.fragments.values_mut() {
-                    for actor in &mut fragment.actors {
-                        // Extend new dispatchers to table fragments.
-                        if let Some(new_dispatchers) = new_dispatchers.remove(&actor.actor_id) {
-                            actor.dispatcher.extend(new_dispatchers);
-                        }
+        for (dependent_table_id, mut new_dispatchers) in dependent_table_actors {
+            let mut dependent_table =
+                table_fragments
+                    .get_mut(dependent_table_id)
+                    .context(format!(
+                        "dependent table_fragment not exist: id={}",
+                        dependent_table_id
+                    ))?;
+            for fragment in dependent_table.fragments.values_mut() {
+                for actor in &mut fragment.actors {
+                    // Extend new dispatchers to table fragments.
+                    if let Some(new_dispatchers) = new_dispatchers.remove(&actor.actor_id) {
+                        actor.dispatcher.extend(new_dispatchers);
                     }
                 }
-                dependent_table.upsert_in_transaction(&mut transaction)?;
-                dependent_tables.push(dependent_table);
             }
-
-            self.env.meta_store().txn(transaction).await?;
-            self.notify_fragment_mapping(&table_fragments, Operation::Add)
-                .await;
-            map.insert(*table_id, table_fragments);
-            for dependent_table in dependent_tables {
-                map.insert(dependent_table.table_id(), dependent_table);
-            }
-
-            Ok(())
-        } else {
-            bail!("table_fragment not exist: id={}", table_id)
         }
+        commit_meta!(self, table_fragments)?;
+        self.notify_fragment_mapping(&table_fragment, Operation::Add)
+            .await;
+
+        Ok(())
     }
 
-    /// Called after the finish of `CreateMaterializedView` command, i.e., materialized view is
+    /// Called after the finish of `CreateStreamingJob` command, i.e., streaming job is
     /// completely created, which updates the state from `Creating` to `Created`.
     pub async fn mark_table_fragments_created(&self, table_id: TableId) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
 
-        if let Some(table_fragments) = map.get(&table_id) {
-            assert_eq!(table_fragments.state(), State::Creating);
+        let mut table_fragments = BTreeMapTransaction::new(map);
+        let mut table_fragment = table_fragments
+            .get_mut(table_id)
+            .context(format!("table_fragment not exist: id={}", table_id))?;
 
-            let mut transaction = Transaction::default();
-
-            let mut table_fragments = table_fragments.clone();
-            table_fragments.set_state(State::Created);
-            table_fragments.upsert_in_transaction(&mut transaction)?;
-
-            self.env.meta_store().txn(transaction).await?;
-            map.insert(table_id, table_fragments);
-
-            Ok(())
-        } else {
-            bail!("table_fragment not exist: id={}", table_id)
-        }
+        assert_eq!(table_fragment.state(), State::Creating);
+        table_fragment.set_state(State::Created);
+        commit_meta!(self, table_fragments)
     }
 
     /// Drop table fragments info and remove downstream actor infos in fragments from its dependent
     /// tables.
-    pub async fn drop_table_fragments(&self, table_id: &TableId) -> MetaResult<()> {
+    pub async fn drop_table_fragments_vec(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
+        let to_delete_table_fragments = table_ids
+            .iter()
+            .filter_map(|table_id| map.get(table_id).cloned())
+            .collect_vec();
 
-        if let Some(table_fragments) = map.get(table_id) {
-            let mut transaction = Transaction::default();
-            table_fragments.delete_in_transaction(&mut transaction)?;
-
-            let dependent_table_ids = table_fragments.dependent_table_ids();
-            let chain_actor_ids = table_fragments.chain_actor_ids();
-            let mut dependent_tables = Vec::with_capacity(dependent_table_ids.len());
+        let mut table_fragments = BTreeMapTransaction::new(map);
+        for table_fragment in &to_delete_table_fragments {
+            table_fragments.remove(table_fragment.table_id());
+            let chain_actor_ids = table_fragment.chain_actor_ids();
+            let dependent_table_ids = table_fragment.dependent_table_ids();
             for dependent_table_id in dependent_table_ids {
-                let mut dependent_table = map
-                    .get(&dependent_table_id)
-                    .ok_or_else(|| anyhow!("table_fragment not exist: id={}", dependent_table_id))?
-                    .clone();
-                for fragment in dependent_table.fragments.values_mut() {
-                    if fragment.fragment_type == FragmentType::Sink as i32 {
-                        for actor in &mut fragment.actors {
-                            // Remove these downstream actor ids from all dispatchers.
-                            for dispatcher in &mut actor.dispatcher {
-                                dispatcher
-                                    .downstream_actor_id
-                                    .retain(|x| !chain_actor_ids.contains(x));
-                            }
-                            // Remove empty dispatchers.
-                            actor
-                                .dispatcher
-                                .retain(|d| !d.downstream_actor_id.is_empty());
-                        }
-                    }
+                if table_ids.contains(&dependent_table_id) {
+                    continue;
                 }
-                dependent_table.upsert_in_transaction(&mut transaction)?;
-                dependent_tables.push(dependent_table);
-            }
+                let mut dependent_table =
+                    table_fragments
+                        .get_mut(dependent_table_id)
+                        .context(format!(
+                            "dependent table_fragment not exist: id={}",
+                            dependent_table_id
+                        ))?;
 
-            self.env.meta_store().txn(transaction).await?;
-            let delete_table_fragments = map.remove(table_id).unwrap();
-            for dependent_table in dependent_tables {
-                map.insert(dependent_table.table_id(), dependent_table);
+                dependent_table
+                    .fragments
+                    .values_mut()
+                    .filter(|f| (f.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0)
+                    .flat_map(|f| &mut f.actors)
+                    .for_each(|a| {
+                        a.dispatcher.retain_mut(|d| {
+                            d.downstream_actor_id
+                                .retain(|x| !chain_actor_ids.contains(x));
+                            !d.downstream_actor_id.is_empty()
+                        })
+                    });
             }
+        }
+        commit_meta!(self, table_fragments)?;
 
-            self.notify_fragment_mapping(&delete_table_fragments, Operation::Delete)
-                .await;
+        for table_fragments in to_delete_table_fragments {
+            if table_fragments.state() != State::Initial {
+                self.notify_fragment_mapping(&table_fragments, Operation::Delete)
+                    .await;
+            }
         }
 
         Ok(())
@@ -352,7 +343,7 @@ where
         check_state: impl Fn(ActorState, TableId, ActorId) -> bool,
     ) -> ActorInfos {
         let mut actor_maps = HashMap::new();
-        let mut source_actor_maps = HashMap::new();
+        let mut barrier_inject_actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
@@ -367,11 +358,11 @@ where
                 }
             }
 
-            let source_actors = fragments.worker_source_actor_states();
-            for (worker_id, actor_states) in source_actors {
+            let barrier_inject_actors = fragments.worker_barrier_inject_actor_states();
+            for (worker_id, actor_states) in barrier_inject_actors {
                 for (actor_id, actor_state) in actor_states {
                     if check_state(actor_state, fragments.table_id(), actor_id) {
-                        source_actor_maps
+                        barrier_inject_actor_maps
                             .entry(worker_id)
                             .or_insert_with(Vec::new)
                             .push(actor_id);
@@ -382,7 +373,7 @@ where
 
         ActorInfos {
             actor_maps,
-            source_actor_maps,
+            barrier_inject_actor_maps,
         }
     }
 
@@ -394,12 +385,11 @@ where
         node_map: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let mut parallel_unit_migrate_map = HashMap::new();
-        let mut pu_map: HashMap<WorkerId, Vec<&ParallelUnit>> = HashMap::new();
-        // split parallel units of node into types, map them with WorkerId
-        for (node_id, node) in node_map {
-            let pu = node.parallel_units.iter().collect_vec();
-            pu_map.insert(*node_id, pu);
-        }
+        let mut pu_map: HashMap<WorkerId, Vec<&ParallelUnit>> = node_map
+            .iter()
+            .map(|(&worker_id, worker)| (worker_id, worker.parallel_units.iter().collect_vec()))
+            .collect();
+
         // update actor status and generate pu to pu migrate info
         let mut table_fragments = self.list_table_fragments().await?;
         let mut new_fragments = Vec::new();
@@ -464,6 +454,33 @@ where
         map.values()
             .flat_map(|table_fragment| table_fragment.chain_actor_ids())
             .collect::<HashSet<_>>()
+    }
+
+    pub async fn update_actor_splits_by_split_assignment(
+        &self,
+        split_assignment: &SplitAssignment,
+    ) -> MetaResult<()> {
+        let map = &mut self.core.write().await.table_fragments;
+        let to_update_table_fragments: HashMap<TableId, HashMap<ActorId, Vec<SplitImpl>>> = map
+            .values()
+            .filter(|t| t.fragment_ids().any(|f| split_assignment.contains_key(&f)))
+            .map(|f| {
+                let mut actor_splits = HashMap::new();
+                f.fragment_ids().for_each(|fragment_id| {
+                    if let Some(splits) = split_assignment.get(&fragment_id).cloned() {
+                        actor_splits.extend(splits);
+                    }
+                });
+                (f.table_id(), actor_splits)
+            })
+            .collect();
+
+        let mut table_fragments = BTreeMapTransaction::new(map);
+        for (table_id, actor_splits) in to_update_table_fragments {
+            let mut table_fragment = table_fragments.get_mut(table_id).unwrap();
+            table_fragment.actor_splits.extend(actor_splits);
+        }
+        commit_meta!(self, table_fragments)
     }
 
     /// Get the actor ids of the fragment with `fragment_id` with `Running` status.
@@ -546,7 +563,6 @@ where
         mut reschedules: HashMap<FragmentId, Reschedule>,
     ) -> MetaResult<()> {
         let map = &mut self.core.write().await.table_fragments;
-        let mut transaction = Transaction::default();
 
         fn update_actors(
             actors: &mut Vec<ActorId>,
@@ -596,30 +612,40 @@ where
             .flat_map(|reschedule| reschedule.added_actors.clone())
             .collect();
 
-        let mut updated_tables = HashMap::new();
+        let to_update_table_fragments = map
+            .values()
+            .filter(|t| t.fragment_ids().any(|f| reschedules.contains_key(&f)))
+            .map(|t| t.table_id())
+            .collect_vec();
+        let mut table_fragments = BTreeMapTransaction::new(map);
+        let mut fragment_mapping_to_notify = vec![];
 
-        for table_fragment in map.values() {
+        for table_id in to_update_table_fragments {
             // Takes out the reschedules of the fragments in this table.
             let reschedules = reschedules
-                .drain_filter(|fragment_id, _| table_fragment.fragments.contains_key(fragment_id))
+                .drain_filter(|fragment_id, _| {
+                    table_fragments
+                        .get(&table_id)
+                        .unwrap()
+                        .fragments
+                        .contains_key(fragment_id)
+                })
                 .collect_vec();
-            let updated = !reschedules.is_empty();
-
-            let mut table_fragment = table_fragment.clone();
 
             for (fragment_id, reschedule) in reschedules {
-                let fragment = table_fragment.fragments.get_mut(&fragment_id).unwrap();
-
                 let Reschedule {
                     added_actors,
                     removed_actors,
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
-                    downstream_fragment_id,
-                    actor_splits: _,
+                    downstream_fragment_ids,
+                    actor_splits,
                 } = reschedule;
 
+                let mut table_fragment = table_fragments.get_mut(table_id).unwrap();
+
+                // First step, update self fragment
                 // Add actors to this fragment: set the state to `Running`.
                 for actor_id in &added_actors {
                     table_fragment
@@ -629,6 +655,19 @@ where
                         .set_state(ActorState::Running);
                 }
 
+                // Remove actors from this fragment.
+                let removed_actor_ids: HashSet<_> = removed_actors.iter().cloned().collect();
+
+                for actor_id in &removed_actor_ids {
+                    table_fragment.actor_status.remove(actor_id);
+                    table_fragment.actor_splits.remove(actor_id);
+                }
+
+                table_fragment.actor_splits.extend(actor_splits);
+
+                let actor_status = table_fragment.actor_status.clone();
+                let fragment = table_fragment.fragments.get_mut(&fragment_id).unwrap();
+
                 // update vnode mapping for actors.
                 for actor in &mut fragment.actors {
                     if let Some(bitmap) = vnode_bitmap_updates.get(&actor.actor_id) {
@@ -636,23 +675,15 @@ where
                     }
                 }
 
-                // Remove actors from this fragment.
-                let removed_actor_ids: HashSet<_> = removed_actors.iter().cloned().collect();
-
                 fragment
                     .actors
                     .retain(|a| !removed_actor_ids.contains(&a.actor_id));
-
-                for actor_id in &removed_actor_ids {
-                    table_fragment.actor_status.remove(actor_id);
-                }
 
                 // update fragment's vnode mapping
                 if let Some(vnode_mapping) = fragment.vnode_mapping.as_mut() {
                     let mut actor_to_parallel_unit = HashMap::with_capacity(fragment.actors.len());
                     for actor in &fragment.actors {
-                        if let Some(actor_status) = table_fragment.actor_status.get(&actor.actor_id)
-                        {
+                        if let Some(actor_status) = actor_status.get(&actor.actor_id) {
                             if let Some(parallel_unit) = actor_status.parallel_unit.as_ref() {
                                 actor_to_parallel_unit.insert(
                                     actor.actor_id as ActorId,
@@ -673,17 +704,17 @@ where
                     if !fragment.state_table_ids.is_empty() {
                         let mut mapping = vnode_mapping.clone();
                         mapping.fragment_id = fragment.fragment_id;
-                        self.env
-                            .notification_manager()
-                            .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
-                            .await;
+                        fragment_mapping_to_notify.push(mapping);
                     }
                 }
 
+                // Second step, update upstream fragments
                 // Update the dispatcher of the upstream fragments.
                 for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
-                    // TODO: here we assume the upstream fragment is in the same materialized view
-                    // as this fragment.
+                    // here we assume the upstream fragment is in the same streaming job as this
+                    // fragment. Cross-table references only occur in the case
+                    // of Chain fragment, and the scale of Chain fragment does not introduce updates
+                    // to the upstream Fragment (because of NoShuffle)
                     let upstream_fragment = table_fragment
                         .fragments
                         .get_mut(&upstream_fragment_id)
@@ -696,7 +727,10 @@ where
 
                         for dispatcher in &mut upstream_actor.dispatcher {
                             if dispatcher.dispatcher_id == dispatcher_id {
-                                dispatcher.hash_mapping = upstream_dispatcher_mapping.clone();
+                                if let DispatcherType::Hash = dispatcher.r#type() {
+                                    dispatcher.hash_mapping = upstream_dispatcher_mapping.clone();
+                                }
+
                                 update_actors(
                                     dispatcher.downstream_actor_id.as_mut(),
                                     &removed_actor_ids,
@@ -708,7 +742,7 @@ where
                 }
 
                 // Update the merge executor of the downstream fragment.
-                if let Some(downstream_fragment_id) = downstream_fragment_id {
+                for &downstream_fragment_id in &downstream_fragment_ids {
                     let downstream_fragment = table_fragment
                         .fragments
                         .get_mut(&downstream_fragment_id)
@@ -735,19 +769,16 @@ where
                     }
                 }
             }
-
-            if updated {
-                table_fragment.upsert_in_transaction(&mut transaction)?;
-                updated_tables.insert(table_fragment.table_id(), table_fragment);
-            }
         }
 
         assert!(reschedules.is_empty(), "all reschedules must be applied");
+        commit_meta!(self, table_fragments)?;
 
-        self.env.meta_store().txn(transaction).await?;
-
-        for (table_id, table_fragments) in updated_tables {
-            map.insert(table_id, table_fragments).unwrap();
+        for mapping in fragment_mapping_to_notify {
+            self.env
+                .notification_manager()
+                .notify_frontend(Operation::Update, Info::ParallelUnitMapping(mapping))
+                .await;
         }
 
         Ok(())
@@ -755,29 +786,50 @@ where
 
     pub async fn table_node_actors(
         &self,
-        table_id: &TableId,
+        table_ids: &HashSet<TableId>,
     ) -> MetaResult<BTreeMap<WorkerId, Vec<ActorId>>> {
         let map = &self.core.read().await.table_fragments;
-        match map.get(table_id) {
-            Some(table_fragment) => Ok(table_fragment.worker_actor_ids()),
-            None => bail!("table_fragment not exist: id={}", table_id),
-        }
+        let table_fragments_vec = table_ids
+            .iter()
+            .map(|table_id| {
+                map.get(table_id)
+                    .ok_or_else(|| anyhow!("table_fragment not exist: id={}", table_id).into())
+            })
+            .collect::<MetaResult<Vec<_>>>()?;
+        Ok(table_fragments_vec
+            .iter()
+            .map(|table_fragments| table_fragments.worker_actor_ids())
+            .reduce(|mut btree_map, next_map| {
+                next_map.into_iter().for_each(|(k, v)| {
+                    btree_map.entry(k).or_insert_with(Vec::new).extend(v);
+                });
+                btree_map
+            })
+            .unwrap())
     }
 
-    pub async fn get_table_actor_ids(&self, table_id: &TableId) -> MetaResult<Vec<ActorId>> {
+    pub async fn get_table_actor_ids(
+        &self,
+        table_ids: &HashSet<TableId>,
+    ) -> MetaResult<Vec<ActorId>> {
         let map = &self.core.read().await.table_fragments;
-        match map.get(table_id) {
-            Some(table_fragment) => Ok(table_fragment.actor_ids()),
-            None => bail!("table_fragment not exist: id={}", table_id),
-        }
+        table_ids
+            .iter()
+            .map(|table_id| {
+                map.get(table_id)
+                    .map(|table_fragment| table_fragment.actor_ids())
+                    .ok_or_else(|| anyhow!("table_fragment not exist: id={}", table_id).into())
+            })
+            .flatten_ok()
+            .collect::<MetaResult<Vec<_>>>()
     }
 
-    pub async fn get_table_sink_actor_ids(&self, table_id: &TableId) -> MetaResult<Vec<ActorId>> {
+    pub async fn get_table_mview_actor_ids(&self, table_id: &TableId) -> MetaResult<Vec<ActorId>> {
         let map = &self.core.read().await.table_fragments;
-        match map.get(table_id) {
-            Some(table_fragment) => Ok(table_fragment.sink_actor_ids()),
-            None => bail!("table_fragment not exist: id={}", table_id),
-        }
+        Ok(map
+            .get(table_id)
+            .context(format!("table_fragment not exist: id={}", table_id))?
+            .mview_actor_ids())
     }
 
     // we will read three things at once, avoiding locking too much.
@@ -789,20 +841,17 @@ where
         let mut info: BuildGraphInfo = Default::default();
 
         for table_id in table_ids {
-            match map.get(table_id) {
-                Some(table_fragment) => {
-                    info.table_sink_actor_ids
-                        .insert(*table_id, table_fragment.sink_actor_ids());
-                }
-                None => {
-                    bail!("table_fragment not exist: id={}", table_id);
-                }
-            }
+            info.table_mview_actor_ids.insert(
+                *table_id,
+                map.get(table_id)
+                    .context(format!("table_fragment not exist: id={}", table_id))?
+                    .mview_actor_ids(),
+            );
         }
         Ok(info)
     }
 
-    pub async fn get_sink_vnode_bitmap_info(
+    pub async fn get_mview_vnode_bitmap_info(
         &self,
         table_ids: &HashSet<TableId>,
     ) -> MetaResult<HashMap<TableId, Vec<(ActorId, Option<Buffer>)>>> {
@@ -810,19 +859,18 @@ where
         let mut info: HashMap<TableId, Vec<(ActorId, Option<Buffer>)>> = HashMap::new();
 
         for table_id in table_ids {
-            match map.get(table_id) {
-                Some(table_fragment) => {
-                    info.insert(*table_id, table_fragment.sink_vnode_bitmap_info());
-                }
-                None => {
-                    bail!("table_fragment not exist: id={}", table_id);
-                }
-            }
+            info.insert(
+                *table_id,
+                map.get(table_id)
+                    .context(format!("table_fragment not exist: id={}", table_id))?
+                    .mview_vnode_bitmap_info(),
+            );
         }
+
         Ok(info)
     }
 
-    pub async fn get_sink_fragment_vnode_info(
+    pub async fn get_mview_fragment_vnode_info(
         &self,
         table_ids: &HashSet<TableId>,
     ) -> MetaResult<HashMap<TableId, FragmentVNodeInfo>> {
@@ -830,21 +878,16 @@ where
         let mut info: HashMap<TableId, FragmentVNodeInfo> = HashMap::new();
 
         for table_id in table_ids {
-            match map.get(table_id) {
-                Some(table_fragment) => {
-                    info.insert(
-                        *table_id,
-                        FragmentVNodeInfo {
-                            actor_parallel_unit_maps: table_fragment.sink_actor_parallel_units(),
-                            vnode_mapping: table_fragment.sink_vnode_mapping(),
-                        },
-                    );
-                }
-
-                None => {
-                    bail!("table_fragment not exist: id={}", table_id);
-                }
-            }
+            let table_fragment = map
+                .get(table_id)
+                .context(format!("table_fragment not exist: id={}", table_id))?;
+            info.insert(
+                *table_id,
+                FragmentVNodeInfo {
+                    actor_parallel_unit_maps: table_fragment.mview_actor_parallel_units(),
+                    vnode_mapping: table_fragment.mview_vnode_mapping(),
+                },
+            );
         }
 
         Ok(info)
@@ -858,14 +901,12 @@ where
         let mut info: HashMap<TableId, BTreeMap<WorkerId, Vec<ActorId>>> = HashMap::new();
 
         for table_id in table_ids {
-            match map.get(table_id) {
-                Some(table_fragment) => {
-                    info.insert(*table_id, table_fragment.worker_actor_ids());
-                }
-                None => {
-                    bail!("table_fragment not exist: id={}", table_id);
-                }
-            }
+            info.insert(
+                *table_id,
+                map.get(table_id)
+                    .context(format!("table_fragment not exist: id={}", table_id))?
+                    .worker_actor_ids(),
+            );
         }
 
         Ok(info)

@@ -25,6 +25,7 @@ use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{FullScanTask, VacuumTask};
 
 use super::CompactorManagerRef;
+use crate::backup_restore::BackupManagerRef;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{ClusterManagerRef, MetaSrvEnv};
@@ -36,6 +37,7 @@ pub type VacuumManagerRef<S> = Arc<VacuumManager<S>>;
 pub struct VacuumManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     hummock_manager: HummockManagerRef<S>,
+    backup_manager: BackupManagerRef<S>,
     /// Use the CompactorManager to dispatch VacuumTask.
     compactor_manager: CompactorManagerRef,
     /// SST ids which have been dispatched to vacuum nodes but are not replied yet.
@@ -49,11 +51,13 @@ where
     pub fn new(
         env: MetaSrvEnv<S>,
         hummock_manager: HummockManagerRef<S>,
+        backup_manager: BackupManagerRef<S>,
         compactor_manager: CompactorManagerRef,
     ) -> Self {
         Self {
             env,
             hummock_manager,
+            backup_manager,
             compactor_manager,
             pending_sst_ids: Default::default(),
         }
@@ -94,7 +98,8 @@ where
                 pending_sst_ids
             } else {
                 // 2. If no pending SSTs, then fetch new ones.
-                let ssts_to_delete = self.hummock_manager.get_ssts_to_delete().await;
+                let mut ssts_to_delete = self.hummock_manager.get_ssts_to_delete().await;
+                self.filter_out_pinned_ssts(&mut ssts_to_delete).await?;
                 if ssts_to_delete.is_empty() {
                     return Ok(vec![]);
                 }
@@ -154,6 +159,27 @@ where
             }
         }
         Ok(sent_batch)
+    }
+
+    async fn filter_out_pinned_ssts(
+        &self,
+        ssts_to_delete: &mut Vec<HummockSstableId>,
+    ) -> MetaResult<()> {
+        let reject: HashSet<HummockSstableId> =
+            self.backup_manager.list_pinned_ssts().into_iter().collect();
+        // Ack these pinned SSTs directly. Otherwise delta log containing them cannot be GCed.
+        // These SSTs will be GCed during full GC when they are no longer pinned.
+        let to_ack = ssts_to_delete
+            .iter()
+            .filter(|s| reject.contains(s))
+            .cloned()
+            .collect_vec();
+        if to_ack.is_empty() {
+            return Ok(());
+        }
+        self.hummock_manager.ack_deleted_ssts(&to_ack).await?;
+        ssts_to_delete.retain(|s| !reject.contains(s));
+        Ok(())
     }
 
     /// Acknowledges deletion of SSTs and deletes corresponding metadata.
@@ -320,29 +346,24 @@ mod tests {
     use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::VacuumTask;
 
+    use crate::backup_restore::BackupManager;
     use crate::hummock::test_utils::{add_test_tables, setup_compute_env};
-    use crate::hummock::{start_vacuum_scheduler, CompactorManager, VacuumManager};
+    use crate::hummock::VacuumManager;
     use crate::MetaOpts;
-
-    #[tokio::test]
-    async fn test_shutdown_vacuum() {
-        let (env, hummock_manager, _cluster_manager, _worker_node) = setup_compute_env(80).await;
-        let compactor_manager = Arc::new(CompactorManager::for_test());
-        let vacuum = Arc::new(VacuumManager::new(env, hummock_manager, compactor_manager));
-        let (join_handle, shutdown_sender) =
-            start_vacuum_scheduler(vacuum, Duration::from_secs(60));
-        shutdown_sender.send(()).unwrap();
-        join_handle.await.unwrap();
-    }
 
     #[tokio::test]
     async fn test_vacuum() {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+        let backup_manager = Arc::new(BackupManager::for_test(
+            env.clone(),
+            hummock_manager.clone(),
+        ));
         let vacuum = Arc::new(VacuumManager::new(
             env,
             hummock_manager.clone(),
+            backup_manager,
             compactor_manager.clone(),
         ));
         assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
@@ -402,6 +423,10 @@ mod tests {
         let (mut env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
+        let backup_manager = Arc::new(BackupManager::for_test(
+            env.clone(),
+            hummock_manager.clone(),
+        ));
         // Use smaller spin interval to accelerate test.
         env.opts = Arc::new(MetaOpts {
             collect_gc_watermark_spin_interval_sec: 1,
@@ -410,6 +435,7 @@ mod tests {
         let vacuum = Arc::new(VacuumManager::new(
             env,
             hummock_manager.clone(),
+            backup_manager,
             compactor_manager.clone(),
         ));
 

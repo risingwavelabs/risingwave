@@ -14,7 +14,6 @@
 use std::clone::Clone;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Instant;
 
 use async_stack_trace::StackTrace;
 use bytes::{Buf, BufMut, Bytes};
@@ -183,7 +182,6 @@ impl SstableStore {
         for &sst_id in sst_id_list {
             paths.push(self.get_sst_data_path(sst_id));
         }
-
         // Delete from storage.
         self.store.delete_objects(&paths).await?;
 
@@ -215,8 +213,8 @@ impl SstableStore {
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
         stats.cache_data_block_total += 1;
-        let tiered_cache = self.tiered_cache.clone();
-        let fetch_block = || {
+        let mut fetch_block = || {
+            let tiered_cache = self.tiered_cache.clone();
             stats.cache_data_block_miss += 1;
             let block_meta = sst
                 .meta
@@ -342,7 +340,7 @@ impl SstableStore {
                     size: (sst.file_size - sst.meta_offset) as usize,
                 };
                 async move {
-                    let now = Instant::now();
+                    let now = minstant::Instant::now();
                     let buf = store
                         .read(&meta_path, Some(loc))
                         .await
@@ -355,14 +353,8 @@ impl SstableStore {
                     Ok((Box::new(sst), charge))
                 }
             })
-            .stack_trace("meta_cache_lookup")
+            .verbose_stack_trace("meta_cache_lookup")
             .await
-            .map_err(|e| {
-                HummockError::other(format!(
-                    "meta cache lookup request dedup get cancel: {:?}",
-                    e,
-                ))
-            })?
     }
 
     pub async fn list_ssts_from_object_store(&self) -> HummockResult<Vec<ObjectMetadata>> {
@@ -524,13 +516,14 @@ impl SstableWriter for BatchUploadWriter {
             // Upload data to object store.
             self.sstable_store
                 .clone()
-                .put_sst_data(self.sst_id, data.clone())
+                .put_sst_data(self.sst_id, data)
                 .await?;
             self.sstable_store.insert_meta_cache(self.sst_id, meta);
 
             // Add block cache.
             if CachePolicy::Fill == self.policy {
-                debug_assert!(!self.block_info.is_empty());
+                // The `block_info` may be empty when there is only range-tombstones, because we
+                //  store them in meta-block.
                 for (block_idx, block) in self.block_info.into_iter().enumerate() {
                     self.sstable_store.block_cache.insert(
                         self.sst_id,
@@ -716,7 +709,7 @@ mod tests {
         for i in x_range {
             let key = iter.key();
             let value = iter.value();
-            assert_eq!(key, iterator_test_key_of(i).as_slice());
+            assert_eq!(key, iterator_test_key_of(i).to_ref());
             assert_eq!(value, get_hummock_value(i).as_slice());
             iter.next().await.unwrap();
         }

@@ -159,19 +159,17 @@ fn generator_from_data_type(
         DataType::Timestamp => {
             let max_past_key = format!("fields.{}.max_past", name);
             let max_past_value = fields_option_map.get(&max_past_key).map(|s| s.to_string());
-            FieldGeneratorImpl::with_random(
-                data_type,
-                None,
-                None,
-                max_past_value,
-                None,
-                random_seed,
-            )
+            let max_past_mode_key = format!("fields.{}.max_past_mode", name);
+            let max_past_mode_value = fields_option_map
+                .get(&max_past_mode_key)
+                .map(|s| s.to_lowercase());
+
+            FieldGeneratorImpl::with_timestamp(max_past_value, max_past_mode_value, random_seed)
         }
         DataType::Varchar => {
             let length_key = format!("fields.{}.length", name);
             let length_value = fields_option_map.get(&length_key).map(|s| s.to_string());
-            FieldGeneratorImpl::with_random(data_type, None, None, None, length_value, random_seed)
+            FieldGeneratorImpl::with_varchar(length_value, random_seed)
         }
         DataType::Struct(struct_type) => {
             let struct_fields = zip_eq(struct_type.field_names.clone(), struct_type.fields.clone())
@@ -188,6 +186,18 @@ fn generator_from_data_type(
                 .collect::<Result<_>>()?;
             FieldGeneratorImpl::with_struct_fields(struct_fields)
         }
+        DataType::List { datatype } => {
+            let length_key = format!("fields.{}.length", name);
+            let length_value = fields_option_map.get(&length_key).map(|s| s.to_string());
+            let generator = generator_from_data_type(
+                *datatype,
+                fields_option_map,
+                &format!("{}._", name),
+                split_index,
+                split_num,
+            )?;
+            FieldGeneratorImpl::with_list(generator, length_value)
+        }
         _ => {
             let kind_key = format!("fields.{}.kind", name);
             if let Some(kind) = fields_option_map.get(&kind_key) && kind.as_str() == SEQUENCE_FIELD_KIND {
@@ -196,7 +206,7 @@ fn generator_from_data_type(
                 let start_value =
                     fields_option_map.get(&start_key).map(|s| s.to_string());
                 let end_value = fields_option_map.get(&end_key).map(|s| s.to_string());
-                FieldGeneratorImpl::with_sequence(
+                FieldGeneratorImpl::with_number_sequence(
                     data_type,
                     start_value,
                     end_value,
@@ -208,12 +218,10 @@ fn generator_from_data_type(
                 let max_key = format!("fields.{}.max", name);
                 let min_value = fields_option_map.get(&min_key).map(|s| s.to_string());
                 let max_value = fields_option_map.get(&max_key).map(|s| s.to_string());
-                FieldGeneratorImpl::with_random(
+                FieldGeneratorImpl::with_number_random(
                     data_type,
                     min_value,
                     max_value,
-                    None,
-                    None,
                     random_seed
                 )
             }

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use chrono::NaiveDateTime;
 use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
 
 use crate::{ExprError, Result};
@@ -32,14 +31,14 @@ pub fn tumble_start_date_time(
 ) -> Result<NaiveDateTimeWrapper> {
     let diff = time.0.timestamp_micros();
     let window_start = tm_diff_bin(diff, window)?;
-    Ok(NaiveDateTimeWrapper(NaiveDateTime::from_timestamp(
+    Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
         window_start / 1_000_000,
         (window_start % 1_000_000 * 1000) as u32,
-    )))
+    ))
 }
 
 #[inline(always)]
-pub fn tumble_start_timestampz(time: i64, window: IntervalUnit) -> Result<i64> {
+pub fn tumble_start_timestamptz(time: i64, window: IntervalUnit) -> Result<i64> {
     // Actually directly calls into the helper `tm_diff_bin`. But we keep the shared utility and
     // enduser function separate.
     let diff = time;
@@ -71,20 +70,16 @@ fn tm_diff_bin(diff_usecs: i64, window: IntervalUnit) -> Result<i64> {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
-    use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper};
+    use chrono::{Datelike, Timelike};
+    use risingwave_common::types::{IntervalUnit, NaiveDateWrapper};
 
     use super::tumble_start_date_time;
 
     #[test]
     fn test_tumble_start_date_time() {
-        let d = NaiveDate::from_ymd(2022, 2, 22);
-        let t = NaiveTime::from_hms(22, 22, 22);
-        let dt = NaiveDateTime::new(d, t);
+        let dt = NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22).and_hms_uncheck(22, 22, 22);
         let interval = IntervalUnit::new(0, 0, 30 * 60 * 1000);
-        let w = tumble_start_date_time(NaiveDateTimeWrapper(dt), interval)
-            .unwrap()
-            .0;
+        let w = tumble_start_date_time(dt, interval).unwrap().0;
         assert_eq!(w.year(), 2022);
         assert_eq!(w.month(), 2);
         assert_eq!(w.day(), 22);

@@ -15,7 +15,6 @@
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DateTimeField, Decimal, IntervalUnit, ScalarImpl};
-use risingwave_expr::vector_op::cast::str_parse;
 use risingwave_sqlparser::ast::{DateTimeField as AstDateTimeField, Expr, Value};
 
 use crate::binder::Binder;
@@ -43,7 +42,10 @@ impl Binder {
     }
 
     pub(super) fn bind_string(&mut self, s: String) -> Result<Literal> {
-        Ok(Literal::new(Some(ScalarImpl::Utf8(s)), DataType::Varchar))
+        Ok(Literal::new(
+            Some(ScalarImpl::Utf8(s.into())),
+            DataType::Varchar,
+        ))
     }
 
     fn bind_bool(&mut self, b: bool) -> Result<Literal> {
@@ -55,10 +57,13 @@ impl Binder {
             (Some(ScalarImpl::Int32(int_32)), DataType::Int32)
         } else if let Ok(int_64) = s.parse::<i64>() {
             (Some(ScalarImpl::Int64(int_64)), DataType::Int64)
-        } else {
+        } else if let Ok(decimal) = s.parse::<Decimal>() {
             // Notice: when the length of decimal exceeds 29(>= 30), it will be rounded up.
-            let decimal = str_parse::<Decimal>(&s)?;
             (Some(ScalarImpl::Decimal(decimal)), DataType::Decimal)
+        } else if let Some(scientific) = Decimal::from_scientific(&s) {
+            (Some(ScalarImpl::Decimal(scientific)), DataType::Decimal)
+        } else {
+            return Err(ErrorCode::BindError(format!("Number {s} overflows")).into());
         };
         Ok(Literal::new(data, data_type))
     }
@@ -110,6 +115,38 @@ impl Binder {
         Ok(expr)
     }
 
+    pub(super) fn bind_array_cast(&mut self, exprs: Vec<Expr>, ty: DataType) -> Result<ExprImpl> {
+        if exprs.is_empty() {
+            let lhs: ExprImpl = FunctionCall::new_unchecked(
+                ExprType::Array,
+                vec![],
+                // Treat `array[]` as `varchar[]` temporarily before applying cast.
+                DataType::List {
+                    datatype: Box::new(DataType::Varchar),
+                },
+            )
+            .into();
+            return lhs.cast_explicit(ty);
+        }
+        let inner_type = if let DataType::List { datatype } = &ty {
+            *datatype.clone()
+        } else {
+            return Err(ErrorCode::BindError(format!(
+                "cannot cast array to non-array type {}",
+                ty
+            ))
+            .into());
+        };
+
+        let exprs = exprs
+            .into_iter()
+            .map(|e| self.bind_cast_inner(e, inner_type.clone()))
+            .collect::<Result<Vec<ExprImpl>>>()?;
+
+        let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Array, exprs, ty).into();
+        Ok(expr)
+    }
+
     pub(super) fn bind_array_index(&mut self, obj: Expr, index: Expr) -> Result<ExprImpl> {
         let obj = self.bind_expr(obj)?;
         match obj.return_type() {
@@ -146,6 +183,7 @@ impl Binder {
 mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
+    use risingwave_sqlparser::ast::Value::Number;
 
     use crate::binder::test_utils::mock_binder;
     use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall};
@@ -189,6 +227,47 @@ mod tests {
         for i in 0..values.len() {
             let value = Value::Number(String::from(values[i]));
             let res = binder.bind_value(value).unwrap();
+            let ans = Literal::new(data[i].clone(), data_type[i].clone());
+            assert_eq!(res, ans);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bind_scientific_number() {
+        use std::str::FromStr;
+
+        use super::*;
+
+        let mut binder = mock_binder();
+        let values = vec![
+            ("1e6"),
+            ("1.25e6"),
+            ("1.25e1"),
+            ("1e-2"),
+            ("1.25e-2"),
+            ("1e15"),
+        ];
+        let data = vec![
+            Some(ScalarImpl::Decimal(Decimal::from_str("1000000").unwrap())),
+            Some(ScalarImpl::Decimal(Decimal::from_str("1250000").unwrap())),
+            Some(ScalarImpl::Decimal(Decimal::from_str("12.5").unwrap())),
+            Some(ScalarImpl::Decimal(Decimal::from_str("0.01").unwrap())),
+            Some(ScalarImpl::Decimal(Decimal::from_str("0.0125").unwrap())),
+            Some(ScalarImpl::Decimal(
+                Decimal::from_str("1000000000000000").unwrap(),
+            )),
+        ];
+        let data_type = vec![
+            DataType::Decimal,
+            DataType::Decimal,
+            DataType::Decimal,
+            DataType::Decimal,
+            DataType::Decimal,
+            DataType::Decimal,
+        ];
+
+        for i in 0..values.len() {
+            let res = binder.bind_value(Number(values[i].to_string())).unwrap();
             let ans = Literal::new(data[i].clone(), data_type[i].clone());
             assert_eq!(res, ans);
         }

@@ -1,0 +1,169 @@
+statement ok
+create materialized source s1 (v1 int, v2 float) with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = '1',
+    fields.v1.end  = '10',
+    fields.v2.kind = 'sequence',
+    fields.v2.start = '11',
+    fields.v2.end = '20',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) row format json;
+
+# Wait enough time to ensure Datagen connector generate data
+sleep 2s
+
+statement ok
+flush;
+
+# Will only generate 10 records since `fields.v1.end` is 10
+query II rowsort
+select v1, v2 from s1 where v1 is not null limit 15;
+----
+1 11
+10 20
+2 12
+3 13
+4 14
+5 15
+6 16
+7 17
+8 18
+9 19
+
+statement ok
+drop source s1;
+
+statement ok
+create materialized source s1 (v1 int)  with (
+    connector = 'datagen',
+    fields.v1.kind = 'sequence',
+    fields.v1.start = '1',
+    fields.v1.end = '100',
+    datagen.rows.per.second = '10',
+    datagen.split.num = '5'
+) row format json;
+
+# Wait enough time to ensure Datagen connector generate data
+sleep 2s
+
+statement ok
+flush;
+
+query I
+select v1 from s1 order by v1 limit 10;
+----
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+statement ok
+drop source s1;
+
+statement ok
+create materialized source s1 (v1 struct<v2 int>)  with (
+    connector = 'datagen',
+    fields.v1.v2.kind = 'sequence',
+    fields.v1.v2.start = '1',
+    fields.v1.v2.end = '100',
+    datagen.rows.per.second = '10',
+    datagen.split.num = '5'
+) row format json;
+
+# Wait enough time to ensure Datagen connector generate data
+sleep 2s
+
+statement ok
+flush;
+
+query I
+select (v1).v2 from s1 order by v1 limit 10;
+----
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+
+statement ok
+drop source s1;
+
+statement ok
+create materialized source s1 (v1 struct<v2 int>, t1 timestamp, c1 varchar) with (
+    connector = 'datagen',
+    fields.v1.v2.kind = 'random',
+    fields.v1.v2.min = '1',
+    fields.v1.v2.max = '100',
+    fields.v1.v2.seed = '1',
+    fields.t1.kind = 'random',
+    fields.t1.max_past = '2h 37min',
+    fields.t1.max_past_mode = 'relative',
+    fields.t1.seed = '3',
+    fields.c1.kind = 'random',
+    fields.c1.length = '100',
+    fields.c1.seed = '3',
+    datagen.rows.per.second = '10',
+    datagen.split.num = '5'
+) row format json;
+
+# Wait enough time to ensure Datagen connector generate data
+sleep 2s
+
+statement ok
+flush;
+
+query I
+select count(*) > 2*10 from s1;
+----
+t
+
+query I
+select l.len, count(*) > 2*10 from (select length(s1.c1) as len from s1) as l group by l.len;
+----
+100 t
+
+statement ok
+drop source s1;
+
+statement ok
+create materialized source s1 (v1 struct<v2 int> [], c1 varchar []) with (
+    connector = 'datagen',
+    fields.v1.length = '2',
+    fields.v1._.v2.kind = 'random',
+    fields.v1._.v2.min = '1',
+    fields.v1._.v2.max = '2',
+    fields.v1._.v2.seed = '1',
+    fields.c1.length = '3',
+    fields.c1._.kind = 'random',
+    fields.c1._.length = '1',
+    fields.c1._.seed = '3',
+    datagen.rows.per.second = '10',
+    datagen.split.num = '5'
+) row format json;
+
+# Wait enough time to ensure Datagen connector generate data
+sleep 2s
+
+statement ok
+flush;
+
+query T
+select count(*) > 10 from s1;
+----
+t
+
+statement ok
+drop source s1;

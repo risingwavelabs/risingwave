@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem::swap;
 use std::ops::RangeBounds;
 use std::sync::atomic::AtomicUsize;
@@ -21,12 +21,15 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    add_new_sub_level, summarize_level_deltas, HummockLevelsExt, LevelDeltasSummary,
+    add_new_sub_level, summarize_group_deltas, GroupDeltasSummary, HummockLevelsExt,
+    HummockVersionExt,
 };
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
+use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, LevelType};
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{
@@ -35,7 +38,7 @@ use crate::hummock::local_version::{
 use crate::hummock::shared_buffer::{
     to_order_sorted, OrderSortedUncommittedData, SharedBuffer, UncommittedData,
 };
-use crate::hummock::utils::{check_subset_preserve_order, filter_single_sst, range_overlap};
+use crate::hummock::utils::filter_single_sst;
 
 // state transition
 impl SyncUncommittedData {
@@ -110,11 +113,12 @@ impl SyncUncommittedData {
 impl SyncUncommittedData {
     pub fn get_overlap_data<R, B>(
         &self,
-        key_range: &R,
+        table_id: TableId,
+        table_key_range: &R,
         epoch: HummockEpoch,
     ) -> OrderSortedUncommittedData
     where
-        R: RangeBounds<B>,
+        R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
         match &self.stage {
@@ -122,7 +126,9 @@ impl SyncUncommittedData {
                 shared_buffer_data
                     .range(..=epoch)
                     .rev() // take rev so that data of newer epoch comes first
-                    .flat_map(|(_, shared_buffer)| shared_buffer.get_overlap_data(key_range))
+                    .flat_map(|(_, shared_buffer)| {
+                        shared_buffer.get_overlap_data(table_id, table_key_range)
+                    })
                     .collect()
             }
             SyncUncommittedDataStage::Syncing(task) | SyncUncommittedDataStage::Failed(task) => {
@@ -133,14 +139,10 @@ impl SyncUncommittedData {
                             .filter(|data| match data {
                                 UncommittedData::Batch(batch) => {
                                     batch.epoch() <= epoch
-                                        && range_overlap(
-                                            key_range,
-                                            batch.start_user_key(),
-                                            batch.end_user_key(),
-                                        )
+                                        && batch.filter(table_id, table_key_range)
                                 }
-                                UncommittedData::Sst((_, info)) => {
-                                    filter_single_sst(info, key_range)
+                                UncommittedData::Sst(LocalSstableInfo { sst_info, .. }) => {
+                                    filter_single_sst(sst_info, table_id, table_key_range)
                                 }
                             })
                             .cloned()
@@ -150,7 +152,9 @@ impl SyncUncommittedData {
             }
             SyncUncommittedDataStage::Synced(ssts, _) => vec![ssts
                 .iter()
-                .filter(|(_, info)| filter_single_sst(info, key_range))
+                .filter(|LocalSstableInfo { sst_info, .. }| {
+                    filter_single_sst(sst_info, table_id, table_key_range)
+                })
                 .map(|info| UncommittedData::Sst(info.clone()))
                 .collect()],
         }
@@ -376,10 +380,11 @@ impl LocalVersion {
     pub fn read_filter<R, B>(
         this: &RwLock<Self>,
         read_epoch: HummockEpoch,
-        key_range: &R,
+        table_id: TableId,
+        table_key_range: &R,
     ) -> ReadVersion
     where
-        R: RangeBounds<B>,
+        R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
         use parking_lot::RwLockReadGuard;
@@ -394,7 +399,9 @@ impl LocalVersion {
                         .shared_buffer
                         .range(smallest_uncommitted_epoch..=read_epoch)
                         .rev() // Important: order by epoch descendingly
-                        .map(|(_, shared_buffer)| shared_buffer.get_overlap_data(key_range))
+                        .map(|(_, shared_buffer)| {
+                            shared_buffer.get_overlap_data(table_id, table_key_range)
+                        })
                         .collect();
                     let sync_data: Vec<OrderSortedUncommittedData> = guard
                         .sync_uncommitted_data
@@ -407,7 +414,9 @@ impl LocalVersion {
                                 false
                             }
                         })
-                        .map(|(_, value)| value.get_overlap_data(key_range, read_epoch))
+                        .map(|(_, value)| {
+                            value.get_overlap_data(table_id, table_key_range, read_epoch)
+                        })
                         .collect();
                     RwLockReadGuard::unlock_fair(guard);
                     (shared_buffer_data, sync_data)
@@ -488,25 +497,38 @@ impl LocalVersion {
                     .flatten()
                     .collect_vec();
                 let mut compaction_group_ssts: HashMap<_, Vec<_>> = HashMap::new();
-                for (compaction_group_id, sst) in synced_ssts {
+                let mut sst_ids = HashSet::new();
+                for LocalSstableInfo {
+                    compaction_group_id,
+                    sst_info: sst,
+                    ..
+                } in synced_ssts
+                {
+                    sst_ids.insert(sst.get_id());
                     compaction_group_ssts
                         .entry(compaction_group_id)
                         .or_default()
                         .push(sst);
                 }
-                Some(compaction_group_ssts)
+                Some((compaction_group_ssts, sst_ids))
             } else {
                 None
             };
 
-        for (compaction_group_id, level_deltas) in &version_delta.level_deltas {
-            let summary = summarize_level_deltas(level_deltas);
+        for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
+            let summary = summarize_group_deltas(group_deltas);
             if let Some(group_construct) = &summary.group_construct {
                 version.levels.insert(
                     *compaction_group_id,
                     <Levels as HummockLevelsExt>::build_initial_levels(
                         group_construct.get_group_config().unwrap(),
                     ),
+                );
+                let parent_group_id = group_construct.get_parent_group_id();
+                version.init_with_parent_group(
+                    parent_group_id,
+                    *compaction_group_id,
+                    &HashSet::from_iter(group_construct.get_table_ids().iter().cloned()),
                 );
             }
             let has_destroy = summary.group_destroy.is_some();
@@ -516,14 +538,14 @@ impl LocalVersion {
                 .expect("compaction group id should exist");
 
             match &mut compaction_group_synced_ssts {
-                Some(compaction_group_ssts) => {
+                Some((_compaction_group_ssts, sst_ids)) => {
                     // The version delta is generated from a `commit_epoch` call.
-                    let LevelDeltasSummary {
+                    let GroupDeltasSummary {
                         delete_sst_levels,
                         delete_sst_ids_set,
                         insert_sst_level_id,
                         insert_sub_level_id,
-                        insert_table_infos,
+                        mut insert_table_infos,
                         ..
                     } = summary;
                     assert!(
@@ -537,17 +559,14 @@ impl LocalVersion {
                         "an commit_epoch call should always insert sst into L0, but not insert to {}",
                         insert_sst_level_id
                     );
-                    if let Some(ssts) = compaction_group_ssts.remove(compaction_group_id) {
-                        assert!(
-                            check_subset_preserve_order(
-                                ssts.iter().map(|info| info.id),
-                                insert_table_infos.iter().map(|info| info.id)
-                            ),
-                            "order of local synced ssts is not preserved in the global inserted sst. local ssts: {:?}, global: {:?}",
-                            ssts.iter().map(|info| info.id).collect_vec(),
-                            insert_table_infos.iter().map(|info| info.id).collect_vec()
+                    insert_table_infos.retain(|info| sst_ids.contains(&info.id));
+                    if !insert_table_infos.is_empty() {
+                        add_new_sub_level(
+                            levels.l0.as_mut().unwrap(),
+                            insert_sub_level_id,
+                            LevelType::Overlapping,
+                            insert_table_infos,
                         );
-                        add_new_sub_level(levels.l0.as_mut().unwrap(), insert_sub_level_id, ssts);
                     }
                 }
                 None => {

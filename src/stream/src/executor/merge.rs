@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BinaryHeap, VecDeque};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use anyhow::anyhow;
+use futures::stream::{FusedStream, FuturesUnordered, StreamFuture};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
@@ -82,8 +85,9 @@ impl MergeExecutor {
     }
 
     #[cfg(test)]
-    pub fn for_test(inputs: Vec<tokio::sync::mpsc::Receiver<Message>>) -> Self {
+    pub fn for_test(inputs: Vec<super::exchange::permit::Receiver>) -> Self {
         use super::exchange::input::LocalInput;
+        use crate::executor::exchange::input::Input;
 
         Self::new(
             Schema::default(),
@@ -92,7 +96,11 @@ impl MergeExecutor {
             514,
             1919,
             1024,
-            inputs.into_iter().map(LocalInput::for_test).collect(),
+            inputs
+                .into_iter()
+                .enumerate()
+                .map(|(idx, input)| LocalInput::new(input, idx as ActorId).boxed_input())
+                .collect(),
             SharedContext::for_test().into(),
             810,
             StreamingMetrics::unused().into(),
@@ -118,6 +126,9 @@ impl MergeExecutor {
             let mut msg: Message = msg?;
 
             match &mut msg {
+                Message::Watermark(_) => {
+                    // Do nothing.
+                }
                 Message::Chunk(chunk) => {
                     self.metrics
                         .actor_in_record_cnt
@@ -138,7 +149,7 @@ impl MergeExecutor {
                     {
                         if !update.added_upstream_actor_id.is_empty() {
                             // Create new upstreams receivers.
-                            let new_upstreams = update
+                            let new_upstreams: Vec<_> = update
                                 .added_upstream_actor_id
                                 .iter()
                                 .map(|&upstream_actor_id| {
@@ -165,10 +176,22 @@ impl MergeExecutor {
                             select_all.add_upstreams_from(select_new);
                         }
 
-                        // Remove upstreams.
-                        select_all.remove_upstreams(
-                            &update.removed_upstream_actor_id.iter().copied().collect(),
-                        );
+                        if !update.get_removed_upstream_actor_id().is_empty() {
+                            // Remove upstreams.
+                            select_all.remove_upstreams(
+                                &update.removed_upstream_actor_id.iter().copied().collect(),
+                            );
+
+                            let col_idxes =
+                                select_all.buffered_watermarks.keys().cloned().collect_vec();
+                            for col_idx in col_idxes {
+                                // Call `check_heap` in case the only upstream(s) that does not have
+                                // watermark in heap is removed
+                                if let Some(watermark) = select_all.check_watermark_heap(col_idx) {
+                                    yield Message::Watermark(watermark);
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -197,99 +220,230 @@ impl Executor for MergeExecutor {
     }
 }
 
-pub struct SelectReceivers {
-    blocks: Vec<BoxedInput>,
-    upstreams: Vec<BoxedInput>,
-    barrier: Option<Barrier>,
-    last_base: usize,
-    actor_id: u32,
+#[derive(Default)]
+struct StagedWatermarks {
+    in_heap: bool,
+    staged: VecDeque<Watermark>,
 }
 
-impl SelectReceivers {
-    fn new(actor_id: u32, upstreams: Vec<BoxedInput>) -> Self {
-        assert!(!upstreams.is_empty());
+struct BufferedWatermarks {
+    /// We store the smallest watermark of each upstream, because the next watermark to emit is
+    /// among them.
+    pub first_buffered_watermarks: BinaryHeap<Reverse<(Watermark, ActorId)>>,
+    /// We buffer other watermarks of each upstream. The next-to-smallest one will become the
+    /// smallest when the smallest is emitted and be moved into heap.
+    pub other_buffered_watermarks: BTreeMap<ActorId, StagedWatermarks>,
+}
 
-        Self {
-            blocks: Vec::with_capacity(upstreams.len()),
-            upstreams,
-            last_base: 0,
-            actor_id,
-            barrier: None,
-        }
-    }
+/// A stream for merging messages from multiple upstreams.
+pub struct SelectReceivers {
+    /// The barrier we're aligning to. If this is `None`, then `blocked_upstreams` is empty.
+    barrier: Option<Barrier>,
+    /// The upstreams that're blocked by the `barrier`.
+    blocked: Vec<BoxedInput>,
+    /// The upstreams that're not blocked and can be polled.
+    active: FuturesUnordered<StreamFuture<BoxedInput>>,
 
-    /// Consume `other` and add its upstreams to `self`.
-    fn add_upstreams_from(&mut self, other: Self) {
-        assert!(self.blocks.is_empty() && self.barrier.is_none());
-        assert!(other.blocks.is_empty() && other.barrier.is_none());
-        assert_eq!(self.actor_id, other.actor_id);
-
-        self.upstreams.extend(other.upstreams);
-        self.last_base = 0;
-    }
-
-    /// Remove upstreams from `self` in `upstream_actor_ids`.
-    fn remove_upstreams(&mut self, upstream_actor_ids: &HashSet<ActorId>) {
-        assert!(self.blocks.is_empty() && self.barrier.is_none());
-
-        self.upstreams
-            .retain(|u| !upstream_actor_ids.contains(&u.actor_id()));
-        self.last_base = 0;
-    }
+    /// The actor id of this fragment.
+    actor_id: u32,
+    /// watermark column index -> `BufferedWatermarks`
+    buffered_watermarks: BTreeMap<usize, BufferedWatermarks>,
 }
 
 impl Stream for SelectReceivers {
     type Item = std::result::Result<Message, StreamExecutorError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut poll_count = 0;
-        while poll_count < self.upstreams.len() {
-            let idx = (poll_count + self.last_base) % self.upstreams.len();
-            match self.upstreams[idx].poll_next_unpin(cx) {
-                Poll::Pending => {
-                    poll_count += 1;
-                    continue;
+        if self.active.is_terminated() {
+            // This only happens if we've been asked to stop.
+            assert!(self.blocked.is_empty());
+            return Poll::Ready(None);
+        }
+
+        loop {
+            match futures::ready!(self.active.poll_next_unpin(cx)) {
+                // Directly forward the error.
+                Some((Some(Err(e)), _)) => {
+                    return Poll::Ready(Some(Err(e)));
                 }
-                Poll::Ready(item) => match item {
-                    None => return Poll::Ready(None),
-                    Some(Err(e)) => return Poll::Ready(Some(Err(e))),
-                    Some(Ok(Message::Barrier(barrier))) => {
-                        let rc = self.upstreams.swap_remove(idx);
-                        self.blocks.push(rc);
-                        if let Some(current_barrier) = self.barrier.as_ref() {
-                            if current_barrier.epoch != barrier.epoch {
-                                return Poll::Ready(Some(Err(StreamExecutorError::align_barrier(
-                                    current_barrier.clone(),
-                                    barrier,
-                                ))));
-                            }
-                        } else {
-                            self.barrier = Some(barrier);
+                // Handle the message from some upstream.
+                Some((Some(Ok(message)), remaining)) => {
+                    let actor_id = remaining.actor_id();
+                    match message {
+                        Message::Chunk(chunk) => {
+                            // Continue polling this upstream by pushing it back to `active`.
+                            self.active.push(remaining.into_future());
+                            return Poll::Ready(Some(Ok(Message::Chunk(chunk))));
                         }
-                        poll_count = 0;
+                        Message::Watermark(watermark) => {
+                            // Continue polling this upstream by pushing it back to `active`.
+                            self.active.push(remaining.into_future());
+                            if let Some(watermark) = self.handle_watermark(actor_id, watermark) {
+                                return Poll::Ready(Some(Ok(Message::Watermark(watermark))));
+                            }
+                        }
+                        Message::Barrier(barrier) => {
+                            // Block this upstream by pushing it to `blocked`.
+                            self.blocked.push(remaining);
+                            if let Some(current_barrier) = self.barrier.as_ref() {
+                                if current_barrier.epoch != barrier.epoch {
+                                    return Poll::Ready(Some(Err(
+                                        StreamExecutorError::align_barrier(
+                                            current_barrier.clone(),
+                                            barrier,
+                                        ),
+                                    )));
+                                }
+                            } else {
+                                self.barrier = Some(barrier);
+                            }
+                        }
                     }
-                    Some(Ok(Message::Chunk(chunk))) => {
-                        let message = Message::Chunk(chunk);
-                        self.last_base = (idx + 1) % self.upstreams.len();
-                        return Poll::Ready(Some(Ok(message)));
-                    }
-                },
+                }
+                // If one upstream is finished, we finish the whole stream with an error. This
+                // should not happen normally as we use the barrier as the control message.
+                Some((None, r)) => {
+                    return Poll::Ready(Some(Err(StreamExecutorError::channel_closed(format!(
+                        "exchange from actor {} to actor {} closed unexpectedly",
+                        r.actor_id(),
+                        self.actor_id
+                    )))))
+                }
+                // There's no active upstreams. Process the barrier and resume the blocked ones.
+                None => break,
             }
         }
-        if self.upstreams.is_empty() {
-            if let Some(barrier) = self.barrier.take() {
-                // If this barrier acquire the executor stop, we do not reset the upstreams
-                // so that the next call would return `Poll::Ready(None)`.
-                if !barrier.is_stop_or_update_drop_actor(self.actor_id) {
-                    self.upstreams = std::mem::take(&mut self.blocks);
-                }
-                let message = Message::Barrier(barrier);
-                Poll::Ready(Some(Ok(message)))
-            } else {
-                Poll::Ready(None)
-            }
+
+        assert!(self.active.is_terminated());
+        let barrier = self.barrier.take().unwrap();
+
+        // If this barrier asks the actor to stop, we do not reset the active upstreams so that the
+        // next call would return `Poll::Ready(None)` due to `is_terminated`.
+        let upstreams = std::mem::take(&mut self.blocked);
+        if barrier.is_stop_or_update_drop_actor(self.actor_id) {
+            drop(upstreams);
         } else {
-            Poll::Pending
+            self.extend_active(upstreams);
+            assert!(!self.active.is_terminated());
+        }
+
+        Poll::Ready(Some(Ok(Message::Barrier(barrier))))
+    }
+}
+
+impl SelectReceivers {
+    fn new(actor_id: u32, upstreams: Vec<BoxedInput>) -> Self {
+        assert!(!upstreams.is_empty());
+
+        let mut this = Self {
+            blocked: Vec::with_capacity(upstreams.len()),
+            active: Default::default(),
+            actor_id,
+            barrier: None,
+            buffered_watermarks: Default::default(),
+        };
+        this.extend_active(upstreams);
+        this
+    }
+
+    /// Extend the active upstreams with the given upstreams. The current stream must be at the
+    /// clean state right after a barrier.
+    fn extend_active(&mut self, upstreams: impl IntoIterator<Item = BoxedInput>) {
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
+
+        self.active
+            .extend(upstreams.into_iter().map(|s| s.into_future()));
+    }
+
+    /// The number of upstreams.
+    fn len(&self) -> usize {
+        self.blocked.len() + self.active.len()
+    }
+
+    /// Check the watermark heap and decide whether to emit a watermark message.
+    fn check_watermark_heap(&mut self, col_idx: usize) -> Option<Watermark> {
+        let len = self.len();
+        let mut watermark_to_transfer = None;
+        let col_data = self.buffered_watermarks.get_mut(&col_idx).unwrap();
+        while !col_data.first_buffered_watermarks.is_empty()
+            && (col_data.first_buffered_watermarks.len() == len
+                || watermark_to_transfer.as_ref().map_or(false, |watermark| {
+                    watermark == &col_data.first_buffered_watermarks.peek().unwrap().0 .0
+                }))
+        {
+            let Reverse((watermark, actor_id)) = col_data.first_buffered_watermarks.pop().unwrap();
+            watermark_to_transfer = Some(watermark);
+            let staged = col_data
+                .other_buffered_watermarks
+                .get_mut(&actor_id)
+                .unwrap();
+            if let Some(first) = staged.staged.pop_front() {
+                col_data
+                    .first_buffered_watermarks
+                    .push(Reverse((first, actor_id)));
+            } else {
+                staged.in_heap = false;
+            }
+        }
+        watermark_to_transfer
+    }
+
+    /// Handle a new watermark message. Optionally returns the watermark message to emit.
+    fn handle_watermark(&mut self, actor_id: ActorId, watermark: Watermark) -> Option<Watermark> {
+        let col_idx = watermark.col_idx;
+        let len = self.len();
+        let watermarks =
+            self.buffered_watermarks
+                .entry(col_idx)
+                .or_insert_with(|| BufferedWatermarks {
+                    first_buffered_watermarks: BinaryHeap::with_capacity(len),
+                    other_buffered_watermarks: BTreeMap::default(),
+                });
+        let staged = watermarks
+            .other_buffered_watermarks
+            .entry(actor_id)
+            .or_default();
+        if staged.in_heap {
+            staged.staged.push_back(watermark);
+            None
+        } else {
+            staged.in_heap = true;
+            watermarks
+                .first_buffered_watermarks
+                .push(Reverse((watermark, actor_id)));
+            self.check_watermark_heap(col_idx)
+        }
+    }
+
+    /// Consume `other` and add its upstreams to `self`. The two streams must be at the clean state
+    /// right after a barrier.
+    fn add_upstreams_from(&mut self, other: Self) {
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
+        assert!(other.blocked.is_empty() && other.barrier.is_none());
+        assert_eq!(self.actor_id, other.actor_id);
+
+        self.active.extend(other.active);
+    }
+
+    /// Remove upstreams from `self` in `upstream_actor_ids`. The current stream must be at the
+    /// clean state right after a barrier.
+    fn remove_upstreams(&mut self, upstream_actor_ids: &HashSet<ActorId>) {
+        assert!(self.blocked.is_empty() && self.barrier.is_none());
+
+        let new_upstreams = std::mem::take(&mut self.active)
+            .into_iter()
+            .map(|s| s.into_inner().unwrap())
+            .filter(|u| !upstream_actor_ids.contains(&u.actor_id()));
+        self.extend_active(new_upstreams);
+
+        for BufferedWatermarks {
+            first_buffered_watermarks,
+            other_buffered_watermarks,
+        } in self.buffered_watermarks.values_mut()
+        {
+            first_buffered_watermarks
+                .retain(|Reverse((_, actor_id))| !upstream_actor_ids.contains(actor_id));
+            other_buffered_watermarks.retain(|actor_id, _| !upstream_actor_ids.contains(actor_id));
         }
     }
 }
@@ -305,6 +459,7 @@ mod tests {
     use futures::FutureExt;
     use itertools::Itertools;
     use risingwave_common::array::{Op, StreamChunk};
+    use risingwave_common::types::ScalarImpl;
     use risingwave_pb::stream_plan::StreamMessage;
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
@@ -315,10 +470,11 @@ mod tests {
     use risingwave_rpc_client::ComputeClientPool;
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
-    use tonic::{Request, Response, Status};
+    use tonic::{Request, Response, Status, Streaming};
 
     use super::*;
     use crate::executor::exchange::input::RemoteInput;
+    use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::{Barrier, Executor, Mutation};
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
@@ -334,7 +490,7 @@ mod tests {
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
         let mut rxs = Vec::with_capacity(CHANNEL_NUMBER);
         for _i in 0..CHANNEL_NUMBER {
-            let (tx, rx) = tokio::sync::mpsc::channel(16);
+            let (tx, rx) = channel_for_test();
             txs.push(tx);
             rxs.push(rx);
         }
@@ -343,13 +499,23 @@ mod tests {
 
         let epochs = (10..1000u64).step_by(10).collect_vec();
 
-        for tx in txs {
+        for (tx_id, tx) in txs.into_iter().enumerate() {
             let epochs = epochs.clone();
             let handle = tokio::spawn(async move {
                 for epoch in epochs {
-                    tx.send(Message::Chunk(build_test_chunk(epoch)))
+                    if epoch % 20 == 0 {
+                        tx.send(Message::Chunk(build_test_chunk(epoch)))
+                            .await
+                            .unwrap();
+                    } else {
+                        tx.send(Message::Watermark(Watermark {
+                            col_idx: (epoch as usize / 20 + tx_id) % CHANNEL_NUMBER,
+                            data_type: DataType::Int64,
+                            val: ScalarImpl::Int64(epoch as i64),
+                        }))
                         .await
                         .unwrap();
+                    }
                     tx.send(Message::Barrier(Barrier::new_test_barrier(epoch)))
                         .await
                         .unwrap();
@@ -368,10 +534,18 @@ mod tests {
         let mut merger = merger.boxed().execute();
         for epoch in epochs {
             // expect n chunks
-            for _ in 0..CHANNEL_NUMBER {
-                assert_matches!(merger.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
-                    assert_eq!(chunk.ops().len() as u64, epoch);
-                });
+            if epoch % 20 == 0 {
+                for _ in 0..CHANNEL_NUMBER {
+                    assert_matches!(merger.next().await.unwrap().unwrap(), Message::Chunk(chunk) => {
+                        assert_eq!(chunk.ops().len() as u64, epoch);
+                    });
+                }
+            } else if epoch as usize / 20 >= CHANNEL_NUMBER - 1 {
+                for _ in 0..CHANNEL_NUMBER {
+                    assert_matches!(merger.next().await.unwrap().unwrap(), Message::Watermark(watermark) => {
+                        assert_eq!(watermark.val, ScalarImpl::Int64((epoch - 20 * (CHANNEL_NUMBER as u64 - 1)) as i64));
+                    });
+                }
             }
             // expect a barrier
             assert_matches!(merger.next().await.unwrap().unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
@@ -519,7 +693,7 @@ mod tests {
 
         async fn get_stream(
             &self,
-            _request: Request<GetStreamRequest>,
+            _request: Request<Streaming<GetStreamRequest>>,
         ) -> std::result::Result<Response<Self::GetStreamStream>, Status> {
             let (tx, rx) = tokio::sync::mpsc::channel(10);
             self.rpc_called.store(true, Ordering::SeqCst);
@@ -533,6 +707,7 @@ mod tests {
                         ),
                     ),
                 }),
+                permits: 1,
             }))
             .await
             .unwrap();
@@ -546,6 +721,7 @@ mod tests {
                         ),
                     ),
                 }),
+                permits: 0,
             }))
             .await
             .unwrap();
@@ -555,6 +731,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_exchange_client() {
+        const BATCHED_PERMITS: usize = 1024;
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
         let addr = "127.0.0.1:12348".parse().unwrap();
@@ -587,6 +764,7 @@ mod tests {
                 (0, 0),
                 (0, 0),
                 Arc::new(StreamingMetrics::unused()),
+                BATCHED_PERMITS,
             )
         };
 

@@ -18,11 +18,16 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
+use super::generic::{self, GenericPlanNode};
 use super::{
     ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, LogicalFilter, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -49,20 +54,17 @@ impl fmt::Display for LogicalApply {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("LogicalApply");
 
-        builder.field("type", &format_args!("{:?}", &self.join_type));
+        builder.field("type", &self.join_type);
 
         let mut concat_schema = self.left().schema().fields.clone();
         concat_schema.extend(self.right().schema().fields.clone());
         let concat_schema = Schema::new(concat_schema);
         builder.field(
             "on",
-            &format_args!(
-                "{}",
-                ConditionDisplay {
-                    condition: &self.on,
-                    input_schema: &concat_schema
-                }
-            ),
+            &ConditionDisplay {
+                condition: &self.on,
+                input_schema: &concat_schema,
+            },
         );
 
         builder.field("correlated_id", &self.correlated_id);
@@ -86,19 +88,9 @@ impl LogicalApply {
         max_one_row: bool,
     ) -> Self {
         let ctx = left.ctx();
-        let out_column_num =
-            LogicalJoin::out_column_num(left.schema().len(), right.schema().len(), join_type);
-        let output_indices = (0..out_column_num).collect::<Vec<_>>();
-        let schema =
-            LogicalJoin::derive_schema(left.schema(), right.schema(), join_type, &output_indices);
-        let pk_indices = LogicalJoin::derive_pk(
-            left.schema().len(),
-            right.schema().len(),
-            left.logical_pk(),
-            right.logical_pk(),
-            join_type,
-            &output_indices,
-        );
+        let join_core = generic::Join::with_full_output(left, right, join_type, on);
+        let schema = join_core.schema();
+        let pk_indices = join_core.logical_pk();
         let (functional_dependency, pk_indices) = match pk_indices {
             Some(pk_indices) => (
                 FunctionalDependencySet::with_key(schema.len(), &pk_indices),
@@ -106,6 +98,7 @@ impl LogicalApply {
             ),
             None => (FunctionalDependencySet::new(schema.len()), vec![]),
         };
+        let (left, right, on, join_type, _output_indices) = join_core.decompose();
         let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
         LogicalApply {
             base,
@@ -182,7 +175,25 @@ impl LogicalApply {
     /// Translate Apply.
     ///
     /// Used to convert other kinds of Apply to cross Apply.
-    pub fn translate_apply(self, new_apply_left: PlanRef, eq_predicates: Vec<ExprImpl>) -> PlanRef {
+    ///
+    /// Before:
+    ///
+    /// ```text
+    ///     LogicalApply
+    ///    /            \
+    ///  LHS           RHS
+    /// ```
+    ///
+    /// After:
+    ///
+    /// ```text
+    ///      LogicalJoin
+    ///    /            \
+    ///  LHS        LogicalApply
+    ///             /           \
+    ///          Domain         RHS
+    /// ```
+    pub fn translate_apply(self, domain: PlanRef, eq_predicates: Vec<ExprImpl>) -> PlanRef {
         let (
             apply_left,
             apply_right,
@@ -196,7 +207,7 @@ impl LogicalApply {
         let correlated_indices_len = correlated_indices.len();
 
         let new_apply = LogicalApply::create(
-            new_apply_left,
+            domain,
             apply_right,
             JoinType::Inner,
             Condition::true_cond(),
@@ -210,7 +221,10 @@ impl LogicalApply {
         });
         let new_join = LogicalJoin::new(apply_left, new_apply, apply_type, on);
 
-        if new_join.join_type() != JoinType::LeftSemi {
+        if new_join.join_type() == JoinType::LeftSemi {
+            // Schema doesn't change, still LHS.
+            new_join.into()
+        } else {
             // `new_join`'s schema is different from original apply's schema, so `LogicalProject` is
             // used to ensure they are the same.
             let mut exprs: Vec<ExprImpl> = vec![];
@@ -225,8 +239,6 @@ impl LogicalApply {
                     }
                 });
             LogicalProject::create(new_join.into(), exprs)
-        } else {
-            new_join.into()
         }
     }
 
@@ -278,14 +290,60 @@ impl PlanTreeNodeBinary for LogicalApply {
 impl_plan_tree_node_for_binary! { LogicalApply }
 
 impl ColPrunable for LogicalApply {
-    fn prune_col(&self, _: &[usize]) -> PlanRef {
+    fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         panic!("LogicalApply should be unnested")
     }
 }
 
 impl PredicatePushdown for LogicalApply {
-    fn predicate_pushdown(&self, _predicate: Condition) -> PlanRef {
-        panic!("LogicalApply should be unnested")
+    fn predicate_pushdown(
+        &self,
+        mut predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        let left_col_num = self.left().schema().len();
+        let right_col_num = self.right().schema().len();
+        let join_type = self.join_type();
+
+        let (left_from_filter, right_from_filter, on) = LogicalJoin::push_down(
+            &mut predicate,
+            left_col_num,
+            right_col_num,
+            LogicalJoin::can_push_left_from_filter(join_type),
+            LogicalJoin::can_push_right_from_filter(join_type),
+            LogicalJoin::can_push_on_from_filter(join_type),
+        );
+
+        let mut new_on = self.on.clone().and(on);
+        let (left_from_on, right_from_on, on) = LogicalJoin::push_down(
+            &mut new_on,
+            left_col_num,
+            right_col_num,
+            LogicalJoin::can_push_left_from_on(join_type),
+            LogicalJoin::can_push_right_from_on(join_type),
+            false,
+        );
+        assert!(
+            on.always_true(),
+            "On-clause should not be pushed to on-clause."
+        );
+
+        let left_predicate = left_from_filter.and(left_from_on);
+        let right_predicate = right_from_filter.and(right_from_on);
+
+        let new_left = self.left().predicate_pushdown(left_predicate, ctx);
+        let new_right = self.right().predicate_pushdown(right_predicate, ctx);
+
+        let new_apply = LogicalApply::create(
+            new_left,
+            new_right,
+            join_type,
+            new_on,
+            self.correlated_id,
+            self.correlated_indices.clone(),
+            self.max_one_row,
+        );
+        LogicalFilter::create(new_apply, predicate)
     }
 }
 
@@ -298,13 +356,16 @@ impl ToBatch for LogicalApply {
 }
 
 impl ToStream for LogicalApply {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         Err(RwError::from(ErrorCode::InternalError(
             "LogicalApply should be unnested".to_string(),
         )))
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         Err(RwError::from(ErrorCode::InternalError(
             "LogicalApply should be unnested".to_string(),
         )))

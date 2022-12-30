@@ -20,14 +20,14 @@ use risingwave_sqlparser::ast::ObjectName;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
 pub async fn handle_create_database(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     database_name: ObjectName,
     if_not_exist: bool,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let database_name = Binder::resolve_database_name(database_name)?;
 
     {
@@ -50,7 +50,7 @@ pub async fn handle_create_database(
             return if if_not_exist {
                 Ok(PgResponse::empty_result_with_notice(
                     StatementType::CREATE_DATABASE,
-                    format!("database {} exists, skipping", database_name),
+                    format!("database \"{}\" exists, skipping", database_name),
                 ))
             } else {
                 Err(CatalogError::Duplicated("database", database_name).into())

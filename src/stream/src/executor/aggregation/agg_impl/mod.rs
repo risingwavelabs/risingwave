@@ -18,13 +18,15 @@
 use std::any::Any;
 
 pub use approx_count_distinct::*;
+pub use approx_distinct_append::AppendOnlyStreamingApproxCountDistinct;
+use approx_distinct_utils::StreamingApproxCountDistinct;
 use dyn_clone::DynClone;
 pub use foldable::*;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, DecimalArray, F32Array, F64Array,
-    I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray, NaiveDateTimeArray,
-    NaiveTimeArray, StructArray, Utf8Array,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, BytesArray, DecimalArray,
+    F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
+    NaiveDateTimeArray, NaiveTimeArray, StructArray, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{DataType, Datum};
@@ -35,6 +37,8 @@ pub use row_count::*;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 mod approx_count_distinct;
+mod approx_distinct_append;
+mod approx_distinct_utils;
 mod foldable;
 mod row_count;
 
@@ -82,6 +86,9 @@ dyn_clone::clone_trait_object!(StreamingAggImpl);
 type StreamingSumAgg<R, I> =
     StreamingFoldAgg<R, I, PrimitiveSummable<<R as Array>::OwnedItem, <I as Array>::OwnedItem>>;
 
+/// `StreamingSum0Agg` sums data of the same type.
+type StreamingSum0Agg = StreamingFoldAgg<I64Array, I64Array, I64Sum0>;
+
 /// `StreamingCountAgg` counts data of any type.
 type StreamingCountAgg<S> = StreamingFoldAgg<I64Array, S, Countable<<S as Array>::OwnedItem>>;
 
@@ -126,10 +133,10 @@ pub fn create_streaming_agg_impl(
                     }
                 )*
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, Some(datum)) => {
-                    Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::with_datum(datum))
+                    Box::new(UpdatableStreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::with_datum(datum))
                 }
                 (AggKind::ApproxCountDistinct, _, DataType::Int64, None) => {
-                    Box::new(StreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::new())
+                    Box::new(UpdatableStreamingApproxCountDistinct::<{approx_count_distinct::DENSE_BITS_DEFAULT}>::with_no_initial())
                 }
                 (other_agg, other_input, other_return, _) => panic!(
                     "streaming agg state not implemented: {:?} {:?} {:?}",
@@ -167,6 +174,8 @@ pub fn create_streaming_agg_impl(
                     (Count, time, int64, StreamingCountAgg::<NaiveTimeArray>),
                     (Count, struct_type, int64, StreamingCountAgg::<StructArray>),
                     (Count, list, int64, StreamingCountAgg::<ListArray>),
+                    // Sum0
+                    (Sum0, int64, int64, StreamingSum0Agg),
                     // Sum
                     (Sum, int64, int64, StreamingSumAgg::<I64Array, I64Array>),
                     (
@@ -202,6 +211,17 @@ pub fn create_streaming_agg_impl(
                     (Min, float32, float32, StreamingMinAgg::<F32Array>),
                     (Min, float64, float64, StreamingMinAgg::<F64Array>),
                     (Min, interval, interval, StreamingMinAgg::<IntervalArray>),
+                    (Min, time, time, StreamingMinAgg::<NaiveTimeArray>),
+                    (Min, date, date, StreamingMinAgg::<NaiveDateArray>),
+                    (
+                        Min,
+                        timestamp,
+                        timestamp,
+                        StreamingMinAgg::<NaiveDateTimeArray>
+                    ),
+                    (Min, timestamptz, timestamptz, StreamingMinAgg::<I64Array>),
+                    (Min, varchar, varchar, StreamingMinAgg::<Utf8Array>),
+                    (Min, bytea, bytea, StreamingMinAgg::<BytesArray>),
                     // Max
                     (Max, int16, int16, StreamingMaxAgg::<I16Array>),
                     (Max, int32, int32, StreamingMaxAgg::<I32Array>),
@@ -210,6 +230,17 @@ pub fn create_streaming_agg_impl(
                     (Max, float32, float32, StreamingMaxAgg::<F32Array>),
                     (Max, float64, float64, StreamingMaxAgg::<F64Array>),
                     (Max, interval, interval, StreamingMaxAgg::<IntervalArray>),
+                    (Max, time, time, StreamingMaxAgg::<NaiveTimeArray>),
+                    (Max, date, date, StreamingMaxAgg::<NaiveDateArray>),
+                    (
+                        Max,
+                        timestamp,
+                        timestamp,
+                        StreamingMaxAgg::<NaiveDateTimeArray>
+                    ),
+                    (Max, timestamptz, timestamptz, StreamingMaxAgg::<I64Array>),
+                    (Max, varchar, varchar, StreamingMaxAgg::<Utf8Array>),
+                    (Max, bytea, bytea, StreamingMaxAgg::<BytesArray>),
                 ]
             )
         }

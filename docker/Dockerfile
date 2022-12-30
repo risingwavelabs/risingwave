@@ -16,6 +16,8 @@ COPY ./ /risingwave
 
 ENV PATH /root/.cargo/bin/:$PATH
 
+ENV IN_CONTAINER=1
+
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
   && rustup set profile minimal \
@@ -28,18 +30,16 @@ RUN mkdir -p /risingwave/bin
 ARG simd_disabled=false
 
 RUN if [ "$simd_disabled" == "true" ]; then \
-    echo "Disabling SIMD build flags for risingwave" && \
-    . scripts/cargo-config-disable-simd.sh; \
+  echo "Disabling SIMD build flags for risingwave" && \
+  . scripts/cargo-config-disable-simd.sh; \
   fi
 
 RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features "static-link static-log-level" && \
   mv /risingwave/target/release/{frontend,compute-node,meta-node,compactor,risingwave} /risingwave/bin/ && \
   cargo clean
-RUN objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/risingwave && \
-  objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/frontend && \
-  objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/compute-node && \
-  objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/meta-node && \
-  objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/compactor
+RUN for component in "risingwave" "compute-node" "meta-node" "frontend" "compactor"; do \
+  objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/${component}; \
+  done
 
 FROM ubuntu:22.04 as image-base
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates && rm -rf /var/lib/{apt,dpkg,cache,log}/

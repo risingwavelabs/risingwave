@@ -20,9 +20,9 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::table::streaming_table::state_table::StateTable;
 use risingwave_storage::StateStore;
 
+use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{Barrier, Executor, Message, MessageStream};
 
@@ -97,6 +97,9 @@ pub async fn poll_until_barrier(stream: impl MessageStream, expected_barrier: Ba
     #[for_await]
     for item in stream {
         match item? {
+            Message::Watermark(_) => {
+                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            }
             c @ Message::Chunk(_) => yield c,
             Message::Barrier(b) => {
                 if b.epoch != expected_barrier.epoch {
@@ -148,6 +151,12 @@ pub async fn align_barrier(left: impl MessageStream, right: impl MessageStream) 
                 Some(Either::Right(Ok(Message::Barrier(b)))) => {
                     yield Either::Right(Message::Barrier(b.clone()));
                     break 'inner (SideStatus::RightBarrier, b);
+                }
+                Some(Either::Right(Ok(Message::Watermark(_)))) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
+                Some(Either::Left(Ok(Message::Watermark(_)))) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
                 }
                 Some(Either::Left(Err(e))) | Some(Either::Right(Err(e))) => return Err(e),
                 None => {
@@ -225,6 +234,12 @@ pub async fn stream_lookup_arrange_prev_epoch(
                         break;
                     }
                 }
+                Either::Left(Message::Watermark(_)) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
+                Either::Right(Message::Watermark(_)) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
             }
         }
 
@@ -234,6 +249,9 @@ pub async fn stream_lookup_arrange_prev_epoch(
                 .await
                 .expect("unexpected close of barrier aligner")?
             {
+                Either::Left(Message::Watermark(_)) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
                 Either::Left(Message::Chunk(msg)) => yield ArrangeMessage::Stream(msg),
                 Either::Left(Message::Barrier(b)) => {
                     yield ArrangeMessage::Barrier(b);
@@ -300,6 +318,12 @@ pub async fn stream_lookup_arrange_this_epoch(
                     }
                     break 'inner Status::ArrangeReady;
                 }
+                Either::Left(Message::Watermark(_)) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
+                Either::Right(Message::Watermark(_)) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
             }
         };
         match status {
@@ -315,6 +339,12 @@ pub async fn stream_lookup_arrange_this_epoch(
                     Either::Left(Message::Barrier(b)) => {
                         yield ArrangeMessage::Barrier(b);
                         break;
+                    }
+                    Either::Left(Message::Watermark(_)) => {
+                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    }
+                    Either::Right(Message::Watermark(_)) => {
+                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
                     }
                     Either::Right(_) => unreachable!(),
                 }
@@ -341,6 +371,9 @@ pub async fn stream_lookup_arrange_this_epoch(
                         }
                         yield ArrangeMessage::Barrier(stream_barrier);
                         break;
+                    }
+                    Either::Right(Message::Watermark(_)) => {
+                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
                     }
                 }
             },

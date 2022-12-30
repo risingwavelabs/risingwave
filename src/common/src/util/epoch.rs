@@ -18,10 +18,12 @@ use std::time::{Duration, SystemTime};
 
 use parse_display::Display;
 
+static UNIX_SINGULARITY_DATE_SEC: u64 = 1_617_235_200;
+
 /// `UNIX_SINGULARITY_DATE_EPOCH` represents the singularity date of the UNIX epoch:
 /// 2021-04-01T00:00:00Z.
 pub static UNIX_SINGULARITY_DATE_EPOCH: LazyLock<SystemTime> =
-    LazyLock::new(|| SystemTime::UNIX_EPOCH + Duration::from_secs(1_617_235_200));
+    LazyLock::new(|| SystemTime::UNIX_EPOCH + Duration::from_secs(UNIX_SINGULARITY_DATE_SEC));
 
 #[derive(Clone, Copy, Debug, Display, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Epoch(pub u64);
@@ -70,6 +72,10 @@ impl Epoch {
             .elapsed()
             .expect("system clock set earlier than singularity date!")
             .as_millis() as u64
+    }
+
+    pub fn as_unix_millis(&self) -> u64 {
+        UNIX_SINGULARITY_DATE_SEC * 1000 + self.physical_time()
     }
 
     /// Returns the epoch in real system time.
@@ -128,7 +134,7 @@ mod tests {
 
     #[test]
     fn test_singularity_system_time() {
-        let utc = Utc.ymd(2021, 4, 1).and_hms(0, 0, 0);
+        let utc = Utc.with_ymd_and_hms(2021, 4, 1, 0, 0, 0).unwrap();
         let singularity_dt = Local.from_utc_datetime(&utc.naive_utc());
         let singularity_st = SystemTime::from(singularity_dt);
         assert_eq!(singularity_st, *UNIX_SINGULARITY_DATE_EPOCH);

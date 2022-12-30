@@ -67,6 +67,10 @@ impl Executor for UnionExecutor {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> ExecutorInfo {
+        self.info.clone()
+    }
 }
 
 /// Merges input streams and aligns with barriers.
@@ -80,6 +84,9 @@ pub fn merge(inputs: Vec<BoxedMessageStream>) -> BoxedMessageStream {
             #[for_await]
             for item in input {
                 match item? {
+                    Message::Watermark(_) => {
+                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                    }
                     msg @ Message::Chunk(_) => yield msg,
                     msg @ Message::Barrier(_) => {
                         if barrier.wait().await.is_leader() {

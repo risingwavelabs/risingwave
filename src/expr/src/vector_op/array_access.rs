@@ -75,15 +75,15 @@ mod tests {
         let l3 = ListRef::ValueRef { val: &v3 };
 
         assert_eq!(
-            array_access::<String>(Some(l1), Some(1)).unwrap(),
+            array_access::<Box<str>>(Some(l1), Some(1)).unwrap(),
             Some("来自".into())
         );
         assert_eq!(
-            array_access::<String>(Some(l2), Some(2)).unwrap(),
+            array_access::<Box<str>>(Some(l2), Some(2)).unwrap(),
             Some("荷兰".into())
         );
         assert_eq!(
-            array_access::<String>(Some(l3), Some(3)).unwrap(),
+            array_access::<Box<str>>(Some(l3), Some(3)).unwrap(),
             Some("的爱".into())
         );
     }

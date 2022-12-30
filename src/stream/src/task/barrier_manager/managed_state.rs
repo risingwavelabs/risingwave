@@ -15,12 +15,15 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::iter::once;
 
+use anyhow::anyhow;
+use risingwave_common::bail;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
 
 use super::progress::ChainState;
 use super::CollectResult;
+use crate::error::{StreamError, StreamResult};
 use crate::executor::Barrier;
 use crate::task::ActorId;
 
@@ -40,7 +43,7 @@ enum ManagedBarrierStateInner {
         remaining_actors: HashSet<ActorId>,
 
         /// Notify that the collection is finished.
-        collect_notifier: oneshot::Sender<CollectResult>,
+        collect_notifier: Option<oneshot::Sender<StreamResult<CollectResult>>>,
     },
 }
 
@@ -61,6 +64,9 @@ pub(super) struct ManagedBarrierState {
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
     pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, ChainState>>,
 
+    /// Record all unexpected exited actors.
+    failure_actors: HashMap<ActorId, StreamError>,
+
     state_store: StateStoreImpl,
 }
 
@@ -70,6 +76,7 @@ impl ManagedBarrierState {
         Self {
             epoch_barrier_state_map: BTreeMap::default(),
             create_mview_progress: Default::default(),
+            failure_actors: Default::default(),
             state_store,
         }
     }
@@ -90,8 +97,8 @@ impl ManagedBarrierState {
         if to_notify {
             while let Some((
                 _,
-                &BarrierState {
-                    inner: ref barrier_inner,
+                BarrierState {
+                    inner: barrier_inner,
                     ..
                 },
             )) = self.epoch_barrier_state_map.first_key_value()
@@ -134,7 +141,7 @@ impl ManagedBarrierState {
                         let result = CollectResult {
                             create_mview_progress,
                         };
-                        if collect_notifier.send(result).is_err() {
+                        if collect_notifier.unwrap().send(Ok(result)).is_err() {
                             warn!("failed to notify barrier collection with epoch {}", epoch)
                         }
                     }
@@ -146,8 +153,35 @@ impl ManagedBarrierState {
 
     /// Clear and reset all states.
     pub(crate) fn clear_all_states(&mut self) {
+        tracing::debug!("clear all states in local barrier manager");
         self.epoch_barrier_state_map.clear();
         self.create_mview_progress.clear();
+        self.failure_actors.clear();
+    }
+
+    /// Notify unexpected actor exit with given `actor_id`.
+    pub(crate) fn notify_failure(&mut self, actor_id: ActorId, err: StreamError) {
+        for barrier_state in self.epoch_barrier_state_map.values_mut() {
+            #[allow(clippy::single_match)]
+            match barrier_state.inner {
+                ManagedBarrierStateInner::Issued {
+                    ref remaining_actors,
+                    ref mut collect_notifier,
+                } => {
+                    if remaining_actors.contains(&actor_id) && let Some(collect_notifier) = collect_notifier.take() && collect_notifier
+                            .send(Err(anyhow!(format!(
+                                "Actor {actor_id} exit unexpectedly: {:?}",
+                                err
+                            ))
+                            .into()))
+                            .is_err() {
+                        warn!("failed to notify actor {} exit: {:?}", actor_id, err);
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.failure_actors.insert(actor_id, err);
     }
 
     /// Collect a `barrier` from the actor with `actor_id`.
@@ -212,8 +246,8 @@ impl ManagedBarrierState {
         &mut self,
         barrier: &Barrier,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-        collect_notifier: oneshot::Sender<CollectResult>,
-    ) {
+        collect_notifier: oneshot::Sender<StreamResult<CollectResult>>,
+    ) -> StreamResult<()> {
         let inner = match self.epoch_barrier_state_map.get_mut(&barrier.epoch.curr) {
             Some(&mut BarrierState {
                 inner:
@@ -222,14 +256,19 @@ impl ManagedBarrierState {
                     },
                 ..
             }) => {
-                let remaining_actors = actor_ids_to_collect
+                let remaining_actors: HashSet<ActorId> = actor_ids_to_collect
                     .into_iter()
                     .filter(|a| !collected_actors.remove(a))
                     .collect();
+                for (actor_id, err) in &self.failure_actors {
+                    if remaining_actors.contains(actor_id) {
+                        bail!("Actor {actor_id} exit unexpectedly: {:?}", err);
+                    }
+                }
                 assert!(collected_actors.is_empty());
                 ManagedBarrierStateInner::Issued {
                     remaining_actors,
-                    collect_notifier,
+                    collect_notifier: Some(collect_notifier),
                 }
             }
             Some(&mut BarrierState {
@@ -245,7 +284,7 @@ impl ManagedBarrierState {
                 let remaining_actors = actor_ids_to_collect.into_iter().collect();
                 ManagedBarrierStateInner::Issued {
                     remaining_actors,
-                    collect_notifier,
+                    collect_notifier: Some(collect_notifier),
                 }
             }
         };
@@ -258,6 +297,8 @@ impl ManagedBarrierState {
             },
         );
         self.may_notify(barrier.epoch.curr);
+
+        Ok(())
     }
 }
 
@@ -283,9 +324,15 @@ mod tests {
         let actor_ids_to_collect1 = HashSet::from([1, 2]);
         let actor_ids_to_collect2 = HashSet::from([1, 2]);
         let actor_ids_to_collect3 = HashSet::from([1, 2, 3]);
-        managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1, tx1);
-        managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, tx2);
-        managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, tx3);
+        managed_barrier_state
+            .transform_to_issued(&barrier1, actor_ids_to_collect1, tx1)
+            .unwrap();
+        managed_barrier_state
+            .transform_to_issued(&barrier2, actor_ids_to_collect2, tx2)
+            .unwrap();
+        managed_barrier_state
+            .transform_to_issued(&barrier3, actor_ids_to_collect3, tx3)
+            .unwrap();
         managed_barrier_state.collect(1, &barrier1);
         managed_barrier_state.collect(2, &barrier1);
         assert_eq!(
@@ -324,9 +371,15 @@ mod tests {
         let actor_ids_to_collect1 = HashSet::from([1, 2, 3, 4]);
         let actor_ids_to_collect2 = HashSet::from([1, 2, 3]);
         let actor_ids_to_collect3 = HashSet::from([1, 2]);
-        managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1, tx1);
-        managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, tx2);
-        managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, tx3);
+        managed_barrier_state
+            .transform_to_issued(&barrier1, actor_ids_to_collect1, tx1)
+            .unwrap();
+        managed_barrier_state
+            .transform_to_issued(&barrier2, actor_ids_to_collect2, tx2)
+            .unwrap();
+        managed_barrier_state
+            .transform_to_issued(&barrier3, actor_ids_to_collect3, tx3)
+            .unwrap();
 
         managed_barrier_state.collect(1, &barrier1);
         managed_barrier_state.collect(1, &barrier2);
@@ -399,7 +452,9 @@ mod tests {
         managed_barrier_state.collect(2, &barrier1);
         managed_barrier_state.collect(2, &barrier2);
         managed_barrier_state.collect(2, &barrier3);
-        managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1, tx1);
+        managed_barrier_state
+            .transform_to_issued(&barrier1, actor_ids_to_collect1, tx1)
+            .unwrap();
         assert_eq!(
             managed_barrier_state
                 .epoch_barrier_state_map
@@ -408,7 +463,9 @@ mod tests {
                 .0,
             &2
         );
-        managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, tx2);
+        managed_barrier_state
+            .transform_to_issued(&barrier2, actor_ids_to_collect2, tx2)
+            .unwrap();
         managed_barrier_state.collect(3, &barrier2);
         assert_eq!(
             managed_barrier_state
@@ -427,7 +484,9 @@ mod tests {
                 .0,
             &3
         );
-        managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, tx3);
+        managed_barrier_state
+            .transform_to_issued(&barrier3, actor_ids_to_collect3, tx3)
+            .unwrap();
         assert!(managed_barrier_state.epoch_barrier_state_map.is_empty());
     }
 }

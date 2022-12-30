@@ -6,7 +6,8 @@ ARG RUST_TOOLCHAIN
 
 RUN apt-get update -yy && \
     DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl parallel \
-    openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-11-jdk wget unzip git tmux lld postgresql-client -yy \
+    openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config bash openjdk-11-jdk wget unzip git tmux lld postgresql-client kafkacat \
+    maven -yy \
     && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 SHELL ["/bin/bash", "-c"]
@@ -27,7 +28,7 @@ RUN rustup component add rustfmt llvm-tools-preview clippy
 
 # install build tools
 RUN cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-cache \
-    && cargo install --git https://github.com/risinglightdb/sqllogictest-rs --bin sqllogictest \
+    && cargo install --git https://github.com/risinglightdb/sqllogictest-rs --rev 65b122f --bin sqllogictest \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
     && rm -rf "/root/.cargo/registry/cache" \

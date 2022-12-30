@@ -1,5 +1,8 @@
 [server]
 heartbeat_interval_ms = 1000
+max_heartbeat_interval_secs = 600
+
+[meta]
 
 [batch]
 
@@ -15,3 +18,4 @@ bloom_false_positive = 0.01
 data_directory = "hummock_001"
 block_cache_capacity_mb = 4096
 meta_cache_capacity_mb = 1024
+object_store_use_batch_delete = true

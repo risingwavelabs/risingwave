@@ -63,8 +63,8 @@ impl InterestedMetrics {
         let iter_rate = (self.iter_cnt - metrics.iter_cnt) as f64 / elapsed;
         println!(
             "read_rate: {}/s\nwrite_rate:{}/s\nnext_rate:{}/s\niter_rate:{}/s\n",
-            Size::Bytes(read_rate),
-            Size::Bytes(write_rate),
+            Size::from_bytes(read_rate),
+            Size::from_bytes(write_rate),
             next_rate,
             iter_rate
         );
@@ -88,7 +88,7 @@ pub async fn do_bench(cmd: BenchCommands) -> Result<()> {
                 let handler = spawn_okk(async move {
                     tracing::info!(thread = i, "starting scan");
                     let state_table = {
-                        let mut tb = make_state_table(hummock, &table);
+                        let mut tb = make_state_table(hummock, &table).await;
                         tb.init_epoch(EpochPair::new_test_epoch(u64::MAX));
                         tb
                     };

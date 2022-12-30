@@ -16,13 +16,15 @@
 mod utils;
 
 mod top_n_cache;
-pub use top_n_cache::TopNCache;
 use top_n_cache::TopNCacheTrait;
 
 // `TopN` variants
 mod group_top_n;
 mod top_n_appendonly;
 mod top_n_plain;
+
 pub use group_top_n::GroupTopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
+pub use top_n_cache::{CacheKey, TopNCache};
 pub use top_n_plain::TopNExecutor;
+pub use utils::{create_cache_key_serde, serialize_pk_to_cache_key, CacheKeySerde};
