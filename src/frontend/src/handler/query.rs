@@ -233,8 +233,14 @@ fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
             } else {
                 Ok(DELETE_RETURNING)
             }
-        }
-        Statement::Update { .. } => Ok(UPDATE),
+        },
+        Statement::Update { returning, .. } => {
+            if returning.is_empty() {
+                Ok(UPDATE)
+            } else {
+                Ok(UPDATE_RETURNING)
+            }
+        },
         _ => Err(RwError::from(ErrorCode::InvalidInputSyntax(
             "unsupported statement type".to_string(),
         ))),

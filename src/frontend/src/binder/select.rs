@@ -281,7 +281,7 @@ impl Binder {
             .zip_eq(aliases.iter())
             .map(|(s, a)| {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
-                Ok(Field::with_name(s.return_type(), name))
+                Ok::<Field, RwError>(Field::with_name(s.return_type(), name))
             })
             .try_collect()?;
         Ok((returning_list, fields))
