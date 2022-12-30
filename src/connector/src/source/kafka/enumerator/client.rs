@@ -140,7 +140,7 @@ impl KafkaSplitEnumerator {
             None
         };
 
-        println!("Start offset: {:?}", expect_start_offset);
+        // println!("Start offset: {:?}", expect_start_offset);
         let mut expect_stop_offset = if let Some(ts) = expect_stop_timestamp_millis {
             Some(
                 self.fetch_offset_for_time(topic_partitions.as_ref(), ts)
