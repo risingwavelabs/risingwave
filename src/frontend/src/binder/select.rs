@@ -272,7 +272,7 @@ impl Binder {
             .any(|expr| expr.has_agg_call() || expr.has_window_function())
         {
             return Err(RwError::from(ErrorCode::BindError(
-                "DELETE should not have agg/window".to_string(),
+                "should not have agg/window in the `RETURNING` list".to_string(),
             )));
         }
 
