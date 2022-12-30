@@ -149,7 +149,7 @@ impl KafkaSplitEnumerator {
         } else {
             None
         };
-        println!("Stop offset: {:?}", expect_stop_offset);
+        // println!("Stop offset: {:?}", expect_stop_offset);
 
         // Watermark here has nothing to do with watermark in streaming processing. Watermark
         // here means smallest/largest offset available for reading.
@@ -164,7 +164,7 @@ impl KafkaSplitEnumerator {
             }
             ret
         };
-        println!("Watermark: {:?}", watermarks);
+        // println!("Watermark: {:?}", watermarks);
 
         Ok(topic_partitions
             .iter()

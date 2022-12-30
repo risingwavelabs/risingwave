@@ -321,7 +321,7 @@ impl PredicatePushdown for LogicalSource {
     ) -> PlanRef {
         let mut range = self.kafka_timestamp_range;
 
-        println!("Before predicate: {:?}", predicate);
+        // println!("Before predicate: {:?}", predicate);
         let mut new_conjunctions = Vec::with_capacity(predicate.conjunctions.len());
         for expr in predicate.conjunctions {
             if let Some(e) = expr_to_kafka_timestamp_range(expr, &mut range, &self.base.schema) {
@@ -332,7 +332,7 @@ impl PredicatePushdown for LogicalSource {
 
         let new_source = self.clone_with_kafka_timestamp_range(range).into();
 
-        println!("After predicate: {:?}", new_conjunctions);
+        // println!("After predicate: {:?}", new_conjunctions);
         if new_conjunctions.is_empty() {
             new_source
         } else {
