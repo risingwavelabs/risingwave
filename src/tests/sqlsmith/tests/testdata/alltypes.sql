@@ -1,4 +1,4 @@
-CREATE TABLE t1 (
+CREATE TABLE alltypes1 (
     c1 boolean,
     c2 smallint,
     c3 integer,
@@ -13,10 +13,11 @@ CREATE TABLE t1 (
     c12 timestamp with time zone,
     c13 interval,
     c14 struct < a integer >,
-    c15 integer []
+    c15 integer [],
+    c16 varchar []
 );
 
-CREATE TABLE t2 (
+CREATE TABLE alltypes2 (
     c1 boolean,
     c2 smallint,
     c3 integer,
@@ -31,5 +32,6 @@ CREATE TABLE t2 (
     c12 timestamp with time zone,
     c13 interval,
     c14 struct < a integer >,
-    c15 integer []
+    c15 integer [],
+    c16 varchar []
 );
