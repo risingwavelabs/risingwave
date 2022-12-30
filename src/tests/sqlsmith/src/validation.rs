@@ -36,11 +36,13 @@ fn not_unique_error(db_error: &str) -> bool {
     db_error.contains("Bind error") && db_error.contains("is not unique")
 }
 
-fn is_unsupported_timestamp_error(db_error: &str) -> bool {
+fn is_unsupported_timestamptz_error(db_error: &str) -> bool {
     db_error.contains("Unsupported function: Timestamptz cmp Date")
         || db_error.contains("Unsupported function: Date cmp Timestamptz ")
         || db_error.contains("Unsupported function: Timestamp cmp Timestamptz")
         || db_error.contains("Unsupported function: Timestamptz cmp Timestamp")
+        || db_error.contains("Unsupported cast: Date to Timestamptz")
+        || db_error.contains("Unsupported cast: Timestamp to Timestamptz")
 }
 
 /// Certain errors are permitted to occur. This is because:
