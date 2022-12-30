@@ -57,6 +57,7 @@ impl Table {
     }
 }
 
+/// Sqlsmith Column definition
 #[derive(Clone, Debug)]
 pub struct Column {
     name: String,
