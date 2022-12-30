@@ -142,7 +142,7 @@
           | └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
           └─BatchExchange { order: [], dist: HashShard(t3.f) }
             └─BatchScan { table: t3, columns: [t3.e, t3.f], distribution: SomeShard }
-- name: insert with returning
+- name: basic insert with returning
   sql: |
     create table t (a int, b int);
     insert into t values (0,1), (1,2) returning *, a, a+b;
@@ -155,6 +155,24 @@
     └─BatchProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1)] }
       └─BatchInsert { table: t }
         └─BatchValues { rows: [[0:Int32, 1:Int32], [1:Int32, 2:Int32]] }
+- name: insert with select and returning
+  sql: |
+    create table t (a int, b int);
+    insert into t select distinct * from t returning *, a, a+b;
+  logical_plan: |
+    LogicalProject { exprs: [t.a, t.b, t.a, (t.a + t.b)] }
+    └─LogicalInsert { table: t }
+      └─LogicalAgg { group_key: [t.a, t.b], aggs: [] }
+        └─LogicalProject { exprs: [t.a, t.b] }
+          └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.a, t.b, t.a, (t.a + t.b)] }
+      └─BatchInsert { table: t }
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchHashAgg { group_key: [t.a, t.b], aggs: [] }
+            └─BatchExchange { order: [], dist: HashShard(t.a, t.b) }
+              └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
 - name: insert with returning agg functions, should not run
   sql: |
     create table t (a int, b int);
