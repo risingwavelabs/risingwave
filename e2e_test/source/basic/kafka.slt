@@ -52,7 +52,7 @@ statement ok
 select * from s4;
 
 statement ok
-create materialized source s5 (v1 int, v2 varchar) with (
+create materialized source s5 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic_with_100_message',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -89,7 +89,7 @@ show sinks
 si
 
 statement ok
-create materialized source s7 (v1 int, v2 varchar) with (
+create materialized source s7 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) with (
   connector = 'kafka',
   topic = 'sink_target',
   properties.bootstrap.server = '127.0.0.1:29092',

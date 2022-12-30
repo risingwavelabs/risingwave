@@ -24,6 +24,7 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(let_chains)]
+#![feature(box_into_inner)]
 
 pub mod aws_utils;
 pub mod error;
