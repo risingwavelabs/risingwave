@@ -49,12 +49,6 @@ pub enum DataType {
     StructOfInt,   // struct < a integer >
 }
 
-impl DataType {
-    pub fn is_scalar(&self) -> bool {
-        todo!()
-    }
-}
-
 impl TryFrom<&DataTypeName> for DataType {
     type Error = String;
 

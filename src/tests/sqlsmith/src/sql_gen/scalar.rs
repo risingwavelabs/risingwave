@@ -71,6 +71,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 data_type: RwDataType::Interval,
                 value: self.gen_temporal_scalar(typ),
             },
+            // T::ListOfVarchar => Expr::InList {} gen_scalar_list(T::Varchar,
+            // self.rng.gen_range(0..=100)), T::ListOfInt => gen_scalar_list(T::Int,
+            // self.rng.gen_range(0..=100)), T::StructOfInt =>
             _ => sql_null(),
         }
     }

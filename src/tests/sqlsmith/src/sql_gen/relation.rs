@@ -96,7 +96,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 // For simplicity only support scalar types for now.
                 let left_ty = left_column.data_type;
                 let right_ty = right_column.data_type;
-                if left_ty.is_scalar() && right_ty.is_scalar() && (left_ty == right_ty) {
+                if left_ty == right_ty {
                     available_join_on_columns.push((left_column, right_column))
                 }
             }
