@@ -381,9 +381,7 @@ mod tests {
                 })
                 .await;
 
-            if resp.is_ok() {
-                leader_count += 1;
-            }
+            leader_count += resp.is_ok() as u16;
         }
         leader_count
     }
@@ -554,20 +552,19 @@ mod tests {
             current_leader = get_agreed_leader(number_of_nodes, meta_port).await;
         }
 
-        // send shutdown to all nodes. There should only be one more node left
-        let mut active_nodes = 0;
-        for (join_handle, shutdown_tx) in node_controllers {
-            active_nodes = match shutdown_tx.send(()) {
-                Ok(_) => active_nodes + 1,
-                Err(_) => active_nodes,
-            };
-            join_handle.await.unwrap();
-        }
+        // assert that we still have 1 leader
+        let leader_count = number_of_leaders(number_of_nodes, meta_port, 2350).await;
         assert_eq!(
-            active_nodes, 1,
-            "After test there should only be one meta node left, but there were {} nodes alive",
-            active_nodes
+            leader_count, 1,
+            "After test: Expected to have 1 leader, instead got {} leaders",
+            leader_count
         );
+
+        for (join_handle, shutdown_tx) in node_controllers {
+            if shutdown_tx.send(()).is_ok() {
+                join_handle.await.unwrap();
+            }
+        }
     }
 
     /// Deletes all leader nodes one after another by triggering fencing
@@ -583,10 +580,8 @@ mod tests {
         // All nodes should agree on who the leader is on beginning
         let _ = get_agreed_leader(number_of_nodes, meta_port).await;
 
-        // delete all nodes on after another
-        let del = vec![(true, true), (true, false), (false, true)];
-
-        for (delete_leader, delete_lease) in del {
+        // delete nodes by triggering fencing
+        for (delete_leader, delete_lease) in vec![(true, true), (true, false), (false, true)] {
             // trigger fencing on the current leader
             let mut txn = Transaction::default();
             if delete_leader {
@@ -605,20 +600,22 @@ mod tests {
             let _ = get_agreed_leader(number_of_nodes, meta_port).await;
         }
 
-        // send shutdown to all nodes. There should only be one more node left
-        let mut active_nodes = 0;
-        for (join_handle, shutdown_tx) in node_controllers {
-            active_nodes = match shutdown_tx.send(()) {
-                Ok(_) => active_nodes + 1,
-                Err(_) => active_nodes,
-            };
-            join_handle.await.unwrap();
-        }
+        // assert that we still have 1 leader
+        let leader_count = number_of_leaders(number_of_nodes, meta_port, 1000).await;
         assert_eq!(
-            active_nodes, 1,
-            "After test there should only be one meta node left, but there were {} nodes alive",
-            active_nodes
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
         );
+
+        // This does not work, because the shutdown handler is still active?
+        // Why?
+        // send shutdown to all nodes. There should only be one more node left
+        for (join_handle, shutdown_tx) in node_controllers {
+            if shutdown_tx.send(()).is_ok() {
+                join_handle.await.unwrap();
+            }
+        }
     }
 
     /// returns number of leaders after failover
