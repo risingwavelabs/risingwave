@@ -267,8 +267,18 @@ impl ParseTo for CreateSourceStatement {
         let (columns, constraints) = p.parse_columns()?;
 
         impl_parse_to!(with_properties: WithProperties, p);
-        impl_parse_to!([Keyword::ROW, Keyword::FORMAT], p);
-        impl_parse_to!(source_schema: SourceSchema, p);
+        let option = with_properties
+            .0
+            .iter()
+            .find(|&opt| opt.name.real_value() == "connector");
+        // row format for cdc source must be debezium json
+        let source_schema = if let Some(opt) = option && opt.value.to_string().contains("-cdc") {
+            SourceSchema::DebeziumJson
+        } else {
+            impl_parse_to!([Keyword::ROW, Keyword::FORMAT], p);
+            SourceSchema::parse_to(p)?
+        };
+
         Ok(Self {
             if_not_exists,
             columns,
