@@ -994,17 +994,16 @@ impl IntervalUnit {
                     .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
                 }
                 (TimeStrToken::Second(second), TimeStrToken::TimeUnit(interval_unit)) => {
-                    result = result + (|| match interval_unit {
+                    result = result + match interval_unit {
                         Second => {
+                            // Currently our precision is millisecond, we should consider to refactor it to microseconds later (#4514).
+                            // If unsatisfied precision is passed as input, we should not return None (Error).
                             // TODO: IntervalUnit only support millisecond precision so the part smaller than millisecond will be truncated.
-                            if second > OrderedF64::from(0) && second < OrderedF64::from(0.001) {
-                                return None;
-                            }
                             let ms = (second.into_inner() * 1000_f64).round() as i64;
                             Some(IntervalUnit::from_millis(ms))
                         }
                         _ => None,
-                    })()
+                    }
                     .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
                 }
                 _ => {

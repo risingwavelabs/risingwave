@@ -1,11 +1,11 @@
 statement ok
+DROP VIEW person;
+
+statement ok
+DROP VIEW auction;
+
+statement ok
+DROP VIEW bid;
+
+statement ok
 DROP SOURCE nexmark;
-
-statement ok
-DROP SOURCE person;
-
-statement ok
-DROP SOURCE auction;
-
-statement ok
-DROP SOURCE bid;
