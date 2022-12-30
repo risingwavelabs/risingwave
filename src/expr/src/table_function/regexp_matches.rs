@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use regex::Regex;
 use risingwave_common::array::{Array, ArrayRef, DataChunk, ListValue, Utf8Array};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::value_encoding::deserialize_datum;
@@ -22,17 +21,9 @@ use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::*;
+use crate::expr::expr_regexp::{RegexpContext, NULL_PATTERN};
 use crate::expr::Expression;
 use crate::ExprError;
-
-#[derive(Debug)]
-pub struct RegexpContext(Regex);
-
-impl RegexpContext {
-    pub fn new(pattern: &str) -> Result<Self> {
-        Ok(Self(Regex::new(pattern)?))
-    }
-}
 
 /// It is almost the same as `regexp_match` function (see `expr_regexp.rs`), except
 /// that all the captures are returned.
@@ -127,24 +118,62 @@ pub fn new_regexp_matches(
         bail!("Expected argument text");
     };
     let text_expr = expr_build_from_prost(text_node)?;
+
     let Some(pattern_node) = args.next() else {
         bail!("Expected argument pattern");
     };
-    let RexNode::Constant(pattern_value) = pattern_node.get_rex_node().unwrap() else {
-        return Err(ExprError::UnsupportedFunction("non-constant pattern in regexp_match".to_string()))
+    let mut pattern = match &pattern_node.rex_node {
+        Some(RexNode::Constant(pattern_value)) => {
+            let pattern_scalar = deserialize_datum(
+                pattern_value.get_body().as_slice(),
+                &DataType::from(pattern_node.get_return_type().unwrap()),
+            )
+            .map_err(|e| ExprError::Internal(e.into()))?
+            .unwrap();
+            let ScalarImpl::Utf8(pattern) = pattern_scalar else {
+                bail!("Expected pattern to be an String");
+            };
+            pattern.to_string()
+        }
+        // NULL pattern
+        None => NULL_PATTERN.to_string(),
+        _ => {
+            return Err(ExprError::UnsupportedFunction(
+                "non-constant pattern in regexp_match".to_string(),
+            ))
+        }
     };
-    let pattern_scalar = deserialize_datum(
-        pattern_value.get_body().as_slice(),
-        &DataType::from(pattern_node.get_return_type().unwrap()),
-    )
-    .map_err(|e| ExprError::Internal(e.into()))?
-    .unwrap();
 
-    let ScalarImpl::Utf8(pattern) = pattern_scalar else {
-        bail!("Expected pattern to be an String");
+    let flags = if let Some(flags_node) = args.next() {
+        match &flags_node.rex_node {
+            Some(RexNode::Constant(flags_value)) => {
+                let flags_scalar = deserialize_datum(
+                    flags_value.get_body().as_slice(),
+                    &DataType::from(flags_node.get_return_type().unwrap()),
+                )
+                .map_err(|e| ExprError::Internal(e.into()))?
+                .unwrap();
+                let ScalarImpl::Utf8(flags) = flags_scalar else {
+                    bail!("Expected flags to be an String");
+                };
+                flags.to_string()
+            }
+            // NULL flag
+            None => {
+                pattern = NULL_PATTERN.to_string();
+                "".to_string()
+            }
+            _ => {
+                return Err(ExprError::UnsupportedFunction(
+                    "non-constant flags in regexp_match".to_string(),
+                ))
+            }
+        }
+    } else {
+        "".to_string()
     };
 
-    let ctx = RegexpContext::new(&pattern)?;
+    let ctx = RegexpContext::new(&pattern, &flags)?;
     Ok(RegexpMatches {
         text: text_expr,
         ctx,
