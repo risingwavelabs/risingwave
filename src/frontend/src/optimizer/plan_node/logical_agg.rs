@@ -289,6 +289,10 @@ impl LogicalAgg {
                     == DataType::Int32
         })
     }
+
+    pub fn core(&self) -> &generic::Agg<PlanRef> {
+        &self.core
+    }
 }
 
 /// `LogicalAggBuilder` extracts agg calls and references to group columns from select list and
