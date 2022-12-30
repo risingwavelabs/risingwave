@@ -283,7 +283,7 @@ impl Binder {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
                 Ok(Field::with_name(s.return_type(), name))
             })
-            .collect::<Result<Vec<Field>>>()?;
+            .try_collect()?;
         Ok((returning_list, fields))
     }
 
