@@ -154,13 +154,13 @@ impl HummockMetaClient for MockHummockMetaClient {
         self.hummock_manager
             .commit_epoch(epoch, sstables, sst_to_worker)
             .await
-            .map_err(mock_err)
+            .map_err(mock_err)?;
+        Ok(())
     }
 
     async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        self.hummock_manager
-            .update_current_epoch(epoch)
-            .map_err(mock_err)
+        self.hummock_manager.update_current_epoch(epoch);
+        Ok(())
     }
 
     async fn subscribe_compact_tasks(

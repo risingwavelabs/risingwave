@@ -5,9 +5,16 @@ statement ok
 create materialized view mv_remote as select * from t_remote;
 
 statement ok
-CREATE SINK s_remote FROM mv_remote WITH (
+CREATE SINK s_postgres FROM mv_remote WITH (
     connector='jdbc',
     jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
+    table.name='t_remote'
+);
+
+statement ok
+CREATE SINK s_mysql FROM mv_remote WITH (
+    connector='jdbc',
+    jdbc.url='jdbc:mysql://mysql:3306/test?user=mysqluser&password=mysqlpw',
     table.name='t_remote'
 );
 
@@ -30,7 +37,10 @@ statement ok
 FLUSH;
 
 statement ok
-DROP SINK s_remote;
+DROP SINK s_postgres;
+
+statement ok
+DROP SINK s_mysql
 
 statement ok
 DROP MATERIALIZED VIEW mv_remote;

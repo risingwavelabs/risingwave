@@ -31,14 +31,14 @@ use risingwave_pb::catalog::Table;
 use risingwave_storage::table::streaming_table::mem_table::RowOp;
 use risingwave_storage::StateStore;
 
-use crate::cache::{new_unbounded, EvictableHashMap, ExecutorCache};
+use crate::cache::{new_unbounded, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
     Executor, ExecutorInfo, Message, PkIndicesRef, StreamExecutorResult,
 };
-use crate::task::AtomicU64RefOpt;
+use crate::task::AtomicU64Ref;
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore> {
@@ -70,8 +70,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
-        watermark_epoch: AtomicU64RefOpt,
-        cache_size: usize,
+        watermark_epoch: AtomicU64Ref,
         handle_pk_conflict: bool,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
@@ -90,7 +89,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(watermark_epoch, cache_size),
+            materialize_cache: MaterializeCache::new(watermark_epoch),
             handle_pk_conflict,
         }
     }
@@ -104,8 +103,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         keys: Vec<OrderPair>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
-        lru_manager: AtomicU64RefOpt,
-        cache_size: usize,
+        watermark_epoch: AtomicU64Ref,
         handle_pk_conflict: bool,
     ) -> Self {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
@@ -136,7 +134,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(lru_manager, cache_size),
+            materialize_cache: MaterializeCache::new(watermark_epoch),
             handle_pk_conflict,
         }
     }
@@ -412,12 +410,8 @@ pub struct MaterializeCache {
 }
 
 impl MaterializeCache {
-    pub fn new(lru_manager: AtomicU64RefOpt, cache_size: usize) -> Self {
-        let cache = if let Some(lru_manager) = lru_manager {
-            ExecutorCache::Managed(new_unbounded(lru_manager))
-        } else {
-            ExecutorCache::Local(EvictableHashMap::new(cache_size))
-        };
+    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
+        let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
         Self { data: cache }
     }
 
@@ -514,6 +508,8 @@ impl MaterializeCache {
 #[cfg(test)]
 mod tests {
 
+    use std::sync::atomic::AtomicU64;
+
     use futures::stream::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
@@ -587,8 +583,7 @@ mod tests {
                 vec![OrderPair::new(0, OrderType::Ascending)],
                 column_ids,
                 1,
-                None,
-                0,
+                Arc::new(AtomicU64::new(0)),
                 false,
             )
             .await,
@@ -704,8 +699,7 @@ mod tests {
                 vec![OrderPair::new(0, OrderType::Ascending)],
                 column_ids,
                 1,
-                None,
-                1 << 16,
+                Arc::new(AtomicU64::new(0)),
                 true,
             )
             .await,
@@ -837,8 +831,7 @@ mod tests {
                 vec![OrderPair::new(0, OrderType::Ascending)],
                 column_ids,
                 1,
-                None,
-                1 << 16,
+                Arc::new(AtomicU64::new(0)),
                 true,
             )
             .await,

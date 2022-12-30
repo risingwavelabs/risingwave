@@ -32,7 +32,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use optimizer_context::*;
 use property::Order;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
@@ -46,6 +46,7 @@ use self::plan_visitor::{
 };
 use self::property::RequiredDist;
 use self::rule::*;
+use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::handler::create_table::DmlFlag;
 use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
@@ -75,7 +76,6 @@ pub struct PlanRoot {
     required_order: Order,
     out_fields: FixedBitSet,
     out_names: Vec<String>,
-    schema: Schema,
 }
 
 impl PlanRoot {
@@ -90,30 +90,45 @@ impl PlanRoot {
         assert_eq!(input_schema.fields().len(), out_fields.len());
         assert_eq!(out_fields.count_ones(..), out_names.len());
 
-        let schema = Schema {
-            fields: out_fields
-                .ones()
-                .zip_eq(&out_names)
-                .map(|(i, name)| {
-                    let mut f = input_schema.fields()[i].clone();
-                    f.name = name.clone();
-                    f
-                })
-                .collect(),
-        };
         Self {
             plan,
             required_dist,
             required_order,
             out_fields,
             out_names,
-            schema,
         }
     }
 
-    /// Get a reference to the plan root's schema.
-    pub fn schema(&self) -> &Schema {
-        &self.schema
+    /// Set customized names of the output fields, used for `CREATE [MATERIALIZED VIEW | SINK] r(a,
+    /// b, ..)`.
+    ///
+    /// If the number of names does not match the number of output fields, an error is returned.
+    pub fn set_out_names(&mut self, out_names: Vec<String>) -> Result<()> {
+        if out_names.len() != self.out_fields.count_ones(..) {
+            Err(ErrorCode::InvalidInputSyntax(
+                "number of column names does not match number of columns".to_string(),
+            ))?
+        }
+        self.out_names = out_names;
+        Ok(())
+    }
+
+    /// Get the plan root's schema, only including the fields to be output.
+    pub fn schema(&self) -> Schema {
+        // The schema can be derived from the `out_fields` and `out_names`, so we don't maintain it
+        // as a field and always construct one on demand here to keep it in sync.
+        Schema {
+            fields: self
+                .out_fields
+                .ones()
+                .map(|i| self.plan.schema().fields()[i].clone())
+                .zip_eq(&self.out_names)
+                .map(|(field, name)| Field {
+                    name: name.clone(),
+                    ..field
+                })
+                .collect(),
+        }
     }
 
     /// Get out fields of the plan root.
@@ -188,6 +203,15 @@ impl PlanRoot {
 
         if explain_trace {
             ctx.trace("Begin:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
+        // Replace source to share source.
+        // Perform share source at the beginning so that we can benefit from predicate pushdown and
+        // column pruning for the share operator.
+        plan = ShareSourceRewriter::share_source(plan);
+        if explain_trace {
+            ctx.trace("Share Source:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
@@ -310,12 +334,24 @@ impl PlanRoot {
         // visibility of these expressions. To avoid these expressions being pruned, we can't use
         // `self.out_fields` as `required_cols` here.
         let required_cols = (0..self.plan.schema().len()).collect_vec();
-        plan = plan.prune_col(&required_cols, &mut ColumnPruningContext::new(plan.clone()));
+        let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
+        plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
         // Column pruning may introduce additional projects, and filter can be pushed again.
         if explain_trace {
             ctx.trace("Prune Columns:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
+
+        if column_pruning_ctx.need_second_round() {
+            // Second round of column pruning and reuse the column pruning context.
+            // Try to replace original share operator with the new one.
+            plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
+            if explain_trace {
+                ctx.trace("Prune Columns (For DAG):");
+                ctx.trace(plan.explain_to_string().unwrap());
+            }
+        }
+
         plan = plan.predicate_pushdown(
             Condition::true_cond(),
             &mut PredicatePushdownContext::new(plan.clone()),
@@ -494,13 +530,6 @@ impl PlanRoot {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan()?;
 
-                // Replace source to share source.
-                let plan = ShareSourceRewriter::share_source(plan);
-                if explain_trace {
-                    ctx.trace("Reuse Source:");
-                    ctx.trace(plan.explain_to_string().unwrap());
-                }
-
                 let (plan, out_col_change) =
                     plan.logical_rewrite_for_stream(&mut Default::default())?;
 
@@ -515,7 +544,6 @@ impl PlanRoot {
                     .rewrite_required_order(&self.required_order)
                     .unwrap();
                 self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
-                self.schema = plan.schema().clone();
                 plan.to_stream_with_dist_required(&self.required_dist, &mut Default::default())
             }
             _ => unreachable!(),
@@ -538,115 +566,105 @@ impl PlanRoot {
         Ok(plan)
     }
 
-    /// Optimize and generate a create materialize view plan.
-    #[allow(clippy::too_many_arguments)]
+    /// Optimize and generate a create table plan.
+    pub fn gen_table_plan(
+        &mut self,
+        table_name: String,
+        columns: Vec<ColumnCatalog>,
+        definition: String,
+        handle_pk_conflict: bool,
+        row_id_index: Option<usize>,
+        dml_flag: DmlFlag,
+    ) -> Result<StreamMaterialize> {
+        let mut stream_plan = self.gen_stream_plan()?;
+
+        match dml_flag {
+            // TODO: remove this branch after we deprecate the materialized source
+            DmlFlag::Disable => { /* do nothing */ }
+
+            // NOTE(stonepage): we can not use this the plan's input append-only property here
+            DmlFlag::All | DmlFlag::AppendOnly => {
+                // Add DML node.
+                stream_plan = StreamDml::new(
+                    stream_plan,
+                    dml_flag == DmlFlag::AppendOnly,
+                    columns.iter().map(|c| c.column_desc.clone()).collect(),
+                )
+                .into();
+                // Add RowIDGen node if needed.
+                if let Some(row_id_index) = row_id_index {
+                    stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
+                }
+            }
+        };
+
+        StreamMaterialize::create_for_table(
+            stream_plan,
+            table_name,
+            self.required_dist.clone(),
+            self.required_order.clone(),
+            columns,
+            definition,
+            handle_pk_conflict,
+            row_id_index,
+        )
+    }
+
+    /// Optimize and generate a create materialized view plan.
     pub fn gen_materialize_plan(
         &mut self,
         mv_name: String,
         definition: String,
-        col_names: Option<Vec<String>>,
-        handle_pk_conflict: bool,
-        row_id_index: Option<usize>,
-        dml_flag: DmlFlag,
-        table_type: TableType,
     ) -> Result<StreamMaterialize> {
-        let out_names = if let Some(col_names) = col_names {
-            col_names
-        } else {
-            self.out_names.clone()
-        };
         let stream_plan = self.gen_stream_plan()?;
-        let materialize = StreamMaterialize::create(
+
+        StreamMaterialize::create(
             stream_plan.clone(),
-            mv_name.clone(),
-            self.required_dist.clone(),
-            self.required_order.clone(),
-            self.out_fields.clone(),
-            out_names.clone(),
-            false,
-            definition.clone(),
-            handle_pk_conflict,
-            row_id_index,
-            table_type,
-        )?;
-
-        if dml_flag == DmlFlag::Disable {
-            return Ok(materialize);
-        }
-
-        let table = materialize.table();
-
-        // NOTE(stonepage): we can not use this the plan's input append-only
-        // property here
-        // table.append_only,
-        let stream_plan = StreamDml::new(
-            stream_plan,
-            dml_flag == DmlFlag::AppendOnly,
-            table.table_desc().columns,
-        )
-        .into();
-
-        let stream_plan = match row_id_index {
-            Some(row_id_index) => StreamRowIdGen::new(stream_plan, row_id_index).into(),
-            None => stream_plan,
-        };
-
-        StreamMaterialize::create(
-            stream_plan,
-            mv_name,
-            self.required_dist.clone(),
-            self.required_order.clone(),
-            self.out_fields.clone(),
-            out_names,
-            false,
-            definition,
-            handle_pk_conflict,
-            row_id_index,
-            table_type,
-        )
-    }
-
-    /// Optimize and generate a create index plan.
-    pub fn gen_create_index_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
-        let stream_plan = self.gen_stream_plan()?;
-        StreamMaterialize::create(
-            stream_plan,
             mv_name,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
             self.out_names.clone(),
-            true,
-            "".into(),
-            false,
-            None,
+            definition,
+            TableType::MaterializedView,
+        )
+    }
+
+    /// Optimize and generate a create index plan.
+    pub fn gen_index_plan(&mut self, index_name: String) -> Result<StreamMaterialize> {
+        let stream_plan = self.gen_stream_plan()?;
+
+        StreamMaterialize::create(
+            stream_plan,
+            index_name,
+            self.required_dist.clone(),
+            self.required_order.clone(),
+            self.out_fields.clone(),
+            self.out_names.clone(),
+            "".into(), // TODO: fill definition here for `SHOW CREATE`
             TableType::Index,
         )
     }
 
     /// Optimize and generate a create sink plan.
-    pub fn gen_create_sink_plan(
+    pub fn gen_sink_plan(
         &mut self,
         sink_name: String,
         definition: String,
-        col_names: Vec<String>,
         properties: WithOptions,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_stream_plan()?;
+
         StreamMaterialize::create(
             stream_plan,
             sink_name,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
-            col_names,
-            false,
+            self.out_names.clone(),
             definition,
-            false,
-            None,
-            // NOTE(Yuanxin): We set the table type as default here because this is irrelevant to
-            // sink's plan generating.
-            TableType::default(),
+            // Note: we first plan it like a materialized view, and then rewrite it into a sink.
+            TableType::MaterializedView,
         )
         .map(|plan| plan.rewrite_into_sink(properties))
     }

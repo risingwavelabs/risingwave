@@ -29,6 +29,23 @@ use crate::optimizer::plan_node::{
 };
 use crate::utils::{ColIndexMapping, Condition};
 
+/// `LogicalShare` operator is used to represent reusing of existing operators.
+/// It is the key operator for DAG plan.
+/// It could have multiple parents which makes it different from other operators.
+/// Currently, it has been used to the following scenarios:
+/// 1. Share source.
+/// 2. Subquery unnesting domain calculation.
+///
+/// A DAG plan example: A self join shares the same source.
+/// ```text
+///     LogicalJoin
+///    /           \
+///   |            |
+///   \           /
+///   LogicalShare
+///        |
+///   LogicalSource
+/// ```
 #[derive(Debug, Clone)]
 pub struct LogicalShare {
     pub base: PlanBase,

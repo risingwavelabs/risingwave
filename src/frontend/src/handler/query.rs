@@ -81,7 +81,7 @@ pub fn gen_batch_query_plan(
     };
 
     let mut logical = planner.plan(bound)?;
-    let schema = logical.schema().clone();
+    let schema = logical.schema();
 
     let physical = match query_mode {
         QueryMode::Local => logical.gen_batch_local_plan()?,

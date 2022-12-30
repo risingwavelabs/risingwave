@@ -171,7 +171,9 @@ impl LogicalJoin {
 
     /// get the Mapping of columnIndex from output column index to internal column index
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        self.i2o_col_mapping().inverse()
+        // If output_indices = [0, 0, 1], we should use it as `o2i_col_mapping` directly.
+        // If we use `self.i2o_col_mapping().inverse()`, we will lose the first 0.
+        ColIndexMapping::new(self.output_indices().iter().map(|x| Some(*x)).collect())
     }
 
     fn derive_fd(core: &generic::Join<PlanRef>) -> FunctionalDependencySet {
