@@ -499,22 +499,25 @@ mod tests {
         let node_controllers_1 = setup_n_nodes(number_of_nodes, meta_port).await;
         let original_leader = get_agreed_leader(number_of_nodes, meta_port).await;
 
+        // add nodes
         let node_controllers_2 =
             setup_n_nodes(number_of_nodes, meta_port + number_of_nodes + 1).await;
-        let new_leader = get_agreed_leader(number_of_nodes, meta_port).await;
         assert_eq!(
-            original_leader, new_leader,
+            original_leader,
+            get_agreed_leader(number_of_nodes, meta_port).await,
             "1: Leader should stay the same if nodes are added"
         );
 
+        // add nodes again
         let node_controllers_3 =
             setup_n_nodes(number_of_nodes, meta_port + number_of_nodes * 2 + 2).await;
-        let new_leader = get_agreed_leader(number_of_nodes, meta_port).await;
         assert_eq!(
-            original_leader, new_leader,
+            original_leader,
+            get_agreed_leader(number_of_nodes, meta_port).await,
             "2: Leader should stay the same if nodes are added"
         );
 
+        // shut down all nodes
         for c in [node_controllers_1, node_controllers_2, node_controllers_3] {
             for (join_handle, shutdown_tx) in c {
                 if shutdown_tx.send(()).is_ok() {
