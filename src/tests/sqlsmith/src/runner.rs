@@ -109,7 +109,7 @@ async fn test_stream_queries<R: Rng>(
 }
 
 fn get_seed_table_sql(testdata: &str) -> String {
-    let seed_files = vec!["tpch.sql", "nexmark.sql"];
+    let seed_files = vec!["tpch.sql", "nexmark.sql", "alltypes.sql"];
     seed_files
         .iter()
         .map(|filename| std::fs::read_to_string(format!("{}/{}", testdata, filename)).unwrap())
