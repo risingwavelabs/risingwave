@@ -47,7 +47,8 @@ pub struct BatchManager {
     config: BatchConfig,
 
     /// Total batch mem usage.
-    /// When each task context report their own usage, it will apply the diff into this total mem value for all tasks.
+    /// When each task context report their own usage, it will apply the diff into this total mem
+    /// value for all tasks.
     mem_val: Arc<TrAdder<i64>>,
 }
 
@@ -217,6 +218,9 @@ impl BatchManager {
         let guard = self.tasks.lock();
         for (t_id, t) in guard.iter() {
             // If the task has been stopped, we should not count this.
+            if t.is_end() {
+                continue;
+            }
             // Alternatively, we can use a bool flag to indicate end of execution.
             // Now we use only store 0 bytes in Context after execution ends.
             let mem_usage = t.get_mem_usage();
@@ -231,7 +235,8 @@ impl BatchManager {
         }
     }
 
-    /// Called by global memory manager for total usage of batch tasks. This op is designed to be light-weight
+    /// Called by global memory manager for total usage of batch tasks. This op is designed to be
+    /// light-weight
     pub fn get_all_memory_usage(&self) -> usize {
         self.mem_val.get() as usize
     }

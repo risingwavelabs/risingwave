@@ -596,6 +596,12 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn get_mem_usage(&self) -> usize {
         self.context.get_mem_usage()
     }
+
+    /// Check the task status: whether has ended.
+    pub fn is_end(&self) -> bool {
+        let guard = self.state.lock();
+        !(*guard == TaskStatus::Running || *guard == TaskStatus::Pending)
+    }
 }
 
 #[cfg(test)]
