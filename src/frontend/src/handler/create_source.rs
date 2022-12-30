@@ -21,13 +21,14 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
 };
-use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
+use risingwave_pb::plan_common::RowFormatType;
 use risingwave_source::{AvroParser, ProtobufParser};
 use risingwave_sqlparser::ast::{AvroSchema, CreateSourceStatement, ProtobufSchema, SourceSchema};
 
 use super::create_table::{bind_sql_columns, bind_sql_table_constraints, gen_materialize_plan};
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::column_catalog::ColumnCatalog;
 use crate::handler::HandlerArgs;
 use crate::optimizer::OptimizerContext;
 use crate::stream_fragmenter::build_graph;
@@ -36,7 +37,7 @@ use crate::stream_fragmenter::build_graph;
 async fn extract_avro_table_schema(
     schema: &AvroSchema,
     with_properties: HashMap<String, String>,
-) -> Result<Vec<ProstColumnCatalog>> {
+) -> Result<Vec<ColumnCatalog>> {
     let parser = AvroParser::new(
         schema.row_schema_location.0.as_str(),
         schema.use_schema_registry,
@@ -46,8 +47,8 @@ async fn extract_avro_table_schema(
     let vec_column_desc = parser.map_to_columns()?;
     Ok(vec_column_desc
         .into_iter()
-        .map(|c| ProstColumnCatalog {
-            column_desc: Some(c),
+        .map(|col| ColumnCatalog {
+            column_desc: col.into(),
             is_hidden: false,
         })
         .collect_vec())
@@ -57,7 +58,7 @@ async fn extract_avro_table_schema(
 async fn extract_protobuf_table_schema(
     schema: &ProtobufSchema,
     with_properties: HashMap<String, String>,
-) -> Result<Vec<ProstColumnCatalog>> {
+) -> Result<Vec<ColumnCatalog>> {
     let parser = ProtobufParser::new(
         &schema.row_schema_location.0,
         &schema.message_name.0,
@@ -69,8 +70,8 @@ async fn extract_protobuf_table_schema(
 
     Ok(column_descs
         .into_iter()
-        .map(|col| ProstColumnCatalog {
-            column_desc: Some(col),
+        .map(|col| ColumnCatalog {
+            column_desc: col.into(),
             is_hidden: false,
         })
         .collect_vec())
@@ -233,6 +234,8 @@ pub async fn handle_create_source(
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+
+    let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
     let source = ProstSource {
         id: 0,
