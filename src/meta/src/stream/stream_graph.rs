@@ -650,6 +650,12 @@ impl StreamGraphBuilder {
                             update_table(table, "DynamicFilterRight");
                         }
                     }
+
+                    NodeBody::Now(node) => {
+                        if let Some(table) = &mut node.state_table {
+                            update_table(table, "NowNode");
+                        }
+                    }
                     _ => {}
                 }
 
