@@ -15,7 +15,7 @@ create materialized source products ( id INT,
  database.name = 'mydb',
  table.name = 'products',
  server.id = '5085'
-) row format debezium_json;
+);
 
 # invalid password
 statement error
@@ -32,7 +32,7 @@ create materialized source products ( id INT,
  database.name = 'mydb',
  table.name = 'products',
  server.id = '5085'
-) row format debezium_json;
+);
 
 # invalid database name
 statement error
@@ -49,7 +49,7 @@ create materialized source products ( id INT,
  database.name = 'mdb',
  table.name = 'products',
  server.id = '5085'
-) row format debezium_json;
+);
 
 # invalid table name
 statement error
@@ -66,7 +66,7 @@ create materialized source products ( id INT,
  database.name = 'mydb',
  table.name = 'prdcts',
  server.id = '5085'
-) row format debezium_json;
+);
 
 # invalid primary key
 statement error
@@ -87,7 +87,7 @@ create materialized source orders (
  database.name = 'mydb',
  table.name = 'orders',
  server.id = '5086'
-) row format debezium_json;
+);
 
 # column data type mismatch
 statement error
@@ -108,7 +108,7 @@ create materialized source orders (
  database.name = 'mydb',
  table.name = 'orders',
  server.id = '5086'
-) row format debezium_json;
+);
 
 # column name mismatch
 statement error
@@ -129,4 +129,4 @@ create materialized source orders (
  database.name = 'mydb',
  table.name = 'orders',
  server.id = '5086'
-) row format debezium_json;
+);

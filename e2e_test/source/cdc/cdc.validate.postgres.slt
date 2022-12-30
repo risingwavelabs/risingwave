@@ -19,7 +19,7 @@ create materialized source shipments (
  schema.name = 'public',
  table.name = 'shipments',
  slot.name = 'shipments'
-) row format debezium_json;
+);
 
 
 # invalid password
@@ -41,7 +41,7 @@ create materialized source shipments (
  schema.name = 'public',
  table.name = 'shipments',
  slot.name = 'shipments'
-) row format debezium_json;
+);
 
 # invalid table name
 statement error
@@ -62,7 +62,7 @@ create materialized source shipments (
  schema.name = 'public',
  table.name = 'shipment',
  slot.name = 'shipments'
-) row format debezium_json;
+);
 
 
 # invalid primary key
@@ -84,7 +84,7 @@ create materialized source shipments (
  schema.name = 'public',
  table.name = 'shipments',
  slot.name = 'shipments'
-) row format debezium_json;
+);
 
 
 # column name mismatch
@@ -106,7 +106,7 @@ create materialized source shipments (
  schema.name = 'public',
  table.name = 'shipments',
  slot.name = 'shipments'
-) row format debezium_json;
+);
 
 # column data type mismatch
 statement error
@@ -127,4 +127,4 @@ create materialized source shipments (
  schema.name = 'public',
  table.name = 'shipments',
  slot.name = 'shipments'
-) row format debezium_json;
+);

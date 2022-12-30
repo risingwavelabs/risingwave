@@ -168,7 +168,6 @@ impl StageExecution {
         ctx: ExecutionContextRef,
     ) -> Self {
         let tasks = (0..stage.parallelism)
-            .into_iter()
             .map(|task_id| (task_id, TaskStatusHolder::new(task_id)))
             .collect();
         Self {

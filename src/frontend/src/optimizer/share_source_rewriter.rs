@@ -93,7 +93,7 @@ impl PlanRewriter for ShareSourceRewriter {
                 let new_inputs = share
                     .inputs()
                     .into_iter()
-                    .map(|input| self.rewrite(input.clone()))
+                    .map(|input| self.rewrite(input))
                     .collect_vec();
                 let new_share = share.clone_with_inputs(&new_inputs);
                 self.share_map.insert(share.id(), new_share.clone());

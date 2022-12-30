@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+
 use assert_matches::assert_matches;
 use futures::StreamExt;
 use itertools::Itertools;
@@ -130,8 +133,7 @@ async fn create_arrangement(
             arrangement_col_arrange_rules(),
             column_ids,
             1,
-            None,
-            0,
+            Arc::new(AtomicU64::new(0)),
             false,
         )
         .await,
@@ -256,8 +258,7 @@ async fn test_lookup_this_epoch() {
             vec![1, 0],
         )
         .await,
-        watermark_epoch: None,
-        cache_size: 1 << 16,
+        watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,
     }));
     let mut lookup_executor = lookup_executor.execute();
@@ -294,6 +295,8 @@ async fn test_lookup_this_epoch() {
 }
 
 #[tokio::test]
+#[ignore]
+// Deprecated because the ability to read from prev epoch has been deprecated.
 async fn test_lookup_last_epoch() {
     let store = MemoryStateStore::new();
     let table_id = TableId::new(1);
@@ -323,8 +326,7 @@ async fn test_lookup_last_epoch() {
             vec![1, 0],
         )
         .await,
-        watermark_epoch: None,
-        cache_size: 1 << 16,
+        watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,
     }));
     let mut lookup_executor = lookup_executor.execute();
