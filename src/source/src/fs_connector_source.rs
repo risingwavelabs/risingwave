@@ -87,6 +87,12 @@ impl FsConnectorSourceReader {
 
                     // If a split is finished reading, recreate a parser
                     if content.len() + msg.offset >= msg.split_size {
+                        // the last record in a file may be missing the terminator,
+                        // so we need to pass an empty payload to inform the parser.
+                        if let Err(e) = parser.parse(&mut buff, builder.row_writer()).await {
+                            tracing::warn!("message parsing failed {}, skipping", e.to_string());
+                        }
+
                         parser = ByteStreamSourceParserImpl::create(
                             &self.format,
                             &self.properties,
