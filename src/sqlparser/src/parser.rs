@@ -2342,10 +2342,7 @@ impl Parser {
             // which may start a construct allowed in this position, to be parsed as aliases.
             // (For example, in `FROM t1 JOIN` the `JOIN` will always be parsed as a keyword,
             // not an alias.)
-            Token::Word(w)
-                if after_as
-                    || (!reserved_kwds.contains(&w.keyword)) =>
-            {
+            Token::Word(w) if after_as || (!reserved_kwds.contains(&w.keyword)) => {
                 Ok(Some(w.to_ident()))
             }
             // MSSQL supports single-quoted strings as aliases for columns

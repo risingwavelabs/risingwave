@@ -159,34 +159,35 @@ pub async fn handle_query(
     };
 
     let rows_count: Option<i32> = match stmt_type {
-        StatementType::SELECT | StatementType::INSERT_RETURNING | StatementType::DELETE_RETURNING | StatementType::UPDATE_RETURNING => None,
+        StatementType::SELECT
+        | StatementType::INSERT_RETURNING
+        | StatementType::DELETE_RETURNING
+        | StatementType::UPDATE_RETURNING => None,
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            {
-                let first_row_set = row_stream
-                    .next()
-                    .await
-                    .expect("compute node should return affected rows in output")
-                    .map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?;
-                let affected_rows_str = first_row_set[0].values()[0]
-                    .as_ref()
-                    .expect("compute node should return affected rows in output");
-                if format {
-                    Some(
-                        i64::from_sql(&postgres_types::Type::INT8, affected_rows_str)
-                            .unwrap()
-                            .try_into()
-                            .expect("affected rows count large than i32"),
-                    )
-                } else {
-                    Some(
-                        String::from_utf8(affected_rows_str.to_vec())
-                            .unwrap()
-                            .parse()
-                            .unwrap_or_default(),
-                    )
-                }
+            let first_row_set = row_stream
+                .next()
+                .await
+                .expect("compute node should return affected rows in output")
+                .map_err(|err| RwError::from(ErrorCode::InternalError(format!("{}", err))))?;
+            let affected_rows_str = first_row_set[0].values()[0]
+                .as_ref()
+                .expect("compute node should return affected rows in output");
+            if format {
+                Some(
+                    i64::from_sql(&postgres_types::Type::INT8, affected_rows_str)
+                        .unwrap()
+                        .try_into()
+                        .expect("affected rows count large than i32"),
+                )
+            } else {
+                Some(
+                    String::from_utf8(affected_rows_str.to_vec())
+                        .unwrap()
+                        .parse()
+                        .unwrap_or_default(),
+                )
             }
-        },
+        }
         _ => unreachable!(),
     };
 
@@ -226,21 +227,21 @@ fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
             } else {
                 Ok(INSERT_RETURNING)
             }
-        },
+        }
         Statement::Delete { returning, .. } => {
             if returning.is_empty() {
                 Ok(DELETE)
             } else {
                 Ok(DELETE_RETURNING)
             }
-        },
+        }
         Statement::Update { returning, .. } => {
             if returning.is_empty() {
                 Ok(UPDATE)
             } else {
                 Ok(UPDATE_RETURNING)
             }
-        },
+        }
         _ => Err(RwError::from(ErrorCode::InvalidInputSyntax(
             "unsupported statement type".to_string(),
         ))),

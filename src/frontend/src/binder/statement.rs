@@ -54,7 +54,8 @@ impl Binder {
                 selection,
                 returning,
             } => Ok(BoundStatement::Update(
-                self.bind_update(table_name, assignments, selection, returning)?.into(),
+                self.bind_update(table_name, assignments, selection, returning)?
+                    .into(),
             )),
 
             Statement::Query(q) => Ok(BoundStatement::Query(self.bind_query(*q)?.into())),

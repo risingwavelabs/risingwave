@@ -98,6 +98,7 @@ impl LogicalUpdate {
     pub fn exprs(&self) -> &[ExprImpl] {
         self.exprs.as_ref()
     }
+
     pub fn has_returning(&self) -> bool {
         self.returning
     }
@@ -114,7 +115,7 @@ impl PlanTreeNodeUnary for LogicalUpdate {
             self.table_name.clone(),
             self.table_id,
             self.exprs.clone(),
-            self.returning
+            self.returning,
         )
     }
 }
