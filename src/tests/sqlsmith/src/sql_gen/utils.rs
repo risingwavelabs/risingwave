@@ -16,11 +16,9 @@
 use std::mem;
 
 use rand::Rng;
-
 use risingwave_sqlparser::ast::{
     FunctionArg, FunctionArgExpr, TableAlias, TableFactor, TableWithJoins,
 };
-
 
 use crate::sql_gen::{Column, Expr, Ident, ObjectName, SqlGenerator, Table};
 

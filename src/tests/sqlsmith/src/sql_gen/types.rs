@@ -266,9 +266,7 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<AggFuncSig>>> =
         let mut funcs = HashMap::<DataType, Vec<AggFuncSig>>::new();
         agg_func_sigs()
             .filter_map(|func| func.try_into().ok())
-            .for_each(|func: AggFuncSig| {
-                funcs.entry(func.ret_type).or_default().push(func)
-            });
+            .for_each(|func: AggFuncSig| funcs.entry(func.ret_type).or_default().push(func));
         funcs
     });
 

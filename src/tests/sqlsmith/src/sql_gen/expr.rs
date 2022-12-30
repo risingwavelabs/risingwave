@@ -12,17 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
-
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
-
 use risingwave_expr::expr::AggKind;
-use risingwave_frontend::expr::{
-    agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType,
-};
+use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType};
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
     TrimWhereField, UnaryOperator, Value,
@@ -105,10 +99,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         match cast_sig.context {
             T::Explicit => {
                 let expr = self
-                    .gen_expr(
-                        cast_sig.from_type,
-                        context.set_inside_explicit_cast(),
-                    )
+                    .gen_expr(cast_sig.from_type, context.set_inside_explicit_cast())
                     .into();
                 let data_type = cast_sig.to_type.into();
                 Some(Expr::Cast { expr, data_type })
