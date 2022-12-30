@@ -43,6 +43,7 @@ fn is_unsupported_timestamptz_error(db_error: &str) -> bool {
         || db_error.contains("Unsupported function: Timestamptz cmp Timestamp")
         || db_error.contains("Unsupported cast: Date to Timestamptz")
         || db_error.contains("Unsupported cast: Timestamp to Timestamptz")
+        || db_error.contains("Unsupported function: Timestamptz atm Timestamptz")
 }
 
 /// Certain errors are permitted to occur. This is because:
