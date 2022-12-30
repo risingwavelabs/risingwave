@@ -182,7 +182,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 10
+    timeout_in_minutes: 12
     retry: *auto-retry
 
   - label: "fuzz test"

@@ -12,7 +12,7 @@ chmod +x ./risingwave_simulation
 echo "--- Extract data for Kafka"
 cd ./scripts/source/
 mkdir -p ./test_data
-unzip -o test_data.zip -d ./test_data
+unzip -o test_data.zip -d .
 cd ../../
 
 export RUST_LOG=info

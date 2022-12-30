@@ -83,7 +83,7 @@ impl Source {
 
         let ordered_col_idx = builder.add_column(&key);
         builder.add_column(&value);
-        builder.add_order_column(ordered_col_idx, OrderType::Ascending, true);
+        builder.add_order_column(ordered_col_idx, OrderType::Ascending);
 
         builder.build(vec![])
     }
