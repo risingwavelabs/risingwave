@@ -117,11 +117,17 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, WatchSender<()>)> {
+    // Signals that everything should be aborted
+    // used by election to signal that leader lost leader and should abort execution
+    let (panic_tx, mut panic_rx) = WatchChannel(());
+    let mut panic_rx_clone = panic_rx.clone();
+
     // Initialize managers
     let (_, election_handle, election_shutdown, mut leader_rx) = run_elections(
         address_info.listen_addr.clone().to_string(),
         meta_store.clone(),
         lease_interval_secs,
+        panic_tx,
     )
     .await?;
 
@@ -132,9 +138,19 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     tokio::spawn(async move {
         let _ = tracing::span!(tracing::Level::INFO, "node_status").enter();
         loop {
-            if note_status_leader_rx.changed().await.is_err() {
-                tracing::error!("Leader sender dropped");
-                return;
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    return;
+                },
+                _ = panic_rx_clone.changed() => {
+                    return;
+                },
+                leader = note_status_leader_rx.changed() => {
+                    if leader.is_err() {
+                        tracing::error!("Leader sender dropped");
+                        return;
+                    }
+                },
             }
 
             let (leader_info, is_leader) = note_status_leader_rx.borrow().clone();
@@ -228,7 +244,14 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .expect("Unable to start leader services");
     });
 
-    Ok((join_handle, svc_shutdown_tx))
+    // kill everything on panic signal
+    let join_handle_with_trigger = tokio::spawn(async move {
+        let _ = panic_rx.changed().await;
+        join_handle.abort();
+    });
+
+    // TODO: Do I still handle this correctly if I pass around the triggered version?
+    Ok((join_handle_with_trigger, svc_shutdown_tx))
 }
 
 #[cfg(test)]
@@ -312,7 +335,7 @@ mod tests {
             let endpoint = Endpoint::from_shared(meta_addr.to_string())
                 .unwrap()
                 .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
-            let channel = endpoint
+            let channel = match endpoint
                 .http2_keep_alive_interval(Duration::from_secs(60))
                 .keep_alive_timeout(Duration::from_secs(60))
                 .connect_timeout(Duration::from_secs(5))
@@ -324,8 +347,10 @@ mod tests {
                         meta_addr,
                         e
                     );
-                })
-                .unwrap();
+                }) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
 
             // check if node is leader
             // Only leader nodes support adding worker nodes
