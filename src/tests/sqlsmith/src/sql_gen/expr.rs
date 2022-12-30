@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::sync::LazyLock;
+
+
 
 use itertools::Itertools;
 use rand::seq::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::DataTypeName;
+
 use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{
-    agg_func_sigs, cast_sigs, func_sigs, AggFuncSig, CastContext, CastSig, ExprType, FuncSign,
+    agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType,
 };
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
@@ -106,7 +106,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             T::Explicit => {
                 let expr = self
                     .gen_expr(
-                        cast_sig.from_type.try_into().unwrap(),
+                        cast_sig.from_type,
                         context.set_inside_explicit_cast(),
                     )
                     .into();

@@ -19,7 +19,7 @@
 use std::vec;
 
 use rand::Rng;
-use risingwave_common::types::DataTypeName;
+
 use risingwave_frontend::bind_data_type;
 use risingwave_sqlparser::ast::{ColumnDef, Expr, Ident, ObjectName, Statement};
 

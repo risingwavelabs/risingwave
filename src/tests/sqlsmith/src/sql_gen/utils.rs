@@ -16,12 +16,12 @@
 use std::mem;
 
 use rand::Rng;
-use risingwave_common::types::DataTypeName;
+
 use risingwave_sqlparser::ast::{
-    DataType as AstDataType, FunctionArg, FunctionArgExpr, TableAlias, TableFactor, TableWithJoins,
+    FunctionArg, FunctionArgExpr, TableAlias, TableFactor, TableWithJoins,
 };
 
-use crate::sql_gen::types::DataType;
+
 use crate::sql_gen::{Column, Expr, Ident, ObjectName, SqlGenerator, Table};
 
 type Context = (Vec<Column>, Vec<Table>);
