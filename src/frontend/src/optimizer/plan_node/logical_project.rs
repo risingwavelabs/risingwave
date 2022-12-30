@@ -30,7 +30,6 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
-use risingwave_common::catalog::{Schema};
 
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]

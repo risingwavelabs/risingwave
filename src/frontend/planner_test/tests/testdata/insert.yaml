@@ -177,4 +177,4 @@
   sql: |
     create table t (a int, b int);
     insert into t values (0,1), (1,2) returning sum(a);
-  binder_error: 'Bind error: DELETE should not have agg/window'
+  binder_error: 'Bind error: should not have agg/window in the `RETURNING` list'
