@@ -99,7 +99,7 @@ pub async fn handle_create_source(
     let (mut column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
 
     // Add hidden column `_rw_kafka_timestamp` to each message
-    if is_kafka {
+    if is_kafka && !is_materialized {
         let kafka_timestamp_column = ColumnDesc {
             data_type: DataType::Timestamptz,
             column_id: ColumnId::new(column_descs.len() as i32),
