@@ -365,6 +365,7 @@ impl PlanRoot {
             ],
             ApplyOrder::TopDown,
         );
+
         if has_logical_over_agg(plan.clone()) {
             return Err(ErrorCode::InternalError(format!(
                 "OverAgg can not be transformed. Plan:\n{}",
@@ -372,6 +373,13 @@ impl PlanRoot {
             ))
             .into());
         }
+
+        plan = self.optimize_by_rules(
+            plan,
+            "Dedup Group keys".to_string(),
+            vec![AggDedupGroupKeyRule::create()],
+            ApplyOrder::TopDown,
+        );
 
         Ok(plan)
     }
