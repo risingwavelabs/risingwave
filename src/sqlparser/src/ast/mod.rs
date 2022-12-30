@@ -884,6 +884,8 @@ pub enum Statement {
         assignments: Vec<Assignment>,
         /// WHERE
         selection: Option<Expr>,
+        /// RETURNING
+        returning: Vec<SelectItem>,
     },
     /// DELETE
     Delete {
@@ -1154,6 +1156,7 @@ impl fmt::Display for Statement {
                 table_name,
                 assignments,
                 selection,
+                returning,
             } => {
                 write!(f, "UPDATE {}", table_name)?;
                 if !assignments.is_empty() {
@@ -1161,6 +1164,9 @@ impl fmt::Display for Statement {
                 }
                 if let Some(selection) = selection {
                     write!(f, " WHERE {}", selection)?;
+                }
+                if !returning.is_empty() {
+                    write!(f, " RETURNING ({})", display_comma_separated(returning))?;
                 }
                 Ok(())
             }

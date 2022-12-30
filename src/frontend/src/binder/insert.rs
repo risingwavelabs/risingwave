@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem, SetExpr};
@@ -51,6 +51,8 @@ pub struct BoundInsert {
     /// `table_source`. This does not include a simple `VALUE`. See comments in code for details.
     pub cast_exprs: Vec<ExprImpl>,
 
+    // used for the 'RETURNING" keyword to indicate the returning items and schema
+    // if the list is empty and the schema is None, the output schema will be a INT64 as the affected row cnt
     pub returning_list: Vec<ExprImpl>,
 
     pub returning_schema: Option<Schema>,

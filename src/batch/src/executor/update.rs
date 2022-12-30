@@ -44,6 +44,7 @@ pub struct UpdateExecutor {
     chunk_size: usize,
     schema: Schema,
     identity: String,
+    returning: bool,
 }
 
 impl UpdateExecutor {
@@ -54,6 +55,7 @@ impl UpdateExecutor {
         exprs: Vec<BoxedExpression>,
         chunk_size: usize,
         identity: String,
+        returning: bool,
     ) -> Self {
         assert_eq!(
             child.schema().data_types(),
@@ -62,6 +64,7 @@ impl UpdateExecutor {
         );
 
         let chunk_size = chunk_size.next_multiple_of(2);
+        let table_schema = child.schema().clone();
 
         Self {
             table_id,
@@ -69,11 +72,15 @@ impl UpdateExecutor {
             child,
             exprs,
             chunk_size,
-            // TODO: support `RETURNING`
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int64)],
+            schema: if returning {
+                table_schema
+            } else {
+                Schema {
+                    fields: vec![Field::unnamed(DataType::Int64)],
+                }
             },
             identity,
+            returning,
         }
     }
 }
@@ -135,12 +142,18 @@ impl UpdateExecutor {
                     unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
                 };
                 if let Some(chunk) = builder.append_one_row(row_insert) {
+                    if self.returning {
+                        yield chunk.clone();
+                    }
                     write_chunk(chunk)?;
                 }
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
+            if self.returning {
+                yield chunk.clone();
+            }
             write_chunk(chunk)?;
         }
 
@@ -153,7 +166,7 @@ impl UpdateExecutor {
             / 2;
 
         // Create ret value
-        {
+        if !self.returning {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
             array_builder.append(Some(rows_updated as i64));
 
@@ -193,6 +206,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             exprs,
             source.context.get_config().developer.batch_chunk_size,
             source.plan_node().get_identity().clone(),
+            update_node.returning,
         )))
     }
 }
@@ -263,6 +277,7 @@ mod tests {
             exprs,
             5,
             "UpdateExecutor".to_string(),
+            false,
         ));
 
         let handle = tokio::spawn(async move {

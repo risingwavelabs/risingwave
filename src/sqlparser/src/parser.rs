@@ -3402,10 +3402,12 @@ impl Parser {
         } else {
             None
         };
+        let returning = self.parse_returning(Optional)?;
         Ok(Statement::Update {
             table_name,
             assignments,
             selection,
+            returning,
         })
     }
 

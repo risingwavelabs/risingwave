@@ -88,6 +88,7 @@ message UpdateNode {
   // Id of the table to perform updating.
   uint32 table_id = 1;
   repeated expr.ExprNode exprs = 2;
+  bool returning = 3;
 }
 
 message ValuesNode {
