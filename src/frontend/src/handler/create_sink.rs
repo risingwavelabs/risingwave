@@ -89,7 +89,7 @@ pub fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name)?;
 
-    let definition = query.to_string();
+    let definition = context.normalized_sql().to_owned();
 
     let bound = {
         let mut binder = Binder::new(session);
@@ -136,7 +136,7 @@ pub async fn handle_create_sink(
     session.check_relation_name_duplicated(stmt.sink_name.clone())?;
 
     let (sink, graph) = {
-        let context = OptimizerContext::new_with_handler_args(handle_args);
+        let context = OptimizerContext::from_handler_args(handle_args);
         let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
 
         (sink, build_graph(plan))

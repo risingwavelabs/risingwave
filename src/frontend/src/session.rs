@@ -43,7 +43,7 @@ use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
-use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, ShowObject, Statement};
+use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -53,9 +53,9 @@ use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::{Catalog, SchemaPath};
 use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
-use crate::handler::handle;
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::handler::util::to_pg_field;
+use crate::handler::{handle, HandlerArgs};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
@@ -68,7 +68,6 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::utils::WithOptions;
 use crate::{FrontendOpts, PgResponseStream, TableCatalog};
 
 /// The global environment for the frontend server.
@@ -806,12 +805,7 @@ impl Session<PgResponseStream> for SessionImpl {
 
 /// Returns row description of the statement
 fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
-    let context = OptimizerContext::new(
-        session,
-        Arc::from(sql),
-        WithOptions::try_from(&stmt)?,
-        ExplainOptions::default(),
-    );
+    let context = OptimizerContext::from_handler_args(HandlerArgs::new(session, &stmt, sql)?);
     let session = context.session_ctx().clone();
 
     let bound = {

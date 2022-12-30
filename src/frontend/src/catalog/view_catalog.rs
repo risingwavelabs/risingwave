@@ -46,4 +46,9 @@ impl ViewCatalog {
     pub fn name(&self) -> &str {
         &self.name
     }
+
+    /// Returns the SQL statement that can be used to create this view.
+    pub fn create_sql(&self) -> String {
+        format!("CREATE VIEW {} AS {}", self.name, self.sql)
+    }
 }

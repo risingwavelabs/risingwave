@@ -36,3 +36,9 @@ impl From<&ProstSink> for SinkCatalog {
         }
     }
 }
+
+impl SinkCatalog {
+    pub fn create_sql(&self) -> String {
+        todo!()
+    }
+}

@@ -45,7 +45,7 @@ pub async fn handle_create_view(
 
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {
-        let context = OptimizerContext::new_with_handler_args(handler_args);
+        let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, _mode, schema) = super::query::gen_batch_query_plan(
             &session,
             context.into(),

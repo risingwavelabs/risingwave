@@ -38,12 +38,7 @@ pub(super) fn handle_explain(
     options: ExplainOptions,
     analyze: bool,
 ) -> Result<RwPgResponse> {
-    let context = OptimizerContext::new(
-        handler_args.session,
-        handler_args.sql,
-        handler_args.with_options,
-        options.clone(),
-    );
+    let context = OptimizerContext::new(handler_args, options.clone());
 
     if analyze {
         return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
