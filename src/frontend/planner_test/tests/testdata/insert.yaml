@@ -142,3 +142,21 @@
           | └─BatchScan { table: t2, columns: [t2.c, t2.d], distribution: SomeShard }
           └─BatchExchange { order: [], dist: HashShard(t3.f) }
             └─BatchScan { table: t3, columns: [t3.e, t3.f], distribution: SomeShard }
+- name: insert with returning
+  sql: |
+    create table t (a int, b int);
+    insert into t values (0,1), (1,2) returning *, a, a+b;
+  logical_plan: |
+    LogicalProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1)] }
+    └─LogicalInsert { table: t }
+      └─LogicalValues { rows: [[0:Int32, 1:Int32], [1:Int32, 2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32] } }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1)] }
+      └─BatchInsert { table: t }
+        └─BatchValues { rows: [[0:Int32, 1:Int32], [1:Int32, 2:Int32]] }
+- name: insert with returning agg functions, should not run
+  sql: |
+    create table t (a int, b int);
+    insert into t values (0,1), (1,2) returning sum(a);
+  binder_error: 'Bind error: DELETE should not have agg/window'

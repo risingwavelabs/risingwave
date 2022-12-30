@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::catalog::{Schema};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{Expr, ObjectName, SelectItem};
 
-use super::{Binder, BoundBaseTable, BoundTableSource, UNNAMED_COLUMN};
-use crate::expr::{Expr as _, ExprImpl};
+use super::{Binder, BoundBaseTable, BoundTableSource};
+use crate::expr::{ExprImpl};
 
 #[derive(Debug)]
 pub struct BoundDelete {
@@ -38,7 +37,7 @@ pub struct BoundDelete {
 
     pub returning_list: Vec<ExprImpl>,
 
-    pub schema: Schema,
+    pub returning_schema: Option<Schema>,
 }
 
 impl Binder {
@@ -56,24 +55,8 @@ impl Binder {
         let owner = table_catalog.owner;
 
         let table = self.bind_table(schema_name, &table_name, None)?;
-        let (returning_list, aliases) = self.bind_select_list(returning_items)?;
-        if returning_list
-            .iter()
-            .any(|expr| expr.has_agg_call() || expr.has_window_function())
-        {
-            return Err(RwError::from(ErrorCode::BindError(
-                "DELETE RETURNING should not have agg/window".to_string(),
-            )));
-        }
-
-        let fields = returning_list
-            .iter()
-            .zip_eq(aliases.iter())
-            .map(|(s, a)| {
-                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
-                Ok(Field::with_name(s.return_type(), name))
-            })
-            .collect::<Result<Vec<Field>>>()?;
+        let (returning_list, fields) = self.bind_returning_list(returning_items)?;
+        let returning = !returning_list.is_empty();
         let delete = BoundDelete {
             table_id,
             table_name,
@@ -81,7 +64,11 @@ impl Binder {
             table,
             selection: selection.map(|expr| self.bind_expr(expr)).transpose()?,
             returning_list,
-            schema: Schema { fields },
+            returning_schema: if returning {
+                Some(Schema { fields })
+            } else {
+                None
+            },
         };
         Ok(delete)
     }

@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::catalog::{Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem, SetExpr};
-use super::UNNAMED_COLUMN;
 
 use super::{BoundQuery, BoundSetExpr};
 use crate::catalog::TableId;
@@ -54,7 +53,7 @@ pub struct BoundInsert {
 
     pub returning_list: Vec<ExprImpl>,
 
-    pub schema: Schema,
+    pub returning_schema: Option<Schema>,
 }
 
 impl Binder {
@@ -165,24 +164,8 @@ impl Binder {
             ))));
         }
 
-        let (returning_list, aliases) = self.bind_select_list(returning_items)?;
-        if returning_list
-            .iter()
-            .any(|expr| expr.has_agg_call() || expr.has_window_function())
-        {
-            return Err(RwError::from(ErrorCode::BindError(
-                "INSERT should not have agg/window".to_string(),
-            )));
-        }
-
-        let fields = returning_list
-            .iter()
-            .zip_eq(aliases.iter())
-            .map(|(s, a)| {
-                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
-                Ok(Field::with_name(s.return_type(), name))
-            })
-            .collect::<Result<Vec<Field>>>()?;
+        let (returning_list, fields) = self.bind_returning_list(returning_items)?;
+        let returning = !returning_list.is_empty();
         // validate that query has a value for each target column, if target columns are used
         // create table t1 (v1 int, v2 int);
         // insert into t1 (v1, v2, v2) values (5, 6); // ...more target columns than values
@@ -216,7 +199,11 @@ impl Binder {
             source,
             cast_exprs,
             returning_list,
-            schema: Schema { fields },
+            returning_schema: if returning {
+                Some(Schema { fields })
+            } else {
+                None
+            },
         };
 
         Ok(insert)

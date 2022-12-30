@@ -16,7 +16,6 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
 use crate::binder::BoundInsert;
-use crate::optimizer::plan_node::generic::Project;
 use crate::optimizer::plan_node::{LogicalInsert, LogicalProject, PlanRef};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::PlanRoot;
@@ -40,19 +39,17 @@ impl Planner {
         .into();
         // If containing RETURNING, add one logicalproject node
         if returning {
-            let len = insert.returning_list.len();
             plan = LogicalProject::create(plan, insert.returning_list);
-            plan = LogicalProject::with_core_and_schema(
-                Project::with_out_col_idx(plan, 0..len),
-                insert.schema,
-            )
-            .into();
         }
         // For insert, frontend will only schedule one task so do not need this to be single.
         let dist = RequiredDist::Any;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
-        let out_names = plan.schema().names();
+        let out_names = if returning {
+            insert.returning_schema.expect("If returning list is not empty, should provide returning schema in BoundInsert.").names()
+        } else {
+            plan.schema().names()
+        };
         let root = PlanRoot::new(plan, dist, Order::any(), out_fields, out_names);
         Ok(root)
     }
