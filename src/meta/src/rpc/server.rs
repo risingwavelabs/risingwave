@@ -117,8 +117,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, WatchSender<()>)> {
-    // Signals that everything should be aborted
-    // used by election to signal that leader lost leader and should abort execution
+    // Used by election to signal that leader lost leadership and should exit immediately
     let (panic_tx, mut panic_rx) = WatchChannel(());
     let mut panic_rx_clone = panic_rx.clone();
 
@@ -250,7 +249,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         join_handle.abort();
     });
 
-    // TODO: Do I still handle this correctly if I pass around the triggered version?
     Ok((join_handle_with_trigger, svc_shutdown_tx))
 }
 

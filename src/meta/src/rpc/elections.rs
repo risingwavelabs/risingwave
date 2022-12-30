@@ -276,7 +276,7 @@ fn gen_rand_lease_id(addr: &str) -> u64 {
 /// `meta_store`: Holds information about the leader.
 /// `lease_time_sec`: Time in seconds that a lease will be valid for.
 /// A large value reduces the meta store traffic. A small value reduces the downtime during failover
-/// `panic_rx`: Hands abort signal when leader looses leadership.
+/// `panic_rx`: Sends abort signal when leader looses leadership.
 ///
 /// ## Returns:
 /// `MetaLeaderInfo` containing the leader who got elected initially.
