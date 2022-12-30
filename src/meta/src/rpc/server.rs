@@ -608,8 +608,6 @@ mod tests {
             leader_count
         );
 
-        // This does not work, because the shutdown handler is still active?
-        // Why?
         // send shutdown to all nodes. There should only be one more node left
         for (join_handle, shutdown_tx) in node_controllers {
             if shutdown_tx.send(()).is_ok() {
