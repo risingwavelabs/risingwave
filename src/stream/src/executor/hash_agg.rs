@@ -430,14 +430,35 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 let mut new_ops = Vec::with_capacity(chunk_size * 2);
 
                 // Retrieve modified states and put the changes into the array builders.
+                let mut agg_tasks = Vec::with_capacity(batch.size_hint().0);
                 for key in batch {
                     let agg_group = agg_groups
-                        .get_mut(&key)
+                        .pop(&key)
                         .expect("changed group must have corresponding AggState")
-                        .as_mut()
                         .unwrap();
                     agg_group.flush_state_if_needed(storages).await?;
+                    agg_tasks.push((key, agg_group));
+                }
+                let mut futures = Vec::with_capacity(agg_tasks.len());
+                for (key, mut agg_group) in agg_tasks {
+                    futures.push(async {
+                        let output = agg_group.get_outputs(storages).await?;
+                        Ok::<_, StreamExecutorError>((key, agg_group, output))
+                    });
+                }
 
+                let mut precalculated_batch = Vec::with_capacity(futures.len());
+
+                let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
+
+                while let Some(result) = buffered.next().await {
+                    precalculated_batch.push(result?);
+                }
+                // Drop the stream manually to teach compiler the async closure above will not use
+                // the read ref anymore.
+                drop(buffered);
+
+                for (key, mut agg_group, output) in precalculated_batch {
                     let AggChangesInfo {
                         n_appended_ops,
                         result_row,
@@ -447,25 +468,26 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             &mut builders[group_key_indices.len()..],
                             &mut new_ops,
                             storages,
+                            Some(output),
                         )
                         .await?;
 
-                    if n_appended_ops == 0 {
-                        continue;
+                    if n_appended_ops != 0 {
+                        for _ in 0..n_appended_ops {
+                            key.deserialize_to_builders(
+                                &mut builders[..group_key_indices.len()],
+                                group_key_data_types,
+                            )?;
+                        }
+                        if let Some(prev_outputs) = prev_outputs {
+                            let old_row = agg_group.group_key().chain(prev_outputs);
+                            result_table.update(old_row, result_row);
+                        } else {
+                            result_table.insert(result_row);
+                        }
                     }
 
-                    for _ in 0..n_appended_ops {
-                        key.deserialize_to_builders(
-                            &mut builders[..group_key_indices.len()],
-                            group_key_data_types,
-                        )?;
-                    }
-                    if let Some(prev_outputs) = prev_outputs {
-                        let old_row = agg_group.group_key().chain(prev_outputs);
-                        result_table.update(old_row, result_row);
-                    } else {
-                        result_table.insert(result_row);
-                    }
+                    agg_groups.put(key, Some(agg_group));
                 }
 
                 let columns = builders

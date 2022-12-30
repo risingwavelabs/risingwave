@@ -165,7 +165,7 @@ impl<S: StateStore> AggGroup<S> {
 
     /// Get the outputs of all managed agg states.
     /// Possibly need to read/sync from state table if the state not cached in memory.
-    async fn get_outputs(
+    pub async fn get_outputs(
         &mut self,
         storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<OwnedRow> {
@@ -196,8 +196,13 @@ impl<S: StateStore> AggGroup<S> {
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
         storages: &[AggStateStorage<S>],
+        precalculated_output: Option<OwnedRow>,
     ) -> StreamExecutorResult<AggChangesInfo> {
-        let curr_outputs: OwnedRow = self.get_outputs(storages).await?;
+        let curr_outputs: OwnedRow = if let Some(precalculated_output) = precalculated_output {
+            precalculated_output
+        } else {
+            self.get_outputs(storages).await?
+        };
 
         let row_count = curr_outputs[ROW_COUNT_COLUMN]
             .as_ref()
