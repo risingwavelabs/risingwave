@@ -77,7 +77,7 @@ select * from s1
 4 4444
 
 query IT rowsort
-select * from s1 _rw_kafka_timestamp > '1990-01-01 0:00:00'
+select * from s1 where _rw_kafka_timestamp > '1977-01-01 00:00:00+00:00'
 ----
 1 1
 2 22
@@ -85,7 +85,7 @@ select * from s1 _rw_kafka_timestamp > '1990-01-01 0:00:00'
 4 4444
 
 query IT
-select * from s1 where _rw_kafka_timestamp > '2045-01-01 0:00:00'
+select * from s1 where _rw_kafka_timestamp > '2045-01-01 0:00:00+00:00'
 ----
 
 query IT rowsort

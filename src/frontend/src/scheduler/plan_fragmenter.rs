@@ -638,6 +638,7 @@ impl BatchPlanFragmenter {
                 .into_iter()
                 .map(SplitImpl::Kafka)
                 .collect_vec();
+                println!("Split info: {:?}", split_info);
                 return Ok(Some(SourceScanInfo::new(split_info)));
             }
         }

@@ -238,7 +238,7 @@ fn expr_to_kafka_timestamp_range(
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
-                            literal.eval_row_const()?.clone().unwrap().into_int64(),
+                            literal.eval_row_const()?.clone().unwrap().into_int64() / 1000,
                             false,
                         )))
                     }
@@ -249,7 +249,7 @@ fn expr_to_kafka_timestamp_range(
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
-                            literal.eval_row_const()?.clone().unwrap().into_int64(),
+                            literal.eval_row_const()?.clone().unwrap().into_int64() / 1000,
                             true,
                         )))
                     }
