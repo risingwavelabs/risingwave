@@ -15,6 +15,7 @@
 //! Provides Data structures for query generation,
 //! and the interface for generating
 //! stream (MATERIALIZED VIEW) and batch query statements.
+
 use std::vec;
 
 use rand::Rng;
@@ -25,10 +26,13 @@ use risingwave_sqlparser::ast::{ColumnDef, Expr, Ident, ObjectName, Statement};
 mod expr;
 pub use expr::print_function_table;
 
+use crate::sql_gen::types::DataType;
+
 mod query;
 mod relation;
 mod scalar;
 mod time_window;
+mod types;
 mod utils;
 
 #[derive(Clone, Debug)]
@@ -56,7 +60,7 @@ impl Table {
 #[derive(Clone, Debug)]
 pub struct Column {
     name: String,
-    data_type: DataTypeName,
+    data_type: DataType,
 }
 
 impl From<ColumnDef> for Column {
@@ -65,7 +69,8 @@ impl From<ColumnDef> for Column {
             name: c.name.real_value(),
             data_type: bind_data_type(&c.data_type.expect("data type should not be none"))
                 .unwrap()
-                .into(),
+                .try_into()
+                .unwrap(),
         }
     }
 }

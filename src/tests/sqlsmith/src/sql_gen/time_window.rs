@@ -17,9 +17,10 @@ use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataTypeName;
 use risingwave_sqlparser::ast::{
-    DataType, FunctionArg, ObjectName, TableAlias, TableFactor, TableWithJoins,
+    DataType as RwDataType, FunctionArg, ObjectName, TableAlias, TableFactor, TableWithJoins,
 };
 
+use crate::sql_gen::types::DataType;
 use crate::sql_gen::utils::{create_args, create_table_alias};
 use crate::sql_gen::{Column, Expr, SqlGenerator, Table};
 
@@ -45,7 +46,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let name = Expr::Identifier(source_table_name.as_str().into());
         // TODO: Currently only literal size expr supported.
         // Tracked in: <https://github.com/risingwavelabs/risingwave/issues/3896>
-        let size = self.gen_simple_scalar(DataTypeName::Interval);
+        let size = self.gen_simple_scalar(DataType::Interval);
         let time_col = time_cols.choose(&mut self.rng).unwrap();
         let time_col = Expr::Identifier(time_col.name.as_str().into());
         let args = create_args(vec![name, time_col, size]);
@@ -73,10 +74,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // Tracked in: <https://github.com/risingwavelabs/risingwave/issues/3896>.
         // We fix slide to "1" here, as slide needs to be divisible by size.
         let slide = Expr::TypedString {
-            data_type: DataType::Interval,
+            data_type: RwDataType::Interval,
             value: "1".to_string(),
         };
-        let size = self.gen_simple_scalar(DataTypeName::Interval);
+        let size = self.gen_simple_scalar(DataType::Interval);
         let time_col = Expr::Identifier(time_col.name.as_str().into());
         let args = create_args(vec![name, time_col, slide, size]);
 
@@ -102,7 +103,7 @@ fn create_tvf(name: &str, alias: TableAlias, args: Vec<FunctionArg>) -> TableWit
 }
 
 fn is_timestamp_col(c: &Column) -> bool {
-    c.data_type == DataTypeName::Timestamp || c.data_type == DataTypeName::Timestamptz
+    c.data_type == DataType::Timestamp || c.data_type == DataType::Timestamptz
 }
 
 fn get_table_name_and_cols_with_timestamp(table: Table) -> (String, Vec<Column>, Vec<Column>) {

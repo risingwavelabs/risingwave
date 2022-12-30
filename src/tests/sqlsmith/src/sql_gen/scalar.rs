@@ -19,24 +19,26 @@ use rand::distributions::Alphanumeric;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataTypeName;
-use risingwave_sqlparser::ast::{DataType, Expr, Value};
+use risingwave_sqlparser::ast::{DataType as RwDataType, Expr, Value};
 
 use crate::sql_gen::expr::sql_null;
+use crate::sql_gen::types::DataType;
 use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    pub(crate) fn gen_simple_scalar(&mut self, typ: DataTypeName) -> Expr {
-        use DataTypeName as T;
+    pub(crate) fn gen_simple_scalar(&mut self, typ: DataType) -> Expr {
+        use DataType as T;
+        // TODO: chance to gen null for scalar.
         match typ {
             T::Int64 => Expr::Value(Value::Number(
                 self.gen_int(i64::MIN as isize, i64::MAX as isize),
             )),
             T::Int32 => Expr::TypedString {
-                data_type: DataType::Int(None),
+                data_type: RwDataType::Int(None),
                 value: self.gen_int(i32::MIN as isize, i32::MAX as isize),
             },
             T::Int16 => Expr::TypedString {
-                data_type: DataType::SmallInt(None),
+                data_type: RwDataType::SmallInt(None),
                 value: self.gen_int(i16::MIN as isize, i16::MAX as isize),
             },
             T::Varchar => Expr::Value(Value::SingleQuotedString(
@@ -46,28 +48,28 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             )),
             T::Decimal => Expr::Value(Value::Number(self.gen_float())),
             T::Float64 => Expr::TypedString {
-                data_type: DataType::Float(None),
+                data_type: RwDataType::Float(None),
                 value: self.gen_float(),
             },
             T::Float32 => Expr::TypedString {
-                data_type: DataType::Real,
+                data_type: RwDataType::Real,
                 value: self.gen_float(),
             },
             T::Boolean => Expr::Value(Value::Boolean(self.rng.gen_bool(0.5))),
             T::Date => Expr::TypedString {
-                data_type: DataType::Date,
+                data_type: RwDataType::Date,
                 value: self.gen_temporal_scalar(typ),
             },
             T::Time => Expr::TypedString {
-                data_type: DataType::Time(false),
+                data_type: RwDataType::Time(false),
                 value: self.gen_temporal_scalar(typ),
             },
             T::Timestamp | T::Timestamptz => Expr::TypedString {
-                data_type: DataType::Timestamp(false),
+                data_type: RwDataType::Timestamp(false),
                 value: self.gen_temporal_scalar(typ),
             },
             T::Interval => Expr::TypedString {
-                data_type: DataType::Interval,
+                data_type: RwDataType::Interval,
                 value: self.gen_temporal_scalar(typ),
             },
             _ => sql_null(),
@@ -104,8 +106,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         n.to_string()
     }
 
-    fn gen_temporal_scalar(&mut self, typ: DataTypeName) -> String {
-        use DataTypeName as T;
+    fn gen_temporal_scalar(&mut self, typ: DataType) -> String {
+        use DataType as T;
 
         let rand_secs = self.rng.gen_range(2..1000000) as u64;
         let minute = 60;

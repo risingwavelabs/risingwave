@@ -12,17 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Interface for generating a query
+//! We construct Query based on the AST representation,
+//! as defined in the [`risingwave_sqlparser`] module.
 use std::vec;
 
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::DataTypeName;
 use risingwave_sqlparser::ast::{
     Cte, Distinct, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, TableWithJoins,
     With,
 };
 
+use crate::sql_gen::types::DataType;
 use crate::sql_gen::utils::create_table_with_joins_from_table;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext, Table};
 
@@ -188,7 +191,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_select_item(&mut self, i: i32, context: SqlGeneratorContext) -> (SelectItem, Column) {
-        use DataTypeName as T;
+        use DataType as T;
         let ret_type = *[
             T::Boolean,
             T::Int16,
@@ -255,7 +258,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_where(&mut self) -> Option<Expr> {
         if self.flip_coin() {
             let context = SqlGeneratorContext::new_with_can_agg(false);
-            Some(self.gen_expr(DataTypeName::Boolean, context))
+            Some(self.gen_expr(DataType::Boolean, context))
         } else {
             None
         }
@@ -280,7 +283,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_having(&mut self, have_group_by: bool) -> Option<Expr> {
         if have_group_by & self.flip_coin() {
             let context = SqlGeneratorContext::new();
-            Some(self.gen_expr(DataTypeName::Boolean, context))
+            Some(self.gen_expr(DataType::Boolean, context))
         } else {
             None
         }

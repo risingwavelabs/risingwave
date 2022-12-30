@@ -28,37 +28,8 @@ use risingwave_sqlparser::ast::{
     TrimWhereField, UnaryOperator, Value,
 };
 
-use crate::sql_gen::utils::data_type_name_to_ast_data_type;
+use crate::sql_gen::types::{DataType, AGG_FUNC_TABLE, CAST_TABLE, FUNC_TABLE};
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
-
-static FUNC_TABLE: LazyLock<HashMap<DataTypeName, Vec<FuncSign>>> = LazyLock::new(|| {
-    let mut funcs = HashMap::<DataTypeName, Vec<FuncSign>>::new();
-    func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
-    funcs
-});
-
-static AGG_FUNC_TABLE: LazyLock<HashMap<DataTypeName, Vec<AggFuncSig>>> = LazyLock::new(|| {
-    let mut funcs = HashMap::<DataTypeName, Vec<AggFuncSig>>::new();
-    agg_func_sigs().for_each(|func| funcs.entry(func.ret_type).or_default().push(func.clone()));
-    funcs
-});
-
-/// Build a cast map from return types to viable cast-signatures.
-/// NOTE: We avoid cast from varchar to other datatypes apart from itself.
-/// This is because arbitrary strings may not be able to cast,
-/// creating large number of invalid queries.
-static CAST_TABLE: LazyLock<HashMap<DataTypeName, Vec<CastSig>>> = LazyLock::new(|| {
-    let mut casts = HashMap::<DataTypeName, Vec<CastSig>>::new();
-    cast_sigs()
-        .filter(|cast| {
-            cast.context == CastContext::Explicit || cast.context == CastContext::Implicit
-        })
-        .filter(|cast| {
-            cast.from_type != DataTypeName::Varchar || cast.to_type == DataTypeName::Varchar
-        })
-        .for_each(|cast| casts.entry(cast.to_type).or_default().push(cast));
-    casts
-});
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// In generating expression, there are two execution modes:
@@ -69,7 +40,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     ///    Only columns present in GROUP BY can be selected.
     ///
     /// `inside_agg` indicates if we are calling `gen_expr` inside an aggregate.
-    pub(crate) fn gen_expr(&mut self, typ: DataTypeName, context: SqlGeneratorContext) -> Expr {
+    pub(crate) fn gen_expr(&mut self, typ: DataType, context: SqlGeneratorContext) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
             return match self.rng.gen_bool(0.5) {
@@ -91,7 +62,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_col(&mut self, typ: DataTypeName, context: SqlGeneratorContext) -> Expr {
+    fn gen_col(&mut self, typ: DataType, context: SqlGeneratorContext) -> Expr {
         let columns = if context.is_inside_agg() {
             if self.bound_relations.is_empty() {
                 return self.gen_simple_scalar(typ);
@@ -119,14 +90,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_cast(&mut self, ret: DataTypeName, context: SqlGeneratorContext) -> Expr {
+    fn gen_cast(&mut self, ret: DataType, context: SqlGeneratorContext) -> Expr {
         self.gen_cast_inner(ret, context)
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
     /// Generate casts from a cast map.
     /// TODO: Assign casts have to be tested via `INSERT`.
-    fn gen_cast_inner(&mut self, ret: DataTypeName, context: SqlGeneratorContext) -> Option<Expr> {
+    fn gen_cast_inner(&mut self, ret: DataType, context: SqlGeneratorContext) -> Option<Expr> {
         let casts = CAST_TABLE.get(&ret)?;
         let cast_sig = casts.choose(&mut self.rng).unwrap();
 
@@ -134,9 +105,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         match cast_sig.context {
             T::Explicit => {
                 let expr = self
-                    .gen_expr(cast_sig.from_type, context.set_inside_explicit_cast())
+                    .gen_expr(
+                        cast_sig.from_type.try_into().unwrap(),
+                        context.set_inside_explicit_cast(),
+                    )
                     .into();
-                let data_type = data_type_name_to_ast_data_type(cast_sig.to_type)?;
+                let data_type = cast_sig.to_type.into();
                 Some(Expr::Cast { expr, data_type })
             }
 
@@ -166,7 +140,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_func(&mut self, ret: DataTypeName, context: SqlGeneratorContext) -> Expr {
+    fn gen_func(&mut self, ret: DataType, context: SqlGeneratorContext) -> Expr {
         match self.rng.gen_bool(0.1) {
             true => self.gen_variadic_func(ret, context),
             false => self.gen_fixed_func(ret, context),
@@ -175,8 +149,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Generates functions with variable arity:
     /// `CASE`, `COALESCE`, `CONCAT`, `CONCAT_WS`
-    fn gen_variadic_func(&mut self, ret: DataTypeName, context: SqlGeneratorContext) -> Expr {
-        use DataTypeName as T;
+    fn gen_variadic_func(&mut self, ret: DataType, context: SqlGeneratorContext) -> Expr {
+        use DataType as T;
         match ret {
             T::Varchar => match self.rng.gen_range(0..=3) {
                 0 => self.gen_case(ret, context),
@@ -189,20 +163,22 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 true => self.gen_case(ret, context),
                 false => self.gen_coalesce(ret, context),
             },
+            // TODO: gen_regexpr
+            // TODO: gen functions which return list, struct
         }
     }
 
-    fn gen_case(&mut self, ret: DataTypeName, context: SqlGeneratorContext) -> Expr {
+    fn gen_case(&mut self, ret: DataType, context: SqlGeneratorContext) -> Expr {
         let n = self.rng.gen_range(1..10);
         Expr::Case {
             operand: None,
-            conditions: self.gen_n_exprs_with_type(n, DataTypeName::Boolean, context),
+            conditions: self.gen_n_exprs_with_type(n, DataType::Boolean, context),
             results: self.gen_n_exprs_with_type(n, ret, context),
             else_result: Some(Box::new(self.gen_expr(ret, context))),
         }
     }
 
-    fn gen_coalesce(&mut self, ret: DataTypeName, context: SqlGeneratorContext) -> Expr {
+    fn gen_coalesce(&mut self, ret: DataType, context: SqlGeneratorContext) -> Expr {
         let non_null = self.gen_expr(ret, context);
         let position = self.rng.gen_range(0..10);
         let mut args = (0..10).map(|_| Expr::Value(Value::Null)).collect_vec();
@@ -215,7 +191,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_concat_ws(&mut self, context: SqlGeneratorContext) -> Expr {
-        let sep = self.gen_expr(DataTypeName::Varchar, context);
+        let sep = self.gen_expr(DataType::Varchar, context);
         let mut args = self.gen_concat_args(context);
         args.insert(0, sep);
         Expr::Function(make_simple_func("concat_ws", &args))
@@ -223,20 +199,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_concat_args(&mut self, context: SqlGeneratorContext) -> Vec<Expr> {
         let n = self.rng.gen_range(1..10);
-        self.gen_n_exprs_with_type(n, DataTypeName::Varchar, context)
+        self.gen_n_exprs_with_type(n, DataType::Varchar, context)
     }
 
     /// Generates `n` expressions of type `ret`.
     fn gen_n_exprs_with_type(
         &mut self,
         n: usize,
-        ret: DataTypeName,
+        ret: DataType,
         context: SqlGeneratorContext,
     ) -> Vec<Expr> {
         (0..n).map(|_| self.gen_expr(ret, context)).collect()
     }
 
-    fn gen_fixed_func(&mut self, ret: DataTypeName, context: SqlGeneratorContext) -> Expr {
+    fn gen_fixed_func(&mut self, ret: DataType, context: SqlGeneratorContext) -> Expr {
         let funcs = match FUNC_TABLE.get(&ret) {
             None => return self.gen_simple_scalar(ret),
             Some(funcs) => funcs,
@@ -258,13 +234,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
-    fn gen_exists(&mut self, ret: DataTypeName, context: SqlGeneratorContext) -> Expr {
+    fn gen_exists(&mut self, ret: DataType, context: SqlGeneratorContext) -> Expr {
         // TODO: Streaming nested loop join is not implemented yet.
         // Tracked by: <https://github.com/singularity-data/risingwave/issues/2655>.
 
         // Generation of subquery inside aggregation is now workaround.
         // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/3896>.
-        if self.is_mview || ret != DataTypeName::Boolean || context.can_gen_agg() {
+        if self.is_mview || ret != DataType::Boolean || context.can_gen_agg() {
             return self.gen_simple_scalar(ret);
         };
         // TODO: Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg
@@ -274,9 +250,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Expr::Exists(Box::new(subquery))
     }
 
-    fn gen_agg(&mut self, ret: DataTypeName) -> Expr {
+    fn gen_agg(&mut self, ret: DataType) -> Expr {
         // TODO: workaround for <https://github.com/risingwavelabs/risingwave/issues/4508>
-        if ret == DataTypeName::Interval {
+        if ret == DataType::Interval {
             return self.gen_simple_scalar(ret);
         }
         let funcs = match AGG_FUNC_TABLE.get(&ret) {
