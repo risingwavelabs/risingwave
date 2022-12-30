@@ -2344,8 +2344,7 @@ impl Parser {
             // not an alias.)
             Token::Word(w)
                 if after_as
-                    || (!reserved_kwds.contains(&w.keyword)
-                        && w.keyword != Keyword::RETURNING) =>
+                    || (!reserved_kwds.contains(&w.keyword)) =>
             {
                 Ok(Some(w.to_ident()))
             }
