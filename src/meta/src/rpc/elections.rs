@@ -15,15 +15,15 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::{process, thread};
 
 use prost::Message;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
 use tokio::sync::oneshot::Sender;
-use tokio::sync::watch::Receiver;
+use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
 use tokio::task::JoinHandle;
 
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
@@ -276,6 +276,7 @@ fn gen_rand_lease_id(addr: &str) -> u64 {
 /// `meta_store`: Holds information about the leader.
 /// `lease_time_sec`: Time in seconds that a lease will be valid for.
 /// A large value reduces the meta store traffic. A small value reduces the downtime during failover
+/// `panic_rx`: Sends abort signal when leader looses leadership.
 ///
 /// ## Returns:
 /// `MetaLeaderInfo` containing the leader who got elected initially.
@@ -286,11 +287,12 @@ pub async fn run_elections<S: MetaStore>(
     addr: String,
     meta_store: Arc<S>,
     lease_time_sec: u64,
+    panic_tx: WatchSender<()>,
 ) -> MetaResult<(
     MetaLeaderInfo,
     JoinHandle<()>,
     Sender<()>,
-    Receiver<(MetaLeaderInfo, bool)>,
+    WatchReceiver<(MetaLeaderInfo, bool)>,
 )> {
     // Randomize interval to reduce mitigate likelihood of simultaneous requests
     let mut rng: StdRng = SeedableRng::from_entropy();
@@ -398,7 +400,8 @@ pub async fn run_elections<S: MetaStore>(
                             // Leader lost leadership. Trigger fencing
                             if is_leader {
                                 tracing::error!("This node lost its leadership. Exiting node");
-                                process::exit(0);
+                                panic_tx.send(()).expect("Panic receiver dropped"); 
+                                return;
                             }
                             // leader failed. Elect new leader
                             continue 'election;

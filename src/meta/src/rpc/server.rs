@@ -117,11 +117,16 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, WatchSender<()>)> {
+    // Used by election to signal that leader lost leadership and should exit immediately
+    let (panic_tx, mut panic_rx) = WatchChannel(());
+    let mut panic_rx_clone = panic_rx.clone();
+
     // Initialize managers
     let (_, election_handle, election_shutdown, mut leader_rx) = run_elections(
         address_info.listen_addr.clone().to_string(),
         meta_store.clone(),
         lease_interval_secs,
+        panic_tx,
     )
     .await?;
 
@@ -132,9 +137,19 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     tokio::spawn(async move {
         let _ = tracing::span!(tracing::Level::INFO, "node_status").enter();
         loop {
-            if note_status_leader_rx.changed().await.is_err() {
-                tracing::error!("Leader sender dropped");
-                return;
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {
+                    return;
+                },
+                _ = panic_rx_clone.changed() => {
+                    return;
+                },
+                leader = note_status_leader_rx.changed() => {
+                    if leader.is_err() {
+                        tracing::error!("Leader sender dropped");
+                        return;
+                    }
+                },
             }
 
             let (leader_info, is_leader) = note_status_leader_rx.borrow().clone();
@@ -229,7 +244,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         .expect("Unable to start leader services");
     });
 
-    Ok((join_handle, svc_shutdown_tx))
+    // kill everything on panic signal
+    let join_handle_with_trigger = tokio::spawn(async move {
+        let _ = panic_rx.changed().await;
+        join_handle.abort();
+    });
+
+    Ok((join_handle_with_trigger, svc_shutdown_tx))
 }
 
 #[cfg(test)]
@@ -340,9 +361,10 @@ mod tests {
 
             // check if node is leader
             // Only leader nodes support adding worker nodes
-            let channel = get_meta_channel(meta_addr)
-                .await
-                .expect("Establishing channel should work");
+            let channel = match get_meta_channel(meta_addr).await {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
             let cluster_client = ClusterServiceClient::new(channel);
 
             // check if node is leader
