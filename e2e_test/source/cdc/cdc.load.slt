@@ -14,7 +14,7 @@ create materialized source products ( id INT,
  database.name = 'mydb',
  table.name = 'products',
  server.id = '5085'
-) row format debezium_json;
+);
 
 statement ok
 create materialized view products_cnt as select count(*) as cnt from products;
@@ -37,7 +37,7 @@ create materialized source orders (
  database.name = 'mydb',
  table.name = 'orders',
  server.id = '5086'
-) row format debezium_json;
+);
 
 statement ok
 create materialized view orders_cnt as select count(*) as cnt from orders;
@@ -60,7 +60,7 @@ create materialized source shipments (
  schema.name = 'public',
  table.name = 'shipments',
  slot.name = 'shipments'
-) row format debezium_json;
+);
 
 statement ok
 create materialized view shipments_cnt as select count(*) as cnt from shipments;
@@ -87,4 +87,4 @@ create materialized source mytable (
  database.name = 'mydb',
  table.name = 'mytable',
  server.id = '5087'
-) row format debezium_json;
+);
