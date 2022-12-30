@@ -31,7 +31,7 @@ RUN curl -sSL "https://github.com/risinglightdb/sqllogictest-driver-jdbc/release
 
 # install build tools
 RUN cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make cargo-cache \
-    && cargo install --git https://github.com/risinglightdb/sqllogictest-rs --rev 879204b9b2dd5a81db4a9781c2e6c68d0713f5d3 --bin sqllogictest \
+    && cargo install --git https://github.com/risinglightdb/sqllogictest-rs --rev 693583b18682c85a2338f5be2df83218f397c470 --bin sqllogictest \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \
     && rm -rf "/root/.cargo/registry/cache" \
