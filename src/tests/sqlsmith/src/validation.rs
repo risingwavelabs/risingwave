@@ -36,16 +36,6 @@ fn not_unique_error(db_error: &str) -> bool {
     db_error.contains("Bind error") && db_error.contains("is not unique")
 }
 
-fn is_unsupported_timestamptz_error(db_error: &str) -> bool {
-    db_error.contains("Unsupported function: Timestamptz cmp Date")
-        || db_error.contains("Unsupported function: Date cmp Timestamptz ")
-        || db_error.contains("Unsupported function: Timestamp cmp Timestamptz")
-        || db_error.contains("Unsupported function: Timestamptz cmp Timestamp")
-        || db_error.contains("Unsupported cast: Date to Timestamptz")
-        || db_error.contains("Unsupported cast: Timestamp to Timestamptz")
-        || db_error.contains("Unsupported function: Timestamptz atm Timestamptz")
-}
-
 /// Certain errors are permitted to occur. This is because:
 /// 1. It is more complex to generate queries without these errors.
 /// 2. These errors seldom occur, skipping them won't affect overall effectiveness of sqlsmith.
@@ -54,5 +44,4 @@ pub fn is_permissible_error(db_error: &str) -> bool {
         || is_division_by_zero_err(db_error)
         || is_unimplemented_error(db_error)
         || not_unique_error(db_error)
-        || is_unsupported_timestamptz_error(db_error)
 }
