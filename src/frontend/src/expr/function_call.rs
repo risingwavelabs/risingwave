@@ -198,17 +198,9 @@ impl FunctionCall {
                     } else {
                         Err(ErrorCode::BindError(
                             "op ANY/ALL (array) requires operator to yield boolean".to_string(),
-                        )
-                        .into())
+                        ))
                     }
                 };
-
-                if inputs[1].is_unknown() {
-                    inputs[1] = ExprImpl::literal_null(DataType::Varchar);
-                    let inner_func = Self::new_binary_op_func(func_types, inputs)?;
-                    return ensure_return_boolean(&inner_func.return_type())
-                        .map(|_| ExprImpl::literal_null(DataType::Boolean));
-                }
 
                 let return_type = infer_some_all(func_types, &mut inputs)?;
                 ensure_return_boolean(&return_type)?;

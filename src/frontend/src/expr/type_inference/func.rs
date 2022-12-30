@@ -58,40 +58,41 @@ pub fn infer_some_all(
     mut func_types: Vec<ExprType>,
     inputs: &mut Vec<ExprImpl>,
 ) -> Result<DataType> {
-    // handle `null` outside this function.
-    assert!(!inputs[1].is_unknown());
-
-    if let DataType::List { box datatype } = inputs[1].return_type() {
-        let final_type = func_types.pop().unwrap();
-        let actuals = vec![
-            (!inputs[0].is_unknown()).then_some(inputs[0].return_type().into()),
-            Some(DataTypeName::from(datatype.clone())),
-        ];
-        let sig = infer_type_name(&FUNC_SIG_MAP, final_type, &actuals)?;
-        if DataTypeName::from(inputs[0].return_type()) != sig.inputs_type[0] {
-            inputs[0] = inputs[0].clone().cast_implicit(sig.inputs_type[0].into())?;
-        }
-        if DataTypeName::from(datatype) != sig.inputs_type[1] {
-            inputs[1] = inputs[1].clone().cast_implicit(DataType::List {
-                datatype: Box::new(sig.inputs_type[1].into()),
-            })?;
-        }
-
-        let inputs_owned = std::mem::take(inputs);
-        let mut func_call =
-            FunctionCall::new_unchecked(final_type, inputs_owned, sig.ret_type.into()).into();
-        while let Some(func_type) = func_types.pop() {
-            func_call = FunctionCall::new(func_type, vec![func_call])?.into();
-        }
-        let return_type = func_call.return_type();
-        *inputs = vec![func_call];
-        Ok(return_type)
+    let element_type = if inputs[1].is_unknown() {
+        None
+    } else if let DataType::List { datatype } = inputs[1].return_type() {
+        Some(DataTypeName::from(*datatype))
     } else {
-        Err(
-            ErrorCode::BindError("op ANY/ALL (array) requires array on right side".to_string())
-                .into(),
+        return Err(ErrorCode::BindError(
+            "op ANY/ALL (array) requires array on right side".to_string(),
         )
+        .into());
+    };
+
+    let final_type = func_types.pop().unwrap();
+    let actuals = vec![
+        (!inputs[0].is_unknown()).then_some(inputs[0].return_type().into()),
+        element_type,
+    ];
+    let sig = infer_type_name(&FUNC_SIG_MAP, final_type, &actuals)?;
+    if DataTypeName::from(inputs[0].return_type()) != sig.inputs_type[0] {
+        inputs[0] = inputs[0].clone().cast_implicit(sig.inputs_type[0].into())?;
     }
+    if element_type != Some(sig.inputs_type[1]) {
+        inputs[1] = inputs[1].clone().cast_implicit(DataType::List {
+            datatype: Box::new(sig.inputs_type[1].into()),
+        })?;
+    }
+
+    let inputs_owned = std::mem::take(inputs);
+    let mut func_call =
+        FunctionCall::new_unchecked(final_type, inputs_owned, sig.ret_type.into()).into();
+    while let Some(func_type) = func_types.pop() {
+        func_call = FunctionCall::new(func_type, vec![func_call])?.into();
+    }
+    let return_type = func_call.return_type();
+    *inputs = vec![func_call];
+    Ok(return_type)
 }
 
 macro_rules! ensure_arity {
