@@ -121,7 +121,6 @@ impl ToBatchProst for BatchSortAgg {
             group_key: self
                 .group_key()
                 .iter()
-                .clone()
                 .map(|idx| ExprImpl::InputRef(Box::new(InputRef::new(*idx, DataType::Int32))))
                 .map(|expr| expr.to_expr_proto())
                 .collect::<Vec<ExprNode>>(),
