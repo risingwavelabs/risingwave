@@ -103,7 +103,8 @@ impl UpdateExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(mut self: Box<Self>) {
         let data_types = self.child.schema().data_types();
-        let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
+        let mut builder = DataChunkBuilder::new(data_types.clone(), self.chunk_size);
+        let mut updated_builder = DataChunkBuilder::new(data_types.clone(), self.chunk_size);
 
         let mut notifiers = Vec::new();
 
@@ -137,24 +138,27 @@ impl UpdateExecutor {
                 DataChunk::new(columns, data_chunk.vis().clone())
             };
 
+            if self.returning {
+                for chunk in updated_builder.append_chunk(updated_data_chunk.clone()) {
+                    yield chunk;
+                }
+            }
+
             for (row_delete, row_insert) in data_chunk.rows().zip_eq(updated_data_chunk.rows()) {
                 let None = builder.append_one_row(row_delete) else {
                     unreachable!("no chunk should be yielded when appending the deleted row as the chunk size is always even");
                 };
                 if let Some(chunk) = builder.append_one_row(row_insert) {
-                    if self.returning {
-                        yield chunk.clone();
-                    }
                     write_chunk(chunk)?;
                 }
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            if self.returning {
-                yield chunk.clone();
-            }
             write_chunk(chunk)?;
+        }
+        if self.returning && let Some(chunk) = updated_builder.consume_all() {
+            yield chunk;
         }
 
         // Wait for all chunks to be taken / written.
