@@ -581,16 +581,16 @@ mod tests {
         let _ = get_agreed_leader(number_of_nodes, meta_port).await;
 
         // delete nodes by triggering fencing
-        for (delete_leader, delete_lease) in vec![(true, true), (true, false), (false, true)] {
+        for (delete_leader, delete_lease) in &[(true, true), (true, false), (false, true)] {
             // trigger fencing on the current leader
             let mut txn = Transaction::default();
-            if delete_leader {
+            if *delete_leader {
                 txn.delete(
                     META_CF_NAME.to_string(),
                     META_LEADER_KEY.as_bytes().to_vec(),
                 );
             }
-            if delete_lease {
+            if *delete_lease {
                 txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
             }
             meta_store.txn(txn).await.unwrap();
