@@ -491,7 +491,7 @@ impl ApplyJoinTransposeRule {
 
         let new_join_left = LogicalApply::create(
             apply_left.clone(),
-            join.left().clone(),
+            join.left(),
             apply_join_type,
             Condition {
                 conjunctions: left_apply_condition,
@@ -502,7 +502,7 @@ impl ApplyJoinTransposeRule {
         );
         let new_join_right = LogicalApply::create(
             apply_left.clone(),
-            join.right().clone(),
+            join.right(),
             apply_join_type,
             Condition {
                 conjunctions: right_apply_condition,
