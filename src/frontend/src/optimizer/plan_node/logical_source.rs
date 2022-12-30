@@ -42,7 +42,7 @@ use crate::TableCatalog;
 /// can limit the timestamp range when querying it directly with batch query. The column type is
 /// [`DataType::Timestamptz`]. For more details, please refer to
 /// [this rfc](https://github.com/risingwavelabs/rfcs/pull/20).
-pub const KAFKA_TIMESTAMP_COLUMN_NAME: &'static str = "_rw_kafka_timestamp";
+pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
 
 /// `LogicalSource` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -238,7 +238,7 @@ fn expr_to_kafka_timestamp_range(
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
-                            literal.eval_row_const()?.clone().unwrap().into_int64() / 1000,
+                            literal.eval_row_const()?.unwrap().into_int64() / 1000,
                             false,
                         )))
                     }
@@ -249,7 +249,7 @@ fn expr_to_kafka_timestamp_range(
                             && literal.return_type() == DataType::Timestamptz =>
                     {
                         Ok(Some((
-                            literal.eval_row_const()?.clone().unwrap().into_int64() / 1000,
+                            literal.eval_row_const()?.unwrap().into_int64() / 1000,
                             true,
                         )))
                     }
@@ -319,7 +319,7 @@ impl PredicatePushdown for LogicalSource {
         predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        let mut range = self.kafka_timestamp_range.clone();
+        let mut range = self.kafka_timestamp_range;
 
         println!("Before predicate: {:?}", predicate);
         let mut new_conjunctions = Vec::with_capacity(predicate.conjunctions.len());
