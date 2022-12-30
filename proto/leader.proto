@@ -10,6 +10,6 @@ message LeaderResponse {
   common.HostAddress leader_addr = 1;
 }
 
-service Leader {
+service LeaderService {
   rpc Leader(LeaderRequest) returns (LeaderResponse);
 }
