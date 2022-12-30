@@ -45,3 +45,8 @@
       └─BatchExchange { order: [], dist: Single }
         └─BatchFilter { predicate: (t.v1 <> t.v2) }
           └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+- sql: |
+    create table t (v1 int, v2 int);
+    update t set (v1, v2) = (v2 + 1, v1 - 1) where v1 != v2 returning *, v2+1, v1-1;
+  logical_plan: ""
+  batch_plan: ""

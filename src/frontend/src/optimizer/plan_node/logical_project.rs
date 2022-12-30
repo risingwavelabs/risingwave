@@ -65,22 +65,6 @@ impl LogicalProject {
         LogicalProject { base, core }
     }
 
-    pub fn with_core_and_schema(core: generic::Project<PlanRef>, schema: Schema) -> Self {
-        let ctx = core.input.ctx();
-
-        let schema = schema;
-        let pk_indices = core.logical_pk();
-        let functional_dependency = Self::derive_fd(&core, core.input.functional_dependency());
-
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
-        LogicalProject { base, core }
-    }
-
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
         self.core.o2i_col_mapping()
     }
