@@ -30,9 +30,9 @@ pub struct OptimizerContext {
     session_ctx: Arc<SessionImpl>,
     /// Store plan node id
     next_plan_node_id: RefCell<i32>,
-    /// For debugging purposes, store the SQL string in Context
+    /// The original SQL string, used for debugging.
     sql: String,
-    /// TODO
+    /// Normalized SQL string. See [`HandlerArgs::normalize_sql`].
     normalized_sql: String,
     /// Explain options
     explain_options: ExplainOptions,
@@ -46,10 +46,13 @@ pub struct OptimizerContext {
 pub type OptimizerContextRef = Rc<OptimizerContext>;
 
 impl OptimizerContext {
+    /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`], with empty
+    /// [`ExplainOptions`].
     pub fn from_handler_args(handler_args: HandlerArgs) -> Self {
         Self::new(handler_args, ExplainOptions::default())
     }
 
+    /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`] and [`ExplainOptions`].
     pub fn new(handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
         Self {
             session_ctx: handler_args.session,
@@ -121,6 +124,7 @@ impl OptimizerContext {
         &self.sql
     }
 
+    /// Return the normalized SQL.
     pub fn normalized_sql(&self) -> &str {
         &self.normalized_sql
     }

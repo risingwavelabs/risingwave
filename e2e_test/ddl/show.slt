@@ -1,5 +1,5 @@
 statement ok
-create table t3 (v1 int, v2 int, v3 int);
+create table if not exists t3 (v1 int, v2 int, v3 int) with (appendonly = 'true');
 
 statement ok
 create materialized view mv3 as select sum(v1) as sum_v1 from t3;
@@ -72,6 +72,14 @@ show materialized sources;
 query T
 show sources;
 ----
+
+# Show create objects.
+
+# The `WITH` options should be preserved, and the `IF NOT EXISTS` clause should be omitted.
+query TT
+show create table t3;
+----
+public.t3 CREATE TABLE t3 (v1 INT, v2 INT, v3 INT) WITH (appendonly = 'true')
 
 query TT
 show create materialized view mv3;

@@ -107,9 +107,7 @@ pub struct TableCatalog {
     /// is not supported yet and expected to be `[0..columns.len()]`
     pub value_indices: Vec<usize>,
 
-    /// Definition of the table.
-    /// - For materialized view, it's the query after `CREATE MATERIALIZED VIEW .. AS`.
-    /// - For table, it's the full normalized `CREATE TABLE` statement.
+    /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
     pub definition: String,
 
     pub handle_pk_conflict: bool,
