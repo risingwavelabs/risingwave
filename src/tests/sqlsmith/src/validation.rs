@@ -53,5 +53,5 @@ pub fn is_permissible_error(db_error: &str) -> bool {
         || is_division_by_zero_err(db_error)
         || is_unimplemented_error(db_error)
         || not_unique_error(db_error)
-        || is_unsupported_timestamp_error(db_error)
+        || is_unsupported_timestamptz_error(db_error)
 }
