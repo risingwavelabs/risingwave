@@ -71,13 +71,12 @@ impl ColIndexMapping {
     }
 
     pub fn identity(size: usize) -> Self {
-        let map = (0..size).into_iter().map(Some).collect();
+        let map = (0..size).map(Some).collect();
         Self::new(map)
     }
 
     pub fn identity_or_none(source_size: usize, target_size: usize) -> Self {
         let map = (0..source_size)
-            .into_iter()
             .map(|i| if i < target_size { Some(i) } else { None })
             .collect();
         Self::with_target_size(map, target_size)
@@ -118,7 +117,6 @@ impl ColIndexMapping {
     /// ```
     pub fn with_shift_offset(source_num: usize, offset: isize) -> Self {
         let map = (0..source_num)
-            .into_iter()
             .map(|source| {
                 let target = source as isize + offset;
                 usize::try_from(target).ok()
@@ -181,10 +179,7 @@ impl ColIndexMapping {
     /// assert_eq!(mapping.try_map(4), None);
     /// ```
     pub fn with_removed_columns(cols: &[usize], src_size: usize) -> Self {
-        let cols = (0..src_size)
-            .into_iter()
-            .filter(|x| !cols.contains(x))
-            .collect_vec();
+        let cols = (0..src_size).filter(|x| !cols.contains(x)).collect_vec();
         Self::with_remaining_columns(&cols, src_size)
     }
 

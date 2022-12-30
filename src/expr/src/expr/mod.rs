@@ -29,7 +29,7 @@ mod expr_is_null;
 mod expr_literal;
 mod expr_nested_construct;
 mod expr_quaternary_bytes;
-mod expr_regexp;
+pub mod expr_regexp;
 mod expr_ternary_bytes;
 mod expr_to_char_const_tmpl;
 mod expr_to_timestamp_const_tmpl;
