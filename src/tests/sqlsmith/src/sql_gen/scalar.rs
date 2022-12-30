@@ -126,7 +126,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let tm = DateTime::<Utc>::from(SystemTime::now() - Duration::from_secs(*secs));
         match typ {
             T::Date => tm.format("%F").to_string(),
-            T::Timestamp | T::Timestamptz => tm.format("%Y-%m-%d %H:%M:%S").to_string(),
+            T::Timestamp => tm.format("%Y-%m-%d %H:%M:%S").to_string(),
+            T::Timestamptz => {
+                let timestamp = tm.format("%Y-%m-%d %H:%M:%S");
+                let timezone = self.rng.gen_range(0..=15);
+                format!("{}+{}", timestamp, timezone)
+            }
             T::Time => tm.format("%T").to_string(),
             T::Interval => secs.to_string(),
             _ => unreachable!(),
