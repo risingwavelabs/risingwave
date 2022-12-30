@@ -73,6 +73,8 @@ mod union_to_distinct_rule;
 pub use union_to_distinct_rule::*;
 mod agg_project_merge_rule;
 pub use agg_project_merge_rule::*;
+mod agg_dedup_group_key_rule;
+pub use agg_dedup_group_key_rule::*;
 mod union_merge_rule;
 pub use union_merge_rule::*;
 mod dag_to_tree_rule;
@@ -109,6 +111,7 @@ macro_rules! for_all_rules {
             ,{AggProjectMergeRule}
             ,{UnionMergeRule}
             ,{DagToTreeRule}
+            ,{AggDedupGroupKeyRule}
         }
     };
 }
