@@ -20,7 +20,7 @@ use std::ops::{Deref, RangeBounds};
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::future::try_join_all;
+use futures::{stream, StreamExt};
 use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
@@ -590,6 +590,7 @@ impl HummockVersionReader {
         let mut non_overlapping_iters = Vec::new();
         let mut overlapping_iters = Vec::new();
         let mut overlapping_iter_count = 0;
+        let mut fetch_meta_reqs = vec![];
         for level in committed.levels(read_options.table_id) {
             if level.table_infos.is_empty() {
                 continue;
@@ -610,7 +611,6 @@ impl HummockVersionReader {
                         && end_table_idx < level.table_infos.len()
                 );
 
-                let mut sstables = vec![];
                 let fetch_meta_req = level.table_infos[start_table_idx..=end_table_idx]
                     .iter()
                     .filter(|sstable_info| {
@@ -620,16 +620,51 @@ impl HummockVersionReader {
                             .is_ok()
                     })
                     .collect_vec();
-                let fetch_meta_resp = try_join_all(fetch_meta_req.iter().map(|sstable_info| {
+                fetch_meta_reqs.push((level.level_type, fetch_meta_req));
+            } else {
+                let table_infos = prune_ssts(
+                    level.table_infos.iter(),
+                    read_options.table_id,
+                    &table_key_range,
+                );
+                if table_infos.is_empty() {
+                    continue;
+                }
+                // Overlapping
+                let fetch_meta_req = table_infos.into_iter().rev().collect_vec();
+                fetch_meta_reqs.push((level.level_type, fetch_meta_req));
+            }
+        }
+        let mut flatten_reqs = vec![];
+        let mut req_count = 0;
+        for (_, fetch_meta_req) in &fetch_meta_reqs {
+            for sstable_info in fetch_meta_req {
+                let inner_req_count = req_count;
+                let capture_ref = async {
                     self.sstable_store
                         .sstable_syncable(sstable_info, &local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
-                }))
-                .await?;
-                for (sstable_info, (sstable, local_cache_meta_block_miss)) in fetch_meta_req
-                    .into_iter()
-                    .zip_eq(fetch_meta_resp.into_iter())
-                {
+                        .await
+                };
+                flatten_reqs
+                    .push(async move { capture_ref.await.map(|result| (inner_req_count, result)) });
+                req_count += 1;
+            }
+        }
+        let mut flatten_resps = vec![None; req_count];
+        let mut buffered = stream::iter(flatten_reqs).buffer_unordered(10);
+        while let Some(result) = buffered.next().await {
+            let (req_index, resp) = result?;
+            flatten_resps[req_count - req_index - 1] = Some(resp);
+        }
+        drop(buffered);
+
+        for (level_type, fetch_meta_req) in fetch_meta_reqs {
+            if level_type == LevelType::Nonoverlapping as i32 {
+                let mut sstables = vec![];
+                for sstable_info in fetch_meta_req {
+                    let (sstable, local_cache_meta_block_miss) =
+                        flatten_resps.pop().unwrap().unwrap();
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
                     if let Some(key_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(sstable.value(), *key_hash, &mut local_stats) {
@@ -651,24 +686,10 @@ impl HummockVersionReader {
                     Arc::new(SstableIteratorReadOptions::default()),
                 ));
             } else {
-                let table_infos = prune_ssts(
-                    level.table_infos.iter(),
-                    read_options.table_id,
-                    &table_key_range,
-                );
-                if table_infos.is_empty() {
-                    continue;
-                }
-                // Overlapping
                 let mut iters = Vec::new();
-                let fetch_meta_resp =
-                    try_join_all(table_infos.into_iter().rev().map(|sstable_info| {
-                        self.sstable_store
-                            .sstable_syncable(sstable_info, &local_stats)
-                            .in_span(Span::enter_with_local_parent("get_sstable"))
-                    }))
-                    .await?;
-                for (sstable, local_cache_meta_block_miss) in fetch_meta_resp {
+                for _sstable_info in fetch_meta_req {
+                    let (sstable, local_cache_meta_block_miss) =
+                        flatten_resps.pop().unwrap().unwrap();
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
@@ -692,6 +713,7 @@ impl HummockVersionReader {
                 overlapping_iters.push(OrderedMergeIteratorInner::new(iters));
             }
         }
+
         self.stats
             .iter_merge_sstable_counts
             .with_label_values(&["committed-overlapping-iter"])
