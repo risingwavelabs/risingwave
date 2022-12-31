@@ -8224,6 +8224,7 @@ dependencies = [
  "log",
  "madsim-rdkafka",
  "openssl",
+ "risingwave_storage",
  "tracing",
 ]
 

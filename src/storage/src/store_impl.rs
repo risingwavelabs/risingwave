@@ -209,6 +209,50 @@ impl Debug for StateStoreImpl {
     }
 }
 
+#[cfg(not(feature = "rocksdb-local"))]
+#[macro_export]
+macro_rules! dispatch_state_store {
+    ($impl:expr, $store:ident, $body:tt, ) => {{
+        use $crate::store_impl::StateStoreImpl;
+
+        match $impl {
+            StateStoreImpl::MemoryStateStore($store) => {
+                // WARNING: don't change this. Enabling memory backend will cause monomorphization
+                // explosion and thus slow compile time in release mode.
+                #[cfg(debug_assertions)]
+                {
+                    $body
+                }
+                #[cfg(not(debug_assertions))]
+                {
+                    let _store = $store;
+                    unimplemented!("memory state store should never be used in release mode");
+                }
+            }
+
+            StateStoreImpl::SledStateStore($store) => {
+                // WARNING: don't change this. Enabling memory backend will cause monomorphization
+                // explosion and thus slow compile time in release mode.
+                #[cfg(debug_assertions)]
+                {
+                    $body
+                }
+                #[cfg(not(debug_assertions))]
+                {
+                    let _store = $store;
+                    unimplemented!("sled state store should never be used in release mode");
+                }
+            }
+
+            StateStoreImpl::HummockStateStore($store) => $body,
+
+            StateStoreImpl::HummockStateStoreV1($store) => $body
+        }
+    }};
+}
+
+
+#[cfg(feature = "rocksdb-local")]
 #[macro_export]
 macro_rules! dispatch_state_store {
     ($impl:expr, $store:ident, $body:tt) => {{
@@ -245,8 +289,8 @@ macro_rules! dispatch_state_store {
 
             StateStoreImpl::HummockStateStore($store) => $body,
 
-            StateStoreImpl::HummockStateStoreV1($store) => $body,
-            #[cfg(feature = "rocksdb-local")]
+            StateStoreImpl::HummockStateStoreV1($store) => $body
+
             StateStoreImpl::RocksDBStateStore($store) => $body,
         }
     }};

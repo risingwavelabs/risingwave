@@ -10,6 +10,7 @@ repository = { workspace = true }
 [features]
 static-link = ["workspace-config/enable-static-link"]
 static-log-level = ["workspace-config/enable-static-log-level"]
+enable-rocksdb-local = ["workspace-config/enable-rocksdb-local"]
 
 [dependencies]
 anyhow = "1"
