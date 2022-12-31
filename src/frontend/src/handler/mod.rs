@@ -51,7 +51,7 @@ pub mod drop_source;
 pub mod drop_table;
 pub mod drop_user;
 mod drop_view;
-mod explain;
+pub mod explain;
 mod flush;
 pub mod handle_privilege;
 pub mod privilege;

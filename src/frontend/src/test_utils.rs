@@ -158,9 +158,10 @@ impl LocalFrontend {
     }
 }
 
-pub async fn get_explain_output(sql: &str, session: Arc<SessionImpl>) -> String {
-    let mut rsp = session.run_statement(sql, false).await.unwrap();
-    assert_eq!(rsp.get_stmt_type(), StatementType::EXPLAIN);
+pub async fn get_explain_output(mut rsp: RwPgResponse) -> String {
+    if rsp.get_stmt_type() != StatementType::EXPLAIN {
+        panic!("RESPONSE INVALID: {rsp:?}");
+    }
     let mut res = String::new();
     #[for_await]
     for row_set in rsp.values_stream() {

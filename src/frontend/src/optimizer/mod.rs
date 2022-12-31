@@ -417,6 +417,8 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
+        ctx.store_logical(plan.explain_to_string().unwrap());
+
         Ok(plan)
     }
 
