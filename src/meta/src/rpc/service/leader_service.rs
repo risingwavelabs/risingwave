@@ -37,10 +37,6 @@ impl LeaderService for LeaderServiceImpl {
         &self,
         _request: Request<LeaderRequest>,
     ) -> Result<Response<LeaderResponse>, Status> {
-        // service never called
-
-        // TODO: change request. Need only a simple ping
-        // let req = request.into_inner();
         let leader_info = self.leader_rx.borrow().0.clone();
         let leader_addr = leader_info_to_host_addr(leader_info);
         let leader_address = HostAddress {
