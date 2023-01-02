@@ -560,7 +560,49 @@ mod tests {
         assert_eq!(DecimalArray::from(&arrow), array);
     }
     #[test]
-    fn struct_array() {}
+    fn struct_array() {
+
+        // Empty array - risingwave to arrow conversion.
+        let test_arr = StructArray::from_slices(&[true, false, true, false], vec![], vec![]);
+        assert_eq!(arrow_array::Array::len(&arrow_array::StructArray::from(&test_arr)), 0);
+
+        // Empty array - arrow to risingwave conversion.
+        let test_arr_2 = arrow_array::StructArray::from(vec![]);
+        assert_eq!(StructArray::from(&test_arr_2).len(), 0);
+        
+
+        // Struct array with primitive types. arrow to risingwave conversion.
+        let test_arrow_struct_array = arrow_array::StructArray::try_from(vec![
+            (
+                "a",
+                Arc::new(arrow_array::BooleanArray::from(vec![Some(false), Some(false), Some(true), None])) as arrow_array::ArrayRef,
+            ), 
+            (
+                "b",
+                Arc::new(arrow_array::Int32Array::from(vec![Some(42), Some(28), Some(19), None])) as arrow_array::ArrayRef
+            ),
+        ]).unwrap();
+        let actual_risingwave_struct_array = StructArray::from(&test_arrow_struct_array);
+        let expected_risingwave_struct_array  = StructArray::from_slices_with_field_names(
+            &[true, true, true, false],
+            vec![
+                array! { BoolArray, [Some(false), Some(false), Some(true), None]}.into(),
+                array! { I32Array, [Some(42), Some(28), Some(19), None] }.into(),
+            ],
+            vec![DataType::Boolean, DataType::INT32],
+            vec![String::from("a"), String::from("b")]
+        );
+
+        // Test for value equivalence.
+        for (actual_data, expected_data) in actual_risingwave_struct_array.iter().zip_eq(expected_risingwave_struct_array.iter()){
+            assert_eq!(actual_data, expected_data);
+        }
+        
+        // Test for field name equivalence.
+        for (actual_name, expected_name) in actual_risingwave_struct_array.children_names().iter().zip_eq(expected_risingwave_struct_array.children_names()){
+            assert_eq!(actual_name, expected_name);
+        }
+    }
 
     #[test]
     fn list() {
