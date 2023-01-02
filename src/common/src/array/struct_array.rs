@@ -281,8 +281,17 @@ impl StructArray {
         &self.children_type
     }
 
+    // returns a vector containing a reference to the arrayimpl.
+    pub fn field_arrays(&self) -> Vec<&ArrayImpl> {
+        self.children.iter().map(|f| &(**f)).collect()
+    }
+
     pub fn field_at(&self, index: usize) -> ArrayRef {
         self.children[index].clone()
+    }
+
+    pub fn children_names(&self) -> &[String] {
+        &self.children_names
     }
 
     pub fn from_slices(

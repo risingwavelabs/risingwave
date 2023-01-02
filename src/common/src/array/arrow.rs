@@ -13,10 +13,12 @@
 // limitations under the License.
 
 //! Converts between arrays and Apache Arrow arrays.
-
+use arrow_schema::Field;
 use chrono::{NaiveDateTime, NaiveTime};
+use itertools::Itertools;
 
 use super::*;
+use crate::types::struct_type::StructType;
 
 /// Implement bi-directional `From` between `ArrayImpl` and `arrow_array::ArrayRef`.
 macro_rules! converts_generic {
@@ -95,6 +97,47 @@ impl From<&arrow_schema::DataType> for DataType {
             Decimal128(_, _) => Self::Decimal,
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
+    }
+}
+
+impl From<&DataType> for arrow_schema::DataType {
+    fn from(value: &DataType) -> Self {
+        match value {
+            DataType::Boolean => Self::Boolean,
+            DataType::Int16 => Self::Int16,
+            DataType::Int32 => Self::Int32,
+            DataType::Int64 => Self::Int64,
+            DataType::Float32 => Self::Float32,
+            DataType::Float64 => Self::Float64,
+            DataType::Date => Self::Date32,
+            DataType::Timestamp => Self::Timestamp(arrow_schema::TimeUnit::Millisecond, None),
+            DataType::Time => Self::Time64(arrow_schema::TimeUnit::Millisecond),
+            DataType::Interval => Self::Interval(arrow_schema::IntervalUnit::DayTime),
+            DataType::Varchar => Self::Utf8,
+            DataType::Bytea => Self::Binary,
+            DataType::Decimal => Self::Decimal128(0, 0),
+            DataType::Struct(struct_type) => Self::Struct(get_field_vector_from_struct_type(struct_type)),
+            DataType::List {datatype} => Self::List(Box::new(Field::new("", arrow_schema::DataType::from(&(**datatype)), true))),
+            _ => todo!("Unsupported arrow data type: {value:?}"),
+        }
+    }
+}
+
+fn get_field_vector_from_struct_type(struct_type: &StructType) -> Vec<Field> {
+    // Check for length equality between field_name vector and datatype vector.
+    if struct_type.field_names.len() != struct_type.fields.len() {
+        return struct_type
+            .fields
+            .iter()
+            .map(|f| Field::new("", arrow_schema::DataType::from(f), true))
+            .collect();
+    } else {
+        return struct_type
+            .fields
+            .iter()
+            .zip_eq(struct_type.field_names.clone())
+            .map(|(f, f_name)| Field::new(f_name, arrow_schema::DataType::from(f), true))
+            .collect();
     }
 }
 
@@ -372,6 +415,29 @@ impl From<&arrow_array::ListArray> for ListArray {
     fn from(array: &arrow_array::ListArray) -> Self {
         let iter = array.iter().map(|o| o.map(|a| ArrayImpl::from(&a)));
         ListArray::from_iter(iter, (&array.value_type()).into())
+    }
+}
+
+impl From<&StructArray> for arrow_array::StructArray {
+    fn from(array: &StructArray) -> Self {
+        let struct_data_vector: Vec<(arrow_schema::Field, arrow_array::ArrayRef)>;
+        if array.children_names().len() != array.children_array_types().len(){
+            struct_data_vector = array
+            .field_arrays()
+            .iter()
+            .zip_eq(array.children_array_types())
+            .map(|(arr, datatype)| (Field::new("", arrow_schema::DataType::from(datatype), true), arrow_array::ArrayRef::from(*arr)))
+            .collect();
+        }else{
+            struct_data_vector = array
+            .field_arrays()
+            .iter()
+            .zip_eq(array.children_array_types())
+            .zip_eq(array.children_names())
+            .map(|(arr_meta_data, field_name)| (Field::new(field_name, arrow_schema::DataType::from(arr_meta_data.1), true), arrow_array::ArrayRef::from(*arr_meta_data.0)))
+            .collect();
+        }
+        arrow_array::StructArray::from(struct_data_vector)
     }
 }
 
