@@ -485,10 +485,6 @@ mod tests {
         reported_leader_addr.first().unwrap().clone()
     }
 
-    // TODO
-    // FIXME: Leader svc test: Delete lease and/or leader info after PR is merged
-    // https://github.com/risingwavelabs/risingwave/pull/7022
-
     /// Adding nodes should not cause leader failover
     #[tokio::test]
     async fn test_leader_svc_add_nodes() {
