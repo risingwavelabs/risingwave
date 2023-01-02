@@ -460,6 +460,9 @@ mod tests {
         Some(reported_leader_addr)
     }
 
+    /// Ping leader service for `number_of_nodes` meta leader nodes, starting at `meta_port`,
+    /// `meta_port + 1`, ...
+    ///
     /// ## Returns
     /// The leader node on which all meta nodes agree
     /// Panics if not all nodes agree
