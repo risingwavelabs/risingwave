@@ -76,7 +76,7 @@ impl ArrayBuilder for StructArrayBuilder {
                 bitmap: BitmapBuilder::with_capacity(capacity),
                 children_array,
                 children_type: children,
-                children_names: children_names,
+                children_names,
                 len: 0,
             }
         } else {
@@ -233,7 +233,7 @@ impl Array for StructArray {
             capacity,
             ArrayMeta::Struct {
                 children: self.children_type.clone(),
-                children_names: self.children_names.clone().into(),
+                children_names: self.children_names.clone(),
             },
         );
         ArrayBuilderImpl::Struct(array_builder)

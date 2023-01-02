@@ -116,8 +116,14 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Varchar => Self::Utf8,
             DataType::Bytea => Self::Binary,
             DataType::Decimal => Self::Decimal128(0, 0),
-            DataType::Struct(struct_type) => Self::Struct(get_field_vector_from_struct_type(struct_type)),
-            DataType::List {datatype} => Self::List(Box::new(Field::new("", arrow_schema::DataType::from(&(**datatype)), true))),
+            DataType::Struct(struct_type) => {
+                Self::Struct(get_field_vector_from_struct_type(struct_type))
+            }
+            DataType::List { datatype } => Self::List(Box::new(Field::new(
+                "",
+                arrow_schema::DataType::from(&(**datatype)),
+                true,
+            ))),
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
     }
@@ -420,23 +426,37 @@ impl From<&arrow_array::ListArray> for ListArray {
 
 impl From<&StructArray> for arrow_array::StructArray {
     fn from(array: &StructArray) -> Self {
-        let struct_data_vector: Vec<(arrow_schema::Field, arrow_array::ArrayRef)>;
-        if array.children_names().len() != array.children_array_types().len(){
-            struct_data_vector = array
-            .field_arrays()
-            .iter()
-            .zip_eq(array.children_array_types())
-            .map(|(arr, datatype)| (Field::new("", arrow_schema::DataType::from(datatype), true), arrow_array::ArrayRef::from(*arr)))
-            .collect();
-        }else{
-            struct_data_vector = array
-            .field_arrays()
-            .iter()
-            .zip_eq(array.children_array_types())
-            .zip_eq(array.children_names())
-            .map(|(arr_meta_data, field_name)| (Field::new(field_name, arrow_schema::DataType::from(arr_meta_data.1), true), arrow_array::ArrayRef::from(*arr_meta_data.0)))
-            .collect();
-        }
+        let struct_data_vector: Vec<(arrow_schema::Field, arrow_array::ArrayRef)> =
+            if array.children_names().len() != array.children_array_types().len() {
+                array
+                    .field_arrays()
+                    .iter()
+                    .zip_eq(array.children_array_types())
+                    .map(|(arr, datatype)| {
+                        (
+                            Field::new("", arrow_schema::DataType::from(datatype), true),
+                            arrow_array::ArrayRef::from(*arr),
+                        )
+                    })
+                    .collect()
+            } else {
+                array
+                    .field_arrays()
+                    .iter()
+                    .zip_eq(array.children_array_types())
+                    .zip_eq(array.children_names())
+                    .map(|(arr_meta_data, field_name)| {
+                        (
+                            Field::new(
+                                field_name,
+                                arrow_schema::DataType::from(arr_meta_data.1),
+                                true,
+                            ),
+                            arrow_array::ArrayRef::from(*arr_meta_data.0),
+                        )
+                    })
+                    .collect()
+            };
         arrow_array::StructArray::from(struct_data_vector)
     }
 }
@@ -450,16 +470,12 @@ impl From<&arrow_array::StructArray> for StructArray {
         match arrow_array::Array::data_type(&array) {
             arrow_schema::DataType::Struct(fields) => StructArray::from_slices_with_field_names(
                 &(null_bitmap),
-                array.columns().iter().map(|f| ArrayImpl::from(f)).collect(),
+                array.columns().iter().map(ArrayImpl::from).collect(),
                 fields
                     .iter()
                     .map(|f| DataType::from(f.data_type()))
                     .collect(),
-                array
-                    .column_names()
-                    .into_iter()
-                    .map(|s| String::from(s))
-                    .collect(),
+                array.column_names().into_iter().map(String::from).collect(),
             ),
             _ => panic!("nested field types cannot be determined."),
         }
@@ -561,45 +577,64 @@ mod tests {
     }
     #[test]
     fn struct_array() {
-
         // Empty array - risingwave to arrow conversion.
         let test_arr = StructArray::from_slices(&[true, false, true, false], vec![], vec![]);
-        assert_eq!(arrow_array::Array::len(&arrow_array::StructArray::from(&test_arr)), 0);
+        assert_eq!(
+            arrow_array::Array::len(&arrow_array::StructArray::from(&test_arr)),
+            0
+        );
 
         // Empty array - arrow to risingwave conversion.
         let test_arr_2 = arrow_array::StructArray::from(vec![]);
         assert_eq!(StructArray::from(&test_arr_2).len(), 0);
-        
 
         // Struct array with primitive types. arrow to risingwave conversion.
         let test_arrow_struct_array = arrow_array::StructArray::try_from(vec![
             (
                 "a",
-                Arc::new(arrow_array::BooleanArray::from(vec![Some(false), Some(false), Some(true), None])) as arrow_array::ArrayRef,
-            ), 
+                Arc::new(arrow_array::BooleanArray::from(vec![
+                    Some(false),
+                    Some(false),
+                    Some(true),
+                    None,
+                ])) as arrow_array::ArrayRef,
+            ),
             (
                 "b",
-                Arc::new(arrow_array::Int32Array::from(vec![Some(42), Some(28), Some(19), None])) as arrow_array::ArrayRef
+                Arc::new(arrow_array::Int32Array::from(vec![
+                    Some(42),
+                    Some(28),
+                    Some(19),
+                    None,
+                ])) as arrow_array::ArrayRef,
             ),
-        ]).unwrap();
+        ])
+        .unwrap();
         let actual_risingwave_struct_array = StructArray::from(&test_arrow_struct_array);
-        let expected_risingwave_struct_array  = StructArray::from_slices_with_field_names(
+        let expected_risingwave_struct_array = StructArray::from_slices_with_field_names(
             &[true, true, true, false],
             vec![
                 array! { BoolArray, [Some(false), Some(false), Some(true), None]}.into(),
                 array! { I32Array, [Some(42), Some(28), Some(19), None] }.into(),
             ],
             vec![DataType::Boolean, DataType::INT32],
-            vec![String::from("a"), String::from("b")]
+            vec![String::from("a"), String::from("b")],
         );
 
         // Test for value equivalence.
-        for (actual_data, expected_data) in actual_risingwave_struct_array.iter().zip_eq(expected_risingwave_struct_array.iter()){
+        for (actual_data, expected_data) in actual_risingwave_struct_array
+            .iter()
+            .zip_eq(expected_risingwave_struct_array.iter())
+        {
             assert_eq!(actual_data, expected_data);
         }
-        
+
         // Test for field name equivalence.
-        for (actual_name, expected_name) in actual_risingwave_struct_array.children_names().iter().zip_eq(expected_risingwave_struct_array.children_names()){
+        for (actual_name, expected_name) in actual_risingwave_struct_array
+            .children_names()
+            .iter()
+            .zip_eq(expected_risingwave_struct_array.children_names())
+        {
             assert_eq!(actual_name, expected_name);
         }
     }

@@ -394,7 +394,7 @@ impl From<BytesArray> for ArrayImpl {
 /// * `ArrayImpl -> &Array` with `impl.as_int16()`.
 /// * `ArrayImpl -> Array` with `impl.into_int16()`.
 /// * `&ArrayImpl -> &Array` with `From` trait.
-/// * `ArrayImpl -> Array' with `From` trait.
+/// * `ArrayImpl -> Array` with `From` trait.
 /// * `ArrayBuilder -> ArrayBuilderImpl` with `From` trait.
 macro_rules! impl_convert {
     ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
