@@ -679,28 +679,7 @@ impl ArrayImpl {
 impl ArrayBuilderImpl {
     /// Create an array builder from given type.
     pub fn from_type(datatype: &DataType, capacity: usize) -> Self {
-        match datatype {
-            DataType::Int16 => Self::Int16(I16ArrayBuilder::new(capacity)),
-            DataType::Int32 => Self::Int32(I32ArrayBuilder::new(capacity)),
-            DataType::Int64 => Self::Int64(I64ArrayBuilder::new(capacity)),
-            DataType::Float32 => Self::Float32(F32ArrayBuilder::new(capacity)),
-            DataType::Float64 => Self::Float64(F64ArrayBuilder::new(capacity)),
-            DataType::Boolean => Self::Bool(BoolArrayBuilder::new(capacity)),
-            DataType::Varchar => Self::Utf8(Utf8ArrayBuilder::new(capacity)),
-            DataType::Decimal => Self::Decimal(DecimalArrayBuilder::new(capacity)),
-            DataType::Date => Self::NaiveDate(NaiveDateArrayBuilder::new(capacity)),
-            DataType::Time => Self::NaiveTime(NaiveTimeArrayBuilder::new(capacity)),
-            DataType::Timestamp => Self::NaiveDateTime(NaiveDateTimeArrayBuilder::new(capacity)),
-            DataType::Timestampz => Self::Int64(I64ArrayBuilder::new(capacity)),
-            DataType::Interval => Self::Interval(IntervalArrayBuilder::new(capacity)),
-            DataType::Struct { .. } => {
-                Self::Struct(StructArrayBuilder::with_meta(capacity, datatype.into()))
-            }
-            DataType::List { .. } => {
-                Self::List(ListArrayBuilder::with_meta(capacity, datatype.into()))
-            }
-            DataType::Bytea => Self::Bytea(BytesArrayBuilder::new(capacity)),
-        }
+        datatype.create_array_builder(capacity)
     }
 }
 
