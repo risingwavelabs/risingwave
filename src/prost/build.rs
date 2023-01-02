@@ -32,6 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "expr",
         "health",
         "hummock",
+        "leader",
         "meta",
         "monitor_service",
         "monitor_service",

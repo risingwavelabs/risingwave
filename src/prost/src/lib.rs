@@ -78,6 +78,9 @@ pub mod backup_service;
 #[cfg_attr(madsim, path = "sim/health.rs")]
 pub mod health;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/leader.rs")]
+pub mod leader;
+#[rustfmt::skip]
 #[path = "connector_service.serde.rs"]
 pub mod connector_service_serde;
 #[rustfmt::skip]
@@ -134,10 +137,6 @@ pub mod monitor_service_serde;
 #[rustfmt::skip]
 #[path = "backup_service.serde.rs"]
 pub mod backup_service_serde;
-
-#[cfg_attr(madsim, path = "sim/leader.rs")]
-pub mod leader;
-#[rustfmt::skip]
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ProstFieldNotFound(pub &'static str);
