@@ -79,7 +79,7 @@ pub fn gen_create_mv_plan(
     let definition = query.to_string();
 
     let bound = {
-        let mut binder = Binder::new(session);
+        let mut binder = Binder::new_for_stream(session);
         binder.bind_query(query)?
     };
 

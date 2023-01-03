@@ -290,7 +290,10 @@ impl Binder {
             // TODO: choose which pg version we should return.
             "version" => return Ok(ExprImpl::literal_varchar("PostgreSQL 13.9-RW".to_string())),
             // non-deterministic
-            "now" => ExprType::Now,
+            "now" => {
+                self.ensure_now_function_allowed()?;
+                ExprType::Now
+            }
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported function: {:?}", function_name),
@@ -488,6 +491,22 @@ impl Binder {
                     .into());
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn ensure_now_function_allowed(&self) -> Result<()> {
+        if self.in_create_mv
+            && !matches!(
+                self.context.clause,
+                Some(Clause::Where) | Some(Clause::Having)
+            )
+        {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "For creation of MV, `now` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
+                self.context.clause
+            ))
+            .into());
         }
         Ok(())
     }
