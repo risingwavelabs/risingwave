@@ -157,22 +157,39 @@ impl TableFunction {
                     .into());
                 }
                 if let Some(flag) = args.get(2) {
-                    if let ExprImpl::Literal(lit) = flag &&
-                      let Some(ScalarImpl::Utf8(flag)) = lit.get_data() {
-                        if flag.as_ref() != "g" {
-                            return Err(ErrorCode::NotImplemented(
-                                "flag in regexp_matches".to_string(),
-                                4545.into()
-                            ).into());
+                    match flag {
+                        ExprImpl::Literal(flag) => {
+                            match flag.get_data() {
+                                Some(flag) => {
+                                    let ScalarImpl::Utf8(flag) = flag else {
+                                        return Err(ErrorCode::BindError(
+                                            "flag in regexp_matches must be a literal string".to_string(),
+                                        ).into());
+                                    };
+                                    for c in flag.chars() {
+                                        if !"icg".contains(c) {
+                                            return Err(ErrorCode::NotImplemented(
+                                                format!(
+                                                    "invalid regular expression option: \"{c}\""
+                                                ),
+                                                None.into(),
+                                            )
+                                            .into());
+                                        }
+                                    }
+                                }
+                                None => {
+                                    // flag is NULL. Will return NULL.
+                                }
+                            }
                         }
-                        // Currently when 'g' is not present, regexp_matches will also return multiple rows.
-                        // This is intuitive, but differs from PG's default behavior.
-                    } else {
-                        return Err(ErrorCode::BindError(
-                            "flag in regexp_matches should be a constant string".to_string(),
-                        )
-                        .into())
-                    };
+                        _ => {
+                            return Err(ErrorCode::BindError(
+                                "flag in regexp_matches must be a literal string".to_string(),
+                            )
+                            .into())
+                        }
+                    }
                 }
                 Ok(TableFunction {
                     args,

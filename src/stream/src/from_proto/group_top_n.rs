@@ -20,9 +20,9 @@ use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::stream_plan::GroupTopNNode;
 
 use super::*;
-use crate::cache::LruManagerRef;
 use crate::common::table::state_table::StateTable;
-use crate::executor::{ActorContextRef, GroupTopNExecutor, PkIndices};
+use crate::executor::{ActorContextRef, GroupTopNExecutor};
+use crate::task::AtomicU64Ref;
 
 pub struct GroupTopNExecutorBuilder;
 
@@ -44,22 +44,22 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
-        let order_pairs = table.get_pk().iter().map(OrderPair::from_prost).collect();
+        let storage_key = table.get_pk().iter().map(OrderPair::from_prost).collect();
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let group_key_types = input.schema().data_types()[..group_by.len()].to_vec();
+        let order_by = node.order_by.iter().map(OrderPair::from_prost).collect();
 
+        assert_eq!(&params.pk_indices, input.pk_indices());
         let args = GroupTopNExecutorDispatcherArgs {
             input,
             ctx: params.actor_context,
-            order_pairs,
+            storage_key,
             offset_and_limit: (node.offset as usize, node.limit as usize),
-            order_by_len: node.order_by_len as usize,
-            pk_indices: params.pk_indices,
+            order_by,
             executor_id: params.executor_id,
             group_by,
             state_table,
-            lru_manager: stream.context.lru_manager.clone(),
-            cache_size: 1 << 16,
+            watermark_epoch: stream.get_watermark_epoch(),
             with_ties: node.with_ties,
             group_key_types,
         };
@@ -70,15 +70,13 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
 struct GroupTopNExecutorDispatcherArgs<S: StateStore> {
     input: BoxedExecutor,
     ctx: ActorContextRef,
-    order_pairs: Vec<OrderPair>,
+    storage_key: Vec<OrderPair>,
     offset_and_limit: (usize, usize),
-    order_by_len: usize,
-    pk_indices: PkIndices,
+    order_by: Vec<OrderPair>,
     executor_id: u64,
     group_by: Vec<usize>,
     state_table: StateTable<S>,
-    lru_manager: Option<LruManagerRef>,
-    cache_size: usize,
+    watermark_epoch: AtomicU64Ref,
     with_ties: bool,
     group_key_types: Vec<DataType>,
 }
@@ -91,29 +89,25 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
             true => Ok(GroupTopNExecutor::<K, S, true>::new(
                 self.input,
                 self.ctx,
-                self.order_pairs,
+                self.storage_key,
                 self.offset_and_limit,
-                self.order_by_len,
-                self.pk_indices,
+                self.order_by,
                 self.executor_id,
                 self.group_by,
                 self.state_table,
-                self.lru_manager,
-                self.cache_size,
+                self.watermark_epoch,
             )?
             .boxed()),
             false => Ok(GroupTopNExecutor::<K, S, false>::new(
                 self.input,
                 self.ctx,
-                self.order_pairs,
+                self.storage_key,
                 self.offset_and_limit,
-                self.order_by_len,
-                self.pk_indices,
+                self.order_by,
                 self.executor_id,
                 self.group_by,
                 self.state_table,
-                self.lru_manager,
-                self.cache_size,
+                self.watermark_epoch,
             )?
             .boxed()),
         }

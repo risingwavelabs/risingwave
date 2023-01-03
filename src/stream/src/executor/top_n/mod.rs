@@ -27,4 +27,4 @@ pub use group_top_n::GroupTopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
 pub use top_n_cache::{CacheKey, TopNCache};
 pub use top_n_plain::TopNExecutor;
-pub use utils::serialize_pk_to_cache_key;
+pub use utils::{create_cache_key_serde, serialize_pk_to_cache_key, CacheKeySerde};

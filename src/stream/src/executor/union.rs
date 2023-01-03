@@ -67,6 +67,10 @@ impl Executor for UnionExecutor {
     fn identity(&self) -> &str {
         &self.info.identity
     }
+
+    fn info(&self) -> ExecutorInfo {
+        self.info.clone()
+    }
 }
 
 /// Merges input streams and aligns with barriers.

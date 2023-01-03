@@ -38,7 +38,7 @@ pub fn tumble_start_date_time(
 }
 
 #[inline(always)]
-pub fn tumble_start_timestampz(time: i64, window: IntervalUnit) -> Result<i64> {
+pub fn tumble_start_timestamptz(time: i64, window: IntervalUnit) -> Result<i64> {
     // Actually directly calls into the helper `tm_diff_bin`. But we keep the shared utility and
     // enduser function separate.
     let diff = time;

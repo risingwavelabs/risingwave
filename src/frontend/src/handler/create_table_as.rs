@@ -15,7 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{ObjectName, Query, Statement};
+use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::{BoundSetExpr, BoundStatement};
@@ -45,7 +45,14 @@ pub async fn handle_create_as(
     table_name: ObjectName,
     if_not_exists: bool,
     query: Box<Query>,
+    columns: Vec<ColumnDef>,
 ) -> Result<RwPgResponse> {
+    if columns.iter().any(|column| column.data_type.is_some()) {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "Should not specify data type in CREATE TABLE AS".into(),
+        )
+        .into());
+    }
     let session = handler_args.session.clone();
 
     if let Err(e) = session.check_relation_name_duplicated(table_name.clone()) {
@@ -60,7 +67,7 @@ pub async fn handle_create_as(
     }
 
     // Generate catalog descs from query
-    let column_descs: Vec<_> = {
+    let mut column_descs: Vec<_> = {
         let mut binder = Binder::new(&session);
         let bound = binder.bind(Statement::Query(query.clone()))?;
         if let BoundStatement::Query(query) = bound {
@@ -86,6 +93,17 @@ pub async fn handle_create_as(
             unreachable!()
         }
     };
+
+    if columns.len() > column_descs.len() {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "too many column names were specified".to_string(),
+        )
+        .into());
+    }
+
+    columns.iter().enumerate().for_each(|(idx, column)| {
+        column_descs[idx].name = column.name.real_value();
+    });
 
     let (graph, source, table) = {
         let context = OptimizerContext::new_with_handler_args(handler_args.clone());

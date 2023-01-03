@@ -20,8 +20,7 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::iterator::ArrayRawIter;
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta};
+use super::{Array, ArrayBuilder, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
@@ -35,9 +34,7 @@ pub struct BytesArray {
 
 impl Array for BytesArray {
     type Builder = BytesArrayBuilder;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = Box<[u8]>;
-    type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = &'a [u8];
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> &[u8] {
@@ -46,33 +43,8 @@ impl Array for BytesArray {
         self.data.get_unchecked(begin..end)
     }
 
-    fn value_at(&self, idx: usize) -> Option<&[u8]> {
-        if !self.is_null(idx) {
-            // SAFETY: The idx is checked in `is_null` and the offset should always be valid.
-            Some(unsafe { self.raw_value_at_unchecked(idx) })
-        } else {
-            None
-        }
-    }
-
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<&[u8]> {
-        if !self.is_null_unchecked(idx) {
-            Some(self.raw_value_at_unchecked(idx))
-        } else {
-            None
-        }
-    }
-
     fn len(&self) -> usize {
         self.offset.len() - 1
-    }
-
-    fn iter(&self) -> ArrayIterator<'_, Self> {
-        ArrayIterator::new(self)
-    }
-
-    fn raw_iter(&self) -> Self::RawIter<'_> {
-        ArrayRawIter::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -138,18 +110,6 @@ impl Array for BytesArray {
 }
 
 impl BytesArray {
-    /// Retrieve the ownership of the single bytes value.
-    ///
-    /// Panics if there're multiple or no values.
-    pub fn into_single_value(self) -> Option<Box<[u8]>> {
-        assert_eq!(self.len(), 1);
-        if !self.is_null(0) {
-            Some(self.data.into_boxed_slice())
-        } else {
-            None
-        }
-    }
-
     pub(super) fn data(&self) -> &[u8] {
         &self.data
     }
@@ -285,13 +245,10 @@ pub struct BytesWriter<'a> {
     builder: &'a mut BytesArrayBuilder,
 }
 
-pub struct WrittenGuard(());
-
 impl<'a> BytesWriter<'a> {
     /// `write_ref` will consume `BytesWriter` and pass the ownership of `builder` to `BytesGuard`.
-    pub fn write_ref(self, value: &[u8]) -> WrittenGuard {
+    pub fn write_ref(self, value: &[u8]) {
         self.builder.append(Some(value));
-        WrittenGuard(())
     }
 
     /// `begin` will create a `PartialBytesWriter`, which allow multiple appendings to create a new
@@ -318,10 +275,8 @@ impl<'a> PartialBytesWriter<'a> {
 
     /// `finish` will be called while the entire record is written.
     /// Exactly one new record was appended and the `builder` can be safely used.
-    pub fn finish(self) -> WrittenGuard {
+    pub fn finish(self) {
         self.builder.finish_partial();
-
-        WrittenGuard(())
     }
 }
 

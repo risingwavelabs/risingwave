@@ -27,7 +27,8 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
 
-use crate::test_utils::{get_test_notification_client, HummockV2MixedStateStore};
+use crate::get_test_notification_client;
+use crate::test_utils::HummockV2MixedStateStore;
 
 #[tokio::test]
 #[ignore]

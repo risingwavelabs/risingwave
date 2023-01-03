@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::mem::swap;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -29,6 +30,7 @@ use crate::source::{BoxSourceStream, Column, ConnectorState, SplitImpl};
 pub struct KafkaSplitReader {
     consumer: StreamConsumer<DefaultConsumerContext>,
     stop_offset: Option<i64>,
+    bytes_per_second: usize,
 }
 
 #[async_trait]
@@ -94,9 +96,17 @@ impl SplitReader for KafkaSplitReader {
             consumer.assign(&tpl)?;
         }
 
+        let bytes_per_second = match properties.bytes_per_second {
+            None => usize::MAX,
+            Some(number) => number
+                .parse::<usize>()
+                .expect("bytes.per.second expect usize"),
+        };
+
         Ok(Self {
             consumer,
             stop_offset,
+            bytes_per_second,
         })
     }
 
@@ -112,12 +122,19 @@ impl KafkaSplitReader {
             yield Vec::new();
             return Ok(());
         }
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        interval.tick().await;
+        let mut bytes_current_second = 0;
+        let mut res = Vec::with_capacity(MAX_CHUNK_SIZE);
         #[for_await]
         'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(MAX_CHUNK_SIZE) {
-            let mut res = Vec::with_capacity(msgs.len());
             for msg in msgs {
                 let msg = msg?;
                 let cur_offset = msg.offset();
+                bytes_current_second += match &msg.payload() {
+                    None => 0,
+                    Some(payload) => payload.len(),
+                };
                 res.push(SourceMessage::from(msg));
                 if let Some(stop_offset) = self.stop_offset {
                     if cur_offset == stop_offset - 1 {
@@ -130,8 +147,23 @@ impl KafkaSplitReader {
                         break 'for_outer_loop;
                     }
                 }
+                // This judgement has to be put in the inner loop as `msgs` can be multiple ones.
+                if bytes_current_second > self.bytes_per_second {
+                    // swap to make compiler happy
+                    let mut cur = Vec::with_capacity(res.capacity());
+                    swap(&mut cur, &mut res);
+                    yield cur;
+                    interval.tick().await;
+                    bytes_current_second = 0;
+                    res.clear();
+                }
             }
-            yield res;
+            let mut cur = Vec::with_capacity(res.capacity());
+            swap(&mut cur, &mut res);
+            yield cur;
+            // don't clear `bytes_current_second` here as it is only related to `.tick()`.
+            // yield in the outer loop so that we can always guarantee that some messages are read
+            // every `MAX_CHUNK_SIZE`.
         }
     }
 }

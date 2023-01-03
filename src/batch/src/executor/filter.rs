@@ -15,7 +15,7 @@
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use risingwave_common::array::ArrayImpl::Bool;
-use risingwave_common::array::{Array, DataChunk};
+use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -61,9 +61,9 @@ impl FilterExecutor {
             let vis_array = self.expr.eval(&data_chunk)?;
 
             if let Bool(vis) = vis_array.as_ref() {
-                #[for_await]
-                for data_chunk in data_chunk_builder
-                    .trunc_data_chunk(data_chunk.with_visibility(vis.iter().collect()))
+                // TODO: should we yield masked data chunk directly?
+                for data_chunk in
+                    data_chunk_builder.append_chunk(data_chunk.with_visibility(vis.to_bitmap()))
                 {
                     yield data_chunk;
                 }

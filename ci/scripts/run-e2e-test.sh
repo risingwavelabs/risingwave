@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 # Exits as soon as any line fails.
 set -euo pipefail
@@ -83,13 +83,31 @@ if [[ "$RUN_META_BACKUP" -eq "1" ]]; then
     BACKUP_TEST_RW_ALL_IN_ONE="target/debug/risingwave" \
     RW_HUMMOCK_URL="hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001" \
     RW_META_ADDR="http://127.0.0.1:5690" \
+    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
     bash "${test_root}/run_all.sh"
     echo "--- Kill cluster"
     cargo make kill
 fi
 
+if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
+    echo "--- e2e, ci-delete-range-test"
+    cargo make clean-data
+    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+    cargo make ci-start ci-delete-range-test
+    buildkite-agent artifact download delete-range-test-"$profile" target/debug/
+    mv target/debug/delete-range-test-"$profile" target/debug/delete-range-test
+    chmod +x ./target/debug/delete-range-test
+
+    config_path=".risingwave/config/risingwave.toml"
+    ./target/debug/delete-range-test --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
+
+    echo "--- Kill cluster"
+    cargo make ci-kill
+fi
+
 if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     echo "--- e2e, ci-compaction-test, nexmark_q7"
+    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
     cargo make ci-start ci-compaction-test
     # Please make sure the regression is expected before increasing the timeout.
     sqllogictest -p 4566 -d dev './e2e_test/compaction/ingest_rows.slt'
@@ -119,6 +137,7 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     chmod +x ./target/debug/compaction-test
     # Use the config of ci-compaction-test for replay.
     config_path=".risingwave/config/risingwave.toml"
+    RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
     ./target/debug/compaction-test --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
 
     echo "--- Kill cluster"

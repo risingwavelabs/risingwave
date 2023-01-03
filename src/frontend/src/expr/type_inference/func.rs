@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::sync::LazyLock;
-
-use itertools::{iproduct, Itertools as _};
+use itertools::Itertools as _;
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{DataType, DataTypeName};
+use risingwave_common::types::{DataType, DataTypeName, ScalarImpl};
+pub use risingwave_expr::sig::func::*;
 
 use super::{align_types, cast_ok_base, CastContext};
 use crate::expr::type_inference::cast::align_array_and_element;
@@ -358,11 +356,44 @@ fn infer_type_for_special(
         ExprType::RegexpMatch => {
             ensure_arity!("regexp_match", 2 <= | inputs | <= 3);
             if inputs.len() == 3 {
-                return Err(ErrorCode::NotImplemented(
-                    "flag in regexp_match".to_string(),
-                    4545.into(),
-                )
-                .into());
+                match &inputs[2] {
+                    ExprImpl::Literal(flag) => {
+                        match flag.get_data() {
+                            Some(flag) => {
+                                let ScalarImpl::Utf8(flag) = flag else {
+                                    return Err(ErrorCode::BindError(
+                                        "flag in regexp_match must be a literal string".to_string(),
+                                    ).into());
+                                };
+                                for c in flag.chars() {
+                                    if c == 'g' {
+                                        return Err(ErrorCode::InvalidInputSyntax(
+                                            "regexp_match() does not support the \"global\" option. Use the regexp_matches function instead."
+                                                .to_string(),
+                                        )
+                                        .into());
+                                    }
+                                    if !"ic".contains(c) {
+                                        return Err(ErrorCode::NotImplemented(
+                                            format!("invalid regular expression option: \"{c}\""),
+                                            None.into(),
+                                        )
+                                        .into());
+                                    }
+                                }
+                            }
+                            None => {
+                                // flag is NULL. Will return NULL.
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(ErrorCode::BindError(
+                            "flag in regexp_match must be a literal string".to_string(),
+                        )
+                        .into())
+                    }
+                }
             }
             Ok(Some(DataType::List {
                 datatype: Box::new(DataType::Varchar),
@@ -468,7 +499,6 @@ fn infer_type_name<'a>(
     inputs: &[Option<DataTypeName>],
 ) -> Result<&'a FuncSign> {
     let candidates = sig_map
-        .0
         .get(&(func_type, inputs.len()))
         .map(std::ops::Deref::deref)
         .unwrap_or_default();
@@ -528,7 +558,7 @@ fn is_preferred(t: DataTypeName) -> bool {
     use DataTypeName as T;
     matches!(
         t,
-        T::Float64 | T::Boolean | T::Varchar | T::Timestampz | T::Interval
+        T::Float64 | T::Boolean | T::Varchar | T::Timestamptz | T::Interval
     )
 }
 
@@ -747,283 +777,10 @@ impl<'a> std::fmt::Debug for TypeDebug<'a> {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
-pub struct FuncSign {
-    pub func: ExprType,
-    pub inputs_type: Vec<DataTypeName>,
-    pub ret_type: DataTypeName,
-}
-
-#[derive(Default)]
-pub struct FuncSigMap(HashMap<(ExprType, usize), Vec<FuncSign>>);
-impl FuncSigMap {
-    fn insert(&mut self, func: ExprType, param_types: Vec<DataTypeName>, ret_type: DataTypeName) {
-        let arity = param_types.len();
-        let inputs_type = param_types.into_iter().map(Into::into).collect();
-        let sig = FuncSign {
-            func,
-            inputs_type,
-            ret_type,
-        };
-        self.0.entry((func, arity)).or_default().push(sig)
-    }
-}
-
-fn build_binary_cmp_funcs(map: &mut FuncSigMap, exprs: &[ExprType], args: &[DataTypeName]) {
-    for (e, lt, rt) in iproduct!(exprs, args, args) {
-        map.insert(*e, vec![*lt, *rt], DataTypeName::Boolean);
-    }
-}
-
-fn build_binary_atm_funcs(map: &mut FuncSigMap, exprs: &[ExprType], args: &[DataTypeName]) {
-    for e in exprs {
-        for (li, lt) in args.iter().enumerate() {
-            for (ri, rt) in args.iter().enumerate() {
-                let ret = if li <= ri { rt } else { lt };
-                map.insert(*e, vec![*lt, *rt], *ret);
-            }
-        }
-    }
-}
-
-fn build_unary_atm_funcs(map: &mut FuncSigMap, exprs: &[ExprType], args: &[DataTypeName]) {
-    for (e, arg) in iproduct!(exprs, args) {
-        map.insert(*e, vec![*arg], *arg);
-    }
-}
-
-fn build_commutative_funcs(
-    map: &mut FuncSigMap,
-    expr: ExprType,
-    arg0: DataTypeName,
-    arg1: DataTypeName,
-    ret: DataTypeName,
-) {
-    map.insert(expr, vec![arg0, arg1], ret);
-    map.insert(expr, vec![arg1, arg0], ret);
-}
-
-fn build_round_funcs(map: &mut FuncSigMap, expr: ExprType) {
-    map.insert(expr, vec![DataTypeName::Float64], DataTypeName::Float64);
-    map.insert(expr, vec![DataTypeName::Decimal], DataTypeName::Decimal);
-}
-
-/// This function builds type derived map for all built-in functions that take a fixed number
-/// of arguments.  They can be determined to have one or more type signatures since some are
-/// compatible with more than one type.
-/// Type signatures and arities of variadic functions are checked
-/// [elsewhere](crate::expr::FunctionCall::new).
-fn build_type_derive_map() -> FuncSigMap {
-    use {DataTypeName as T, ExprType as E};
-    let mut map = FuncSigMap::default();
-    let all_types = [
-        T::Boolean,
-        T::Int16,
-        T::Int32,
-        T::Int64,
-        T::Decimal,
-        T::Float32,
-        T::Float64,
-        T::Varchar,
-        T::Date,
-        T::Timestamp,
-        T::Timestampz,
-        T::Time,
-        T::Interval,
-    ];
-    let num_types = [
-        T::Int16,
-        T::Int32,
-        T::Int64,
-        T::Decimal,
-        T::Float32,
-        T::Float64,
-    ];
-
-    // logical expressions
-    for e in [E::Not, E::IsTrue, E::IsNotTrue, E::IsFalse, E::IsNotFalse] {
-        map.insert(e, vec![T::Boolean], T::Boolean);
-    }
-    for e in [E::And, E::Or] {
-        map.insert(e, vec![T::Boolean, T::Boolean], T::Boolean);
-    }
-    map.insert(E::BoolOut, vec![T::Boolean], T::Varchar);
-
-    // comparison expressions
-    for e in [E::IsNull, E::IsNotNull] {
-        for t in all_types {
-            map.insert(e, vec![t], T::Boolean);
-        }
-    }
-    let cmp_exprs = &[
-        E::Equal,
-        E::NotEqual,
-        E::LessThan,
-        E::LessThanOrEqual,
-        E::GreaterThan,
-        E::GreaterThanOrEqual,
-        E::IsDistinctFrom,
-        E::IsNotDistinctFrom,
-    ];
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &num_types);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Struct]);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Date, T::Timestamp, T::Timestampz]);
-    build_binary_cmp_funcs(&mut map, cmp_exprs, &[T::Time, T::Interval]);
-    for e in cmp_exprs {
-        for t in [T::Boolean, T::Varchar] {
-            map.insert(*e, vec![t, t], T::Boolean);
-        }
-    }
-
-    let unary_atm_exprs = &[E::Abs, E::Neg];
-
-    build_unary_atm_funcs(&mut map, unary_atm_exprs, &num_types);
-    build_binary_atm_funcs(
-        &mut map,
-        &[E::Add, E::Subtract, E::Multiply, E::Divide],
-        &[T::Int16, T::Int32, T::Int64, T::Decimal],
-    );
-    build_binary_atm_funcs(
-        &mut map,
-        &[E::Add, E::Subtract, E::Multiply, E::Divide],
-        &[T::Float32, T::Float64],
-    );
-    build_binary_atm_funcs(
-        &mut map,
-        &[E::Modulus],
-        &[T::Int16, T::Int32, T::Int64, T::Decimal],
-    );
-    map.insert(E::RoundDigit, vec![T::Decimal, T::Int32], T::Decimal);
-
-    // build bitwise operator
-    // bitwise operator
-    let integral_types = [T::Int16, T::Int32, T::Int64]; // reusable for and/or/xor/not
-
-    build_binary_atm_funcs(
-        &mut map,
-        &[E::BitwiseAnd, E::BitwiseOr, E::BitwiseXor],
-        &integral_types,
-    );
-
-    // Shift Operator is not using `build_binary_atm_funcs` because
-    // allowed rhs is different from allowed lhs
-    // return type is lhs rather than larger of the two
-    for (e, lt, rt) in iproduct!(
-        &[E::BitwiseShiftLeft, E::BitwiseShiftRight],
-        &integral_types,
-        &[T::Int16, T::Int32]
-    ) {
-        map.insert(*e, vec![*lt, *rt], *lt);
-    }
-
-    build_unary_atm_funcs(&mut map, &[E::BitwiseNot], &[T::Int16, T::Int32, T::Int64]);
-
-    build_round_funcs(&mut map, E::Round);
-    build_round_funcs(&mut map, E::Ceil);
-    build_round_funcs(&mut map, E::Floor);
-
-    // temporal expressions
-    for (base, delta) in [
-        (T::Date, T::Int32),
-        (T::Timestamp, T::Interval),
-        (T::Timestampz, T::Interval),
-        (T::Time, T::Interval),
-    ] {
-        build_commutative_funcs(&mut map, E::Add, base, delta, base);
-        map.insert(E::Subtract, vec![base, delta], base);
-        map.insert(E::Subtract, vec![base, base], delta);
-    }
-    map.insert(E::Add, vec![T::Interval, T::Interval], T::Interval);
-    map.insert(E::Subtract, vec![T::Interval, T::Interval], T::Interval);
-
-    // date + interval = timestamp, date - interval = timestamp
-    build_commutative_funcs(&mut map, E::Add, T::Date, T::Interval, T::Timestamp);
-    map.insert(E::Subtract, vec![T::Date, T::Interval], T::Timestamp);
-    // date + time = timestamp
-    build_commutative_funcs(&mut map, E::Add, T::Date, T::Time, T::Timestamp);
-    // interval * float8 = interval, interval / float8 = interval
-    for t in num_types {
-        build_commutative_funcs(&mut map, E::Multiply, T::Interval, t, T::Interval);
-        map.insert(E::Divide, vec![T::Interval, t], T::Interval);
-    }
-
-    for t in [T::Timestampz, T::Timestamp, T::Time, T::Date] {
-        map.insert(E::Extract, vec![T::Varchar, t], T::Decimal);
-    }
-    for t in [T::Timestamp, T::Date] {
-        map.insert(E::TumbleStart, vec![t, T::Interval], T::Timestamp);
-    }
-    map.insert(
-        E::TumbleStart,
-        vec![T::Timestampz, T::Interval],
-        T::Timestampz,
-    );
-    map.insert(E::ToTimestamp, vec![T::Float64], T::Timestampz);
-    map.insert(E::AtTimeZone, vec![T::Timestamp, T::Varchar], T::Timestampz);
-    map.insert(E::AtTimeZone, vec![T::Timestampz, T::Varchar], T::Timestamp);
-    map.insert(E::DateTrunc, vec![T::Varchar, T::Timestamp], T::Timestamp);
-    map.insert(
-        E::DateTrunc,
-        vec![T::Varchar, T::Timestampz, T::Varchar],
-        T::Timestampz,
-    );
-    map.insert(E::DateTrunc, vec![T::Varchar, T::Interval], T::Interval);
-
-    // string expressions
-    for e in [E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper, E::Md5] {
-        map.insert(e, vec![T::Varchar], T::Varchar);
-    }
-    for e in [E::Trim, E::Ltrim, E::Rtrim] {
-        map.insert(e, vec![T::Varchar, T::Varchar], T::Varchar);
-    }
-    for e in [E::Repeat, E::Substr] {
-        map.insert(e, vec![T::Varchar, T::Int32], T::Varchar);
-    }
-    map.insert(E::Substr, vec![T::Varchar, T::Int32, T::Int32], T::Varchar);
-    for e in [E::Replace, E::Translate] {
-        map.insert(e, vec![T::Varchar, T::Varchar, T::Varchar], T::Varchar);
-    }
-    map.insert(
-        E::Overlay,
-        vec![T::Varchar, T::Varchar, T::Int32],
-        T::Varchar,
-    );
-    map.insert(
-        E::Overlay,
-        vec![T::Varchar, T::Varchar, T::Int32, T::Int32],
-        T::Varchar,
-    );
-    for e in [
-        E::Length,
-        E::Ascii,
-        E::CharLength,
-        E::OctetLength,
-        E::BitLength,
-    ] {
-        map.insert(e, vec![T::Varchar], T::Int32);
-    }
-    map.insert(E::Position, vec![T::Varchar, T::Varchar], T::Int32);
-    map.insert(E::Like, vec![T::Varchar, T::Varchar], T::Boolean);
-    map.insert(
-        E::SplitPart,
-        vec![T::Varchar, T::Varchar, T::Int32],
-        T::Varchar,
-    );
-    // TODO: Support more `to_char` types.
-    map.insert(E::ToChar, vec![T::Timestamp, T::Varchar], T::Varchar);
-
-    map
-}
-
-static FUNC_SIG_MAP: LazyLock<FuncSigMap> = LazyLock::new(build_type_derive_map);
-
-/// The table of function signatures.
-pub fn func_sigs() -> impl Iterator<Item = &'static FuncSign> {
-    FUNC_SIG_MAP.0.values().flatten()
-}
-
 #[cfg(test)]
 mod tests {
+    use itertools::iproduct;
+
     use super::*;
 
     fn infer_type_v0(func_type: ExprType, inputs_type: Vec<DataType>) -> Result<DataType> {
@@ -1232,15 +989,15 @@ mod tests {
             (
                 "`top_matches` ranks by exact count then preferred count",
                 vec![
-                    vec![T::Float64, T::Float64, T::Float64, T::Timestampz], // 0 exact 3 preferred
-                    vec![T::Float64, T::Int32, T::Float32, T::Timestamp],    // 1 exact 1 preferred
-                    vec![T::Float32, T::Float32, T::Int32, T::Timestampz],   // 1 exact 0 preferred
-                    vec![T::Int32, T::Float64, T::Float32, T::Timestampz],   // 1 exact 1 preferred
-                    vec![T::Int32, T::Int16, T::Int32, T::Timestampz], // 2 exact 1 non-castable
-                    vec![T::Int32, T::Float64, T::Float32, T::Date],   // 1 exact 1 preferred
+                    vec![T::Float64, T::Float64, T::Float64, T::Timestamptz], /* 0 exact 3 preferred */
+                    vec![T::Float64, T::Int32, T::Float32, T::Timestamp], // 1 exact 1 preferred
+                    vec![T::Float32, T::Float32, T::Int32, T::Timestamptz], // 1 exact 0 preferred
+                    vec![T::Int32, T::Float64, T::Float32, T::Timestamptz], // 1 exact 1 preferred
+                    vec![T::Int32, T::Int16, T::Int32, T::Timestamptz],   // 2 exact 1 non-castable
+                    vec![T::Int32, T::Float64, T::Float32, T::Date],      // 1 exact 1 preferred
                 ],
                 &[Some(T::Int32), Some(T::Int32), Some(T::Int32), None] as &[_],
-                Ok(&[T::Int32, T::Float64, T::Float32, T::Timestampz] as &[_]),
+                Ok(&[T::Int32, T::Float64, T::Float32, T::Timestamptz] as &[_]),
             ),
             (
                 "Rule 4e fails and Rule 4f unique.",

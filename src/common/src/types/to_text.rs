@@ -12,17 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
+use std::fmt::{Result, Write};
 use std::num::FpCategory;
 
 use chrono::{TimeZone, Utc};
-use num_traits::ToPrimitive;
 
 use super::{DataType, DatumRef, ScalarRefImpl};
+use crate::for_all_scalar_variants;
 
 // Used to convert ScalarRef to text format
 pub trait ToText {
-    fn to_text_with_type(&self, ty: &DataType) -> String;
+    /// Write the text to the writer.
+    fn write<W: Write>(&self, f: &mut W) -> Result;
+
+    fn write_with_type<W: Write>(&self, _ty: &DataType, f: &mut W) -> Result;
+
+    fn to_text_with_type(&self, ty: &DataType) -> String {
+        let mut s = String::new();
+        self.write_with_type(ty, &mut s).unwrap();
+        s
+    }
+
     /// `to_text` is a special version of `to_text_with_type`, it convert the scalar to default type
     /// text. E.g. for Int64, it will convert to text as a Int64 type.
     /// We should prefer to use `to_text_with_type` because it's more clear and readable.
@@ -45,20 +55,24 @@ pub trait ToText {
     /// - `ScalarRefImpl::Struct` -> `DataType::Struct`
     ///
     /// Exception:
-    /// The scalar of `DataType::Timestampz` is the `ScalarRefImpl::Int64`.
-    fn to_text(&self) -> String;
+    /// The scalar of `DataType::Timestamptz` is the `ScalarRefImpl::Int64`.
+    fn to_text(&self) -> String {
+        let mut s = String::new();
+        self.write(&mut s).unwrap();
+        s
+    }
 }
 
 macro_rules! implement_using_to_string {
     ($({ $scalar_type:ty , $data_type:ident} ),*) => {
         $(
             impl ToText for $scalar_type {
-                fn to_text(&self) -> String {
-                    self.to_string()
+                fn write<W: Write>(&self, f: &mut W) -> Result {
+                    write!(f, "{self}")
                 }
-                fn to_text_with_type(&self, ty: &DataType) -> String {
+                fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
                     match ty {
-                        DataType::$data_type => self.to_text(),
+                        DataType::$data_type => self.write(f),
                         _ => unreachable!(),
                     }
                 }
@@ -71,12 +85,12 @@ macro_rules! implement_using_itoa {
     ($({ $scalar_type:ty , $data_type:ident} ),*) => {
         $(
             impl ToText for $scalar_type {
-                fn to_text(&self) -> String {
-                    itoa::Buffer::new().format(*self).to_owned()
+                fn write<W: Write>(&self, f: &mut W) -> Result {
+                    write!(f, "{}", itoa::Buffer::new().format(*self))
                 }
-                fn to_text_with_type(&self, ty:&DataType) -> String {
+                fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
                     match ty {
-                        DataType::$data_type => self.to_text(),
+                        DataType::$data_type => self.write(f),
                         _ => unreachable!(),
                     }
                 }
@@ -96,49 +110,44 @@ implement_using_itoa! {
 }
 
 macro_rules! implement_using_ryu {
-    ($({ $scalar_type:ty, $to_std_type:ident, $data_type:ident } ),*) => {
+    ($({ $scalar_type:ty, $data_type:ident } ),*) => {
             $(
             impl ToText for $scalar_type {
-                fn to_text(&self) -> String {
+                fn write<W: Write>(&self, f: &mut W) -> Result {
                     match self.classify() {
-                        FpCategory::Infinite if self.is_sign_negative() => "-Infinity".to_owned(),
-                        FpCategory::Infinite => "Infinity".to_owned(),
-                        FpCategory::Zero if self.is_sign_negative() => "-0".to_owned(),
-                        FpCategory::Nan => "NaN".to_owned(),
-                        _ => match self.$to_std_type() {
-                            Some(v) => {
-                                let mut buf = ryu::Buffer::new();
-                                let mut s = buf.format_finite(v);
-                                if let Some(trimmed) = s.strip_suffix(".0") {
-                                    s = trimmed;
-                                }
-                                let mut s_chars = s.chars().peekable();
-                                let mut s_owned = s.to_owned();
-                                let mut index = 0;
-                                while let Some(c) = s_chars.next() {
-                                    index += 1;
-                                    if c == 'e' {
-                                        if s_chars.peek() != Some(&'-') {
-                                            s_owned.insert(index, '+');
-                                        } else {
-                                            index += 1;
-                                        }
-
-                                        if index + 1 == s.len() {
-                                            s_owned.insert(index,'0');
-                                        }
-                                        break;
-                                    }
-                                }
-                                s_owned
+                        FpCategory::Infinite if self.is_sign_negative() => write!(f, "-Infinity"),
+                        FpCategory::Infinite => write!(f, "Infinity"),
+                        FpCategory::Zero if self.is_sign_negative() => write!(f, "-0"),
+                        FpCategory::Nan => write!(f, "NaN"),
+                        _ => {
+                            let mut buf = ryu::Buffer::new();
+                            let mut s = buf.format_finite(self.0);
+                            if let Some(trimmed) = s.strip_suffix(".0") {
+                                s = trimmed;
                             }
-                            None => "NaN".to_owned(),
-                        },
+                            if let Some(mut idx) = s.as_bytes().iter().position(|x| *x == b'e') {
+                                idx += 1;
+                                write!(f, "{}", &s[..idx])?;
+                                if s.as_bytes()[idx] == b'-' {
+                                    write!(f, "-")?;
+                                    idx += 1;
+                                } else {
+                                    write!(f, "+")?;
+                                }
+                                if idx + 1 == s.len() {
+                                    write!(f, "0")?;
+                                }
+                                write!(f, "{}", &s[idx..])?;
+                            } else {
+                                write!(f, "{}", s)?;
+                            }
+                            Ok(())
+                        }
                     }
                 }
-                fn to_text_with_type(&self, ty: &DataType) -> String {
+                fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
                     match ty {
-                        DataType::$data_type => self.to_text(),
+                        DataType::$data_type => self.write(f),
                         _ => unreachable!(),
                     }
                 }
@@ -148,19 +157,19 @@ macro_rules! implement_using_ryu {
 }
 
 implement_using_ryu! {
-    { crate::types::OrderedF32, to_f32,Float32 },
-    { crate::types::OrderedF64, to_f64,Float64 }
+    { crate::types::OrderedF32, Float32 },
+    { crate::types::OrderedF64, Float64 }
 }
 
 impl ToText for i64 {
-    fn to_text(&self) -> String {
-        self.to_string()
+    fn write<W: Write>(&self, f: &mut W) -> Result {
+        write!(f, "{self}")
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
         match ty {
-            DataType::Int64 => self.to_text(),
-            DataType::Timestampz => {
+            DataType::Int64 => self.write(f),
+            DataType::Timestamptz => {
                 // Just a meaningful representation as placeholder. The real implementation depends
                 // on TimeZone from session. See #3552.
                 let secs = self.div_euclid(1_000_000);
@@ -168,7 +177,8 @@ impl ToText for i64 {
                 let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
                 // PostgreSQL uses a space rather than `T` to separate the date and time.
                 // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-DATETIME-OUTPUT
-                instant.format("%Y-%m-%d %H:%M:%S%.f%:z").to_string()
+                // same as `instant.format("%Y-%m-%d %H:%M:%S%.f%:z")` but faster
+                write!(f, "{}+00:00", instant.naive_local())
             }
             _ => unreachable!(),
         }
@@ -176,91 +186,66 @@ impl ToText for i64 {
 }
 
 impl ToText for bool {
-    fn to_text(&self) -> String {
+    fn write<W: Write>(&self, f: &mut W) -> Result {
         if *self {
-            "t".to_string()
+            write!(f, "t")
         } else {
-            "f".to_string()
+            write!(f, "f")
         }
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
         match ty {
-            DataType::Boolean => self.to_text(),
+            DataType::Boolean => self.write(f),
             _ => unreachable!(),
         }
     }
 }
 
 impl ToText for &[u8] {
-    fn to_text(&self) -> String {
-        let mut s = String::with_capacity(2 + 2 * self.len());
-        write!(s, "\\x{}", hex::encode(self)).unwrap();
-        s
+    fn write<W: Write>(&self, f: &mut W) -> Result {
+        write!(f, "\\x{}", hex::encode(self))
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
         match ty {
-            DataType::Bytea => self.to_text(),
+            DataType::Bytea => self.write(f),
             _ => unreachable!(),
         }
     }
 }
 
-impl ToText for ScalarRefImpl<'_> {
-    fn to_text(&self) -> String {
-        match self {
-            ScalarRefImpl::Bool(b) => b.to_text(),
-            ScalarRefImpl::Int16(i) => i.to_text(),
-            ScalarRefImpl::Int32(i) => i.to_text(),
-            ScalarRefImpl::Int64(i) => i.to_text(),
-            ScalarRefImpl::Float32(f) => f.to_text(),
-            ScalarRefImpl::Float64(f) => f.to_text(),
-            ScalarRefImpl::Decimal(d) => d.to_text(),
-            ScalarRefImpl::Interval(i) => i.to_text(),
-            ScalarRefImpl::NaiveDate(d) => d.to_text(),
-            ScalarRefImpl::NaiveTime(t) => t.to_text(),
-            ScalarRefImpl::NaiveDateTime(dt) => dt.to_text(),
-            ScalarRefImpl::List(l) => l.to_text(),
-            ScalarRefImpl::Struct(s) => s.to_text(),
-            ScalarRefImpl::Utf8(v) => v.to_text(),
-            ScalarRefImpl::Bytea(v) => v.to_text(),
-        }
-    }
+macro_rules! impl_totext_for_scalar {
+    ($({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty }),*) => {
+        impl ToText for ScalarRefImpl<'_> {
+            fn write<W: Write>(&self, f: &mut W) -> Result {
+                match self {
+                    $(ScalarRefImpl::$variant_name(v) => v.write(f),)*
+                }
+            }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
-        match self {
-            ScalarRefImpl::Bool(b) => b.to_text_with_type(ty),
-            ScalarRefImpl::Int16(i) => i.to_text_with_type(ty),
-            ScalarRefImpl::Int32(i) => i.to_text_with_type(ty),
-            ScalarRefImpl::Int64(i) => i.to_text_with_type(ty),
-            ScalarRefImpl::Float32(f) => f.to_text_with_type(ty),
-            ScalarRefImpl::Float64(f) => f.to_text_with_type(ty),
-            ScalarRefImpl::Decimal(d) => d.to_text_with_type(ty),
-            ScalarRefImpl::Interval(i) => i.to_text_with_type(ty),
-            ScalarRefImpl::NaiveDate(d) => d.to_text_with_type(ty),
-            ScalarRefImpl::NaiveTime(t) => t.to_text_with_type(ty),
-            ScalarRefImpl::NaiveDateTime(dt) => dt.to_text_with_type(ty),
-            ScalarRefImpl::List(l) => l.to_text_with_type(ty),
-            ScalarRefImpl::Struct(s) => s.to_text_with_type(ty),
-            ScalarRefImpl::Utf8(v) => v.to_text_with_type(ty),
-            ScalarRefImpl::Bytea(v) => v.to_text_with_type(ty),
+            fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
+                match self {
+                    $(ScalarRefImpl::$variant_name(v) => v.write_with_type(ty, f),)*
+                }
+            }
         }
-    }
+    };
 }
+for_all_scalar_variants! { impl_totext_for_scalar }
 
 impl ToText for DatumRef<'_> {
-    fn to_text(&self) -> String {
+    fn write<W: Write>(&self, f: &mut W) -> Result {
         match self {
-            Some(data) => data.to_text(),
-            None => "NULL".to_string(),
+            Some(data) => data.write(f),
+            None => write!(f, "NULL"),
         }
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
         match self {
-            Some(data) => data.to_text_with_type(ty),
-            None => "NULL".to_string(),
+            Some(data) => data.write_with_type(ty, f),
+            None => write!(f, "NULL"),
         }
     }
 }

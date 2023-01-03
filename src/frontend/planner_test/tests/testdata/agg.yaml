@@ -224,6 +224,59 @@
         └─BatchExchange { order: [t.v1 DESC], dist: HashShard(t.v1) }
           └─BatchSort { order: [t.v1 DESC] }
             └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+- name: Not use BatchSortAgg, when input provides order
+  sql: |
+    create table t(v1 int, v2 int);
+    create materialized view mv as select * from t order by v1 desc;
+    select v1, max(v2) from mv group by v1;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashAgg { group_key: [mv.v1], aggs: [max(mv.v2)] }
+      └─BatchExchange { order: [], dist: HashShard(mv.v1) }
+        └─BatchScan { table: mv, columns: [mv.v1, mv.v2], distribution: SomeShard }
+  with_config_map:
+    RW_BATCH_ENABLE_SORT_AGG: 'false'
+- name: Not use BatchSortAgg, when output requires order
+  sql: |
+    create table t(v1 int, v2 int);
+    select v1, max(v2) from t group by v1 order by v1 desc;
+  batch_plan: |
+    BatchExchange { order: [t.v1 DESC], dist: Single }
+    └─BatchSort { order: [t.v1 DESC] }
+      └─BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
+        └─BatchExchange { order: [], dist: HashShard(t.v1) }
+          └─BatchSort { order: [t.v1 DESC] }
+            └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+  with_config_map:
+    RW_BATCH_ENABLE_SORT_AGG: 'false'
+- name: Not use BatchSortAgg, when required order satisfies input order
+  sql: |
+    create table t(k1 int, k2 int, v1 int);
+    SELECT max(v1), k1, k2 from t group by k1, k2 order by k1;
+  batch_plan: |
+    BatchExchange { order: [t.k1 ASC], dist: Single }
+    └─BatchProject { exprs: [max(t.v1), t.k1, t.k2] }
+      └─BatchSort { order: [t.k1 ASC] }
+        └─BatchHashAgg { group_key: [t.k1, t.k2], aggs: [max(t.v1)] }
+          └─BatchExchange { order: [], dist: HashShard(t.k1, t.k2) }
+            └─BatchSort { order: [t.k1 ASC, t.k2 ASC] }
+              └─BatchScan { table: t, columns: [t.k1, t.k2, t.v1], distribution: SomeShard }
+  with_config_map:
+    RW_BATCH_ENABLE_SORT_AGG: 'false'
+- name: Not use BatchSortAgg, when output requires order with swapped output
+  sql: |
+    create table t(v1 int, v2 int);
+    select max(v2), v1 from t group by v1 order by v1 desc;
+  batch_plan: |
+    BatchExchange { order: [t.v1 DESC], dist: Single }
+    └─BatchProject { exprs: [max(t.v2), t.v1] }
+      └─BatchSort { order: [t.v1 DESC] }
+        └─BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
+          └─BatchExchange { order: [], dist: HashShard(t.v1) }
+            └─BatchSort { order: [t.v1 DESC] }
+              └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+  with_config_map:
+    RW_BATCH_ENABLE_SORT_AGG: 'false'
 - sql: |
     create table t (v1 real);
     select count(*) from t;
@@ -385,12 +438,13 @@
         └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [t.v1] }
-    └─LogicalAgg { group_key: [t.v1, t.v1], aggs: [] }
-      └─LogicalScan { table: t, columns: [t.v1] }
+    └─LogicalProject { exprs: [t.v1, t.v1] }
+      └─LogicalAgg { group_key: [t.v1], aggs: [] }
+        └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, t.v1(hidden)], pk_columns: [v1, t.v1] }
+    StreamMaterialize { columns: [v1, t.v1(hidden)], pk_columns: [t.v1] }
     └─StreamProject { exprs: [t.v1, t.v1] }
-      └─StreamHashAgg { group_key: [t.v1, t.v1], aggs: [count] }
+      └─StreamHashAgg { group_key: [t.v1], aggs: [count] }
         └─StreamExchange { dist: HashShard(t.v1) }
           └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: dup group key
@@ -404,12 +458,13 @@
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan: |
     LogicalProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1)] }
-    └─LogicalAgg { group_key: [t.v3, t.v2, t.v2], aggs: [min(t.v1), max(t.v1)] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3] }
+    └─LogicalProject { exprs: [t.v3, t.v2, t.v2, min(t.v1), max(t.v1)] }
+      └─LogicalAgg { group_key: [t.v3, t.v2], aggs: [min(t.v1), max(t.v1)] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3] }
   stream_plan: |
-    StreamMaterialize { columns: [v2, min_v1, v3, max_v1, t.v2(hidden)], pk_columns: [v3, v2, t.v2] }
+    StreamMaterialize { columns: [v2, min_v1, v3, max_v1, t.v2(hidden)], pk_columns: [v3, t.v2] }
     └─StreamProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1), t.v2] }
-      └─StreamHashAgg { group_key: [t.v3, t.v2, t.v2], aggs: [count, min(t.v1), max(t.v1)] }
+      └─StreamHashAgg { group_key: [t.v3, t.v2], aggs: [count, min(t.v1), max(t.v1)] }
         └─StreamExchange { dist: HashShard(t.v2, t.v3) }
           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by agg input
@@ -736,8 +791,9 @@
     select count(x), sum(distinct y), sum(distinct y) from t;
   optimized_logical_plan: |
     LogicalAgg { aggs: [sum0(count(t.x)), sum(t.y), sum(t.y)] }
-    └─LogicalAgg { group_key: [t.y, t.y], aggs: [count(t.x)] }
-      └─LogicalScan { table: t, columns: [t.x, t.y] }
+    └─LogicalProject { exprs: [t.y, t.y, count(t.x)] }
+      └─LogicalAgg { group_key: [t.y], aggs: [count(t.x)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y] }
 - sql: |
     create table t(x int, y int);
     select count(y), sum(distinct y) from t;

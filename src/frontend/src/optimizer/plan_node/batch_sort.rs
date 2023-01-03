@@ -73,7 +73,7 @@ impl ToDistributedBatch for BatchSort {
 
 impl ToBatchProst for BatchSort {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let column_orders = self.base.order.to_protobuf(&self.base.schema);
+        let column_orders = self.base.order.to_protobuf();
         NodeBody::Sort(SortNode { column_orders })
     }
 }

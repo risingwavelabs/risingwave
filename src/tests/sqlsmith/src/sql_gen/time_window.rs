@@ -102,7 +102,7 @@ fn create_tvf(name: &str, alias: TableAlias, args: Vec<FunctionArg>) -> TableWit
 }
 
 fn is_timestamp_col(c: &Column) -> bool {
-    c.data_type == DataTypeName::Timestamp || c.data_type == DataTypeName::Timestampz
+    c.data_type == DataTypeName::Timestamp || c.data_type == DataTypeName::Timestamptz
 }
 
 fn get_table_name_and_cols_with_timestamp(table: Table) -> (String, Vec<Column>, Vec<Column>) {

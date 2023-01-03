@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{StringWriter, WrittenGuard};
+use std::fmt::Write;
 
 use crate::Result;
 
@@ -20,13 +20,13 @@ use crate::Result;
 /// are actually different when the string is in right-to-left languages like Arabic or Hebrew.
 /// Since we would like to simplify the implementation, currently we omit this case.
 #[inline(always)]
-pub fn ltrim(s: &str, writer: StringWriter<'_>) -> Result<WrittenGuard> {
-    Ok(writer.write_ref(s.trim_start()))
+pub fn ltrim(s: &str, writer: &mut dyn Write) -> Result<()> {
+    writer.write_str(s.trim_start()).unwrap();
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
 
     use super::*;
 
@@ -38,12 +38,9 @@ mod tests {
         ];
 
         for (s, expected) in cases {
-            let mut builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let _guard = ltrim(s, writer)?;
-            let array = builder.finish();
-            let v = array.value_at(0).unwrap();
-            assert_eq!(v, expected);
+            let mut writer = String::new();
+            ltrim(s, &mut writer)?;
+            assert_eq!(writer, expected);
         }
         Ok(())
     }

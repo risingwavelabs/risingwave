@@ -336,22 +336,10 @@ pub struct DeveloperConfig {
     #[serde(default = "default::developer::stream_enable_executor_row_count")]
     pub stream_enable_executor_row_count: bool,
 
-    /// Whether to use a managed lru cache (evict by epoch)
-    #[serde(default = "default::developer::stream_enable_managed_cache")]
-    pub stream_enable_managed_cache: bool,
-
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
     /// `SourceExecutor`.
     #[serde(default = "default::developer::stream_connector_message_buffer_size")]
     pub stream_connector_message_buffer_size: usize,
-
-    /// Limit number of cached entries (one per group key).
-    #[serde(default = "default::developer::stream_unsafe_hash_agg_cache_size")]
-    pub unsafe_stream_hash_agg_cache_size: usize,
-
-    /// Limit number of the cached entries (one per join key) on each side.
-    #[serde(default = "default::developer::unsafe_stream_join_cache_size")]
-    pub unsafe_stream_join_cache_size: usize,
 
     /// Limit number of the cached entries in an extreme aggregation call.
     #[serde(default = "default::developer::unsafe_stream_extreme_cache_size")]
@@ -360,6 +348,16 @@ pub struct DeveloperConfig {
     /// The maximum size of the chunk produced by executor at a time.
     #[serde(default = "default::developer::stream_chunk_size")]
     pub stream_chunk_size: usize,
+
+    /// The initial permits that a channel holds, i.e., the maximum row count can be buffered in
+    /// the channel.
+    #[serde(default = "default::developer::stream_exchange_initial_permits")]
+    pub stream_exchange_initial_permits: usize,
+
+    /// The permits that are batched to add back, for reducing the backward `AddPermits` messages
+    /// in remote exchange.
+    #[serde(default = "default::developer::stream_exchange_batched_permits")]
+    pub stream_exchange_batched_permits: usize,
 }
 
 impl Default for DeveloperConfig {
@@ -529,18 +527,6 @@ mod default {
         pub fn checkpoint_frequency() -> usize {
             10
         }
-
-        #[cfg(madsim)]
-        pub fn total_memory_available_bytes() -> usize {
-            16 * 1024 * 1024 * 1024
-        }
-
-        #[allow(dead_code)]
-        #[cfg(not(madsim))]
-        pub fn total_memory_available_bytes() -> usize {
-            use crate::util::resource_util;
-            resource_util::memory::total_memory_used_bytes()
-        }
     }
 
     pub mod file_cache {
@@ -579,20 +565,8 @@ mod default {
             false
         }
 
-        pub fn stream_enable_managed_cache() -> bool {
-            true
-        }
-
         pub fn stream_connector_message_buffer_size() -> usize {
             16
-        }
-
-        pub fn stream_unsafe_hash_agg_cache_size() -> usize {
-            1 << 16
-        }
-
-        pub fn unsafe_stream_join_cache_size() -> usize {
-            1 << 16
         }
 
         pub fn unsafe_stream_extreme_cache_size() -> usize {
@@ -600,6 +574,14 @@ mod default {
         }
 
         pub fn stream_chunk_size() -> usize {
+            1024
+        }
+
+        pub fn stream_exchange_initial_permits() -> usize {
+            8192
+        }
+
+        pub fn stream_exchange_batched_permits() -> usize {
             1024
         }
     }

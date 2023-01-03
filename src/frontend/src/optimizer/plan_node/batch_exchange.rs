@@ -87,7 +87,7 @@ impl ToBatchProst for BatchExchange {
                     sources: vec![],
                     input_schema: self.base.schema.to_prost(),
                 }),
-                column_orders: self.base.order.to_protobuf(&self.base.schema),
+                column_orders: self.base.order.to_protobuf(),
             })
         }
     }

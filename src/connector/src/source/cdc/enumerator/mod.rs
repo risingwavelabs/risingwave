@@ -12,7 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
+
 use async_trait::async_trait;
+use risingwave_common::util::addr::HostAddr;
+use risingwave_rpc_client::ConnectorClient;
 
 use crate::source::cdc::{CdcProperties, CdcSplit};
 use crate::source::SplitEnumerator;
@@ -29,6 +33,20 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
     type Split = CdcSplit;
 
     async fn new(props: CdcProperties) -> anyhow::Result<DebeziumSplitEnumerator> {
+        let cdc_client =
+            ConnectorClient::new(HostAddr::from_str(&props.connector_node_addr)?).await?;
+
+        // validate connector properties
+        cdc_client
+            .validate_properties(
+                props.source_id as u64,
+                props.source_type_enum()?,
+                props.props,
+                props.table_schema,
+            )
+            .await?;
+
+        tracing::debug!("validate properties success");
         Ok(Self {
             source_id: props.source_id,
         })

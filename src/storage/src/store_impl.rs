@@ -510,6 +510,7 @@ impl StateStoreImpl {
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     config.object_store_use_batch_delete,
+                    "Hummock",
                 )
                 .await;
                 let object_store = if config.enable_local_spill {

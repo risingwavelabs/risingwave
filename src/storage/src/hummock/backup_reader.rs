@@ -49,6 +49,7 @@ pub async fn parse_meta_snapshot_storage(
             &config.backup.storage_url,
             Arc::new(ObjectStoreMetrics::unused()),
             true,
+            "Meta Backup",
         )
         .await,
     );

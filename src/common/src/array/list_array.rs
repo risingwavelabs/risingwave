@@ -23,10 +23,7 @@ use itertools::Itertools;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
 use serde::{Deserializer, Serializer};
 
-use super::iterator::ArrayRawIter;
-use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult, RowRef,
-};
+use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult, RowRef};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::row::Row;
 use crate::types::to_text::ToText;
@@ -161,41 +158,15 @@ pub struct ListArray {
 
 impl Array for ListArray {
     type Builder = ListArrayBuilder;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = ListValue;
-    type RawIter<'a> = ArrayRawIter<'a, Self>;
     type RefItem<'a> = ListRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
         ListRef::Indexed { arr: self, idx }
     }
 
-    fn value_at(&self, idx: usize) -> Option<ListRef<'_>> {
-        if !self.is_null(idx) {
-            Some(ListRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
-    }
-
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<ListRef<'_>> {
-        if !self.is_null_unchecked(idx) {
-            Some(ListRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
-    }
-
     fn len(&self) -> usize {
         self.bitmap.len()
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        ArrayIterator::new(self)
-    }
-
-    fn raw_iter(&self) -> Self::RawIter<'_> {
-        ArrayRawIter::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -505,7 +476,7 @@ impl Debug for ListRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         iter_elems_ref!(self, it, {
             for v in it {
-                v.fmt(f)?;
+                Debug::fmt(&v, f)?;
             }
             Ok(())
         })
@@ -515,9 +486,10 @@ impl Debug for ListRef<'_> {
 impl ToText for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     // Refer to PostgreSQL `array_out` or `appendPGArray`.
-    fn to_text(&self) -> String {
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         iter_elems_ref!(self, it, {
-            format!(
+            write!(
+                f,
                 "{{{}}}",
                 it.format_with(",", |datum_ref, f| {
                     let s = datum_ref.to_text();
@@ -549,9 +521,9 @@ impl ToText for ListRef<'_> {
         })
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            DataType::List { .. } => self.to_text(),
+            DataType::List { .. } => self.write(f),
             _ => unreachable!(),
         }
     }

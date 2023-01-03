@@ -29,9 +29,9 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
 
+use crate::get_test_notification_client;
 use crate::test_utils::{
-    get_test_notification_client, with_hummock_storage_v1, with_hummock_storage_v2,
-    HummockStateStoreTestTrait,
+    with_hummock_storage_v1, with_hummock_storage_v2, HummockStateStoreTestTrait,
 };
 
 macro_rules! assert_count_range_scan {

@@ -202,6 +202,18 @@ impl BatchManager {
     pub fn config(&self) -> &BatchConfig {
         &self.config
     }
+
+    /// Kill batch queries with larges memory consumption per task. Required to maintain task level
+    /// memory usage in the struct. Will be called by global memory manager.
+    pub fn kill_queries(&self) {
+        todo!()
+    }
+
+    /// Called by global memory manager for total usage of batch tasks. This variable should be
+    /// maintained by Batch Manager.
+    pub fn get_all_memory_usage(&self) -> usize {
+        todo!()
+    }
 }
 
 impl Default for BatchManager {

@@ -362,10 +362,18 @@ impl StreamGraphBuilder {
         upstream_fragment_id: GlobalFragmentId,
         upstream_actor_ids: &[LocalActorId],
         downstream_actor_ids: &[LocalActorId],
-        exchange_operator_id: u64,
-        dispatch_strategy: DispatchStrategy,
-        same_worker_node: bool,
+        edge: StreamFragmentEdge,
     ) {
+        let exchange_operator_id = edge.link_id;
+        let same_worker_node = edge.same_worker_node;
+        let dispatch_strategy = edge.dispatch_strategy.unwrap();
+        // We can't use the exchange operator id directly as the dispatch id, because an exchange
+        // could belong to more than one downstream in DAG.
+        // We can use downstream fragment id as an unique id for dispatcher.
+        // In this way we can ensure the dispatchers of `StreamActor` would have different id,
+        // even though they come from the same exchange operator.
+        let dispatch_id = edge.downstream_id as u64;
+
         if dispatch_strategy.get_type().unwrap() == DispatcherType::NoShuffle {
             assert_eq!(
                 upstream_actor_ids.len(),
@@ -386,7 +394,7 @@ impl StreamGraphBuilder {
                         .unwrap()
                         .add_dispatcher(
                             dispatch_strategy.clone(),
-                            exchange_operator_id,
+                            dispatch_id,
                             OrderedActorLink(vec![*downstream_id]),
                             same_worker_node,
                         );
@@ -431,7 +439,7 @@ impl StreamGraphBuilder {
                 .unwrap()
                 .add_dispatcher(
                     dispatch_strategy.clone(),
-                    exchange_operator_id,
+                    dispatch_id,
                     OrderedActorLink(downstream_actor_ids.to_vec()),
                     same_worker_node,
                 );
@@ -567,8 +575,10 @@ impl StreamGraphBuilder {
                     }
 
                     NodeBody::Source(node) => {
-                        if let Some(table) = &mut node.state_table {
-                            update_table(table, "SourceInternalTable");
+                        if let Some(source) = &mut node.source_inner {
+                            if let Some(table) = &mut source.state_table {
+                                update_table(table, "SourceInternalTable");
+                            }
                         }
                     }
 
@@ -638,6 +648,12 @@ impl StreamGraphBuilder {
                         }
                         if let Some(table) = &mut node.right_table {
                             update_table(table, "DynamicFilterRight");
+                        }
+                    }
+
+                    NodeBody::Now(node) => {
+                        if let Some(table) = &mut node.state_table {
+                            update_table(table, "NowNode");
                         }
                     }
                     _ => {}
@@ -785,7 +801,7 @@ impl ActorGraphBuilder {
         })
     }
 
-    pub fn fill_mview_or_sink_id(
+    pub fn fill_database_object_id(
         &mut self,
         database_id: DatabaseId,
         schema_id: SchemaId,
@@ -798,23 +814,32 @@ impl ActorGraphBuilder {
             table_id: TableId,
             fragment_id: FragmentId,
         }
-        fn fill_mview_or_sink_id_inner(stream_node: &mut StreamNode, ctx: &FillIdContext) -> usize {
+        fn fill_database_object_id_inner(
+            stream_node: &mut StreamNode,
+            ctx: &FillIdContext,
+        ) -> usize {
             let mut mview_count = 0;
             let node_body = stream_node.node_body.as_mut().unwrap();
-            if let NodeBody::Materialize(materialize_node) = node_body {
-                materialize_node.table_id = ctx.table_id.table_id;
-                materialize_node.table.as_mut().unwrap().id = ctx.table_id.table_id;
-                materialize_node.table.as_mut().unwrap().database_id = ctx.database_id;
-                materialize_node.table.as_mut().unwrap().schema_id = ctx.schema_id;
-                materialize_node.table.as_mut().unwrap().fragment_id = ctx.fragment_id;
-                mview_count += 1;
-            }
-            if let NodeBody::Sink(sink_node) = node_body {
-                sink_node.table_id = ctx.table_id.table_id;
-                mview_count += 1;
+            match node_body {
+                NodeBody::Materialize(materialize_node) => {
+                    materialize_node.table_id = ctx.table_id.table_id;
+                    materialize_node.table.as_mut().unwrap().id = ctx.table_id.table_id;
+                    materialize_node.table.as_mut().unwrap().database_id = ctx.database_id;
+                    materialize_node.table.as_mut().unwrap().schema_id = ctx.schema_id;
+                    materialize_node.table.as_mut().unwrap().fragment_id = ctx.fragment_id;
+                    mview_count += 1;
+                }
+                NodeBody::Sink(sink_node) => {
+                    sink_node.table_id = ctx.table_id.table_id;
+                    mview_count += 1;
+                }
+                NodeBody::Dml(dml_node) => {
+                    dml_node.table_id = ctx.table_id.table_id;
+                }
+                _ => {}
             }
             for input in &mut stream_node.input {
-                mview_count += fill_mview_or_sink_id_inner(input, ctx);
+                mview_count += fill_database_object_id_inner(input, ctx);
             }
             mview_count
         }
@@ -822,7 +847,7 @@ impl ActorGraphBuilder {
         let mut mview_count = 0;
         let mut fragment_id = 0;
         for fragment in self.fragment_graph.fragments_mut().values_mut() {
-            let delta = fill_mview_or_sink_id_inner(
+            let delta = fill_database_object_id_inner(
                 fragment.node.as_mut().unwrap(),
                 &FillIdContext {
                     database_id,
@@ -1047,9 +1072,7 @@ impl ActorGraphBuilder {
                         fragment_id,
                         &actor_ids,
                         downstream_actors,
-                        dispatch_edge.link_id,
-                        dispatch_strategy.clone(),
-                        dispatch_edge.same_worker_node,
+                        dispatch_edge.clone(),
                     );
                 }
                 DispatcherType::Unspecified => unreachable!(),
@@ -1076,7 +1099,11 @@ impl ActorGraphBuilder {
                 vec![node.get_table_id()]
             }
             NodeBody::Source(node) => {
-                vec![node.state_table.as_ref().unwrap().id]
+                if let Some(source) = &node.source_inner {
+                    vec![source.state_table.as_ref().unwrap().id]
+                } else {
+                    vec![]
+                }
             }
             NodeBody::Arrange(node) => {
                 vec![node.table.as_ref().unwrap().id]

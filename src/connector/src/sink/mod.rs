@@ -173,10 +173,6 @@ pub type Result<T> = std::result::Result<T, SinkError>;
 
 #[derive(Error, Debug)]
 pub enum SinkError {
-    #[error("MySql error: {0}")]
-    MySql(String),
-    #[error("MySql inner error: {0}")]
-    MySqlInner(#[from] mysql_async::Error),
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
     #[error("Remote sink error: {0}")]
