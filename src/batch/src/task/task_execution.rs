@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::StreamExt;
 use minitrace::prelude::*;
@@ -27,6 +29,7 @@ use risingwave_pb::batch_plan::{
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
+use task_stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio_metrics::TaskMonitor;
@@ -42,6 +45,46 @@ use crate::task::BatchTaskContext;
 
 // Now we will only at most have 2 status for each status channel. Running -> Failed or Finished.
 const TASK_STATUS_BUFFER_SIZE: usize = 2;
+
+/// A special version for batch allocation stat, passed in another task `context` C to report task
+/// mem usage 0 bytes at the end.
+pub async fn allocation_stat_for_batch<Fut, T, F, C>(
+    future: Fut,
+    interval: Duration,
+    mut report: F,
+    context: C,
+) -> T
+where
+    Fut: Future<Output = T>,
+    F: FnMut(usize),
+    C: BatchTaskContext,
+{
+    BYTES_ALLOCATED
+        .scope(TaskLocalBytesAllocated::new(), async move {
+            // The guard has the same lifetime as the counter so that the counter will keep positive
+            // in the whole scope. When the scope exits, the guard is released, so the counter can
+            // reach zero eventually and then `drop` itself.
+            let _guard = Box::new(114514);
+            let monitor = async move {
+                let mut interval = tokio::time::interval(interval);
+                loop {
+                    interval.tick().await;
+                    BYTES_ALLOCATED.with(|bytes| report(bytes.val()));
+                }
+            };
+            let output = tokio::select! {
+                biased;
+                _ = monitor => unreachable!(),
+                output = future => {
+                    // Report mem usage as 0 after ends immediately.
+                    context.store_mem_usage(0);
+                    output
+                },
+            };
+            output
+        })
+        .await
+}
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Default)]
 pub struct TaskId {
@@ -300,7 +343,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let t_1 = self.clone();
         let t_2 = self.clone();
         // Spawn task for real execution.
-        self.runtime.spawn(async move {
+        let fut = async move {
             trace!("Executing plan [{:?}]", task_id);
             let mut sender = sender;
             let mut state_tx = state_tx;
@@ -372,7 +415,21 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     error!("Batch task {:?} panic!", task_id);
                 }
             }
-        });
+        };
+
+        // For every fired Batch Task, we will wrap it with allocation stats to report memory
+        // estimation per task to `BatchManager`.
+        let ctx1 = self.context.clone();
+        let ctx2 = self.context.clone();
+        let alloc_stat_wrap_fut = allocation_stat_for_batch(
+            fut,
+            Duration::from_millis(1000),
+            move |bytes| {
+                ctx1.store_mem_usage(bytes);
+            },
+            ctx2,
+        );
+        self.runtime.spawn(alloc_stat_wrap_fut);
         Ok(())
     }
 
@@ -471,6 +528,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 e
             );
         }
+
         Ok(())
     }
 
@@ -533,6 +591,16 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             .lock()
             .take()
             .expect("The state receivers must have been inited!")
+    }
+
+    pub fn get_mem_usage(&self) -> usize {
+        self.context.get_mem_usage()
+    }
+
+    /// Check the task status: whether has ended.
+    pub fn is_end(&self) -> bool {
+        let guard = self.state.lock();
+        !(*guard == TaskStatus::Running || *guard == TaskStatus::Pending)
     }
 }
 
