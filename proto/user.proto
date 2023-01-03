@@ -137,3 +137,7 @@ service UserService {
   // RevokePrivilege revokes a privilege from a user.
   rpc RevokePrivilege(RevokePrivilegeRequest) returns (RevokePrivilegeResponse);
 }
+
+message Foo{
+  uint32 id = 1;
+}

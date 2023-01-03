@@ -37,6 +37,7 @@ jobs:
             git reset
             echo "::error::Generated proto files are not up to date."
             FORK_POINT=$(git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF)
+            echo "FORK_POINT: $FORK_POINT"
             if ! git diff --quiet $FORK_POINT..upstream/$GITHUB_BASE_REF -- ../proto; then
               echo "::error::Your branch is out-of-date. Please update your branch first and then run 'npm run gen-proto' at dashboard/ and commit the changes."
             else
