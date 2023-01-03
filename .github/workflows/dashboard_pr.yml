@@ -41,6 +41,7 @@ jobs:
             echo "GITHUB_BASE_REF: $GITHUB_BASE_REF"
             git rev-parse origin/$GITHUB_HEAD_REF
             git rev-parse upstream/$GITHUB_BASE_REF
+            git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF
 
             FORK_POINT=$(git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF)
             echo "FORK_POINT: $FORK_POINT"
