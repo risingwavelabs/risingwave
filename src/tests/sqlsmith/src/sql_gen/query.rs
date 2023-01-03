@@ -206,6 +206,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             T::Timestamptz,
             T::Time,
             T::Interval,
+            T::StructOfInt,
+            T::ListOfVarchar,
+            T::ListOfInt,
         ]
         .choose(&mut self.rng)
         .unwrap();
