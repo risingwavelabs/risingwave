@@ -9,19 +9,19 @@ public class Record implements AutoCloseable {
         this.isClosed = false;
     }
 
-    byte[] getKey() {
+    public byte[] getKey() {
         return Binding.recordGetKey(pointer);
     }
 
-    boolean isNull(int index) {
+    public boolean isNull(int index) {
         return Binding.recordIsNull(pointer, index);
     }
 
-    long getLong(int index) {
+    public long getLong(int index) {
         return Binding.recordGetInt64Value(pointer, index);
     }
 
-    String getString(int index) {
+    public String getString(int index) {
         return Binding.recordGetStringValue(pointer, index);
     }
 
