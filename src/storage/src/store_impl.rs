@@ -212,7 +212,7 @@ impl Debug for StateStoreImpl {
 #[cfg(not(feature = "rocksdb-local"))]
 #[macro_export]
 macro_rules! dispatch_state_store {
-    ($impl:expr, $store:ident, $body:tt, ) => {{
+    ($impl:expr, $store:ident, $body:tt) => {{
         use $crate::store_impl::StateStoreImpl;
 
         match $impl {
