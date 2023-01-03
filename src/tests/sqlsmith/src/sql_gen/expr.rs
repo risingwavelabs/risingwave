@@ -35,7 +35,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     ///    Only columns present in GROUP BY can be selected.
     ///
     /// `inside_agg` indicates if we are calling `gen_expr` inside an aggregate.
-    pub(crate) fn gen_expr(&mut self, typ: DataType, context: SqlGeneratorContext) -> Expr {
+    pub(crate) fn gen_expr(&mut self, typ: &DataType, context: SqlGeneratorContext) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
             return match self.rng.gen_bool(0.5) {
@@ -57,7 +57,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_col(&mut self, typ: DataType, context: SqlGeneratorContext) -> Expr {
+    fn gen_col(&mut self, typ: &DataType, context: SqlGeneratorContext) -> Expr {
         let columns = if context.is_inside_agg() {
             if self.bound_relations.is_empty() {
                 return self.gen_simple_scalar(typ);
@@ -75,7 +75,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         let matched_cols = columns
             .iter()
-            .filter(|col| col.data_type == typ)
+            .filter(|col| col.data_type == *typ)
             .collect::<Vec<_>>();
         if matched_cols.is_empty() {
             self.gen_simple_scalar(typ)
@@ -100,7 +100,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         match cast_sig.context {
             T::Explicit => {
                 let expr = self
-                    .gen_expr(cast_sig.from_type, context.set_inside_explicit_cast())
+                    .gen_expr(&cast_sig.from_type, context.set_inside_explicit_cast())
                     .into();
                 let data_type = data_type_to_ast_data_type(&cast_sig.to_type);
                 Some(Expr::Cast { expr, data_type })
@@ -183,7 +183,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_concat_ws(&mut self, context: SqlGeneratorContext) -> Expr {
-        let sep = self.gen_expr(DataType::Varchar, context);
+        let sep = self.gen_expr(&DataType::Varchar, context);
         let mut args = self.gen_concat_args(context);
         args.insert(0, sep);
         Expr::Function(make_simple_func("concat_ws", &args))
@@ -213,7 +213,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let exprs: Vec<Expr> = func
             .inputs_type
             .iter()
-            .map(|t| self.gen_expr(*t, context))
+            .map(|t| self.gen_expr(t, context))
             .collect();
         let expr = if exprs.len() == 1 {
             make_unary_op(func.func, &exprs[0])
@@ -244,7 +244,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_agg(&mut self, ret: &DataType) -> Expr {
         // TODO: workaround for <https://github.com/risingwavelabs/risingwave/issues/4508>
-        if ret == DataType::Interval {
+        if *ret == DataType::Interval {
             return self.gen_simple_scalar(ret);
         }
         let funcs = match AGG_FUNC_TABLE.get(&ret) {
@@ -258,7 +258,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let exprs: Vec<Expr> = func
             .inputs_type
             .iter()
-            .map(|t| self.gen_expr(*t, context))
+            .map(|t| self.gen_expr(t, context))
             .collect();
 
         let distinct = self.flip_coin() && self.is_distinct_allowed;

@@ -222,7 +222,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_select_item(&mut self, i: i32, context: SqlGeneratorContext) -> (SelectItem, Column) {
         let ret_type = self.gen_data_type();
 
-        let expr = self.gen_expr(ret_type, context);
+        let expr = self.gen_expr(&ret_type, context);
 
         let alias = format!("col_{}", i);
         (
@@ -270,7 +270,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_where(&mut self) -> Option<Expr> {
         if self.flip_coin() {
             let context = SqlGeneratorContext::new_with_can_agg(false);
-            Some(self.gen_expr(DataType::Boolean, context))
+            Some(self.gen_expr(&DataType::Boolean, context))
         } else {
             None
         }
@@ -295,7 +295,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_having(&mut self, have_group_by: bool) -> Option<Expr> {
         if have_group_by & self.flip_coin() {
             let context = SqlGeneratorContext::new();
-            Some(self.gen_expr(DataType::Boolean, context))
+            Some(self.gen_expr(&DataType::Boolean, context))
         } else {
             None
         }
