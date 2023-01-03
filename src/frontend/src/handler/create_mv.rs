@@ -76,10 +76,10 @@ pub fn gen_create_mv_plan(
 
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
-    let definition = query.to_string();
+    let definition = context.normalized_sql().to_owned();
 
     let bound = {
-        let mut binder = Binder::new(session);
+        let mut binder = Binder::new_for_stream(session);
         binder.bind_query(query)?
     };
 
@@ -123,7 +123,7 @@ pub async fn handle_create_mv(
     session.check_relation_name_duplicated(name.clone())?;
 
     let (table, graph) = {
-        let context = OptimizerContext::new_with_handler_args(handler_args);
+        let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
         let graph = build_graph(plan);
 

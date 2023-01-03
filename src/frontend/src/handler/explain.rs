@@ -38,12 +38,7 @@ pub fn handle_explain(
     options: ExplainOptions,
     analyze: bool,
 ) -> Result<RwPgResponse> {
-    let context = OptimizerContext::new(
-        handler_args.session,
-        handler_args.sql,
-        handler_args.with_options,
-        options.clone(),
-    );
+    let context = OptimizerContext::new(handler_args, options.clone());
 
     if analyze {
         return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
@@ -170,7 +165,7 @@ pub fn handle_explain(
 
     Ok(PgResponse::new_for_stream(
         StatementType::EXPLAIN,
-        Some(rows.len() as i32),
+        None,
         rows.into(),
         vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),

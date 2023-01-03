@@ -360,6 +360,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "atomic"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b88d82667eca772c4aa12f0f1348b3ae643424c8876448f3f7bd5787032e234c"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2801,6 +2810,19 @@ dependencies = [
  "native-tls",
  "tokio",
  "tokio-native-tls",
+]
+
+[[package]]
+name = "hytra"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d7ee43a7d27a202506374a5afb36b89c3be719ace2082e492dabb2034028124"
+dependencies = [
+ "atomic",
+ "crossbeam-utils",
+ "num-traits",
+ "rayon",
+ "thread_local",
 ]
 
 [[package]]
@@ -5260,6 +5282,7 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
+ "hytra",
  "itertools",
  "madsim-tokio",
  "madsim-tonic",
@@ -5283,6 +5306,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "static_assertions",
+ "task_stats_alloc",
  "tempfile",
  "thiserror",
  "tikv-jemallocator",

@@ -463,7 +463,6 @@ impl HummockEventHandler {
                             if is_checkpoint {
                                 self.uploader.start_sync_epoch(epoch);
                             }
-                            self.seal_epoch.store(epoch, Ordering::SeqCst);
                         }
                         #[cfg(any(test, feature = "test"))]
                         HummockEvent::FlushEvent(sender) => {

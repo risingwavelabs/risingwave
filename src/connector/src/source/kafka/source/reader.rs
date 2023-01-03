@@ -29,6 +29,7 @@ use crate::source::{BoxSourceStream, Column, ConnectorState, SplitImpl};
 
 pub struct KafkaSplitReader {
     consumer: StreamConsumer<DefaultConsumerContext>,
+    start_offset: Option<i64>,
     stop_offset: Option<i64>,
     bytes_per_second: usize,
 }
@@ -73,6 +74,7 @@ impl SplitReader for KafkaSplitReader {
             .await
             .context("failed to create kafka consumer")?;
 
+        let mut start_offset = None;
         let mut stop_offset = None;
         if let Some(splits) = state {
             assert_eq!(splits.len(), 1);
@@ -81,6 +83,7 @@ impl SplitReader for KafkaSplitReader {
             for split in &splits {
                 if let SplitImpl::Kafka(k) = split {
                     if let Some(offset) = k.start_offset {
+                        start_offset = Some(offset);
                         tpl.add_partition_offset(
                             k.topic.as_str(),
                             k.partition,
@@ -105,6 +108,7 @@ impl SplitReader for KafkaSplitReader {
 
         Ok(Self {
             consumer,
+            start_offset,
             stop_offset,
             bytes_per_second,
         })
@@ -118,9 +122,14 @@ impl SplitReader for KafkaSplitReader {
 impl KafkaSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(self) {
-        if let Some(stop_offset) = self.stop_offset && stop_offset == 0{
-            yield Vec::new();
-            return Ok(());
+        if let Some(stop_offset) = self.stop_offset {
+            if let Some(start_offset) = self.start_offset && (start_offset+1) >= stop_offset {
+                yield Vec::new();
+                return Ok(());
+            } else if stop_offset == 0 {
+                yield Vec::new();
+                return Ok(());
+            }
         }
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         interval.tick().await;

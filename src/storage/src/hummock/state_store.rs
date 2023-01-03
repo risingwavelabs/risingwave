@@ -268,6 +268,9 @@ impl StateStore for HummockStorage {
             warn!("sealing invalid epoch");
             return;
         }
+        // Update `seal_epoch` synchronously,
+        // as `HummockEvent::SealEpoch` is handled asynchronously.
+        self.seal_epoch.store(epoch, MemOrdering::SeqCst);
         self.hummock_event_sender
             .send(HummockEvent::SealEpoch {
                 epoch,

@@ -13,9 +13,8 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
-use crate::optimizer::max_one_row_visitor::MaxOneRowVisitor;
 use crate::optimizer::plan_node::LogicalApply;
-use crate::optimizer::plan_visitor::PlanVisitor;
+use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
 use crate::optimizer::PlanRef;
 
 /// Eliminate max one row restriction from `LogicalApply`.
