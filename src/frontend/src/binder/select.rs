@@ -382,6 +382,13 @@ impl Binder {
             Expr::CompoundIdentifier(idents) => idents.last().map(|ident| ident.real_value()),
             Expr::FieldIdentifier(_, idents) => idents.last().map(|ident| ident.real_value()),
             Expr::Function(func) => Some(func.name.real_value()),
+            Expr::Case { .. } => Some("case".to_string()),
+            Expr::Cast { expr, data_type } => self
+                .derive_alias(&expr)
+                .or(Some(data_type.to_string().to_lowercase())),
+            Expr::Row(_) => Some("row".to_string()),
+            Expr::Array(_) => Some("array".to_string()),
+            Expr::ArrayIndex { obj, index: _ } => self.derive_alias(&obj),
             _ => None,
         }
     }
