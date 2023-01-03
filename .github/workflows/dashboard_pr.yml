@@ -30,8 +30,6 @@ jobs:
       - name: build
         working-directory: ./dashboard
         run: |
-          set +e
-
           npm install
           npm run gen-proto
 
@@ -39,13 +37,7 @@ jobs:
           if ! git diff --quiet --staged; then
             git reset
             echo "::error::Generated proto files are not up to date."
-
-            echo "GITHUB_HEAD_REF: $GITHUB_HEAD_REF"
-            echo "GITHUB_BASE_REF: $GITHUB_BASE_REF"
-            git rev-parse origin/$GITHUB_HEAD_REF
-            git rev-parse upstream/$GITHUB_BASE_REF
-
-            git log --graph --abbrev-commit --decorate --format=format:'%C(bold blue)%h%C(reset) - %C(bold green)(%ar)%C(reset) %C(white)%s%C(reset) %C(dim white)- %an%C(reset)%C(auto)%d%C(reset)' --branches
+            git log --graph --abbrev-commit --branches | head -n 20
 
             git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF
             echo "Return code: $?"
