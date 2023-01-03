@@ -42,19 +42,17 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
         DataType::Timestamptz => AstDataType::Timestamp(true),
         DataType::Time => AstDataType::Time(false),
         DataType::Interval => AstDataType::Interval,
-        DataType::Struct(inner) => {
-            AstDataType::Struct(
-                inner
-                    .field_names
-                    .iter()
-                    .zip_eq(inner.fields.iter())
-                    .map(|(name, typ)| StructField {
-                        name: name.as_str().into(),
-                        data_type: data_type_to_ast_data_type(typ),
-                    })
-                    .collect(),
-            )
-        }
+        DataType::Struct(inner) => AstDataType::Struct(
+            inner
+                .field_names
+                .iter()
+                .zip_eq(inner.fields.iter())
+                .map(|(name, typ)| StructField {
+                    name: name.as_str().into(),
+                    data_type: data_type_to_ast_data_type(typ),
+                })
+                .collect(),
+        ),
         DataType::List { datatype: ref typ } => {
             AstDataType::Array(Box::new(data_type_to_ast_data_type(typ)))
         }
