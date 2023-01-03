@@ -18,8 +18,8 @@ use chrono::{DateTime, Utc};
 use rand::distributions::Alphanumeric;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::DataType;
 use risingwave_common::types::struct_type::StructType;
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
 
 use crate::sql_gen::expr::sql_null;
@@ -75,8 +75,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             T::List { datatype: ref ty } => {
                 let n = self.rng.gen_range(0..=100);
                 Expr::Array(self.gen_simple_scalar_list(ty, n))
-            },
-            T::Struct(ref inner) => Expr::Row(inner.fields.iter().map(|typ| self.gen_simple_scalar(typ)).collect()),
+            }
+            T::Struct(ref inner) => Expr::Row(
+                inner
+                    .fields
+                    .iter()
+                    .map(|typ| self.gen_simple_scalar(typ))
+                    .collect(),
+            ),
             _ => sql_null(),
         }
     }

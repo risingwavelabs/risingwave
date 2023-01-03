@@ -200,7 +200,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_list_data_type(&mut self, depth: usize) -> DataType {
-        DataType::List { datatype: Box::new(self.gen_data_type_inner(depth)) }
+        DataType::List {
+            datatype: Box::new(self.gen_data_type_inner(depth)),
+        }
     }
 
     fn gen_struct_data_type(&mut self, depth: usize) -> DataType {
