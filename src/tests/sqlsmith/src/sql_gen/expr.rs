@@ -85,14 +85,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_cast(&mut self, ret: DataType, context: SqlGeneratorContext) -> Expr {
+    fn gen_cast(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         self.gen_cast_inner(ret, context)
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
     /// Generate casts from a cast map.
     /// TODO: Assign casts have to be tested via `INSERT`.
-    fn gen_cast_inner(&mut self, ret: DataType, context: SqlGeneratorContext) -> Option<Expr> {
+    fn gen_cast_inner(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Option<Expr> {
         let casts = CAST_TABLE.get(&ret)?;
         let cast_sig = casts.choose(&mut self.rng).unwrap();
 
@@ -132,7 +132,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_func(&mut self, ret: DataType, context: SqlGeneratorContext) -> Expr {
+    fn gen_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         match self.rng.gen_bool(0.1) {
             true => self.gen_variadic_func(ret, context),
             false => self.gen_fixed_func(ret, context),
@@ -141,7 +141,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Generates functions with variable arity:
     /// `CASE`, `COALESCE`, `CONCAT`, `CONCAT_WS`
-    fn gen_variadic_func(&mut self, ret: DataType, context: SqlGeneratorContext) -> Expr {
+    fn gen_variadic_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         use DataType as T;
         match ret {
             T::Varchar => match self.rng.gen_range(0..=3) {
@@ -160,7 +160,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_case(&mut self, ret: DataType, context: SqlGeneratorContext) -> Expr {
+    fn gen_case(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         let n = self.rng.gen_range(1..10);
         Expr::Case {
             operand: None,
@@ -170,7 +170,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }
     }
 
-    fn gen_coalesce(&mut self, ret: DataType, context: SqlGeneratorContext) -> Expr {
+    fn gen_coalesce(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         let non_null = self.gen_expr(ret, context);
         let position = self.rng.gen_range(0..10);
         let mut args = (0..10).map(|_| Expr::Value(Value::Null)).collect_vec();
@@ -198,13 +198,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_n_exprs_with_type(
         &mut self,
         n: usize,
-        ret: DataType,
+        ret: &DataType,
         context: SqlGeneratorContext,
     ) -> Vec<Expr> {
         (0..n).map(|_| self.gen_expr(ret, context)).collect()
     }
 
-    fn gen_fixed_func(&mut self, ret: DataType, context: SqlGeneratorContext) -> Expr {
+    fn gen_fixed_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         let funcs = match FUNC_TABLE.get(&ret) {
             None => return self.gen_simple_scalar(ret),
             Some(funcs) => funcs,
@@ -226,7 +226,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .unwrap_or_else(|| self.gen_simple_scalar(ret))
     }
 
-    fn gen_exists(&mut self, ret: DataType, context: SqlGeneratorContext) -> Expr {
+    fn gen_exists(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         // TODO: Streaming nested loop join is not implemented yet.
         // Tracked by: <https://github.com/singularity-data/risingwave/issues/2655>.
 
@@ -242,7 +242,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Expr::Exists(Box::new(subquery))
     }
 
-    fn gen_agg(&mut self, ret: DataType) -> Expr {
+    fn gen_agg(&mut self, ret: &DataType) -> Expr {
         // TODO: workaround for <https://github.com/risingwavelabs/risingwave/issues/4508>
         if ret == DataType::Interval {
             return self.gen_simple_scalar(ret);
