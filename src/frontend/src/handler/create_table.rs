@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -188,10 +188,11 @@ pub fn bind_sql_table_constraints(
     let mut columns_catalog = column_descs
         .into_iter()
         .map(|c| {
+            // All columns except `_row_id` or starts with `_rw` should be visible.
+            let is_hidden = c.name.starts_with("_rw");
             ColumnCatalog {
                 column_desc: c,
-                // All columns except `_row_id` should be visible.
-                is_hidden: false,
+                is_hidden,
             }
         })
         .collect_vec();
@@ -221,6 +222,7 @@ pub(crate) fn gen_create_table_plan(
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
+    let definition = context.normalized_sql().to_owned();
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
     gen_create_table_plan_without_bind(
         session,
@@ -229,6 +231,7 @@ pub(crate) fn gen_create_table_plan(
         column_descs,
         pk_column_id_from_columns,
         constraints,
+        definition,
     )
 }
 
@@ -239,6 +242,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     column_descs: Vec<ColumnDesc>,
     pk_column_id_from_columns: Option<ColumnId>,
     constraints: Vec<TableConstraint>,
+    definition: String,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
@@ -249,7 +253,6 @@ pub(crate) fn gen_create_table_plan_without_bind(
         true => DmlFlag::AppendOnly,
         false => DmlFlag::All,
     };
-    let definition = context.sql().to_owned(); // TODO: use formatted SQL
 
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -421,7 +424,7 @@ pub async fn handle_create_table(
     }
 
     let (graph, source, table) = {
-        let context = OptimizerContext::new_with_handler_args(handler_args);
+        let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, source, table) = gen_create_table_plan(
             &session,
             context.into(),

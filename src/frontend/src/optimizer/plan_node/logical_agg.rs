@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -288,6 +288,10 @@ impl LogicalAgg {
                     .data_type
                     == DataType::Int32
         })
+    }
+
+    pub fn core(&self) -> &generic::Agg<PlanRef> {
+        &self.core
     }
 }
 
@@ -640,10 +644,8 @@ impl LogicalAgg {
         input_fd_set: &FunctionalDependencySet,
         group_key: &[usize],
     ) -> FunctionalDependencySet {
-        let mut fd_set = FunctionalDependencySet::with_key(
-            column_cnt,
-            &(0..group_key.len()).into_iter().collect_vec(),
-        );
+        let mut fd_set =
+            FunctionalDependencySet::with_key(column_cnt, &(0..group_key.len()).collect_vec());
         // take group keys from input_columns, then grow the target size to column_cnt
         let i2o = ColIndexMapping::with_remaining_columns(group_key, input_len).composite(
             &ColIndexMapping::identity_or_none(group_key.len(), column_cnt),

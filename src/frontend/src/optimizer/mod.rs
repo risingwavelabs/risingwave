@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,45 +17,40 @@ pub use plan_node::PlanRef;
 pub mod property;
 
 mod delta_join_solver;
-mod heuristic;
-mod max_one_row_visitor;
-mod plan_correlated_id_finder;
+mod heuristic_optimizer;
 mod plan_rewriter;
+pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
 pub use plan_visitor::PlanVisitor;
 mod optimizer_context;
 mod rule;
-mod share_parent_counter;
-mod share_source_rewriter;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 pub use optimizer_context::*;
+use plan_rewriter::ShareSourceRewriter;
 use property::Order;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 
-use self::heuristic::{ApplyOrder, HeuristicOptimizer};
+use self::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{
     BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamRowIdGen,
     StreamSink,
 };
 use self::plan_visitor::{
-    has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_logical_apply,
-    has_logical_over_agg,
+    has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_batch_source,
+    has_logical_apply, has_logical_over_agg, HasMaxOneRowApply,
 };
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::handler::create_table::DmlFlag;
-use crate::optimizer::max_one_row_visitor::HasMaxOneRowApply;
 use crate::optimizer::plan_node::{
     BatchExchange, ColumnPruningContext, PlanNodeType, PredicatePushdownContext,
 };
-use crate::optimizer::plan_visitor::has_batch_source;
 use crate::optimizer::property::Distribution;
-use crate::optimizer::share_source_rewriter::ShareSourceRewriter;
 use crate::utils::Condition;
 use crate::WithOptions;
 
@@ -401,6 +396,7 @@ impl PlanRoot {
             ],
             ApplyOrder::TopDown,
         );
+
         if has_logical_over_agg(plan.clone()) {
             return Err(ErrorCode::InternalError(format!(
                 "OverAgg can not be transformed. Plan:\n{}",
@@ -408,6 +404,15 @@ impl PlanRoot {
             ))
             .into());
         }
+
+        plan = self.optimize_by_rules(
+            plan,
+            "Dedup Group keys".to_string(),
+            vec![AggDedupGroupKeyRule::create()],
+            ApplyOrder::TopDown,
+        );
+
+        ctx.store_logical(plan.explain_to_string().unwrap());
 
         Ok(plan)
     }
@@ -448,7 +453,7 @@ impl PlanRoot {
         !has_batch_exchange(plan.clone()) // there's no (single) exchange
             && ((has_batch_seq_scan(plan.clone()) // but there's a seq scan (which must be single)
             && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table())) // and it's not a system table
-            || has_batch_source(plan.clone())) // or there's a source
+            || has_batch_source(plan)) // or there's a source
 
         // TODO: join between a normal table and a system table is not supported yet
     }
@@ -619,7 +624,7 @@ impl PlanRoot {
         let stream_plan = self.gen_stream_plan()?;
 
         StreamMaterialize::create(
-            stream_plan.clone(),
+            stream_plan,
             mv_name,
             self.required_dist.clone(),
             self.required_order.clone(),

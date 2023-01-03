@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,6 +27,7 @@ use risingwave_sqlparser::ast::Statement;
 
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
+use crate::handler::flush::do_flush;
 use crate::handler::privilege::{check_privileges, resolve_privileges};
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
@@ -97,10 +98,11 @@ pub async fn handle_query(
     let stmt_type = to_statement_type(&stmt)?;
     let session = handler_args.session.clone();
     let query_start_time = Instant::now();
+    let only_checkpoint_visible = handler_args.session.config().only_checkpoint_visible();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, query_mode, output_schema) = {
-        let context = OptimizerContext::new_with_handler_args(handler_args);
+        let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
 
         tracing::trace!(
@@ -137,7 +139,7 @@ pub async fn handle_query(
             let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
             let query_id = query.query_id().clone();
             let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
-            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot)
+            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, only_checkpoint_visible)
         };
         match query_mode {
             QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
@@ -262,12 +264,7 @@ pub async fn local_execute(
 pub async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
     match stmt_type {
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            let client = session.env().meta_client();
-            let snapshot = client.flush(true).await?;
-            session
-                .env()
-                .hummock_snapshot_manager()
-                .update_epoch(snapshot);
+            do_flush(session).await?;
         }
         _ => {}
     }
