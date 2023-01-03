@@ -104,7 +104,6 @@ impl UpdateExecutor {
     async fn do_execute(mut self: Box<Self>) {
         let data_types = self.child.schema().data_types();
         let mut builder = DataChunkBuilder::new(data_types.clone(), self.chunk_size);
-        let mut updated_builder = DataChunkBuilder::new(data_types.clone(), self.chunk_size);
 
         let mut notifiers = Vec::new();
 
@@ -139,9 +138,7 @@ impl UpdateExecutor {
             };
 
             if self.returning {
-                for chunk in updated_builder.append_chunk(updated_data_chunk.clone()) {
-                    yield chunk;
-                }
+                yield updated_data_chunk.clone();
             }
 
             for (row_delete, row_insert) in data_chunk.rows().zip_eq(updated_data_chunk.rows()) {
@@ -156,9 +153,6 @@ impl UpdateExecutor {
 
         if let Some(chunk) = builder.consume_all() {
             write_chunk(chunk)?;
-        }
-        if self.returning && let Some(chunk) = updated_builder.consume_all() {
-            yield chunk;
         }
 
         // Wait for all chunks to be taken / written.

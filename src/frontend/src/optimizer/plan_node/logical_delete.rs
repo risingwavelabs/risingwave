@@ -45,7 +45,6 @@ impl LogicalDelete {
     /// Create a [`LogicalDelete`] node. Used internally by optimizer.
     pub fn new(input: PlanRef, table_name: String, table_id: TableId, returning: bool) -> Self {
         let ctx = input.ctx();
-        // TODO: support `RETURNING`.
         let schema = if returning {
             input.schema().clone()
         } else {

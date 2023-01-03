@@ -102,7 +102,6 @@ impl InsertExecutor {
         let mut builder = DataChunkBuilder::new(data_types, 1024);
 
         let mut notifiers = Vec::new();
-        // let mut returning_columns = Vec::new();
 
         // Transform the data chunk to a stream chunk, then write to the source.
         let mut write_chunk = |chunk: DataChunk| -> Result<()> {
@@ -137,18 +136,15 @@ impl InsertExecutor {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
+            if self.returning {
+                yield data_chunk.clone();
+            }
             for chunk in builder.append_chunk(data_chunk) {
-                if self.returning {
-                    yield chunk.clone();
-                }
                 write_chunk(chunk)?;
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            if self.returning {
-                yield chunk.clone();
-            }
             write_chunk(chunk)?;
         }
 
@@ -169,10 +165,6 @@ impl InsertExecutor {
 
             yield ret_chunk
         }
-        // } else {
-        //     let ret_chunk = DataChunk::new(returning_columns, rows_inserted);
-        //     yield ret_chunk
-        // }
     }
 }
 

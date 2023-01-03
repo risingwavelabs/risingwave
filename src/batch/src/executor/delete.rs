@@ -107,18 +107,15 @@ impl DeleteExecutor {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
+            if self.returning {
+                yield data_chunk.clone();
+            }
             for chunk in builder.append_chunk(data_chunk) {
-                if self.returning {
-                    yield chunk.clone();
-                }
                 write_chunk(chunk)?;
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            if self.returning {
-                yield chunk.clone();
-            }
             write_chunk(chunk)?;
         }
 
