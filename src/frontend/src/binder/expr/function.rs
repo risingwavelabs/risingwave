@@ -294,8 +294,8 @@ impl Binder {
                 self.ensure_now_function_allowed()?;
                 if !self.in_create_mv {
                     inputs.push(ExprImpl::from(Literal::new(
-                        Some(ScalarImpl::NaiveDateTime(self.bind_timestamp)),
-                        DataType::Timestamp,
+                        Some(ScalarImpl::Int64((self.bind_timestamp_ms * 1000) as i64)),
+                        DataType::Timestamptz,
                     )));
                 }
                 ExprType::Now

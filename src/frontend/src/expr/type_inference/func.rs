@@ -479,7 +479,11 @@ fn infer_type_for_special(
         }
         ExprType::Now => {
             ensure_arity!("now", | inputs | <= 1);
-            Ok(Some(DataType::Timestamp))
+            if let Some(first_input) = inputs.first() {
+                Ok(Some(first_input.return_type()))
+            } else {
+                Ok(Some(DataType::Timestamp))
+            }
         }
         _ => Ok(None),
     }
