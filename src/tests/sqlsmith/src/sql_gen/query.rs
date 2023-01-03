@@ -20,10 +20,13 @@ use std::vec;
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
+use risingwave_frontend::bind_data_type;
 use risingwave_sqlparser::ast::{
-    DataType, Cte, Distinct, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, TableWithJoins,
+    DataType as AstDataType, Cte, Distinct, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, TableWithJoins,
     With,
 };
+
+use risingwave_common::types::DataType;
 
 use crate::sql_gen::utils::create_table_with_joins_from_table;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext, Table};
@@ -208,7 +211,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         //     T::Timestamptz,
         //     T::Time,
         //     T::Interval,
-        //     T::
+        //     T::Struct,
+        //     T::List,
         // ]
         // .choose(&mut self.rng)
         // .unwrap();

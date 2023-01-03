@@ -18,9 +18,9 @@ use chrono::{DateTime, Utc};
 use rand::distributions::Alphanumeric;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_sqlparser::ast::{DataType as RwDataType, Expr, Value};
+use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
+use risingwave_common::types::DataType;
 
-use crate::sql_gen::types::DataType;
 use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
@@ -32,11 +32,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 self.gen_int(i64::MIN as isize, i64::MAX as isize),
             )),
             T::Int32 => Expr::TypedString {
-                data_type: RwDataType::Int(None),
+                data_type: AstDataType::Int(None),
                 value: self.gen_int(i32::MIN as isize, i32::MAX as isize),
             },
             T::Int16 => Expr::TypedString {
-                data_type: RwDataType::SmallInt(None),
+                data_type: AstDataType::SmallInt(None),
                 value: self.gen_int(i16::MIN as isize, i16::MAX as isize),
             },
             T::Varchar => Expr::Value(Value::SingleQuotedString(
@@ -46,39 +46,39 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             )),
             T::Decimal => Expr::Value(Value::Number(self.gen_float())),
             T::Float64 => Expr::TypedString {
-                data_type: RwDataType::Float(None),
+                data_type: AstDataType::Float(None),
                 value: self.gen_float(),
             },
             T::Float32 => Expr::TypedString {
-                data_type: RwDataType::Real,
+                data_type: AstDataType::Real,
                 value: self.gen_float(),
             },
             T::Boolean => Expr::Value(Value::Boolean(self.rng.gen_bool(0.5))),
             T::Date => Expr::TypedString {
-                data_type: RwDataType::Date,
+                data_type: AstDataType::Date,
                 value: self.gen_temporal_scalar(typ),
             },
             T::Time => Expr::TypedString {
-                data_type: RwDataType::Time(false),
+                data_type: AstDataType::Time(false),
                 value: self.gen_temporal_scalar(typ),
             },
             T::Timestamp | T::Timestamptz => Expr::TypedString {
-                data_type: RwDataType::Timestamp(false),
+                data_type: AstDataType::Timestamp(false),
                 value: self.gen_temporal_scalar(typ),
             },
             T::Interval => Expr::TypedString {
-                data_type: RwDataType::Interval,
+                data_type: AstDataType::Interval,
                 value: self.gen_temporal_scalar(typ),
             },
-            T::ListOfVarchar => {
-                let n = self.rng.gen_range(0..=100);
-                self.gen_simple_scalar_list(T::Varchar, n)
-            }
-            T::ListOfInt => {
-                let n = self.rng.gen_range(0..=100);
-                self.gen_simple_scalar_list(T::Int32, n)
-            }
-            T::StructOfInt => Expr::Row(vec![self.gen_simple_scalar(T::Int32)]),
+            // T::ListOfVarchar => {
+            //     let n = self.rng.gen_range(0..=100);
+            //     self.gen_simple_scalar_list(T::Varchar, n)
+            // }
+            // T::ListOfInt => {
+            //     let n = self.rng.gen_range(0..=100);
+            //     self.gen_simple_scalar_list(T::Int32, n)
+            // }
+            // T::StructOfInt => Expr::Row(vec![self.gen_simple_scalar(T::Int32)]),
         }
     }
 

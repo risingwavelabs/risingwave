@@ -18,11 +18,12 @@ use rand::Rng;
 use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType};
 use risingwave_sqlparser::ast::{
-    DataType, BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
+    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
     TrimWhereField, UnaryOperator, Value,
 };
+use risingwave_common::types::DataType;
 
-use crate::sql_gen::types::{AGG_FUNC_TABLE, CAST_TABLE, FUNC_TABLE};
+use crate::sql_gen::types::{AGG_FUNC_TABLE, CAST_TABLE, FUNC_TABLE, data_type_to_ast_data_type};
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
@@ -101,7 +102,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 let expr = self
                     .gen_expr(cast_sig.from_type, context.set_inside_explicit_cast())
                     .into();
-                let data_type = cast_sig.to_type.into();
+                let data_type = data_type_to_ast_data_type(&cast_sig.to_type);
                 Some(Expr::Cast { expr, data_type })
             }
 

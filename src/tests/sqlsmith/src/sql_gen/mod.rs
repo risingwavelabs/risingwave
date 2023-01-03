@@ -21,11 +21,10 @@ use std::vec;
 use rand::Rng;
 use risingwave_frontend::bind_data_type;
 use risingwave_sqlparser::ast::{ColumnDef, Expr, Ident, ObjectName, Statement};
+use risingwave_common::types::DataType;
 
 mod expr;
 pub use expr::print_function_table;
-
-use crate::sql_gen::types::DataType;
 
 mod query;
 mod relation;
@@ -67,10 +66,7 @@ impl From<ColumnDef> for Column {
     fn from(c: ColumnDef) -> Self {
         Self {
             name: c.name.real_value(),
-            data_type: bind_data_type(&c.data_type.expect("data type should not be none"))
-                .unwrap()
-                .try_into()
-                .unwrap(),
+            data_type: bind_data_type(&c.data_type.expect("data type should not be none")).unwrap(),
         }
     }
 }

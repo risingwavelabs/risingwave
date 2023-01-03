@@ -16,10 +16,11 @@ use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_sqlparser::ast::{
-    DataType as RwDataType, FunctionArg, ObjectName, TableAlias, TableFactor, TableWithJoins,
+    DataType as AstDataType, FunctionArg, ObjectName, TableAlias, TableFactor, TableWithJoins,
 };
 
-use crate::sql_gen::types::DataType;
+use risingwave_common::types::DataType;
+
 use crate::sql_gen::utils::{create_args, create_table_alias};
 use crate::sql_gen::{Column, Expr, SqlGenerator, Table};
 
@@ -73,7 +74,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // Tracked in: <https://github.com/risingwavelabs/risingwave/issues/3896>.
         // We fix slide to "1" here, as slide needs to be divisible by size.
         let slide = Expr::TypedString {
-            data_type: RwDataType::Interval,
+            data_type: AstDataType::Interval,
             value: "1".to_string(),
         };
         let size = self.gen_simple_scalar(DataType::Interval);
