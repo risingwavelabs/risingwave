@@ -99,21 +99,19 @@ impl Expression for SomeAllExpression {
             |left: Option<ScalarRefImpl<'_>>,
              right: Option<ScalarRefImpl<'_>>,
              num_array: &mut Vec<Option<usize>>| {
-                let datum_left = left.map(|s| s.into_scalar_impl());
-                let datum_right = right.map(|s| s.into_scalar_impl());
-                if datum_right.is_none() {
+                if right.is_none() {
                     num_array.push(None);
                     return;
                 }
 
-                let datum_right = datum_right.unwrap();
+                let datum_right = right.unwrap();
                 match datum_right {
-                    ScalarImpl::List(array) => {
-                        let len = array.values().len();
+                    ScalarRefImpl::List(array) => {
+                        let len = array.values_ref().len();
                         num_array.push(Some(len));
-                        unfolded_arr_left_builder.append_datum_n(len, datum_left.as_ref());
-                        for item in array.values() {
-                            unfolded_arr_right_builder.append_datum(item.as_ref());
+                        unfolded_arr_left_builder.append_datum_n(len, left);
+                        for item in array.values_ref() {
+                            unfolded_arr_right_builder.append_datum(item);
                         }
                     }
                     _ => unreachable!(),
