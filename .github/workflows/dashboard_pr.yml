@@ -37,7 +37,7 @@ jobs:
             git reset
             echo "::error::Generated proto files are not up to date."
 
-            echo "::group::fetch branch history"
+            echo "::group::check if the branch is out-of-date"
             git pull origin $GITHUB_HEAD_REF --unshallow
             git remote add upstream https://github.com/risingwavelabs/risingwave.git
             git fetch upstream $GITHUB_BASE_REF:$GITHUB_BASE_REF
