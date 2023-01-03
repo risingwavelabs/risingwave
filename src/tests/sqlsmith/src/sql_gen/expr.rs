@@ -164,7 +164,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let n = self.rng.gen_range(1..10);
         Expr::Case {
             operand: None,
-            conditions: self.gen_n_exprs_with_type(n, DataType::Boolean, context),
+            conditions: self.gen_n_exprs_with_type(n, &DataType::Boolean, context),
             results: self.gen_n_exprs_with_type(n, ret, context),
             else_result: Some(Box::new(self.gen_expr(ret, context))),
         }
@@ -191,7 +191,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_concat_args(&mut self, context: SqlGeneratorContext) -> Vec<Expr> {
         let n = self.rng.gen_range(1..10);
-        self.gen_n_exprs_with_type(n, DataType::Varchar, context)
+        self.gen_n_exprs_with_type(n, &DataType::Varchar, context)
     }
 
     /// Generates `n` expressions of type `ret`.
@@ -232,7 +232,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         // Generation of subquery inside aggregation is now workaround.
         // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/3896>.
-        if self.is_mview || ret != DataType::Boolean || context.can_gen_agg() {
+        if self.is_mview || *ret != DataType::Boolean || context.can_gen_agg() {
             return self.gen_simple_scalar(ret);
         };
         // TODO: Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg

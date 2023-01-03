@@ -46,7 +46,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let name = Expr::Identifier(source_table_name.as_str().into());
         // TODO: Currently only literal size expr supported.
         // Tracked in: <https://github.com/risingwavelabs/risingwave/issues/3896>
-        let size = self.gen_simple_scalar(DataType::Interval);
+        let size = self.gen_simple_scalar(&DataType::Interval);
         let time_col = time_cols.choose(&mut self.rng).unwrap();
         let time_col = Expr::Identifier(time_col.name.as_str().into());
         let args = create_args(vec![name, time_col, size]);
@@ -77,7 +77,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             data_type: AstDataType::Interval,
             value: "1".to_string(),
         };
-        let size = self.gen_simple_scalar(DataType::Interval);
+        let size = self.gen_simple_scalar(&DataType::Interval);
         let time_col = Expr::Identifier(time_col.name.as_str().into());
         let args = create_args(vec![name, time_col, slide, size]);
 

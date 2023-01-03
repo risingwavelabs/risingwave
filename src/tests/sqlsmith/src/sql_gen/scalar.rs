@@ -24,7 +24,7 @@ use risingwave_common::types::DataType;
 use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    pub(super) fn gen_simple_scalar(&mut self, typ: DataType) -> Expr {
+    pub(super) fn gen_simple_scalar(&mut self, typ: &DataType) -> Expr {
         use DataType as T;
         // TODO: chance to gen null for scalar.
         match typ {
@@ -83,7 +83,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates a list of [`n`] simple scalar values of a specific [`type`].
-    fn gen_simple_scalar_list(&mut self, ty: DataType, n: usize) -> Expr {
+    fn gen_simple_scalar_list(&mut self, ty: &DataType, n: usize) -> Expr {
         Expr::Array((0..n).map(|_| self.gen_simple_scalar(ty)).collect())
     }
 
@@ -117,7 +117,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         n.to_string()
     }
 
-    fn gen_temporal_scalar(&mut self, typ: DataType) -> String {
+    fn gen_temporal_scalar(&mut self, typ: &DataType) -> String {
         use DataType as T;
 
         let rand_secs = self.rng.gen_range(2..1000000) as u64;
