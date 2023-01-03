@@ -512,7 +512,7 @@ impl BatchPlanFragmenter {
                                 .take(1)
                                 .update(|(_, info)| {
                                     info.vnode_bitmap =
-                                        Bitmap::all_high_bits(VirtualNode::COUNT).to_protobuf();
+                                        Bitmap::ones(VirtualNode::COUNT).to_protobuf();
                                 })
                                 .collect();
                         }
@@ -618,30 +618,30 @@ impl BatchPlanFragmenter {
         }
 
         if let Some(source_node) = node.as_batch_source() {
-            let property = ConnectorProperties::extract(
-                source_node.logical().source_catalog().properties.clone(),
-            )?;
-            let mut enumerator = block_on(SplitEnumeratorImpl::create(property))?;
-            let kafka_enumerator = match enumerator {
-                SplitEnumeratorImpl::Kafka(ref mut kafka_enumerator) => kafka_enumerator,
-                _ => {
-                    return Err(SchedulerError::Internal(anyhow!(
-                        "Unsupported to query directly from this source"
-                    )))
-                }
-            };
-            let split_info = block_on(kafka_enumerator.list_splits_batch(None, None))?
-                .into_iter()
-                .map(SplitImpl::Kafka)
-                .collect_vec();
-
-            Ok(Some(SourceScanInfo::new(split_info)))
-        } else {
-            node.inputs()
-                .into_iter()
-                .find_map(|n| Self::collect_stage_source(n).transpose())
-                .transpose()
+            let source_catalog = source_node.logical().source_catalog();
+            if let Some(source_catalog) = source_catalog {
+                let property = ConnectorProperties::extract(source_catalog.properties.clone())?;
+                let mut enumerator = block_on(SplitEnumeratorImpl::create(property))?;
+                let kafka_enumerator = match enumerator {
+                    SplitEnumeratorImpl::Kafka(ref mut kafka_enumerator) => kafka_enumerator,
+                    _ => {
+                        return Err(SchedulerError::Internal(anyhow!(
+                            "Unsupported to query directly from this source"
+                        )))
+                    }
+                };
+                let split_info = block_on(kafka_enumerator.list_splits_batch(None, None))?
+                    .into_iter()
+                    .map(SplitImpl::Kafka)
+                    .collect_vec();
+                return Ok(Some(SourceScanInfo::new(split_info)));
+            }
         }
+
+        node.inputs()
+            .into_iter()
+            .find_map(|n| Self::collect_stage_source(n).transpose())
+            .transpose()
     }
 
     /// Check whether this stage contains a table scan node and the table's information if so.

@@ -152,9 +152,6 @@ impl fmt::Display for StreamHashJoin {
             },
         );
 
-        if self.append_only() {
-            builder.field("append_only", &format_args!("{}", true));
-        }
         if verbose {
             if self
                 .logical

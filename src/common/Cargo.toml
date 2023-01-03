@@ -82,3 +82,7 @@ tempfile = "3"
 [[bench]]
 name = "bench_encoding"
 harness = false
+
+[[bench]]
+name = "bitmap"
+harness = false

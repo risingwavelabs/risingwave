@@ -25,8 +25,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use enum_as_inner::EnumAsInner;
-use fs_connector_source::FsConnectorSource;
 use futures::stream::BoxStream;
 pub use manager::*;
 pub use parser::*;
@@ -35,19 +33,16 @@ use risingwave_common::error::RwError;
 use risingwave_connector::source::SplitId;
 pub use table::*;
 
-use crate::connector_source::ConnectorSource;
-
 pub mod parser;
 
 mod manager;
-pub use manager::test_utils as table_test_utils;
 
 pub mod dml_manager;
 
 mod common;
 pub mod connector_source;
 pub use connector_source::test_utils as connector_test_utils;
-mod fs_connector_source;
+pub mod fs_connector_source;
 pub mod monitor;
 pub mod row_id;
 mod table;
@@ -62,13 +57,6 @@ pub enum SourceFormat {
     Maxwell,
     CanalJson,
     Csv,
-}
-
-#[derive(Debug, EnumAsInner)]
-pub enum SourceImpl {
-    Table(TableSource),
-    Connector(ConnectorSource),
-    FsConnector(FsConnectorSource),
 }
 
 pub type BoxSourceWithStateStream<T> = BoxStream<'static, Result<T, RwError>>;

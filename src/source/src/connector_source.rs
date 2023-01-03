@@ -36,9 +36,10 @@ use risingwave_pb::plan_common::{
     ColumnCatalog as ProstColumnCatalog, RowFormatType as ProstRowFormatType,
 };
 
+use crate::fs_connector_source::FsConnectorSource;
 use crate::monitor::SourceMetrics;
 use crate::{
-    SourceColumnDesc, SourceFormat, SourceParserImpl, SourceStreamChunkBuilder,
+    ParserConfig, SourceColumnDesc, SourceFormat, SourceParserImpl, SourceStreamChunkBuilder,
     StreamChunkWithState,
 };
 
@@ -200,9 +201,8 @@ impl ConnectorSource {
         let mut config = ConnectorProperties::extract(properties.clone())
             .map_err(|e| ConnectorError(e.into()))?;
         if let Some(addr) = connector_node_addr {
-            config.set_connector_node_addr(addr);
             // fixme: require source_id
-            // config.set_source_id_for_cdc(source_id);
+            config.init_properties_for_cdc(0, addr, None)
         }
         let parser = SourceParserImpl::create(
             &format,
@@ -291,10 +291,10 @@ pub struct SourceDescV2 {
 
 #[derive(Clone)]
 pub struct SourceDescBuilderV2 {
-    row_id_index: Option<ProstColumnIndex>,
     columns: Vec<ProstColumnCatalog>,
     metrics: Arc<SourceMetrics>,
     pk_column_ids: Vec<i32>,
+    row_id_index: Option<ProstColumnIndex>,
     properties: HashMap<String, String>,
     source_info: ProstStreamSourceInfo,
     connector_params: ConnectorParams,
@@ -304,20 +304,20 @@ pub struct SourceDescBuilderV2 {
 impl SourceDescBuilderV2 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        row_id_index: Option<ProstColumnIndex>,
         columns: Vec<ProstColumnCatalog>,
         metrics: Arc<SourceMetrics>,
         pk_column_ids: Vec<i32>,
+        row_id_index: Option<ProstColumnIndex>,
         properties: HashMap<String, String>,
         source_info: ProstStreamSourceInfo,
         connector_params: ConnectorParams,
         connector_message_buffer_size: usize,
     ) -> Self {
         Self {
-            row_id_index,
             columns,
             metrics,
             pk_column_ids,
+            row_id_index,
             properties,
             source_info,
             connector_params,
@@ -374,6 +374,33 @@ impl SourceDescBuilderV2 {
             pk_column_ids: self.pk_column_ids,
         })
     }
+
+    pub fn metrics(&self) -> Arc<SourceMetrics> {
+        self.metrics.clone()
+    }
+
+    pub fn build_fs_stream_source(&self) -> Result<FsConnectorSource> {
+        let format = match self.source_info.get_row_format()? {
+            ProstRowFormatType::Csv => SourceFormat::Csv,
+            _ => unreachable!(),
+        };
+        let parser_config = ParserConfig::new(&format, &self.source_info);
+        let mut columns: Vec<_> = self
+            .columns
+            .iter()
+            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
+            .collect();
+        if let Some(row_id_index) = self.row_id_index.as_ref() {
+            columns[row_id_index.index as usize].skip_parse = true;
+        }
+        FsConnectorSource::new(
+            format,
+            self.properties.clone(),
+            columns,
+            self.connector_params.connector_rpc_endpoint.clone(),
+            parser_config,
+        )
+    }
 }
 
 pub mod test_utils {
@@ -387,8 +414,8 @@ pub mod test_utils {
 
     pub fn create_source_desc_builder(
         schema: &Schema,
-        row_id_index: Option<u64>,
         pk_column_ids: Vec<i32>,
+        row_id_index: Option<u64>,
         source_info: StreamSourceInfo,
         properties: HashMap<String, String>,
     ) -> SourceDescBuilderV2 {
@@ -412,10 +439,10 @@ pub mod test_utils {
             })
             .collect();
         SourceDescBuilderV2 {
-            row_id_index,
             columns,
             metrics: Default::default(),
             pk_column_ids,
+            row_id_index,
             properties,
             source_info,
             connector_params: Default::default(),

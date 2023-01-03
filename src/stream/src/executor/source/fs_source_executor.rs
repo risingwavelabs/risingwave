@@ -15,18 +15,16 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
-use risingwave_common::util::epoch::UNIX_SINGULARITY_DATE_EPOCH;
 use risingwave_connector::source::filesystem::FsSplit;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
-use risingwave_source::connector_source::SourceContext;
-use risingwave_source::row_id::RowIdGenerator;
+use risingwave_source::connector_source::{SourceContext, SourceDescBuilderV2};
+use risingwave_source::fs_connector_source::FsConnectorSource;
+use risingwave_source::monitor::SourceMetrics;
 use risingwave_source::*;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -38,17 +36,13 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::source::reader::SourceReaderStream;
 use crate::executor::source::state_table_handler::SourceStateTableHandler;
 use crate::executor::*;
-
 /// [`FsSourceExecutor`] is a streaming source, fir external file systems
 /// such as s3.
 pub struct FsSourceExecutor<S: StateStore> {
     ctx: ActorContextRef,
 
     source_id: TableId,
-    source_desc_builder: SourceDescBuilder,
-
-    /// Row id generator for this source executor.
-    row_id_generator: RowIdGenerator,
+    source_desc_builder: SourceDescBuilderV2,
 
     column_ids: Vec<ColumnId>,
     schema: Schema,
@@ -87,10 +81,9 @@ impl<S: StateStore> FsSourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        source_desc_builder: SourceDescBuilder,
+        source_desc_builder: SourceDescBuilderV2,
         source_id: TableId,
         source_name: String,
-        vnodes: Bitmap,
         state_table: SourceStateTableHandler<S>,
         column_ids: Vec<ColumnId>,
         schema: Schema,
@@ -102,17 +95,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
         streaming_metrics: Arc<StreamingMetrics>,
         expected_barrier_latency_ms: u64,
     ) -> StreamResult<Self> {
-        // Using vnode range start for row id generator.
-        let vnode_id = vnodes.next_set_bit(0).unwrap_or(0);
         Ok(Self {
             ctx,
             source_id,
             source_name,
             source_desc_builder,
-            row_id_generator: RowIdGenerator::with_epoch(
-                vnode_id as u32,
-                *UNIX_SINGULARITY_DATE_EPOCH,
-            ),
             column_ids,
             schema,
             pk_indices,
@@ -125,56 +112,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
             state_cache: HashMap::new(),
             expected_barrier_latency_ms,
         })
-    }
-
-    /// Generate a row ID column.
-    async fn gen_row_id_column(&mut self, len: usize) -> Column {
-        let mut builder = I64ArrayBuilder::new(len);
-        let row_ids = self.row_id_generator.next_batch(len).await;
-
-        for row_id in row_ids {
-            builder.append(Some(row_id));
-        }
-
-        builder.finish().into()
-    }
-
-    /// Generate a row ID column according to ops.
-    async fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
-        let len = column.array_ref().len();
-        let mut builder = I64ArrayBuilder::new(len);
-
-        for i in 0..len {
-            // Only refill row_id for insert operation.
-            if ops.get(i) == Some(&Op::Insert) {
-                builder.append(Some(self.row_id_generator.next().await));
-            } else {
-                builder.append(Some(
-                    i64::try_from(column.array_ref().datum_at(i).unwrap()).unwrap(),
-                ));
-            }
-        }
-
-        builder.finish().into()
-    }
-
-    async fn refill_row_id_column(
-        &mut self,
-        chunk: StreamChunk,
-        append_only: bool,
-        row_id_index: Option<usize>,
-    ) -> StreamChunk {
-        if let Some(idx) = row_id_index {
-            let (ops, mut columns, bitmap) = chunk.into_inner();
-            if append_only {
-                columns[idx] = self.gen_row_id_column(columns[idx].array().len()).await;
-            } else {
-                columns[idx] = self.gen_row_id_column_by_op(&columns[idx], &ops).await;
-            }
-            StreamChunk::new(ops, columns, bitmap)
-        } else {
-            chunk
-        }
     }
 }
 
@@ -255,26 +192,20 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
     async fn build_stream_source_reader(
         &mut self,
-        source_desc: &SourceDescRef,
+        fs_source: &FsConnectorSource,
+        source_metrics: Arc<SourceMetrics>,
         splits: Vec<FsSplit>,
     ) -> StreamExecutorResult<BoxSourceWithStateStream<FsStreamChunkWithState>> {
-        match &source_desc.source {
-            SourceImpl::FsConnector(c) => {
-                let steam_reader = c
-                    .stream_reader(
-                        splits,
-                        self.column_ids.clone(),
-                        source_desc.metrics.clone(),
-                        SourceContext::new(self.ctx.id, self.source_id),
-                    )
-                    .await
-                    .map_err(StreamExecutorError::connector_error)?;
-                Ok(steam_reader.into_stream())
-            }
-            _ => {
-                unreachable!()
-            }
-        }
+        let steam_reader = fs_source
+            .stream_reader(
+                splits,
+                self.column_ids.clone(),
+                source_metrics.clone(),
+                SourceContext::new(self.ctx.id, self.source_id),
+            )
+            .await
+            .map_err(StreamExecutorError::connector_error)?;
+        Ok(steam_reader.into_stream())
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -284,19 +215,20 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .recv()
             .stack_trace("source_recv_first_barrier")
             .await
-            .unwrap();
+            .ok_or_else(|| {
+                StreamExecutorError::from(anyhow!(
+                    "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
+                    self.ctx.id,
+                    self.source_id
+                ))
+            })?;
 
-        let source_desc = self
+        let fs_source = self
             .source_desc_builder
             .build_fs_stream_source()
             .map_err(StreamExecutorError::connector_error)?;
-        // source_desc's row_id_index is based on its columns, and it is possible
-        // that we prune some columns when generating column_ids. So this index
-        // can not be directly used.
-        let row_id_index = source_desc
-            .row_id_index
-            .map(|idx| source_desc.columns[idx].column_id)
-            .and_then(|ref cid| self.column_ids.iter().position(|id| id.eq(cid)));
+
+        let source_metrics = self.source_desc_builder.metrics();
 
         // If the first barrier is configuration change, then the source executor must be newly
         // created, and we should start with the paused state.
@@ -351,7 +283,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .collect();
 
         let source_chunk_reader = self
-            .build_stream_source_reader(&source_desc, recover_state)
+            .build_stream_source_reader(&fs_source, source_metrics.clone(), recover_state)
             .stack_trace("fs_source_start_reader")
             .await?;
 
@@ -382,32 +314,24 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     if let Some(ref mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             Mutation::SourceChangeSplit(actor_splits) => {
-                                self.apply_split_change(&source_desc, &mut stream, actor_splits)
-                                    .await?
+                                self.apply_split_change(
+                                    &fs_source,
+                                    source_metrics.clone(),
+                                    &mut stream,
+                                    actor_splits,
+                                )
+                                .await?
                             }
                             Mutation::Pause => stream.pause_source(),
                             Mutation::Resume => stream.resume_source(),
-                            Mutation::Update {
-                                vnode_bitmaps,
-                                actor_splits,
-                                ..
-                            } => {
-                                // Update row id generator if vnode mapping is changed.
-                                // Note that: since update barrier will only occurs between pause
-                                // and resume barrier, duplicated row id won't be generated.
-                                if let Some(vnode_bitmaps) = vnode_bitmaps.get(&self.ctx.id) {
-                                    let vnode_id =
-                                        vnode_bitmaps.next_set_bit(0).unwrap_or(0) as u32;
-                                    if self.row_id_generator.vnode_id != vnode_id {
-                                        self.row_id_generator = RowIdGenerator::with_epoch(
-                                            vnode_id,
-                                            *UNIX_SINGULARITY_DATE_EPOCH,
-                                        );
-                                    }
-                                }
-
-                                self.apply_split_change(&source_desc, &mut stream, actor_splits)
-                                    .await?;
+                            Mutation::Update { actor_splits, .. } => {
+                                self.apply_split_change(
+                                    &fs_source,
+                                    source_metrics.clone(),
+                                    &mut stream,
+                                    actor_splits,
+                                )
+                                .await?;
                             }
                             _ => {}
                         }
@@ -418,7 +342,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                 }
 
                 Either::Right(FsStreamChunkWithState {
-                    mut chunk,
+                    chunk,
                     split_offset_mapping,
                 }) => {
                     if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
@@ -443,16 +367,6 @@ impl<S: StateStore> FsSourceExecutor<S> {
                         self.state_cache.extend(state)
                     }
 
-                    // Refill row id column for source.
-                    chunk = match &source_desc.source {
-                        SourceImpl::FsConnector(_) => {
-                            self.refill_row_id_column(chunk, true, row_id_index).await
-                        }
-                        _ => {
-                            unreachable!()
-                        }
-                    };
-
                     self.metrics
                         .source_output_row_count
                         .with_label_values(&[
@@ -474,7 +388,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
     async fn apply_split_change(
         &mut self,
-        source_desc: &SourceDescRef,
+        fs_source: &FsConnectorSource,
+        source_metrics: Arc<SourceMetrics>,
         stream: &mut SourceReaderStream<FsStreamChunkWithState>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
@@ -486,8 +401,13 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     "apply split change"
                 );
 
-                self.replace_stream_reader_with_target_state(source_desc, stream, target_state)
-                    .await?;
+                self.replace_stream_reader_with_target_state(
+                    fs_source,
+                    source_metrics,
+                    stream,
+                    target_state,
+                )
+                .await?;
             }
         }
 
@@ -496,7 +416,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
     async fn replace_stream_reader_with_target_state(
         &mut self,
-        source_desc: &SourceDescRef,
+        fs_source: &FsConnectorSource,
+        source_metrics: Arc<SourceMetrics>,
         stream: &mut SourceReaderStream<FsStreamChunkWithState>,
         target_state: Vec<FsSplit>,
     ) -> StreamExecutorResult<()> {
@@ -508,7 +429,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         // Replace the source reader with a new one of the new state.
         let reader = self
-            .build_stream_source_reader(source_desc, target_state.clone())
+            .build_stream_source_reader(fs_source, source_metrics, target_state.clone())
             .await?;
         stream.replace_source_stream(reader);
 

@@ -52,19 +52,11 @@ impl RegexpMatches {
         for capture in self.ctx.0.captures_iter(text) {
             // If there are multiple captures, then the first one is the whole match, and should be
             // ignored in PostgreSQL's behavior.
-            let mut skip_flag = self.ctx.0.captures_len() > 1;
+            let skip_flag = self.ctx.0.captures_len() > 1;
             let list = capture
                 .iter()
-                .skip_while(|_| {
-                    if skip_flag {
-                        skip_flag = false;
-                        true
-                    } else {
-                        false
-                    }
-                })
-                .flatten()
-                .map(|mat| Some(mat.as_str().into()))
+                .skip(if skip_flag { 1 } else { 0 })
+                .map(|mat| mat.map(|m| m.as_str().into()))
                 .collect_vec();
             let list = ListValue::new(list);
             builder.append_datum(&Some(list.into()));
@@ -85,7 +77,7 @@ impl TableFunction for RegexpMatches {
         let text_arr = self.text.eval_checked(input)?;
         let text_arr: &Utf8Array = text_arr.as_ref().into();
 
-        let bitmap = input.get_visibility_ref();
+        let bitmap = input.visibility();
         let mut output_arrays: Vec<ArrayRef> = vec![];
 
         match bitmap {
