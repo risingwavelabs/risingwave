@@ -276,7 +276,7 @@ pub async fn handle_create_source(
     // TODO(Yuanxin): This should be removed after unsupporting `CREATE MATERIALIZED SOURCE`.
     if is_materialized {
         let (graph, table) = {
-            let context = OptimizerContext::new_with_handler_args(handler_args);
+            let context = OptimizerContext::from_handler_args(handler_args);
             let (plan, table) =
                 gen_materialize_plan(context.into(), source.clone(), session.user_id())?;
             let graph = build_graph(plan);

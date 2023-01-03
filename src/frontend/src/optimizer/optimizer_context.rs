@@ -30,8 +30,10 @@ pub struct OptimizerContext {
     session_ctx: Arc<SessionImpl>,
     /// Store plan node id
     next_plan_node_id: RefCell<i32>,
-    /// For debugging purposes, store the SQL string in Context
-    sql: Arc<str>,
+    /// The original SQL string, used for debugging.
+    sql: String,
+    /// Normalized SQL string. See [`HandlerArgs::normalize_sql`].
+    normalized_sql: String,
     /// Explain options
     explain_options: ExplainOptions,
     /// Store the trace of optimizer
@@ -46,30 +48,24 @@ pub struct OptimizerContext {
 pub type OptimizerContextRef = Rc<OptimizerContext>;
 
 impl OptimizerContext {
-    pub fn new_with_handler_args(handler_args: HandlerArgs) -> Self {
-        Self::new(
-            handler_args.session,
-            handler_args.sql,
-            handler_args.with_options,
-            ExplainOptions::default(),
-        )
+    /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`], with empty
+    /// [`ExplainOptions`].
+    pub fn from_handler_args(handler_args: HandlerArgs) -> Self {
+        Self::new(handler_args, ExplainOptions::default())
     }
 
-    pub fn new(
-        session_ctx: Arc<SessionImpl>,
-        sql: Arc<str>,
-        with_options: WithOptions,
-        explain_options: ExplainOptions,
-    ) -> Self {
+    /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`] and [`ExplainOptions`].
+    pub fn new(handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
         Self {
-            session_ctx,
+            session_ctx: handler_args.session,
             next_plan_node_id: RefCell::new(0),
-            sql,
+            sql: handler_args.sql,
+            normalized_sql: handler_args.normalized_sql,
             explain_options,
             optimizer_trace: RefCell::new(vec![]),
             logical_explain: RefCell::new(None),
             next_correlated_id: RefCell::new(0),
-            with_options,
+            with_options: handler_args.with_options,
         }
     }
 
@@ -80,7 +76,8 @@ impl OptimizerContext {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_plan_node_id: RefCell::new(0),
-            sql: Arc::from(""),
+            sql: "".to_owned(),
+            normalized_sql: "".to_owned(),
             explain_options: ExplainOptions::default(),
             optimizer_trace: RefCell::new(vec![]),
             logical_explain: RefCell::new(None),
@@ -143,6 +140,11 @@ impl OptimizerContext {
     /// Return the original SQL.
     pub fn sql(&self) -> &str {
         &self.sql
+    }
+
+    /// Return the normalized SQL.
+    pub fn normalized_sql(&self) -> &str {
+        &self.normalized_sql
     }
 }
 
