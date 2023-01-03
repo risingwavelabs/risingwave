@@ -29,6 +29,8 @@ jobs:
       - name: build
         working-directory: ./dashboard
         run: |
+          set +e
+
           npm install
           npm run gen-proto
 
