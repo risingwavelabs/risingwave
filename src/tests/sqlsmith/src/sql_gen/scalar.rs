@@ -22,6 +22,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
 
 use crate::sql_gen::expr::sql_null;
+use crate::sql_gen::types::data_type_to_ast_data_type;
 use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
@@ -73,7 +74,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             },
             T::List { datatype: ref ty } => {
                 let n = self.rng.gen_range(0..=100);
-                Expr::Array(self.gen_simple_scalar_list(ty, n))
+                if n == 0 {
+                    Expr::Cast {
+                        expr: Box::new(Expr::Array(vec![])),
+                        data_type: data_type_to_ast_data_type(ty),
+                    }
+                } else {
+                    Expr::Array(self.gen_simple_scalar_list(ty, n))
+                }
             }
             T::Struct(ref inner) => Expr::Row(
                 inner
