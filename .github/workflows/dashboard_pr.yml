@@ -27,9 +27,9 @@ jobs:
       - name: build
         working-directory: ./dashboard
         run: |
-          set +e 
-
+          echo "::group::npm install"
           npm install
+          echo "::endgroup::"
           npm run gen-proto
 
           git add -A
@@ -37,7 +37,7 @@ jobs:
             git reset
             echo "::error::Generated proto files are not up to date."
 
-            # fetch branch history
+            echo "::group::fetch branch history"
             git pull origin $GITHUB_HEAD_REF --unshallow
             git remote add upstream https://github.com/risingwavelabs/risingwave.git
             git fetch upstream $GITHUB_BASE_REF:$GITHUB_BASE_REF
@@ -49,6 +49,8 @@ jobs:
 
             FORK_POINT=$(git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF)
             echo "FORK_POINT: $FORK_POINT"
+            echo "::endgroup::"
+
             if ! git diff --quiet $FORK_POINT..upstream/$GITHUB_BASE_REF -- ../proto; then
               echo "::error::Your branch is out-of-date. Please update your branch first and then run 'npm i && npm run gen-proto' at dashboard/ and commit the changes."
             else
