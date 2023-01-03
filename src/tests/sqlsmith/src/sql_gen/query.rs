@@ -198,13 +198,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_list_data_type(&mut self, depth: usize) -> DataType {
+        assert!(depth >= 0);
         DataType::List {
             datatype: Box::new(self.gen_data_type_inner(depth)),
         }
     }
 
     fn gen_struct_data_type(&mut self, depth: usize) -> DataType {
-        assert!(depth > 0);
+        assert!(depth >= 0);
         let num_fields = self.rng.gen_range(1..10);
         let fields = (0..num_fields)
             .map(|_| self.gen_data_type_inner(depth))
