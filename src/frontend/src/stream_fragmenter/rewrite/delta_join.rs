@@ -328,7 +328,6 @@ fn infer_internal_table_catalog(
         internal_table_catalog_builder.add_order_column(
             order.index as usize,
             OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap()),
-            true,
         );
     }
 

@@ -19,53 +19,42 @@ use std::ops::{Deref, DerefMut};
 use itertools::Itertools;
 use lru::{DefaultHasher, LruCache};
 
-mod evictable;
 mod managed_lru;
-pub use evictable::*;
 pub use managed_lru::*;
 use risingwave_common::buffer::Bitmap;
 
-pub enum ExecutorCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
+pub struct ExecutorCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
     /// An managed cache. Eviction depends on the node memory usage.
-    Managed(ManagedLruCache<K, V, S, A>),
-    /// An local cache. Eviction depends on local executor cache limit setting.
-    Local(EvictableHashMap<K, V, S, A>),
+    cache: ManagedLruCache<K, V, S, A>,
 }
 
 impl<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator> ExecutorCache<K, V, S, A> {
+    pub fn new(cache: ManagedLruCache<K, V, S, A>) -> Self {
+        Self { cache }
+    }
+
     /// Evict epochs lower than the watermark
     pub fn evict(&mut self) {
-        match self {
-            ExecutorCache::Managed(cache) => cache.evict(),
-            ExecutorCache::Local(cache) => cache.evict_to_target_cap(),
-        }
+        self.cache.evict()
     }
 
     /// Update the current epoch for cache. Only effective when using [`ManagedLruCache`]
     pub fn update_epoch(&mut self, epoch: u64) {
-        if let ExecutorCache::Managed(cache) = self {
-            cache.update_epoch(epoch)
-        }
+        self.cache.update_epoch(epoch)
     }
 
     /// An iterator visiting all values in most-recently used order. The iterator element type is
     /// &V.
     pub fn values(&self) -> impl Iterator<Item = &V> {
         let get_val = |(_k, v)| v;
-        match self {
-            ExecutorCache::Managed(cache) => cache.iter().map(get_val),
-            ExecutorCache::Local(cache) => cache.iter().map(get_val),
-        }
+        self.cache.iter().map(get_val)
     }
 
     /// An iterator visiting all values mutably in most-recently used order. The iterator element
     /// type is &mut V.
     pub fn values_mut(&mut self) -> impl Iterator<Item = &mut V> {
         let get_val = |(_k, v)| v;
-        match self {
-            ExecutorCache::Managed(cache) => cache.iter_mut().map(get_val),
-            ExecutorCache::Local(cache) => cache.iter_mut().map(get_val),
-        }
+        self.cache.iter_mut().map(get_val)
     }
 }
 
@@ -73,19 +62,13 @@ impl<K, V, S, A: Clone + Allocator> Deref for ExecutorCache<K, V, S, A> {
     type Target = LruCache<K, V, S, A>;
 
     fn deref(&self) -> &Self::Target {
-        match self {
-            ExecutorCache::Managed(cache) => &cache.inner,
-            ExecutorCache::Local(cache) => &cache.inner,
-        }
+        &self.cache.inner
     }
 }
 
 impl<K, V, S, A: Clone + Allocator> DerefMut for ExecutorCache<K, V, S, A> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        match self {
-            ExecutorCache::Managed(cache) => &mut cache.inner,
-            ExecutorCache::Local(cache) => &mut cache.inner,
-        }
+        &mut self.cache.inner
     }
 }
 

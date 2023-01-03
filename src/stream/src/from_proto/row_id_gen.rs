@@ -38,6 +38,7 @@ impl ExecutorBuilder for RowIdGenExecutorBuilder {
             .vnode_bitmap
             .expect("vnodes not set for row id gen executor");
         let executor = RowIdGenExecutor::new(
+            params.actor_context,
             upstream,
             params.schema,
             params.pk_indices,

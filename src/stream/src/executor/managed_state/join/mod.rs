@@ -36,11 +36,11 @@ use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::StateStore;
 
-use crate::cache::{cache_may_stale, new_with_hasher_in, EvictableHashMap, ExecutorCache};
+use crate::cache::{cache_may_stale, new_with_hasher_in, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::{ActorId, AtomicU64RefOpt};
+use crate::task::{ActorId, AtomicU64Ref};
 
 type DegreeType = u64;
 
@@ -230,8 +230,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        watermark_epoch: AtomicU64RefOpt,
-        cache_size: usize,
+        watermark_epoch: AtomicU64Ref,
         join_key_data_types: Vec<DataType>,
         state_all_data_types: Vec<DataType>,
         state_table: StateTable<S>,
@@ -270,19 +269,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             table: degree_table,
         };
 
-        let cache = if let Some(lru_manager) = watermark_epoch {
-            ExecutorCache::Managed(new_with_hasher_in(
-                lru_manager,
-                PrecomputedBuildHasher,
-                alloc,
-            ))
-        } else {
-            ExecutorCache::Local(EvictableHashMap::with_hasher_in(
-                cache_size,
-                PrecomputedBuildHasher,
-                alloc,
-            ))
-        };
+        let cache = ExecutorCache::new(new_with_hasher_in(
+            watermark_epoch,
+            PrecomputedBuildHasher,
+            alloc,
+        ));
 
         Self {
             inner: cache,
