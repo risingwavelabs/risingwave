@@ -18,11 +18,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Distinct, Expr, Select, SelectItem};
+use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
-use crate::bind_data_type;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
 use crate::catalog::system_catalog::pg_catalog::{
@@ -386,10 +385,7 @@ fn derive_alias(expr: &Expr) -> Option<String> {
         Expr::FieldIdentifier(_, idents) => idents.last().map(|ident| ident.real_value()),
         Expr::Function(func) => Some(func.name.real_value()),
         Expr::Case { .. } => Some("case".to_string()),
-        Expr::Cast { expr, data_type } => derive_alias(&expr).or(Some(data_type_to_alias(
-            // We bind_expr before derive_alias, so the unwrap should be safe
-            &bind_data_type(&data_type).unwrap(),
-        ))),
+        Expr::Cast { expr, data_type } => derive_alias(&expr).or(data_type_to_alias(&data_type)),
         Expr::Row(_) => Some("row".to_string()),
         Expr::Array(_) => Some("array".to_string()),
         Expr::ArrayIndex { obj, index: _ } => derive_alias(&obj),
@@ -397,24 +393,35 @@ fn derive_alias(expr: &Expr) -> Option<String> {
     }
 }
 
-fn data_type_to_alias(data_type: &DataType) -> String {
-    match data_type {
-        DataType::Boolean => "bool".to_string(),
-        DataType::Int16 => "int2".to_string(),
-        DataType::Int32 => "int4".to_string(),
-        DataType::Int64 => "int8".to_string(),
-        DataType::Float32 => "float4".to_string(),
-        DataType::Float64 => "float8".to_string(),
-        DataType::Decimal => "numeric".to_string(),
-        DataType::Date => "date".to_string(),
-        DataType::Varchar => "varchar".to_string(),
-        DataType::Time => "time".to_string(),
-        DataType::Timestamp => "timestamp".to_string(),
-        DataType::Timestamptz => "timestampz".to_string(),
-        DataType::Interval => "interval".to_string(),
-        // Note: Postgres doesn't have anonymous structs, we just use "struct" here
-        DataType::Struct(_) => "struct".to_string(),
-        DataType::List { datatype } => data_type_to_alias(datatype),
-        DataType::Bytea => "bytea".to_string(),
-    }
+fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
+    let alias = match data_type {
+        AstDataType::Char(_) => "bpchar".to_string(),
+        AstDataType::Varchar => "varchar".to_string(),
+        AstDataType::Uuid => "uuid".to_string(),
+        AstDataType::Decimal(_, _) => "numeric".to_string(),
+        AstDataType::Real | AstDataType::Float(Some(1..=24)) => "float4".to_string(),
+        AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => "float8".to_string(),
+        AstDataType::Float(Some(0 | 54..)) => unreachable!(),
+        AstDataType::SmallInt => "int2".to_string(),
+        AstDataType::Int => "int4".to_string(),
+        AstDataType::BigInt => "int8".to_string(),
+        AstDataType::Boolean => "bool".to_string(),
+        AstDataType::Date => "date".to_string(),
+        AstDataType::Time(tz) => format!("time{}", if *tz { "z" } else { "" }),
+        AstDataType::Timestamp(tz) => {
+            format!("timestamp{}", if *tz { "z" } else { "" })
+        }
+        AstDataType::Interval => "interval".to_string(),
+        AstDataType::Regclass => "regclass".to_string(),
+        AstDataType::Text => "text".to_string(),
+        AstDataType::Bytea => "bytea".to_string(),
+        AstDataType::Array(ty) => return data_type_to_alias(ty),
+        AstDataType::Custom(ty) => format!("{}", ty),
+        AstDataType::Struct(_) => {
+            // Note: Postgres doesn't have anonymous structs
+            return None;
+        }
+    };
+
+    Some(alias)
 }

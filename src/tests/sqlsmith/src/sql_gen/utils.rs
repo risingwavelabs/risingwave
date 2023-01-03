@@ -109,9 +109,9 @@ fn create_function_arg_from_expr(expr: Expr) -> FunctionArg {
 pub(crate) fn data_type_name_to_ast_data_type(type_name: DataTypeName) -> Option<DataType> {
     match type_name {
         DataTypeName::Boolean => Some(DataType::Boolean),
-        DataTypeName::Int16 => Some(DataType::SmallInt(None)),
-        DataTypeName::Int32 => Some(DataType::Int(None)),
-        DataTypeName::Int64 => Some(DataType::BigInt(None)),
+        DataTypeName::Int16 => Some(DataType::SmallInt),
+        DataTypeName::Int32 => Some(DataType::Int),
+        DataTypeName::Int64 => Some(DataType::BigInt),
         DataTypeName::Decimal => Some(DataType::Decimal(None, None)),
         DataTypeName::Float32 => Some(DataType::Real),
         DataTypeName::Float64 => Some(DataType::Double),
