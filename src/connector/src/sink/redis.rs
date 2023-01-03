@@ -30,6 +30,8 @@ pub const REDIS_SINK: &str = "redis";
 #[derive(Clone, Debug)]
 pub struct RedisConfig {
     pub endpoint: String,
+    pub key_format: Option<String>,
+    pub value_format: Option<String>,
 }
 
 impl RedisConfig {
@@ -38,7 +40,13 @@ impl RedisConfig {
             .get("endpoint")
             .ok_or_else(|| SinkError::Config("endpoint".to_string()))?
             .to_string();
-        Ok(RedisConfig { endpoint })
+        let key_format = map.get("key.format").map(|s| s.to_string());
+        let value_format = map.get("value.format").map(|s| s.to_string());
+        Ok(RedisConfig {
+            endpoint,
+            key_format,
+            value_format,
+        })
     }
 }
 
@@ -50,6 +58,7 @@ pub struct RedisSink {
     conn: RedisConnectionImpl,
     // the command pipeline for write-commit
     pipe: redis::Pipeline,
+    kv_formatter: Option<RedisKvFormatter>,
     batch_id: u64,
     epoch: u64,
     update_cache: Vec<String>,
@@ -80,12 +89,22 @@ impl RedisSink {
         let client = redis::Client::open(cfg.endpoint.clone())?;
         let conn = client.get_connection()?;
         let pipe = redis::pipe();
+        let config = cfg.clone();
+        let kv_formatter = match (cfg.key_format, cfg.value_format) {
+            (Some(key_format), Some(value_format)) => Some(RedisKvFormatter::new(
+                key_format.as_str(),
+                value_format.as_str(),
+                schema.clone(),
+            )?),
+            _ => None,
+        };
         Ok(Self {
-            config: cfg,
+            config,
             schema,
             client: Some(client),
             conn: RedisConnectionImpl::Redis(conn),
             pipe,
+            kv_formatter,
             batch_id: 0,
             epoch: 0,
             update_cache: Vec::with_capacity(1),
@@ -99,11 +118,14 @@ impl RedisSink {
         Ok(Self {
             config: RedisConfig {
                 endpoint: "".parse().unwrap(),
+                key_format: None,
+                value_format: None,
             },
             schema,
             client: None,
             conn: RedisConnectionImpl::Mock(MockConnection {}),
             pipe,
+            kv_formatter: None,
             batch_id: 0,
             epoch: 0,
             update_cache: Vec::new(),
@@ -111,15 +133,139 @@ impl RedisSink {
         })
     }
 
-    pub fn make_redis_key(row: RowRef<'_>, pk_indices: &[usize]) -> String {
+    pub fn default_redis_key(row: RowRef<'_>, pk_indices: &[usize]) -> String {
         pk_indices
             .iter()
             .map(|i| row.datum_at(*i).to_text())
             .join(":")
     }
+
+    pub fn default_redis_value(row: RowRef<'_>) -> String {
+        format!("[{}]", row.iter().map(|v| v.to_text()).join(","))
+    }
 }
 
 pub struct MockConnection {}
+
+#[derive(Clone, Debug)]
+struct FormatString {
+    // fields that appear in the format string
+    fields: Vec<String>,
+    // parts of the format string that are literal text
+    literals: Vec<String>,
+}
+
+impl FormatString {
+    fn new(s: &str) -> Result<Self> {
+        let mut fields = Vec::new();
+        let mut literals = Vec::new();
+        let mut current_literal = String::new();
+
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '{' {
+                literals.push(current_literal);
+                current_literal = String::new();
+
+                let mut field_name = String::new();
+                for c in chars.by_ref() {
+                    if c == '}' {
+                        break;
+                    }
+                    field_name.push(c);
+                }
+                if field_name.is_empty() {
+                    return Err(SinkError::Config(
+                        "empty field name in format string".to_string(),
+                    ));
+                }
+                fields.push(field_name);
+            } else {
+                current_literal.push(c);
+            }
+        }
+        literals.push(current_literal);
+
+        Ok(Self { fields, literals })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RedisKvFormatter {
+    key_format: FormatString,
+    value_format: FormatString,
+    field_index: HashMap<String, usize>,
+    schema: Schema,
+}
+
+impl RedisKvFormatter {
+    pub fn new(key_format: &str, value_format: &str, schema: Schema) -> Result<Self> {
+        let key_format = FormatString::new(key_format)?;
+        let value_format = FormatString::new(value_format)?;
+        let field_index: HashMap<String, usize> = schema
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(i, f)| (f.name.clone(), i))
+            .collect();
+        for field in key_format.fields.iter().chain(value_format.fields.iter()) {
+            if !field_index.contains_key(field) {
+                return Err(SinkError::Config(format!(
+                    "field {} not found in schema",
+                    field
+                )));
+            }
+        }
+        Ok(Self {
+            key_format,
+            value_format,
+            field_index,
+            schema,
+        })
+    }
+
+    pub fn format_key(&self, row: RowRef<'_>) -> Result<String> {
+        let mut key = String::new();
+
+        let mut fields = self.key_format.fields.iter().peekable();
+        let mut literals = self.key_format.literals.iter().peekable();
+        while let (Some(field), Some(literal)) = (fields.next(), literals.next()) {
+            key.push_str(literal);
+            let field_name = field;
+            let field_index = self
+                .field_index
+                .get(field_name)
+                .ok_or_else(|| SinkError::Config(format!("field {} not found", field_name)))?;
+            let field_value = row.datum_at(*field_index).to_text();
+            key.push_str(&field_value);
+        }
+        if let Some(literal) = literals.next() {
+            key.push_str(literal);
+        }
+        Ok(key)
+    }
+
+    pub fn format_value(&self, row: RowRef<'_>) -> Result<String> {
+        let mut value = String::new();
+
+        let mut fields = self.value_format.fields.iter().peekable();
+        let mut literals = self.value_format.literals.iter().peekable();
+        while let (Some(field), Some(literal)) = (fields.next(), literals.next()) {
+            value.push_str(literal);
+            let field_name = field;
+            let field_index = self
+                .field_index
+                .get(field_name)
+                .ok_or_else(|| SinkError::Config(format!("field {} not found", field_name)))?;
+            let field_value = row.datum_at(*field_index).to_text();
+            value.push_str(&field_value);
+        }
+        if let Some(literal) = literals.next() {
+            value.push_str(literal);
+        }
+        Ok(value)
+    }
+}
 
 impl ConnectionLike for MockConnection {
     fn req_packed_command(&mut self, _cmd: &[u8]) -> RedisResult<Value> {
@@ -152,27 +298,46 @@ impl ConnectionLike for MockConnection {
 impl Sink for RedisSink {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         for (op, row) in chunk.rows() {
-            let key = Self::make_redis_key(row, &self.pk_indices);
             match op {
-                Op::Insert => {
-                    // current format: key=`pk1[:pk2:pk3:...]` value="[v1,v2,...]"
-                    self.pipe.set(
-                        key,
-                        format!("[{}]", row.iter().map(|v| v.to_text()).join(",")),
-                    );
-                }
-                Op::Delete => {
-                    self.pipe.del(key);
-                }
+                Op::Insert => match &self.kv_formatter {
+                    Some(formatter) => {
+                        let key = formatter.format_key(row)?;
+                        let value = formatter.format_value(row)?;
+                        self.pipe.set(key, value);
+                    }
+                    _ => {
+                        let key = Self::default_redis_key(row, &self.pk_indices);
+                        let value = Self::default_redis_value(row);
+                        self.pipe.set(key, value);
+                    }
+                },
+                Op::Delete => match &self.kv_formatter {
+                    Some(formatter) => {
+                        let key = formatter.format_key(row)?;
+                        self.pipe.del(key);
+                    }
+                    _ => {
+                        let key = Self::default_redis_key(row, &self.pk_indices);
+                        self.pipe.del(key);
+                    }
+                },
                 Op::UpdateDelete => {
+                    let key = match &self.kv_formatter {
+                        Some(formatter) => formatter.format_key(row)?,
+                        None => Self::default_redis_key(row, &self.pk_indices),
+                    };
                     self.update_cache.push(key);
                 }
                 Op::UpdateInsert => {
+                    let value = match &self.kv_formatter {
+                        Some(formatter) => formatter.format_value(row)?,
+                        None => Self::default_redis_value(row),
+                    };
                     self.pipe.set(
                         self.update_cache
                             .pop()
                             .ok_or_else(|| SinkError::Redis("no update insert".to_string()))?,
-                        format!("[{}]", row.iter().map(|v| v.to_text()).join(",")),
+                        value,
                     );
                 }
             }
