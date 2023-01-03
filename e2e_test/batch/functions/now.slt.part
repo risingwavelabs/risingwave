@@ -5,4 +5,13 @@ statement ok
 insert into tz values(now());
 
 statement ok
+create table t (a timestamp);
+
+statement ok
+insert into t values(now());
+
+statement ok
 drop table tz
+
+statement ok
+drop table t
