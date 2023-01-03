@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::{Distinct, Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
+use crate::bind_data_type;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
 use crate::catalog::system_catalog::pg_catalog::{
@@ -180,8 +181,9 @@ impl Binder {
         for item in select_items {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
+                    let bound = self.bind_expr(expr.clone())?;
                     let alias = derive_alias(&expr);
-                    select_list.push(self.bind_expr(expr)?);
+                    select_list.push(bound);
                     aliases.push(alias);
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
@@ -384,12 +386,35 @@ fn derive_alias(expr: &Expr) -> Option<String> {
         Expr::FieldIdentifier(_, idents) => idents.last().map(|ident| ident.real_value()),
         Expr::Function(func) => Some(func.name.real_value()),
         Expr::Case { .. } => Some("case".to_string()),
-        Expr::Cast { expr, data_type } => {
-            derive_alias(&expr).or(Some(data_type.to_string().to_lowercase()))
-        }
+        Expr::Cast { expr, data_type } => derive_alias(&expr).or(Some(data_type_to_alias(
+            // We bind_expr before derive_alias, so the unwrap should be safe
+            &bind_data_type(&data_type).unwrap(),
+        ))),
         Expr::Row(_) => Some("row".to_string()),
         Expr::Array(_) => Some("array".to_string()),
         Expr::ArrayIndex { obj, index: _ } => derive_alias(&obj),
         _ => None,
+    }
+}
+
+fn data_type_to_alias(data_type: &DataType) -> String {
+    match data_type {
+        DataType::Boolean => "bool".to_string(),
+        DataType::Int16 => "int2".to_string(),
+        DataType::Int32 => "int4".to_string(),
+        DataType::Int64 => "int8".to_string(),
+        DataType::Float32 => "float4".to_string(),
+        DataType::Float64 => "float8".to_string(),
+        DataType::Decimal => "numeric".to_string(),
+        DataType::Date => "date".to_string(),
+        DataType::Varchar => "varchar".to_string(),
+        DataType::Time => "time".to_string(),
+        DataType::Timestamp => "timestamp".to_string(),
+        DataType::Timestamptz => "timestampz".to_string(),
+        DataType::Interval => "interval".to_string(),
+        // Note: Postgres doesn't have anonymous structs, we just use "struct" here
+        DataType::Struct(_) => "struct".to_string(),
+        DataType::List { datatype } => data_type_to_alias(datatype),
+        DataType::Bytea => "bytea".to_string(),
     }
 }
