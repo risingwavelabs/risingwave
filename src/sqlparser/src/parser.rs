@@ -2281,7 +2281,7 @@ impl Parser {
                 Keyword::SMALLINT => Ok(DataType::SmallInt),
                 Keyword::INT | Keyword::INTEGER => Ok(DataType::Int),
                 Keyword::BIGINT => Ok(DataType::BigInt),
-                Keyword::VARCHAR => Ok(DataType::Varchar),
+                Keyword::STRING | Keyword::VARCHAR => Ok(DataType::Varchar),
                 Keyword::CHAR | Keyword::CHARACTER => {
                     if self.parse_keyword(Keyword::VARYING) {
                         Ok(DataType::Varchar)
