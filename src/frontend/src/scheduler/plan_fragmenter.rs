@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -468,8 +468,7 @@ impl StageGraphBuilder {
 impl BatchPlanFragmenter {
     /// Split the plan node into each stages, based on exchange node.
     pub fn split(mut self, batch_node: PlanRef) -> SchedulerResult<Query> {
-        let root_stage =
-            self.new_stage(batch_node.clone(), Distribution::Single.to_prost(1, &self))?;
+        let root_stage = self.new_stage(batch_node, Distribution::Single.to_prost(1, &self))?;
         let stage_graph = self.stage_graph_builder.build(root_stage.id);
         Ok(Query {
             stage_graph,

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use risingwave_sqlparser::ast::ExplainOptions;
+use risingwave_sqlparser::ast::{ExplainOptions, ExplainType};
 
 use crate::expr::CorrelatedId;
 use crate::handler::HandlerArgs;
@@ -36,6 +36,8 @@ pub struct OptimizerContext {
     explain_options: ExplainOptions,
     /// Store the trace of optimizer
     optimizer_trace: RefCell<Vec<String>>,
+    /// Store the optimized logical plan of optimizer
+    logical_explain: RefCell<Option<String>>,
     /// Store correlated id
     next_correlated_id: RefCell<u32>,
     /// Store options or properties from the `with` clause
@@ -65,6 +67,7 @@ impl OptimizerContext {
             sql,
             explain_options,
             optimizer_trace: RefCell::new(vec![]),
+            logical_explain: RefCell::new(None),
             next_correlated_id: RefCell::new(0),
             with_options,
         }
@@ -80,6 +83,7 @@ impl OptimizerContext {
             sql: Arc::from(""),
             explain_options: ExplainOptions::default(),
             optimizer_trace: RefCell::new(vec![]),
+            logical_explain: RefCell::new(None),
             next_correlated_id: RefCell::new(0),
             with_options: Default::default(),
         }
@@ -105,9 +109,23 @@ impl OptimizerContext {
     }
 
     pub fn trace(&self, str: impl Into<String>) {
+        // If explain type is logical, do not store the trace for any optimizations beyond logical.
+        if self.explain_options.explain_type == ExplainType::Logical
+            && self.logical_explain.borrow().is_some()
+        {
+            return;
+        }
         let mut optimizer_trace = self.optimizer_trace.borrow_mut();
         optimizer_trace.push(str.into());
         optimizer_trace.push("\n".to_string());
+    }
+
+    pub fn store_logical(&self, str: impl Into<String>) {
+        *self.logical_explain.borrow_mut() = Some(str.into())
+    }
+
+    pub fn take_logical(&self) -> Option<String> {
+        self.logical_explain.borrow_mut().take()
     }
 
     pub fn take_trace(&self) -> Vec<String> {
