@@ -51,7 +51,7 @@ pub(super) fn get_column_names(
             for (i, alias) in select.aliases.iter().enumerate() {
                 if alias.is_none() {
                     return Err(ErrorCode::BindError(format!(
-                    "An alias must be specified for the expression {}(counting from 1) in result relation", i+1
+                    "An alias must be specified for the {} expression (counting from 1) in result relation", ordinal(i+1)
                 ))
                 .into());
                 }
@@ -154,6 +154,20 @@ It only indicates the physical clustering of the data, which may improve the per
     }
 }
 
+fn ordinal(i: usize) -> String {
+    let s = i.to_string();
+    let suffix = if s.ends_with('1') && !s.ends_with("11") {
+        "st"
+    } else if s.ends_with('2') && !s.ends_with("12") {
+        "nd"
+    } else if s.ends_with('3') && !s.ends_with("13") {
+        "rd"
+    } else {
+        "th"
+    };
+    s + suffix
+}
+
 #[cfg(test)]
 pub mod tests {
     use std::collections::HashMap;
@@ -243,7 +257,7 @@ pub mod tests {
         let err = frontend.run_sql(sql).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Bind error: An alias must be specified for the expression 1(counting from 1) in result relation"
+            "Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation"
         );
 
         // some expression without alias is forbidden.
@@ -251,7 +265,7 @@ pub mod tests {
         let err = frontend.run_sql(sql).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Bind error: An alias must be specified for the expression 1(counting from 1) in result relation"
+            "Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation"
         );
     }
 

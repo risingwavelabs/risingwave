@@ -3,12 +3,12 @@
   sql: |
     create table t (a int);
     select a is null from t;
-  stream_error: 'Bind error: An alias must be specified for the expression 1(counting from 1) in result relation'
+  stream_error: 'Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation'
 - name: is_true
   sql: |
     create table t (a bool);
     select a, a is true from t;
-  stream_error: 'Bind error: An alias must be specified for the expression 2(counting from 1) in result relation'
+  stream_error: 'Bind error: An alias must be specified for the 2nd expression (counting from 1) in result relation'
 - name: is_null with alias
   sql: |
     create table t (a int);
