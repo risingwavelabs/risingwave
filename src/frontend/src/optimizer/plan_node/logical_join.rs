@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,7 +28,6 @@ use super::{
     PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
-use crate::optimizer::max_one_row_visitor::MaxOneRowVisitor;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -36,7 +35,7 @@ use crate::optimizer::plan_node::{
     EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
     StreamDynamicFilter, StreamFilter, ToStreamContext,
 };
-use crate::optimizer::plan_visitor::PlanVisitor;
+use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -171,7 +170,9 @@ impl LogicalJoin {
 
     /// get the Mapping of columnIndex from output column index to internal column index
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        self.i2o_col_mapping().inverse()
+        // If output_indices = [0, 0, 1], we should use it as `o2i_col_mapping` directly.
+        // If we use `self.i2o_col_mapping().inverse()`, we will lose the first 0.
+        ColIndexMapping::new(self.output_indices().iter().map(|x| Some(*x)).collect())
     }
 
     fn derive_fd(core: &generic::Join<PlanRef>) -> FunctionalDependencySet {

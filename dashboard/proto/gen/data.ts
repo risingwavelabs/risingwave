@@ -324,8 +324,8 @@ export const DataType_TypeName = {
   TIMESTAMP: "TIMESTAMP",
   INTERVAL: "INTERVAL",
   DATE: "DATE",
-  /** TIMESTAMPZ - Timestamp type with timezone */
-  TIMESTAMPZ: "TIMESTAMPZ",
+  /** TIMESTAMPTZ - Timestamp type with timezone */
+  TIMESTAMPTZ: "TIMESTAMPTZ",
   STRUCT: "STRUCT",
   LIST: "LIST",
   BYTEA: "BYTEA",
@@ -376,8 +376,8 @@ export function dataType_TypeNameFromJSON(object: any): DataType_TypeName {
     case "DATE":
       return DataType_TypeName.DATE;
     case 13:
-    case "TIMESTAMPZ":
-      return DataType_TypeName.TIMESTAMPZ;
+    case "TIMESTAMPTZ":
+      return DataType_TypeName.TIMESTAMPTZ;
     case 15:
     case "STRUCT":
       return DataType_TypeName.STRUCT;
@@ -422,8 +422,8 @@ export function dataType_TypeNameToJSON(object: DataType_TypeName): string {
       return "INTERVAL";
     case DataType_TypeName.DATE:
       return "DATE";
-    case DataType_TypeName.TIMESTAMPZ:
-      return "TIMESTAMPZ";
+    case DataType_TypeName.TIMESTAMPTZ:
+      return "TIMESTAMPTZ";
     case DataType_TypeName.STRUCT:
       return "STRUCT";
     case DataType_TypeName.LIST:

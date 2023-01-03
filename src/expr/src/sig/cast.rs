@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -73,7 +73,7 @@ pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
             T::Float64,
         ],
     );
-    insert_cast_seq(&mut m, &[T::Date, T::Timestamp, T::Timestampz]);
+    insert_cast_seq(&mut m, &[T::Date, T::Timestamp, T::Timestamptz]);
     insert_cast_seq(&mut m, &[T::Time, T::Interval]);
 
     // Casting to and from string type.
@@ -87,7 +87,7 @@ pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
         T::Float64,
         T::Date,
         T::Timestamp,
-        T::Timestampz,
+        T::Timestamptz,
         T::Time,
         T::Interval,
     ] {
@@ -97,7 +97,7 @@ pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
 
     // Misc casts allowed by PG that are neither in implicit cast sequences nor from/to string.
     m.insert((T::Timestamp, T::Time), CastContext::Assign);
-    m.insert((T::Timestampz, T::Time), CastContext::Assign);
+    m.insert((T::Timestamptz, T::Time), CastContext::Assign);
     m.insert((T::Boolean, T::Int32), CastContext::Explicit);
     m.insert((T::Int32, T::Boolean), CastContext::Explicit);
     m

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@ use pb::stream_node as pb_node;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::catalog::{ColumnIndex, SourceInfo};
+use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan as pb;
 use smallvec::SmallVec;
 
@@ -241,6 +241,7 @@ impl HashJoin {
         // The pk of hash join internal and degree table should be join_key + input_pk.
         let join_key_len = join_key_indices.len();
         let mut pk_indices = join_key_indices;
+
         // TODO(yuhao): dedup the dist key and pk.
         pk_indices.extend(input.logical_pk());
 
@@ -252,7 +253,6 @@ impl HashJoin {
         internal_columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
         });
-
         pk_indices.iter().for_each(|idx| {
             internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
         });
@@ -265,7 +265,7 @@ impl HashJoin {
 
         pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
             degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
-            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending)
+            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending);
         });
         degree_table_catalog_builder.add_column(&degree_column_field);
         degree_table_catalog_builder
@@ -273,7 +273,6 @@ impl HashJoin {
 
         internal_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
         degree_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
-
         (
             internal_table_catalog_builder.build(internal_table_dist_keys),
             degree_table_catalog_builder.build(degree_table_dist_keys),
@@ -694,7 +693,7 @@ pub fn to_stream_prost_body(
         }),
         Node::Source(me) => {
             let me = &me.core.catalog;
-            ProstNode::Source(SourceNode {
+            let source_inner = me.as_ref().map(|me| StreamSource {
                 source_id: me.id,
                 source_name: me.name.clone(),
                 state_table: Some(
@@ -702,16 +701,15 @@ pub fn to_stream_prost_body(
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
-                info: Some(SourceInfo {
-                    source_info: Some(me.info.clone()),
-                }),
+                info: Some(me.info.clone()),
                 row_id_index: me
                     .row_id_index
                     .map(|index| ColumnIndex { index: index as _ }),
                 columns: me.columns.iter().map(|c| c.to_protobuf()).collect(),
                 pk_column_ids: me.pk_col_ids.iter().map(Into::into).collect(),
                 properties: me.properties.clone(),
-            })
+            });
+            ProstNode::Source(SourceNode { source_inner })
         }
         Node::TopN(me) => {
             let me = &me.core;

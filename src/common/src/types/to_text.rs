@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -55,7 +55,7 @@ pub trait ToText {
     /// - `ScalarRefImpl::Struct` -> `DataType::Struct`
     ///
     /// Exception:
-    /// The scalar of `DataType::Timestampz` is the `ScalarRefImpl::Int64`.
+    /// The scalar of `DataType::Timestamptz` is the `ScalarRefImpl::Int64`.
     fn to_text(&self) -> String {
         let mut s = String::new();
         self.write(&mut s).unwrap();
@@ -169,7 +169,7 @@ impl ToText for i64 {
     fn write_with_type<W: Write>(&self, ty: &DataType, f: &mut W) -> Result {
         match ty {
             DataType::Int64 => self.write(f),
-            DataType::Timestampz => {
+            DataType::Timestamptz => {
                 // Just a meaningful representation as placeholder. The real implementation depends
                 // on TimeZone from session. See #3552.
                 let secs = self.div_euclid(1_000_000);

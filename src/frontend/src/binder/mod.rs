@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -38,7 +38,7 @@ pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundTableSource, BoundWatermark,
+    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundWatermark,
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use risingwave_common::error::ErrorCode;
@@ -77,10 +77,12 @@ pub struct Binder {
     cte_to_relation: HashMap<String, (BoundQuery, TableAlias)>,
 
     search_path: SearchPath,
+    /// Whether the Binder is binding an MV.
+    in_create_mv: bool,
 }
 
 impl Binder {
-    pub fn new(session: &SessionImpl) -> Binder {
+    fn new_inner(session: &SessionImpl, in_create_mv: bool) -> Binder {
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
             db_name: session.database().to_string(),
@@ -92,7 +94,16 @@ impl Binder {
             next_values_id: 0,
             cte_to_relation: HashMap::new(),
             search_path: session.config().get_search_path(),
+            in_create_mv,
         }
+    }
+
+    pub fn new(session: &SessionImpl) -> Binder {
+        Self::new_inner(session, false)
+    }
+
+    pub fn new_for_stream(session: &SessionImpl) -> Binder {
+        Self::new_inner(session, true)
     }
 
     /// Bind a [`Statement`].

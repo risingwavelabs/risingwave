@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,6 +28,7 @@ use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableId};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::stream_plan::Barrier;
 use risingwave_pb::stream_service::{
@@ -854,38 +855,21 @@ where
                 // the L0 layer files are generated.
                 // See https://github.com/singularity-data/risingwave/issues/1251
                 let checkpoint = node.command_ctx.checkpoint;
-                let mut sst_to_worker: HashMap<HummockSstableId, WorkerId> = HashMap::new();
-                let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
-                for resp in resps.iter_mut() {
-                    let mut t: Vec<ExtendedSstableInfo> = resp
-                        .synced_sstables
-                        .iter_mut()
-                        .map(|grouped| {
-                            let sst_info =
-                                std::mem::take(&mut grouped.sst).expect("field not None");
-                            sst_to_worker.insert(sst_info.id, resp.worker_id);
-                            ExtendedSstableInfo::new(
-                                grouped.compaction_group_id,
-                                sst_info,
-                                std::mem::take(&mut grouped.table_stats_map),
-                            )
-                        })
-                        .collect_vec();
-                    synced_ssts.append(&mut t);
-                }
-
+                let (sst_to_worker, synced_ssts) = collect_synced_ssts(resps);
                 // hummock_manager commit epoch.
+                let mut new_snapshot = None;
                 if prev_epoch == INVALID_EPOCH {
                     assert!(
                         synced_ssts.is_empty(),
                         "no sstables should be produced in the first epoch"
                     );
                 } else if checkpoint {
-                    self.hummock_manager
+                    new_snapshot = self
+                        .hummock_manager
                         .commit_epoch(node.command_ctx.prev_epoch.0, synced_ssts, sst_to_worker)
                         .await?;
                 } else {
-                    self.hummock_manager.update_current_epoch(prev_epoch)?;
+                    new_snapshot = Some(self.hummock_manager.update_current_epoch(prev_epoch));
                     // if we collect a barrier(checkpoint = false),
                     // we need to ensure that command is Plain and the notifier's checkpoint is
                     // false
@@ -893,6 +877,16 @@ where
                 }
 
                 node.command_ctx.post_collect().await?;
+                // Notify new snapshot after fragment_mapping changes have been notified in
+                // `post_collect`.
+                if let Some(snapshot) = new_snapshot {
+                    self.env
+                        .notification_manager()
+                        .notify_frontend_without_version(
+                            Operation::Update, // Frontends don't care about operation.
+                            Info::HummockSnapshot(snapshot),
+                        );
+                }
 
                 // Notify about collected.
                 let mut notifiers = take(&mut node.notifiers);
@@ -966,3 +960,30 @@ where
 }
 
 pub type BarrierManagerRef<S> = Arc<GlobalBarrierManager<S>>;
+
+fn collect_synced_ssts(
+    resps: &mut [BarrierCompleteResponse],
+) -> (
+    HashMap<HummockSstableId, WorkerId>,
+    Vec<ExtendedSstableInfo>,
+) {
+    let mut sst_to_worker: HashMap<HummockSstableId, WorkerId> = HashMap::new();
+    let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
+    for resp in resps.iter_mut() {
+        let mut t: Vec<ExtendedSstableInfo> = resp
+            .synced_sstables
+            .iter_mut()
+            .map(|grouped| {
+                let sst_info = std::mem::take(&mut grouped.sst).expect("field not None");
+                sst_to_worker.insert(sst_info.id, resp.worker_id);
+                ExtendedSstableInfo::new(
+                    grouped.compaction_group_id,
+                    sst_info,
+                    std::mem::take(&mut grouped.table_stats_map),
+                )
+            })
+            .collect_vec();
+        synced_ssts.append(&mut t);
+    }
+    (sst_to_worker, synced_ssts)
+}

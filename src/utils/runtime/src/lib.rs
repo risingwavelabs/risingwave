@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,8 +33,10 @@ use tracing_subscriber::{filter, EnvFilter};
 
 /// Dump logs of all SQLs, i.e., tracing target `pgwire_query_log` to `.risingwave/log/query.log`.
 ///
-/// Changing the level of `pgwire` to `TRACE` in `configure_risingwave_targets_fmt` can also turn on
-/// the logs, but without a dedicated file.
+/// Other ways to enable query log:
+/// - Sets `RW_QUERY_LOG_PATH` to a directory.
+/// - Changing the level of `pgwire` to `TRACE` in `configure_risingwave_targets_fmt` can also turn
+///   on the logs, but without a dedicated file.
 const ENABLE_QUERY_LOG_FILE: bool = false;
 /// Use an [excessively pretty, human-readable formatter](tracing_subscriber::fmt::format::Pretty).
 /// Includes line numbers for each log.
@@ -106,6 +108,13 @@ pub fn set_panic_hook() {
 }
 
 /// Init logger for RisingWave binaries.
+///
+/// Currently, the following env variables will be read:
+///
+/// * `RUST_LOG`: overrides default level and tracing targets. e.g.,
+///   `RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info"`
+/// * `RW_QUERY_LOG_PATH`: the path to generate query log. If set, [`ENABLE_QUERY_LOG_FILE`] is
+///   turned on.
 pub fn init_risingwave_logger(settings: LoggerSettings) {
     let mut layers = vec![];
 
@@ -143,14 +152,21 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         layers.push(fmt_layer.with_filter(to_env_filter(filter)).boxed());
     };
 
-    if ENABLE_QUERY_LOG_FILE {
-        let query_log_path = ".risingwave/log/query.log";
+    let query_log_path = std::env::var("RW_QUERY_LOG_PATH");
+    if query_log_path.is_ok() || ENABLE_QUERY_LOG_FILE {
+        let query_log_path = query_log_path.unwrap_or(".risingwave/log".to_string());
+        let query_log_path = PathBuf::from(query_log_path);
         let file = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
-            .open(query_log_path)
-            .expect("failed to create '.risingwave/log/query.log'");
+            .open(query_log_path.join("query.log"))
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to create '{}/query.log': {e}",
+                    query_log_path.display()
+                )
+            });
         let layer = tracing_subscriber::fmt::layer()
             .with_ansi(false)
             .with_level(false)
@@ -161,13 +177,17 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         layers.push(layer.boxed());
 
         // also dump slow query log
-        let slow_query_log_path = ".risingwave/log/slow_query.log";
         let file = std::fs::OpenOptions::new()
             .create(true)
             .write(true)
             .truncate(true)
-            .open(slow_query_log_path)
-            .expect("failed to create '.risingwave/log/slow_query.log'");
+            .open(query_log_path.join("slow_query.log"))
+            .unwrap_or_else(|e| {
+                panic!(
+                    "failed to create '{}/slow_query.log': {e}",
+                    query_log_path.display()
+                )
+            });
         let layer = tracing_subscriber::fmt::layer()
             .with_ansi(false)
             .with_level(false)

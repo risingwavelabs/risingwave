@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -212,17 +212,17 @@ pub fn timestamp_interval_sub<T1, T2, T3>(
 }
 
 #[inline(always)]
-pub fn timestampz_interval_add<T1, T2, T3>(l: i64, r: IntervalUnit) -> Result<i64> {
-    interval_timestampz_add::<T1, T2, T3>(r, l)
+pub fn timestamptz_interval_add<T1, T2, T3>(l: i64, r: IntervalUnit) -> Result<i64> {
+    interval_timestamptz_add::<T1, T2, T3>(r, l)
 }
 
 #[inline(always)]
-pub fn timestampz_interval_sub<T1, T2, T3>(l: i64, r: IntervalUnit) -> Result<i64> {
-    interval_timestampz_add::<T1, T2, T3>(r.negative(), l)
+pub fn timestamptz_interval_sub<T1, T2, T3>(l: i64, r: IntervalUnit) -> Result<i64> {
+    interval_timestamptz_add::<T1, T2, T3>(r.negative(), l)
 }
 
 #[inline(always)]
-pub fn interval_timestampz_add<T1, T2, T3>(l: IntervalUnit, r: i64) -> Result<i64> {
+pub fn interval_timestamptz_add<T1, T2, T3>(l: IntervalUnit, r: i64) -> Result<i64> {
     // Without session TimeZone, we cannot add month/day in local time. See #5826.
     // However, we only reject months but accept days, assuming them are always 24-hour and ignoring
     // Daylight Saving.

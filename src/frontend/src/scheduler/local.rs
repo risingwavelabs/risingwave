@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -114,7 +114,6 @@ impl LocalQueryExecution {
             &plan_node,
             &task_id,
             context,
-            // TODO: Add support to use current epoch when needed
             self.snapshot.get_batch_query_epoch(),
         );
         let executor = executor.build().await?;
@@ -245,7 +244,6 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            // TODO: Add support to use current epoch when needed
                             epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         let exchange_source = ExchangeSource {
@@ -278,7 +276,6 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            // TODO: Add support to use current epoch when needed
                             epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         // NOTE: select a random work node here.
@@ -311,7 +308,6 @@ impl LocalQueryExecution {
 
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
-                        // TODO: Add support to use current epoch when needed
                         epoch: Some(self.snapshot.get_batch_query_epoch()),
                     };
 

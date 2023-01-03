@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -376,7 +376,7 @@ macro_rules! for_all_cmp_variants {
             { decimal, decimal, decimal, $general_f },
             { float32, decimal, float64, $general_f },
             { float64, decimal, float64, $general_f },
-            { timestampz, timestampz, timestampz, $general_f },
+            { timestamptz, timestamptz, timestamptz, $general_f },
             { timestamp, timestamp, timestamp, $general_f },
             { interval, interval, interval, $general_f },
             { time, time, time, $general_f },

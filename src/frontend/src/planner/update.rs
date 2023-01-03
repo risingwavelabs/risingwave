@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,17 +24,19 @@ use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {
     pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<PlanRoot> {
-        let name = update.table_source.name.clone();
-        let source_id = update.table_source.source_id;
-        let table_id = update.table_source.associated_mview_id;
         let scan = self.plan_relation(update.table)?;
         let input = if let Some(expr) = update.selection {
             LogicalFilter::create_with_expr(scan, expr)
         } else {
             scan
         };
-        let plan: PlanRef =
-            LogicalUpdate::create(input, name, source_id, table_id, update.exprs)?.into();
+        let plan: PlanRef = LogicalUpdate::create(
+            input,
+            update.table_name.clone(),
+            update.table_id,
+            update.exprs,
+        )?
+        .into();
 
         // For update, frontend will only schedule one task so do not need this to be single.
         let dist = RequiredDist::Any;
