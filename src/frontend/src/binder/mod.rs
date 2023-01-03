@@ -77,10 +77,12 @@ pub struct Binder {
     cte_to_relation: HashMap<String, (BoundQuery, TableAlias)>,
 
     search_path: SearchPath,
+    /// Whether the Binder is binding an MV.
+    in_create_mv: bool,
 }
 
 impl Binder {
-    pub fn new(session: &SessionImpl) -> Binder {
+    fn new_inner(session: &SessionImpl, in_create_mv: bool) -> Binder {
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
             db_name: session.database().to_string(),
@@ -92,7 +94,16 @@ impl Binder {
             next_values_id: 0,
             cte_to_relation: HashMap::new(),
             search_path: session.config().get_search_path(),
+            in_create_mv,
         }
+    }
+
+    pub fn new(session: &SessionImpl) -> Binder {
+        Self::new_inner(session, false)
+    }
+
+    pub fn new_for_stream(session: &SessionImpl) -> Binder {
+        Self::new_inner(session, true)
     }
 
     /// Bind a [`Statement`].

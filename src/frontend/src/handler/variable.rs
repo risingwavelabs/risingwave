@@ -51,7 +51,7 @@ pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Re
 
     Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        Some(1),
+        None,
         vec![row].into(),
         vec![PgFieldDescriptor::new(
             name.to_ascii_lowercase(),
@@ -79,7 +79,7 @@ pub(super) fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse>
 
     Ok(RwPgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        Some(all_variables.len() as i32),
+        None,
         rows.into(),
         vec![
             PgFieldDescriptor::new(
