@@ -45,6 +45,7 @@ pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (St
 }
 
 /// Parse SQL
+/// FIXME(Noel): Introduce error type for sqlsmith for this.
 pub fn parse_sql(sql: &str) -> Vec<Statement> {
     Parser::parse_sql(sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql))
 }
