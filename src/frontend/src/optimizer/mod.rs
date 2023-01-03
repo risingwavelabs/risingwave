@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -401,6 +401,7 @@ impl PlanRoot {
             ],
             ApplyOrder::TopDown,
         );
+
         if has_logical_over_agg(plan.clone()) {
             return Err(ErrorCode::InternalError(format!(
                 "OverAgg can not be transformed. Plan:\n{}",
@@ -408,6 +409,15 @@ impl PlanRoot {
             ))
             .into());
         }
+
+        plan = self.optimize_by_rules(
+            plan,
+            "Dedup Group keys".to_string(),
+            vec![AggDedupGroupKeyRule::create()],
+            ApplyOrder::TopDown,
+        );
+
+        ctx.store_logical(plan.explain_to_string().unwrap());
 
         Ok(plan)
     }
@@ -448,7 +458,7 @@ impl PlanRoot {
         !has_batch_exchange(plan.clone()) // there's no (single) exchange
             && ((has_batch_seq_scan(plan.clone()) // but there's a seq scan (which must be single)
             && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table())) // and it's not a system table
-            || has_batch_source(plan.clone())) // or there's a source
+            || has_batch_source(plan)) // or there's a source
 
         // TODO: join between a normal table and a system table is not supported yet
     }
@@ -619,7 +629,7 @@ impl PlanRoot {
         let stream_plan = self.gen_stream_plan()?;
 
         StreamMaterialize::create(
-            stream_plan.clone(),
+            stream_plan,
             mv_name,
             self.required_dist.clone(),
             self.required_order.clone(),
