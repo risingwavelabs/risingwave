@@ -93,7 +93,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generate casts from a cast map.
     /// TODO: Assign casts have to be tested via `INSERT`.
     fn gen_cast_inner(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Option<Expr> {
-        let casts = CAST_TABLE.get(&ret)?;
+        let casts = CAST_TABLE.get(ret)?;
         let cast_sig = casts.choose(&mut self.rng).unwrap();
 
         use CastContext as T;
@@ -205,7 +205,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_fixed_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
-        let funcs = match FUNC_TABLE.get(&ret) {
+        let funcs = match FUNC_TABLE.get(ret) {
             None => return self.gen_simple_scalar(ret),
             Some(funcs) => funcs,
         };
@@ -247,7 +247,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         if *ret == DataType::Interval {
             return self.gen_simple_scalar(ret);
         }
-        let funcs = match AGG_FUNC_TABLE.get(&ret) {
+        let funcs = match AGG_FUNC_TABLE.get(ret) {
             None => return self.gen_simple_scalar(ret),
             Some(funcs) => funcs,
         };
