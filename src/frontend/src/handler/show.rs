@@ -96,7 +96,7 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
 
             return Ok(PgResponse::new_for_stream(
                 StatementType::SHOW_COMMAND,
-                Some(rows.len() as i32),
+                None,
                 rows.into(),
                 vec![
                     PgFieldDescriptor::new(
@@ -121,7 +121,7 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
 
     Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        Some(rows.len() as i32),
+        None,
         rows.into(),
         vec![PgFieldDescriptor::new(
             "Name".to_owned(),
