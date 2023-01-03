@@ -28,22 +28,22 @@ use risingwave_sqlparser::ast::{DataType as AstDataType, StructField};
 
 pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
     match data_type {
-        DataType::Boolean => (AstDataType::Boolean),
-        DataType::Int16 => (AstDataType::SmallInt(None)),
-        DataType::Int32 => (AstDataType::Int(None)),
-        DataType::Int64 => (AstDataType::BigInt(None)),
-        DataType::Decimal => (AstDataType::Decimal(None, None)),
-        DataType::Float32 => (AstDataType::Real),
-        DataType::Float64 => (AstDataType::Double),
-        DataType::Varchar => (AstDataType::Varchar),
-        DataType::Bytea => (AstDataType::Bytea),
-        DataType::Date => (AstDataType::Date),
-        DataType::Timestamp => (AstDataType::Timestamp(false)),
-        DataType::Timestamptz => (AstDataType::Timestamp(true)),
-        DataType::Time => (AstDataType::Time(false)),
-        DataType::Interval => (AstDataType::Interval),
+        DataType::Boolean => AstDataType::Boolean,
+        DataType::Int16 => AstDataType::SmallInt(None),
+        DataType::Int32 => AstDataType::Int(None),
+        DataType::Int64 => AstDataType::BigInt(None),
+        DataType::Decimal => AstDataType::Decimal(None, None),
+        DataType::Float32 => AstDataType::Real,
+        DataType::Float64 => AstDataType::Double,
+        DataType::Varchar => AstDataType::Varchar,
+        DataType::Bytea => AstDataType::Bytea,
+        DataType::Date => AstDataType::Date,
+        DataType::Timestamp => AstDataType::Timestamp(false),
+        DataType::Timestamptz => AstDataType::Timestamp(true),
+        DataType::Time => AstDataType::Time(false),
+        DataType::Interval => AstDataType::Interval,
         DataType::Struct(inner) => {
-            (AstDataType::Struct(
+            AstDataType::Struct(
                 inner
                     .field_names
                     .iter()
@@ -53,10 +53,10 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
                         data_type: data_type_to_ast_data_type(typ),
                     })
                     .collect(),
-            ))
+            )
         }
         DataType::List { datatype: ref typ } => {
-            (AstDataType::Array(Box::new(data_type_to_ast_data_type(typ))))
+            AstDataType::Array(Box::new(data_type_to_ast_data_type(typ)))
         }
     }
 }
