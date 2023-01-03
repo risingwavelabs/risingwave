@@ -47,11 +47,15 @@ pub(super) fn get_column_names(
         // If user provide columns name (col_names.is_some()), we don't need alias.
         // For other expressions (col_names.is_none()), we require the user to explicitly assign an
         // alias.
-        if col_names.is_none() && select.aliases.iter().any(Option::is_none) {
-            return Err(ErrorCode::BindError(
-                "An alias must be specified for an expression".to_string(),
-            )
-            .into());
+        if col_names.is_none() {
+            for (i, alias) in select.aliases.iter().enumerate() {
+                if alias.is_none() {
+                    return Err(ErrorCode::BindError(format!(
+                    "An alias must be specified for the expression {}(counting from 1) in result relation", i+1
+                ))
+                .into());
+                }
+            }
         }
         if let Some(relation) = &select.from {
             let mut check_items = Vec::new();

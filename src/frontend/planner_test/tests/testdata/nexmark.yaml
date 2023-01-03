@@ -701,7 +701,7 @@
     JOIN side_input FOR SYSTEM_TIME AS OF B.p_time AS S
     ON mod(B.auction, 10000) = S.key; */
     select 1;
-  stream_error: 'Bind error: An alias must be specified for an expression'
+  stream_error: 'Bind error: An alias must be specified for the expression 1(counting from 1) in result relation'
 - id: nexmark_q14
   before:
   - create_tables
