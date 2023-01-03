@@ -257,7 +257,6 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 value_indices,
                 prefix_hint_len,
             );
-
             Ok(Box::new(RowSeqScanExecutor::new(
                 table,
                 scan_ranges,

@@ -48,6 +48,10 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             // Simply ignore the tpch test cases when enable kill nodes.
             continue;
         }
+        if kill && path.ends_with("visibility_all.slt") {
+            // Simply ignore the read uncommitted test cases when enable kill nodes.
+            continue;
+        }
 
         // XXX: hack for kafka source test
         let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));

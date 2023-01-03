@@ -27,6 +27,7 @@ use risingwave_sqlparser::ast::Statement;
 
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
+use crate::handler::flush::do_flush;
 use crate::handler::privilege::{check_privileges, resolve_privileges};
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
@@ -97,6 +98,7 @@ pub async fn handle_query(
     let stmt_type = to_statement_type(&stmt)?;
     let session = handler_args.session.clone();
     let query_start_time = Instant::now();
+    let only_checkpoint_visible = handler_args.session.config().only_checkpoint_visible();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, query_mode, output_schema) = {
@@ -137,7 +139,7 @@ pub async fn handle_query(
             let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
             let query_id = query.query_id().clone();
             let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
-            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot)
+            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, only_checkpoint_visible)
         };
         match query_mode {
             QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
@@ -262,12 +264,7 @@ pub async fn local_execute(
 pub async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
     match stmt_type {
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            let client = session.env().meta_client();
-            let snapshot = client.flush(true).await?;
-            session
-                .env()
-                .hummock_snapshot_manager()
-                .update_epoch(snapshot);
+            do_flush(session).await?;
         }
         _ => {}
     }

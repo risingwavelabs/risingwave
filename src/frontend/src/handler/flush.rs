@@ -17,16 +17,20 @@ use risingwave_common::error::Result;
 
 use super::RwPgResponse;
 use crate::handler::HandlerArgs;
+use crate::session::SessionImpl;
 
 pub(super) async fn handle_flush(handler_args: HandlerArgs) -> Result<RwPgResponse> {
-    let client = handler_args.session.env().meta_client();
-    // The returned epoch >= epoch for flush, but it is okay.
-    let snapshot = client.flush(true).await?;
-    // Update max epoch to ensure read-after-write correctness.
-    handler_args
-        .session
+    do_flush(&handler_args.session).await?;
+    Ok(PgResponse::empty_result(StatementType::FLUSH))
+}
+
+pub(crate) async fn do_flush(session: &SessionImpl) -> Result<()> {
+    let client = session.env().meta_client();
+    let checkpoint = session.config().only_checkpoint_visible();
+    let snapshot = client.flush(checkpoint).await?;
+    session
         .env()
         .hummock_snapshot_manager()
         .update_epoch(snapshot);
-    Ok(PgResponse::empty_result(StatementType::FLUSH))
+    Ok(())
 }

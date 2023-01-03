@@ -114,7 +114,6 @@ impl LocalQueryExecution {
             &plan_node,
             &task_id,
             context,
-            // TODO: Add support to use current epoch when needed
             self.snapshot.get_batch_query_epoch(),
         );
         let executor = executor.build().await?;
@@ -245,7 +244,6 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            // TODO: Add support to use current epoch when needed
                             epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         let exchange_source = ExchangeSource {
@@ -278,7 +276,6 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            // TODO: Add support to use current epoch when needed
                             epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         // NOTE: select a random work node here.
@@ -311,7 +308,6 @@ impl LocalQueryExecution {
 
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
-                        // TODO: Add support to use current epoch when needed
                         epoch: Some(self.snapshot.get_batch_query_epoch()),
                     };
 

@@ -15,6 +15,7 @@
 mod query_mode;
 mod search_path;
 mod transaction_isolation_level;
+mod visibility_mode;
 
 use std::ops::Deref;
 
@@ -24,11 +25,12 @@ pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 
 use crate::error::{ErrorCode, RwError};
 use crate::session_config::transaction_isolation_level::IsolationLevel;
+use crate::session_config::visibility_mode::VisibilityMode;
 use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 12] = [
+const CONFIG_KEYS: [&str; 13] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -41,6 +43,7 @@ const CONFIG_KEYS: [&str; 12] = [
     "TRANSACTION ISOLATION LEVEL",
     "QUERY_EPOCH",
     "RW_BATCH_ENABLE_SORT_AGG",
+    "VISIBILITY_MODE",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -57,6 +60,7 @@ const SEARCH_PATH: usize = 8;
 const TRANSACTION_ISOLATION_LEVEL: usize = 9;
 const QUERY_EPOCH: usize = 10;
 const BATCH_ENABLE_SORT_AGG: usize = 11;
+const VISIBILITY_MODE: usize = 12;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -288,6 +292,9 @@ pub struct ConfigMap {
     /// see <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
     search_path: SearchPath,
 
+    /// If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.
+    visibility_mode: VisibilityMode,
+
     /// see <https://www.postgresql.org/docs/current/transaction-iso.html>
     transaction_isolation_level: IsolationLevel,
 
@@ -318,6 +325,8 @@ impl ConfigMap {
             self.max_split_range_gap = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
             self.search_path = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(VisibilityMode::entry_name()) {
+            self.visibility_mode = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(QueryEpoch::entry_name()) {
             self.query_epoch = val.as_slice().try_into()?;
         } else {
@@ -348,6 +357,8 @@ impl ConfigMap {
             Ok(self.max_split_range_gap.to_string())
         } else if key.eq_ignore_ascii_case(SearchPath::entry_name()) {
             Ok(self.search_path.to_string())
+        } else if key.eq_ignore_ascii_case(VisibilityMode::entry_name()) {
+            Ok(self.visibility_mode.to_string())
         } else if key.eq_ignore_ascii_case(IsolationLevel::entry_name()) {
             Ok(self.transaction_isolation_level.to_string())
         } else if key.eq_ignore_ascii_case(QueryEpoch::entry_name()) {
@@ -409,6 +420,11 @@ impl ConfigMap {
                 setting : self.search_path.to_string(),
                 description : String::from("Sets the order in which schemas are searched when an object (table, data type, function, etc.) is referenced by a simple name with no schema specified")
             },
+            VariableInfo{
+                name : VisibilityMode::entry_name().to_lowercase(),
+                setting : self.visibility_mode.to_string(),
+                description : String::from("If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.")
+            },
             VariableInfo {
                 name: QueryEpoch::entry_name().to_lowercase(),
                 setting : self.query_epoch.to_string(),
@@ -459,6 +475,10 @@ impl ConfigMap {
 
     pub fn get_search_path(&self) -> SearchPath {
         self.search_path.clone()
+    }
+
+    pub fn only_checkpoint_visible(&self) -> bool {
+        matches!(self.visibility_mode, VisibilityMode::Checkpoint)
     }
 
     pub fn get_query_epoch(&self) -> Option<Epoch> {
