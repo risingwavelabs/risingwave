@@ -22,13 +22,11 @@ use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::struct_type::StructType;
-
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_sqlparser::ast::{
     Cte, Distinct, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, TableWithJoins,
     With,
 };
-
 
 use crate::sql_gen::utils::create_table_with_joins_from_table;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext, Table};

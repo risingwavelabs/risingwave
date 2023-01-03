@@ -18,7 +18,6 @@ use chrono::{DateTime, Utc};
 use rand::distributions::Alphanumeric;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
 
