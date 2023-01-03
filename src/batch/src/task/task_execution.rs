@@ -46,8 +46,8 @@ use crate::task::BatchTaskContext;
 // Now we will only at most have 2 status for each status channel. Running -> Failed or Finished.
 const TASK_STATUS_BUFFER_SIZE: usize = 2;
 
-/// A special version for batch allocation stat, passed in another task context to report task mem
-/// usage 0 bytes at the end.
+/// A special version for batch allocation stat, passed in another task `context` C to report task
+/// mem usage 0 bytes at the end.
 pub async fn allocation_stat_for_batch<Fut, T, F, C>(
     future: Fut,
     interval: Duration,
@@ -77,7 +77,7 @@ where
                 _ = monitor => unreachable!(),
                 output = future => {
                     // Report mem usage as 0 after ends immediately.
-                    context.record_mem_usage(0);
+                    context.store_mem_usage(0);
                     output
                 },
             };
@@ -418,14 +418,14 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         };
 
         // For every fired Batch Task, we will wrap it with allocation stats to report memory
-        // estimation to `BatchManager`.
+        // estimation per task to `BatchManager`.
         let ctx1 = self.context.clone();
         let ctx2 = self.context.clone();
         let alloc_stat_wrap_fut = allocation_stat_for_batch(
             fut,
             Duration::from_millis(1000),
             move |bytes| {
-                ctx1.record_mem_usage(bytes);
+                ctx1.store_mem_usage(bytes);
             },
             ctx2,
         );

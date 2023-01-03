@@ -46,10 +46,10 @@ pub struct BatchManager {
     /// Batch configuration
     config: BatchConfig,
 
-    /// Total batch mem usage.
+    /// Total batch memory usage in this CN.
     /// When each task context report their own usage, it will apply the diff into this total mem
     /// value for all tasks.
-    mem_val: Arc<TrAdder<i64>>,
+    total_mem_val: Arc<TrAdder<i64>>,
 }
 
 impl BatchManager {
@@ -72,7 +72,7 @@ impl BatchManager {
             // stream manager.
             runtime: Box::leak(Box::new(runtime)),
             config,
-            mem_val: TrAdder::new().into(),
+            total_mem_val: TrAdder::new().into(),
         }
     }
 
@@ -238,11 +238,13 @@ impl BatchManager {
     /// Called by global memory manager for total usage of batch tasks. This op is designed to be
     /// light-weight
     pub fn get_all_memory_usage(&self) -> usize {
-        self.mem_val.get() as usize
+        self.total_mem_val.get() as usize
     }
 
+    /// Calculate the diff between this time and last time memory usage report, apply the diff for
+    /// the global counter. Due to the limitation of hytra, we need to use i64 type here.
     pub fn apply_mem_diff(&self, diff: i64) {
-        self.mem_val.inc(diff)
+        self.total_mem_val.inc(diff)
     }
 }
 

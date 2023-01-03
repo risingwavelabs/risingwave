@@ -60,7 +60,7 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 
     fn source_metrics(&self) -> Arc<SourceMetrics>;
 
-    fn record_mem_usage(&self, val: usize);
+    fn store_mem_usage(&self, val: usize);
 
     fn get_mem_usage(&self) -> usize;
 }
@@ -72,9 +72,10 @@ pub struct ComputeNodeContext {
     // None: Local mode don't record metrics.
     task_metrics: Option<BatchTaskMetricsWithTaskLabels>,
 
-    // Last mem usage value.
+    // Last mem usage value. Init to be 0. Should be the last value of `cur_mem_val`.
     last_mem_val: Arc<AtomicUsize>,
-    // Record how many memory bytes have been used in this task,
+    // How many memory bytes have been used in this task for the latest report value. Will be moved
+    // to `last_mem_val` if new value comes in.
     cur_mem_val: Arc<AtomicUsize>,
 }
 
@@ -117,7 +118,7 @@ impl BatchTaskContext for ComputeNodeContext {
         self.env.source_metrics()
     }
 
-    fn record_mem_usage(&self, val: usize) {
+    fn store_mem_usage(&self, val: usize) {
         // Record the last mem val.
         // Calculate the difference between old val and new value, and apply the diff to total
         // memory usage value.
