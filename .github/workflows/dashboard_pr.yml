@@ -41,6 +41,9 @@ jobs:
             echo "::error::Generated proto files are not up to date."
             git log --oneline --graph --abbrev-commit --branches | head -n 20
 
+            echo "origin/$GITHUB_HEAD_REF: $(git rev-parse origin/$GITHUB_HEAD_REF)"
+            echo "upstream/$GITHUB_BASE_REF: $(git rev-parse upstream/$GITHUB_BASE_REF)"
+
             # git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF
             # echo "Return code: $?"
             git merge-base $(git rev-parse origin/$GITHUB_HEAD_REF) $(git rev-parse upstream/$GITHUB_BASE_REF)
