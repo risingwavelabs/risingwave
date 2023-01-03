@@ -93,7 +93,7 @@ impl LogicalInsert {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(f, "{} {{ table: {} }}", name, self.table_source_name)
+        write!(f, "{} {{ table: {} }}, {{ returning: {} }}", name, self.table_source_name, self.returning)
     }
 
     // Get the column indexes in which to insert to

@@ -72,7 +72,7 @@ impl LogicalDelete {
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        write!(f, "{} {{ table: {} }}", name, self.table_name)
+        write!(f, "{} {{ table: {} }}, {{ returning: {} }}", name, self.table_name, self.returning)
     }
 
     #[must_use]
