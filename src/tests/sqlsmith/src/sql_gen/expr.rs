@@ -18,11 +18,11 @@ use rand::Rng;
 use risingwave_expr::expr::AggKind;
 use risingwave_frontend::expr::{agg_func_sigs, cast_sigs, func_sigs, CastContext, ExprType};
 use risingwave_sqlparser::ast::{
-    BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
+    DataType, BinaryOperator, Expr, Function, FunctionArg, FunctionArgExpr, Ident, ObjectName,
     TrimWhereField, UnaryOperator, Value,
 };
 
-use crate::sql_gen::types::{DataType, AGG_FUNC_TABLE, CAST_TABLE, FUNC_TABLE};
+use crate::sql_gen::types::{AGG_FUNC_TABLE, CAST_TABLE, FUNC_TABLE};
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {

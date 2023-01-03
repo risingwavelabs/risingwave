@@ -21,11 +21,10 @@ use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_sqlparser::ast::{
-    Cte, Distinct, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, TableWithJoins,
+    DataType, Cte, Distinct, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, TableWithJoins,
     With,
 };
 
-use crate::sql_gen::types::DataType;
 use crate::sql_gen::utils::create_table_with_joins_from_table;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext, Table};
 
@@ -190,28 +189,34 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .unzip()
     }
 
+    fn gen_data_type(&mut self) -> DataType {
+        // use DataTypeName as T;
+        // use DataType as S;
+        // match i in self.rng.gen_range()
+        //
+        // let ret_type = *[
+        //     T::Boolean,
+        //     T::Int16,
+        //     T::Int32,
+        //     T::Int64,
+        //     T::Decimal,
+        //     T::Float32,
+        //     T::Float64,
+        //     T::Varchar,
+        //     T::Date,
+        //     T::Timestamp,
+        //     T::Timestamptz,
+        //     T::Time,
+        //     T::Interval,
+        //     T::
+        // ]
+        // .choose(&mut self.rng)
+        // .unwrap();
+        todo!()
+    }
+
     fn gen_select_item(&mut self, i: i32, context: SqlGeneratorContext) -> (SelectItem, Column) {
-        use DataType as T;
-        let ret_type = *[
-            T::Boolean,
-            T::Int16,
-            T::Int32,
-            T::Int64,
-            T::Decimal,
-            T::Float32,
-            T::Float64,
-            T::Varchar,
-            T::Date,
-            T::Timestamp,
-            T::Timestamptz,
-            T::Time,
-            T::Interval,
-            T::StructOfInt,
-            T::ListOfVarchar,
-            T::ListOfInt,
-        ]
-        .choose(&mut self.rng)
-        .unwrap();
+        let ret_type = self.gen_data_type();
 
         let expr = self.gen_expr(ret_type, context);
 
