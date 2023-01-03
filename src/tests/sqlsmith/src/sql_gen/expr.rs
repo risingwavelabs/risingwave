@@ -454,7 +454,6 @@ fn make_bin_op(func: ExprType, exprs: &[Expr]) -> Option<Expr> {
 
 /// Generates a `NULL` value.
 /// TODO(Noel): Generate null for other scalar values.
-#[allow(dead_code)]
 pub(crate) fn sql_null() -> Expr {
     Expr::Value(Value::Null)
 }

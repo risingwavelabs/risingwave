@@ -20,6 +20,8 @@ use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
 use risingwave_common::types::DataType;
+use crate::sql_gen;
+use crate::sql_gen::expr::sql_null;
 
 use crate::sql_gen::SqlGenerator;
 
@@ -27,7 +29,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(super) fn gen_simple_scalar(&mut self, typ: &DataType) -> Expr {
         use DataType as T;
         // TODO: chance to gen null for scalar.
-        match typ {
+        match *typ {
             T::Int64 => Expr::Value(Value::Number(
                 self.gen_int(i64::MIN as isize, i64::MAX as isize),
             )),
@@ -79,6 +81,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             //     self.gen_simple_scalar_list(T::Int32, n)
             // }
             // T::StructOfInt => Expr::Row(vec![self.gen_simple_scalar(T::Int32)]),
+            _ => sql_null(),
         }
     }
 

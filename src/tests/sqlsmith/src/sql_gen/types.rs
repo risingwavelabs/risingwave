@@ -115,7 +115,7 @@ pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<FuncSig>>> = LazyLo
     let mut funcs = HashMap::<DataType, Vec<FuncSig>>::new();
     func_sigs()
         .filter_map(|func| func.try_into().ok())
-        .for_each(|func: FuncSig| funcs.entry(func.ret_type).or_default().push(func));
+        .for_each(|func: FuncSig| funcs.entry(func.ret_type.clone()).or_default().push(func));
     funcs
 });
 
@@ -125,7 +125,7 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<AggFuncSig>>> =
         let mut funcs = HashMap::<DataType, Vec<AggFuncSig>>::new();
         agg_func_sigs()
             .filter_map(|func| func.try_into().ok())
-            .for_each(|func: AggFuncSig| funcs.entry(func.ret_type).or_default().push(func));
+            .for_each(|func: AggFuncSig| funcs.entry(func.ret_type.clone()).or_default().push(func));
         funcs
     });
 
@@ -141,6 +141,6 @@ pub(crate) static CAST_TABLE: LazyLock<HashMap<DataType, Vec<CastSig>>> = LazyLo
             cast.context == CastContext::Explicit || cast.context == CastContext::Implicit
         })
         .filter(|cast| cast.from_type != DataType::Varchar || cast.to_type == DataType::Varchar)
-        .for_each(|cast| casts.entry(cast.to_type).or_default().push(cast));
+        .for_each(|cast| casts.entry(cast.to_type.clone()).or_default().push(cast));
     casts
 });

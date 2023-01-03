@@ -49,7 +49,7 @@ impl Table {
             .iter()
             .map(|c| Column {
                 name: format!("{}.{}", self.name, c.name),
-                data_type: c.data_type,
+                data_type: c.data_type.clone(),
             })
             .collect()
     }
