@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,8 +16,10 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::DataType;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
 };
@@ -29,7 +31,9 @@ use super::create_table::{bind_sql_columns, bind_sql_table_constraints, gen_mate
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::ColumnId;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::optimizer::OptimizerContext;
 use crate::stream_fragmenter::build_graph;
 
@@ -83,23 +87,40 @@ pub async fn handle_create_source(
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<RwPgResponse> {
-    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
-    let (mut columns, pk_column_ids, row_id_index) =
-        bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
-    if row_id_index.is_none() && !is_materialized {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "The non-materialized source does not support PRIMARY KEY constraint, please use \"CREATE MATERIALIZED SOURCE\" instead".to_owned(),
-        )
-        .into());
-    }
     let with_properties = handler_args.with_options.inner().clone();
-    const UPSTREAM_SOURCE_KEY: &str = "connector";
+
     // confluent schema registry must be used with kafka
     let is_kafka = with_properties
         .get("connector")
         .unwrap_or(&"".to_string())
         .to_lowercase()
         .eq("kafka");
+
+    let (mut column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
+
+    // Add hidden column `_rw_kafka_timestamp` to each message
+    if is_kafka && !is_materialized {
+        let kafka_timestamp_column = ColumnDesc {
+            data_type: DataType::Timestamptz,
+            column_id: ColumnId::new(column_descs.len() as i32),
+            name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
+            field_descs: vec![],
+            type_name: "".to_string(),
+        };
+        column_descs.push(kafka_timestamp_column);
+    }
+
+    let (mut columns, pk_column_ids, row_id_index) =
+        bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
+
+    if row_id_index.is_none() && !is_materialized {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "The non-materialized source does not support PRIMARY KEY constraint, please use \"CREATE MATERIALIZED SOURCE\" instead".to_owned(),
+        )
+        .into());
+    }
+
+    const UPSTREAM_SOURCE_KEY: &str = "connector";
     if !is_kafka
         && matches!(
             &stmt.source_schema,
@@ -117,6 +138,7 @@ pub async fn handle_create_source(
             UPSTREAM_SOURCE_KEY
         ))));
     }
+
     let (columns, source_info) = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
             if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
