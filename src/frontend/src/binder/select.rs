@@ -180,24 +180,8 @@ impl Binder {
         for item in select_items {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
-                    let (select_expr, alias) = match expr.clone() {
-                        Expr::Identifier(ident) => {
-                            (self.bind_expr(expr)?, Some(ident.real_value()))
-                        }
-                        Expr::CompoundIdentifier(idents) => (
-                            self.bind_expr(expr)?,
-                            idents.last().map(|ident| ident.real_value()),
-                        ),
-                        Expr::FieldIdentifier(field_expr, idents) => (
-                            self.bind_single_field_column(*field_expr.clone(), &idents)?,
-                            idents.last().map(|ident| ident.real_value()),
-                        ),
-                        Expr::Function(func) => {
-                            (self.bind_expr(expr)?, Some(func.name.real_value()))
-                        }
-                        _ => (self.bind_expr(expr)?, None),
-                    };
-                    select_list.push(select_expr);
+                    let alias = self.derive_alias(&expr);
+                    select_list.push(self.bind_expr(expr)?);
                     aliases.push(alias);
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
@@ -390,5 +374,15 @@ impl Binder {
                 BoundDistinct::DistinctOn(bound_exprs)
             }
         })
+    }
+
+    fn derive_alias(&mut self, expr: &Expr) -> Option<String> {
+        match expr.clone() {
+            Expr::Identifier(ident) => Some(ident.real_value()),
+            Expr::CompoundIdentifier(idents) => idents.last().map(|ident| ident.real_value()),
+            Expr::FieldIdentifier(_, idents) => idents.last().map(|ident| ident.real_value()),
+            Expr::Function(func) => Some(func.name.real_value()),
+            _ => None,
+        }
     }
 }
