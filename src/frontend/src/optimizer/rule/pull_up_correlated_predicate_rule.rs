@@ -17,8 +17,7 @@ use itertools::{Either, Itertools};
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
 use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_correlated_id_finder::PlanCorrelatedIdFinder;
-use crate::optimizer::plan_visitor::PlanVisitor;
+use crate::optimizer::plan_visitor::{PlanCorrelatedIdFinder, PlanVisitor};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 

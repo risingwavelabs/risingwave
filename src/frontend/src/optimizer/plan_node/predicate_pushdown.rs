@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use paste::paste;
 
 use super::*;
-use crate::optimizer::share_parent_counter::ShareParentCounter;
+use crate::optimizer::plan_visitor::ShareParentCounter;
 use crate::optimizer::PlanVisitor;
 use crate::utils::Condition;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
