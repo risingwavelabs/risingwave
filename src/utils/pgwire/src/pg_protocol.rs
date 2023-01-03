@@ -172,6 +172,9 @@ where
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
                             .unwrap();
+                        self.stream.flush().await.unwrap_or_else(|e| {
+                            tracing::error!("flush error: {}", e);
+                        });
                         return true;
                     }
 
