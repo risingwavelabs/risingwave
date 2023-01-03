@@ -39,8 +39,8 @@ jobs:
             echo "::error::Generated proto files are not up to date."
             git log --graph --abbrev-commit --branches | head -n 20
 
-            git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF
-            echo "Return code: $?"
+            # git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF
+            # echo "Return code: $?"
             git merge-base $(git rev-parse origin/$GITHUB_HEAD_REF) $(git rev-parse upstream/$GITHUB_BASE_REF)
 
             FORK_POINT=$(git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF)
