@@ -47,7 +47,7 @@ jobs:
 
             git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF
             echo "Return code: $?"
-            git merge-base 48dbca435da8f01bee9e5c7cb68b887422d01292 12127933b945ba414e5a7329e04139c65f09f9c7
+            git merge-base $(git rev-parse origin/$GITHUB_HEAD_REF) $(git rev-parse upstream/$GITHUB_BASE_REF)
 
             FORK_POINT=$(git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF)
             echo "FORK_POINT: $FORK_POINT"
