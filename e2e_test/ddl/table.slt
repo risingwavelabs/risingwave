@@ -188,11 +188,17 @@ insert into t values (1);
 statement ok
 insert into t values (2);
 
-statement error 
+statement ok
 create table n1 as select sum(v1) from t;
 
-statement error 
+statement ok
+drop table n1;
+
+statement ok
 create table n1(v1) as select sum(v1) from t;
+
+statement ok
+drop table n1;
 
 statement ok
 create table n1 as select sum(v1) as sum from t;
