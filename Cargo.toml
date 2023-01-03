@@ -42,6 +42,7 @@ members = [
   "src/utils/sync-point",
   "src/utils/workspace-config",
   "src/workspace-hack",
+  "src/udf/arrow-flight-client",
 ]
 
 [workspace.package]
