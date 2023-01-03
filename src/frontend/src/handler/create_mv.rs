@@ -218,7 +218,7 @@ pub mod tests {
         assert_eq!(columns, expected_columns);
     }
 
-    /// When creating MV, The only thing to allow without explicit alias is `InputRef`.
+    /// When creating MV, a unique column name must be specified for each column
     #[tokio::test]
     async fn test_no_alias() {
         let frontend = LocalFrontend::new(Default::default()).await;
@@ -226,12 +226,16 @@ pub mod tests {
         let sql = "create table t(x varchar)";
         frontend.run_sql(sql).await.unwrap();
 
-        // Aggregation without alias is forbidden.
-        let sql = "create materialized view mv1 as select count(x) from t";
+        // Aggregation without alias is ok.
+        let sql = "create materialized view mv0 as select count(x) from t";
+        frontend.run_sql(sql).await.unwrap();
+
+        // Same aggregations without alias is forbidden, because it make the same column name.
+        let sql = "create materialized view mv1 as select count(x), count(*) from t";
         let err = frontend.run_sql(sql).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Bind error: An alias must be specified for an expression"
+            "Invalid input syntax: column \"count\" specified more than once"
         );
 
         // Literal without alias is forbidden.
@@ -239,15 +243,15 @@ pub mod tests {
         let err = frontend.run_sql(sql).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Bind error: An alias must be specified for an expression"
+            "Bind error: An alias must be specified for the expression 1(counting from 1) in result relation"
         );
 
-        // Function without alias is forbidden.
-        let sql = "create materialized view mv1 as select length(x) from t";
+        // some expression without alias is forbidden.
+        let sql = "create materialized view mv1 as select x is null from t";
         let err = frontend.run_sql(sql).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Bind error: An alias must be specified for an expression"
+            "Bind error: An alias must be specified for the expression 1(counting from 1) in result relation"
         );
     }
 
