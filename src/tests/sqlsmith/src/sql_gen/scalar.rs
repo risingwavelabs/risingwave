@@ -18,11 +18,11 @@ use chrono::{DateTime, Utc};
 use rand::distributions::Alphanumeric;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
 use risingwave_common::types::DataType;
-use crate::sql_gen;
-use crate::sql_gen::expr::sql_null;
+use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
 
+
+use crate::sql_gen::expr::sql_null;
 use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {

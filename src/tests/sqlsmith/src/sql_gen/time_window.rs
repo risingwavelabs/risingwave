@@ -15,11 +15,10 @@
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     DataType as AstDataType, FunctionArg, ObjectName, TableAlias, TableFactor, TableWithJoins,
 };
-
-use risingwave_common::types::DataType;
 
 use crate::sql_gen::utils::{create_args, create_table_alias};
 use crate::sql_gen::{Column, Expr, SqlGenerator, Table};
