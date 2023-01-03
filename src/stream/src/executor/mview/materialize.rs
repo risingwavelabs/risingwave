@@ -22,7 +22,7 @@ use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
-use risingwave_common::row::{CompactedRow, RowDeserializer};
+use risingwave_common::row::RowDeserializer;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -411,7 +411,7 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
 
 /// A cache for materialize executors.
 pub struct MaterializeCache {
-    data: ExecutorCache<Vec<u8>, Option<CompactedRow>>,
+    data: ExecutorCache<Vec<u8>, Option<Vec<u8>>>,
 }
 
 impl MaterializeCache {
@@ -437,16 +437,16 @@ impl MaterializeCache {
                     match self.force_get(&key) {
                         Some(old_row) => fixed_changes.push((
                             key.clone(),
-                            RowOp::Update((old_row.row.clone(), new_row.clone())),
+                            RowOp::Update((old_row.to_vec(), new_row.clone())),
                         )),
                         None => fixed_changes.push((key.clone(), RowOp::Insert(new_row.clone()))),
                     };
-                    self.put(key, Some(CompactedRow { row: new_row }));
+                    self.put(key, Some(new_row));
                 }
                 RowOp::Delete(_) => {
                     match self.force_get(&key) {
                         Some(old_row) => {
-                            fixed_changes.push((key.clone(), RowOp::Delete(old_row.row.clone())));
+                            fixed_changes.push((key.clone(), RowOp::Delete(old_row.clone())));
                         }
                         None => (), // delete a nonexistent value
                     };
@@ -456,11 +456,11 @@ impl MaterializeCache {
                     match self.force_get(&key) {
                         Some(old_row) => fixed_changes.push((
                             key.clone(),
-                            RowOp::Update((old_row.row.clone(), new_row.clone())),
+                            RowOp::Update((old_row.clone(), new_row.clone())),
                         )),
                         None => fixed_changes.push((key.clone(), RowOp::Insert(new_row.clone()))),
                     }
-                    self.put(key, Some(CompactedRow { row: new_row }));
+                    self.put(key, Some(new_row));
                 }
             }
         }
@@ -487,13 +487,13 @@ impl MaterializeCache {
         let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
         while let Some(result) = buffered.next().await {
             let (key, value) = result;
-            self.data.push(key, value?);
+            self.data.push(key, value?.map(|v| v.row.to_vec()));
         }
 
         Ok(())
     }
 
-    pub fn force_get(&mut self, key: &[u8]) -> &Option<CompactedRow> {
+    pub fn force_get(&mut self, key: &[u8]) -> &Option<Vec<u8>> {
         self.data.get(key).unwrap_or_else(|| {
             panic!(
                 "the key {:?} has not been fetched in the materialize executor's cache ",
@@ -502,7 +502,7 @@ impl MaterializeCache {
         })
     }
 
-    pub fn put(&mut self, key: Vec<u8>, value: Option<CompactedRow>) {
+    pub fn put(&mut self, key: Vec<u8>, value: Option<Vec<u8>>) {
         self.data.push(key, value);
     }
 

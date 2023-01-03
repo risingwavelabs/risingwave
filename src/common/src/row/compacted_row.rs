@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use bytes::Bytes;
+
 use super::{OwnedRow, Row, RowDeserializer};
 use crate::types::DataType;
 use crate::util::value_encoding;
@@ -20,20 +22,20 @@ use crate::util::value_encoding;
 /// Executors need to serialize Row into `CompactedRow` before writing into cache.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct CompactedRow {
-    pub row: Vec<u8>,
+    pub row: Bytes,
 }
 
 impl CompactedRow {
     /// Deserialize [`CompactedRow`] into [`OwnedRow`] with given types.
     pub fn deserialize(&self, data_types: &[DataType]) -> value_encoding::Result<OwnedRow> {
-        RowDeserializer::new(data_types).deserialize(self.row.as_slice())
+        RowDeserializer::new(data_types).deserialize(self.row.as_ref())
     }
 }
 
 impl<R: Row> From<R> for CompactedRow {
     fn from(row: R) -> Self {
         Self {
-            row: row.value_serialize(),
+            row: Bytes::from(row.value_serialize()),
         }
     }
 }

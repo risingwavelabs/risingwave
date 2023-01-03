@@ -106,7 +106,7 @@ impl EncodedJoinRow {
 
 impl EstimateSize for EncodedJoinRow {
     fn estimated_heap_size(&self) -> usize {
-        self.compacted_row.row.estimated_heap_size()
+        self.compacted_row.row.len()
     }
 }
 
