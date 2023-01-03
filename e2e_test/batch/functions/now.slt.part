@@ -1,0 +1,8 @@
+statement ok
+create table tz (a timestamp with time zone);
+
+statement ok
+insert into tz values(now());
+
+statement ok
+drop table tz
