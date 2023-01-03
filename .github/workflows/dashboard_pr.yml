@@ -17,10 +17,6 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
-      - run: |
-          git pull origin $GITHUB_HEAD_REF --unshallow
-          git remote add upstream https://github.com/risingwavelabs/risingwave.git
-          git fetch upstream $GITHUB_BASE_REF:$GITHUB_BASE_REF
       - uses: actions/setup-node@v2
         with:
           node-version: "18"
@@ -40,14 +36,16 @@ jobs:
           if ! git diff --quiet --staged; then
             git reset
             echo "::error::Generated proto files are not up to date."
-            git log --oneline --graph --abbrev-commit --branches | head -n 20
+
+            # fetch branch history
+            git pull origin $GITHUB_HEAD_REF --unshallow
+            git remote add upstream https://github.com/risingwavelabs/risingwave.git
+            git fetch upstream $GITHUB_BASE_REF:$GITHUB_BASE_REF
 
             echo "origin/$GITHUB_HEAD_REF: $(git rev-parse origin/$GITHUB_HEAD_REF)"
             echo "upstream/$GITHUB_BASE_REF: $(git rev-parse upstream/$GITHUB_BASE_REF)"
 
-            # git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF
-            # echo "Return code: $?"
-            git merge-base $(git rev-parse origin/$GITHUB_HEAD_REF) $(git rev-parse upstream/$GITHUB_BASE_REF)
+            git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF
 
             FORK_POINT=$(git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF)
             echo "FORK_POINT: $FORK_POINT"
