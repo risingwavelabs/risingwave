@@ -139,6 +139,8 @@ impl KafkaSplitEnumerator {
         } else {
             None
         };
+
+        // println!("Start offset: {:?}", expect_start_offset);
         let mut expect_stop_offset = if let Some(ts) = expect_stop_timestamp_millis {
             Some(
                 self.fetch_offset_for_time(topic_partitions.as_ref(), ts)
@@ -147,6 +149,7 @@ impl KafkaSplitEnumerator {
         } else {
             None
         };
+        // println!("Stop offset: {:?}", expect_stop_offset);
 
         // Watermark here has nothing to do with watermark in streaming processing. Watermark
         // here means smallest/largest offset available for reading.
@@ -161,28 +164,45 @@ impl KafkaSplitEnumerator {
             }
             ret
         };
+        // println!("Watermark: {:?}", watermarks);
 
-        topic_partitions.iter().map(|partition| {
-            let (low, high) = watermarks.remove(&partition).unwrap();
-            let start_offset = {
-                let start = expect_start_offset.as_mut().map(|m| m.remove(partition).unwrap_or(Some(low))).unwrap_or(Some(low)).unwrap_or(low);
-                i64::max(start, low)
-            };
-            let stop_offset = {
-                let stop = expect_stop_offset.as_mut().map(|m| m.remove(partition).unwrap_or(Some(high))).unwrap_or(Some(high)).unwrap_or(high);
-                i64::min(stop, high)
-            };
+        Ok(topic_partitions
+            .iter()
+            .map(|partition| {
+                let (low, high) = watermarks.remove(&partition).unwrap();
+                let start_offset = {
+                    let start = expect_start_offset
+                        .as_mut()
+                        .map(|m| m.remove(partition).flatten().map(|t| t-1).unwrap_or(low))
+                        .unwrap_or(low);
+                    i64::max(start, low)
+                };
+                let stop_offset = {
+                    let stop = expect_stop_offset
+                        .as_mut()
+                        .map(|m| m.remove(partition).unwrap_or(Some(high)))
+                        .unwrap_or(Some(high))
+                        .unwrap_or(high);
+                    i64::min(stop, high)
+                };
 
-            if start_offset > stop_offset {
-                return Err(anyhow!(format!("topic {} partition {}: requested start offset {} is greater than stop offset {}",self.topic, partition, start_offset, stop_offset)));
-            }
-            Ok(KafkaSplit {
-                topic: self.topic.clone(),
-                partition: *partition,
-                start_offset: Some(start_offset),
-                stop_offset: Some(stop_offset),
+                if start_offset > stop_offset {
+                    tracing::warn!(
+                        "Skipping topic {} partition {}: requested start offset {} is greater than stop offset {}",
+                        self.topic,
+                        partition,
+                        start_offset,
+                        stop_offset
+                    );
+                }
+                KafkaSplit {
+                    topic: self.topic.clone(),
+                    partition: *partition,
+                    start_offset: Some(start_offset),
+                    stop_offset: Some(stop_offset),
+                }
             })
-        }).collect::<anyhow::Result<Vec<KafkaSplit>>>()
+            .collect::<Vec<KafkaSplit>>())
     }
 
     async fn fetch_stop_offset(
