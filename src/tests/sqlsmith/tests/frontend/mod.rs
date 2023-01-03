@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -115,6 +115,31 @@ async fn create_tables(
     Ok((tables, setup_sql))
 }
 
+/// Unparse
+fn unparse(sql: Statement) -> String {
+    format!("{}", sql)
+}
+
+/// Parse first SQL statement
+fn parse_first_sql_stmt(sql: &str) -> Statement {
+    parse_sql(sql)[0].clone()
+}
+
+/// Tests property `parse(unparse(parse(sql))) == parse(sql)`
+fn round_trip_parse_test(sql: &str) -> Result<Statement> {
+    let start = parse_first_sql_stmt(sql);
+    let round_trip = parse_first_sql_stmt(&unparse(parse_first_sql_stmt(sql)));
+    if start != round_trip {
+        Err(format!(
+            "Roundtrip test failed\nStart: {}\nRoundtrip: {}",
+            start, round_trip
+        )
+        .into())
+    } else {
+        Ok(start)
+    }
+}
+
 async fn test_stream_query(
     session: Arc<SessionImpl>,
     tables: Vec<Table>,
@@ -131,8 +156,7 @@ async fn test_stream_query(
     let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
     reproduce_failing_queries(setup_sql, &sql);
     // The generated SQL must be parsable.
-    let statements = parse_sql(&sql);
-    let stmt = statements[0].clone();
+    let stmt = round_trip_parse_test(&sql)?;
     let skipped = handle(session.clone(), stmt, &sql).await?;
     if !skipped {
         let drop_sql = format!("DROP MATERIALIZED VIEW {}", table.name);
@@ -179,8 +203,7 @@ fn test_batch_query(
     reproduce_failing_queries(setup_sql, &sql);
 
     // The generated SQL must be parsable.
-    let statements = parse_sql(&sql);
-    let stmt = statements[0].clone();
+    let stmt = round_trip_parse_test(&sql)?;
     let context: OptimizerContextRef = OptimizerContext::new(
         session.clone(),
         Arc::from(sql),

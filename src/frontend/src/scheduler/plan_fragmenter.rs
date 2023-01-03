@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -629,10 +629,15 @@ impl BatchPlanFragmenter {
                         )))
                     }
                 };
-                let split_info = block_on(kafka_enumerator.list_splits_batch(None, None))?
-                    .into_iter()
-                    .map(SplitImpl::Kafka)
-                    .collect_vec();
+                let timestamp_bound = source_node.logical().kafka_timestamp_range_value();
+                // println!("Timestamp bound: {:?}", timestamp_bound);
+                let split_info = block_on(
+                    kafka_enumerator.list_splits_batch(timestamp_bound.0, timestamp_bound.1),
+                )?
+                .into_iter()
+                .map(SplitImpl::Kafka)
+                .collect_vec();
+                // println!("Split info: {:?}", split_info);
                 return Ok(Some(SourceScanInfo::new(split_info)));
             }
         }
