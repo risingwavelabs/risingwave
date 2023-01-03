@@ -15,8 +15,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use chrono::prelude::*;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::SearchPath;
+use risingwave_common::types::NaiveDateTimeWrapper;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
 
 mod bind_context;
@@ -58,6 +60,7 @@ pub struct Binder {
     db_name: String,
     context: BindContext,
     auth_context: Arc<AuthContext>,
+    bind_timestamp: NaiveDateTimeWrapper,
     /// A stack holding contexts of outer queries when binding a subquery.
     /// It also holds all of the lateral contexts for each respective
     /// subquery.
@@ -83,11 +86,16 @@ pub struct Binder {
 
 impl Binder {
     fn new_inner(session: &SessionImpl, in_create_mv: bool) -> Binder {
+        let now_nsecs = Local::now().timestamp_nanos();
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
             db_name: session.database().to_string(),
             context: BindContext::new(),
             auth_context: session.auth_context(),
+            bind_timestamp: NaiveDateTimeWrapper::from_timestamp_uncheck(
+                now_nsecs / 1_000_000_000,
+                (now_nsecs % 1_000_000_000) as u32,
+            ),
             upper_subquery_contexts: vec![],
             lateral_contexts: vec![],
             next_subquery_id: 0,

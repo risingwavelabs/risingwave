@@ -89,6 +89,17 @@ macro_rules! ensure_arity {
             .into());
         }
     };
+    ($func:literal, | $inputs:ident | <= $upper:literal) => {
+        if !($inputs.len() <= $upper) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes at most {} arguments ({} given)",
+                $func,
+                $upper,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
 }
 
 /// An intermediate representation of struct type when resolving the type to cast.
@@ -467,7 +478,7 @@ fn infer_type_for_special(
             Ok(Some(DataType::Int16))
         }
         ExprType::Now => {
-            ensure_arity!("now", | inputs | == 0);
+            ensure_arity!("now", | inputs | <= 1);
             Ok(Some(DataType::Timestamp))
         }
         _ => Ok(None),
