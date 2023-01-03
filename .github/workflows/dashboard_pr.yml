@@ -44,14 +44,17 @@ jobs:
             echo "GITHUB_BASE_REF: $GITHUB_BASE_REF"
             git rev-parse origin/$GITHUB_HEAD_REF
             git rev-parse upstream/$GITHUB_BASE_REF
+
             git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF
+            echo "Return code: $?"
+            git merge-base 48dbca435da8f01bee9e5c7cb68b887422d01292 12127933b945ba414e5a7329e04139c65f09f9c7
 
             FORK_POINT=$(git merge-base origin/$GITHUB_HEAD_REF upstream/$GITHUB_BASE_REF)
             echo "FORK_POINT: $FORK_POINT"
             if ! git diff --quiet $FORK_POINT..upstream/$GITHUB_BASE_REF -- ../proto; then
-              echo "::error::Your branch is out-of-date. Please update your branch first and then run 'npm run gen-proto' at dashboard/ and commit the changes."
+              echo "::error::Your branch is out-of-date. Please update your branch first and then run 'npm i && npm run gen-proto' at dashboard/ and commit the changes."
             else
-              echo "::error::Please run 'npm run gen-proto' at dashboard/ and commit the changes."
+              echo "::error::Please run 'npm i && npm run gen-proto' at dashboard/ and commit the changes."
             fi
             exit 1
           fi
