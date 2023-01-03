@@ -665,6 +665,7 @@ impl HummockVersionReader {
                 for sstable_info in fetch_meta_req {
                     let (sstable, local_cache_meta_block_miss) =
                         flatten_resps.pop().unwrap().unwrap();
+                    assert_eq!(sstable_info.id, sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
                     if let Some(key_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(sstable.value(), *key_hash, &mut local_stats) {
@@ -687,9 +688,10 @@ impl HummockVersionReader {
                 ));
             } else {
                 let mut iters = Vec::new();
-                for _sstable_info in fetch_meta_req {
+                for sstable_info in fetch_meta_req {
                     let (sstable, local_cache_meta_block_miss) =
                         flatten_resps.pop().unwrap().unwrap();
+                    assert_eq!(sstable_info.id, sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
                         if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
