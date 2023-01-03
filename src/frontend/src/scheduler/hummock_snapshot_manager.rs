@@ -222,6 +222,10 @@ impl HummockSnapshotManager {
             current_epoch: std::cmp::max(prev.current_epoch, snapshot.current_epoch),
         });
     }
+
+    pub fn latest_snapshot_current_epoch(&self) -> Epoch {
+        self.latest_snapshot.load().current_epoch.into()
+    }
 }
 
 struct HummockSnapshotManagerCore {

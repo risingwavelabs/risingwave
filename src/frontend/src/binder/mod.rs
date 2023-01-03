@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use chrono::prelude::*;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::SearchPath;
 use risingwave_common::types::NaiveDateTimeWrapper;
@@ -86,15 +85,19 @@ pub struct Binder {
 
 impl Binder {
     fn new_inner(session: &SessionImpl, in_create_mv: bool) -> Binder {
-        let now_nsecs = Local::now().timestamp_nanos();
+        let now_ms = session
+            .env()
+            .hummock_snapshot_manager()
+            .latest_snapshot_current_epoch()
+            .as_unix_millis();
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
             db_name: session.database().to_string(),
             context: BindContext::new(),
             auth_context: session.auth_context(),
             bind_timestamp: NaiveDateTimeWrapper::from_timestamp_uncheck(
-                now_nsecs / 1_000_000_000,
-                (now_nsecs % 1_000_000_000) as u32,
+                (now_ms / 1000) as i64,
+                (now_ms % 1000 * 1_000_000) as u32,
             ),
             upper_subquery_contexts: vec![],
             lateral_contexts: vec![],
