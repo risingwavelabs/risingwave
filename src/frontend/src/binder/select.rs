@@ -180,7 +180,7 @@ impl Binder {
         for item in select_items {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
-                    let alias = self.derive_alias(&expr);
+                    let alias = derive_alias(&expr);
                     select_list.push(self.bind_expr(expr)?);
                     aliases.push(alias);
                 }
@@ -375,21 +375,21 @@ impl Binder {
             }
         })
     }
+}
 
-    fn derive_alias(&mut self, expr: &Expr) -> Option<String> {
-        match expr.clone() {
-            Expr::Identifier(ident) => Some(ident.real_value()),
-            Expr::CompoundIdentifier(idents) => idents.last().map(|ident| ident.real_value()),
-            Expr::FieldIdentifier(_, idents) => idents.last().map(|ident| ident.real_value()),
-            Expr::Function(func) => Some(func.name.real_value()),
-            Expr::Case { .. } => Some("case".to_string()),
-            Expr::Cast { expr, data_type } => self
-                .derive_alias(&expr)
-                .or(Some(data_type.to_string().to_lowercase())),
-            Expr::Row(_) => Some("row".to_string()),
-            Expr::Array(_) => Some("array".to_string()),
-            Expr::ArrayIndex { obj, index: _ } => self.derive_alias(&obj),
-            _ => None,
+fn derive_alias(expr: &Expr) -> Option<String> {
+    match expr.clone() {
+        Expr::Identifier(ident) => Some(ident.real_value()),
+        Expr::CompoundIdentifier(idents) => idents.last().map(|ident| ident.real_value()),
+        Expr::FieldIdentifier(_, idents) => idents.last().map(|ident| ident.real_value()),
+        Expr::Function(func) => Some(func.name.real_value()),
+        Expr::Case { .. } => Some("case".to_string()),
+        Expr::Cast { expr, data_type } => {
+            derive_alias(&expr).or(Some(data_type.to_string().to_lowercase()))
         }
+        Expr::Row(_) => Some("row".to_string()),
+        Expr::Array(_) => Some("array".to_string()),
+        Expr::ArrayIndex { obj, index: _ } => derive_alias(&obj),
+        _ => None,
     }
 }
