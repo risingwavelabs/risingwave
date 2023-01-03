@@ -119,11 +119,9 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::Struct(struct_type) => {
                 Self::Struct(get_field_vector_from_struct_type(struct_type))
             }
-            DataType::List { datatype } => Self::List(Box::new(Field::new(
-                "",
-                arrow_schema::DataType::from(&(**datatype)),
-                true,
-            ))),
+            DataType::List { datatype } => {
+                Self::List(Box::new(Field::new("", datatype.as_ref().into(), true)))
+            }
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
     }
@@ -132,18 +130,18 @@ impl From<&DataType> for arrow_schema::DataType {
 fn get_field_vector_from_struct_type(struct_type: &StructType) -> Vec<Field> {
     // Check for length equality between field_name vector and datatype vector.
     if struct_type.field_names.len() != struct_type.fields.len() {
-        return struct_type
+        struct_type
             .fields
             .iter()
-            .map(|f| Field::new("", arrow_schema::DataType::from(f), true))
-            .collect();
+            .map(|f| Field::new("", f.into(), true))
+            .collect()
     } else {
-        return struct_type
+        struct_type
             .fields
             .iter()
             .zip_eq(struct_type.field_names.clone())
-            .map(|(f, f_name)| Field::new(f_name, arrow_schema::DataType::from(f), true))
-            .collect();
+            .map(|(f, f_name)| Field::new(f_name, f.into(), true))
+            .collect()
     }
 }
 
@@ -432,12 +430,7 @@ impl From<&StructArray> for arrow_array::StructArray {
                     .field_arrays()
                     .iter()
                     .zip_eq(array.children_array_types())
-                    .map(|(arr, datatype)| {
-                        (
-                            Field::new("", arrow_schema::DataType::from(datatype), true),
-                            arrow_array::ArrayRef::from(*arr),
-                        )
-                    })
+                    .map(|(arr, datatype)| (Field::new("", datatype.into(), true), (*arr).into()))
                     .collect()
             } else {
                 array
@@ -445,15 +438,8 @@ impl From<&StructArray> for arrow_array::StructArray {
                     .iter()
                     .zip_eq(array.children_array_types())
                     .zip_eq(array.children_names())
-                    .map(|(arr_meta_data, field_name)| {
-                        (
-                            Field::new(
-                                field_name,
-                                arrow_schema::DataType::from(arr_meta_data.1),
-                                true,
-                            ),
-                            arrow_array::ArrayRef::from(*arr_meta_data.0),
-                        )
+                    .map(|((arr, datatype), field_name)| {
+                        (Field::new(field_name, datatype.into(), true), (*arr).into())
                     })
                     .collect()
             };
@@ -577,12 +563,11 @@ mod tests {
     }
     #[test]
     fn struct_array() {
+        use arrow_array::Array as _;
+
         // Empty array - risingwave to arrow conversion.
         let test_arr = StructArray::from_slices(&[true, false, true, false], vec![], vec![]);
-        assert_eq!(
-            arrow_array::Array::len(&arrow_array::StructArray::from(&test_arr)),
-            0
-        );
+        assert_eq!(arrow_array::StructArray::from(&test_arr).len(), 0);
 
         // Empty array - arrow to risingwave conversion.
         let test_arr_2 = arrow_array::StructArray::from(vec![]);
@@ -620,23 +605,10 @@ mod tests {
             vec![DataType::Boolean, DataType::INT32],
             vec![String::from("a"), String::from("b")],
         );
-
-        // Test for value equivalence.
-        for (actual_data, expected_data) in actual_risingwave_struct_array
-            .iter()
-            .zip_eq(expected_risingwave_struct_array.iter())
-        {
-            assert_eq!(actual_data, expected_data);
-        }
-
-        // Test for field name equivalence.
-        for (actual_name, expected_name) in actual_risingwave_struct_array
-            .children_names()
-            .iter()
-            .zip_eq(expected_risingwave_struct_array.children_names())
-        {
-            assert_eq!(actual_name, expected_name);
-        }
+        assert_eq!(
+            expected_risingwave_struct_array,
+            actual_risingwave_struct_array
+        );
     }
 
     #[test]
