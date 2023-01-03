@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod share_source_rewriter;
 use itertools::Itertools;
 use paste::paste;
+pub use share_source_rewriter::*;
 
 use crate::for_all_plan_nodes;
 use crate::optimizer::plan_node::*;
