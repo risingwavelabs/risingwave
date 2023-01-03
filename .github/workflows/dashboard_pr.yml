@@ -18,7 +18,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           repository: ${{ github.event.pull_request.head.repo.full_name }}
       - run: |
-          git branch -vv
+          git pull
           git remote add upstream https://github.com/risingwavelabs/risingwave.git
           git fetch upstream $GITHUB_BASE_REF:$GITHUB_BASE_REF
       - uses: actions/setup-node@v2
