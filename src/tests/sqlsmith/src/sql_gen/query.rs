@@ -15,20 +15,28 @@
 //! Interface for generating a query
 //! We construct Query based on the AST representation,
 //! as defined in the [`risingwave_sqlparser`] module.
+use std::sync::Arc;
 use std::vec;
 
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::DataType;
-
+use risingwave_common::types::struct_type::StructType;
+use risingwave_common::types::DataType::Date;
+use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_sqlparser::ast::{
-    Cte, Distinct, Expr, Ident, OrderByExpr, Query, Select, SelectItem,
-    SetExpr, TableWithJoins, With,
+    Cte, Distinct, Expr, Ident, OrderByExpr, Query, Select, SelectItem, SetExpr, TableWithJoins,
+    With,
 };
+use tracing_subscriber::registry::Data;
 
 use crate::sql_gen::utils::create_table_with_joins_from_table;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext, Table};
+
+static STRUCT_FIELD_NAMES: [&str; 26] = [
+    "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s",
+    "t", "u", "v", "w", "x", "y", "z",
+];
 
 /// Generators
 impl<'a, R: Rng> SqlGenerator<'a, R> {
@@ -191,31 +199,74 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             .unzip()
     }
 
-    fn gen_data_type(&mut self) -> DataType {
-        // use DataTypeName as T;
-        // use DataType as S;
-        // match i in self.rng.gen_range()
-        //
-        // let ret_type = *[
-        //     T::Boolean,
-        //     T::Int16,
-        //     T::Int32,
-        //     T::Int64,
-        //     T::Decimal,
-        //     T::Float32,
-        //     T::Float64,
-        //     T::Varchar,
-        //     T::Date,
-        //     T::Timestamp,
-        //     T::Timestamptz,
-        //     T::Time,
-        //     T::Interval,
-        //     T::Struct,
-        //     T::List,
-        // ]
-        // .choose(&mut self.rng)
-        // .unwrap();
+    fn gen_list_data_type(&mut self, depth: usize) -> DataType {
         todo!()
+    }
+
+    fn gen_struct_data_type(&mut self, depth: usize) -> DataType {
+        assert!(depth > 0);
+        let num_fields = self.rng.gen_range(1..10);
+        let fields = (0..num_fields)
+            .map(|_| self.gen_data_type_inner(depth))
+            .collect();
+        let field_names = STRUCT_FIELD_NAMES[0..num_fields]
+            .iter()
+            .map(|s| (*s).into())
+            .collect();
+        DataType::Struct(Arc::new(StructType {
+            fields,
+            field_names,
+        }))
+    }
+
+    fn gen_data_type(&mut self) -> DataType {
+        // Depth of struct/list nesting
+        let depth = self.rng.gen_range(0..=1);
+        self.gen_data_type_inner(depth)
+    }
+
+    fn gen_data_type_inner(&mut self, depth: usize) -> DataType {
+        use {DataType as S, DataTypeName as T};
+        let mut candidate_ret_types = vec![
+            T::Boolean,
+            T::Int16,
+            T::Int32,
+            T::Int64,
+            T::Decimal,
+            T::Float32,
+            T::Float64,
+            T::Varchar,
+            T::Date,
+            T::Timestamp,
+            T::Timestamptz,
+            T::Time,
+            T::Interval,
+        ];
+        if depth > 0 {
+            candidate_ret_types.push(T::Struct);
+            candidate_ret_types.push(T::List);
+        }
+
+        let ret_type = candidate_ret_types.choose(&mut self.rng).unwrap();
+
+        match ret_type {
+            T::Boolean => S::Boolean,
+            T::Int16 => S::Int16,
+            T::Int32 => S::Int32,
+            T::Int64 => S::Int64,
+            T::Decimal => S::Decimal,
+            T::Float32 => S::Float32,
+            T::Float64 => S::Float64,
+            T::Varchar => S::Varchar,
+            T::Date => S::Date,
+            T::Timestamp => S::Timestamp,
+            T::Timestamptz => S::Timestamptz,
+            T::Time => S::Time,
+            T::Interval => S::Interval,
+            T::Struct => self.gen_struct_data_type(depth - 1),
+            T::List => self.gen_list_data_type(depth - 1),
+            _ => unreachable!(),
+        }
     }
 
     fn gen_select_item(&mut self, i: i32, context: SqlGeneratorContext) -> (SelectItem, Column) {
