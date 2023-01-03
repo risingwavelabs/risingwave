@@ -281,9 +281,8 @@ mod tests {
     #[test]
     fn vec_min_list() -> Result<()> {
         use risingwave_common::array;
-        let input = ListArray::from_slices(
-            &[true, true, true],
-            vec![
+        let input = ListArray::from_iter(
+            [
                 Some(array! { I32Array, [Some(0)] }.into()),
                 Some(array! { I32Array, [Some(1)] }.into()),
                 Some(array! { I32Array, [Some(2)] }.into()),
