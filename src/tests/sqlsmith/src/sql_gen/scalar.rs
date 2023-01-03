@@ -20,12 +20,11 @@ use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_sqlparser::ast::{DataType as RwDataType, Expr, Value};
 
-use crate::sql_gen::expr::sql_null;
 use crate::sql_gen::types::DataType;
 use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
-    pub(crate) fn gen_simple_scalar(&mut self, typ: DataType) -> Expr {
+    pub(super) fn gen_simple_scalar(&mut self, typ: DataType) -> Expr {
         use DataType as T;
         // TODO: chance to gen null for scalar.
         match typ {
@@ -71,11 +70,21 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 data_type: RwDataType::Interval,
                 value: self.gen_temporal_scalar(typ),
             },
-            // T::ListOfVarchar => Expr::InList {} gen_scalar_list(T::Varchar,
-            // self.rng.gen_range(0..=100)), T::ListOfInt => gen_scalar_list(T::Int,
-            // self.rng.gen_range(0..=100)), T::StructOfInt =>
-            _ => sql_null(),
+            T::ListOfVarchar => {
+                let n = self.rng.gen_range(0..=100);
+                self.gen_simple_scalar_list(T::Varchar, n)
+            }
+            T::ListOfInt => {
+                let n = self.rng.gen_range(0..=100);
+                self.gen_simple_scalar_list(T::Int32, n)
+            }
+            T::StructOfInt => Expr::Row(vec![self.gen_simple_scalar(T::Int32)]),
         }
+    }
+
+    /// Generates a list of [`n`] simple scalar values of a specific [`type`].
+    fn gen_simple_scalar_list(&mut self, ty: DataType, n: usize) -> Expr {
+        Expr::Array((0..n).map(|_| self.gen_simple_scalar(ty)).collect())
     }
 
     fn gen_int(&mut self, _min: isize, max: isize) -> String {
