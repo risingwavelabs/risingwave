@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -119,7 +119,7 @@ pub(crate) fn data_type_name_to_ast_data_type(type_name: DataTypeName) -> Option
         DataTypeName::Bytea => Some(DataType::Bytea),
         DataTypeName::Date => Some(DataType::Date),
         DataTypeName::Timestamp => Some(DataType::Timestamp(false)),
-        DataTypeName::Timestampz => Some(DataType::Timestamp(true)),
+        DataTypeName::Timestamptz => Some(DataType::Timestamp(true)),
         DataTypeName::Time => Some(DataType::Time(false)),
         DataTypeName::Interval => Some(DataType::Interval),
         DataTypeName::Struct | DataTypeName::List => None,

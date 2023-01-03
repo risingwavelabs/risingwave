@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -268,6 +268,9 @@ impl StateStore for HummockStorage {
             warn!("sealing invalid epoch");
             return;
         }
+        // Update `seal_epoch` synchronously,
+        // as `HummockEvent::SealEpoch` is handled asynchronously.
+        self.seal_epoch.store(epoch, MemOrdering::SeqCst);
         self.hummock_event_sender
             .send(HummockEvent::SealEpoch {
                 epoch,

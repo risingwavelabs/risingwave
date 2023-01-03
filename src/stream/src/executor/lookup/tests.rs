@@ -1,16 +1,19 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
 
 use assert_matches::assert_matches;
 use futures::StreamExt;
@@ -130,8 +133,7 @@ async fn create_arrangement(
             arrangement_col_arrange_rules(),
             column_ids,
             1,
-            None,
-            0,
+            Arc::new(AtomicU64::new(0)),
             false,
         )
         .await,
@@ -256,8 +258,7 @@ async fn test_lookup_this_epoch() {
             vec![1, 0],
         )
         .await,
-        watermark_epoch: None,
-        cache_size: 1 << 16,
+        watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,
     }));
     let mut lookup_executor = lookup_executor.execute();
@@ -325,8 +326,7 @@ async fn test_lookup_last_epoch() {
             vec![1, 0],
         )
         .await,
-        watermark_epoch: None,
-        cache_size: 1 << 16,
+        watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,
     }));
     let mut lookup_executor = lookup_executor.execute();

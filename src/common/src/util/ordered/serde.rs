@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -313,7 +313,7 @@ mod tests {
                 serde.serialize(&row, &mut row_bytes);
                 let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
                 let encoding_data_size =
-                    ScalarImpl::encoding_data_size(&DataType::Timestampz, &mut deserializer)
+                    ScalarImpl::encoding_data_size(&DataType::Timestamptz, &mut deserializer)
                         .unwrap();
                 let data_size = size_of::<i64>();
                 assert_eq!(8, data_size);

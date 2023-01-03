@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,14 +26,14 @@ use std::sync::Arc;
 use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
 use risingwave_frontend::handler::{
-    create_index, create_mv, create_schema, create_source, create_table, drop_table, variable,
-    HandlerArgs,
+    create_index, create_mv, create_schema, create_source, create_table, drop_table, explain,
+    variable, HandlerArgs,
 };
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
 use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef,
-    PlanRef, Planner, WithOptions,
+    PlanRef, Planner,
 };
 use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -294,11 +294,8 @@ impl TestCase {
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
-            let handler_args = HandlerArgs {
-                session: session.clone(),
-                sql: Arc::from(sql),
-                with_options: WithOptions::try_from(&stmt)?,
-            };
+            // TODO: `sql` may contain multiple statements here.
+            let handler_args = HandlerArgs::new(session.clone(), &stmt, sql)?;
             match stmt.clone() {
                 Statement::Query(_)
                 | Statement::Insert { .. }
@@ -312,9 +309,7 @@ impl TestCase {
                         ..Default::default()
                     };
                     let context = OptimizerContext::new(
-                        session.clone(),
-                        Arc::from(sql),
-                        WithOptions::try_from(&stmt)?,
+                        HandlerArgs::new(session.clone(), &stmt, sql)?,
                         explain_options,
                     );
                     let ret = self.apply_query(&stmt, context.into())?;
@@ -392,11 +387,17 @@ impl TestCase {
                 } => {
                     variable::handle_set(handler_args, variable, value).unwrap();
                 }
-                Statement::Explain { .. } => {
-                    let explain_output = get_explain_output(sql, session.clone()).await;
+                Statement::Explain {
+                    analyze,
+                    statement,
+                    options,
+                } => {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
+                    let rsp = explain::handle_explain(handler_args, *statement, options, analyze)?;
+
+                    let explain_output = get_explain_output(rsp).await;
                     let ret = TestCaseResult {
                         explain_output: Some(explain_output),
                         ..Default::default()

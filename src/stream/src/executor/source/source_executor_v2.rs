@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,6 +14,7 @@
 
 use std::fmt::Formatter;
 
+use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -37,7 +38,7 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 /// [`StreamSourceCore`] stores the necessary information for the source executor to execute on the
 /// external connector.
 pub struct StreamSourceCore<S: StateStore> {
-    table_id: TableId,
+    source_id: TableId,
     source_name: String,
 
     column_ids: Vec<ColumnId>,
@@ -57,6 +58,30 @@ pub struct StreamSourceCore<S: StateStore> {
 
     /// In-memory cache for the splits.
     state_cache: HashMap<SplitId, SplitImpl>,
+}
+
+impl<S> StreamSourceCore<S>
+where
+    S: StateStore,
+{
+    pub fn new(
+        source_id: TableId,
+        source_name: String,
+        column_ids: Vec<ColumnId>,
+        source_desc_builder: SourceDescBuilderV2,
+        split_state_store: SourceStateTableHandler<S>,
+    ) -> Self {
+        Self {
+            source_id,
+            source_name,
+            column_ids,
+            source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
+            source_desc_builder: Some(source_desc_builder),
+            stream_source_splits: Vec::new(),
+            split_state_store,
+            state_cache: HashMap::new(),
+        }
+    }
 }
 
 pub struct SourceExecutorV2<S: StateStore> {
@@ -123,7 +148,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
                 source_desc.metrics.clone(),
                 SourceContext::new(
                     self.ctx.id,
-                    self.stream_source_core.as_ref().unwrap().table_id,
+                    self.stream_source_core.as_ref().unwrap().source_id,
                 ),
             )
             .await
@@ -249,7 +274,13 @@ impl<S: StateStore> SourceExecutorV2<S> {
             .recv()
             .stack_trace("source_recv_first_barrier")
             .await
-            .unwrap();
+            .ok_or_else(|| {
+                StreamExecutorError::from(anyhow!(
+                    "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
+                    self.ctx.id,
+                    self.stream_source_core.as_ref().unwrap().source_id
+                ))
+            })?;
 
         let mut core = self.stream_source_core.unwrap();
 
@@ -295,11 +326,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
         self.stream_source_core = Some(core);
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::info!(
-            "start actor {:?} with state {:?}",
-            self.ctx.id,
-            recover_state
-        );
+        tracing::info!(actor_id = self.ctx.id, state = ?recover_state, "start with state");
 
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
@@ -431,7 +458,12 @@ impl<S: StateStore> SourceExecutorV2<S> {
             .recv()
             .stack_trace("source_recv_first_barrier")
             .await
-            .unwrap();
+            .ok_or_else(|| {
+                StreamExecutorError::from(anyhow!(
+                    "failed to receive the first barrier, actor_id: {:?} with no stream source",
+                    self.ctx.id
+                ))
+            })?;
         yield Message::Barrier(barrier);
 
         while let Some(barrier) = barrier_receiver.recv().await {
@@ -466,7 +498,7 @@ impl<S: StateStore> Debug for SourceExecutorV2<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(core) = &self.stream_source_core {
             f.debug_struct("SourceExecutor")
-                .field("source_id", &core.table_id)
+                .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
                 .field("pk_indices", &self.pk_indices)
                 .finish()
@@ -478,6 +510,7 @@ impl<S: StateStore> Debug for SourceExecutorV2<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU64;
     use std::time::Duration;
 
     use maplit::{convert_args, hashmap};
@@ -527,8 +560,8 @@ mod tests {
         ));
         let source_desc_builder = create_source_desc_builder(
             &schema,
-            row_id_index,
             pk_column_ids,
+            row_id_index,
             source_info,
             properties,
         );
@@ -538,7 +571,7 @@ mod tests {
         )
         .await;
         let core = StreamSourceCore::<MemoryStateStore> {
-            table_id,
+            source_id: table_id,
             column_ids,
             source_identify: "Table_".to_string() + &table_id.table_id().to_string(),
             source_desc_builder: Some(source_desc_builder),
@@ -614,8 +647,8 @@ mod tests {
 
         let source_desc_builder = create_source_desc_builder(
             &schema,
-            row_id_index,
             pk_column_ids,
+            row_id_index,
             source_info,
             properties,
         );
@@ -630,7 +663,7 @@ mod tests {
         .await;
 
         let core = StreamSourceCore::<MemoryStateStore> {
-            table_id,
+            source_id: table_id,
             column_ids: column_ids.clone(),
             source_identify: "Table_".to_string() + &table_id.table_id().to_string(),
             source_desc_builder: Some(source_desc_builder),
@@ -658,8 +691,7 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids,
             2,
-            None,
-            0,
+            Arc::new(AtomicU64::new(0)),
             false,
         )
         .await

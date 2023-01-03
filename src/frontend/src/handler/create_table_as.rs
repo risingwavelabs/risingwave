@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -96,7 +96,7 @@ pub async fn handle_create_as(
 
     if columns.len() > column_descs.len() {
         return Err(ErrorCode::InvalidInputSyntax(
-            " too many column names were specified".to_string(),
+            "too many column names were specified".to_string(),
         )
         .into());
     }
@@ -106,7 +106,7 @@ pub async fn handle_create_as(
     });
 
     let (graph, source, table) = {
-        let context = OptimizerContext::new_with_handler_args(handler_args.clone());
+        let context = OptimizerContext::from_handler_args(handler_args.clone());
         let (plan, source, table) = gen_create_table_plan_without_bind(
             &session,
             context.into(),
@@ -114,6 +114,7 @@ pub async fn handle_create_as(
             column_descs,
             None,
             vec![],
+            "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
         )?;
         let graph = build_graph(plan);
 

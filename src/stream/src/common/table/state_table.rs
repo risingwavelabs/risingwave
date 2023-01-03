@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -429,11 +429,11 @@ impl<S: StateStore> StateTable<S> {
         match mem_table_res {
             Some(row_op) => match row_op {
                 KeyOp::Insert(row_bytes) => Ok(Some(CompactedRow {
-                    row: row_bytes.to_vec(),
+                    row: row_bytes.clone(),
                 })),
                 KeyOp::Delete(_) => Ok(None),
                 KeyOp::Update((_, row_bytes)) => Ok(Some(CompactedRow {
-                    row: row_bytes.to_vec(),
+                    row: row_bytes.clone(),
                 })),
             },
             None => {
@@ -458,7 +458,7 @@ impl<S: StateStore> StateTable<S> {
                     .await?
                 {
                     Ok(Some(CompactedRow {
-                        row: storage_row_bytes.to_vec(),
+                        row: storage_row_bytes,
                     }))
                 } else {
                     Ok(None)

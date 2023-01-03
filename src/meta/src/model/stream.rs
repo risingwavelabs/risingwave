@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ParallelUnitId;
-use risingwave_common::util::is_stream_source;
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -225,14 +224,16 @@ impl TableFragments {
         }
     }
 
-    /// Find the source node inside the stream node, if any.
-    pub fn find_source_node(stream_node: &StreamNode) -> Option<&SourceNode> {
+    /// Find the source node that contains an external stream source inside the stream node, if any.
+    pub fn find_source_node_with_stream_source(stream_node: &StreamNode) -> Option<&SourceNode> {
         if let Some(NodeBody::Source(source)) = stream_node.node_body.as_ref() {
-            return Some(source);
+            if source.source_inner.is_some() {
+                return Some(source);
+            }
         }
 
         for child in &stream_node.input {
-            if let Some(source) = Self::find_source_node(child) {
+            if let Some(source) = Self::find_source_node_with_stream_source(child) {
                 return Some(source);
             }
         }
@@ -240,16 +241,17 @@ impl TableFragments {
         None
     }
 
-    /// Extract the fragments that include stream source executors, grouping by source id.
+    /// Extract the fragments that include source executors that contains an external stream source,
+    /// grouping by source id.
     pub fn stream_source_fragments(&self) -> HashMap<SourceId, BTreeSet<FragmentId>> {
         let mut source_fragments = HashMap::new();
 
         for fragment in self.fragments() {
             for actor in &fragment.actors {
-                if let Some(source_id) =
-                    TableFragments::find_source_node(actor.nodes.as_ref().unwrap())
-                        .filter(|s| is_stream_source(s))
-                        .map(|s| s.source_id)
+                if let Some(source_id) = TableFragments::find_source_node_with_stream_source(
+                    actor.nodes.as_ref().unwrap(),
+                )
+                .map(|s| s.source_inner.as_ref().unwrap().source_id)
                 {
                     source_fragments
                         .entry(source_id)

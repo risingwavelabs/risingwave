@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -30,7 +30,7 @@ use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::{Barrier, Executor, Message, PkIndices};
-use crate::task::AtomicU64RefOpt;
+use crate::task::AtomicU64Ref;
 
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
@@ -104,9 +104,7 @@ pub struct LookupExecutorParams<S: StateStore> {
 
     pub state_table: StateTable<S>,
 
-    pub watermark_epoch: AtomicU64RefOpt,
-
-    pub cache_size: usize,
+    pub watermark_epoch: AtomicU64Ref,
 
     pub chunk_size: usize,
 }
@@ -126,7 +124,6 @@ impl<S: StateStore> LookupExecutor<S> {
             column_mapping,
             state_table,
             watermark_epoch,
-            cache_size,
             chunk_size,
         } = params;
 
@@ -223,7 +220,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(watermark_epoch, cache_size),
+            lookup_cache: LookupCache::new(watermark_epoch),
             chunk_size,
         }
     }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -35,6 +35,7 @@ use std::rc::Rc;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
 use itertools::Itertools;
+pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -86,6 +87,34 @@ pub enum Convention {
 impl ColPrunable for PlanRef {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
+            // Check the share cache first. If cache exists, it means this is the second round of
+            // column pruning.
+            if let Some((new_share, merge_required_cols)) = ctx.get_share_cache(self.id()) {
+                // If it is the first visit, recursively call `prune_col` for its input and
+                // replace it.
+                if ctx.visit_share_at_second_round(self.id()) {
+                    let new_logical_share: &LogicalShare = new_share
+                        .as_logical_share()
+                        .expect("must be share operator");
+                    let new_share_input = new_logical_share.input().prune_col(
+                        &(0..new_logical_share.base.schema().len()).collect_vec(),
+                        ctx,
+                    );
+                    new_logical_share.replace_input(new_share_input);
+                }
+
+                // Calculate the new required columns based on the new share.
+                let new_required_cols: Vec<usize> = required_cols
+                    .iter()
+                    .map(|col| merge_required_cols.iter().position(|x| x == col).unwrap())
+                    .collect_vec();
+                let mapping = ColIndexMapping::with_remaining_columns(
+                    &new_required_cols,
+                    new_share.schema().len(),
+                );
+                return LogicalProject::with_mapping(new_share.clone(), mapping).into();
+            }
+
             // `LogicalShare` can't clone, so we implement column pruning for `LogicalShare`
             // here.
             // Basically, we need to wait for all parents of `LogicalShare` to prune columns before
@@ -102,6 +131,11 @@ impl ColPrunable for PlanRef {
                     .collect_vec();
                 let input: PlanRef = logical_share.input();
                 let input = input.prune_col(&merge_require_cols, ctx);
+
+                // Cache the new share operator for the second round.
+                let new_logical_share = LogicalShare::create(input.clone());
+                ctx.add_share_cache(self.id(), new_logical_share, merge_require_cols.clone());
+
                 let exprs = logical_share
                     .base
                     .schema()

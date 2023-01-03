@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,8 +20,7 @@ use crate::catalog::SourceId;
 use crate::optimizer::plan_node::{
     LogicalShare, LogicalSource, PlanNodeId, PlanTreeNode, StreamShare,
 };
-use crate::optimizer::plan_rewriter::PlanRewriter;
-use crate::optimizer::PlanVisitor;
+use crate::optimizer::{PlanRewriter, PlanVisitor};
 use crate::PlanRef;
 
 #[derive(Debug, Clone, Default)]
@@ -64,7 +63,12 @@ impl ShareSourceRewriter {
 
 impl PlanRewriter for ShareSourceRewriter {
     fn rewrite_logical_source(&mut self, source: &LogicalSource) -> PlanRef {
-        let source_id = source.core.catalog.id;
+        let source_id = match &source.core.catalog {
+            Some(s) => s.id,
+            None => {
+                return source.clone().into();
+            }
+        };
         if !self.share_ids.contains(&source_id) {
             let source_ref = source.clone().into();
             return source_ref;
@@ -88,7 +92,7 @@ impl PlanRewriter for ShareSourceRewriter {
                 let new_inputs = share
                     .inputs()
                     .into_iter()
-                    .map(|input| self.rewrite(input.clone()))
+                    .map(|input| self.rewrite(input))
                     .collect_vec();
                 let new_share = share.clone_with_inputs(&new_inputs);
                 self.share_map.insert(share.id(), new_share.clone());
@@ -108,9 +112,11 @@ impl PlanVisitor<()> for SourceCounter {
     fn merge(_: (), _: ()) {}
 
     fn visit_logical_source(&mut self, source: &LogicalSource) {
-        self.source_counter
-            .entry(source.core.catalog.id)
-            .and_modify(|count| *count += 1)
-            .or_insert(1);
+        if let Some(source) = &source.core.catalog {
+            self.source_counter
+                .entry(source.id)
+                .and_modify(|count| *count += 1)
+                .or_insert(1);
+        }
     }
 }

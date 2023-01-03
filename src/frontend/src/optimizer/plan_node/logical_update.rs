@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -37,9 +37,8 @@ use crate::utils::{ColIndexMapping, Condition};
 #[derive(Debug, Clone)]
 pub struct LogicalUpdate {
     pub base: PlanBase,
-    table_source_name: String, // explain-only
-    source_id: TableId,        // TODO: use SourceId
-    associated_mview_id: TableId,
+    table_name: String, // explain-only
+    table_id: TableId,
     input: PlanRef,
     exprs: Vec<ExprImpl>,
 }
@@ -49,8 +48,7 @@ impl LogicalUpdate {
     pub fn new(
         input: PlanRef,
         table_source_name: String,
-        source_id: TableId,
-        associated_mview_id: TableId,
+        table_id: TableId,
         exprs: Vec<ExprImpl>,
     ) -> Self {
         let ctx = input.ctx();
@@ -60,9 +58,8 @@ impl LogicalUpdate {
         let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
         Self {
             base,
-            table_source_name,
-            source_id,
-            associated_mview_id,
+            table_name: table_source_name,
+            table_id,
             input,
             exprs,
         }
@@ -72,36 +69,23 @@ impl LogicalUpdate {
     pub fn create(
         input: PlanRef,
         table_source_name: String,
-        source_id: TableId,
         table_id: TableId,
         exprs: Vec<ExprImpl>,
     ) -> Result<Self> {
-        Ok(Self::new(
-            input,
-            table_source_name,
-            source_id,
-            table_id,
-            exprs,
-        ))
+        Ok(Self::new(input, table_source_name, table_id, exprs))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         write!(
             f,
             "{} {{ table: {}, exprs: {:?} }}",
-            name, self.table_source_name, self.exprs
+            name, self.table_name, self.exprs
         )
     }
 
-    /// Get the logical update's source id.
     #[must_use]
-    pub fn source_id(&self) -> TableId {
-        self.source_id
-    }
-
-    #[must_use]
-    pub fn associated_mview_id(&self) -> TableId {
-        self.associated_mview_id
+    pub fn table_id(&self) -> TableId {
+        self.table_id
     }
 
     pub fn exprs(&self) -> &[ExprImpl] {
@@ -117,9 +101,8 @@ impl PlanTreeNodeUnary for LogicalUpdate {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(
             input,
-            self.table_source_name.clone(),
-            self.source_id,
-            self.associated_mview_id,
+            self.table_name.clone(),
+            self.table_id,
             self.exprs.clone(),
         )
     }

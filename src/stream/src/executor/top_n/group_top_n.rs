@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,13 +27,13 @@ use risingwave_storage::StateStore;
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::TopNCache;
-use crate::cache::{cache_may_stale, new_unbounded, EvictableHashMap, ExecutorCache};
+use crate::cache::{cache_may_stale, new_unbounded, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
-use crate::task::AtomicU64RefOpt;
+use crate::task::AtomicU64Ref;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
     TopNExecutorWrapper<InnerGroupTopNExecutorNew<K, S, WITH_TIES>>;
@@ -49,8 +49,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-        watermark_epoch: AtomicU64RefOpt,
-        cache_size: usize,
+        watermark_epoch: AtomicU64Ref,
     ) -> StreamResult<Self> {
         let info = input.info();
         Ok(TopNExecutorWrapper {
@@ -65,7 +64,6 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
                 group_by,
                 state_table,
                 watermark_epoch,
-                cache_size,
             )?,
         })
     }
@@ -105,8 +103,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
-        lru_manager: AtomicU64RefOpt,
-        cache_size: usize,
+        lru_manager: AtomicU64Ref,
     ) -> StreamResult<Self> {
         let ExecutorInfo {
             pk_indices, schema, ..
@@ -127,7 +124,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_idx).collect(),
             group_by,
-            caches: GroupTopNCache::new(lru_manager, cache_size),
+            caches: GroupTopNCache::new(lru_manager),
             cache_key_serde,
         })
     }
@@ -138,12 +135,8 @@ pub struct GroupTopNCache<K: HashKey, const WITH_TIES: bool> {
 }
 
 impl<K: HashKey, const WITH_TIES: bool> GroupTopNCache<K, WITH_TIES> {
-    pub fn new(lru_manager: AtomicU64RefOpt, cache_size: usize) -> Self {
-        let cache = if let Some(lru_manager) = lru_manager {
-            ExecutorCache::Managed(new_unbounded(lru_manager))
-        } else {
-            ExecutorCache::Local(EvictableHashMap::new(cache_size))
-        };
+    pub fn new(lru_manager: AtomicU64Ref) -> Self {
+        let cache = ExecutorCache::new(new_unbounded(lru_manager));
         Self { data: cache }
     }
 
@@ -254,6 +247,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU64;
+
     use assert_matches::assert_matches;
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
@@ -374,8 +369,7 @@ mod tests {
             1,
             vec![1],
             state_table,
-            None,
-            0,
+            Arc::new(AtomicU64::new(0)),
         )
         .unwrap();
         let top_n_executor = Box::new(a);
@@ -472,8 +466,7 @@ mod tests {
                 1,
                 vec![1],
                 state_table,
-                None,
-                0,
+                Arc::new(AtomicU64::new(0)),
             )
             .unwrap(),
         );
@@ -562,8 +555,7 @@ mod tests {
                 1,
                 vec![1, 2],
                 state_table.clone(),
-                None,
-                0,
+                Arc::new(AtomicU64::new(0)),
             )
             .unwrap(),
         );

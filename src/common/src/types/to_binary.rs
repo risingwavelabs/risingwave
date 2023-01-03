@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -61,7 +61,7 @@ impl ToBinary for i64 {
                 self.to_sql(&Type::ANY, &mut output).unwrap();
                 Ok(Some(output.freeze()))
             }
-            DataType::Timestampz => {
+            DataType::Timestamptz => {
                 let secs = self.div_euclid(1_000_000);
                 let nsecs = self.rem_euclid(1_000_000) * 1000;
                 let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();

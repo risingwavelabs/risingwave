@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -102,7 +102,7 @@ fn create_tvf(name: &str, alias: TableAlias, args: Vec<FunctionArg>) -> TableWit
 }
 
 fn is_timestamp_col(c: &Column) -> bool {
-    c.data_type == DataTypeName::Timestamp || c.data_type == DataTypeName::Timestampz
+    c.data_type == DataTypeName::Timestamp || c.data_type == DataTypeName::Timestamptz
 }
 
 fn get_table_name_and_cols_with_timestamp(table: Table) -> (String, Vec<Column>, Vec<Column>) {

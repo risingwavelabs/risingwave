@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,7 +25,7 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, PkIndices};
-use crate::task::AtomicU64RefOpt;
+use crate::task::AtomicU64Ref;
 
 pub struct HashJoinExecutorBuilder;
 
@@ -114,7 +114,6 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             executor_id: params.executor_id,
             cond: condition,
             op_info: params.op_info,
-            cache_size: stream.config.developer.unsafe_stream_join_cache_size,
             state_table_l,
             degree_state_table_l,
             state_table_r,
@@ -143,12 +142,11 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     executor_id: u64,
     cond: Option<BoxedExpression>,
     op_info: String,
-    cache_size: usize,
     state_table_l: StateTable<S>,
     degree_state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
     degree_state_table_r: StateTable<S>,
-    lru_manager: AtomicU64RefOpt,
+    lru_manager: AtomicU64Ref,
     is_append_only: bool,
     metrics: Arc<StreamingMetrics>,
     join_type_proto: JoinTypeProto,
@@ -176,7 +174,6 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                         self.executor_id,
                         self.cond,
                         self.op_info,
-                        self.cache_size,
                         self.state_table_l,
                         self.degree_state_table_l,
                         self.state_table_r,

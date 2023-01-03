@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -253,13 +253,7 @@ where
             .add_compactor(context_id, req.max_concurrent_task_number);
         // Trigger compaction on all compaction groups.
         for cg_id in self.hummock_manager.compaction_group_ids().await {
-            if let Err(e) = self.hummock_manager.try_send_compaction_request(cg_id) {
-                tracing::warn!(
-                    "Failed to schedule compaction for compaction group {}. {}",
-                    cg_id,
-                    e
-                );
-            }
+            self.hummock_manager.try_send_compaction_request(cg_id);
         }
         self.hummock_manager
             .try_resume_compaction(CompactionResumeTrigger::CompactorAddition { context_id });

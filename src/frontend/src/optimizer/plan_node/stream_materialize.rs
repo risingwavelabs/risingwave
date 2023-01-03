@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,8 +19,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, TableId};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
@@ -53,55 +52,36 @@ impl StreamMaterialize {
         Self { base, input, table }
     }
 
-    /// Create a materialize node.
+    /// Create a materialize node, for `MATERIALIZED VIEW`, `INDEX`, and `SINK`.
     ///
-    /// When creating index, `is_index` should be true. Then, materialize will distribute keys
+    /// When creating index, `TableType` should be `Index`. Then, materialize will distribute keys
     /// using `user_distributed_by`.
     #[allow(clippy::too_many_arguments)]
     pub fn create(
         input: PlanRef,
-        mv_name: String,
+        name: String,
         user_distributed_by: RequiredDist,
         user_order_by: Order,
         user_cols: FixedBitSet,
         out_names: Vec<String>,
-        is_index: bool,
         definition: String,
-        handle_pk_conflict: bool,
-        row_id_index: Option<usize>,
         table_type: TableType,
     ) -> Result<Self> {
-        let required_dist = match input.distribution() {
-            Distribution::Single => RequiredDist::single(),
-            _ => {
-                if is_index {
-                    assert_matches!(
-                        user_distributed_by,
-                        RequiredDist::PhysicalDist(Distribution::HashShard(_))
-                    );
-                    user_distributed_by
-                } else {
-                    assert_matches!(user_distributed_by, RequiredDist::Any);
-                    // ensure the same pk will not shuffle to different node
-                    RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
-                }
-            }
-        };
+        let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
+        let schema = input.schema();
 
-        let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
-        let base = PlanBase::derive_stream_plan_base(&input);
-        let schema = &base.schema;
-        let pk_indices = &base.logical_pk;
-
+        // Used to validate and deduplicate column names.
         let mut col_names = HashSet::new();
         for name in &out_names {
             if !col_names.insert(name.clone()) {
-                return Err(
-                    InternalError(format!("column {} specified more than once", name)).into(),
-                );
+                Err(ErrorCode::InvalidInputSyntax(format!(
+                    "column \"{}\" specified more than once",
+                    name
+                )))?;
             }
         }
         let mut out_name_iter = out_names.into_iter();
+
         let columns = schema
             .fields()
             .iter()
@@ -122,7 +102,7 @@ impl StreamMaterialize {
 
                     while !col_names.insert(name.clone()) {
                         count += 1;
-                        name = field.name.clone() + "#" + &count.to_string();
+                        name = format!("{}#{}", field.name, count);
                     }
 
                     name
@@ -130,6 +110,113 @@ impl StreamMaterialize {
                 c
             })
             .collect_vec();
+
+        let table = Self::derive_table_catalog(
+            input.clone(),
+            name,
+            user_order_by,
+            columns,
+            definition,
+            false,
+            None,
+            table_type,
+        )?;
+
+        Ok(Self::new(input, table))
+    }
+
+    /// Create a materialize node, for `TABLE`.
+    ///
+    /// Different from `create`, the `columns` are passed in directly, instead of being derived from
+    /// the input. So the column IDs are preserved from the SQL columns binding step and will be
+    /// consistent with the source node and DML node.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_for_table(
+        input: PlanRef,
+        name: String,
+        user_distributed_by: RequiredDist,
+        user_order_by: Order,
+        columns: Vec<ColumnCatalog>,
+        definition: String,
+        handle_pk_conflict: bool,
+        row_id_index: Option<usize>,
+    ) -> Result<Self> {
+        let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
+
+        let table = Self::derive_table_catalog(
+            input.clone(),
+            name,
+            user_order_by,
+            columns,
+            definition,
+            handle_pk_conflict,
+            row_id_index,
+            TableType::Table,
+        )?;
+
+        Ok(Self::new(input, table))
+    }
+
+    /// Rewrite the input to satisfy the required distribution if necessary, according to the type.
+    fn rewrite_input(
+        input: PlanRef,
+        user_distributed_by: RequiredDist,
+        table_type: TableType,
+    ) -> Result<PlanRef> {
+        let required_dist = match input.distribution() {
+            Distribution::Single => RequiredDist::single(),
+            _ => match table_type {
+                TableType::Table | TableType::MaterializedView => {
+                    assert_matches!(user_distributed_by, RequiredDist::Any);
+                    // ensure the same pk will not shuffle to different node
+                    RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
+                }
+                TableType::Index => {
+                    assert_matches!(
+                        user_distributed_by,
+                        RequiredDist::PhysicalDist(Distribution::HashShard(_))
+                    );
+                    user_distributed_by
+                }
+                TableType::Internal => unreachable!(),
+            },
+        };
+
+        required_dist.enforce_if_not_satisfies(input, &Order::any())
+    }
+
+    /// Derive the table catalog with the given arguments.
+    ///
+    /// - The caller must ensure the validity of the given `columns`.
+    /// - The `rewritten_input` should be generated by `rewrite_input`.
+    #[allow(clippy::too_many_arguments)]
+    fn derive_table_catalog(
+        rewritten_input: PlanRef,
+        name: String,
+        user_order_by: Order,
+        columns: Vec<ColumnCatalog>,
+        definition: String,
+        handle_pk_conflict: bool,
+        row_id_index: Option<usize>,
+        table_type: TableType,
+    ) -> Result<TableCatalog> {
+        let input = rewritten_input;
+
+        // Note(congyi): avoid pk duplication
+        let pk_indices = input.logical_pk().iter().copied().unique().collect_vec();
+        let schema = input.schema();
+        let distribution = input.distribution();
+
+        // Assert the uniqueness of column names, including hidden columns.
+        if let Some(name) = columns.iter().map(|c| c.name()).duplicates().next() {
+            panic!("column \"{}\" specified more than once", name);
+        }
+        // Assert that the schema of given `columns` is correct.
+        assert_eq!(
+            columns.iter().map(|c| c.data_type().clone()).collect_vec(),
+            input.schema().data_types()
+        );
+
         let value_indices = (0..columns.len()).collect_vec();
         let mut in_order = FixedBitSet::with_capacity(schema.len());
         let mut pk_list = vec![];
@@ -140,7 +227,7 @@ impl StreamMaterialize {
             in_order.insert(idx);
         }
 
-        for &idx in pk_indices {
+        for &idx in &pk_indices {
             if in_order.contains(idx) {
                 continue;
             }
@@ -151,17 +238,17 @@ impl StreamMaterialize {
             in_order.insert(idx);
         }
 
-        let ctx = input.ctx();
-        let distribution_key = base.dist.dist_column_indices().to_vec();
-        let properties = ctx.with_options().internal_table_subset();
+        let distribution_key = distribution.dist_column_indices().to_vec();
+        let properties = input.ctx().with_options().internal_table_subset(); // TODO: remove this
         let read_prefix_len_hint = pk_indices.len();
-        let table = TableCatalog {
+
+        Ok(TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
-            name: mv_name,
+            name,
             columns,
             pk: pk_list,
-            stream_key: pk_indices.clone(),
+            stream_key: pk_indices,
             distribution_key,
             table_type,
             append_only: input.append_only(),
@@ -175,9 +262,7 @@ impl StreamMaterialize {
             definition,
             handle_pk_conflict,
             read_prefix_len_hint,
-        };
-
-        Ok(Self { base, input, table })
+        })
     }
 
     /// Get a reference to the stream materialize's table.
@@ -190,6 +275,7 @@ impl StreamMaterialize {
         self.table.name()
     }
 
+    /// Rewrite this plan node into [`StreamSink`] with the given `properties`.
     pub fn rewrite_into_sink(self, properties: WithOptions) -> StreamSink {
         let Self {
             base,

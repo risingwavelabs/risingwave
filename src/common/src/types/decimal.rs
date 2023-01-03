@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,6 +27,7 @@ use super::to_text::ToText;
 use super::DataType;
 use crate::array::ArrayResult;
 use crate::error::Result as RwResult;
+use crate::types::ordered_float::OrderedFloat;
 use crate::types::Decimal::Normalized;
 
 #[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
@@ -189,6 +190,11 @@ macro_rules! impl_try_from_float {
         impl core::convert::From<$from_ty> for $to_ty {
             fn from(value: $from_ty) -> Self {
                 $convert(value).expect("f32/f64 to decimal should not fail")
+            }
+        }
+        impl core::convert::From<OrderedFloat<$from_ty>> for $to_ty {
+            fn from(value: OrderedFloat<$from_ty>) -> Self {
+                $convert(value.0).expect("f32/f64 to decimal should not fail")
             }
         }
     };
