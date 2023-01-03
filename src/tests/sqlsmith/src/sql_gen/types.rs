@@ -1,4 +1,4 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,22 +17,68 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use itertools::Itertools;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::sig::agg::{agg_func_sigs, AggFuncSig as RwAggFuncSig};
 use risingwave_expr::sig::cast::{cast_sigs, CastContext, CastSig as RwCastSig};
 use risingwave_expr::sig::func::{func_sigs, FuncSign as RwFuncSig};
 use risingwave_frontend::expr::ExprType;
-use risingwave_sqlparser::ast::DataType as AstDataType;
+use risingwave_sqlparser::ast::{DataType as AstDataType, StructField};
 
-/// Data type is required in the constructed expression (e.g. CAST).
-/// This is utility function for that.
-pub(super) fn data_type_to_ast_data_type(_datatype: &DataType) -> AstDataType {
-    todo!()
+pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
+    match data_type {
+        DataType::Boolean => (AstDataType::Boolean),
+        DataType::Int16 => (AstDataType::SmallInt(None)),
+        DataType::Int32 => (AstDataType::Int(None)),
+        DataType::Int64 => (AstDataType::BigInt(None)),
+        DataType::Decimal => (AstDataType::Decimal(None, None)),
+        DataType::Float32 => (AstDataType::Real),
+        DataType::Float64 => (AstDataType::Double),
+        DataType::Varchar => (AstDataType::Varchar),
+        DataType::Bytea => (AstDataType::Bytea),
+        DataType::Date => (AstDataType::Date),
+        DataType::Timestamp => (AstDataType::Timestamp(false)),
+        DataType::Timestamptz => (AstDataType::Timestamp(true)),
+        DataType::Time => (AstDataType::Time(false)),
+        DataType::Interval => (AstDataType::Interval),
+        DataType::Struct(inner) => {
+            (AstDataType::Struct(
+                inner
+                    .field_names
+                    .iter()
+                    .zip_eq(inner.fields.iter())
+                    .map(|(name, typ)| StructField {
+                        name: name.as_str().into(),
+                        data_type: data_type_to_ast_data_type(typ),
+                    })
+                    .collect(),
+            ))
+        }
+        DataType::List { datatype: ref typ } => {
+            (AstDataType::Array(Box::new(data_type_to_ast_data_type(typ))))
+        }
+    }
 }
 
-fn data_type_name_to_ast_data_type(_data_type_name: &DataTypeName) -> Option<DataType> {
-    todo!()
+fn data_type_name_to_ast_data_type(data_type_name: &DataTypeName) -> Option<DataType> {
+    use DataTypeName as T;
+    match data_type_name {
+        T::Boolean => Some(DataType::Boolean),
+        T::Int16 => Some(DataType::Int16),
+        T::Int32 => Some(DataType::Int32),
+        T::Int64 => Some(DataType::Int64),
+        T::Decimal => Some(DataType::Decimal),
+        T::Float32 => Some(DataType::Float32),
+        T::Float64 => Some(DataType::Float64),
+        T::Varchar => Some(DataType::Varchar),
+        T::Date => Some(DataType::Date),
+        T::Timestamp => Some(DataType::Timestamp),
+        T::Timestamptz => Some(DataType::Timestamptz),
+        T::Time => Some(DataType::Time),
+        T::Interval => Some(DataType::Interval),
+        _ => None,
+    }
 }
 
 /// Provide internal `CastSig` which can be used for `struct` and `list`.
