@@ -20,15 +20,14 @@ CREATE TABLE orders (
                         PRIMARY KEY (o_orderkey)
 );
 
-CREATE MATERIALIZED VIEW m5 AS SELECT 0 AS col_0 FROM partsupp AS t_0 GROUP BY t_0.ps_suppkey HAVING INTERVAL '733678' <> TIME '17:49:13';
+CREATE MATERIALIZED VIEW m5 AS SELECT 0 AS col_0 FROM partsupp;
 
 SELECT
     1
 FROM
-    m5 AS t_20
-        JOIN orders AS t_21 ON t_20.col_0 = t_21.o_orderkey
+    m5 JOIN orders ON m5.col_0 = orders.o_orderkey
 GROUP BY
-    t_20.col_0,
-    t_21.o_totalprice
+    m5.col_0,
+    orders.o_totalprice
 HAVING
-    SMALLINT '27538' = t_20.col_0;
+    SMALLINT '27538' = m5.col_0;
