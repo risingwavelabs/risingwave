@@ -29,9 +29,9 @@ use risingwave_sqlparser::ast::{DataType as AstDataType, StructField};
 pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
     match data_type {
         DataType::Boolean => AstDataType::Boolean,
-        DataType::Int16 => AstDataType::SmallInt(None),
-        DataType::Int32 => AstDataType::Int(None),
-        DataType::Int64 => AstDataType::BigInt(None),
+        DataType::Int16 => AstDataType::SmallInt,
+        DataType::Int32 => AstDataType::Int,
+        DataType::Int64 => AstDataType::BigInt,
         DataType::Decimal => AstDataType::Decimal(None, None),
         DataType::Float32 => AstDataType::Real,
         DataType::Float64 => AstDataType::Double,
