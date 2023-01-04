@@ -73,7 +73,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 value: self.gen_temporal_scalar(typ),
             },
             T::List { datatype: ref ty } => {
-                let n = self.rng.gen_range(0..=100);
+                let n = self.rng.gen_range(1..=100); // Avoid ambiguous type
                 if n == 0 {
                     Expr::Cast {
                         expr: Box::new(Expr::Array(vec![])),
