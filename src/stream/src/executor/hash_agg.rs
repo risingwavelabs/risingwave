@@ -426,7 +426,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 let keys_in_batch = batch.into_iter().collect_vec();
 
                 // Flush agg states.
-                for key in keys_in_batch.iter() {
+                for key in &keys_in_batch {
                     let agg_group = agg_groups
                         .get_mut(key)
                         .expect("changed group must have corresponding AggGroup")
