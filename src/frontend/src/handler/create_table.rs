@@ -50,16 +50,54 @@ pub enum DmlFlag {
     AppendOnly,
 }
 
+pub struct ColumnIdGenerator {
+    pub existing: HashMap<String, ColumnId>,
+    pub next_id: ColumnId,
+}
+
+impl ColumnIdGenerator {
+    pub fn new(existing_columns: &[ColumnCatalog], next_column_id: ColumnId) -> Self {
+        let existing = existing_columns
+            .iter()
+            .map(|col| (col.name().to_owned(), col.column_id()))
+            .collect();
+        Self {
+            existing,
+            next_id: next_column_id,
+        }
+    }
+
+    pub fn initial() -> Self {
+        Self {
+            existing: HashMap::new(),
+            next_id: ColumnId::from(USER_COLUMN_ID_OFFSET),
+        }
+    }
+
+    pub fn gen(&mut self, name: &str) -> ColumnId {
+        if let Some(id) = self.existing.get(name) {
+            *id
+        } else {
+            let id = self.next_id;
+            self.next_id = self.next_id.next();
+            id
+        }
+    }
+}
+
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
 /// This primary key is not combined with table constraints yet.
-pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Option<ColumnId>)> {
+pub fn bind_sql_columns(
+    columns: Vec<ColumnDef>,
+    col_id_gen: &mut ColumnIdGenerator,
+) -> Result<(Vec<ColumnDesc>, Option<ColumnId>)> {
     // In `ColumnDef`, pk can contain only one column. So we use `Option` rather than `Vec`.
     let mut pk_column_id = None;
     let mut column_descs = Vec::with_capacity(columns.len());
 
-    for (i, column) in columns.into_iter().enumerate() {
-        let column_id = ColumnId::from(i as i32 + USER_COLUMN_ID_OFFSET);
+    for column in columns {
+        let column_id = col_id_gen.gen(&column.name.real_value());
         // Destruct to make sure all fields are properly handled rather than ignored.
         // Do NOT use `..` to ignore fields you do not want to deal with.
         // Reject them with a clear NotImplemented error.
@@ -218,9 +256,10 @@ pub(crate) fn gen_create_table_plan(
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
+    col_id_gen: &mut ColumnIdGenerator,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let definition = context.normalized_sql().to_owned();
-    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
+    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, col_id_gen)?;
     gen_create_table_plan_without_bind(
         session,
         context,
@@ -428,6 +467,7 @@ pub async fn handle_create_table(
             table_name.clone(),
             columns,
             constraints,
+            &mut ColumnIdGenerator::initial(),
         )?;
         let graph = build_graph(plan);
 
@@ -540,7 +580,8 @@ mod tests {
                     ..
                 } = ast.remove(0) else { panic!("test case should be create table") };
             let actual: Result<_> = (|| {
-                let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
+                let (column_descs, pk_column_id_from_columns) =
+                    bind_sql_columns(columns, &mut ColumnIdGenerator::initial())?;
                 let (_, pk_column_ids, _) = bind_sql_table_constraints(
                     column_descs,
                     pk_column_id_from_columns,

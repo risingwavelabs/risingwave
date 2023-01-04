@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
+use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
+use risingwave_sqlparser::ast::{ColumnDef, Ident, ObjectName, Statement};
+use risingwave_sqlparser::parser::Parser;
 
+use super::create_table::{gen_create_table_plan, ColumnIdGenerator};
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::Relation;
-use crate::Binder;
+use crate::{build_graph, Binder, OptimizerContext};
 
 #[expect(clippy::unused_async)]
 pub async fn handle_add_column(
@@ -37,13 +41,20 @@ pub async fn handle_add_column(
         }
     };
 
+    let [mut definition]: [_; 1] = Parser::parse_sql(&catalog.definition)
+        .context("unable to parse original table definition")?
+        .try_into()
+        .unwrap();
+    let Statement::CreateTable { columns, .. } = &mut definition else {
+        panic!()
+    };
+
     // Duplicated names can actually be checked by `StreamMaterialize`. We do here for better error
     // reporting.
     let new_column_name = new_column.name.real_value();
-    if catalog
-        .columns()
+    if columns
         .iter()
-        .any(|c| c.name() == new_column_name)
+        .any(|c| c.name.real_value() == new_column_name)
     {
         Err(ErrorCode::InvalidInputSyntax(format!(
             "column \"{}\" of table \"{}\" already exists",
@@ -51,20 +62,51 @@ pub async fn handle_add_column(
         )))?
     }
 
-    // let _new_column = {
-    //     let column_id_offset = catalog.version.unwrap().next_column_id.get_id();
-    //     let (columns, pk_id) = bind_sql_columns_with_offset(vec![new_column], column_id_offset)?;
-    //     if pk_id.is_some() {
-    //         Err(ErrorCode::NotImplemented(
-    //             "add a primary key column".to_owned(),
-    //             6903.into(),
-    //         ))?
-    //     }
-    //     columns.into_iter().exactly_one().unwrap()
-    // };
+    columns.push(new_column);
 
-    Err(ErrorCode::NotImplemented(
-        "ADD COLUMN".to_owned(),
-        6903.into(),
-    ))?
+    let handler_args = HandlerArgs::new(session.clone(), &definition, "")?;
+    let mut col_id_gen = ColumnIdGenerator::new(
+        catalog.columns(),
+        catalog.version.as_ref().unwrap().next_column_id,
+    );
+    let Statement::CreateTable {
+        columns,
+        constraints,
+        ..
+    } = definition else {
+        panic!();
+    };
+
+    let new_name = {
+        let mut idents = table_name.0;
+        let last_ident = idents.last_mut().unwrap();
+        *last_ident = Ident::new(format!("{}_add_column_{}", last_ident, new_column_name));
+        ObjectName(idents)
+    };
+
+    let (graph, source, table) = {
+        let context = OptimizerContext::from_handler_args(handler_args);
+        let (plan, source, table) = gen_create_table_plan(
+            &session,
+            context.into(),
+            new_name,
+            columns,
+            constraints,
+            &mut col_id_gen,
+        )?;
+        let graph = build_graph(plan);
+
+        (graph, source, table)
+    };
+
+    let catalog_writer = session.env().catalog_writer();
+
+    catalog_writer.create_table(source, table, graph).await?;
+
+    Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
+
+    // Err(ErrorCode::NotImplemented(
+    //     "ADD COLUMN".to_owned(),
+    //     6903.into(),
+    // ))?
 }
