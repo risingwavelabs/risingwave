@@ -171,6 +171,10 @@ where
         values_stream: VS,
         row_desc: Vec<PgFieldDescriptor>,
     ) -> Self {
+        assert!(
+            stmt_type.is_query() ^ row_cnt.is_some(),
+            "should specify row count for command and not for query: {stmt_type}"
+        );
         Self {
             stmt_type,
             row_cnt,

@@ -106,7 +106,7 @@ pub async fn handle_create_as(
     });
 
     let (graph, source, table) = {
-        let context = OptimizerContext::new_with_handler_args(handler_args.clone());
+        let context = OptimizerContext::from_handler_args(handler_args.clone());
         let (plan, source, table) = gen_create_table_plan_without_bind(
             &session,
             context.into(),
@@ -114,6 +114,7 @@ pub async fn handle_create_as(
             column_descs,
             None,
             vec![],
+            "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
         )?;
         let graph = build_graph(plan);
 

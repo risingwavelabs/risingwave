@@ -119,7 +119,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
     // TODO: recover the original user statement
     Ok(PgResponse::new_for_stream(
         StatementType::DESCRIBE_TABLE,
-        Some(rows.len() as i32),
+        None,
         rows.into(),
         vec![
             PgFieldDescriptor::new(
