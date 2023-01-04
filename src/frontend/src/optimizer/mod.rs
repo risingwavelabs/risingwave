@@ -40,7 +40,7 @@ use self::plan_node::{
 };
 use self::plan_visitor::{
     has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_batch_source,
-    has_logical_apply, has_logical_over_agg, HasMaxOneRowApply,
+    has_logical_apply, has_logical_over_agg, HasMaxOneRowApply, InputRefValidator,
 };
 use self::property::RequiredDist;
 use self::rule::*;
@@ -412,6 +412,8 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
+        InputRefValidator.validate(plan.clone());
+
         ctx.store_logical(plan.explain_to_string().unwrap());
 
         Ok(plan)
@@ -433,6 +435,7 @@ impl PlanRoot {
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
+        InputRefValidator.validate(plan.clone());
         assert!(*plan.distribution() == Distribution::Single, "{}", plan);
         assert!(!has_batch_exchange(plan.clone()), "{}", plan);
 
@@ -567,6 +570,8 @@ impl PlanRoot {
         //     vec![IndexDeltaJoinRule::create()],
         //     ApplyOrder::BottomUp,
         // );
+
+        InputRefValidator.validate(plan.clone());
 
         Ok(plan)
     }
