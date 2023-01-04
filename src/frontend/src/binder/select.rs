@@ -180,8 +180,8 @@ impl Binder {
         for item in select_items {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
-                    let bound = self.bind_expr(expr.clone())?;
                     let alias = derive_alias(&expr);
+                    let bound = self.bind_expr(expr)?;
                     select_list.push(bound);
                     aliases.push(alias);
                 }
@@ -385,7 +385,9 @@ fn derive_alias(expr: &Expr) -> Option<String> {
         Expr::FieldIdentifier(_, idents) => idents.last().map(|ident| ident.real_value()),
         Expr::Function(func) => Some(func.name.real_value()),
         Expr::Case { .. } => Some("case".to_string()),
-        Expr::Cast { expr, data_type } => derive_alias(&expr).or(data_type_to_alias(&data_type)),
+        Expr::Cast { expr, data_type } => {
+            derive_alias(&expr).or_else(|| data_type_to_alias(&data_type))
+        }
         Expr::Row(_) => Some("row".to_string()),
         Expr::Array(_) => Some("array".to_string()),
         Expr::ArrayIndex { obj, index: _ } => derive_alias(&obj),
@@ -409,7 +411,7 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         AstDataType::Date => "date".to_string(),
         AstDataType::Time(tz) => format!("time{}", if *tz { "z" } else { "" }),
         AstDataType::Timestamp(tz) => {
-            format!("timestamp{}", if *tz { "z" } else { "" })
+            format!("timestamp{}", if *tz { "tz" } else { "" })
         }
         AstDataType::Interval => "interval".to_string(),
         AstDataType::Regclass => "regclass".to_string(),
