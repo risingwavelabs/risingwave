@@ -24,18 +24,18 @@ if [ "$1" == "compress" ]; then
   if [ -f "$zip_file" ]; then
     rm "$zip_file"
   fi
-  zip -r "$zip_file" ./test_data/*
+  zip -r "$zip_file" ./test_data/ch_benchmark/
   exit 0
 fi
 
 echo "--- Extract data for Kafka"
 cd ./source/
-mkdir -p ./test_data
+mkdir -p ./test_data/ch_benchmark/
 unzip -o test_data.zip -d .
 cd ..
 
 echo "Create topics"
-for filename in "$SCRIPT_PATH"/test_data/*; do
+for filename in "$SCRIPT_PATH"/test_data/**/*; do
     ([ -e "$filename" ]
     base=$(basename "$filename")
     topic="${base%%.*}"
