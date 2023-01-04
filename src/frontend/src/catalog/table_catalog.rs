@@ -406,7 +406,7 @@ mod tests {
             table_type: ProstTableType::Table as i32,
             columns: vec![
                 ProstColumnCatalog {
-                    column_desc: Some((&row_id_column_desc(ColumnId::new(0))).into()),
+                    column_desc: Some((&row_id_column_desc()).into()),
                     is_hidden: true,
                 },
                 ProstColumnCatalog {
@@ -468,7 +468,7 @@ mod tests {
                 name: "test".to_string(),
                 table_type: TableType::Table,
                 columns: vec![
-                    ColumnCatalog::row_id_column(ColumnId::new(0)),
+                    ColumnCatalog::row_id_column(),
                     ColumnCatalog {
                         column_desc: ColumnDesc {
                             data_type: DataType::new_struct(

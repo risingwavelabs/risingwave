@@ -31,7 +31,7 @@ use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::{check_valid_column_name, ColumnId};
+use crate::catalog::{check_valid_column_name, ColumnId, USER_COLUMN_ID_OFFSET};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
@@ -54,20 +54,12 @@ pub enum DmlFlag {
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
 /// This primary key is not combined with table constraints yet.
 pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Option<ColumnId>)> {
-    bind_sql_columns_with_offset(columns, 0)
-}
-
-/// Bind the columns with an `offset` on the column IDs to allocate. See [`bind_sql_columns`].
-pub fn bind_sql_columns_with_offset(
-    columns: Vec<ColumnDef>,
-    column_id_offset: i32,
-) -> Result<(Vec<ColumnDesc>, Option<ColumnId>)> {
     // In `ColumnDef`, pk can contain only one column. So we use `Option` rather than `Vec`.
     let mut pk_column_id = None;
     let mut column_descs = Vec::with_capacity(columns.len());
 
     for (i, column) in columns.into_iter().enumerate() {
-        let column_id = ColumnId::from(column_id_offset + i as i32);
+        let column_id = ColumnId::from(i as i32 + USER_COLUMN_ID_OFFSET);
         // Destruct to make sure all fields are properly handled rather than ignored.
         // Do NOT use `..` to ignore fields you do not want to deal with.
         // Reject them with a clear NotImplemented error.
@@ -204,11 +196,11 @@ pub fn bind_sql_table_constraints(
 
     // Add `_row_id` column if `pk_column_ids` is empty.
     let row_id_index = pk_column_ids.is_empty().then(|| {
-        let row_id_index = columns_catalog.len();
-        let row_id_column_id = ColumnId::new(row_id_index as i32);
-        columns_catalog.push(ColumnCatalog::row_id_column(row_id_column_id));
-        pk_column_ids.push(row_id_column_id);
-        row_id_index
+        let column = ColumnCatalog::row_id_column();
+        let index = columns_catalog.len();
+        pk_column_ids = vec![column.column_id()];
+        columns_catalog.push(column);
+        index
     });
 
     if let Some(col) = columns_catalog.iter().map(|c| c.name()).duplicates().next() {

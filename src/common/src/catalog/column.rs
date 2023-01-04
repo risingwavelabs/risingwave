@@ -37,13 +37,13 @@ impl ColumnId {
 }
 
 impl ColumnId {
-    pub fn get_id(&self) -> i32 {
+    pub const fn get_id(&self) -> i32 {
         self.0
     }
 
     /// Returns the subsequent column id.
     #[must_use]
-    pub fn next(self) -> Self {
+    pub const fn next(self) -> Self {
         Self(self.0 + 1)
     }
 }

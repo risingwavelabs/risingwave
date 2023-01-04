@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
-use super::create_table::bind_sql_columns_with_offset;
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::Relation;
 use crate::Binder;
@@ -53,17 +51,17 @@ pub async fn handle_add_column(
         )))?
     }
 
-    let _new_column = {
-        let column_id_offset = catalog.version.unwrap().next_column_id.get_id();
-        let (columns, pk_id) = bind_sql_columns_with_offset(vec![new_column], column_id_offset)?;
-        if pk_id.is_some() {
-            Err(ErrorCode::NotImplemented(
-                "add a primary key column".to_owned(),
-                6903.into(),
-            ))?
-        }
-        columns.into_iter().exactly_one().unwrap()
-    };
+    // let _new_column = {
+    //     let column_id_offset = catalog.version.unwrap().next_column_id.get_id();
+    //     let (columns, pk_id) = bind_sql_columns_with_offset(vec![new_column], column_id_offset)?;
+    //     if pk_id.is_some() {
+    //         Err(ErrorCode::NotImplemented(
+    //             "add a primary key column".to_owned(),
+    //             6903.into(),
+    //         ))?
+    //     }
+    //     columns.into_iter().exactly_one().unwrap()
+    // };
 
     Err(ErrorCode::NotImplemented(
         "ADD COLUMN".to_owned(),
