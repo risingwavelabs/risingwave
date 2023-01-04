@@ -15,9 +15,11 @@
 //! Value encoding is an encoding format which converts the data into a binary form (not
 //! memcomparable).
 
+use std::backtrace::Backtrace;
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
+use regex::internal::Input;
 
 use crate::array::{ListRef, ListValue, StructRef, StructValue};
 use crate::types::struct_type::StructType;
@@ -57,9 +59,9 @@ pub fn deserialize_datum(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
 // prevent recursive use of &mut
 #[inline(always)]
 fn inner_deserialize_datum(data: &mut impl Buf, ty: &DataType) -> Result<Datum> {
-    let mut s = vec![123; 1000];
-    data.copy_to_slice(&mut s);
-    println!("data: {:?}", s);
+    let bt = Backtrace::force_capture();
+    println!("\nbacktrace:\n---\n{}---\n", bt);
+    println!("data: {:?}", data.chunk());
     println!("datatype: {:?}", ty);
     let null_tag = data.get_u8();
     println!("null_tag: {:?}", null_tag);

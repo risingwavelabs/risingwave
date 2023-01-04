@@ -77,6 +77,10 @@ impl ScanRange {
         scan_range: ProstScanRange,
         mut pk_types: impl Iterator<Item = DataType>,
     ) -> Result<Self> {
+        let pk_types_other: Vec<_> = pk_types.collect();
+        println!("\npk_types: {:?}", pk_types_other);
+        let mut pk_types = pk_types_other.iter();
+
         let pk_prefix = OwnedRow::new(
             scan_range
                 .eq_conds
