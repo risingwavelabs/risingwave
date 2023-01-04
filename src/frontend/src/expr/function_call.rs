@@ -208,8 +208,8 @@ impl FunctionCall {
         self.func_type
     }
 
+    /// Refer to [`ExprType`] for details.
     pub fn is_pure(&self) -> bool {
-        // See proto for details
         0 < self.func_type as i32 && self.func_type as i32 <= 600
     }
 

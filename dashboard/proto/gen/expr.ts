@@ -122,10 +122,11 @@ export const ExprNode_Type = {
   ARRAY_CAT: "ARRAY_CAT",
   ARRAY_APPEND: "ARRAY_APPEND",
   ARRAY_PREPEND: "ARRAY_PREPEND",
-  /** SEARCH - Search operator and Search ARGument */
-  SEARCH: "SEARCH",
-  SARG: "SARG",
-  /** VNODE - Internal functions */
+  /**
+   * VNODE - Non-pure functions below (> 600)
+   * ------------------------
+   * Internal functions
+   */
   VNODE: "VNODE",
   /** NOW - Non-deterministic functions */
   NOW: "NOW",
@@ -370,12 +371,6 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 533:
     case "ARRAY_PREPEND":
       return ExprNode_Type.ARRAY_PREPEND;
-    case 998:
-    case "SEARCH":
-      return ExprNode_Type.SEARCH;
-    case 999:
-    case "SARG":
-      return ExprNode_Type.SARG;
     case 1101:
     case "VNODE":
       return ExprNode_Type.VNODE;
@@ -547,10 +542,6 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "ARRAY_APPEND";
     case ExprNode_Type.ARRAY_PREPEND:
       return "ARRAY_PREPEND";
-    case ExprNode_Type.SEARCH:
-      return "SEARCH";
-    case ExprNode_Type.SARG:
-      return "SARG";
     case ExprNode_Type.VNODE:
       return "VNODE";
     case ExprNode_Type.NOW:
