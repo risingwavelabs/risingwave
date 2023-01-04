@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use futures::{stream, StreamExt};
+use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
@@ -423,48 +423,48 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             let group_key_data_types = &schema.data_types()[..group_key_indices.len()];
             let mut group_chunks = IterChunks::chunks(group_change_set.drain(), *chunk_size);
             while let Some(batch) = group_chunks.next() {
+                let keys_in_batch = batch.into_iter().collect_vec();
+
+                // Flush agg states.
+                for key in keys_in_batch.iter() {
+                    let agg_group = agg_groups
+                        .get_mut(key)
+                        .expect("changed group must have corresponding AggGroup")
+                        .as_mut()
+                        .unwrap();
+                    agg_group.flush_state_if_needed(storages).await?;
+                }
+
                 // Create array builders.
                 // As the datatype is retrieved from schema, it contains both group key and
                 // aggregation state outputs.
                 let mut builders = schema.create_array_builders(chunk_size * 2);
                 let mut new_ops = Vec::with_capacity(chunk_size * 2);
 
-                // Retrieve modified states and put the changes into the array builders.
-                let mut agg_tasks = Vec::with_capacity(batch.size_hint().0);
-                for key in batch {
-                    let agg_group = agg_groups
+                // Calculate current outputs, concurrently.
+                let futs = keys_in_batch.into_iter().map(|key| {
+                    let mut agg_group = agg_groups
                         .pop(&key)
                         .expect("changed group must have corresponding AggGroup")
                         .unwrap();
-                    agg_group.flush_state_if_needed(storages).await?;
-                    agg_tasks.push((key, agg_group));
-                }
-                let mut futures = Vec::with_capacity(agg_tasks.len());
-                for (key, mut agg_group) in agg_tasks {
-                    futures.push(async {
-                        let output = agg_group.get_outputs(storages).await?;
-                        Ok::<_, StreamExecutorError>((key, agg_group, output))
-                    });
-                }
+                    async {
+                        let curr_outputs = agg_group.get_outputs(storages).await?;
+                        Ok::<_, StreamExecutorError>((key, agg_group, curr_outputs))
+                    }
+                });
+                let outputs_in_batch: Vec<_> = stream::iter(futs)
+                    .buffer_unordered(10)
+                    .fuse()
+                    .try_collect()
+                    .await?;
 
-                let mut precalculated_batch = Vec::with_capacity(futures.len());
-
-                let mut buffered = stream::iter(futures).buffer_unordered(10).fuse();
-
-                while let Some(result) = buffered.next().await {
-                    precalculated_batch.push(result?);
-                }
-                // Drop the stream manually to teach compiler the async closure above will not use
-                // the read ref anymore.
-                drop(buffered);
-
-                for (key, mut agg_group, outputs) in precalculated_batch {
+                for (key, mut agg_group, curr_outputs) in outputs_in_batch {
                     let AggChangesInfo {
                         n_appended_ops,
                         result_row,
                         prev_outputs,
                     } = agg_group.build_changes(
-                        outputs,
+                        curr_outputs,
                         &mut builders[group_key_indices.len()..],
                         &mut new_ops,
                     );
@@ -484,6 +484,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         }
                     }
 
+                    // put the agg group back into the agg group cache
                     agg_groups.put(key, Some(agg_group));
                 }
 
