@@ -813,11 +813,13 @@ fn is_pure_fn_except_for_input_ref(expr: &ExprImpl) -> bool {
 ///
 /// Suppose we derive a predicate from the left side to be pushed to the right side.
 /// * `expr`: An expr from the left side.
-/// * `schema`: The left side's schema.
+/// * `col_num`: The number of columns in the left side.
+/// * `other_size_schema`: The right side's schema.
 fn derive_predicate_from_eq_condition(
     expr: &ExprImpl,
     eq_condition: &EqJoinPredicate,
-    schema: &Schema,
+    col_num: usize,
+    other_size_schema: &Schema,
     expr_is_left: bool,
 ) -> Option<ExprImpl> {
     if !is_pure_fn_except_for_input_ref(expr) {
@@ -829,7 +831,7 @@ fn derive_predicate_from_eq_condition(
         eq_condition.right_eq_indexes()
     };
     if expr
-        .collect_input_refs(schema.len())
+        .collect_input_refs(col_num)
         .ones()
         .any(|index| !eq_indices.contains(&index))
     {
@@ -847,18 +849,23 @@ fn derive_predicate_from_eq_condition(
             .map(|(x, y)| (y, x))
             .collect()
     };
-    struct InputRefsRewriter {
+    struct InputRefsRewriter<'a> {
         mapping: HashMap<usize, usize>,
+        schema: &'a Schema,
     }
-    impl ExprRewriter for InputRefsRewriter {
-        fn rewrite_input_ref(&mut self, mut input_ref: InputRef) -> ExprImpl {
-            input_ref.index = *self.mapping.get(&input_ref.index).unwrap();
-            input_ref.into()
+    impl<'a> ExprRewriter for InputRefsRewriter<'a> {
+        fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+            InputRef::new(
+                *self.mapping.get(&input_ref.index).unwrap(),
+                self.schema[input_ref.index].data_type().clone(),
+            )
+            .into()
         }
     }
     Some(
         InputRefsRewriter {
             mapping: other_side_mapping,
+            schema: other_size_schema,
         }
         .rewrite_expr(expr.clone()),
     )
@@ -944,7 +951,8 @@ impl PredicatePushdown for LogicalJoin {
                         derive_predicate_from_eq_condition(
                             expr,
                             &eq_condition,
-                            self.left().schema(),
+                            left_col_num,
+                            self.right().schema(),
                             true,
                         )
                     })
@@ -967,7 +975,8 @@ impl PredicatePushdown for LogicalJoin {
                         derive_predicate_from_eq_condition(
                             expr,
                             &eq_condition,
-                            self.right().schema(),
+                            right_col_num,
+                            self.left().schema(),
                             false,
                         )
                     })
