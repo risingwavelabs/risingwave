@@ -206,7 +206,7 @@ impl<S: StateStore> AggGroup<S> {
         curr_outputs: OwnedRow,
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
-    ) -> StreamExecutorResult<AggChangesInfo> {
+    ) -> AggChangesInfo {
         let row_count = curr_outputs[ROW_COUNT_COLUMN]
             .as_ref()
             .map(|x| *x.as_int64())
@@ -300,10 +300,10 @@ impl<S: StateStore> AggGroup<S> {
             std::mem::replace(&mut self.prev_outputs, Some(curr_outputs))
         };
 
-        Ok(AggChangesInfo {
+        AggChangesInfo {
             n_appended_ops,
             result_row,
             prev_outputs,
-        })
+        }
     }
 }

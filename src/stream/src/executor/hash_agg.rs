@@ -467,7 +467,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         outputs,
                         &mut builders[group_key_indices.len()..],
                         &mut new_ops,
-                    )?;
+                    );
 
                     if n_appended_ops != 0 {
                         for _ in 0..n_appended_ops {

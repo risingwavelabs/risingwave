@@ -230,7 +230,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 result_row,
                 prev_outputs,
                 n_appended_ops,
-            } = agg_group.build_changes(curr_outputs, &mut builders, &mut new_ops)?;
+            } = agg_group.build_changes(curr_outputs, &mut builders, &mut new_ops);
 
             if n_appended_ops == 0 {
                 // Agg result is not changed.
