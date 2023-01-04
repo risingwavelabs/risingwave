@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::common::MetaServiceOpts;
+use crate::CtlContext;
 
-pub async fn list_version_deltas(start_id: u64, num_epochs: u32) -> anyhow::Result<()> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
+pub async fn list_version_deltas(
+    context: &CtlContext,
+    start_id: u64,
+    num_epochs: u32,
+) -> anyhow::Result<()> {
+    let meta_client = context.get_meta_client().await?;
     let resp = meta_client
         .list_version_deltas(start_id, num_epochs, u64::MAX)
         .await?;

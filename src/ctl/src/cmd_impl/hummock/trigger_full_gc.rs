@@ -14,11 +14,13 @@
 
 use risingwave_rpc_client::HummockMetaClient;
 
-use crate::common::MetaServiceOpts;
+use crate::CtlContext;
 
-pub async fn trigger_full_gc(sst_retention_time_sec: u64) -> anyhow::Result<()> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
+pub async fn trigger_full_gc(
+    context: &CtlContext,
+    sst_retention_time_sec: u64,
+) -> anyhow::Result<()> {
+    let meta_client = context.get_meta_client().await?;
     let result = meta_client.trigger_full_gc(sst_retention_time_sec).await;
     println!("{:#?}", result);
     Ok(())

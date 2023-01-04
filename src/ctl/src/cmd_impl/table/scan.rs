@@ -27,7 +27,7 @@ use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 use risingwave_stream::common::table::state_table::StateTable;
 
-use crate::common::HummockServiceOpts;
+use crate::CtlContext;
 
 pub async fn get_table_catalog(meta: MetaClient, mv_name: String) -> Result<TableCatalog> {
     let mvs = meta.risectl_list_state_tables().await?;
@@ -93,25 +93,21 @@ pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> St
     )
 }
 
-pub async fn scan(mv_name: String) -> Result<()> {
-    let mut hummock_opts = HummockServiceOpts::from_env()?;
-    let (meta, hummock) = hummock_opts.create_hummock_store().await?;
-    let table = get_table_catalog(meta.clone(), mv_name).await?;
-    do_scan(table, hummock, hummock_opts).await
+pub async fn scan(context: &CtlContext, mv_name: String) -> Result<()> {
+    let meta_client = context.get_meta_client().await?;
+    let hummock = context.get_hummock_store().await?;
+    let table = get_table_catalog(meta_client, mv_name).await?;
+    do_scan(table, hummock).await
 }
 
-pub async fn scan_id(table_id: u32) -> Result<()> {
-    let mut hummock_opts = HummockServiceOpts::from_env()?;
-    let (meta, hummock) = hummock_opts.create_hummock_store().await?;
-    let table = get_table_catalog_by_id(meta.clone(), table_id).await?;
-    do_scan(table, hummock, hummock_opts).await
+pub async fn scan_id(context: &CtlContext, table_id: u32) -> Result<()> {
+    let meta_client = context.get_meta_client().await?;
+    let hummock = context.get_hummock_store().await?;
+    let table = get_table_catalog_by_id(meta_client, table_id).await?;
+    do_scan(table, hummock).await
 }
 
-async fn do_scan(
-    table: TableCatalog,
-    hummock: MonitoredStateStore<HummockStorage>,
-    mut hummock_opts: HummockServiceOpts,
-) -> Result<()> {
+async fn do_scan(table: TableCatalog, hummock: MonitoredStateStore<HummockStorage>) -> Result<()> {
     print_table_catalog(&table);
 
     println!("Rows:");
@@ -124,7 +120,5 @@ async fn do_scan(
     while let Some(item) = stream.next().await {
         println!("{:?}", item?);
     }
-
-    hummock_opts.shutdown().await;
     Ok(())
 }

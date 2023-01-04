@@ -62,7 +62,6 @@ Note: the default value of `RW_META_ADDR` is 'http://127.0.0.1:5690'.";
         .await?;
         let worker_id = client.worker_id();
         tracing::info!("registered as RiseCtl worker, worker_id = {}", worker_id);
-        // TODO: remove worker node
         Ok(client)
     }
 }
