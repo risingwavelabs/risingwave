@@ -231,6 +231,8 @@ impl BatchManager {
         }
         if let Some(id) = max_mem_task_id {
             let t = guard.get(&id).unwrap();
+            // FIXME: `Abort` will not report error but truncated results to user. We should
+            // consider throw error.
             t.abort_task();
         }
     }
