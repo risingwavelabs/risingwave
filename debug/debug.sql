@@ -22,7 +22,7 @@ CREATE TABLE orders (
 
 CREATE MATERIALIZED VIEW m5 AS SELECT 0 AS col_0 FROM partsupp;
 
-EXPLAIN SELECT
+SELECT
     1
 FROM
     m5 JOIN orders ON m5.col_0 = orders.o_orderkey

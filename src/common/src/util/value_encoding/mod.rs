@@ -56,7 +56,12 @@ pub fn deserialize_datum(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
 // prevent recursive use of &mut
 #[inline(always)]
 fn inner_deserialize_datum(data: &mut impl Buf, ty: &DataType) -> Result<Datum> {
+    let mut s = vec![];
+    data.copy_to_slice(&mut s);
+    println!("data: {:?}", s);
+    println!("datatype: {:?}", ty);
     let null_tag = data.get_u8();
+    println!("null_tag: {:?}", null_tag);
     match null_tag {
         0 => Ok(None),
         1 => Some(deserialize_value(ty, data)).transpose(),
