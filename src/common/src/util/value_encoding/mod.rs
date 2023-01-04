@@ -59,17 +59,39 @@ pub fn deserialize_datum(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
 // prevent recursive use of &mut
 #[inline(always)]
 fn inner_deserialize_datum(data: &mut impl Buf, ty: &DataType) -> Result<Datum> {
-    let bt = Backtrace::force_capture();
-    println!("\nbacktrace:\n---\n{}---\n", bt);
+    // let bt = Backtrace::force_capture();
+    // println!("\nbacktrace:\n---\n{}---\n", bt);
     println!("data: {:?}", data.chunk());
-    println!("datatype: {:?}", ty);
+    let ty2 = DataType::Int32;
+    if data.chunk() == [1, 146, 107, 0, 0] {
+        let ty = &ty2;
+
+     println!("datatype: {:?}", ty);
     let null_tag = data.get_u8();
     println!("null_tag: {:?}", null_tag);
     match null_tag {
         0 => Ok(None),
-        1 => Some(deserialize_value(ty, data)).transpose(),
+        1 => {
+            let v = Some(deserialize_value(ty, data)).transpose();
+            println!("deserialized: {:?}", v);
+            v
+        }
+        _ => Err(ValueEncodingError::InvalidTagEncoding(null_tag)),
+    }    } else {
+     println!("datatype: {:?}", ty);
+    let null_tag = data.get_u8();
+    println!("null_tag: {:?}", null_tag);
+    match null_tag {
+        0 => Ok(None),
+        1 => {
+            let v = Some(deserialize_value(ty, data)).transpose();
+            println!("deserialized: {:?}", v);
+            v
+        }
         _ => Err(ValueEncodingError::InvalidTagEncoding(null_tag)),
     }
+    }
+
 }
 
 fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {

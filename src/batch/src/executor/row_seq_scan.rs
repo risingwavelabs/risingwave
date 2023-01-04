@@ -79,7 +79,11 @@ impl ScanRange {
     ) -> Result<Self> {
         let pk_types_other: Vec<_> = pk_types.collect();
         println!("\npk_types: {:?}", pk_types_other);
+
         let mut pk_types = pk_types_other.iter();
+        println!("scan_range lower_bound: {:?}", scan_range.lower_bound);
+        println!("scan_range upper_bound: {:?}", scan_range.upper_bound);
+        println!("scan_range eq_conds: {:?}", scan_range.eq_conds);
 
         let pk_prefix = OwnedRow::new(
             scan_range
@@ -163,6 +167,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         source: &ExecutorBuilder<'_, C>,
         inputs: Vec<BoxedExecutor>,
     ) -> Result<BoxedExecutor> {
+        println!("Creating new seq scan executor...");
         ensure!(
             inputs.is_empty(),
             "Row sequential scan should not have input executor!"
@@ -181,6 +186,11 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .iter()
             .map(ColumnDesc::from)
             .collect_vec();
+
+        for col in &column_descs {
+            println!("col: {:?}", col);
+        }
+
         let column_ids = seq_scan_node
             .column_ids
             .iter()
@@ -231,6 +241,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .map(|&k| k as usize)
             .collect_vec();
         let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+        println!("exec scan_ranges: {:?}", &seq_scan_node.scan_ranges);
         let scan_ranges = {
             let scan_ranges = &seq_scan_node.scan_ranges;
             if scan_ranges.is_empty() {

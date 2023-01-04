@@ -47,6 +47,7 @@ impl BatchSeqScan {
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, order);
 
         {
+            println!("scan range: {:?}", scan_ranges);
             // validate scan_range
             scan_ranges.iter().for_each(|scan_range| {
                 assert!(!scan_range.is_full_table_scan());
@@ -225,7 +226,6 @@ impl ToBatchProst for BatchSeqScan {
             println!("col: {:?}", col);
         }
 
-        println!("table_name: {:?}", self.logical.table_desc());
         println!("table_name: {:?}", self.logical.table_desc());
 
         if self.logical.is_sys_table() {

@@ -395,8 +395,11 @@ impl Condition {
 
             // analyze exprs in the group. scan_range is not updated
             for expr in group.clone() {
+                println!("trace cond to pred {:?}", expr);
+                println!("trace cond to pred dt {:?}", expr.as_eq_const().unwrap().0.data_type);
                 if let Some((input_ref, const_expr)) = expr.as_eq_const() &&
                     let Ok(const_expr) = const_expr.cast_implicit(input_ref.data_type) {
+                    println!("const expr");
                     assert_eq!(input_ref.index, order_column_ids[i]);
                     let Some(value) = const_expr.eval_row_const()? else {
                         // column = NULL
