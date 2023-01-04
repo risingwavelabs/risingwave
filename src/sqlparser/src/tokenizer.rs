@@ -47,6 +47,8 @@ pub enum Token {
     Char(char),
     /// Single quoted string: i.e: 'string'
     SingleQuotedString(String),
+    /// Single quoted string with c-style escapes: i.e: E'string'
+    CstyleEscapesString(String),
     /// "National" string literal: i.e: N'string'
     NationalStringLiteral(String),
     /// Hexadecimal string literal: i.e.: X'deadbeef'
@@ -150,6 +152,7 @@ impl fmt::Display for Token {
             Token::SingleQuotedString(ref s) => write!(f, "'{}'", s),
             Token::NationalStringLiteral(ref s) => write!(f, "N'{}'", s),
             Token::HexStringLiteral(ref s) => write!(f, "X'{}'", s),
+            Token::CstyleEscapesString(ref s) => write!(f, "E'{}'", s),
             Token::Comma => f.write_str(","),
             Token::Whitespace(ws) => write!(f, "{}", ws),
             Token::DoubleEq => f.write_str("=="),
@@ -369,6 +372,21 @@ impl<'a> Tokenizer<'a> {
                         _ => {
                             // regular identifier starting with an "N"
                             let s = self.tokenize_word('N', chars);
+                            Ok(Some(Token::make_word(&s, None)))
+                        }
+                    }
+                }
+                x @ 'e' | x @ 'E' => {
+                    chars.next(); // consume, to check the next char
+                    match chars.peek() {
+                        Some('\'') => {
+                            // E'...' - a <character string literal>
+                            let s = self.tokenize_single_quoted_string(chars)?;
+                            Ok(Some(Token::CstyleEscapesString(s)))
+                        }
+                        _ => {
+                            // regular identifier starting with an "E"
+                            let s = self.tokenize_word(x, chars);
                             Ok(Some(Token::make_word(&s, None)))
                         }
                     }
