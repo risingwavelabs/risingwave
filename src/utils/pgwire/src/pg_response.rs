@@ -121,6 +121,9 @@ impl StatementType {
                 | StatementType::COPY
                 | StatementType::FETCH
                 | StatementType::SELECT
+                | StatementType::INSERT_RETURNING
+                | StatementType::DELETE_RETURNING
+                | StatementType::UPDATE_RETURNING
         )
     }
 
@@ -144,6 +147,15 @@ impl StatementType {
                 | StatementType::SHOW_COMMAND
                 | StatementType::DESCRIBE_TABLE
                 | StatementType::INSERT_RETURNING
+                | StatementType::DELETE_RETURNING
+                | StatementType::UPDATE_RETURNING
+        )
+    }
+
+    pub fn is_returning(&self) -> bool {
+        matches!(
+            self,
+            StatementType::INSERT_RETURNING
                 | StatementType::DELETE_RETURNING
                 | StatementType::UPDATE_RETURNING
         )

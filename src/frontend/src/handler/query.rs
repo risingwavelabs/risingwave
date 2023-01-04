@@ -282,11 +282,8 @@ pub async fn local_execute(
 }
 
 pub async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
-    match stmt_type {
-        StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            do_flush(session).await?;
-        }
-        _ => {}
+    if stmt_type.is_dml() {
+        do_flush(session).await?;
     }
     Ok(())
 }
