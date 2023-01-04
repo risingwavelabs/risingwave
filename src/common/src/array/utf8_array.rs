@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,7 +22,7 @@ use crate::array::ArrayBuilderImpl;
 use crate::buffer::Bitmap;
 
 /// `Utf8Array` is a collection of Rust Utf8 `str`s. It's a wrapper of `BytesArray`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Utf8Array {
     bytes: BytesArray,
 }
@@ -106,6 +106,10 @@ impl Utf8Array {
             }
         }
         builder.finish()
+    }
+
+    pub(super) fn data(&self) -> &[u8] {
+        self.bytes.data()
     }
 }
 

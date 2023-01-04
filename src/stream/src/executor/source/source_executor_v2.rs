@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -510,6 +510,7 @@ impl<S: StateStore> Debug for SourceExecutorV2<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU64;
     use std::time::Duration;
 
     use maplit::{convert_args, hashmap};
@@ -690,8 +691,7 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids,
             2,
-            None,
-            0,
+            Arc::new(AtomicU64::new(0)),
             false,
         )
         .await

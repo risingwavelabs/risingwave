@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,7 @@
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use futures::stream::StreamExt;
@@ -158,9 +159,11 @@ async fn test_table_materialize() -> StreamResult<()> {
     let (barrier_tx, barrier_rx) = unbounded_channel();
     let vnodes = Bitmap::from_bytes(&[0b11111111]);
 
+    let actor_ctx = ActorContext::create(0x3f3f3f);
+
     // Create a `SourceExecutor` to read the changes.
     let source_executor = SourceExecutorV2::<PanicStateStore>::new(
-        ActorContext::create(0x3f3f3f),
+        actor_ctx.clone(),
         all_schema.clone(),
         pk_indices.clone(),
         None, // There is no external stream source.
@@ -182,6 +185,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     );
 
     let row_id_gen_executor = RowIdGenExecutor::new(
+        actor_ctx,
         Box::new(dml_executor),
         all_schema.clone(),
         pk_indices.clone(),
@@ -198,8 +202,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         vec![OrderPair::new(0, OrderType::Ascending)],
         all_column_ids.clone(),
         4,
-        None,
-        0,
+        Arc::new(AtomicU64::new(0)),
         false,
     )
     .await

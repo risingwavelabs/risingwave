@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,9 +25,9 @@ use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
 /// `BytesArray` is a collection of Rust `[u8]`s.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BytesArray {
-    offset: Vec<usize>,
+    offset: Vec<u32>,
     bitmap: Bitmap,
     data: Vec<u8>,
 }
@@ -38,8 +38,8 @@ impl Array for BytesArray {
     type RefItem<'a> = &'a [u8];
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> &[u8] {
-        let begin = *self.offset.get_unchecked(idx);
-        let end = *self.offset.get_unchecked(idx + 1);
+        let begin = *self.offset.get_unchecked(idx) as usize;
+        let end = *self.offset.get_unchecked(idx + 1) as usize;
         self.data.get_unchecked(begin..end)
     }
 
@@ -110,7 +110,6 @@ impl Array for BytesArray {
 }
 
 impl BytesArray {
-    #[cfg(test)]
     pub(super) fn data(&self) -> &[u8] {
         &self.data
     }
@@ -142,7 +141,7 @@ impl<'a> FromIterator<&'a [u8]> for BytesArray {
 /// `BytesArrayBuilder` use `&[u8]` to build an `BytesArray`.
 #[derive(Debug)]
 pub struct BytesArrayBuilder {
-    offset: Vec<usize>,
+    offset: Vec<u32>,
     bitmap: BitmapBuilder,
     data: Vec<u8>,
 }
@@ -166,16 +165,17 @@ impl ArrayBuilder for BytesArrayBuilder {
                 self.bitmap.append_n(n, true);
                 self.data.reserve(x.len() * n);
                 self.offset.reserve(n);
+                assert!(self.data.capacity() <= u32::MAX as usize);
                 for _ in 0..n {
                     self.data.extend_from_slice(x);
-                    self.offset.push(self.data.len());
+                    self.offset.push(self.data.len() as u32);
                 }
             }
             None => {
                 self.bitmap.append_n(n, false);
                 self.offset.reserve(n);
                 for _ in 0..n {
-                    self.offset.push(self.data.len());
+                    self.offset.push(self.data.len() as u32);
                 }
             }
         }
@@ -196,7 +196,7 @@ impl ArrayBuilder for BytesArrayBuilder {
         if self.bitmap.pop().is_some() {
             self.offset.pop().unwrap();
             let end = self.offset.last().unwrap();
-            self.data.truncate(*end);
+            self.data.truncate(*end as usize);
             Some(())
         } else {
             None
@@ -227,7 +227,7 @@ impl BytesArrayBuilder {
     /// `finish_partial` was safe even if we don't call `append_partial`, which is equivalent to
     /// appending an empty bytes.
     fn finish_partial(&mut self) {
-        self.offset.push(self.data.len());
+        self.offset.push(self.data.len() as u32);
         self.bitmap.append(true);
     }
 
@@ -236,8 +236,8 @@ impl BytesArrayBuilder {
     /// This is a safe method, if no `append_partial` was called, then the call has no effect.
     fn rollback_partial(&mut self) {
         let &last_offset = self.offset.last().unwrap();
-        assert!(last_offset <= self.data.len());
-        self.data.truncate(last_offset);
+        assert!(last_offset <= self.data.len() as u32);
+        self.data.truncate(last_offset as usize);
     }
 }
 

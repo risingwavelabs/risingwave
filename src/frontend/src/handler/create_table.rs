@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,7 +23,6 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
 };
-use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, TableConstraint,
 };
@@ -32,7 +31,6 @@ use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::catalog::table_catalog::TableType;
 use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
@@ -137,7 +135,7 @@ pub fn bind_sql_table_constraints(
     column_descs: Vec<ColumnDesc>,
     pk_column_id_from_columns: Option<ColumnId>,
     constraints: Vec<TableConstraint>,
-) -> Result<(Vec<ProstColumnCatalog>, Vec<ColumnId>, Option<usize>)> {
+) -> Result<(Vec<ColumnCatalog>, Vec<ColumnId>, Option<usize>)> {
     let mut pk_column_names = vec![];
     for constraint in constraints {
         match constraint {
@@ -195,12 +193,12 @@ pub fn bind_sql_table_constraints(
     let mut columns_catalog = column_descs
         .into_iter()
         .map(|c| {
+            // All columns except `_row_id` or starts with `_rw` should be visible.
+            let is_hidden = c.name.starts_with("_rw");
             ColumnCatalog {
                 column_desc: c,
-                // All columns except `_row_id` should be visible.
-                is_hidden: false,
+                is_hidden,
             }
-            .to_protobuf()
         })
         .collect_vec();
 
@@ -208,10 +206,17 @@ pub fn bind_sql_table_constraints(
     let row_id_index = pk_column_ids.is_empty().then(|| {
         let row_id_index = columns_catalog.len();
         let row_id_column_id = ColumnId::new(row_id_index as i32);
-        columns_catalog.push(ColumnCatalog::row_id_column(row_id_column_id).to_protobuf());
+        columns_catalog.push(ColumnCatalog::row_id_column(row_id_column_id));
         pk_column_ids.push(row_id_column_id);
         row_id_index
     });
+
+    if let Some(col) = columns_catalog.iter().map(|c| c.name()).duplicates().next() {
+        Err(ErrorCode::InvalidInputSyntax(format!(
+            "column \"{col}\" specified more than once"
+        )))?;
+    }
+
     Ok((columns_catalog, pk_column_ids, row_id_index))
 }
 
@@ -222,6 +227,7 @@ pub(crate) fn gen_create_table_plan(
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
+    let definition = context.normalized_sql().to_owned();
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
     gen_create_table_plan_without_bind(
         session,
@@ -230,6 +236,7 @@ pub(crate) fn gen_create_table_plan(
         column_descs,
         pk_column_id_from_columns,
         constraints,
+        definition,
     )
 }
 
@@ -240,6 +247,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     column_descs: Vec<ColumnDesc>,
     pk_column_id_from_columns: Option<ColumnId>,
     constraints: Vec<TableConstraint>,
+    definition: String,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
@@ -265,7 +273,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
             database_id,
             name: name.clone(),
             row_id_index: row_id_index.clone(),
-            columns: columns.clone(),
+            columns: columns.iter().map(|c| c.to_protobuf()).collect(),
             pk_column_ids: pk_column_ids.clone(),
             properties,
             info: Some(StreamSourceInfo::default()),
@@ -283,7 +291,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         .collect_vec();
     let column_descs = columns
         .iter()
-        .map(|column| column.column_desc.clone().unwrap().into())
+        .map(|column| column.column_desc.clone())
         .collect_vec();
 
     let row_id_index = row_id_index.as_ref().map(|index| index.index as _);
@@ -317,14 +325,13 @@ pub(crate) fn gen_create_table_plan_without_bind(
     // The materialize executor need not handle primary key conflict if the primary key is row id.
     let handle_pk_conflict = row_id_index.is_none();
 
-    let materialize = plan_root.gen_materialize_plan(
+    let materialize = plan_root.gen_table_plan(
         name,
-        "".into(),
-        None,
+        columns,
+        definition,
         handle_pk_conflict,
         row_id_index,
         dml_flag,
-        TableType::Table,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -341,6 +348,8 @@ pub(crate) fn gen_materialize_plan(
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         let row_id_index = source.row_id_index.as_ref().map(|index| index.index as _);
+        let definition = context.sql().to_owned(); // TODO: use formatted SQL
+
         // Manually assemble the materialization plan for the table.
         let source_node: PlanRef = LogicalSource::new(
             Some(Rc::new((&source).into())),
@@ -379,14 +388,17 @@ pub(crate) fn gen_materialize_plan(
             out_names,
         );
 
-        plan_root.gen_materialize_plan(
+        plan_root.gen_table_plan(
             source.name.clone(),
-            "".into(),
-            None,
+            source
+                .columns
+                .into_iter()
+                .map(ColumnCatalog::from)
+                .collect(),
+            definition,
             handle_pk_conflict,
             row_id_index,
             DmlFlag::Disable,
-            TableType::Table,
         )?
     };
     let mut table = materialize
@@ -417,7 +429,7 @@ pub async fn handle_create_table(
     }
 
     let (graph, source, table) = {
-        let context = OptimizerContext::new_with_handler_args(handler_args);
+        let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, source, table) = gen_create_table_plan(
             &session,
             context.into(),
