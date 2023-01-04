@@ -838,23 +838,21 @@ fn derive_predicate_from_eq_condition(
     }
     // The function is pure except for `InputRef` and all `InputRef`s are `eq_condition` indices.
     // Hence, we can substitute those `InputRef`s with indices from the other side.
-    let other_side_mapping = eq_condition
-        .eq_keys()
-        .iter()
-        .map(|(left, right, _)| {
-            if expr_is_left {
-                (left.index, right.clone())
-            } else {
-                (right.index, left.clone())
-            }
-        })
-        .collect();
+    let other_side_mapping = if expr_is_left {
+        eq_condition.eq_indexes_typed().into_iter().collect()
+    } else {
+        eq_condition
+            .eq_indexes_typed()
+            .into_iter()
+            .map(|(x, y)| (y, x))
+            .collect()
+    };
     struct InputRefsRewriter {
-        mapping: HashMap<usize, InputRef>,
+        mapping: HashMap<InputRef, InputRef>,
     }
     impl ExprRewriter for InputRefsRewriter {
         fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-            self.mapping[&input_ref.index].clone().into()
+            self.mapping[&input_ref].clone().into()
         }
     }
     Some(

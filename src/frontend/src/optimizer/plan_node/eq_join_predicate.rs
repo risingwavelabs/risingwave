@@ -156,6 +156,8 @@ impl EqJoinPredicate {
     }
 
     /// Get a reference to the join predicate's eq keys.
+    ///
+    /// Note: `right_col_index` starts from `left_cols_num`
     pub fn eq_keys(&self) -> &[(InputRef, InputRef, bool)] {
         self.eq_keys.as_ref()
     }
@@ -167,6 +169,18 @@ impl EqJoinPredicate {
         self.eq_keys
             .iter()
             .map(|(left, right, _)| (left.index(), right.index() - self.left_cols_num))
+            .collect()
+    }
+
+    /// Note: `right_col_index` starts from `0`
+    pub fn eq_indexes_typed(&self) -> Vec<(InputRef, InputRef)> {
+        self.eq_keys
+            .iter()
+            .cloned()
+            .map(|(left, mut right, _)| {
+                right.index = right.index - self.left_cols_num;
+                (left, right)
+            })
             .collect()
     }
 
