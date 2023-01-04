@@ -123,6 +123,10 @@ impl<S: StateStore> SortBuffer<S> {
     /// Delete a record from the buffer.
     /// TODO: The delete is always be called in order per group, so should we support range_delete
     /// here?
+    ///
+    /// # Panics
+    ///
+    /// Panics if the record is not found in the buffer.
     pub fn delete(&mut self, row: impl Row) {
         let timestamp_datum = row
             .datum_at(self.sort_column_index)
