@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,8 +15,8 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{process, thread};
 
 use prost::Message;
 use rand::rngs::StdRng;
@@ -181,13 +181,13 @@ async fn renew_lease<S: MetaStore>(
     meta_store: &Arc<S>,
 ) -> MetaResult<bool> {
     let now = since_epoch();
-    let mut txn = Transaction::default();
     let lease_info = MetaLeaseInfo {
         leader: Some(leader_info.clone()),
         lease_register_time: now.as_secs(),
         lease_expire_time: now.as_secs() + lease_time_sec,
     };
 
+    let mut txn = Transaction::default();
     txn.check_equal(
         META_CF_NAME.to_string(),
         META_LEADER_KEY.as_bytes().to_vec(),
@@ -377,7 +377,9 @@ pub async fn run_elections<S: MetaStore>(
                 initial_election = false;
 
                 // signal to observers if there is a change in leadership
-                leader_tx.send((leader_info.clone(), is_leader)).unwrap();
+                leader_tx
+                    .send((leader_info.clone(), is_leader))
+                    .expect("Leader receiver dropped");
 
                 // election done. Enter the term of the current leader
                 // Leader stays in power until leader crashes
@@ -393,6 +395,11 @@ pub async fn run_elections<S: MetaStore>(
 
                     if let Ok(leader_alive) =
                         manage_term(is_leader, &leader_info, lease_time_sec, &meta_store).await && !leader_alive {
+                            // Leader lost leadership. Trigger fencing
+                            if is_leader {
+                                tracing::error!("This node lost its leadership. Exiting node");
+                                process::exit(0);
+                            }
                             // leader failed. Elect new leader
                             continue 'election;
                     }
@@ -698,6 +705,29 @@ mod tests {
         // Follower: If new leader was, start election cycle
         assert!(
             !manage_term(false, &other_leader_info, lease_timeout, &mock_meta_store)
+                .await
+                .unwrap(),
+            "Follower: If new leader was elected, follower should enter election cycle"
+        );
+    }
+
+    // Nobody can renew leader info does not exist
+    #[tokio::test]
+    async fn not_renew_lease_2() {
+        let mock_meta_store = Arc::new(MemStore::new());
+
+        let other_leader_info = MetaLeaderInfo {
+            node_address: "other:1234".into(),
+            lease_id: 456,
+        };
+        assert!(
+            !manage_term(true, &other_leader_info, 123, &mock_meta_store)
+                .await
+                .unwrap(),
+            "Leader: If new leader was elected old leader should NOT renew lease"
+        );
+        assert!(
+            !manage_term(false, &other_leader_info, 123, &mock_meta_store)
                 .await
                 .unwrap(),
             "Follower: If new leader was elected, follower should enter election cycle"

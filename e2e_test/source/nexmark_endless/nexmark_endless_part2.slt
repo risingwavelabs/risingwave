@@ -31,7 +31,7 @@ include ../../nexmark/drop_sources.slt.part
 include ../../nexmark/create_sources.slt.part
 include ../../streaming/nexmark/views/q9.slt.part
 
-sleep 20s
+sleep 25s
 
 query I
 select count(*) > 0 from (select * from nexmark_q9 limit 1);

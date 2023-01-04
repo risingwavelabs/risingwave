@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -292,7 +292,7 @@ fn assemble_materialize(
         project_required_cols,
         out_names,
     )
-    .gen_create_index_plan(index_name)
+    .gen_index_plan(index_name)
 }
 
 fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<Ident>> {
@@ -353,7 +353,7 @@ pub async fn handle_create_index(
             }
         }
 
-        let context = OptimizerContext::new_with_handler_args(handler_args);
+        let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, index_table, index) = gen_create_index_plan(
             &session,
             context.into(),

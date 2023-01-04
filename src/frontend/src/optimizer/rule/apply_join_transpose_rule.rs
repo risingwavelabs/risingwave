@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,10 +23,10 @@ use crate::expr::{
     CollectInputRef, CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprType,
     ExprVisitor, FunctionCall, InputRef,
 };
-use crate::optimizer::plan_correlated_id_finder::{ExprCorrelatedIdFinder, PlanCorrelatedIdFinder};
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalFilter, LogicalJoin, LogicalProject, PlanTreeNodeBinary,
 };
+use crate::optimizer::plan_visitor::{ExprCorrelatedIdFinder, PlanCorrelatedIdFinder};
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -491,7 +491,7 @@ impl ApplyJoinTransposeRule {
 
         let new_join_left = LogicalApply::create(
             apply_left.clone(),
-            join.left().clone(),
+            join.left(),
             apply_join_type,
             Condition {
                 conjunctions: left_apply_condition,
@@ -502,7 +502,7 @@ impl ApplyJoinTransposeRule {
         );
         let new_join_right = LogicalApply::create(
             apply_left.clone(),
-            join.right().clone(),
+            join.right(),
             apply_join_type,
             Condition {
                 conjunctions: right_apply_condition,

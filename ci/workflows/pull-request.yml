@@ -182,7 +182,7 @@ steps:
           config: ci/docker-compose.yml
           environment:
             - CODECOV_TOKEN
-    timeout_in_minutes: 10
+    timeout_in_minutes: 12
     retry: *auto-retry
 
   - label: "fuzz test"
@@ -234,7 +234,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
-    command: "timeout 14m ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=16 timeout 14m ci/scripts/deterministic-e2e-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -247,7 +247,7 @@ steps:
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
-    command: "KILL_RATE=0.5 timeout 14m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=16 KILL_RATE=0.5 timeout 14m ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache

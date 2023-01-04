@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -53,7 +53,7 @@ pub static LOCAL_TEST_ADDR: std::sync::LazyLock<HostAddr> =
 
 pub type ActorHandle = JoinHandle<()>;
 
-pub type AtomicU64RefOpt = Option<Arc<AtomicU64>>;
+pub type AtomicU64Ref = Arc<AtomicU64>;
 
 pub struct LocalStreamManagerCore {
     /// Runtime for the streaming actors.
@@ -85,7 +85,7 @@ pub struct LocalStreamManagerCore {
     stack_trace_manager: Option<StackTraceManager<ActorId>>,
 
     /// Watermark epoch number.
-    watermark_epoch: Option<Arc<AtomicU64>>,
+    watermark_epoch: AtomicU64Ref,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -367,7 +367,7 @@ impl LocalStreamManager {
 
     /// After memory manager is created, it will store the watermark epoch in stream manager, so
     /// stream executor can get it to build managed cache.
-    pub async fn set_watermark_epoch(&self, watermark_epoch: Option<Arc<AtomicU64>>) {
+    pub async fn set_watermark_epoch(&self, watermark_epoch: AtomicU64Ref) {
         let mut guard = self.core.lock().await;
         guard.watermark_epoch = watermark_epoch;
     }
@@ -429,7 +429,7 @@ impl LocalStreamManagerCore {
             streaming_metrics,
             config,
             stack_trace_manager: async_stack_trace_config.map(StackTraceManager::new),
-            watermark_epoch: None,
+            watermark_epoch: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -841,7 +841,7 @@ impl LocalStreamManagerCore {
     }
 
     /// When executor need to create cache, it will call this needs the watermark epoch for evict.
-    pub fn get_watermark_epoch(&self) -> AtomicU64RefOpt {
+    pub fn get_watermark_epoch(&self) -> AtomicU64Ref {
         self.watermark_epoch.clone()
     }
 }

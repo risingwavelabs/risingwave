@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use paste::paste;
 
 use super::*;
 pub use crate::expr::CollectInputRef;
-use crate::optimizer::share_parent_counter::ShareParentCounter;
+use crate::optimizer::plan_visitor::ShareParentCounter;
 use crate::optimizer::PlanVisitor;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 
@@ -55,8 +55,24 @@ for_stream_plan_nodes! { impl_prune_col }
 
 #[derive(Debug, Clone)]
 pub struct ColumnPruningContext {
+    /// `share_required_cols_map` is used by the first round of column pruning to keep track of
+    /// each parent required columns.
     share_required_cols_map: HashMap<PlanNodeId, Vec<Vec<usize>>>,
+    /// Used to calculate how many parents the share operator has.
     share_parent_counter: ShareParentCounter,
+    /// Share input cache used by the second round of column pruning.
+    /// For a DAG plan, use only one round to prune column is not enough,
+    /// because we need to change the schema of share operator
+    /// and you don't know what is the final schema when the first parent try to prune column,
+    /// so we need a second round to use the information collected by the first round.
+    /// `share_cache` maps original share operator plan id to the new share operator and the column
+    /// changed mapping which is actually the merged required columns calculated at the first
+    /// round.
+    share_cache: HashMap<PlanNodeId, (PlanRef, Vec<usize>)>,
+    /// `share_visited` is used to track whether the share operator is visited, because we need to
+    /// recursively call the `prune_col` of the new share operator to trigger the replacement.
+    /// It is only used at the second round of the column pruning.
+    share_visited: HashSet<PlanNodeId>,
 }
 
 impl ColumnPruningContext {
@@ -66,6 +82,8 @@ impl ColumnPruningContext {
         Self {
             share_required_cols_map: Default::default(),
             share_parent_counter,
+            share_cache: Default::default(),
+            share_visited: Default::default(),
         }
     }
 
@@ -87,5 +105,28 @@ impl ColumnPruningContext {
 
     pub fn take_required_cols(&mut self, plan_node_id: PlanNodeId) -> Option<Vec<Vec<usize>>> {
         self.share_required_cols_map.remove(&plan_node_id)
+    }
+
+    pub fn add_share_cache(
+        &mut self,
+        plan_node_id: PlanNodeId,
+        new_share: PlanRef,
+        merged_required_columns: Vec<usize>,
+    ) {
+        self.share_cache
+            .try_insert(plan_node_id, (new_share, merged_required_columns))
+            .unwrap();
+    }
+
+    pub fn get_share_cache(&self, plan_node_id: PlanNodeId) -> Option<(PlanRef, Vec<usize>)> {
+        self.share_cache.get(&plan_node_id).cloned()
+    }
+
+    pub fn need_second_round(&self) -> bool {
+        !self.share_cache.is_empty()
+    }
+
+    pub fn visit_share_at_second_round(&mut self, plan_node_id: PlanNodeId) -> bool {
+        self.share_visited.insert(plan_node_id)
     }
 }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,22 +16,28 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::DataType;
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
 };
-use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
+use risingwave_pb::plan_common::RowFormatType;
 use risingwave_source::{AvroParser, ProtobufParser};
 use risingwave_sqlparser::ast::{AvroSchema, CreateSourceStatement, ProtobufSchema, SourceSchema};
 
-use super::create_table::{bind_sql_columns, bind_sql_table_constraints, gen_materialize_plan};
+use super::create_table::{bind_sql_table_constraints, gen_materialize_plan};
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::ColumnId;
+use crate::handler::create_table::bind_sql_columns;
 use crate::handler::HandlerArgs;
-use crate::{build_graph, OptimizerContext};
+use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
+use crate::optimizer::OptimizerContext;
+use crate::stream_fragmenter::build_graph;
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 
@@ -39,7 +45,7 @@ pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 async fn extract_avro_table_schema(
     schema: &AvroSchema,
     with_properties: HashMap<String, String>,
-) -> Result<Vec<ProstColumnCatalog>> {
+) -> Result<Vec<ColumnCatalog>> {
     let parser = AvroParser::new(
         schema.row_schema_location.0.as_str(),
         schema.use_schema_registry,
@@ -49,8 +55,8 @@ async fn extract_avro_table_schema(
     let vec_column_desc = parser.map_to_columns()?;
     Ok(vec_column_desc
         .into_iter()
-        .map(|c| ProstColumnCatalog {
-            column_desc: Some(c),
+        .map(|col| ColumnCatalog {
+            column_desc: col.into(),
             is_hidden: false,
         })
         .collect_vec())
@@ -60,7 +66,7 @@ async fn extract_avro_table_schema(
 async fn extract_protobuf_table_schema(
     schema: &ProtobufSchema,
     with_properties: HashMap<String, String>,
-) -> Result<Vec<ProstColumnCatalog>> {
+) -> Result<Vec<ColumnCatalog>> {
     let parser = ProtobufParser::new(
         &schema.row_schema_location.0,
         &schema.message_name.0,
@@ -72,27 +78,29 @@ async fn extract_protobuf_table_schema(
 
     Ok(column_descs
         .into_iter()
-        .map(|col| ProstColumnCatalog {
-            column_desc: Some(col),
+        .map(|col| ColumnCatalog {
+            column_desc: col.into(),
             is_hidden: false,
         })
         .collect_vec())
 }
 
+pub(crate) fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool {
+    with_properties
+        .get(UPSTREAM_SOURCE_KEY)
+        .unwrap_or(&"".to_string())
+        .to_lowercase()
+        .eq(KAFKA_CONNECTOR)
+}
+
 pub(crate) async fn resolve_source_schema(
     source_schema: SourceSchema,
-    columns: &mut Vec<ProstColumnCatalog>,
+    columns: &mut Vec<ColumnCatalog>,
     with_properties: &HashMap<String, String>,
     row_id_index: Option<usize>,
     pk_column_ids: &[ColumnId],
 ) -> Result<StreamSourceInfo> {
-    // confluent schema registry must be used with kafka
-    let is_kafka = with_properties
-        .get(UPSTREAM_SOURCE_KEY)
-        .unwrap_or(&"".to_string())
-        .to_lowercase()
-        .eq(KAFKA_CONNECTOR);
-    if !is_kafka
+    if !is_kafka_source(with_properties)
         && matches!(
             &source_schema,
             SourceSchema::Protobuf(ProtobufSchema {
@@ -210,12 +218,35 @@ pub(crate) async fn resolve_source_schema(
     Ok(source_info)
 }
 
+// Add a hidden column `_rw_kafka_timestamp` to each message from Kafka source.
+pub(crate) fn check_and_add_timestamp_column(
+    with_properties: &HashMap<String, String>,
+    column_descs: &mut Vec<ColumnDesc>,
+    is_materialized: bool,
+) {
+    if is_kafka_source(with_properties) && !is_materialized {
+        let kafka_timestamp_column = ColumnDesc {
+            data_type: DataType::Timestamptz,
+            column_id: ColumnId::new(column_descs.len() as i32),
+            name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
+            field_descs: vec![],
+            type_name: "".to_string(),
+        };
+        column_descs.push(kafka_timestamp_column);
+    }
+}
+
 pub async fn handle_create_source(
     handler_args: HandlerArgs,
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<RwPgResponse> {
-    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
+    let with_properties = handler_args.with_options.inner().clone();
+
+    let (mut column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
+
+    check_and_add_timestamp_column(&with_properties, &mut column_descs, is_materialized);
+
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
     if row_id_index.is_none() && !is_materialized {
@@ -224,7 +255,6 @@ pub async fn handle_create_source(
         )
         .into());
     }
-    let with_properties = handler_args.with_options.inner().clone();
 
     let source_info = resolve_source_schema(
         stmt.source_schema,
@@ -246,6 +276,8 @@ pub async fn handle_create_source(
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
+    let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
+
     let source = ProstSource {
         id: 0,
         schema_id,
@@ -263,7 +295,7 @@ pub async fn handle_create_source(
     // TODO(Yuanxin): This should be removed after unsupporting `CREATE MATERIALIZED SOURCE`.
     if is_materialized {
         let (graph, table) = {
-            let context = OptimizerContext::new_with_handler_args(handler_args);
+            let context = OptimizerContext::from_handler_args(handler_args);
             let (plan, table) =
                 gen_materialize_plan(context.into(), source.clone(), session.user_id())?;
             let graph = build_graph(plan);

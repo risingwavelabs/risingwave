@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,24 +32,16 @@ use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::explain_stream_graph;
 
-pub(super) fn handle_explain(
+pub fn handle_explain(
     handler_args: HandlerArgs,
     stmt: Statement,
     options: ExplainOptions,
     analyze: bool,
 ) -> Result<RwPgResponse> {
-    let context = OptimizerContext::new(
-        handler_args.session,
-        handler_args.sql,
-        handler_args.with_options.clone(),
-        options.clone(),
-    );
+    let context = OptimizerContext::new(handler_args.clone(), options.clone());
 
     if analyze {
         return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
-    }
-    if options.explain_type == ExplainType::Logical {
-        return Err(ErrorCode::NotImplemented("explain logical".to_string(), 4856.into()).into());
     }
 
     let session = context.session_ctx().clone();
@@ -129,8 +121,8 @@ pub(super) fn handle_explain(
         vec![]
     };
 
-    if options.explain_type == ExplainType::DistSql {
-        match plan.convention() {
+    match options.explain_type {
+        ExplainType::DistSql => match plan.convention() {
             Convention::Logical => unreachable!(),
             Convention::Batch => {
                 let plan_fragmenter = BatchPlanFragmenter::new(
@@ -154,22 +146,36 @@ pub(super) fn handle_explain(
                         .map(|s| Row::new(vec![Some(s.to_string().into())])),
                 );
             }
+        },
+        ExplainType::Physical => {
+            // if explain trace is open, the plan has been in the rows
+            if !explain_trace {
+                let output = plan.explain_to_string()?;
+                rows.extend(
+                    output
+                        .lines()
+                        .map(|s| Row::new(vec![Some(s.to_string().into())])),
+                );
+            }
         }
-    } else {
-        // if explain trace is open, the plan has been in the rows
-        if !explain_trace {
-            let output = plan.explain_to_string()?;
-            rows.extend(
-                output
-                    .lines()
-                    .map(|s| Row::new(vec![Some(s.to_string().into())])),
-            );
+        ExplainType::Logical => {
+            // if explain trace is open, the plan has been in the rows
+            if !explain_trace {
+                let output = plan.ctx().take_logical().ok_or_else(|| {
+                    ErrorCode::InternalError("Logical plan not found for query".into())
+                })?;
+                rows.extend(
+                    output
+                        .lines()
+                        .map(|s| Row::new(vec![Some(s.to_string().into())])),
+                );
+            }
         }
     }
 
     Ok(PgResponse::new_for_stream(
         StatementType::EXPLAIN,
-        Some(rows.len() as i32),
+        None,
         rows.into(),
         vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
