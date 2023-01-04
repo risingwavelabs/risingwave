@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -51,7 +51,7 @@ impl ProtobufParser {
 
         let schema_bytes = if use_schema_registry {
             let kafka_topic = get_kafka_topic(&props)?;
-            let client = Client::new(url)?;
+            let client = Client::new(url, &props)?;
             compile_file_descriptor_from_schema_registry(
                 format!("{}-value", kafka_topic).as_str(),
                 &client,
@@ -333,7 +333,7 @@ mod test {
         let dir = PathBuf::from("src/test_data");
         format!(
             "file://{}",
-            std::fs::canonicalize(&dir).unwrap().to_str().unwrap()
+            std::fs::canonicalize(dir).unwrap().to_str().unwrap()
         )
     }
 

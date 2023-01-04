@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@ use std::ops::BitAnd;
 use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk, Vis, VisRef};
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -50,7 +50,7 @@ impl Expression for CoalesceExpression {
             orig_vis
                 .as_ref()
                 .bitand(res_bitmap_ref)
-                .ones()
+                .iter_ones()
                 .for_each(|pos| {
                     selection[pos] = Some(child_idx);
                 });
@@ -70,7 +70,7 @@ impl Expression for CoalesceExpression {
         Ok(Arc::new(builder.finish()))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         for child in &self.children {
             let datum = child.eval_row(input)?;
             if datum.is_some() {
@@ -114,7 +114,7 @@ impl<'a> TryFrom<&'a ExprNode> for CoalesceExpression {
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::DataChunk;
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{Scalar, ScalarImpl};
     use risingwave_pb::data::data_type::TypeName;
@@ -195,7 +195,7 @@ mod tests {
                 .iter()
                 .map(|o| o.map(|int| int.to_scalar_value()))
                 .collect();
-            let row = Row::new(datum_vec);
+            let row = OwnedRow::new(datum_vec);
 
             let result = nullif_expr.eval_row(&row).unwrap();
             assert_eq!(result, expected[i]);

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,9 +32,10 @@ use risingwave_storage::store::{
     ReadOptions, StateStore, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
 };
 
+use crate::get_test_notification_client;
 use crate::test_utils::{
-    get_test_notification_client, with_hummock_storage_v1, with_hummock_storage_v2,
-    HummockStateStoreTestTrait, HummockV2MixedStateStore,
+    with_hummock_storage_v1, with_hummock_storage_v2, HummockStateStoreTestTrait,
+    HummockV2MixedStateStore,
 };
 
 #[tokio::test]
@@ -121,10 +122,11 @@ async fn test_basic_inner(
             epoch1,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -137,10 +139,11 @@ async fn test_basic_inner(
             epoch1,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -155,10 +158,11 @@ async fn test_basic_inner(
             epoch1,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -186,10 +190,11 @@ async fn test_basic_inner(
             epoch2,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -218,10 +223,11 @@ async fn test_basic_inner(
             epoch3,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -235,10 +241,11 @@ async fn test_basic_inner(
             epoch3,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -256,6 +263,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -270,10 +278,11 @@ async fn test_basic_inner(
             epoch1,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -288,10 +297,11 @@ async fn test_basic_inner(
             epoch2,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -309,6 +319,7 @@ async fn test_basic_inner(
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -323,10 +334,11 @@ async fn test_basic_inner(
             epoch3,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -349,10 +361,11 @@ async fn test_basic_inner(
             epoch2,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -365,10 +378,11 @@ async fn test_basic_inner(
             epoch2,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -567,10 +581,11 @@ async fn test_reload_storage() {
             epoch1,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -585,10 +600,11 @@ async fn test_reload_storage() {
             epoch1,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -616,10 +632,11 @@ async fn test_reload_storage() {
             epoch2,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -634,10 +651,11 @@ async fn test_reload_storage() {
             epoch1,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -652,10 +670,11 @@ async fn test_reload_storage() {
             epoch1,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -670,10 +689,11 @@ async fn test_reload_storage() {
             epoch2,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -687,10 +707,11 @@ async fn test_reload_storage() {
             epoch2,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -731,10 +752,11 @@ async fn test_write_anytime_inner(
                         epoch,
                         ReadOptions {
                             ignore_range_tombstone: false,
-                            check_bloom_filter: true,
+                            check_bloom_filter: false,
                             prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
+                            read_version_from_backup: false,
                         }
                     )
                     .await
@@ -749,10 +771,11 @@ async fn test_write_anytime_inner(
                         epoch,
                         ReadOptions {
                             ignore_range_tombstone: false,
-                            check_bloom_filter: true,
+                            check_bloom_filter: false,
                             prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
+                            read_version_from_backup: false,
                         }
                     )
                     .await
@@ -767,10 +790,11 @@ async fn test_write_anytime_inner(
                         epoch,
                         ReadOptions {
                             ignore_range_tombstone: false,
-                            check_bloom_filter: true,
+                            check_bloom_filter: false,
                             prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
+                            read_version_from_backup: false,
                         }
                     )
                     .await
@@ -791,6 +815,7 @@ async fn test_write_anytime_inner(
                         prefix_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -852,10 +877,11 @@ async fn test_write_anytime_inner(
                         epoch,
                         ReadOptions {
                             ignore_range_tombstone: false,
-                            check_bloom_filter: true,
+                            check_bloom_filter: false,
                             prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
+                            read_version_from_backup: false,
                         }
                     )
                     .await
@@ -868,10 +894,11 @@ async fn test_write_anytime_inner(
                     epoch,
                     ReadOptions {
                         ignore_range_tombstone: false,
-                        check_bloom_filter: true,
+                        check_bloom_filter: false,
                         prefix_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
+                        read_version_from_backup: false,
                     }
                 )
                 .await
@@ -885,10 +912,11 @@ async fn test_write_anytime_inner(
                         epoch,
                         ReadOptions {
                             ignore_range_tombstone: false,
-                            check_bloom_filter: true,
+                            check_bloom_filter: false,
                             prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
+                            read_version_from_backup: false,
                         }
                     )
                     .await
@@ -908,6 +936,7 @@ async fn test_write_anytime_inner(
                         prefix_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -1058,10 +1087,11 @@ async fn test_delete_get_inner(
             epoch2,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
+                check_bloom_filter: false,
                 prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             }
         )
         .await
@@ -1143,10 +1173,11 @@ async fn test_multiple_epoch_sync_inner(
                         epoch1,
                         ReadOptions {
                             ignore_range_tombstone: false,
-                            check_bloom_filter: true,
+                            check_bloom_filter: false,
                             prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
+                            read_version_from_backup: false,
                         }
                     )
                     .await
@@ -1160,10 +1191,11 @@ async fn test_multiple_epoch_sync_inner(
                     epoch2,
                     ReadOptions {
                         ignore_range_tombstone: false,
-                        check_bloom_filter: true,
+                        check_bloom_filter: false,
                         prefix_hint: None,
                         table_id: Default::default(),
                         retention_seconds: None,
+                        read_version_from_backup: false,
                     }
                 )
                 .await
@@ -1176,10 +1208,11 @@ async fn test_multiple_epoch_sync_inner(
                         epoch3,
                         ReadOptions {
                             ignore_range_tombstone: false,
-                            check_bloom_filter: true,
+                            check_bloom_filter: false,
                             prefix_hint: None,
                             table_id: Default::default(),
                             retention_seconds: None,
+                            read_version_from_backup: false,
                         }
                     )
                     .await
@@ -1211,25 +1244,7 @@ async fn test_multiple_epoch_sync_inner(
 
 #[tokio::test]
 async fn test_gc_watermark_and_clear_shared_buffer() {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-
-    let hummock_storage = HummockStorage::for_test(
-        hummock_options,
-        sstable_store,
-        meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
-    )
-    .await
-    .unwrap();
-
-    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage, Default::default()).await;
+    let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
 
     assert_eq!(
         hummock_storage

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,8 +19,8 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::ScalarImpl;
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundWindowTableFunction, Relation,
-    WindowTableFunctionKind,
+    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundWatermark,
+    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, TableFunction};
 use crate::optimizer::plan_node::{
@@ -28,6 +28,9 @@ use crate::optimizer::plan_node::{
     LogicalTableFunction, PlanRef,
 };
 use crate::planner::Planner;
+
+const ERROR_WINDOW_SIZE_ARG: &str =
+    "The size arg of window table function should be an interval literal.";
 
 impl Planner {
     pub fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
@@ -40,6 +43,7 @@ impl Planner {
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
             Relation::TableFunction(tf) => self.plan_table_function(*tf),
+            Relation::Watermark(tf) => self.plan_watermark(*tf),
         }
     }
 
@@ -70,7 +74,24 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        Ok(LogicalSource::new(Rc::new(source.catalog), self.ctx()).into())
+        let column_descs = source
+            .catalog
+            .columns
+            .iter()
+            .map(|column| column.column_desc.clone())
+            .collect_vec();
+        let pk_col_ids = source.catalog.pk_col_ids.clone();
+        let row_id_index = source.catalog.row_id_index;
+        let gen_row_id = source.catalog.append_only;
+        Ok(LogicalSource::new(
+            Some(Rc::new(source.catalog)),
+            column_descs,
+            pk_col_ids,
+            row_id_index,
+            gen_row_id,
+            self.ctx(),
+        )
+        .into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {
@@ -78,7 +99,15 @@ impl Planner {
         let right = self.plan_relation(join.right)?;
         let join_type = join.join_type;
         let on_clause = join.cond;
-        Ok(LogicalJoin::create(left, right, join_type, on_clause))
+        if on_clause.has_subquery() {
+            Err(ErrorCode::NotImplemented(
+                "Subquery in join on condition is unsupported".into(),
+                None.into(),
+            )
+            .into())
+        } else {
+            Ok(LogicalJoin::create(left, right, join_type, on_clause))
+        }
     }
 
     pub(super) fn plan_window_table_function(
@@ -102,6 +131,10 @@ impl Planner {
 
     pub(super) fn plan_table_function(&mut self, table_function: TableFunction) -> Result<PlanRef> {
         Ok(LogicalTableFunction::new(table_function, self.ctx()).into())
+    }
+
+    pub(super) fn plan_watermark(&mut self, _watermark: BoundWatermark) -> Result<PlanRef> {
+        todo!("plan watermark");
     }
 
     fn plan_tumble_window(
@@ -163,10 +196,7 @@ impl Planner {
                 let project = LogicalProject::create(base, exprs);
                 Ok(project)
             }
-            _ => Err(ErrorCode::BindError(
-                "Invalid arguments for TUMBLE window function".to_string(),
-            )
-            .into()),
+            _ => Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
         }
     }
 
@@ -179,13 +209,13 @@ impl Planner {
         let input = self.plan_relation(input)?;
         let mut args = args.into_iter();
         let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) = args.next_tuple() else {
-            return Err(ErrorCode::BindError("Invalid arguments for HOP window function".to_string()).into());
+            return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
         let Some(ScalarImpl::Interval(window_slide)) = *window_slide.get_data() else {
-            return Err(ErrorCode::BindError("Invalid arguments for HOP window function".to_string()).into());
+            return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
         let Some(ScalarImpl::Interval(window_size)) = *window_size.get_data() else {
-            return Err(ErrorCode::BindError("Invalid arguments for HOP window function".to_string()).into());
+            return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
 
         if !window_size.is_positive() || !window_slide.is_positive() {

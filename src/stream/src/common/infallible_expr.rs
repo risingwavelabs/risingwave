@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
-use risingwave_common::row::{Row, Row2};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::Datum;
 use risingwave_expr::expr::Expression;
 use risingwave_expr::ExprError;
@@ -42,7 +42,7 @@ pub trait InfallibleExpression: Expression {
         })
     }
 
-    fn eval_row_infallible(&self, input: &Row, on_err: impl Fn(ExprError)) -> Datum {
+    fn eval_row_infallible(&self, input: &OwnedRow, on_err: impl Fn(ExprError)) -> Datum {
         const_assert!(!crate::STRICT_MODE);
 
         #[expect(clippy::disallowed_methods)]

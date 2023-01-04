@@ -6,6 +6,7 @@ FPR = "FPR"
 ot = "ot"
 inout = "inout"
 numer = "numer"
+nd = "nd"
 
 [files]
 extend-exclude = ["src/tests/regress/data", "e2e_test", "**/*.svg", "scripts"]

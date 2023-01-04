@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,8 +15,9 @@
 // Copyright 2020 TiKV Project Authors. Licensed under Apache-2.0.
 
 use std::cmp::{self};
-use std::hash::Hasher;
 use std::ptr;
+
+use xxhash_rust::xxh64;
 
 use super::{HummockError, HummockResult};
 
@@ -29,7 +30,7 @@ unsafe fn u32(ptr: *const u8) -> u32 {
 }
 
 #[inline]
-pub fn bytes_diff<'a, 'b>(base: &'a [u8], target: &'b [u8]) -> &'b [u8] {
+pub fn bytes_diff<'a>(base: &[u8], target: &'a [u8]) -> &'a [u8] {
     let end = cmp::min(base.len(), target.len());
     let mut i = 0;
     unsafe {
@@ -54,9 +55,7 @@ pub fn bytes_diff<'a, 'b>(base: &'a [u8], target: &'b [u8]) -> &'b [u8] {
 
 /// Calculates the ``XxHash`` of the given data.
 pub fn xxhash64_checksum(data: &[u8]) -> u64 {
-    let mut hasher = twox_hash::XxHash64::with_seed(0);
-    hasher.write(data);
-    hasher.finish()
+    xxh64::xxh64(data, 0)
 }
 
 /// Verifies the checksum of the data equals the given checksum with xxhash64.

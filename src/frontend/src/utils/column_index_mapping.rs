@@ -1,11 +1,11 @@
 use std::cmp::max;
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -71,13 +71,12 @@ impl ColIndexMapping {
     }
 
     pub fn identity(size: usize) -> Self {
-        let map = (0..size).into_iter().map(Some).collect();
+        let map = (0..size).map(Some).collect();
         Self::new(map)
     }
 
     pub fn identity_or_none(source_size: usize, target_size: usize) -> Self {
         let map = (0..source_size)
-            .into_iter()
             .map(|i| if i < target_size { Some(i) } else { None })
             .collect();
         Self::with_target_size(map, target_size)
@@ -118,7 +117,6 @@ impl ColIndexMapping {
     /// ```
     pub fn with_shift_offset(source_num: usize, offset: isize) -> Self {
         let map = (0..source_num)
-            .into_iter()
             .map(|source| {
                 let target = source as isize + offset;
                 usize::try_from(target).ok()
@@ -181,19 +179,20 @@ impl ColIndexMapping {
     /// assert_eq!(mapping.try_map(4), None);
     /// ```
     pub fn with_removed_columns(cols: &[usize], src_size: usize) -> Self {
-        let cols = (0..src_size)
-            .into_iter()
-            .filter(|x| !cols.contains(x))
-            .collect_vec();
+        let cols = (0..src_size).filter(|x| !cols.contains(x)).collect_vec();
         Self::with_remaining_columns(&cols, src_size)
     }
 
     #[must_use]
+    /// Compose column index mappings.
+    /// For example if this maps 0->5,
+    /// and `following` maps 5->1,
+    /// Then the composite has 0->5->1 => 0->1.
     pub fn composite(&self, following: &Self) -> Self {
         // debug!("composing {:?} and {:?}", self, following);
         let mut map = self.map.clone();
-        for tar in &mut map {
-            *tar = tar.and_then(|index| following.try_map(index));
+        for target in &mut map {
+            *target = target.and_then(|index| following.try_map(index));
         }
         Self::with_target_size(map, following.target_size())
     }

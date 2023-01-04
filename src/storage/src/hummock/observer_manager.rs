@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,10 +25,13 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::event_handler::HummockEvent;
 
 pub struct HummockObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+
+    backup_reader: BackupReaderRef,
 
     version_update_sender: UnboundedSender<HummockEvent>,
 
@@ -68,6 +71,10 @@ impl ObserverState for HummockObserverNode {
                     });
             }
 
+            Info::MetaBackupManifestId(id) => {
+                self.backup_reader.try_refresh_manifest(id.id);
+            }
+
             _ => {
                 panic!("error type notification");
             }
@@ -80,6 +87,12 @@ impl ObserverState for HummockObserverNode {
         };
 
         self.handle_catalog_snapshot(snapshot.tables);
+        self.backup_reader.try_refresh_manifest(
+            snapshot
+                .meta_backup_manifest_id
+                .expect("should get meta backup manifest id")
+                .id,
+        );
         let _ = self
             .version_update_sender
             .send(HummockEvent::VersionUpdate(
@@ -100,10 +113,12 @@ impl ObserverState for HummockObserverNode {
 impl HummockObserverNode {
     pub fn new(
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
+        backup_reader: BackupReaderRef,
         version_update_sender: UnboundedSender<HummockEvent>,
     ) -> Self {
         Self {
             filter_key_extractor_manager,
+            backup_reader,
             version_update_sender,
             version: 0,
         }

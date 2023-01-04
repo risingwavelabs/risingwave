@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -34,6 +34,7 @@ use serde::ser::SerializeStruct;
 use serde::Serialize;
 use uuid::Uuid;
 
+use super::SchedulerError;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
@@ -190,6 +191,13 @@ impl Query {
             })
             .collect()
     }
+
+    pub fn has_lookup_join_stage(&self) -> bool {
+        self.stage_graph
+            .stages
+            .iter()
+            .any(|(_stage_id, stage_query)| stage_query.has_lookup_join())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -271,6 +279,7 @@ pub struct QueryStage {
     /// Indicates whether this stage contains a table scan node and the table's information if so.
     pub table_scan_info: Option<TableScanInfo>,
     pub source_info: Option<SourceScanInfo>,
+    pub has_lookup_join: bool,
 }
 
 impl QueryStage {
@@ -279,6 +288,12 @@ impl QueryStage {
     /// the executor building process on the batch execution engine.
     pub fn has_table_scan(&self) -> bool {
         self.table_scan_info.is_some()
+    }
+
+    /// If true, this stage contains lookup join executor.
+    /// We need to delay epoch unpin util the end of the query.
+    pub fn has_lookup_join(&self) -> bool {
+        self.has_lookup_join
     }
 }
 
@@ -319,6 +334,7 @@ struct QueryStageBuilder {
     /// See also [`QueryStage::table_scan_info`].
     table_scan_info: Option<TableScanInfo>,
     source_info: Option<SourceScanInfo>,
+    has_lookup_join: bool,
 }
 
 impl QueryStageBuilder {
@@ -329,6 +345,7 @@ impl QueryStageBuilder {
         exchange_info: ExchangeInfo,
         table_scan_info: Option<TableScanInfo>,
         source_info: Option<SourceScanInfo>,
+        has_lookup_join: bool,
     ) -> Self {
         Self {
             query_id,
@@ -339,6 +356,7 @@ impl QueryStageBuilder {
             children_stages: vec![],
             table_scan_info,
             source_info,
+            has_lookup_join,
         }
     }
 
@@ -351,6 +369,7 @@ impl QueryStageBuilder {
             parallelism: self.parallelism,
             table_scan_info: self.table_scan_info,
             source_info: self.source_info,
+            has_lookup_join: self.has_lookup_join,
         });
 
         stage_graph_builder.add_node(stage.clone());
@@ -449,8 +468,7 @@ impl StageGraphBuilder {
 impl BatchPlanFragmenter {
     /// Split the plan node into each stages, based on exchange node.
     pub fn split(mut self, batch_node: PlanRef) -> SchedulerResult<Query> {
-        let root_stage =
-            self.new_stage(batch_node.clone(), Distribution::Single.to_prost(1, &self))?;
+        let root_stage = self.new_stage(batch_node, Distribution::Single.to_prost(1, &self))?;
         let stage_graph = self.stage_graph_builder.build(root_stage.id);
         Ok(Query {
             stage_graph,
@@ -474,6 +492,7 @@ impl BatchPlanFragmenter {
         } else {
             None
         };
+        let mut has_lookup_join = false;
         let parallelism = match root.distribution() {
             Distribution::Single => {
                 if let Some(info) = &mut table_scan_info {
@@ -492,7 +511,7 @@ impl BatchPlanFragmenter {
                                 .take(1)
                                 .update(|(_, info)| {
                                     info.vnode_bitmap =
-                                        Bitmap::all_high_bits(VirtualNode::COUNT).to_protobuf();
+                                        Bitmap::ones(VirtualNode::COUNT).to_protobuf();
                                 })
                                 .collect();
                         }
@@ -514,6 +533,7 @@ impl BatchPlanFragmenter {
                 } else if let Some(lookup_join_parallelism) =
                     self.collect_stage_lookup_join_parallelism(root.clone())?
                 {
+                    has_lookup_join = true;
                     lookup_join_parallelism
                 } else if let Some(source_info) = &source_info {
                     source_info.split_info().len()
@@ -530,6 +550,7 @@ impl BatchPlanFragmenter {
             exchange_info,
             table_scan_info,
             source_info,
+            has_lookup_join,
         );
 
         self.visit_node(root, &mut builder, None)?;
@@ -596,18 +617,35 @@ impl BatchPlanFragmenter {
         }
 
         if let Some(source_node) = node.as_batch_source() {
-            let property = ConnectorProperties::extract(
-                source_node.logical().source_catalog().properties.clone(),
-            )?;
-            let mut enumerator = block_on(SplitEnumeratorImpl::create(property))?;
-            let split_info = block_on(enumerator.list_splits())?;
-            Ok(Some(SourceScanInfo::new(split_info)))
-        } else {
-            node.inputs()
+            let source_catalog = source_node.logical().source_catalog();
+            if let Some(source_catalog) = source_catalog {
+                let property = ConnectorProperties::extract(source_catalog.properties.clone())?;
+                let mut enumerator = block_on(SplitEnumeratorImpl::create(property))?;
+                let kafka_enumerator = match enumerator {
+                    SplitEnumeratorImpl::Kafka(ref mut kafka_enumerator) => kafka_enumerator,
+                    _ => {
+                        return Err(SchedulerError::Internal(anyhow!(
+                            "Unsupported to query directly from this source"
+                        )))
+                    }
+                };
+                let timestamp_bound = source_node.logical().kafka_timestamp_range_value();
+                // println!("Timestamp bound: {:?}", timestamp_bound);
+                let split_info = block_on(
+                    kafka_enumerator.list_splits_batch(timestamp_bound.0, timestamp_bound.1),
+                )?
                 .into_iter()
-                .find_map(|n| Self::collect_stage_source(n).transpose())
-                .transpose()
+                .map(SplitImpl::Kafka)
+                .collect_vec();
+                // println!("Split info: {:?}", split_info);
+                return Ok(Some(SourceScanInfo::new(split_info)));
+            }
         }
+
+        node.inputs()
+            .into_iter()
+            .find_map(|n| Self::collect_stage_source(n).transpose())
+            .transpose()
     }
 
     /// Check whether this stage contains a table scan node and the table's information if so.

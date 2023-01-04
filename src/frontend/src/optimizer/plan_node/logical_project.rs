@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,7 +24,10 @@ use super::{
     PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
-use crate::optimizer::plan_node::CollectInputRef;
+use crate::optimizer::plan_node::{
+    CollectInputRef, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
+};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, Substitute};
 
@@ -164,7 +167,7 @@ impl fmt::Display for LogicalProject {
 }
 
 impl ColPrunable for LogicalProject {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let input_col_num = self.input().schema().len();
         let mut input_required_appeared = FixedBitSet::with_capacity(input_col_num);
 
@@ -185,7 +188,7 @@ impl ColPrunable for LogicalProject {
         };
 
         let input_required_cols = input_required_cols.ones().collect_vec();
-        let new_input = self.input().prune_col(&input_required_cols);
+        let new_input = self.input().prune_col(&input_required_cols, ctx);
         let mut mapping = ColIndexMapping::with_remaining_columns(
             &input_required_cols,
             self.input().schema().len(),
@@ -202,14 +205,18 @@ impl ColPrunable for LogicalProject {
 }
 
 impl PredicatePushdown for LogicalProject {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         // convert the predicate to one that references the child of the project
         let mut subst = Substitute {
             mapping: self.exprs().clone(),
         };
         let predicate = predicate.rewrite_expr(&mut subst);
 
-        gen_filter_and_pushdown(self, Condition::true_cond(), predicate)
+        gen_filter_and_pushdown(self, Condition::true_cond(), predicate, ctx)
     }
 }
 
@@ -245,7 +252,11 @@ impl ToBatch for LogicalProject {
 }
 
 impl ToStream for LogicalProject {
-    fn to_stream_with_dist_required(&self, required_dist: &RequiredDist) -> Result<PlanRef> {
+    fn to_stream_with_dist_required(
+        &self,
+        required_dist: &RequiredDist,
+        ctx: &mut ToStreamContext,
+    ) -> Result<PlanRef> {
         let input_required = if required_dist.satisfies(&RequiredDist::AnyShard) {
             RequiredDist::Any
         } else {
@@ -260,7 +271,9 @@ impl ToStream for LogicalProject {
                 _ => input_required,
             }
         };
-        let new_input = self.input().to_stream_with_dist_required(&input_required)?;
+        let new_input = self
+            .input()
+            .to_stream_with_dist_required(&input_required, ctx)?;
         let new_logical = self.clone_with_input(new_input.clone());
         let stream_plan = if let Some(input_proj) = new_input.as_stream_project() {
             let outer_project = new_logical;
@@ -281,12 +294,15 @@ impl ToStream for LogicalProject {
         required_dist.enforce_if_not_satisfies(stream_plan.into(), &Order::any())
     }
 
-    fn to_stream(&self) -> Result<PlanRef> {
-        self.to_stream_with_dist_required(&RequiredDist::Any)
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        self.to_stream_with_dist_required(&RequiredDist::Any, ctx)
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.
@@ -323,8 +339,8 @@ mod tests {
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
+    use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::session::OptimizerContext;
 
     #[tokio::test]
     /// Pruning
@@ -352,7 +368,7 @@ mod tests {
             },
             ctx,
         );
-        let project = LogicalProject::new(
+        let project: PlanRef = LogicalProject::new(
             values.into(),
             vec![
                 ExprImpl::Literal(Box::new(Literal::new(None, ty.clone()))),
@@ -368,11 +384,15 @@ mod tests {
                     .unwrap(),
                 )),
             ],
-        );
+        )
+        .into();
 
         // Perform the prune
         let required_cols = vec![1, 2];
-        let plan = project.prune_col(&required_cols);
+        let plan = project.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(project.clone()),
+        );
 
         // Check the result
         let project = plan.as_logical_project().unwrap();

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -113,7 +113,7 @@ for_all_utf8_utf8_op! { impl_utf8_utf8 }
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::DataChunk;
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{Datum, ScalarImpl};
 
     use super::*;
@@ -135,7 +135,7 @@ mod tests {
         let res = expr.eval(&DataChunk::new_dummy(1)).unwrap();
         assert_eq!(res.to_datum(), expected);
 
-        let res = expr.eval_row(&Row::new(vec![])).unwrap();
+        let res = expr.eval_row(&OwnedRow::new(vec![])).unwrap();
         assert_eq!(res, expected);
     }
 

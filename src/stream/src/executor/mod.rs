@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,7 +28,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum_to_bytes};
+use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::data::{Datum as ProstDatum, Epoch as ProstEpoch};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
@@ -134,7 +134,7 @@ pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
 /// Static information of an executor.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ExecutorInfo {
     /// See [`Executor::schema`].
     pub schema: Schema,
@@ -583,7 +583,7 @@ impl Watermark {
             col_idx: self.col_idx as _,
             data_type: Some(self.data_type.to_protobuf()),
             val: Some(ProstDatum {
-                body: serialize_datum_to_bytes(Some(&self.val)),
+                body: serialize_datum(Some(&self.val)),
             }),
         }
     }
@@ -670,7 +670,6 @@ pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
 /// Expect the first message of the given `stream` as a barrier.
-#[track_caller]
 pub async fn expect_first_barrier(
     stream: &mut (impl MessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {
@@ -686,7 +685,6 @@ pub async fn expect_first_barrier(
 }
 
 /// Expect the first message of the given `stream` as a barrier.
-#[track_caller]
 pub async fn expect_first_barrier_from_aligned_stream(
     stream: &mut (impl AlignedMessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {

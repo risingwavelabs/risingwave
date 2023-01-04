@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -35,7 +35,7 @@ enum HummockErrorInner {
     #[error("Mock error {0}.")]
     MockError(String),
     #[error("ObjectStore failed with IO error {0}.")]
-    ObjectIoError(ObjectError),
+    ObjectIoError(Box<ObjectError>),
     #[error("Meta error {0}.")]
     MetaError(String),
     #[error("Invalid WriteBatch.")]
@@ -56,6 +56,8 @@ enum HummockErrorInner {
     CompactionGroupError(String),
     #[error("SstableUpload error {0}.")]
     SstableUploadError(String),
+    #[error("Read backup error {0}.")]
+    ReadBackupError(String),
     #[error("Other error {0}.")]
     Other(String),
 }
@@ -70,7 +72,7 @@ pub struct HummockError {
 
 impl HummockError {
     pub fn object_io_error(error: ObjectError) -> HummockError {
-        HummockErrorInner::ObjectIoError(error).into()
+        HummockErrorInner::ObjectIoError(error.into()).into()
     }
 
     pub fn invalid_format_version(v: u32) -> HummockError {
@@ -117,6 +119,10 @@ impl HummockError {
         HummockErrorInner::ExpiredEpoch { safe_epoch, epoch }.into()
     }
 
+    pub fn is_expired_epoch(&self) -> bool {
+        matches!(self.inner, HummockErrorInner::ExpiredEpoch { .. })
+    }
+
     pub fn compaction_executor(error: impl ToString) -> HummockError {
         HummockErrorInner::CompactionExecutor(error.to_string()).into()
     }
@@ -137,6 +143,10 @@ impl HummockError {
         HummockErrorInner::SstableUploadError(error.to_string()).into()
     }
 
+    pub fn read_backup_error(error: impl ToString) -> HummockError {
+        HummockErrorInner::ReadBackupError(error.to_string()).into()
+    }
+
     pub fn other(error: impl ToString) -> HummockError {
         HummockErrorInner::Other(error.to_string()).into()
     }
@@ -150,7 +160,7 @@ impl From<prost::DecodeError> for HummockError {
 
 impl From<ObjectError> for HummockError {
     fn from(error: ObjectError) -> Self {
-        HummockErrorInner::ObjectIoError(error).into()
+        HummockErrorInner::ObjectIoError(error.into()).into()
     }
 }
 
@@ -163,11 +173,7 @@ impl std::fmt::Debug for HummockError {
         if let Some(backtrace) = (&self.inner as &dyn Error).request_ref::<Backtrace>() {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
-            write!(
-                f,
-                "  backtrace of `TracedHummockError`:\n{}",
-                self.backtrace
-            )?;
+            write!(f, "  backtrace of `HummockError`:\n{}", self.backtrace)?;
         }
         Ok(())
     }

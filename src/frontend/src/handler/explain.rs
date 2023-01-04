@@ -1,18 +1,16 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-use std::sync::atomic::Ordering;
 
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -27,32 +25,26 @@ use super::create_sink::gen_sink_plan;
 use super::create_table::gen_create_table_plan;
 use super::query::gen_batch_query_plan;
 use super::RwPgResponse;
+use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Convention;
+use crate::optimizer::OptimizerContext;
 use crate::scheduler::BatchPlanFragmenter;
-use crate::session::OptimizerContext;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::explain_stream_graph;
 
-pub(super) fn handle_explain(
-    context: OptimizerContext,
+pub fn handle_explain(
+    handler_args: HandlerArgs,
     stmt: Statement,
     options: ExplainOptions,
     analyze: bool,
 ) -> Result<RwPgResponse> {
+    let context = OptimizerContext::new(handler_args, options.clone());
+
     if analyze {
         return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
     }
-    if options.explain_type == ExplainType::Logical {
-        return Err(ErrorCode::NotImplemented("explain logical".to_string(), 4856.into()).into());
-    }
 
-    let session = context.session_ctx.clone();
-    context
-        .explain_verbose
-        .store(options.verbose, Ordering::Release);
-    context
-        .explain_trace
-        .store(options.trace, Ordering::Release);
+    let session = context.session_ctx().clone();
 
     let plan = match stmt {
         Statement::CreateView {
@@ -119,8 +111,8 @@ pub(super) fn handle_explain(
         vec![]
     };
 
-    if options.explain_type == ExplainType::DistSql {
-        match plan.convention() {
+    match options.explain_type {
+        ExplainType::DistSql => match plan.convention() {
             Convention::Logical => unreachable!(),
             Convention::Batch => {
                 let plan_fragmenter = BatchPlanFragmenter::new(
@@ -144,22 +136,36 @@ pub(super) fn handle_explain(
                         .map(|s| Row::new(vec![Some(s.to_string().into())])),
                 );
             }
+        },
+        ExplainType::Physical => {
+            // if explain trace is open, the plan has been in the rows
+            if !explain_trace {
+                let output = plan.explain_to_string()?;
+                rows.extend(
+                    output
+                        .lines()
+                        .map(|s| Row::new(vec![Some(s.to_string().into())])),
+                );
+            }
         }
-    } else {
-        // if explain trace is open, the plan has been in the rows
-        if !explain_trace {
-            let output = plan.explain_to_string()?;
-            rows.extend(
-                output
-                    .lines()
-                    .map(|s| Row::new(vec![Some(s.to_string().into())])),
-            );
+        ExplainType::Logical => {
+            // if explain trace is open, the plan has been in the rows
+            if !explain_trace {
+                let output = plan.ctx().take_logical().ok_or_else(|| {
+                    ErrorCode::InternalError("Logical plan not found for query".into())
+                })?;
+                rows.extend(
+                    output
+                        .lines()
+                        .map(|s| Row::new(vec![Some(s.to_string().into())])),
+                );
+            }
         }
     }
 
     Ok(PgResponse::new_for_stream(
         StatementType::EXPLAIN,
-        Some(rows.len() as i32),
+        None,
         rows.into(),
         vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),

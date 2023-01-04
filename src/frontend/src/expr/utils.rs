@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -386,6 +386,29 @@ impl From<CollectInputRef> for FixedBitSet {
 impl Extend<usize> for CollectInputRef {
     fn extend<T: IntoIterator<Item = usize>>(&mut self, iter: T) {
         self.input_bits.extend(iter);
+    }
+}
+
+/// Count `Now`s in the expression.
+#[derive(Clone, Default)]
+pub struct CountNow {}
+
+impl ExprVisitor<usize> for CountNow {
+    fn merge(a: usize, b: usize) -> usize {
+        a + b
+    }
+
+    fn visit_function_call(&mut self, func_call: &FunctionCall) -> usize {
+        if func_call.get_expr_type() == ExprType::Now {
+            1
+        } else {
+            func_call
+                .inputs()
+                .iter()
+                .map(|expr| self.visit_expr(expr))
+                .reduce(Self::merge)
+                .unwrap_or_default()
+        }
     }
 }
 

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -96,7 +96,7 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
         DataType::Date => HashKeySize::Fixed(size_of::<NaiveDateWrapper>()),
         DataType::Time => HashKeySize::Fixed(size_of::<NaiveTimeWrapper>()),
         DataType::Timestamp => HashKeySize::Fixed(size_of::<NaiveDateTimeWrapper>()),
-        DataType::Timestampz => HashKeySize::Fixed(size_of::<i64>()),
+        DataType::Timestamptz => HashKeySize::Fixed(size_of::<i64>()),
         DataType::Interval => HashKeySize::Fixed(size_of::<IntervalUnit>()),
 
         DataType::Varchar => HashKeySize::Variable,

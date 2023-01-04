@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,7 @@ use risingwave_common::array::{ArrayBuilderImpl, Op};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::must_match;
-use risingwave_common::row::{Row, Row2, RowExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
@@ -32,13 +32,13 @@ use crate::executor::PkIndices;
 /// [`AggGroup`] manages agg states of all agg calls for one `group_key`.
 pub struct AggGroup<S: StateStore> {
     /// Group key.
-    group_key: Option<Row>,
+    group_key: Option<OwnedRow>,
 
     /// Current managed states for all [`AggCall`]s.
     states: Vec<AggState<S>>,
 
     /// Previous outputs of managed states. Initializing with `None`.
-    prev_outputs: Option<Row>,
+    prev_outputs: Option<OwnedRow>,
 }
 
 impl<S: StateStore> Debug for AggGroup<S> {
@@ -58,16 +58,16 @@ pub struct AggChangesInfo {
     /// The number of rows and corresponding ops in the changes.
     pub n_appended_ops: usize,
     /// The result row containing group key prefix. To be inserted into result table.
-    pub result_row: Row,
+    pub result_row: OwnedRow,
     /// The previous outputs of all agg calls recorded in the `AggState`.
-    pub prev_outputs: Option<Row>,
+    pub prev_outputs: Option<OwnedRow>,
 }
 
 impl<S: StateStore> AggGroup<S> {
     /// Create [`AggGroup`] for the given [`AggCall`]s and `group_key`.
     /// For [`crate::executor::GlobalSimpleAggExecutor`], the `group_key` should be `None`.
     pub async fn create(
-        group_key: Option<Row>,
+        group_key: Option<OwnedRow>,
         agg_calls: &[AggCall],
         storages: &[AggStateStorage<S>],
         result_table: &StateTable<S>,
@@ -75,9 +75,7 @@ impl<S: StateStore> AggGroup<S> {
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<AggGroup<S>> {
-        let prev_outputs: Option<Row> = result_table
-            .get_row(group_key.as_ref().unwrap_or_else(Row::empty))
-            .await?;
+        let prev_outputs: Option<OwnedRow> = result_table.get_row(&group_key).await?;
         if let Some(prev_outputs) = &prev_outputs {
             assert_eq!(prev_outputs.len(), agg_calls.len());
         }
@@ -113,7 +111,7 @@ impl<S: StateStore> AggGroup<S> {
         })
     }
 
-    pub fn group_key(&self) -> Option<&Row> {
+    pub fn group_key(&self) -> Option<&OwnedRow> {
         self.group_key.as_ref()
     }
 
@@ -167,7 +165,10 @@ impl<S: StateStore> AggGroup<S> {
 
     /// Get the outputs of all managed agg states.
     /// Possibly need to read/sync from state table if the state not cached in memory.
-    async fn get_outputs(&mut self, storages: &[AggStateStorage<S>]) -> StreamExecutorResult<Row> {
+    async fn get_outputs(
+        &mut self,
+        storages: &[AggStateStorage<S>],
+    ) -> StreamExecutorResult<OwnedRow> {
         futures::future::try_join_all(
             self.states
                 .iter_mut()
@@ -175,7 +176,7 @@ impl<S: StateStore> AggGroup<S> {
                 .map(|(state, storage)| state.get_output(storage, self.group_key.as_ref())),
         )
         .await
-        .map(Row::new)
+        .map(OwnedRow::new)
     }
 
     /// Reset all in-memory states to their initial state, i.e. to reset all agg state structs to
@@ -196,7 +197,7 @@ impl<S: StateStore> AggGroup<S> {
         new_ops: &mut Vec<Op>,
         storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<AggChangesInfo> {
-        let curr_outputs: Row = self.get_outputs(storages).await?;
+        let curr_outputs: OwnedRow = self.get_outputs(storages).await?;
 
         let row_count = curr_outputs[ROW_COUNT_COLUMN]
             .as_ref()
@@ -290,11 +291,7 @@ impl<S: StateStore> AggGroup<S> {
             }
         };
 
-        let result_row = self
-            .group_key()
-            .unwrap_or_else(Row::empty)
-            .chain(&curr_outputs)
-            .into_owned_row();
+        let result_row = self.group_key().chain(&curr_outputs).into_owned_row();
 
         let prev_outputs = if n_appended_ops == 0 {
             self.prev_outputs.clone()

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -115,6 +115,96 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 }
 
 impl KafkaSplitEnumerator {
+    pub async fn list_splits_batch(
+        &mut self,
+        expect_start_timestamp_millis: Option<i64>,
+        expect_stop_timestamp_millis: Option<i64>,
+    ) -> anyhow::Result<Vec<KafkaSplit>> {
+        let topic_partitions = self.fetch_topic_partition().await.map_err(|e| {
+            anyhow!(format!(
+                "failed to fetch metadata from kafka ({}), error: {}",
+                self.broker_address, e
+            ))
+        })?;
+
+        // here we are getting the start offset and end offset for each partition with the given
+        // timestamp if the timestamp is None, we will use the low watermark and high
+        // watermark as the start and end offset if the timestamp is provided, we will use
+        // the watermark to narrow down the range
+        let mut expect_start_offset = if let Some(ts) = expect_start_timestamp_millis {
+            Some(
+                self.fetch_offset_for_time(topic_partitions.as_ref(), ts)
+                    .await?,
+            )
+        } else {
+            None
+        };
+
+        // println!("Start offset: {:?}", expect_start_offset);
+        let mut expect_stop_offset = if let Some(ts) = expect_stop_timestamp_millis {
+            Some(
+                self.fetch_offset_for_time(topic_partitions.as_ref(), ts)
+                    .await?,
+            )
+        } else {
+            None
+        };
+        // println!("Stop offset: {:?}", expect_stop_offset);
+
+        // Watermark here has nothing to do with watermark in streaming processing. Watermark
+        // here means smallest/largest offset available for reading.
+        let mut watermarks = {
+            let mut ret = HashMap::new();
+            for partition in &topic_partitions {
+                let (low, high) = self
+                    .client
+                    .fetch_watermarks(self.topic.as_str(), *partition, KAFKA_SYNC_CALL_TIMEOUT)
+                    .await?;
+                ret.insert(partition, (low - 1, high));
+            }
+            ret
+        };
+        // println!("Watermark: {:?}", watermarks);
+
+        Ok(topic_partitions
+            .iter()
+            .map(|partition| {
+                let (low, high) = watermarks.remove(&partition).unwrap();
+                let start_offset = {
+                    let start = expect_start_offset
+                        .as_mut()
+                        .map(|m| m.remove(partition).flatten().map(|t| t-1).unwrap_or(low))
+                        .unwrap_or(low);
+                    i64::max(start, low)
+                };
+                let stop_offset = {
+                    let stop = expect_stop_offset
+                        .as_mut()
+                        .map(|m| m.remove(partition).unwrap_or(Some(high)))
+                        .unwrap_or(Some(high))
+                        .unwrap_or(high);
+                    i64::min(stop, high)
+                };
+
+                if start_offset > stop_offset {
+                    tracing::warn!(
+                        "Skipping topic {} partition {}: requested start offset {} is greater than stop offset {}",
+                        self.topic,
+                        partition,
+                        start_offset,
+                        stop_offset
+                    );
+                }
+                KafkaSplit {
+                    topic: self.topic.clone(),
+                    partition: *partition,
+                    start_offset: Some(start_offset),
+                    stop_offset: Some(stop_offset),
+                }
+            })
+            .collect::<Vec<KafkaSplit>>())
+    }
+
     async fn fetch_stop_offset(
         &self,
         partitions: &[i32],

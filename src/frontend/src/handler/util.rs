@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,8 +26,8 @@ use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::Result as RwResult;
+use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl};
-use risingwave_expr::vector_op::cast::{timestampz_to_utc_binary, timestampz_to_utc_string};
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
@@ -88,17 +88,9 @@ fn pg_value_format(data_type: &DataType, d: ScalarRefImpl<'_>, format: bool) -> 
     // format == false means TEXT format
     // format == true means BINARY format
     if !format {
-        match (data_type, d) {
-            (DataType::Timestampz, ScalarRefImpl::Int64(us)) => {
-                Ok(timestampz_to_utc_string(us).into_boxed_bytes().into())
-            }
-            _ => Ok(d.text_format().into()),
-        }
+        Ok(d.text_format(data_type).into())
     } else {
-        match (data_type, d) {
-            (DataType::Timestampz, ScalarRefImpl::Int64(us)) => Ok(timestampz_to_utc_binary(us)),
-            _ => d.binary_format(),
-        }
+        d.binary_format(data_type)
     }
 }
 
@@ -107,7 +99,7 @@ fn to_pg_rows(column_types: &[DataType], chunk: DataChunk, format: bool) -> RwRe
         .rows()
         .map(|r| {
             let row = r
-                .values()
+                .iter()
                 .zip_eq(column_types)
                 .map(|(data, t)| match data {
                     Some(data) => Some(pg_value_format(t, data, format)).transpose(),

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,8 +28,9 @@ pub struct StreamDml {
 }
 
 impl StreamDml {
-    pub fn new(input: PlanRef, column_descs: Vec<ColumnDesc>) -> Self {
-        let base = PlanBase::derive_stream_plan_base(&input);
+    pub fn new(input: PlanRef, append_only: bool, column_descs: Vec<ColumnDesc>) -> Self {
+        let mut base = PlanBase::derive_stream_plan_base(&input);
+        base.append_only = append_only;
         Self {
             base,
             input,
@@ -61,7 +62,7 @@ impl PlanTreeNodeUnary for StreamDml {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.column_descs.clone())
+        Self::new(input, self.append_only(), self.column_descs.clone())
     }
 }
 

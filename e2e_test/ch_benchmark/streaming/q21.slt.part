@@ -1,4 +1,5 @@
-query TT rowsort
-select * from ch_benchmark_q21;
+query TT
+select * from ch_benchmark_q21
+order by numwait desc, su_name;
 ----
-Supplier#000000011       10
+ 'Supplier#000000044       5

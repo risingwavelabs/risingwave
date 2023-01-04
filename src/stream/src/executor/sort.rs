@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,7 +21,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{self, Row, Row2, RowExt};
+use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
@@ -35,15 +35,16 @@ use super::{
 use crate::common::table::state_table::StateTable;
 
 /// [`SortBufferKey`] contains a record's timestamp and pk.
-type SortBufferKey = (ScalarImpl, Row);
+type SortBufferKey = (ScalarImpl, OwnedRow);
 
 /// [`SortBufferValue`] contains a record's value and a flag indicating whether the record has been
 /// persisted to storage.
 /// NOTE: There is an exhausting trade-off for which structure to use for the in-memory buffer. For
-/// example, up to 8x memory can be used with `Row` compared to the `CompactRow`. However, if there
-/// are only a few rows that will be temporarily stored in the buffer during an epoch, `Row` will be
-/// more efficient instead due to no ser/de needed. So here we could do further optimizations.
-type SortBufferValue = (Row, bool);
+/// example, up to 8x memory can be used with [`OwnedRow`] compared to the `CompactRow`. However, if
+/// there are only a few rows that will be temporarily stored in the buffer during an epoch,
+/// [`OwnedRow`] will be more efficient instead due to no ser/de needed. So here we could do further
+/// optimizations.
+type SortBufferValue = (OwnedRow, bool);
 
 /// [`SortExecutor`] consumes unordered input data and outputs ordered data to downstream.
 pub struct SortExecutor<S: StateStore> {
@@ -258,7 +259,7 @@ impl<S: StateStore> SortExecutor<S> {
             curr_vnode_bitmap.to_owned()
         };
         let mut values_per_vnode = Vec::new();
-        for owned_vnode in newly_owned_vnodes.ones() {
+        for owned_vnode in newly_owned_vnodes.iter_ones() {
             let value_iter = self
                 .state_table
                 .iter_with_pk_range(
@@ -276,7 +277,7 @@ impl<S: StateStore> SortExecutor<S> {
             let mut stream = select_all(values_per_vnode);
             while let Some(storage_result) = stream.next().await {
                 // Insert the data into buffer.
-                let row: Row = storage_result?.into_owned();
+                let row: OwnedRow = storage_result?.into_owned();
                 let timestamp_datum = row
                     .datum_at(self.sort_column_index)
                     .to_owned_datum()

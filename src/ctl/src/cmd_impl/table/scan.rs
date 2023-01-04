@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -89,6 +89,7 @@ pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> St
         Distribution::all_vnodes(table.distribution_key().to_vec()),
         TableOption::build_table_option(&HashMap::new()),
         (0..table.columns().len()).collect(),
+        table.read_prefix_len_hint,
     )
 }
 
@@ -117,7 +118,7 @@ async fn do_scan(
     let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
     let storage_table = make_storage_table(hummock, &table);
     let stream = storage_table
-        .batch_iter(HummockReadEpoch::Committed(read_epoch))
+        .batch_iter(HummockReadEpoch::Committed(read_epoch), true)
         .await?;
     pin_mut!(stream);
     while let Some(item) = stream.next().await {

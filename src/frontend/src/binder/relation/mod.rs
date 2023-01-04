@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,23 +17,31 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    Field, TableId, DEFAULT_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
+    Field, TableId, DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
 };
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
-use risingwave_sqlparser::ast::{FunctionArg, Ident, ObjectName, TableAlias, TableFactor};
+use risingwave_sqlparser::ast::{
+    Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
+};
 
+use self::watermark::is_watermark_func;
 use super::bind_context::ColumnBinding;
 use crate::binder::{Binder, BoundSetExpr};
-use crate::expr::{Expr, ExprImpl, TableFunction, TableFunctionType};
+use crate::catalog::system_catalog::pg_catalog::{
+    PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
+};
+use crate::expr::{Expr, ExprImpl, InputRef, TableFunction, TableFunctionType};
 
 mod join;
 mod subquery;
 mod table_or_source;
+mod watermark;
 mod window_table_function;
 
 pub use join::BoundJoin;
 pub use subquery::BoundSubquery;
-pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable, BoundTableSource};
+pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable};
+pub use watermark::BoundWatermark;
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
 use crate::expr::{CorrelatedId, Depth};
@@ -49,6 +57,7 @@ pub enum Relation {
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
     TableFunction(Box<TableFunction>),
+    Watermark(Box<BoundWatermark>),
 }
 
 impl Relation {
@@ -280,6 +289,41 @@ impl Binder {
         }
     }
 
+    // Bind a relation provided a function arg.
+    fn bind_relation_by_function_arg(
+        &mut self,
+        arg: Option<FunctionArg>,
+        err_msg: &str,
+    ) -> Result<(Relation, ObjectName)> {
+        let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))) = arg else {
+            return Err(ErrorCode::BindError(err_msg.to_string()).into());
+        };
+        let table_name = match expr {
+            ParserExpr::Identifier(ident) => Ok::<_, RwError>(ObjectName(vec![ident])),
+            ParserExpr::CompoundIdentifier(idents) => Ok(ObjectName(idents)),
+            _ => Err(ErrorCode::BindError(err_msg.to_string()).into()),
+        }?;
+
+        Ok((
+            self.bind_relation_by_name(table_name.clone(), None)?,
+            table_name,
+        ))
+    }
+
+    // Bind column provided a function arg.
+    fn bind_column_by_function_args(
+        &mut self,
+        arg: Option<FunctionArg>,
+        err_msg: &str,
+    ) -> Result<Box<InputRef>> {
+        if let Some(time_col_arg) = arg
+          && let Some(ExprImpl::InputRef(time_col)) = self.bind_function_arg(time_col_arg)?.into_iter().next() {
+            Ok(time_col)
+        } else {
+            Err(ErrorCode::BindError(err_msg.to_string()).into())
+        }
+    }
+
     /// `rw_table(table_id[,schema_name])` which queries internal table
     fn bind_internal_table(
         &mut self,
@@ -315,9 +359,19 @@ impl Binder {
             TableFactor::TableFunction { name, alias, args } => {
                 let func_name = &name.0[0].real_value();
                 if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
-                    return self.bind_internal_table(args, alias);
-                }
-                if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
+                    self.bind_internal_table(args, alias)
+                } else if func_name.eq_ignore_ascii_case(PG_GET_KEYWORDS_FUNC_NAME)
+                    || name.real_value().eq_ignore_ascii_case(
+                        format!("{}.{}", PG_CATALOG_SCHEMA_NAME, PG_GET_KEYWORDS_FUNC_NAME)
+                            .as_str(),
+                    )
+                {
+                    self.bind_relation_by_name_inner(
+                        Some(PG_CATALOG_SCHEMA_NAME),
+                        PG_KEYWORDS_TABLE_NAME,
+                        alias,
+                    )
+                } else if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
                     let args: Vec<ExprImpl> = args
                         .into_iter()
                         .map(|arg| self.bind_function_arg(arg))
@@ -341,17 +395,22 @@ impl Binder {
                         alias,
                     )?;
 
-                    return Ok(Relation::TableFunction(Box::new(tf)));
-                }
-                let kind = WindowTableFunctionKind::from_str(func_name).map_err(|_| {
-                    ErrorCode::NotImplemented(
+                    Ok(Relation::TableFunction(Box::new(tf)))
+                } else if let Ok(kind) = WindowTableFunctionKind::from_str(func_name) {
+                    Ok(Relation::WindowTableFunction(Box::new(
+                        self.bind_window_table_function(alias, kind, args)?,
+                    )))
+                } else if is_watermark_func(func_name) {
+                    Ok(Relation::Watermark(Box::new(
+                        self.bind_watermark(alias, args)?,
+                    )))
+                } else {
+                    Err(ErrorCode::NotImplemented(
                         format!("unknown table function kind: {}", func_name),
                         1191.into(),
                     )
-                })?;
-                Ok(Relation::WindowTableFunction(Box::new(
-                    self.bind_window_table_function(alias, kind, args)?,
-                )))
+                    .into())
+                }
             }
             TableFactor::Derived {
                 lateral,

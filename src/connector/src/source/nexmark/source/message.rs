@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,7 @@
 use bytes::Bytes;
 use nexmark::event::Event;
 
+use crate::source::nexmark::source::combined_event::CombinedEvent;
 use crate::source::{SourceMessage, SplitId};
 
 #[derive(Clone, Debug)]
@@ -35,7 +36,7 @@ impl From<NexmarkMessage> for SourceMessage {
 }
 
 impl NexmarkMessage {
-    pub fn new(split_id: SplitId, offset: u64, event: Event) -> Self {
+    pub fn new_single_event(split_id: SplitId, offset: u64, event: Event) -> Self {
         NexmarkMessage {
             split_id,
             sequence_number: offset.to_string(),
@@ -46,6 +47,20 @@ impl NexmarkMessage {
             }
             .unwrap()
             .into(),
+        }
+    }
+
+    pub fn new_combined_event(split_id: SplitId, offset: u64, event: Event) -> Self {
+        let combined_event = match event {
+            Event::Person(p) => CombinedEvent::person(p),
+            Event::Auction(a) => CombinedEvent::auction(a),
+            Event::Bid(b) => CombinedEvent::bid(b),
+        };
+        let combined_event = serde_json::to_string(&combined_event).unwrap();
+        NexmarkMessage {
+            split_id,
+            sequence_number: offset.to_string(),
+            payload: combined_event.into(),
         }
     }
 }

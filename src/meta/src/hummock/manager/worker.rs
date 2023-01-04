@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,6 +14,7 @@
 
 use std::time::Duration;
 
+use risingwave_hummock_sdk::HummockVersionId;
 use sync_point::sync_point;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -27,6 +28,8 @@ pub type HummockManagerEventSender = tokio::sync::mpsc::UnboundedSender<HummockM
 pub type HummockManagerEventReceiver = tokio::sync::mpsc::UnboundedReceiver<HummockManagerEvent>;
 
 pub enum HummockManagerEvent {
+    DropSafePoint(HummockVersionId),
+    #[allow(dead_code)]
     Shutdown,
 }
 
@@ -80,14 +83,18 @@ where
     }
 
     /// Returns false indicates to shutdown worker
-    #[expect(clippy::unused_async)]
     async fn handle_hummock_manager_event(&self, event: HummockManagerEvent) -> bool {
         match event {
+            HummockManagerEvent::DropSafePoint(id) => {
+                self.unregister_safe_point(id).await;
+                sync_point!("UNREGISTER_HUMMOCK_VERSION_SAFE_POINT");
+            }
             HummockManagerEvent::Shutdown => {
                 tracing::info!("Hummock manager worker is stopped");
-                false
+                return false;
             }
         }
+        true
     }
 
     async fn handle_local_notification(&self, notification: LocalNotification) {
@@ -143,12 +150,6 @@ where
                 tracing::info!("Cancelled compaction task {}", task_id);
                 sync_point!("AFTER_CANCEL_COMPACTION_TASK_ASYNC");
             }
-        }
-    }
-
-    pub fn try_send_event(&self, event: HummockManagerEvent) {
-        if let Err(e) = self.event_sender.send(event) {
-            tracing::warn!("failed to send event to hummock manager {}", e);
         }
     }
 }

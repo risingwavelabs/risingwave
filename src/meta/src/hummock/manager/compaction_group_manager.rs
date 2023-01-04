@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -700,9 +700,6 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::SubLevelMaxCompactionBytes(c) => {
                 target.sub_level_max_compaction_bytes = *c;
             }
-            MutableConfig::Level0TriggerFileNumber(c) => {
-                target.level0_trigger_file_number = *c;
-            }
             MutableConfig::Level0TierCompactFileNumber(c) => {
                 target.level0_tier_compact_file_number = *c;
             }
@@ -746,16 +743,16 @@ mod tests {
         let registered_number = |inner: &CompactionGroupManagerInner<MemStore>| {
             inner
                 .compaction_groups
-                .iter()
-                .map(|(_, cg)| cg.member_table_ids.len())
+                .values()
+                .map(|cg| cg.member_table_ids.len())
                 .sum::<usize>()
         };
 
         let table_option_number = |inner: &CompactionGroupManagerInner<MemStore>| {
             inner
                 .compaction_groups
-                .iter()
-                .map(|(_, cg)| cg.table_id_to_options().len())
+                .values()
+                .map(|cg| cg.table_id_to_options().len())
                 .sum::<usize>()
         };
 

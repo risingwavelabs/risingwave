@@ -2,5 +2,5 @@
 query TR rowsort
 select * from tpch_q5;
 ----
-IRAQ 74391.7890
-IRAN 41912.9640
+IRAN	41912.9640
+IRAQ	74391.7890

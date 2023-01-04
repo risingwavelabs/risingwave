@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,15 +13,16 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     StreamFragment as StreamFragmentProto, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, FragmentType, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    DispatchStrategy, FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
-type LocalFragmentId = u32;
+pub type LocalFragmentId = u32;
 
 /// [`StreamFragment`] represent a fragment node in fragment DAG.
 #[derive(Clone, Debug)]
@@ -32,8 +33,8 @@ pub struct StreamFragment {
     /// root stream node in this fragment.
     pub node: Option<Box<StreamNode>>,
 
-    /// type of this fragment.
-    pub fragment_type: FragmentType,
+    /// Bitwise-OR of type Flags of this fragment.
+    pub fragment_type_mask: u32,
 
     /// mark whether this fragment should only have one actor.
     pub is_singleton: bool,
@@ -64,7 +65,7 @@ impl StreamFragment {
     pub fn new(fragment_id: LocalFragmentId) -> Self {
         Self {
             fragment_id,
-            fragment_type: FragmentType::Others,
+            fragment_type_mask: FragmentTypeFlag::FragmentUnspecified as u32,
             // FIXME: is it okay to use `false` as default value?
             is_singleton: false,
             node: None,
@@ -77,7 +78,7 @@ impl StreamFragment {
         StreamFragmentProto {
             fragment_id: self.fragment_id,
             node: self.node.clone().map(|n| *n),
-            fragment_type: self.fragment_type as i32,
+            fragment_type_mask: self.fragment_type_mask,
             is_singleton: self.is_singleton,
             table_ids_cnt: self.table_ids_cnt,
             upstream_table_ids: self.upstream_table_ids.clone(),
@@ -89,7 +90,7 @@ impl StreamFragment {
 #[derive(Default)]
 pub struct StreamFragmentGraph {
     /// stores all the fragments in the graph.
-    fragments: HashMap<LocalFragmentId, StreamFragment>,
+    fragments: HashMap<LocalFragmentId, Rc<StreamFragment>>,
 
     /// stores edges between fragments: (upstream, downstream) => edge.
     edges: HashMap<(LocalFragmentId, LocalFragmentId), StreamFragmentEdgeProto>,
@@ -111,10 +112,14 @@ impl StreamFragmentGraph {
     }
 
     /// Adds a fragment to the graph.
-    pub fn add_fragment(&mut self, stream_fragment: StreamFragment) {
+    pub fn add_fragment(&mut self, stream_fragment: Rc<StreamFragment>) {
         let id = stream_fragment.fragment_id;
         let ret = self.fragments.insert(id, stream_fragment);
         assert!(ret.is_none(), "fragment already exists: {:?}", id);
+    }
+
+    pub fn get_fragment(&self, fragment_id: &LocalFragmentId) -> Option<&Rc<StreamFragment>> {
+        self.fragments.get(fragment_id)
     }
 
     /// Links upstream to downstream in the graph.
@@ -132,13 +137,8 @@ impl StreamFragmentGraph {
             link_id: edge.link_id,
         };
 
-        let ret = self
-            .edges
-            .insert((upstream_id, downstream_id), edge.clone());
-        assert!(
-            ret.is_none(),
-            "edge already exists: {:?}",
-            (upstream_id, downstream_id, edge)
-        );
+        self.edges
+            .try_insert((upstream_id, downstream_id), edge)
+            .unwrap();
     }
 }

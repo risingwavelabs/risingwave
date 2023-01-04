@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -385,7 +385,40 @@ impl Binder {
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
-        self.bind_cast_inner(expr, bind_data_type(&data_type)?)
+        match &data_type {
+            // Casting to Regclass type means getting the oid of expr.
+            // See https://www.postgresql.org/docs/current/datatype-oid.html.
+            // Currently only string liter expr is supported since we cannot handle subquery in join
+            // on condition: https://github.com/risingwavelabs/risingwave/issues/6852
+            // TODO: Add generic expr support when needed
+            AstDataType::Regclass => {
+                let input = self.bind_expr(expr)?;
+                let class_name = match &input {
+                    ExprImpl::Literal(literal)
+                        if literal.return_type() == DataType::Varchar
+                            && let Some(scalar) = literal.get_data() =>
+                    {
+                        match scalar {
+                            risingwave_common::types::ScalarImpl::Utf8(s) => s,
+                            _ => {
+                                return Err(ErrorCode::BindError(
+                                    "Unsupported input type".to_string(),
+                                )
+                                .into())
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(
+                            ErrorCode::BindError("Unsupported input type".to_string()).into()
+                        )
+                    }
+                };
+                self.resolve_regclass(class_name)
+                    .map(|id| ExprImpl::literal_int(id as i32))
+            }
+            _ => self.bind_cast_inner(expr, bind_data_type(&data_type)?),
+        }
     }
 
     pub fn bind_cast_inner(&mut self, expr: Expr, data_type: DataType) -> Result<ExprImpl> {
@@ -443,7 +476,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Date => DataType::Date,
         AstDataType::Time(false) => DataType::Time,
         AstDataType::Timestamp(false) => DataType::Timestamp,
-        AstDataType::Timestamp(true) => DataType::Timestampz,
+        AstDataType::Timestamp(true) => DataType::Timestamptz,
         AstDataType::Interval => DataType::Interval,
         AstDataType::Array(datatype) => DataType::List {
             datatype: Box::new(bind_data_type(datatype)?),
@@ -471,7 +504,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "int8" => DataType::Int64,
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
-                "timestamptz" => DataType::Timestampz,
+                "timestamptz" => DataType::Timestamptz,
                 _ => return Err(new_err().into()),
             }
         }

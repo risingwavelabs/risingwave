@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,18 +22,18 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Field;
 use risingwave_common::catalog::Schema;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
+use risingwave_common::row::Row;
 #[cfg(test)]
 use risingwave_common::types::DataType;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
-use risingwave_pb::connector_service::sink_config::table_schema::Column;
-use risingwave_pb::connector_service::sink_config::TableSchema;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::{JsonPayload, Payload};
 use risingwave_pb::connector_service::sink_stream_request::{
     Request as SinkRequest, StartEpoch, StartSink, SyncBatch, WriteBatch,
 };
-use risingwave_pb::connector_service::{SinkConfig, SinkResponse, SinkStreamRequest};
+use risingwave_pb::connector_service::table_schema::Column;
+use risingwave_pb::connector_service::{SinkConfig, SinkResponse, SinkStreamRequest, TableSchema};
 use serde_json::Value;
 use serde_json::Value::Number;
 use tokio::sync::mpsc;
@@ -242,7 +242,7 @@ impl Sink for RemoteSink {
         for (op, row_ref) in chunk.rows() {
             let mut map = serde_json::Map::new();
             row_ref
-                .values()
+                .iter()
                 .zip_eq(self.schema.fields.iter())
                 .for_each(|(v, f)| {
                     map.insert(f.name.clone(), parse_datum(v));

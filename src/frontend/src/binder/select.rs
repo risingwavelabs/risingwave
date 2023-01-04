@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -180,7 +180,7 @@ impl Binder {
         for item in select_items {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
-                    let (select_expr, alias) = match &expr.clone() {
+                    let (select_expr, alias) = match expr.clone() {
                         Expr::Identifier(ident) => {
                             (self.bind_expr(expr)?, Some(ident.real_value()))
                         }
@@ -189,7 +189,7 @@ impl Binder {
                             idents.last().map(|ident| ident.real_value()),
                         ),
                         Expr::FieldIdentifier(field_expr, idents) => (
-                            self.bind_single_field_column(*field_expr.clone(), idents)?,
+                            self.bind_single_field_column(*field_expr.clone(), &idents)?,
                             idents.last().map(|ident| ident.real_value()),
                         ),
                         _ => (self.bind_expr(expr)?, None),
@@ -217,8 +217,8 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
-                SelectItem::ExprQualifiedWildcard(expr, idents) => {
-                    let (exprs, names) = self.bind_wildcard_field_column(expr, &idents.0)?;
+                SelectItem::ExprQualifiedWildcard(expr, prefix) => {
+                    let (exprs, names) = self.bind_wildcard_field_column(expr, prefix)?;
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }

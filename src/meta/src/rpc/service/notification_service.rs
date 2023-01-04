@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{ParallelUnitMapping, WorkerNode, WorkerType};
@@ -24,6 +25,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
+use crate::backup_restore::BackupManagerRef;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
     Catalog, CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, MetaSrvEnv, Notification,
@@ -38,6 +40,7 @@ pub struct NotificationServiceImpl<S: MetaStore> {
     cluster_manager: ClusterManagerRef<S>,
     hummock_manager: HummockManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
+    backup_manager: BackupManagerRef<S>,
 }
 
 impl<S> NotificationServiceImpl<S>
@@ -50,6 +53,7 @@ where
         cluster_manager: ClusterManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
+        backup_manager: BackupManagerRef<S>,
     ) -> Self {
         Self {
             env,
@@ -57,6 +61,7 @@ where
             cluster_manager,
             hummock_manager,
             fragment_manager,
+            backup_manager,
         }
     }
 
@@ -148,6 +153,7 @@ where
             .await
             .current_version
             .clone();
+        let meta_backup_manifest_id = self.backup_manager.manifest().manifest_id;
 
         MetaSnapshot {
             tables,
@@ -155,6 +161,9 @@ where
             version: Some(SnapshotVersion {
                 catalog_version,
                 ..Default::default()
+            }),
+            meta_backup_manifest_id: Some(MetaBackupManifestId {
+                id: meta_backup_manifest_id,
             }),
             ..Default::default()
         }

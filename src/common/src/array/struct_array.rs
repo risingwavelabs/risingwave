@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,15 +22,13 @@ use bytes::{Buf, BufMut};
 use itertools::Itertools;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
 
-use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult,
-};
+use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult};
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, hash_datum, serialize_datum_into, DataType, Datum, DatumRef, Scalar,
-    ScalarRefImpl, ToDatumRef,
+    hash_datum, memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum,
+    DatumRef, Scalar, ScalarRefImpl, ToDatumRef,
 };
 
 #[derive(Debug)]
@@ -76,24 +74,24 @@ impl ArrayBuilder for StructArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<StructRef<'_>>) {
+    fn append_n(&mut self, n: usize, value: Option<StructRef<'_>>) {
         match value {
             None => {
-                self.bitmap.append(false);
+                self.bitmap.append_n(n, false);
                 for child in &mut self.children_array {
-                    child.append_datum(Datum::None);
+                    child.append_datum_n(n, Datum::None);
                 }
             }
             Some(v) => {
-                self.bitmap.append(true);
+                self.bitmap.append_n(n, true);
                 let fields = v.fields_ref();
                 assert_eq!(fields.len(), self.children_array.len());
-                for (field_idx, f) in fields.into_iter().enumerate() {
-                    self.children_array[field_idx].append_datum(f);
+                for (child, f) in self.children_array.iter_mut().zip_eq(fields) {
+                    child.append_datum_n(n, f);
                 }
             }
         }
-        self.len += 1;
+        self.len += n;
     }
 
     fn append_array(&mut self, other: &StructArray) {
@@ -154,32 +152,15 @@ impl StructArrayBuilder {
 
 impl Array for StructArray {
     type Builder = StructArrayBuilder;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = StructValue;
     type RefItem<'a> = StructRef<'a>;
 
-    fn value_at(&self, idx: usize) -> Option<StructRef<'_>> {
-        if !self.is_null(idx) {
-            Some(StructRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
-    }
-
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<StructRef<'_>> {
-        if !self.is_null_unchecked(idx) {
-            Some(StructRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> StructRef<'_> {
+        StructRef::Indexed { arr: self, idx }
     }
 
     fn len(&self) -> usize {
         self.len
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        ArrayIterator::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -317,13 +298,13 @@ impl StructValue {
         &self.fields
     }
 
-    pub fn deserialize(
+    pub fn memcmp_deserialize(
         fields: &[DataType],
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
         fields
             .iter()
-            .map(|field| deserialize_datum_from(field, deserializer))
+            .map(|field| memcmp_deserialize_datum_from(field, deserializer))
             .try_collect()
             .map(Self::new)
     }
@@ -356,13 +337,13 @@ impl<'a> StructRef<'a> {
         iter_fields_ref!(self, it, { it.collect() })
     }
 
-    pub fn serialize(
+    pub fn memcmp_serialize(
         &self,
         serializer: &mut memcomparable::Serializer<impl BufMut>,
     ) -> memcomparable::Result<()> {
         iter_fields_ref!(self, it, {
             for datum_ref in it {
-                serialize_datum_into(datum_ref, serializer)?
+                memcmp_serialize_datum_into(datum_ref, serializer)?
             }
             Ok(())
         })
@@ -417,9 +398,15 @@ fn cmp_struct_field(l: &Option<ScalarRefImpl<'_>>, r: &Option<ScalarRefImpl<'_>>
 
 impl Debug for StructRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut is_first = true;
         iter_fields_ref!(self, it, {
             for v in it {
-                v.fmt(f)?;
+                if is_first {
+                    write!(f, "{:?}", v)?;
+                    is_first = false;
+                } else {
+                    write!(f, ", {:?}", v)?;
+                }
             }
             Ok(())
         })
@@ -427,13 +414,27 @@ impl Debug for StructRef<'_> {
 }
 
 impl ToText for StructRef<'_> {
-    fn to_text(&self) -> String {
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         iter_fields_ref!(self, it, {
-            format!(
-                "({})",
-                it.map(|x| x.to_text()).collect::<Vec<String>>().join(",")
-            )
+            write!(f, "(")?;
+            let mut is_first = true;
+            for x in it {
+                if is_first {
+                    is_first = false;
+                } else {
+                    write!(f, ",")?;
+                }
+                ToText::write(&x, f)?;
+            }
+            write!(f, ")")
         })
+    }
+
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
+        match ty {
+            DataType::Struct(_) => self.write(f),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -589,11 +590,11 @@ mod tests {
         ];
         let struct_ref = StructRef::ValueRef { val: &value };
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        struct_ref.serialize(&mut serializer).unwrap();
+        struct_ref.memcmp_serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         assert_eq!(
-            StructValue::deserialize(&fields, &mut deserializer).unwrap(),
+            StructValue::memcmp_deserialize(&fields, &mut deserializer).unwrap(),
             value
         );
 
@@ -607,11 +608,11 @@ mod tests {
         let array = builder.finish();
         let struct_ref = array.value_at(0).unwrap();
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        struct_ref.serialize(&mut serializer).unwrap();
+        struct_ref.memcmp_serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         assert_eq!(
-            StructValue::deserialize(&fields, &mut deserializer).unwrap(),
+            StructValue::memcmp_deserialize(&fields, &mut deserializer).unwrap(),
             value
         );
     }
@@ -682,14 +683,14 @@ mod tests {
             let lhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 StructRef::ValueRef { val: &lhs }
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
             let rhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 StructRef::ValueRef { val: &rhs }
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -709,7 +710,7 @@ mod tests {
                 array
                     .value_at(0)
                     .unwrap()
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -718,7 +719,7 @@ mod tests {
                 array
                     .value_at(1)
                     .unwrap()
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };

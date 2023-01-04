@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,7 +19,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
-use risingwave_common::util::epoch::INVALID_EPOCH;
+use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::HummockSnapshot;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{channel as once_channel, Sender as Callback};
@@ -32,7 +33,31 @@ use crate::scheduler::{SchedulerError, SchedulerResult};
 const UNPIN_INTERVAL_SECS: u64 = 10;
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
-pub type PinnedHummockSnapshot = HummockSnapshotGuard;
+pub enum PinnedHummockSnapshot {
+    FrontendPinned(
+        HummockSnapshotGuard,
+        // `only_checkpoint_visible`.
+        // It's embedded here because we always use it together with snapshot.
+        bool,
+    ),
+    /// Other arbitrary epoch, e.g. user specified.
+    /// Availability and consistency of underlying data should be guaranteed accordingly.
+    /// Currently it's only used for querying meta snapshot backup.
+    Other(Epoch),
+}
+
+impl PinnedHummockSnapshot {
+    pub fn get_batch_query_epoch(&self) -> BatchQueryEpoch {
+        match self {
+            PinnedHummockSnapshot::FrontendPinned(s, checkpoint) => {
+                s.get_batch_query_epoch(*checkpoint)
+            }
+            PinnedHummockSnapshot::Other(e) => BatchQueryEpoch {
+                epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),
+            },
+        }
+    }
+}
 
 type SnapshotRef = Arc<ArcSwap<HummockSnapshot>>;
 
@@ -73,12 +98,13 @@ pub struct HummockSnapshotGuard {
 }
 
 impl HummockSnapshotGuard {
-    pub fn get_committed_epoch(&self) -> u64 {
-        self.snapshot.committed_epoch
-    }
-
-    pub fn get_current_epoch(&self) -> u64 {
-        self.snapshot.current_epoch
+    pub fn get_batch_query_epoch(&self, checkpoint: bool) -> BatchQueryEpoch {
+        let epoch = if checkpoint {
+            batch_query_epoch::Epoch::Committed(self.snapshot.committed_epoch)
+        } else {
+            batch_query_epoch::Epoch::Current(self.snapshot.current_epoch)
+        };
+        BatchQueryEpoch { epoch: Some(epoch) }
     }
 }
 
@@ -165,7 +191,7 @@ impl HummockSnapshotManager {
         }
     }
 
-    pub async fn acquire(&self, query_id: &QueryId) -> SchedulerResult<PinnedHummockSnapshot> {
+    pub async fn acquire(&self, query_id: &QueryId) -> SchedulerResult<HummockSnapshotGuard> {
         let (sender, rc) = once_channel();
         let msg = EpochOperation::RequestEpoch {
             query_id: query_id.clone(),

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,7 +25,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
-use risingwave_common::row::{Row, RowExt};
+use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_storage::StateStore;
@@ -34,13 +34,14 @@ use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorag
 use super::{
     expect_first_barrier, ActorContextRef, Executor, PkIndicesRef, StreamExecutorResult, Watermark,
 };
-use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::cache::{cache_may_stale, new_with_hasher, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{generate_agg_schema, AggCall, AggChangesInfo, AggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message, PkIndices};
+use crate::task::AtomicU64Ref;
 
 type AggGroupBox<S> = Box<AggGroup<S>>;
 type AggGroupMapItem<S> = Option<AggGroupBox<S>>;
@@ -99,7 +100,7 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     group_key_indices: Vec<usize>,
 
     /// Lru manager. None if using local eviction.
-    lru_manager: Option<LruManagerRef>,
+    watermark_epoch: AtomicU64Ref,
 
     /// How many times have we hit the cache of join executor
     lookup_miss_count: AtomicU64,
@@ -107,9 +108,6 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     total_lookup_count: AtomicU64,
 
     metrics: Arc<StreamingMetrics>,
-
-    /// Cache size (one per group by key)
-    group_by_cache_size: usize,
 
     /// Extreme state cache size
     extreme_cache_size: usize,
@@ -154,11 +152,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         storages: Vec<AggStateStorage<S>>,
         result_table: StateTable<S>,
         pk_indices: PkIndices,
+        extreme_cache_size: usize,
         executor_id: u64,
         group_key_indices: Vec<usize>,
-        group_by_cache_size: usize,
-        extreme_cache_size: usize,
-        lru_manager: Option<LruManagerRef>,
+        watermark_epoch: AtomicU64Ref,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
     ) -> StreamResult<Self> {
@@ -180,12 +177,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 agg_calls,
+                extreme_cache_size,
                 storages,
                 result_table,
                 group_key_indices,
-                group_by_cache_size,
-                extreme_cache_size,
-                lru_manager,
+                watermark_epoch,
                 group_change_set: HashSet::new(),
                 lookup_miss_count: AtomicU64::new(0),
                 total_lookup_count: AtomicU64::new(0),
@@ -465,10 +461,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         )?;
                     }
                     if let Some(prev_outputs) = prev_outputs {
-                        let old_row = agg_group
-                            .group_key()
-                            .unwrap_or_else(Row::empty)
-                            .chain(prev_outputs);
+                        let old_row = agg_group.group_key().chain(prev_outputs);
                         result_table.update(old_row, result_row);
                     } else {
                         result_table.insert(result_row);
@@ -525,14 +518,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } = self;
 
         // The cached state managers. `HashKey -> AggStates`.
-        let mut agg_states = if let Some(lru_manager) = extra.lru_manager.clone() {
-            ExecutorCache::Managed(lru_manager.create_cache_with_hasher(PrecomputedBuildHasher))
-        } else {
-            ExecutorCache::Local(EvictableHashMap::with_hasher(
-                extra.group_by_cache_size,
-                PrecomputedBuildHasher,
-            ))
-        };
+        let mut agg_states = ExecutorCache::new(new_with_hasher(
+            extra.watermark_epoch.clone(),
+            PrecomputedBuildHasher,
+        ));
 
         // First barrier
         let mut input = input.execute();
@@ -600,6 +589,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
 
     use assert_matches::assert_matches;
@@ -609,7 +599,7 @@ mod tests {
     use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::hash::SerializedKey;
-    use risingwave_common::row::{Row, Row2};
+    use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::*;
     use risingwave_storage::memory::MemoryStateStore;
@@ -628,7 +618,6 @@ mod tests {
         agg_calls: Vec<AggCall>,
         group_key_indices: Vec<usize>,
         pk_indices: PkIndices,
-        group_by_cache_size: usize,
         extreme_cache_size: usize,
         executor_id: u64,
     ) -> Box<dyn Executor> {
@@ -663,11 +652,10 @@ mod tests {
             agg_state_tables,
             result_table,
             pk_indices,
+            extreme_cache_size,
             executor_id,
             group_key_indices,
-            group_by_cache_size,
-            extreme_cache_size,
-            None,
+            Arc::new(AtomicU64::new(0)),
             Arc::new(StreamingMetrics::unused()),
             1024,
         )
@@ -754,7 +742,6 @@ mod tests {
             agg_calls,
             keys,
             vec![],
-            1 << 16,
             1 << 10,
             1,
         )
@@ -857,7 +844,6 @@ mod tests {
             agg_calls,
             key_indices,
             vec![],
-            1 << 16,
             1 << 10,
             1,
         )
@@ -952,7 +938,6 @@ mod tests {
             agg_calls,
             keys,
             vec![2],
-            1 << 16,
             1 << 10,
             1,
         )
@@ -1052,7 +1037,6 @@ mod tests {
             agg_calls,
             keys,
             vec![2],
-            1 << 16,
             1 << 10,
             1,
         )
@@ -1094,13 +1078,13 @@ mod tests {
     }
 
     trait SortedRows {
-        fn sorted_rows(self) -> Vec<(Op, Row)>;
+        fn sorted_rows(self) -> Vec<(Op, OwnedRow)>;
     }
     impl SortedRows for StreamChunk {
-        fn sorted_rows(self) -> Vec<(Op, Row)> {
+        fn sorted_rows(self) -> Vec<(Op, OwnedRow)> {
             let (chunk, ops) = self.into_parts();
             ops.into_iter()
-                .zip_eq(chunk.rows().map(Row2::into_owned_row))
+                .zip_eq(chunk.rows().map(Row::into_owned_row))
                 .sorted()
                 .collect_vec()
         }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,10 +21,10 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
 use super::RwPgResponse;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 
 pub fn handle_set(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     name: Ident,
     value: Vec<SetVariableValue>,
 ) -> Result<RwPgResponse> {
@@ -33,25 +33,25 @@ pub fn handle_set(
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
     // We remark that the name of session parameter is always case-insensitive.
-    context
-        .session_ctx
+    handler_args
+        .session
         .set_config(&name.real_value().to_lowercase(), string_vals)?;
 
     Ok(PgResponse::empty_result(StatementType::SET_OPTION))
 }
 
-pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Result<RwPgResponse> {
-    let config_reader = context.session_ctx.config();
+pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Result<RwPgResponse> {
+    let config_reader = handler_args.session.config();
     // TODO: Verify that the name used in `show` command is indeed always case-insensitive.
     let name = variable.iter().map(|e| e.real_value()).join(" ");
     if name.eq_ignore_ascii_case("ALL") {
-        return handle_show_all(&context);
+        return handle_show_all(handler_args.clone());
     }
     let row = Row::new(vec![Some(config_reader.get(&name)?.into())]);
 
     Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        Some(1),
+        None,
         vec![row].into(),
         vec![PgFieldDescriptor::new(
             name.to_ascii_lowercase(),
@@ -61,8 +61,8 @@ pub(super) fn handle_show(context: OptimizerContext, variable: Vec<Ident>) -> Re
     ))
 }
 
-pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<RwPgResponse> {
-    let config_reader = context.session_ctx.config();
+pub(super) fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    let config_reader = handler_args.session.config();
 
     let all_variables = config_reader.get_all();
 
@@ -79,7 +79,7 @@ pub(super) fn handle_show_all(context: &OptimizerContext) -> Result<RwPgResponse
 
     Ok(RwPgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        Some(all_variables.len() as i32),
+        None,
         rows.into(),
         vec![
             PgFieldDescriptor::new(

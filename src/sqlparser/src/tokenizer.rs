@@ -2,7 +2,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -395,11 +395,11 @@ impl<'a> Tokenizer<'a> {
                     chars.next(); // consume the first char
                     let s = self.tokenize_word(ch, chars);
 
-                    if s.chars().all(|x| ('0'..='9').contains(&x) || x == '.') {
+                    if s.chars().all(|x| x.is_ascii_digit() || x == '.') {
                         let mut s = peeking_take_while(&mut s.chars().peekable(), |ch| {
-                            matches!(ch, '0'..='9' | '.')
+                            ch.is_ascii_digit() || ch == '.'
                         });
-                        let s2 = peeking_take_while(chars, |ch| matches!(ch, '0'..='9' | '.'));
+                        let s2 = peeking_take_while(chars, |ch| ch.is_ascii_digit() || ch == '.');
                         s += s2.as_str();
                         return Ok(Some(Token::Number(s)));
                     }
@@ -427,7 +427,7 @@ impl<'a> Tokenizer<'a> {
                 }
                 // numbers and period
                 '0'..='9' | '.' => {
-                    let mut s = peeking_take_while(chars, |ch| matches!(ch, '0'..='9'));
+                    let mut s = peeking_take_while(chars, |ch| ch.is_ascii_digit());
 
                     // match binary literal that starts with 0x
                     if s == "0" && chars.peek() == Some(&'x') {
@@ -444,7 +444,7 @@ impl<'a> Tokenizer<'a> {
                         s.push('.');
                         chars.next();
                     }
-                    s += &peeking_take_while(chars, |ch| matches!(ch, '0'..='9'));
+                    s += &peeking_take_while(chars, |ch| ch.is_ascii_digit());
 
                     // No number -> Token::Period
                     if s == "." {
@@ -461,7 +461,7 @@ impl<'a> Tokenizer<'a> {
                                 s.push('-');
                                 chars.next();
                             }
-                            s += &peeking_take_while(chars, |ch| matches!(ch, '0'..='9'));
+                            s += &peeking_take_while(chars, |ch| ch.is_ascii_digit());
                             return Ok(Some(Token::Number(s)));
                         }
                         // Not a scientific number
@@ -729,16 +729,12 @@ fn is_identifier_start(ch: char) -> bool {
     // See https://www.postgresql.org/docs/11/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS
     // We don't yet support identifiers beginning with "letters with
     // diacritical marks and non-Latin letters"
-    ('a'..='z').contains(&ch) || ('A'..='Z').contains(&ch) || ch == '_'
+    ch.is_ascii_alphabetic() || ch == '_'
 }
 
 /// Determine if a character is a valid unquoted identifier character
 fn is_identifier_part(ch: char) -> bool {
-    ('a'..='z').contains(&ch)
-        || ('A'..='Z').contains(&ch)
-        || ('0'..='9').contains(&ch)
-        || ch == '$'
-        || ch == '_'
+    ch.is_ascii_alphanumeric() || ch == '$' || ch == '_'
 }
 
 #[cfg(test)]

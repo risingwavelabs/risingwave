@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -38,7 +38,7 @@ mod tests {
             assert_eq!(v.get_months(), 12);
             assert_eq!(v.get_days(), 0);
         }
-        let ret_arr = IntervalArray::from_slice(&[Some(IntervalUnit::from_ymd(1, 0, 0)), None]);
+        let ret_arr = IntervalArray::from_iter([Some(IntervalUnit::from_ymd(1, 0, 0)), None]);
         let v = ret_arr.value_at(0).unwrap();
         assert_eq!(v.get_years(), 1);
         assert_eq!(v.get_months(), 12);

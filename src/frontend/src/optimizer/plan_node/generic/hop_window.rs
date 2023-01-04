@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,7 +21,7 @@ use risingwave_common::types::{DataType, IntervalUnit};
 use super::super::utils::IndicesDisplay;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{InputRef, InputRefDisplay};
-use crate::session::OptimizerContextRef;
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 
 /// [`HopWindow`] implements Hop Table Function.
 #[derive(Debug, Clone)]
@@ -30,6 +30,13 @@ pub struct HopWindow<PlanRef> {
     pub time_col: InputRef,
     pub window_slide: IntervalUnit,
     pub window_size: IntervalUnit,
+    /// Provides mapping from input schema, window_start, window_end to output schema.
+    /// For example, if we had:
+    /// input schema: | 0: trip_time | 1: trip_name |
+    /// window_start: 2
+    /// window_end: 3
+    /// output schema: | trip_name | window_start |
+    /// Then, output_indices: [1, 2]
     pub output_indices: Vec<usize>,
 }
 

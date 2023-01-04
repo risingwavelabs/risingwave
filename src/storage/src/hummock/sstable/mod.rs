@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -51,6 +51,7 @@ pub use delete_range_aggregator::{
 pub use sstable_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
+use xxhash_rust::xxh32;
 
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
@@ -139,18 +140,28 @@ impl Sstable {
         !self.meta.bloom_filter.is_empty()
     }
 
-    pub fn surely_not_have_user_key(&self, user_key: &[u8]) -> bool {
+    pub fn surely_not_have_dist_key(&self, dist_key: &[u8]) -> bool {
         let enable_bloom_filter: fn() -> bool = || {
             fail_point!("disable_bloom_filter", |_| false);
             true
         };
         if enable_bloom_filter() && self.has_bloom_filter() {
-            let hash = farmhash::fingerprint32(user_key);
-            let bloom = Bloom::new(&self.meta.bloom_filter);
-            bloom.surely_not_have_hash(hash)
+            let hash = xxh32::xxh32(dist_key, 0);
+            self.surely_not_have_hashvalue(hash)
         } else {
             false
         }
+    }
+
+    #[inline(always)]
+    pub fn hash_for_bloom_filter(dist_key: &[u8]) -> u32 {
+        xxh32::xxh32(dist_key, 0)
+    }
+
+    #[inline(always)]
+    pub fn surely_not_have_hashvalue(&self, hash: u32) -> bool {
+        let bloom = Bloom::new(&self.meta.bloom_filter);
+        bloom.surely_not_have_hash(hash)
     }
 
     pub fn block_count(&self) -> usize {

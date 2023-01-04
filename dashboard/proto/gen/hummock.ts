@@ -683,7 +683,6 @@ export interface RiseCtlUpdateCompactionConfigRequest_MutableConfig {
     | { $case: "maxBytesForLevelMultiplier"; maxBytesForLevelMultiplier: number }
     | { $case: "maxCompactionBytes"; maxCompactionBytes: number }
     | { $case: "subLevelMaxCompactionBytes"; subLevelMaxCompactionBytes: number }
-    | { $case: "level0TriggerFileNumber"; level0TriggerFileNumber: number }
     | { $case: "level0TierCompactFileNumber"; level0TierCompactFileNumber: number }
     | { $case: "targetFileSizeBase"; targetFileSizeBase: number }
     | { $case: "compactionFilterMask"; compactionFilterMask: number }
@@ -708,7 +707,6 @@ export interface CompactionConfig {
   maxBytesForLevelMultiplier: number;
   maxCompactionBytes: number;
   subLevelMaxCompactionBytes: number;
-  level0TriggerFileNumber: number;
   level0TierCompactFileNumber: number;
   compactionMode: CompactionConfig_CompactionMode;
   compressionAlgorithm: string[];
@@ -3976,8 +3974,6 @@ export const RiseCtlUpdateCompactionConfigRequest_MutableConfig = {
         ? { $case: "maxCompactionBytes", maxCompactionBytes: Number(object.maxCompactionBytes) }
         : isSet(object.subLevelMaxCompactionBytes)
         ? { $case: "subLevelMaxCompactionBytes", subLevelMaxCompactionBytes: Number(object.subLevelMaxCompactionBytes) }
-        : isSet(object.level0TriggerFileNumber)
-        ? { $case: "level0TriggerFileNumber", level0TriggerFileNumber: Number(object.level0TriggerFileNumber) }
         : isSet(object.level0TierCompactFileNumber)
         ? {
           $case: "level0TierCompactFileNumber",
@@ -4003,8 +3999,6 @@ export const RiseCtlUpdateCompactionConfigRequest_MutableConfig = {
       (obj.maxCompactionBytes = Math.round(message.mutableConfig?.maxCompactionBytes));
     message.mutableConfig?.$case === "subLevelMaxCompactionBytes" &&
       (obj.subLevelMaxCompactionBytes = Math.round(message.mutableConfig?.subLevelMaxCompactionBytes));
-    message.mutableConfig?.$case === "level0TriggerFileNumber" &&
-      (obj.level0TriggerFileNumber = Math.round(message.mutableConfig?.level0TriggerFileNumber));
     message.mutableConfig?.$case === "level0TierCompactFileNumber" &&
       (obj.level0TierCompactFileNumber = Math.round(message.mutableConfig?.level0TierCompactFileNumber));
     message.mutableConfig?.$case === "targetFileSizeBase" &&
@@ -4058,16 +4052,6 @@ export const RiseCtlUpdateCompactionConfigRequest_MutableConfig = {
       message.mutableConfig = {
         $case: "subLevelMaxCompactionBytes",
         subLevelMaxCompactionBytes: object.mutableConfig.subLevelMaxCompactionBytes,
-      };
-    }
-    if (
-      object.mutableConfig?.$case === "level0TriggerFileNumber" &&
-      object.mutableConfig?.level0TriggerFileNumber !== undefined &&
-      object.mutableConfig?.level0TriggerFileNumber !== null
-    ) {
-      message.mutableConfig = {
-        $case: "level0TriggerFileNumber",
-        level0TriggerFileNumber: object.mutableConfig.level0TriggerFileNumber,
       };
     }
     if (
@@ -4198,7 +4182,6 @@ function createBaseCompactionConfig(): CompactionConfig {
     maxBytesForLevelMultiplier: 0,
     maxCompactionBytes: 0,
     subLevelMaxCompactionBytes: 0,
-    level0TriggerFileNumber: 0,
     level0TierCompactFileNumber: 0,
     compactionMode: CompactionConfig_CompactionMode.UNSPECIFIED,
     compressionAlgorithm: [],
@@ -4220,7 +4203,6 @@ export const CompactionConfig = {
       subLevelMaxCompactionBytes: isSet(object.subLevelMaxCompactionBytes)
         ? Number(object.subLevelMaxCompactionBytes)
         : 0,
-      level0TriggerFileNumber: isSet(object.level0TriggerFileNumber) ? Number(object.level0TriggerFileNumber) : 0,
       level0TierCompactFileNumber: isSet(object.level0TierCompactFileNumber)
         ? Number(object.level0TierCompactFileNumber)
         : 0,
@@ -4245,8 +4227,6 @@ export const CompactionConfig = {
     message.maxCompactionBytes !== undefined && (obj.maxCompactionBytes = Math.round(message.maxCompactionBytes));
     message.subLevelMaxCompactionBytes !== undefined &&
       (obj.subLevelMaxCompactionBytes = Math.round(message.subLevelMaxCompactionBytes));
-    message.level0TriggerFileNumber !== undefined &&
-      (obj.level0TriggerFileNumber = Math.round(message.level0TriggerFileNumber));
     message.level0TierCompactFileNumber !== undefined &&
       (obj.level0TierCompactFileNumber = Math.round(message.level0TierCompactFileNumber));
     message.compactionMode !== undefined &&
@@ -4269,7 +4249,6 @@ export const CompactionConfig = {
     message.maxBytesForLevelMultiplier = object.maxBytesForLevelMultiplier ?? 0;
     message.maxCompactionBytes = object.maxCompactionBytes ?? 0;
     message.subLevelMaxCompactionBytes = object.subLevelMaxCompactionBytes ?? 0;
-    message.level0TriggerFileNumber = object.level0TriggerFileNumber ?? 0;
     message.level0TierCompactFileNumber = object.level0TierCompactFileNumber ?? 0;
     message.compactionMode = object.compactionMode ?? CompactionConfig_CompactionMode.UNSPECIFIED;
     message.compressionAlgorithm = object.compressionAlgorithm?.map((e) => e) || [];

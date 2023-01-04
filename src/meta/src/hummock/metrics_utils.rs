@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,7 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use itertools::enumerate;
 use prost::Message;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion, HummockVersionStats,
 };
@@ -180,6 +180,10 @@ pub fn trigger_pin_unpin_version_state(
 ) {
     if let Some(m) = pinned_versions.values().map(|v| v.min_pinned_id).min() {
         metrics.min_pinned_version_id.set(m as i64);
+    } else {
+        metrics
+            .min_pinned_version_id
+            .set(HummockVersionId::MAX as _);
     }
 }
 
@@ -193,5 +197,17 @@ pub fn trigger_pin_unpin_snapshot_state(
         .min()
     {
         metrics.min_pinned_epoch.set(m as i64);
+    } else {
+        metrics.min_pinned_epoch.set(HummockEpoch::MAX as _);
+    }
+}
+
+pub fn trigger_safepoint_stat(metrics: &MetaMetrics, safepoints: &[HummockVersionId]) {
+    if let Some(sp) = safepoints.iter().min() {
+        metrics.min_safepoint_version_id.set(*sp as _);
+    } else {
+        metrics
+            .min_safepoint_version_id
+            .set(HummockVersionId::MAX as _);
     }
 }

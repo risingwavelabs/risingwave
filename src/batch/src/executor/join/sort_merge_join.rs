@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
-use risingwave_common::row::RowExt;
+use risingwave_common::row::{Row, RowExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
@@ -131,9 +131,9 @@ impl SortMergeJoinExecutor {
         for probe_chunk in probe_side.execute() {
             let probe_chunk = probe_chunk?;
             for probe_row in probe_chunk.rows() {
-                let probe_key = probe_row.row_by_indices(&probe_key_idxs);
+                let probe_key = probe_row.project(&probe_key_idxs);
                 // If current probe key equals to last probe key, reuse join results.
-                if let Some(last_probe_key) = &last_probe_key && *last_probe_key == probe_key {
+                if let Some(last_probe_key) = &last_probe_key && Row::eq(last_probe_key, probe_key) {
                     for (chunk, row_idx) in &last_matched_build_rows {
                         let build_row = chunk.row_at_unchecked_vis(*row_idx);
                         if let Some(spilled) = chunk_builder.append_one_row((&probe_row).chain(build_row)) {
@@ -148,17 +148,20 @@ impl SortMergeJoinExecutor {
                     loop {
                         if let Some(next_build_row_idx) = build_chunk.next_visible_row_idx(build_row_idx) {
                             let build_row = build_chunk.row_at_unchecked_vis(next_build_row_idx);
-                            let build_key = build_row.row_by_indices(&build_key_idxs);
-                            // TODO: [`Row`] may not be PartialOrd. May use some trait like
-                            // [`ScalarPartialOrd`].
-                            if probe_key == build_key {
-                                last_matched_build_rows.push((build_chunk.clone(), next_build_row_idx));
-                                if let Some(spilled) = chunk_builder.append_one_row((&probe_row).chain(build_row)) {
-                                    yield spilled
+                            let build_key = build_row.project(&build_key_idxs);
+
+                            match Row::cmp(&probe_key, build_key) {
+                                std::cmp::Ordering::Equal => {
+                                    last_matched_build_rows.push((build_chunk.clone(), next_build_row_idx));
+                                    if let Some(spilled) = chunk_builder.append_one_row((&probe_row).chain(build_row)) {
+                                        yield spilled
+                                    }
                                 }
-                            } else if ASCENDING && probe_key < build_key || !ASCENDING && probe_key > build_key {
-                                break;
+                                std::cmp::Ordering::Less if ASCENDING => break,
+                                std::cmp::Ordering::Greater if !ASCENDING => break,
+                                _ => {}
                             }
+
                             build_row_idx = next_build_row_idx + 1;
                         }
                         // Current build side chunk is drained, fetch the next chunk.
@@ -171,7 +174,7 @@ impl SortMergeJoinExecutor {
                             break
                         }
                     }
-                    last_probe_key = Some(probe_key);
+                    last_probe_key = Some(probe_key.into_owned_row());
                 }
             }
         }

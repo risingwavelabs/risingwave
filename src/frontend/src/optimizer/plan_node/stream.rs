@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@ use pb::stream_node as pb_node;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::catalog::{ColumnIndex, SourceInfo};
+use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan as pb;
 use smallvec::SmallVec;
 
@@ -25,9 +25,9 @@ use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::TableCatalogBuilder;
 use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::expr::{Expr, ExprImpl};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::plan_tree_node_v2::PlanTreeNodeV2;
 use crate::optimizer::property::{Distribution, FieldOrder};
-use crate::session::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
@@ -239,37 +239,40 @@ impl HashJoin {
             .collect();
 
         // The pk of hash join internal and degree table should be join_key + input_pk.
+        let join_key_len = join_key_indices.len();
         let mut pk_indices = join_key_indices;
+
         // TODO(yuhao): dedup the dist key and pk.
         pk_indices.extend(input.logical_pk());
 
         // Build internal table
         let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(input.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
         let internal_columns_fields = schema.fields().to_vec();
 
         internal_columns_fields.iter().for_each(|field| {
             internal_table_catalog_builder.add_column(field);
         });
-
         pk_indices.iter().for_each(|idx| {
             internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
         });
 
         // Build degree table.
         let mut degree_table_catalog_builder =
-            TableCatalogBuilder::new(input.ctx().inner().with_options.internal_table_subset());
+            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
 
         let degree_column_field = Field::with_name(DataType::Int64, "_degree");
 
         pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
             degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
-            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending)
+            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending);
         });
         degree_table_catalog_builder.add_column(&degree_column_field);
         degree_table_catalog_builder
             .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
 
+        internal_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
+        degree_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
         (
             internal_table_catalog_builder.build(internal_table_dist_keys),
             degree_table_catalog_builder.build(degree_table_dist_keys),
@@ -331,7 +334,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Project, core
 #[derive(Debug, Clone)]
 pub struct Sink {
     pub input: PlanRef,
-    pub table: TableCatalog,
+    pub sink_desc: TableCatalog,
 }
 impl_plan_tree_node_v2_for_stream_unary_node!(Sink, input);
 /// [`Source`] represents a table/connector source at the very beginning of the graph.
@@ -549,7 +552,7 @@ pub fn to_stream_prost_body(
                 with_ties: me.core.with_ties,
                 group_key: me.core.group_key.iter().map(|idx| *idx as u32).collect(),
                 table: Some(table.to_internal_table_prost()),
-                order_by_len: me.core.order.len() as u32,
+                order_by: me.core.order.to_protobuf(),
             };
 
             ProstNode::GroupTopN(group_topn_node)
@@ -677,16 +680,20 @@ pub fn to_stream_prost_body(
                 select_list: me.exprs.iter().map(Expr::to_expr_proto).collect(),
             })
         }
-        Node::Sink(me) => {
-            ProstNode::Sink(SinkNode {
-                table_id: me.table.id().into(),
-                column_ids: vec![], // TODO(nanderstabel): fix empty Vector
-                properties: me.table.properties.inner().clone(),
-            })
-        }
+        Node::Sink(me) => ProstNode::Sink(SinkNode {
+            table_id: me.sink_desc.id().into(),
+            properties: me.sink_desc.properties.inner().clone(),
+            fields: me
+                .sink_desc
+                .columns()
+                .iter()
+                .map(|c| Field::from(c.column_desc.clone()).to_prost())
+                .collect(),
+            sink_pk: me.sink_desc.pk().iter().map(|c| c.index as u32).collect(),
+        }),
         Node::Source(me) => {
             let me = &me.core.catalog;
-            ProstNode::Source(SourceNode {
+            let source_inner = me.as_ref().map(|me| StreamSource {
                 source_id: me.id,
                 source_name: me.name.clone(),
                 state_table: Some(
@@ -694,16 +701,15 @@ pub fn to_stream_prost_body(
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
-                info: Some(SourceInfo {
-                    source_info: Some(me.info.clone()),
-                }),
+                info: Some(me.info.clone()),
                 row_id_index: me
                     .row_id_index
                     .map(|index| ColumnIndex { index: index as _ }),
                 columns: me.columns.iter().map(|c| c.to_protobuf()).collect(),
                 pk_column_ids: me.pk_col_ids.iter().map(Into::into).collect(),
                 properties: me.properties.clone(),
-            })
+            });
+            ProstNode::Source(SourceNode { source_inner })
         }
         Node::TopN(me) => {
             let me = &me.core;
@@ -716,7 +722,7 @@ pub fn to_stream_prost_body(
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
-                order_by_len: me.order.len() as u32,
+                order_by: me.order.to_protobuf(),
             };
             // TODO: support with ties for append only TopN
             // <https://github.com/risingwavelabs/risingwave/issues/5642>

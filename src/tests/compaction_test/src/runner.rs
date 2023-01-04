@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::net::SocketAddr;
-use std::ops::Bound;
+use std::ops::{Bound, Deref};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -26,7 +26,7 @@ use clap::Parser;
 use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, StorageConfig};
+use risingwave_common::config::{load_config, RwConfig, StorageConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
@@ -121,7 +121,7 @@ pub async fn compaction_test_main(
     Ok(())
 }
 
-async fn start_meta_node(listen_addr: String, config_path: String) {
+pub async fn start_meta_node(listen_addr: String, config_path: String) {
     let opts = risingwave_meta::MetaNodeOpts::parse_from([
         "meta-node",
         "--listen-addr",
@@ -131,6 +131,11 @@ async fn start_meta_node(listen_addr: String, config_path: String) {
         "--config-path",
         &config_path,
     ]);
+    let config = load_config(&opts.config_path);
+    assert!(
+        config.meta.enable_compaction_deterministic,
+        "enable_compaction_deterministic should be set"
+    );
     risingwave_meta::start(opts).await
 }
 
@@ -156,7 +161,7 @@ async fn start_compactor_node(
     risingwave_compactor::start(opts).await
 }
 
-fn start_compactor_thread(
+pub fn start_compactor_thread(
     meta_endpoint: String,
     client_addr: String,
     state_store: String,
@@ -591,6 +596,7 @@ async fn open_hummock_iters(
                     retention_seconds: None,
                     check_bloom_filter: false,
                     ignore_range_tombstone: false,
+                    read_version_from_backup: false,
                 },
             )
             .await?;
@@ -652,11 +658,15 @@ pub async fn create_hummock_store_with_metrics(
         state_store_metrics: Arc::new(StateStoreMetrics::unused()),
         object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
     };
+    let rw_config = RwConfig {
+        storage: storage_config.deref().clone(),
+        ..Default::default()
+    };
 
     let state_store_impl = StateStoreImpl::new(
         &opts.state_store,
         "",
-        storage_config,
+        &rw_config,
         Arc::new(MonitoredHummockMetaClient::new(
             meta_client.clone(),
             metrics.hummock_metrics.clone(),

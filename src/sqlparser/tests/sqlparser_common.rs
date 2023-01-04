@@ -2,7 +2,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -1475,7 +1475,7 @@ fn parse_alter_table() {
         } => {
             assert_eq!("tab", name.to_string());
             assert_eq!("foo", column_def.name.to_string());
-            assert_eq!("TEXT", column_def.data_type.to_string());
+            assert_eq!("TEXT", column_def.data_type.unwrap().to_string());
         }
         _ => unreachable!(),
     };

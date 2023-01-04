@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,7 @@
 use std::env;
 use std::ffi::OsString;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::str::FromStr;
 
@@ -26,21 +26,11 @@ use risedev::{
     MetaNodeService, ServiceConfig,
 };
 use risingwave_common::config::load_config;
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
 use tokio::signal;
 
-async fn load_risedev_config(profile: &str) -> Result<(Option<String>, Vec<ServiceConfig>)> {
-    let risedev_config = {
-        let mut content = String::new();
-        File::open("risedev.yml")
-            .await?
-            .read_to_string(&mut content)
-            .await?;
-        content
-    };
-    let (config_path, risedev_config) = ConfigExpander::expand(&risedev_config, profile)?;
-    let services = ConfigExpander::deserialize(&risedev_config, profile)?;
+fn load_risedev_config(profile: &str) -> Result<(Option<String>, Vec<ServiceConfig>)> {
+    let (config_path, risedev_config) = ConfigExpander::expand(".", profile)?;
+    let services = ConfigExpander::deserialize(&risedev_config)?;
 
     Ok((config_path, services))
 }
@@ -60,17 +50,15 @@ pub async fn playground() -> Result<()> {
     } else {
         "playground".to_string()
     };
-    let force_shared_hummock_in_mem = std::env::var("FORCE_SHARED_HUMMOCK_IN_MEM").is_ok();
 
     let apply_config_file = |cmd: &mut Command, config_path: Option<&str>| {
-        let path = Path::new(config_path.unwrap_or("src/config/risingwave.toml"));
-        println!("config file: {}", path.display());
-        if path.exists() {
-            cmd.arg("--config-path").arg(path);
+        if let Some(c) = config_path {
+            println!("config file: {}", c);
+            cmd.arg("--config-path").arg(c);
         }
     };
 
-    let services = match load_risedev_config(&profile).await {
+    let services = match load_risedev_config(&profile) {
         Err(e) => {
             tracing::warn!("Failed to load risedev config. All components will be started using the default command line options.\n{}", e);
             vec![
@@ -98,7 +86,7 @@ pub async fn playground() -> Result<()> {
                         ComputeNodeService::apply_command_args(
                             &mut command,
                             c,
-                            if force_shared_hummock_in_mem || compute_node_count > 1 {
+                            if compute_node_count > 1 {
                                 HummockInMemoryStrategy::Shared
                             } else {
                                 HummockInMemoryStrategy::Isolated
@@ -206,8 +194,6 @@ pub async fn playground() -> Result<()> {
             }
         }
     }
-
-    sync_point::sync_point!("CLUSTER_READY");
 
     // wait for log messages to be flushed
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;

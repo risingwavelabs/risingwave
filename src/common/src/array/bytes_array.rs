@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,13 +20,12 @@ use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta};
+use super::{Array, ArrayBuilder, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
+/// `BytesArray` is a collection of Rust `[u8]`s.
 #[derive(Debug, Clone)]
-/// The layout of `BytesArray` is the same as `Utf8Array`. Now the `BytesGuard` and `BytesWriter` is
-/// not added yet, can add it when we need to support corresponding expression.
 pub struct BytesArray {
     offset: Vec<usize>,
     bitmap: Bitmap,
@@ -35,34 +34,17 @@ pub struct BytesArray {
 
 impl Array for BytesArray {
     type Builder = BytesArrayBuilder;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = Box<[u8]>;
     type RefItem<'a> = &'a [u8];
 
-    fn value_at(&self, idx: usize) -> Option<&[u8]> {
-        if !self.is_null(idx) {
-            let data_slice = &self.data[self.offset[idx]..self.offset[idx + 1]];
-            Some(data_slice)
-        } else {
-            None
-        }
-    }
-
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<&[u8]> {
-        if !self.is_null_unchecked(idx) {
-            let data_slice = &self.data[self.offset[idx]..self.offset[idx + 1]];
-            Some(data_slice)
-        } else {
-            None
-        }
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> &[u8] {
+        let begin = *self.offset.get_unchecked(idx);
+        let end = *self.offset.get_unchecked(idx + 1);
+        self.data.get_unchecked(begin..end)
     }
 
     fn len(&self) -> usize {
         self.offset.len() - 1
-    }
-
-    fn iter(&self) -> ArrayIterator<'_, Self> {
-        ArrayIterator::new(self)
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -128,12 +110,32 @@ impl Array for BytesArray {
 }
 
 impl BytesArray {
-    pub fn from_slice(data: &[Option<&[u8]>]) -> Self {
-        let mut builder = <Self as Array>::Builder::new(data.len());
-        for i in data {
-            builder.append(*i);
+    #[cfg(test)]
+    pub(super) fn data(&self) -> &[u8] {
+        &self.data
+    }
+}
+
+impl<'a> FromIterator<Option<&'a [u8]>> for BytesArray {
+    fn from_iter<I: IntoIterator<Item = Option<&'a [u8]>>>(iter: I) -> Self {
+        let iter = iter.into_iter();
+        let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
+        for i in iter {
+            builder.append(i);
         }
         builder.finish()
+    }
+}
+
+impl<'a> FromIterator<&'a Option<&'a [u8]>> for BytesArray {
+    fn from_iter<I: IntoIterator<Item = &'a Option<&'a [u8]>>>(iter: I) -> Self {
+        iter.into_iter().cloned().collect()
+    }
+}
+
+impl<'a> FromIterator<&'a [u8]> for BytesArray {
+    fn from_iter<I: IntoIterator<Item = &'a [u8]>>(iter: I) -> Self {
+        iter.into_iter().map(Some).collect()
     }
 }
 
@@ -158,16 +160,23 @@ impl ArrayBuilder for BytesArrayBuilder {
         }
     }
 
-    fn append<'a>(&'a mut self, value: Option<&'a [u8]>) {
+    fn append_n<'a>(&'a mut self, n: usize, value: Option<&'a [u8]>) {
         match value {
             Some(x) => {
-                self.bitmap.append(true);
-                self.data.extend_from_slice(x);
-                self.offset.push(self.data.len())
+                self.bitmap.append_n(n, true);
+                self.data.reserve(x.len() * n);
+                self.offset.reserve(n);
+                for _ in 0..n {
+                    self.data.extend_from_slice(x);
+                    self.offset.push(self.data.len());
+                }
             }
             None => {
-                self.bitmap.append(false);
-                self.offset.push(self.data.len())
+                self.bitmap.append_n(n, false);
+                self.offset.reserve(n);
+                for _ in 0..n {
+                    self.offset.push(self.data.len());
+                }
             }
         }
     }
@@ -200,5 +209,80 @@ impl ArrayBuilder for BytesArrayBuilder {
             data: self.data,
             offset: self.offset,
         }
+    }
+}
+
+impl BytesArrayBuilder {
+    pub fn writer(&mut self) -> BytesWriter<'_> {
+        BytesWriter { builder: self }
+    }
+
+    /// `append_partial` will add a partial dirty data of the new record.
+    /// The partial data will keep untracked until `finish_partial` was called.
+    unsafe fn append_partial(&mut self, x: &[u8]) {
+        self.data.extend_from_slice(x);
+    }
+
+    /// `finish_partial` will create a new record based on the current dirty data.
+    /// `finish_partial` was safe even if we don't call `append_partial`, which is equivalent to
+    /// appending an empty bytes.
+    fn finish_partial(&mut self) {
+        self.offset.push(self.data.len());
+        self.bitmap.append(true);
+    }
+
+    /// Rollback the partial-written data by [`Self::append_partial`].
+    ///
+    /// This is a safe method, if no `append_partial` was called, then the call has no effect.
+    fn rollback_partial(&mut self) {
+        let &last_offset = self.offset.last().unwrap();
+        assert!(last_offset <= self.data.len());
+        self.data.truncate(last_offset);
+    }
+}
+
+pub struct BytesWriter<'a> {
+    builder: &'a mut BytesArrayBuilder,
+}
+
+impl<'a> BytesWriter<'a> {
+    /// `write_ref` will consume `BytesWriter` and pass the ownership of `builder` to `BytesGuard`.
+    pub fn write_ref(self, value: &[u8]) {
+        self.builder.append(Some(value));
+    }
+
+    /// `begin` will create a `PartialBytesWriter`, which allow multiple appendings to create a new
+    /// record.
+    pub fn begin(self) -> PartialBytesWriter<'a> {
+        PartialBytesWriter {
+            builder: self.builder,
+        }
+    }
+}
+
+pub struct PartialBytesWriter<'a> {
+    builder: &'a mut BytesArrayBuilder,
+}
+
+impl<'a> PartialBytesWriter<'a> {
+    /// `write_ref` will append partial dirty data to `builder`.
+    /// `PartialBytesWriter::write_ref` is different from `BytesWriter::write_ref`
+    /// in that it allows us to call it multiple times.
+    pub fn write_ref(&mut self, value: &[u8]) {
+        // SAFETY: We'll clean the dirty `builder` in the `drop`.
+        unsafe { self.builder.append_partial(value) }
+    }
+
+    /// `finish` will be called while the entire record is written.
+    /// Exactly one new record was appended and the `builder` can be safely used.
+    pub fn finish(self) {
+        self.builder.finish_partial();
+    }
+}
+
+impl<'a> Drop for PartialBytesWriter<'a> {
+    fn drop(&mut self) {
+        // If `finish` is not called, we should rollback the data.
+        self.builder.rollback_partial();
     }
 }

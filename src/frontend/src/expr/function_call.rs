@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -109,6 +109,9 @@ impl FunctionCall {
     /// Create a cast expr over `child` to `target` type in `allows` context.
     pub fn new_cast(child: ExprImpl, target: DataType, allows: CastContext) -> Result<ExprImpl> {
         if is_row_function(&child) {
+            // Row function will have empty fields in Datatype::Struct at this point. Therefore,
+            // we will need to take some special care to generate the cast types. For normal struct
+            // types, they will be handled in `cast_ok`.
             return Self::cast_nested(child, target, allows);
         }
         let source = child.return_type();
@@ -203,6 +206,11 @@ impl FunctionCall {
 
     pub fn get_expr_type(&self) -> ExprType {
         self.func_type
+    }
+
+    pub fn is_pure(&self) -> bool {
+        // See proto for details
+        0 < self.func_type as i32 && self.func_type as i32 <= 600
     }
 
     /// Get a reference to the function call's inputs.
@@ -335,7 +343,7 @@ fn explain_verbose_binary_op(
     Ok(())
 }
 
-fn is_row_function(expr: &ExprImpl) -> bool {
+pub fn is_row_function(expr: &ExprImpl) -> bool {
     if let ExprImpl::FunctionCall(func) = expr {
         if func.get_expr_type() == ExprType::Row {
             return true;

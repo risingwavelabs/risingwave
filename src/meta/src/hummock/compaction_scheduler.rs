@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -53,7 +53,7 @@ pub enum ScheduleStatus {
 }
 
 impl CompactionRequestChannel {
-    fn new(request_tx: UnboundedSender<CompactionGroupId>) -> Self {
+    pub fn new(request_tx: UnboundedSender<CompactionGroupId>) -> Self {
         Self {
             request_tx,
             scheduled: Default::default(),
@@ -74,7 +74,7 @@ impl CompactionRequestChannel {
         Ok(true)
     }
 
-    fn unschedule(&self, compaction_group: CompactionGroupId) {
+    pub fn unschedule(&self, compaction_group: CompactionGroupId) {
         self.scheduled.lock().remove(&compaction_group);
     }
 }
@@ -118,7 +118,7 @@ where
 
         self.hummock_manager.init_compaction_scheduler(
             sched_channel.clone(),
-            self.compaction_resume_notifier.clone(),
+            Some(self.compaction_resume_notifier.clone()),
         );
 
         tracing::info!("Start compaction scheduler.");

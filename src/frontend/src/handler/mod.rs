@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,21 +23,24 @@ use pgwire::pg_response::{PgResponse, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
+use risingwave_sqlparser::ast::{
+    CreateSinkStatement, CreateSourceStatement, DropStatement, ObjectType, Statement,
+};
 
 use self::util::DataChunkToRowSetAdapter;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
-use crate::session::{OptimizerContext, SessionImpl};
+use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
 pub mod alter_user;
 mod create_database;
 pub mod create_index;
 pub mod create_mv;
-mod create_schema;
+pub mod create_schema;
 pub mod create_sink;
 pub mod create_source;
 pub mod create_table;
+pub mod create_table_as;
 pub mod create_user;
 mod create_view;
 mod describe;
@@ -50,7 +53,7 @@ pub mod drop_source;
 pub mod drop_table;
 pub mod drop_user;
 mod drop_view;
-mod explain;
+pub mod explain;
 mod flush;
 pub mod handle_privilege;
 pub mod privilege;
@@ -86,28 +89,81 @@ impl From<Vec<Row>> for PgResponseStream {
     }
 }
 
+#[derive(Clone)]
+pub struct HandlerArgs {
+    pub session: Arc<SessionImpl>,
+    pub sql: String,
+    pub normalized_sql: String,
+    pub with_options: WithOptions,
+}
+
+impl HandlerArgs {
+    pub fn new(session: Arc<SessionImpl>, stmt: &Statement, sql: &str) -> Result<Self> {
+        Ok(Self {
+            session,
+            sql: sql.into(),
+            with_options: WithOptions::try_from(stmt)?,
+            normalized_sql: Self::normalize_sql(stmt),
+        })
+    }
+
+    /// Get normalized SQL from the statement.
+    ///
+    /// - Generally, the normalized SQL is the unparsed (and formatted) result of the statement.
+    /// - For `CREATE` statements, the clauses like `OR REPLACE` and `IF NOT EXISTS` are removed to
+    ///   make it suitable for the `SHOW CREATE` statements.
+    fn normalize_sql(stmt: &Statement) -> String {
+        let mut stmt = stmt.clone();
+        match &mut stmt {
+            Statement::CreateView { or_replace, .. } => {
+                *or_replace = false;
+            }
+            Statement::CreateTable {
+                or_replace,
+                if_not_exists,
+                ..
+            } => {
+                *or_replace = false;
+                *if_not_exists = false;
+            }
+            Statement::CreateIndex { if_not_exists, .. } => {
+                *if_not_exists = false;
+            }
+            Statement::CreateSource {
+                stmt: CreateSourceStatement { if_not_exists, .. },
+                ..
+            } => {
+                *if_not_exists = false;
+            }
+            Statement::CreateSink {
+                stmt: CreateSinkStatement { if_not_exists, .. },
+            } => {
+                *if_not_exists = false;
+            }
+            _ => {}
+        }
+        stmt.to_string()
+    }
+}
+
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
     sql: &str,
     format: bool,
 ) -> Result<RwPgResponse> {
-    let context = OptimizerContext::new(
-        session.clone(),
-        Arc::from(sql),
-        WithOptions::try_from(&stmt)?,
-    );
+    let handler_args = HandlerArgs::new(session, &stmt, sql)?;
     match stmt {
         Statement::Explain {
             statement,
             analyze,
             options,
-        } => explain::handle_explain(context, *statement, options, analyze),
+        } => explain::handle_explain(handler_args, *statement, options, analyze),
         Statement::CreateSource {
             is_materialized,
             stmt,
-        } => create_source::handle_create_source(context, is_materialized, stmt).await,
-        Statement::CreateSink { stmt } => create_sink::handle_create_sink(context, stmt).await,
+        } => create_source::handle_create_source(handler_args, is_materialized, stmt).await,
+        Statement::CreateSink { stmt } => create_sink::handle_create_sink(handler_args, stmt).await,
         Statement::CreateTable {
             name,
             columns,
@@ -134,26 +190,46 @@ pub async fn handle(
                 )
                 .into());
             }
-            if query.is_some() {
-                return Err(ErrorCode::NotImplemented("CREATE AS".to_string(), 6215.into()).into());
+            if let Some(query) = query {
+                return create_table_as::handle_create_as(
+                    handler_args,
+                    name,
+                    if_not_exists,
+                    query,
+                    columns,
+                )
+                .await;
             }
-            create_table::handle_create_table(context, name, columns, constraints, if_not_exists)
-                .await
+            create_table::handle_create_table(
+                handler_args,
+                name,
+                columns,
+                constraints,
+                if_not_exists,
+            )
+            .await
         }
         Statement::CreateDatabase {
             db_name,
             if_not_exists,
-        } => create_database::handle_create_database(context, db_name, if_not_exists).await,
+        } => create_database::handle_create_database(handler_args, db_name, if_not_exists).await,
         Statement::CreateSchema {
             schema_name,
             if_not_exists,
-        } => create_schema::handle_create_schema(context, schema_name, if_not_exists).await,
-        Statement::CreateUser(stmt) => create_user::handle_create_user(context, stmt).await,
-        Statement::AlterUser(stmt) => alter_user::handle_alter_user(context, stmt).await,
-        Statement::Grant { .. } => handle_privilege::handle_grant_privilege(context, stmt).await,
-        Statement::Revoke { .. } => handle_privilege::handle_revoke_privilege(context, stmt).await,
-        Statement::Describe { name } => describe::handle_describe(context, name),
-        Statement::ShowObjects(show_object) => show::handle_show_object(context, show_object),
+        } => create_schema::handle_create_schema(handler_args, schema_name, if_not_exists).await,
+        Statement::CreateUser(stmt) => create_user::handle_create_user(handler_args, stmt).await,
+        Statement::AlterUser(stmt) => alter_user::handle_alter_user(handler_args, stmt).await,
+        Statement::Grant { .. } => {
+            handle_privilege::handle_grant_privilege(handler_args, stmt).await
+        }
+        Statement::Revoke { .. } => {
+            handle_privilege::handle_revoke_privilege(handler_args, stmt).await
+        }
+        Statement::Describe { name } => describe::handle_describe(handler_args, name),
+        Statement::ShowObjects(show_object) => show::handle_show_object(handler_args, show_object),
+        Statement::ShowCreateObject { create_type, name } => {
+            show::handle_show_create_object(handler_args, create_type, name)
+        }
         Statement::Drop(DropStatement {
             object_type,
             object_name,
@@ -161,21 +237,23 @@ pub async fn handle(
             drop_mode,
         }) => match object_type {
             ObjectType::Table => {
-                drop_table::handle_drop_table(context, object_name, if_exists).await
+                drop_table::handle_drop_table(handler_args, object_name, if_exists).await
             }
             ObjectType::MaterializedView => {
-                drop_mv::handle_drop_mv(context, object_name, if_exists).await
+                drop_mv::handle_drop_mv(handler_args, object_name, if_exists).await
             }
             ObjectType::Index => {
-                drop_index::handle_drop_index(context, object_name, if_exists).await
+                drop_index::handle_drop_index(handler_args, object_name, if_exists).await
             }
             ObjectType::Source => {
-                drop_source::handle_drop_source(context, object_name, if_exists).await
+                drop_source::handle_drop_source(handler_args, object_name, if_exists).await
             }
-            ObjectType::Sink => drop_sink::handle_drop_sink(context, object_name, if_exists).await,
+            ObjectType::Sink => {
+                drop_sink::handle_drop_sink(handler_args, object_name, if_exists).await
+            }
             ObjectType::Database => {
                 drop_database::handle_drop_database(
-                    context,
+                    handler_args,
                     object_name,
                     if_exists,
                     drop_mode.into(),
@@ -183,13 +261,21 @@ pub async fn handle(
                 .await
             }
             ObjectType::Schema => {
-                drop_schema::handle_drop_schema(context, object_name, if_exists, drop_mode.into())
-                    .await
+                drop_schema::handle_drop_schema(
+                    handler_args,
+                    object_name,
+                    if_exists,
+                    drop_mode.into(),
+                )
+                .await
             }
             ObjectType::User => {
-                drop_user::handle_drop_user(context, object_name, if_exists, drop_mode.into()).await
+                drop_user::handle_drop_user(handler_args, object_name, if_exists, drop_mode.into())
+                    .await
             }
-            ObjectType::View => drop_view::handle_drop_view(context, object_name, if_exists).await,
+            ObjectType::View => {
+                drop_view::handle_drop_view(handler_args, object_name, if_exists).await
+            }
             ObjectType::MaterializedSource => Err((ErrorCode::InvalidInputSyntax(
                 "Use `DROP SOURCE` to drop a materialized source.".to_owned(),
             ))
@@ -198,7 +284,7 @@ pub async fn handle(
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
-        | Statement::Update { .. } => query::handle_query(context, stmt, format).await,
+        | Statement::Update { .. } => query::handle_query(handler_args, stmt, format).await,
         Statement::CreateView {
             materialized,
             name,
@@ -216,18 +302,18 @@ pub async fn handle(
                 .into());
             }
             if materialized {
-                create_mv::handle_create_mv(context, name, *query, columns).await
+                create_mv::handle_create_mv(handler_args, name, *query, columns).await
             } else {
-                create_view::handle_create_view(context, name, columns, *query).await
+                create_view::handle_create_view(handler_args, name, columns, *query).await
             }
         }
-        Statement::Flush => flush::handle_flush(context).await,
+        Statement::Flush => flush::handle_flush(handler_args).await,
         Statement::SetVariable {
             local: _,
             variable,
             value,
-        } => variable::handle_set(context, variable, value),
-        Statement::ShowVariable { variable } => variable::handle_show(context, variable),
+        } => variable::handle_set(handler_args, variable, value),
+        Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
         Statement::CreateIndex {
             name,
             table_name,
@@ -244,7 +330,7 @@ pub async fn handle(
             }
 
             create_index::handle_create_index(
-                context,
+                handler_args,
                 if_not_exists,
                 name,
                 table_name,

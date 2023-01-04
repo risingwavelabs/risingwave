@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -165,12 +165,8 @@ where
         &self,
         ssts_to_delete: &mut Vec<HummockSstableId>,
     ) -> MetaResult<()> {
-        let reject: HashSet<HummockSstableId> = self
-            .backup_manager
-            .list_pinned_ssts()
-            .await?
-            .into_iter()
-            .collect();
+        let reject: HashSet<HummockSstableId> =
+            self.backup_manager.list_pinned_ssts().into_iter().collect();
         // Ack these pinned SSTs directly. Otherwise delta log containing them cannot be GCed.
         // These SSTs will be GCed during full GC when they are no longer pinned.
         let to_ack = ssts_to_delete

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -474,7 +474,7 @@ mod tests {
 
     use super::*;
     use crate::executor::exchange::input::RemoteInput;
-    use crate::executor::exchange::permit::channel;
+    use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::{Barrier, Executor, Mutation};
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
@@ -490,7 +490,7 @@ mod tests {
         let mut txs = Vec::with_capacity(CHANNEL_NUMBER);
         let mut rxs = Vec::with_capacity(CHANNEL_NUMBER);
         for _i in 0..CHANNEL_NUMBER {
-            let (tx, rx) = channel();
+            let (tx, rx) = channel_for_test();
             txs.push(tx);
             rxs.push(rx);
         }
@@ -731,6 +731,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stream_exchange_client() {
+        const BATCHED_PERMITS: usize = 1024;
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
         let addr = "127.0.0.1:12348".parse().unwrap();
@@ -763,6 +764,7 @@ mod tests {
                 (0, 0),
                 (0, 0),
                 Arc::new(StreamingMetrics::unused()),
+                BATCHED_PERMITS,
             )
         };
 

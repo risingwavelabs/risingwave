@@ -117,21 +117,28 @@ message ActorMapping {
   repeated uint32 data = 2;
 }
 
-message SourceNode {
-  uint32 source_id = 1; // use source_id to fetch SourceDesc from local source manager
+message StreamSource {
+  uint32 source_id = 1;
   catalog.Table state_table = 2;
   catalog.ColumnIndex row_id_index = 3;
   repeated plan_common.ColumnCatalog columns = 4;
   repeated int32 pk_column_ids = 5;
   map<string, string> properties = 6;
-  catalog.SourceInfo info = 7;
+  catalog.StreamSourceInfo info = 7;
   string source_name = 8;
+}
+
+message SourceNode {
+  // The source node can contain either a stream source or nothing. So here we extract all
+  // information about stream source to a message, and here it will be an `Option` in Rust.
+  StreamSource source_inner = 1;
 }
 
 message SinkNode {
   uint32 table_id = 1;
-  repeated int32 column_ids = 2;
   map<string, string> properties = 3;
+  repeated plan_common.Field fields = 4;
+  repeated uint32 sink_pk = 5;
 }
 
 message ProjectNode {
@@ -209,7 +216,7 @@ message TopNNode {
   uint64 limit = 1;
   uint64 offset = 2;
   catalog.Table table = 3;
-  uint32 order_by_len = 4;
+  repeated plan_common.ColumnOrder order_by = 4;
   bool with_ties = 5;
 }
 
@@ -219,7 +226,7 @@ message GroupTopNNode {
   uint64 offset = 2;
   repeated uint32 group_key = 3;
   catalog.Table table = 4;
-  uint32 order_by_len = 5;
+  repeated plan_common.ColumnOrder order_by = 5;
   bool with_ties = 6;
 }
 
@@ -525,7 +532,9 @@ message Dispatcher {
   // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-  // - For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+  // - For dispatchers within actors, the id is the same as its downstream fragment id.
+  //   We can't use the exchange operator id directly as the dispatch id, because an exchange
+  //   could belong to more than one downstream in DAG.
   // - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
@@ -552,12 +561,13 @@ message StreamActor {
   string mview_definition = 9;
 }
 
-enum FragmentType {
+enum FragmentTypeFlag {
   FRAGMENT_UNSPECIFIED = 0;
-  OTHERS = 1;
-  SOURCE = 2;
-  MVIEW = 3;
+  SOURCE = 1;
+  MVIEW = 2;
   SINK = 4;
+  NOW = 8;
+  CHAIN_NODE = 16;
 }
 
 message StreamFragmentGraph {
@@ -566,7 +576,8 @@ message StreamFragmentGraph {
     uint32 fragment_id = 1;
     // root stream node in this fragment.
     StreamNode node = 2;
-    FragmentType fragment_type = 3;
+    // Bitwise-OR of FragmentTypeFlags
+    uint32 fragment_type_mask = 3;
     // mark whether this fragment should only have one actor.
     bool is_singleton = 4;
     // Number of table ids (stateful states) for this fragment.

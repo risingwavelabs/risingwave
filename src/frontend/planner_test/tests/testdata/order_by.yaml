@@ -186,6 +186,15 @@
   batch_plan: |
     BatchExchange { order: [mv.v DESC], dist: Single }
     └─BatchScan { table: mv, columns: [mv.v], distribution: SomeShard }
+- name: BatchSort needed, because our BatchScan can not get a ordered result when scan from ranges
+  sql: |
+    create table t(v int);
+    create materialized view mv as select * from t order by v asc;
+    select * from mv where v = 1 or v = 2 order by v asc;
+  batch_plan: |
+    BatchExchange { order: [mv.v ASC], dist: Single }
+    └─BatchSort { order: [mv.v ASC] }
+      └─BatchScan { table: mv, columns: [mv.v], scan_ranges: [mv.v = Int32(1) , mv.v = Int32(2)], distribution: SomeShard }
 - name: BatchSort needed, when input is sorted in wrong order
   sql: |
     create table t(v int);

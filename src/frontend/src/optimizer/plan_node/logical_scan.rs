@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,12 +28,17 @@ use super::{
     StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
+use crate::expr::{
+    CollectInputRef, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
+};
+use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::{
+    BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
+    PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
-use crate::session::OptimizerContextRef;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
@@ -375,42 +380,56 @@ impl_plan_tree_node_for_leaf! {LogicalScan}
 impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
+        let output_col_names = if verbose {
+            self.column_names_with_table_prefix()
+        } else {
+            self.column_names()
+        }
+        .join(", ");
+
         if self.predicate().always_true() {
             write!(
                 f,
                 "LogicalScan {{ table: {}, columns: [{}] }}",
                 self.table_name(),
-                if verbose {
-                    self.column_names_with_table_prefix()
-                } else {
-                    self.column_names()
-                }
-                .join(", "),
+                output_col_names,
             )
         } else {
-            let required_col_names = self
-                .required_col_idx()
-                .iter()
-                .map(|i| self.table_desc().columns[*i].name.to_string())
-                .collect_vec();
+            write!(f, "LogicalScan {{ table: {}", self.table_name())?;
+            if self.output_col_idx() == self.required_col_idx() {
+                write!(f, ", columns: [{}]", output_col_names)?;
+            } else {
+                write!(
+                    f,
+                    ", output_columns: [{}], required_columns: [{}]",
+                    output_col_names,
+                    self.required_col_idx().iter().format_with(", ", |i, f| {
+                        if verbose {
+                            f(&format_args!(
+                                "{}.{}",
+                                self.table_name(),
+                                self.table_desc().columns[*i].name
+                            ))
+                        } else {
+                            f(&format_args!("{}", self.table_desc().columns[*i].name))
+                        }
+                    })
+                )?;
+            }
 
+            let fields = self
+                .table_desc()
+                .columns
+                .iter()
+                .map(|col| Field::from_with_table_name_prefix(col, self.table_name()))
+                .collect_vec();
+            let input_schema = Schema { fields };
             write!(
                 f,
-                "LogicalScan {{ table: {}, output_columns: [{}], required_columns: [{}], predicate: {} }}",
-                self.table_name(),
-                if verbose {
-                    self.column_names_with_table_prefix()
-                } else {
-                    self.column_names()
-                }.join(", "),
-                required_col_names.join(", "),
-                {
-                    let fields = self.table_desc().columns.iter().map(|col| Field::from_with_table_name_prefix(col, self.table_name())).collect_vec();
-                    let input_schema = Schema{fields};
-                    format!("{}", ConditionDisplay {
-                        condition: self.predicate(),
-                        input_schema: &input_schema,
-                    })
+                ", predicate: {} }}",
+                ConditionDisplay {
+                    condition: self.predicate(),
+                    input_schema: &input_schema,
                 }
             )
         }
@@ -418,7 +437,7 @@ impl fmt::Display for LogicalScan {
 }
 
 impl ColPrunable for LogicalScan {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let output_col_idx: Vec<usize> = required_cols
             .iter()
             .map(|i| self.required_col_idx()[*i])
@@ -432,13 +451,42 @@ impl ColPrunable for LogicalScan {
 }
 
 impl PredicatePushdown for LogicalScan {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        mut predicate: Condition,
+        _ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
+        // This case could come from the predicate push down before the subquery unnesting.
+        struct HasCorrelated {}
+        impl ExprVisitor<bool> for HasCorrelated {
+            fn merge(a: bool, b: bool) -> bool {
+                a | b
+            }
+
+            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) -> bool {
+                true
+            }
+        }
+        let non_pushable_predicate: Vec<_> = predicate
+            .conjunctions
+            .drain_filter(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
+            .collect();
         let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
         ));
-
-        self.clone_with_predicate(predicate.and(self.predicate().clone()))
-            .into()
+        if non_pushable_predicate.is_empty() {
+            self.clone_with_predicate(predicate.and(self.predicate().clone()))
+                .into()
+        } else {
+            return LogicalFilter::create(
+                self.clone_with_predicate(predicate.and(self.predicate().clone()))
+                    .into(),
+                Condition {
+                    conjunctions: non_pushable_predicate,
+                },
+            );
+        }
     }
 }
 
@@ -451,8 +499,7 @@ impl LogicalScan {
                 self.core.table_desc.clone(),
                 self.base
                     .ctx
-                    .inner()
-                    .session_ctx
+                    .session_ctx()
                     .config()
                     .get_max_split_range_gap(),
             )?;
@@ -549,7 +596,7 @@ impl ToBatch for LogicalScan {
 }
 
 impl ToStream for LogicalScan {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         if self.is_sys_table() {
             return Err(RwError::from(ErrorCode::NotImplemented(
                 "streaming on system table is not allowed".to_string(),
@@ -564,11 +611,14 @@ impl ToStream for LogicalScan {
             if let Some(exprs) = project_expr {
                 plan = LogicalProject::create(plan, exprs)
             }
-            plan.to_stream()
+            plan.to_stream(ctx)
         }
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         if self.is_sys_table() {
             return Err(RwError::from(ErrorCode::NotImplemented(
                 "streaming on system table is not allowed".to_string(),

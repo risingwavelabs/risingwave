@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,6 +22,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::RwError;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::BoxedExpression;
@@ -88,7 +89,7 @@ impl<K: HashKey> LookupJoinBase<K> {
                         self.outer_side_key_idxs
                             .iter()
                             .take(self.lookup_prefix_len)
-                            .map(|&idx| row.value_at(idx).to_owned_datum())
+                            .map(|&idx| row.datum_at(idx).to_owned_datum())
                             .collect_vec()
                     })
                 })
@@ -185,9 +186,8 @@ impl<K: HashKey> LookupJoinBase<K> {
                     DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
                 #[for_await]
                 for chunk in stream {
-                    #[for_await]
                     for output_chunk in output_chunk_builder
-                        .trunc_data_chunk(chunk?.reorder_columns(&self.output_indices))
+                        .append_chunk(chunk?.reorder_columns(&self.output_indices))
                     {
                         yield output_chunk
                     }

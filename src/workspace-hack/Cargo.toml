@@ -28,7 +28,6 @@ criterion = { version = "0.4", features = ["async", "async_futures", "async_toki
 crossbeam-channel = { version = "0.5", features = ["crossbeam-utils", "std"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
 crossbeam-epoch = { version = "0.9", features = ["alloc", "once_cell", "std"] }
-crossbeam-utils = { version = "0.8", features = ["once_cell", "std"] }
 either = { version = "1", features = ["use_std"] }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4", features = ["std"] }
@@ -69,7 +68,6 @@ parking_lot_core = { version = "0.9", default-features = false, features = ["bac
 petgraph = { version = "0.6", features = ["graphmap", "matrix_graph", "stable_graph"] }
 phf = { version = "0.11", features = ["std", "uncased"] }
 phf_shared = { version = "0.11", features = ["std", "uncased"] }
-postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc", default-features = false, features = ["chrono-04", "derive", "postgres-derive", "with-chrono-0_4"] }
 prometheus = { version = "0.13", features = ["libc", "process", "procfs", "protobuf"] }
 prost = { version = "0.11", features = ["no-recursion-limit", "prost-derive", "std"] }
 prost-types = { version = "0.11", features = ["std"] }
@@ -79,7 +77,6 @@ regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cac
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 reqwest = { version = "0.11", features = ["__tls", "default-tls", "hyper-tls", "json", "native-tls-crate", "serde_json", "tokio-native-tls"] }
 ring = { version = "0.16", features = ["alloc", "dev_urandom_fallback", "once_cell", "std"] }
-rust_decimal = { version = "1", features = ["byteorder", "bytes", "db-tokio-postgres", "postgres", "rand", "serde", "std", "tokio-postgres"] }
 scopeguard = { version = "1", features = ["use_std"] }
 serde = { version = "1", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
 smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
@@ -114,7 +111,6 @@ criterion = { version = "0.4", features = ["async", "async_futures", "async_toki
 crossbeam-channel = { version = "0.5", features = ["crossbeam-utils", "std"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
 crossbeam-epoch = { version = "0.9", features = ["alloc", "once_cell", "std"] }
-crossbeam-utils = { version = "0.8", features = ["once_cell", "std"] }
 either = { version = "1", features = ["use_std"] }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4", features = ["std"] }
@@ -155,7 +151,6 @@ parking_lot_core = { version = "0.9", default-features = false, features = ["bac
 petgraph = { version = "0.6", features = ["graphmap", "matrix_graph", "stable_graph"] }
 phf = { version = "0.11", features = ["std", "uncased"] }
 phf_shared = { version = "0.11", features = ["std", "uncased"] }
-postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc", default-features = false, features = ["chrono-04", "derive", "postgres-derive", "with-chrono-0_4"] }
 proc-macro2 = { version = "1", features = ["proc-macro", "span-locations"] }
 prometheus = { version = "0.13", features = ["libc", "process", "procfs", "protobuf"] }
 prost = { version = "0.11", features = ["no-recursion-limit", "prost-derive", "std"] }
@@ -166,7 +161,6 @@ regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cac
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 reqwest = { version = "0.11", features = ["__tls", "default-tls", "hyper-tls", "json", "native-tls-crate", "serde_json", "tokio-native-tls"] }
 ring = { version = "0.16", features = ["alloc", "dev_urandom_fallback", "once_cell", "std"] }
-rust_decimal = { version = "1", features = ["byteorder", "bytes", "db-tokio-postgres", "postgres", "rand", "serde", "std", "tokio-postgres"] }
 scopeguard = { version = "1", features = ["use_std"] }
 serde = { version = "1", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
 smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,10 +22,8 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::ActorInfo;
 use risingwave_rpc_client::ComputeClientPool;
 
-use crate::cache::{LruManager, LruManagerRef};
 use crate::error::StreamResult;
 use crate::executor::exchange::permit::{self, Receiver, Sender};
-use crate::executor::monitor::StreamingMetrics;
 
 mod barrier_manager;
 mod env;
@@ -81,7 +79,7 @@ pub struct SharedContext {
 
     pub(crate) barrier_manager: Arc<Mutex<LocalBarrierManager>>,
 
-    pub(crate) lru_manager: Option<LruManagerRef>,
+    pub(crate) config: StreamingConfig,
 }
 
 impl std::fmt::Debug for SharedContext {
@@ -93,31 +91,14 @@ impl std::fmt::Debug for SharedContext {
 }
 
 impl SharedContext {
-    pub fn new(
-        addr: HostAddr,
-        state_store: StateStoreImpl,
-        streaming_metrics: Arc<StreamingMetrics>,
-        config: &StreamingConfig,
-        total_memory_available_bytes: usize,
-    ) -> Self {
-        let create_lru_manager = || {
-            let mgr = LruManager::new(
-                total_memory_available_bytes,
-                config.barrier_interval_ms,
-                streaming_metrics,
-            );
-            // Run a background memory monitor
-            tokio::spawn(mgr.clone().run());
-            mgr
-        };
-        let enable_managed_cache = config.developer.stream_enable_managed_cache;
+    pub fn new(addr: HostAddr, state_store: StateStoreImpl, config: &StreamingConfig) -> Self {
         Self {
             channel_map: Default::default(),
             actor_infos: Default::default(),
             addr,
             compute_client_pool: ComputeClientPool::default(),
-            lru_manager: enable_managed_cache.then(create_lru_manager),
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(state_store))),
+            config: config.clone(),
         }
     }
 
@@ -131,7 +112,7 @@ impl SharedContext {
             barrier_manager: Arc::new(Mutex::new(LocalBarrierManager::new(
                 StateStoreImpl::for_test(),
             ))),
-            lru_manager: None,
+            config: StreamingConfig::default(),
         }
     }
 
@@ -166,7 +147,10 @@ impl SharedContext {
 
     #[inline]
     pub fn add_channel_pairs(&self, ids: UpDownActorIds) {
-        let (tx, rx) = permit::channel();
+        let (tx, rx) = permit::channel(
+            self.config.developer.stream_exchange_initial_permits,
+            self.config.developer.stream_exchange_batched_permits,
+        );
         assert!(
             self.lock_channel_map()
                 .insert(ids, (Some(tx), Some(rx)))

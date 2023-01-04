@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -155,7 +155,7 @@ mod tests {
     use crate::executor::test_utils::MockExecutor;
 
     fn create_column(vec: &[Option<i32>]) -> Column {
-        PrimitiveArray::from_slice(vec).into()
+        PrimitiveArray::from_iter(vec).into()
     }
 
     async fn test_limit_all_visible(
@@ -287,14 +287,7 @@ mod tests {
                 .as_slice(),
         );
 
-        let visible_array = BoolArray::from_slice(
-            visible
-                .clone()
-                .into_iter()
-                .map(Some)
-                .collect_vec()
-                .as_slice(),
-        );
+        let visible_array = BoolArray::from_iter(visible.iter().cloned());
 
         let col1 = visible_array.into();
         let schema = Schema {

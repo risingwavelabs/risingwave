@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -41,7 +41,7 @@ mod utils;
 
 pub use agg_call::AggCall;
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
-pub use function_call::{FunctionCall, FunctionCallDisplay};
+pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
 pub use subquery::{Subquery, SubqueryKind};
@@ -156,6 +156,12 @@ impl ExprImpl {
         visitor.into()
     }
 
+    /// Count `Now`s in the expression.
+    pub fn count_nows(&self) -> usize {
+        let mut visitor = CountNow::default();
+        visitor.visit_expr(self)
+    }
+
     /// Check whether self is literal NULL.
     pub fn is_null(&self) -> bool {
         matches!(self, ExprImpl::Literal(literal) if literal.get_data().is_none())
@@ -204,7 +210,7 @@ impl ExprImpl {
     ///
     /// TODO: This is a naive implementation. We should avoid proto ser/de.
     /// Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let backend_expr = build_from_prost(&self.to_expr_proto())?;
         backend_expr.eval_row(input).map_err(Into::into)
     }
@@ -212,7 +218,7 @@ impl ExprImpl {
     /// Evaluate a constant expression.
     pub fn eval_row_const(&self) -> Result<Datum> {
         assert!(self.is_const());
-        self.eval_row(Row::empty())
+        self.eval_row(OwnedRow::empty())
     }
 }
 
@@ -782,7 +788,7 @@ macro_rules! assert_eq_input_ref {
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 
 use crate::binder::BoundSetExpr;
 use crate::utils::Condition;

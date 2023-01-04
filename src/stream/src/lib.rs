@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,7 +27,6 @@
 #![feature(generators)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
-#![feature(unzip_option)]
 #![feature(allocator_api)]
 #![feature(map_try_insert)]
 #![feature(result_option_inspect)]
@@ -37,6 +36,7 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(btree_drain_filter)]
+#![feature(bound_map)]
 
 #[macro_use]
 extern crate tracing;

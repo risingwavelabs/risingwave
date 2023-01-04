@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn vec_sum_int32() -> Result<()> {
-        let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]);
+        let input = I32Array::from_iter([1, 2, 3]);
         let agg_kind = AggKind::Sum;
         let input_type = DataType::Int32;
         let return_type = DataType::Int64;
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn vec_sum_int64() -> Result<()> {
-        let input = I64Array::from_slice(&[Some(1), Some(2), Some(3)]);
+        let input = I64Array::from_iter([1, 2, 3]);
         let agg_kind = AggKind::Sum;
         let input_type = DataType::Int64;
         let return_type = DataType::Decimal;
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn vec_min_float32() -> Result<()> {
-        let input = F32Array::from_slice(&[Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]);
+        let input = F32Array::from_iter([Some(1.0.into()), Some(2.0.into()), Some(3.0.into())]);
         let agg_kind = AggKind::Min;
         let input_type = DataType::Float32;
         let return_type = DataType::Float32;
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn vec_min_char() -> Result<()> {
-        let input = Utf8Array::from_slice(&[Some("b"), Some("aa")]);
+        let input = Utf8Array::from_iter(["b", "aa"]);
         let agg_kind = AggKind::Min;
         let input_type = DataType::Varchar;
         let return_type = DataType::Varchar;
@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn vec_max_char() -> Result<()> {
-        let input = Utf8Array::from_slice(&[Some("b"), Some("aa")]);
+        let input = Utf8Array::from_iter(["b", "aa"]);
         let agg_kind = AggKind::Max;
         let input_type = DataType::Varchar;
         let return_type = DataType::Varchar;
@@ -357,13 +357,14 @@ mod tests {
             assert_eq!(actual, expected);
             Ok(())
         };
-        let input = I32Array::from_slice(&[Some(1), Some(2), Some(3)]);
+        let input = I32Array::from_iter([1, 2, 3]);
         let expected = &[Some(3)];
         test_case(input.into(), expected)?;
-        let input = I32Array::from_slice(&[]);
+        #[allow(clippy::needless_borrow)]
+        let input = I32Array::from_iter(&[]);
         let expected = &[Some(0)];
         test_case(input.into(), expected)?;
-        let input = I32Array::from_slice(&[None]);
+        let input = I32Array::from_iter([None]);
         let expected = &[Some(0)];
         test_case(input.into(), expected)
     }

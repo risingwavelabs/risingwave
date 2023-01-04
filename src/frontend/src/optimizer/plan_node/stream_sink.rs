@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use risingwave_common::catalog::Field;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{PlanBase, PlanRef, StreamNode};
@@ -76,7 +77,18 @@ impl StreamNode for StreamSink {
 
         ProstStreamNode::Sink(SinkNode {
             table_id: self.sink_catalog.id().into(),
-            column_ids: vec![], // TODO(nanderstabel): fix empty Vector
+            fields: self
+                .sink_catalog
+                .columns()
+                .iter()
+                .map(|c| Field::from(c.column_desc.clone()).to_prost())
+                .collect(),
+            sink_pk: self
+                .sink_catalog
+                .pk()
+                .iter()
+                .map(|c| c.index as u32)
+                .collect(),
             properties: self.sink_catalog.properties.inner().clone(),
         })
     }

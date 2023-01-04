@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,6 @@ use std::ops::{BitAnd, BitOr, BitXor, Not};
 
 use num_traits::{CheckedShl, CheckedShr};
 
-use crate::vector_op::arithmetic_op::general_atm;
 use crate::{ExprError, Result};
 
 // Conscious decision for shl and shr is made here to diverge from PostgreSQL.
@@ -58,41 +57,41 @@ where
     // TODO: We need to improve the error message
     let r: u32 = r
         .try_into()
-        .map_err(|_| ExprError::Cast(type_name::<T2>(), type_name::<u32>()))?;
+        .map_err(|_| ExprError::CastOutOfRange(type_name::<u32>()))?;
     atm(l, r)
 }
 
 #[inline(always)]
-pub fn general_bitand<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
+pub fn general_bitand<T1, T2, T3>(l: T1, r: T2) -> T3
 where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
+    T1: Into<T3> + Debug,
+    T2: Into<T3> + Debug,
     T3: BitAnd<Output = T3>,
 {
-    general_atm(l, r, |a, b| Ok(a.bitand(b)))
+    l.into() & r.into()
 }
 
 #[inline(always)]
-pub fn general_bitor<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
+pub fn general_bitor<T1, T2, T3>(l: T1, r: T2) -> T3
 where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
+    T1: Into<T3> + Debug,
+    T2: Into<T3> + Debug,
     T3: BitOr<Output = T3>,
 {
-    general_atm(l, r, |a, b| Ok(a.bitor(b)))
+    l.into() | r.into()
 }
 
 #[inline(always)]
-pub fn general_bitxor<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
+pub fn general_bitxor<T1, T2, T3>(l: T1, r: T2) -> T3
 where
-    T1: TryInto<T3> + Debug,
-    T2: TryInto<T3> + Debug,
+    T1: Into<T3> + Debug,
+    T2: Into<T3> + Debug,
     T3: BitXor<Output = T3>,
 {
-    general_atm(l, r, |a, b| Ok(a.bitxor(b)))
+    l.into() ^ r.into()
 }
 
 #[inline(always)]
-pub fn general_bitnot<T1: Not<Output = T1>>(expr: T1) -> Result<T1> {
-    Ok(expr.not())
+pub fn general_bitnot<T1: Not<Output = T1>>(expr: T1) -> T1 {
+    !expr
 }

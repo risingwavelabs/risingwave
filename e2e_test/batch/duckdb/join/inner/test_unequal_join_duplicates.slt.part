@@ -1,5 +1,5 @@
 # Copied from https://github.com/duckdb/duckdb (MIT licensed).
-# Copyright 2018-2022 Stichting DuckDB Foundation 
+# Copyright 2018-2022 Stichting DuckDB Foundation
 
 # description: Test inequality join with > STANDARD_VECTOR_SIZE duplicates
 
@@ -25,4 +25,3 @@ SET RW_IMPLICIT_FLUSH TO true;
 # SELECT COUNT(*) FROM test INNER JOIN test2 ON test.b<>test2.b
 # ----
 # 10240
-

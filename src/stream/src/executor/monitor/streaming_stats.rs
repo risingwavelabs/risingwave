@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -37,6 +37,7 @@ pub struct StreamingMetrics {
     pub actor_poll_cnt: GenericGaugeVec<AtomicI64>,
     pub actor_idle_duration: GenericGaugeVec<AtomicF64>,
     pub actor_idle_cnt: GenericGaugeVec<AtomicI64>,
+    pub actor_memory_usage: GenericGaugeVec<AtomicI64>,
     pub actor_in_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_out_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
@@ -238,6 +239,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let actor_memory_usage = register_int_gauge_vec_with_registry!(
+            "actor_memory_usage",
+            "Memory usage (bytes)",
+            &["actor_id"],
+            registry,
+        )
+        .unwrap();
+
         let join_lookup_miss_count = register_int_counter_vec_with_registry!(
             "stream_join_lookup_miss_count",
             "Join executor lookup miss duration",
@@ -391,6 +400,7 @@ impl StreamingMetrics {
             actor_poll_cnt,
             actor_idle_duration,
             actor_idle_cnt,
+            actor_memory_usage,
             actor_in_record_cnt,
             actor_out_record_cnt,
             actor_sampled_deserialize_duration_ns,

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,20 +21,21 @@ mod resolve_id;
 
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Result};
 pub use resolve_id::*;
 use risingwave_frontend::handler::{
-    create_index, create_mv, create_source, create_table, drop_table, variable,
+    create_index, create_mv, create_schema, create_source, create_table, drop_table, explain,
+    variable, HandlerArgs,
 };
-use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
 use risingwave_frontend::{
-    build_graph, explain_stream_graph, Binder, FrontendOpts, PlanRef, Planner, WithOptions,
+    build_graph, explain_stream_graph, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef,
+    PlanRef, Planner,
 };
-use risingwave_sqlparser::ast::{ObjectName, Statement};
+use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
@@ -293,12 +294,8 @@ impl TestCase {
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
-            let context = OptimizerContext::new(
-                session.clone(),
-                Arc::from(sql),
-                WithOptions::try_from(&stmt)?,
-            );
-            context.explain_verbose.store(true, Ordering::Relaxed); // use explain verbose in planner tests
+            // TODO: `sql` may contain multiple statements here.
+            let handler_args = HandlerArgs::new(session.clone(), &stmt, sql)?;
             match stmt.clone() {
                 Statement::Query(_)
                 | Statement::Insert { .. }
@@ -307,6 +304,14 @@ impl TestCase {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
+                    let explain_options = ExplainOptions {
+                        verbose: true,
+                        ..Default::default()
+                    };
+                    let context = OptimizerContext::new(
+                        HandlerArgs::new(session.clone(), &stmt, sql)?,
+                        explain_options,
+                    );
                     let ret = self.apply_query(&stmt, context.into())?;
                     if do_check_result {
                         check_result(self, &ret)?;
@@ -321,7 +326,7 @@ impl TestCase {
                     ..
                 } => {
                     create_table::handle_create_table(
-                        context,
+                        handler_args,
                         name,
                         columns,
                         constraints,
@@ -333,7 +338,8 @@ impl TestCase {
                     is_materialized,
                     stmt,
                 } => {
-                    create_source::handle_create_source(context, is_materialized, stmt).await?;
+                    create_source::handle_create_source(handler_args, is_materialized, stmt)
+                        .await?;
                 }
                 Statement::CreateIndex {
                     name,
@@ -346,7 +352,7 @@ impl TestCase {
                     ..
                 } => {
                     create_index::handle_create_index(
-                        context,
+                        handler_args,
                         if_not_exists,
                         name,
                         table_name,
@@ -364,11 +370,11 @@ impl TestCase {
                     columns,
                     ..
                 } => {
-                    create_mv::handle_create_mv(context, name, *query, columns).await?;
+                    create_mv::handle_create_mv(handler_args, name, *query, columns).await?;
                 }
                 Statement::Drop(drop_statement) => {
                     drop_table::handle_drop_table(
-                        context,
+                        handler_args,
                         drop_statement.object_name,
                         drop_statement.if_exists,
                     )
@@ -379,13 +385,19 @@ impl TestCase {
                     variable,
                     value,
                 } => {
-                    variable::handle_set(context, variable, value).unwrap();
+                    variable::handle_set(handler_args, variable, value).unwrap();
                 }
-                Statement::Explain { .. } => {
-                    let explain_output = get_explain_output(sql, session.clone()).await;
+                Statement::Explain {
+                    analyze,
+                    statement,
+                    options,
+                } => {
                     if result.is_some() {
                         panic!("two queries in one test case");
                     }
+                    let rsp = explain::handle_explain(handler_args, *statement, options, analyze)?;
+
+                    let explain_output = get_explain_output(rsp).await;
                     let ret = TestCaseResult {
                         explain_output: Some(explain_output),
                         ..Default::default()
@@ -394,6 +406,13 @@ impl TestCase {
                         check_result(self, &ret)?;
                     }
                     result = Some(ret);
+                }
+                Statement::CreateSchema {
+                    schema_name,
+                    if_not_exists,
+                } => {
+                    create_schema::handle_create_schema(handler_args, schema_name, if_not_exists)
+                        .await?;
                 }
                 _ => return Err(anyhow!("Unsupported statement type")),
             }
@@ -406,7 +425,7 @@ impl TestCase {
         stmt: &Statement,
         context: OptimizerContextRef,
     ) -> Result<TestCaseResult> {
-        let session = context.inner().session_ctx.clone();
+        let session = context.session_ctx().clone();
         let mut ret = TestCaseResult::default();
 
         let bound = {

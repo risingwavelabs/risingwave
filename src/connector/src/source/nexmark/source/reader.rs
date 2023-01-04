@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -37,7 +37,7 @@ pub struct NexmarkSplitReader {
     assigned_split: NexmarkSplit,
     split_id: SplitId,
     event_num: u64,
-    event_type: EventType,
+    event_type: Option<EventType>,
     use_real_time: bool,
     min_event_gap_in_ns: u64,
     max_chunk_size: u64,
@@ -70,11 +70,17 @@ impl SplitReader for NexmarkSplitReader {
             assigned_split = split;
         }
 
+        let mut generator = EventGenerator::new(NexmarkConfig::from(&*properties))
+            .with_offset(offset)
+            .with_step(split_num);
+        // If the user doesn't specify the event type in the source definition, then the user
+        // intends to use unified source(three different types of events together).
+        if let Some(event_type) = properties.table_type.as_ref() {
+            generator = generator.with_type_filter(*event_type);
+        }
+
         Ok(NexmarkSplitReader {
-            generator: EventGenerator::new(NexmarkConfig::from(&*properties))
-                .with_offset(offset)
-                .with_step(split_num)
-                .with_type_filter(properties.table_type),
+            generator,
             assigned_split,
             split_id,
             max_chunk_size: properties.max_chunk_size,
@@ -105,8 +111,18 @@ impl NexmarkSplitReader {
                     break;
                 }
                 let event = self.generator.next().unwrap();
-                let event =
-                    NexmarkMessage::new(self.split_id.clone(), self.generator.offset(), event);
+                let event = match self.event_type {
+                    Some(_) => NexmarkMessage::new_single_event(
+                        self.split_id.clone(),
+                        self.generator.offset(),
+                        event,
+                    ),
+                    None => NexmarkMessage::new_combined_event(
+                        self.split_id.clone(),
+                        self.generator.offset(),
+                        event,
+                    ),
+                };
                 msgs.push(event.into());
             }
             if msgs.is_empty() {
@@ -147,7 +163,7 @@ mod tests {
         let props = Box::new(NexmarkPropertiesInner {
             split_num: 2,
             min_event_gap_in_ns: 0,
-            table_type: EventType::Bid,
+            table_type: Some(EventType::Bid),
             max_chunk_size: 5,
             ..Default::default()
         });

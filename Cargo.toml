@@ -23,6 +23,8 @@ members = [
   "src/sqlparser",
   "src/sqlparser/test_runner",
   "src/storage",
+  "src/storage/backup",
+  "src/storage/backup/cmd",
   "src/storage/compactor",
   "src/java_binding",
   "src/storage/hummock_sdk",
@@ -99,6 +101,8 @@ opt-level = 3
 [profile.ci-dev.package."async_stack_trace"]
 opt-level = 3
 [profile.ci-dev.package."indextree"]
+opt-level = 3
+[profile.ci-dev.package."task_stats_alloc"]
 opt-level = 3
 
 # The profile used for deterministic simulation tests in CI.

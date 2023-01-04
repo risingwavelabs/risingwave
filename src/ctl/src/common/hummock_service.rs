@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use risingwave_common::config::StorageConfig;
+use risingwave_common::config::{RwConfig, StorageConfig};
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
@@ -100,6 +100,10 @@ For `./risedev apply-compose-deploy` users,
             share_buffer_compaction_worker_threads_number: 0,
             ..Default::default()
         };
+        let rw_config = RwConfig {
+            storage: config.clone(),
+            ..Default::default()
+        };
 
         tracing::info!("using Hummock config: {:#?}", config);
 
@@ -112,7 +116,7 @@ For `./risedev apply-compose-deploy` users,
         let state_store_impl = StateStoreImpl::new(
             &self.hummock_url,
             "",
-            Arc::new(config),
+            &rw_config,
             Arc::new(MonitoredHummockMetaClient::new(
                 meta_client.clone(),
                 metrics.hummock_metrics.clone(),

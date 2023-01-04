@@ -1,6 +1,6 @@
 /* eslint-disable */
 import { PlanFragment, TaskId as TaskId1, TaskOutputId } from "./batch_plan";
-import { Status } from "./common";
+import { BatchQueryEpoch, Status } from "./common";
 import { DataChunk } from "./data";
 import { StreamMessage } from "./stream_plan";
 
@@ -81,7 +81,7 @@ export function taskInfo_TaskStatusToJSON(object: TaskInfo_TaskStatus): string {
 export interface CreateTaskRequest {
   taskId: TaskId1 | undefined;
   plan: PlanFragment | undefined;
-  epoch: number;
+  epoch: BatchQueryEpoch | undefined;
 }
 
 export interface AbortTaskRequest {
@@ -109,7 +109,7 @@ export interface GetDataResponse {
 export interface ExecuteRequest {
   taskId: TaskId1 | undefined;
   plan: PlanFragment | undefined;
-  epoch: number;
+  epoch: BatchQueryEpoch | undefined;
 }
 
 export interface GetDataRequest {
@@ -206,7 +206,7 @@ export const TaskInfo = {
 };
 
 function createBaseCreateTaskRequest(): CreateTaskRequest {
-  return { taskId: undefined, plan: undefined, epoch: 0 };
+  return { taskId: undefined, plan: undefined, epoch: undefined };
 }
 
 export const CreateTaskRequest = {
@@ -214,7 +214,7 @@ export const CreateTaskRequest = {
     return {
       taskId: isSet(object.taskId) ? TaskId1.fromJSON(object.taskId) : undefined,
       plan: isSet(object.plan) ? PlanFragment.fromJSON(object.plan) : undefined,
-      epoch: isSet(object.epoch) ? Number(object.epoch) : 0,
+      epoch: isSet(object.epoch) ? BatchQueryEpoch.fromJSON(object.epoch) : undefined,
     };
   },
 
@@ -222,7 +222,7 @@ export const CreateTaskRequest = {
     const obj: any = {};
     message.taskId !== undefined && (obj.taskId = message.taskId ? TaskId1.toJSON(message.taskId) : undefined);
     message.plan !== undefined && (obj.plan = message.plan ? PlanFragment.toJSON(message.plan) : undefined);
-    message.epoch !== undefined && (obj.epoch = Math.round(message.epoch));
+    message.epoch !== undefined && (obj.epoch = message.epoch ? BatchQueryEpoch.toJSON(message.epoch) : undefined);
     return obj;
   },
 
@@ -234,7 +234,9 @@ export const CreateTaskRequest = {
     message.plan = (object.plan !== undefined && object.plan !== null)
       ? PlanFragment.fromPartial(object.plan)
       : undefined;
-    message.epoch = object.epoch ?? 0;
+    message.epoch = (object.epoch !== undefined && object.epoch !== null)
+      ? BatchQueryEpoch.fromPartial(object.epoch)
+      : undefined;
     return message;
   },
 };
@@ -375,7 +377,7 @@ export const GetDataResponse = {
 };
 
 function createBaseExecuteRequest(): ExecuteRequest {
-  return { taskId: undefined, plan: undefined, epoch: 0 };
+  return { taskId: undefined, plan: undefined, epoch: undefined };
 }
 
 export const ExecuteRequest = {
@@ -383,7 +385,7 @@ export const ExecuteRequest = {
     return {
       taskId: isSet(object.taskId) ? TaskId1.fromJSON(object.taskId) : undefined,
       plan: isSet(object.plan) ? PlanFragment.fromJSON(object.plan) : undefined,
-      epoch: isSet(object.epoch) ? Number(object.epoch) : 0,
+      epoch: isSet(object.epoch) ? BatchQueryEpoch.fromJSON(object.epoch) : undefined,
     };
   },
 
@@ -391,7 +393,7 @@ export const ExecuteRequest = {
     const obj: any = {};
     message.taskId !== undefined && (obj.taskId = message.taskId ? TaskId1.toJSON(message.taskId) : undefined);
     message.plan !== undefined && (obj.plan = message.plan ? PlanFragment.toJSON(message.plan) : undefined);
-    message.epoch !== undefined && (obj.epoch = Math.round(message.epoch));
+    message.epoch !== undefined && (obj.epoch = message.epoch ? BatchQueryEpoch.toJSON(message.epoch) : undefined);
     return obj;
   },
 
@@ -403,7 +405,9 @@ export const ExecuteRequest = {
     message.plan = (object.plan !== undefined && object.plan !== null)
       ? PlanFragment.fromPartial(object.plan)
       : undefined;
-    message.epoch = object.epoch ?? 0;
+    message.epoch = (object.epoch !== undefined && object.epoch !== null)
+      ? BatchQueryEpoch.fromPartial(object.epoch)
+      : undefined;
     return message;
   },
 };

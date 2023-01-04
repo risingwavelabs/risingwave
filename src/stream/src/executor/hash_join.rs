@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
-use risingwave_common::row::{Row, Row2};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::expr::BoxedExpression;
@@ -37,11 +37,11 @@ use super::monitor::StreamingMetrics;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
-use crate::cache::LruManagerRef;
 use crate::common::table::state_table::StateTable;
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::expect_first_barrier_from_aligned_stream;
 use crate::executor::JoinType::LeftAnti;
+use crate::task::AtomicU64Ref;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -280,7 +280,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     fn with_match_on_insert(
         &mut self,
         row: &RowRef<'_>,
-        matched_row: &JoinRow<Row>,
+        matched_row: &JoinRow<OwnedRow>,
     ) -> Option<StreamChunk> {
         // Left/Right Anti sides
         if is_anti(T) {
@@ -322,7 +322,7 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     fn with_match_on_delete(
         &mut self,
         row: &RowRef<'_>,
-        matched_row: &JoinRow<Row>,
+        matched_row: &JoinRow<OwnedRow>,
     ) -> Option<StreamChunk> {
         // Left/Right Anti sides
         if is_anti(T) {
@@ -405,12 +405,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         executor_id: u64,
         cond: Option<BoxedExpression>,
         op_info: String,
-        cache_size: usize,
         state_table_l: StateTable<S>,
         degree_state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
         degree_state_table_r: StateTable<S>,
-        lru_manager: Option<LruManagerRef>,
+        watermark_epoch: AtomicU64Ref,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
@@ -532,8 +531,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             schema: actual_schema,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
-                    lru_manager.clone(),
-                    cache_size,
+                    watermark_epoch.clone(),
                     join_key_data_types_l,
                     state_all_data_types_l.clone(),
                     state_table_l,
@@ -556,8 +554,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
-                    lru_manager,
-                    cache_size,
+                    watermark_epoch,
                     join_key_data_types_r,
                     state_all_data_types_r.clone(),
                     state_table_r,
@@ -619,6 +616,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 .with_label_values(&[&actor_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             match msg? {
+                AlignedMessage::WatermarkLeft(_) | AlignedMessage::WatermarkRight(_) => {
+                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                }
                 AlignedMessage::Left(chunk) => {
                     #[for_await]
                     for chunk in Self::eq_join_oneside::<{ SideType::Left }>(
@@ -732,18 +732,18 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     fn row_concat(
         row_update: &RowRef<'_>,
         update_start_pos: usize,
-        row_matched: &Row,
+        row_matched: &OwnedRow,
         matched_start_pos: usize,
-    ) -> Row {
-        let mut new_row = vec![None; row_update.size() + row_matched.len()];
+    ) -> OwnedRow {
+        let mut new_row = vec![None; row_update.len() + row_matched.len()];
 
-        for (i, datum_ref) in row_update.values().enumerate() {
+        for (i, datum_ref) in row_update.iter().enumerate() {
             new_row[i + update_start_pos] = datum_ref.to_owned_datum();
         }
         for i in 0..row_matched.len() {
             new_row[i + matched_start_pos] = row_matched[i].clone();
         }
-        Row::new(new_row)
+        OwnedRow::new(new_row)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -776,7 +776,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             ),
         };
 
-        let mut check_join_condition = |row_update: &RowRef<'_>, row_matched: &Row| -> bool {
+        let mut check_join_condition = |row_update: &RowRef<'_>, row_matched: &OwnedRow| -> bool {
             // TODO(yuhao-su): We should find a better way to eval the expression without concat
             // two rows.
             // if there are non-equi expressions
@@ -916,6 +916,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU64;
+
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
@@ -1039,12 +1041,11 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
-            1 << 16,
             state_l,
             degree_state_l,
             state_r,
             degree_state_r,
-            None,
+            Arc::new(AtomicU64::new(0)),
             false,
             Arc::new(StreamingMetrics::unused()),
             1024,
@@ -1112,12 +1113,11 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
-            1 << 16,
             state_l,
             degree_state_l,
             state_r,
             degree_state_r,
-            None,
+            Arc::new(AtomicU64::new(0)),
             true,
             Arc::new(StreamingMetrics::unused()),
             1024,

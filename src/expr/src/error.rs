@@ -1,16 +1,18 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::borrow::Cow;
 
 pub use anyhow::anyhow;
 use regex;
@@ -22,15 +24,16 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ExprError {
+    // Ideally "Unsupported" errors are caught by frontend. But when the match arms between
+    // frontend and backend are inconsistent, we do not panic with `unreachable!`.
     #[error("Unsupported function: {0}")]
     UnsupportedFunction(String),
 
-    #[error("Can't cast {0} to {1}")]
-    Cast(&'static str, &'static str),
+    #[error("Unsupported cast: {0:?} to {1:?}")]
+    UnsupportedCast(DataType, DataType),
 
-    // TODO: Unify Cast and Cast2.
-    #[error("Can't cast {0:?} to {1:?}")]
-    Cast2(DataType, DataType),
+    #[error("Casting to {0} out of range")]
+    CastOutOfRange(&'static str),
 
     #[error("Numeric out of range")]
     NumericOutOfRange,
@@ -39,7 +42,7 @@ pub enum ExprError {
     DivisionByZero,
 
     #[error("Parse error: {0}")]
-    Parse(&'static str),
+    Parse(Cow<'static, str>),
 
     #[error("Invalid parameter {name}: {reason}")]
     InvalidParam { name: &'static str, reason: String },
@@ -66,6 +69,12 @@ impl From<regex::Error> for ExprError {
             name: "pattern",
             reason: re.to_string(),
         }
+    }
+}
+
+impl From<chrono::ParseError> for ExprError {
+    fn from(e: chrono::ParseError) -> Self {
+        Self::Parse(e.to_string().into())
     }
 }
 

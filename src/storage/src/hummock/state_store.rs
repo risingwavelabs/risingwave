@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::Bound::{Excluded, Included};
-use std::ops::{Bound, RangeBounds};
+use std::ops::Bound;
 use std::sync::atomic::Ordering as MemOrdering;
 use std::time::Duration;
 
@@ -22,7 +21,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::key::{map_table_key_range, next_key, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{map_table_key_range, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::sync::oneshot;
@@ -62,8 +61,11 @@ impl HummockStorage {
             Bound::Included(TableKey(key.to_vec())),
         );
 
-        let read_version_tuple =
-            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?;
+        let read_version_tuple = if read_options.read_version_from_backup {
+            self.build_read_version_tuple_from_backup(epoch).await?
+        } else {
+            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?
+        };
 
         self.hummock_version_reader
             .get(TableKey(key), epoch, read_options, read_version_tuple)
@@ -76,12 +78,33 @@ impl HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
-        let read_version_tuple =
-            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?;
+        let read_version_tuple = if read_options.read_version_from_backup {
+            self.build_read_version_tuple_from_backup(epoch).await?
+        } else {
+            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?
+        };
 
         self.hummock_version_reader
             .iter(key_range, epoch, read_options, read_version_tuple)
             .await
+    }
+
+    async fn build_read_version_tuple_from_backup(
+        &self,
+        epoch: u64,
+    ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+        match self.backup_reader.try_get_hummock_version(epoch).await {
+            Ok(Some(backup_version)) => {
+                validate_epoch(backup_version.safe_epoch(), epoch)?;
+                Ok((Vec::default(), Vec::default(), backup_version))
+            }
+            Ok(None) => Err(HummockError::read_backup_error(format!(
+                "backup include epoch {} not found",
+                epoch
+            ))
+            .into()),
+            Err(e) => Err(e),
+        }
     }
 
     fn build_read_version_tuple(
@@ -142,55 +165,6 @@ impl StateStoreRead for HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        if let Some(prefix_hint) = read_options.prefix_hint.as_ref() {
-            let next_key = next_key(prefix_hint);
-
-            // learn more detail about start_bound with storage_table.rs.
-            match key_range.start_bound() {
-                // it guarantees that the start bound must be included (some different case)
-                // 1. Include(pk + col_bound) => prefix_hint <= start_bound <
-                // next_key(prefix_hint)
-                //
-                // for case2, frontend need to reject this, avoid excluded start_bound and
-                // transform it to included(next_key), without this case we can just guarantee
-                // that start_bound < next_key
-                //
-                // 2. Include(next_key(pk +
-                // col_bound)) => prefix_hint <= start_bound <= next_key(prefix_hint)
-                //
-                // 3. Include(pk) => prefix_hint <= start_bound < next_key(prefix_hint)
-                Included(range_start) | Excluded(range_start) => {
-                    assert!(range_start.as_slice() >= prefix_hint.as_slice());
-                    assert!(range_start.as_slice() < next_key.as_slice() || next_key.is_empty());
-                }
-
-                _ => unreachable!(),
-            }
-
-            match key_range.end_bound() {
-                Included(range_end) => {
-                    assert!(range_end.as_slice() >= prefix_hint.as_slice());
-                    assert!(range_end.as_slice() < next_key.as_slice() || next_key.is_empty());
-                }
-
-                // 1. Excluded(end_bound_of_prefix(pk + col)) => prefix_hint < end_bound <=
-                // next_key(prefix_hint)
-                //
-                // 2. Excluded(pk + bound) => prefix_hint < end_bound <=
-                // next_key(prefix_hint)
-                Excluded(range_end) => {
-                    assert!(range_end.as_slice() > prefix_hint.as_slice());
-                    assert!(range_end.as_slice() <= next_key.as_slice() || next_key.is_empty());
-                }
-
-                std::ops::Bound::Unbounded => {
-                    assert!(next_key.is_empty());
-                }
-            }
-        } else {
-            // not check
-        }
-
         self.iter_inner(map_table_key_range(key_range), epoch, read_options)
     }
 }
@@ -222,7 +196,7 @@ impl StateStore for HummockStorage {
                     );
                     return Ok(());
                 }
-                HummockReadEpoch::NoWait(_) => return Ok(()),
+                HummockReadEpoch::NoWait(_) | HummockReadEpoch::Backup(_) => return Ok(()),
             };
             if wait_epoch == HummockEpoch::MAX {
                 panic!("epoch should not be u64::MAX");
@@ -294,6 +268,9 @@ impl StateStore for HummockStorage {
             warn!("sealing invalid epoch");
             return;
         }
+        // Update `seal_epoch` synchronously,
+        // as `HummockEvent::SealEpoch` is handled asynchronously.
+        self.seal_epoch.store(epoch, MemOrdering::SeqCst);
         self.hummock_event_sender
             .send(HummockEvent::SealEpoch {
                 epoch,

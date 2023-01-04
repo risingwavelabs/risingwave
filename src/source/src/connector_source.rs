@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -36,9 +36,10 @@ use risingwave_pb::plan_common::{
     ColumnCatalog as ProstColumnCatalog, RowFormatType as ProstRowFormatType,
 };
 
+use crate::fs_connector_source::FsConnectorSource;
 use crate::monitor::SourceMetrics;
 use crate::{
-    SourceColumnDesc, SourceFormat, SourceParserImpl, SourceStreamChunkBuilder,
+    ParserConfig, SourceColumnDesc, SourceFormat, SourceParserImpl, SourceStreamChunkBuilder,
     StreamChunkWithState,
 };
 
@@ -141,6 +142,17 @@ impl InnerConnectorSourceReader {
                 .partition_input_count
                 .with_label_values(&[&actor_id, &source_id, &id])
                 .inc_by(msgs.len() as u64);
+            let sum_bytes = msgs
+                .iter()
+                .map(|msg| match &msg.payload {
+                    None => 0,
+                    Some(payload) => payload.len() as u64,
+                })
+                .sum();
+            self.metrics
+                .partition_input_bytes
+                .with_label_values(&[&actor_id, &source_id, &id])
+                .inc_by(sum_bytes);
             yield msgs;
         }
     }
@@ -197,13 +209,12 @@ impl ConnectorSource {
         connector_node_addr: Option<String>,
         connector_message_buffer_size: usize,
     ) -> Result<Self> {
-        // Store the connector node address to properties for later use.
-        let mut source_props: HashMap<String, String> =
-            HashMap::from_iter(properties.clone().into_iter());
-        connector_node_addr
-            .map(|addr| source_props.insert("connector_node_addr".to_string(), addr));
-        let config =
-            ConnectorProperties::extract(source_props).map_err(|e| ConnectorError(e.into()))?;
+        let mut config = ConnectorProperties::extract(properties.clone())
+            .map_err(|e| ConnectorError(e.into()))?;
+        if let Some(addr) = connector_node_addr {
+            // fixme: require source_id
+            config.init_properties_for_cdc(0, addr, None)
+        }
         let parser = SourceParserImpl::create(
             &format,
             &properties,
@@ -291,10 +302,10 @@ pub struct SourceDescV2 {
 
 #[derive(Clone)]
 pub struct SourceDescBuilderV2 {
-    row_id_index: Option<ProstColumnIndex>,
     columns: Vec<ProstColumnCatalog>,
     metrics: Arc<SourceMetrics>,
     pk_column_ids: Vec<i32>,
+    row_id_index: Option<ProstColumnIndex>,
     properties: HashMap<String, String>,
     source_info: ProstStreamSourceInfo,
     connector_params: ConnectorParams,
@@ -304,20 +315,20 @@ pub struct SourceDescBuilderV2 {
 impl SourceDescBuilderV2 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        row_id_index: Option<ProstColumnIndex>,
         columns: Vec<ProstColumnCatalog>,
         metrics: Arc<SourceMetrics>,
         pk_column_ids: Vec<i32>,
+        row_id_index: Option<ProstColumnIndex>,
         properties: HashMap<String, String>,
         source_info: ProstStreamSourceInfo,
         connector_params: ConnectorParams,
         connector_message_buffer_size: usize,
     ) -> Self {
         Self {
-            row_id_index,
             columns,
             metrics,
             pk_column_ids,
+            row_id_index,
             properties,
             source_info,
             connector_params,
@@ -333,6 +344,7 @@ impl SourceDescBuilderV2 {
             ProstRowFormatType::Avro => SourceFormat::Avro,
             ProstRowFormatType::Maxwell => SourceFormat::Maxwell,
             ProstRowFormatType::CanalJson => SourceFormat::CanalJson,
+            ProstRowFormatType::Csv => SourceFormat::Csv,
             ProstRowFormatType::RowUnspecified => unreachable!(),
         };
 
@@ -373,6 +385,33 @@ impl SourceDescBuilderV2 {
             pk_column_ids: self.pk_column_ids,
         })
     }
+
+    pub fn metrics(&self) -> Arc<SourceMetrics> {
+        self.metrics.clone()
+    }
+
+    pub fn build_fs_stream_source(&self) -> Result<FsConnectorSource> {
+        let format = match self.source_info.get_row_format()? {
+            ProstRowFormatType::Csv => SourceFormat::Csv,
+            _ => unreachable!(),
+        };
+        let parser_config = ParserConfig::new(&format, &self.source_info);
+        let mut columns: Vec<_> = self
+            .columns
+            .iter()
+            .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
+            .collect();
+        if let Some(row_id_index) = self.row_id_index.as_ref() {
+            columns[row_id_index.index as usize].skip_parse = true;
+        }
+        FsConnectorSource::new(
+            format,
+            self.properties.clone(),
+            columns,
+            self.connector_params.connector_rpc_endpoint.clone(),
+            parser_config,
+        )
+    }
 }
 
 pub mod test_utils {
@@ -386,8 +425,8 @@ pub mod test_utils {
 
     pub fn create_source_desc_builder(
         schema: &Schema,
-        row_id_index: Option<u64>,
         pk_column_ids: Vec<i32>,
+        row_id_index: Option<u64>,
         source_info: StreamSourceInfo,
         properties: HashMap<String, String>,
     ) -> SourceDescBuilderV2 {
@@ -411,10 +450,10 @@ pub mod test_utils {
             })
             .collect();
         SourceDescBuilderV2 {
-            row_id_index,
             columns,
             metrics: Default::default(),
             pk_column_ids,
+            row_id_index,
             properties,
             source_info,
             connector_params: Default::default(),

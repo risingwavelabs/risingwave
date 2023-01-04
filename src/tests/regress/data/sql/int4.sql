@@ -29,69 +29,69 @@ INSERT INTO INT4_TBL(f1) VALUES ('');
 
 SELECT * FROM INT4_TBL;
 
---@ SELECT i.* FROM INT4_TBL i WHERE i.f1 <> int2 '0';
+SELECT i.* FROM INT4_TBL i WHERE i.f1 <> smallint '0';
 
---@ SELECT i.* FROM INT4_TBL i WHERE i.f1 <> int4 '0';
+SELECT i.* FROM INT4_TBL i WHERE i.f1 <> int '0';
 
---@ SELECT i.* FROM INT4_TBL i WHERE i.f1 = int2 '0';
+SELECT i.* FROM INT4_TBL i WHERE i.f1 = smallint '0';
 
---@ SELECT i.* FROM INT4_TBL i WHERE i.f1 = int4 '0';
+SELECT i.* FROM INT4_TBL i WHERE i.f1 = int '0';
 
---@ SELECT i.* FROM INT4_TBL i WHERE i.f1 < int2 '0';
+SELECT i.* FROM INT4_TBL i WHERE i.f1 < smallint '0';
 
---@ SELECT i.* FROM INT4_TBL i WHERE i.f1 < int4 '0';
+SELECT i.* FROM INT4_TBL i WHERE i.f1 < int '0';
 
---@ SELECT i.* FROM INT4_TBL i WHERE i.f1 <= int2 '0';
+SELECT i.* FROM INT4_TBL i WHERE i.f1 <= smallint '0';
 
---@ SELECT i.* FROM INT4_TBL i WHERE i.f1 <= int4 '0';
+SELECT i.* FROM INT4_TBL i WHERE i.f1 <= int '0';
 
---@ SELECT i.* FROM INT4_TBL i WHERE i.f1 > int2 '0';
+SELECT i.* FROM INT4_TBL i WHERE i.f1 > smallint '0';
 
---@ SELECT i.* FROM INT4_TBL i WHERE i.f1 > int4 '0';
+SELECT i.* FROM INT4_TBL i WHERE i.f1 > int '0';
 
---@ SELECT i.* FROM INT4_TBL i WHERE i.f1 >= int2 '0';
+SELECT i.* FROM INT4_TBL i WHERE i.f1 >= smallint '0';
 
---@ SELECT i.* FROM INT4_TBL i WHERE i.f1 >= int4 '0';
+SELECT i.* FROM INT4_TBL i WHERE i.f1 >= int '0';
 
 -- positive odds
---@ SELECT i.* FROM INT4_TBL i WHERE (i.f1 % int2 '2') = int2 '1';
+SELECT i.* FROM INT4_TBL i WHERE (i.f1 % smallint '2') = smallint '1';
 
 -- any evens
---@ SELECT i.* FROM INT4_TBL i WHERE (i.f1 % int4 '2') = int2 '0';
+SELECT i.* FROM INT4_TBL i WHERE (i.f1 % int '2') = smallint '0';
 
-SELECT i.f1, i.f1 * int2 '2' AS x FROM INT4_TBL i;
+SELECT i.f1, i.f1 * smallint '2' AS x FROM INT4_TBL i;
 
---@ SELECT i.f1, i.f1 * int2 '2' AS x FROM INT4_TBL i
---@ WHERE abs(f1) < 1073741824;
+SELECT i.f1, i.f1 * smallint '2' AS x FROM INT4_TBL i
+WHERE abs(f1) < 1073741824;
 
-SELECT i.f1, i.f1 * int4 '2' AS x FROM INT4_TBL i;
+SELECT i.f1, i.f1 * int '2' AS x FROM INT4_TBL i;
 
---@ SELECT i.f1, i.f1 * int4 '2' AS x FROM INT4_TBL i
---@ WHERE abs(f1) < 1073741824;
+SELECT i.f1, i.f1 * int '2' AS x FROM INT4_TBL i
+WHERE abs(f1) < 1073741824;
 
-SELECT i.f1, i.f1 + int2 '2' AS x FROM INT4_TBL i;
+SELECT i.f1, i.f1 + smallint '2' AS x FROM INT4_TBL i;
 
---@ SELECT i.f1, i.f1 + int2 '2' AS x FROM INT4_TBL i
---@ WHERE f1 < 2147483646;
+SELECT i.f1, i.f1 + smallint '2' AS x FROM INT4_TBL i
+WHERE f1 < 2147483646;
 
-SELECT i.f1, i.f1 + int4 '2' AS x FROM INT4_TBL i;
+SELECT i.f1, i.f1 + int '2' AS x FROM INT4_TBL i;
 
---@ SELECT i.f1, i.f1 + int4 '2' AS x FROM INT4_TBL i
---@ WHERE f1 < 2147483646;
+SELECT i.f1, i.f1 + int '2' AS x FROM INT4_TBL i
+WHERE f1 < 2147483646;
 
-SELECT i.f1, i.f1 - int2 '2' AS x FROM INT4_TBL i;
+SELECT i.f1, i.f1 - smallint '2' AS x FROM INT4_TBL i;
 
---@ SELECT i.f1, i.f1 - int2 '2' AS x FROM INT4_TBL i
---@ WHERE f1 > -2147483647;
+SELECT i.f1, i.f1 - smallint '2' AS x FROM INT4_TBL i
+WHERE f1 > -2147483647;
 
-SELECT i.f1, i.f1 - int4 '2' AS x FROM INT4_TBL i;
+SELECT i.f1, i.f1 - int '2' AS x FROM INT4_TBL i;
 
---@ SELECT i.f1, i.f1 - int4 '2' AS x FROM INT4_TBL i
---@ WHERE f1 > -2147483647;
+SELECT i.f1, i.f1 - int '2' AS x FROM INT4_TBL i
+WHERE f1 > -2147483647;
 
---@ SELECT i.f1, i.f1 / int2 '2' AS x FROM INT4_TBL i;
+SELECT i.f1, i.f1 / smallint '2' AS x FROM INT4_TBL i;
 
---@ SELECT i.f1, i.f1 / int4 '2' AS x FROM INT4_TBL i;
+SELECT i.f1, i.f1 / int '2' AS x FROM INT4_TBL i;
 
 --
 -- more complex expressions
@@ -106,13 +106,13 @@ SELECT 2- -1 AS three;
 
 SELECT 2 - -2 AS four;
 
---@ SELECT int2 '2' * int2 '2' = int2 '16' / int2 '4' AS true;
+SELECT smallint '2' * smallint '2' = smallint '16' / smallint '4' AS true;
 
---@ SELECT int4 '2' * int2 '2' = int2 '16' / int4 '4' AS true;
+SELECT int '2' * smallint '2' = smallint '16' / int '4' AS true;
 
---@ SELECT int2 '2' * int4 '2' = int4 '16' / int2 '4' AS true;
+SELECT smallint '2' * int '2' = int '16' / smallint '4' AS true;
 
---@ SELECT int4 '1000' < int4 '999' AS false;
+SELECT int '1000' < int '999' AS false;
 
 SELECT 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 AS ten;
 
@@ -121,8 +121,8 @@ SELECT 2 + 2 / 2 AS three;
 SELECT (2 + 2) / 2 AS two;
 
 -- corner case
---@ SELECT (-1::int4<<31)::text;
---@ SELECT ((-1::int4<<31)+1)::text;
+SELECT (-1::int4<<31)::text AS text;
+SELECT ((-1::int4<<31)+1)::text AS text;
 
 -- check sane handling of INT_MIN overflow cases
 SELECT (-2147483648)::int4 * (-1)::int4;
@@ -176,3 +176,5 @@ SELECT gcd((-2147483648)::int4, (-2147483648)::int4); -- overflow
 
 SELECT lcm((-2147483648)::int4, 1::int4); -- overflow
 SELECT lcm(2147483647::int4, 2147483646::int4); -- overflow
+
+DROP TABLE INT4_TBL;

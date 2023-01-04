@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -172,6 +172,9 @@ where
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
                             .unwrap();
+                        self.stream.flush().await.unwrap_or_else(|e| {
+                            tracing::error!("flush error: {}", e);
+                        });
                         return true;
                     }
 
@@ -309,7 +312,9 @@ where
 
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
         let sql = query_string.map_err(|err| PsqlError::QueryError(Box::new(err)))?;
-        tracing::trace!("(simple query)receive query: {}", sql);
+        tracing::trace!(
+            target: "pgwire_query_log",
+            "(simple query)receive query: {}", sql);
 
         let session = self.session.clone().unwrap();
         // execute query
@@ -413,6 +418,7 @@ where
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
         // 1. Get statement.
         trace!(
+            target: "pgwire_query_log",
             "(extended query)bind: get statement name: {}",
             &statement_name
         );
@@ -459,7 +465,7 @@ where
                 .ok_or_else(PsqlError::no_portal)?
         };
 
-        tracing::trace!("(extended query)execute query: {}", portal.query_string());
+        tracing::trace!(target: "pgwire_query_log", "(extended query)execute query: {}", portal.query_string());
 
         // 2. Execute instance statement using portal.
         let session = self.session.clone().unwrap();
@@ -475,6 +481,7 @@ where
         //  b'S' => Statement
         //  b'P' => Portal
         tracing::trace!(
+            target: "pgwire_query_log",
             "(extended query)describe name: {}",
             cstr_to_str(&msg.name).unwrap()
         );

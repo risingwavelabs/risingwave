@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,6 +14,8 @@
 
 #![cfg_attr(not(madsim), allow(dead_code))]
 #![feature(once_cell)]
+
+use std::path::PathBuf;
 
 use clap::Parser;
 
@@ -104,6 +106,14 @@ pub struct Args {
     /// test data.
     #[clap(long)]
     sqlsmith: Option<usize>,
+
+    /// Load etcd data from toml file.
+    #[clap(long)]
+    etcd_data: Option<PathBuf>,
+
+    /// Dump etcd data into toml file before exit.
+    #[clap(long)]
+    etcd_dump: Option<PathBuf>,
 }
 
 #[cfg(madsim)]
@@ -115,6 +125,11 @@ async fn main() {
     use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts};
     use risingwave_simulation::slt::*;
 
+    tracing_subscriber::fmt()
+        // no ANSI color codes when output to file
+        .with_ansi(console::colors_enabled_stderr() && console::colors_enabled())
+        .init();
+
     let args = Args::parse();
     let config = Configuration {
         config_path: args.config_path.unwrap_or_default(),
@@ -123,6 +138,7 @@ async fn main() {
         compactor_nodes: args.compactor_nodes,
         compute_node_cores: args.compute_node_cores,
         etcd_timeout_rate: args.etcd_timeout_rate,
+        etcd_data_path: args.etcd_data,
     };
     let kill_opts = KillOpts {
         kill_meta: args.kill_meta || args.kill,
@@ -164,4 +180,16 @@ async fn main() {
             }
         })
         .await;
+
+    if let Some(path) = args.etcd_dump {
+        cluster
+            .run_on_client(async move {
+                let mut client = etcd_client::Client::connect(["192.168.10.1:2388"], None)
+                    .await
+                    .unwrap();
+                let dump = client.dump().await.unwrap();
+                std::fs::write(path, dump).unwrap();
+            })
+            .await;
+    }
 }

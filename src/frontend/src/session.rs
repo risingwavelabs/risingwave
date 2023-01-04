@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,10 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt::Formatter;
 use std::io::{Error, ErrorKind};
-use std::marker::Sync;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 // use tokio::sync::Mutex;
 use std::time::Duration;
@@ -44,6 +42,7 @@ use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
+use risingwave_source::monitor::SourceMetrics;
 use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
@@ -54,15 +53,14 @@ use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::{Catalog, SchemaPath};
 use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
-use crate::expr::CorrelatedId;
-use crate::handler::handle;
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::handler::util::to_pg_field;
+use crate::handler::{handle, HandlerArgs};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
 use crate::observer::FrontendObserverNode;
-use crate::optimizer::plan_node::PlanNodeId;
+use crate::optimizer::OptimizerContext;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
@@ -70,123 +68,7 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::utils::WithOptions;
 use crate::{FrontendOpts, PgResponseStream, TableCatalog};
-
-pub struct OptimizerContext {
-    pub session_ctx: Arc<SessionImpl>,
-    // We use `AtomicI32` here because `Arc<T>` implements `Send` only when `T: Send + Sync`.
-    pub next_id: AtomicI32,
-    /// For debugging purposes, store the SQL string in Context
-    pub sql: Arc<str>,
-
-    /// it indicates whether the explain mode is verbose for explain statement
-    pub explain_verbose: AtomicBool,
-
-    /// it indicates whether the explain mode is trace for explain statement
-    pub explain_trace: AtomicBool,
-    /// Store the trace of optimizer
-    pub optimizer_trace: Arc<Mutex<Vec<String>>>,
-    /// Store correlated id
-    pub next_correlated_id: AtomicU32,
-    /// Store options or properties from the `with` clause
-    pub with_options: WithOptions,
-}
-
-#[derive(Clone, Debug)]
-pub struct OptimizerContextRef {
-    inner: Arc<OptimizerContext>,
-}
-
-impl !Sync for OptimizerContextRef {}
-
-impl From<OptimizerContext> for OptimizerContextRef {
-    fn from(inner: OptimizerContext) -> Self {
-        Self {
-            inner: Arc::new(inner),
-        }
-    }
-}
-
-impl OptimizerContextRef {
-    pub fn inner(&self) -> &OptimizerContext {
-        &self.inner
-    }
-
-    pub fn next_plan_node_id(&self) -> PlanNodeId {
-        // It's safe to use `fetch_add` and `Relaxed` ordering since we have marked
-        // `QueryContextRef` not `Sync`.
-        let next_id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
-        PlanNodeId(next_id)
-    }
-
-    pub fn next_correlated_id(&self) -> CorrelatedId {
-        self.inner
-            .next_correlated_id
-            .fetch_add(1, Ordering::Relaxed)
-    }
-
-    pub fn is_explain_verbose(&self) -> bool {
-        self.inner.explain_verbose.load(Ordering::Acquire)
-    }
-
-    pub fn is_explain_trace(&self) -> bool {
-        self.inner.explain_trace.load(Ordering::Acquire)
-    }
-
-    pub fn trace(&self, str: impl Into<String>) {
-        let mut guard = self.inner.optimizer_trace.lock().unwrap();
-        guard.push(str.into());
-        guard.push("\n".to_string());
-    }
-
-    pub fn take_trace(&self) -> Vec<String> {
-        let mut guard = self.inner.optimizer_trace.lock().unwrap();
-        guard.drain(..).collect()
-    }
-}
-
-impl OptimizerContext {
-    pub fn new(session_ctx: Arc<SessionImpl>, sql: Arc<str>, with_options: WithOptions) -> Self {
-        Self {
-            session_ctx,
-            next_id: AtomicI32::new(0),
-            sql,
-            explain_verbose: AtomicBool::new(false),
-            explain_trace: AtomicBool::new(false),
-            optimizer_trace: Arc::new(Mutex::new(vec![])),
-            next_correlated_id: AtomicU32::new(1),
-            with_options,
-        }
-    }
-
-    // TODO(TaoWu): Remove the async.
-    #[cfg(test)]
-    #[expect(clippy::unused_async)]
-    pub async fn mock() -> OptimizerContextRef {
-        Self {
-            session_ctx: Arc::new(SessionImpl::mock()),
-            next_id: AtomicI32::new(0),
-            sql: Arc::from(""),
-            explain_verbose: AtomicBool::new(false),
-            explain_trace: AtomicBool::new(false),
-            optimizer_trace: Arc::new(Mutex::new(vec![])),
-            next_correlated_id: AtomicU32::new(1),
-            with_options: Default::default(),
-        }
-        .into()
-    }
-}
-
-impl std::fmt::Debug for OptimizerContext {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "QueryContext {{ current id = {} }}",
-            self.next_id.load(Ordering::Relaxed)
-        )
-    }
-}
 
 /// The global environment for the frontend server.
 #[derive(Clone)]
@@ -210,6 +92,8 @@ pub struct FrontendEnv {
     sessions_map: SessionMapRef,
 
     pub frontend_metrics: Arc<FrontendMetrics>,
+
+    source_metrics: Arc<SourceMetrics>,
 
     batch_config: BatchConfig,
 }
@@ -252,6 +136,7 @@ impl FrontendEnv {
             sessions_map: Arc::new(Mutex::new(HashMap::new())),
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             batch_config: BatchConfig::default(),
+            source_metrics: Arc::new(SourceMetrics::default()),
         }
     }
 
@@ -342,6 +227,7 @@ impl FrontendEnv {
         let registry = prometheus::Registry::new();
         monitor_process(&registry).unwrap();
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
+        let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
 
         if opts.metrics_level > 0 {
             MetricsManager::boot_metrics_service(opts.prometheus_listener_addr.clone(), registry);
@@ -376,6 +262,7 @@ impl FrontendEnv {
                 frontend_metrics,
                 sessions_map: Arc::new(Mutex::new(HashMap::new())),
                 batch_config,
+                source_metrics,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -437,6 +324,10 @@ impl FrontendEnv {
 
     pub fn batch_config(&self) -> &BatchConfig {
         &self.batch_config
+    }
+
+    pub fn source_metrics(&self) -> Arc<SourceMetrics> {
+        self.source_metrics.clone()
     }
 }
 
@@ -788,6 +679,7 @@ impl Session<PgResponseStream> for SessionImpl {
                     match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
                         Ok(result) => break result,
                         Err(_) => tracing::warn!(
+                            target: "risingwave_frontend_slow_query_log",
                             sql,
                             "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
                         ),
@@ -913,8 +805,8 @@ impl Session<PgResponseStream> for SessionImpl {
 
 /// Returns row description of the statement
 fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
-    let context = OptimizerContext::new(session, Arc::from(sql), WithOptions::try_from(&stmt)?);
-    let session = context.session_ctx.clone();
+    let context = OptimizerContext::from_handler_args(HandlerArgs::new(session, &stmt, sql)?);
+    let session = context.session_ctx().clone();
 
     let bound = {
         let mut binder = Binder::new(&session);
@@ -931,17 +823,4 @@ fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<Pg
         .collect::<Vec<PgFieldDescriptor>>();
 
     Ok(pg_descs)
-}
-
-#[cfg(test)]
-mod tests {
-    use assert_impl::assert_impl;
-
-    use crate::session::OptimizerContextRef;
-
-    #[test]
-    fn check_query_context_ref() {
-        assert_impl!(Send: OptimizerContextRef);
-        assert_impl!(!Sync: OptimizerContextRef);
-    }
 }

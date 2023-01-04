@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -125,8 +125,10 @@ impl Binder {
             "ceil" => ExprType::Ceil,
             "floor" => ExprType::Floor,
             "abs" => ExprType::Abs,
+            "mod" => ExprType::Modulus,
             // temporal/chrono
-            "to_timestamp" => ExprType::ToTimestamp,
+            "to_timestamp" if inputs.len() == 1 => ExprType::ToTimestamp,
+            "to_timestamp" if inputs.len() == 2 => ExprType::ToTimestamp1,
             "date_trunc" => ExprType::DateTrunc,
             // string
             "substr" => ExprType::Substr,
@@ -258,9 +260,40 @@ impl Binder {
                     .into())
                 };
             }
+            "pg_get_expr" => {
+                return if inputs.len() == 2 || inputs.len() == 3 {
+                    // TODO: implement pg_get_expr rather than just return empty as an workaround.
+                    Ok(ExprImpl::literal_varchar("".into()))
+                } else {
+                    Err(ErrorCode::ExprError(
+                        "Too many/few arguments for pg_catalog.pg_get_expr()".into(),
+                    )
+                    .into())
+                };
+            }
+            "format_type" => {
+                return if inputs.len() == 2 {
+                    // TODO
+                    // return null as an workaround for now
+                    Ok(ExprImpl::literal_null(DataType::Varchar))
+                } else {
+                    Err(
+                        ErrorCode::ExprError("Too many/few arguments for format_type()".into())
+                            .into(),
+                    )
+                };
+            }
             "pg_table_is_visible" => return Ok(ExprImpl::literal_bool(true)),
             // internal
             "rw_vnode" => ExprType::Vnode,
+            // TODO: include version/tag/commit_id
+            // TODO: choose which pg version we should return.
+            "version" => return Ok(ExprImpl::literal_varchar("PostgreSQL 13.9-RW".to_string())),
+            // non-deterministic
+            "now" => {
+                self.ensure_now_function_allowed()?;
+                ExprType::Now
+            }
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported function: {:?}", function_name),
@@ -458,6 +491,22 @@ impl Binder {
                     .into());
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn ensure_now_function_allowed(&self) -> Result<()> {
+        if self.in_create_mv
+            && !matches!(
+                self.context.clause,
+                Some(Clause::Where) | Some(Clause::Having)
+            )
+        {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "For creation of MV, `now` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
+                self.context.clause
+            ))
+            .into());
         }
         Ok(())
     }

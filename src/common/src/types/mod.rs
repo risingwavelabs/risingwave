@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -114,7 +114,7 @@ pub enum DataType {
     Timestamp,
     #[display("timestamp with time zone")]
     #[from_str(regex = "(?i)^timestamptz$|^timestamp with time zone$")]
-    Timestampz,
+    Timestamptz,
     #[display("interval")]
     #[from_str(regex = "(?i)^interval$")]
     Interval,
@@ -149,7 +149,7 @@ impl DataTypeName {
             | DataTypeName::Varchar
             | DataTypeName::Date
             | DataTypeName::Timestamp
-            | DataTypeName::Timestampz
+            | DataTypeName::Timestamptz
             | DataTypeName::Time
             | DataTypeName::Bytea
             | DataTypeName::Interval => true,
@@ -171,7 +171,7 @@ impl DataTypeName {
             DataTypeName::Bytea => DataType::Bytea,
             DataTypeName::Date => DataType::Date,
             DataTypeName::Timestamp => DataType::Timestamp,
-            DataTypeName::Timestampz => DataType::Timestampz,
+            DataTypeName::Timestamptz => DataType::Timestamptz,
             DataTypeName::Time => DataType::Time,
             DataTypeName::Interval => DataType::Interval,
             DataTypeName::Struct | DataTypeName::List => {
@@ -208,7 +208,7 @@ impl From<&ProstDataType> for DataType {
             TypeName::Date => DataType::Date,
             TypeName::Time => DataType::Time,
             TypeName::Timestamp => DataType::Timestamp,
-            TypeName::Timestampz => DataType::Timestampz,
+            TypeName::Timestamptz => DataType::Timestamptz,
             TypeName::Decimal => DataType::Decimal,
             TypeName::Interval => DataType::Interval,
             TypeName::Bytea => DataType::Bytea,
@@ -238,7 +238,7 @@ impl DataType {
     pub const INTERVAL: DataType = DataType::Interval;
     pub const TIME: DataType = DataType::Time;
     pub const TIMESTAMP: DataType = DataType::Timestamp;
-    pub const TIMESTAMPZ: DataType = DataType::Timestampz;
+    pub const TIMESTAMPTZ: DataType = DataType::Timestamptz;
     pub const VARCHAR: DataType = DataType::Varchar;
 
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
@@ -255,7 +255,7 @@ impl DataType {
             DataType::Varchar => Utf8ArrayBuilder::new(capacity).into(),
             DataType::Time => NaiveTimeArrayBuilder::new(capacity).into(),
             DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity).into(),
-            DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
+            DataType::Timestamptz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
             DataType::Struct(t) => {
                 StructArrayBuilder::with_meta(capacity, t.to_array_meta()).into()
@@ -283,7 +283,7 @@ impl DataType {
             DataType::Date => TypeName::Date,
             DataType::Time => TypeName::Time,
             DataType::Timestamp => TypeName::Timestamp,
-            DataType::Timestampz => TypeName::Timestampz,
+            DataType::Timestamptz => TypeName::Timestamptz,
             DataType::Decimal => TypeName::Decimal,
             DataType::Interval => TypeName::Interval,
             DataType::Struct { .. } => TypeName::Struct,
@@ -334,7 +334,7 @@ impl DataType {
     /// Returns the output type of window function on a given input type.
     pub fn window_of(input: &DataType) -> Option<DataType> {
         match input {
-            DataType::Timestampz => Some(DataType::Timestampz),
+            DataType::Timestamptz => Some(DataType::Timestamptz),
             DataType::Timestamp | DataType::Date => Some(DataType::Timestamp),
             _ => None,
         }
@@ -345,7 +345,7 @@ impl DataType {
         use DataType::*;
         match self {
             Boolean | Int16 | Int32 | Int64 => true,
-            Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestampz
+            Float32 | Float64 | Decimal | Date | Varchar | Time | Timestamp | Timestamptz
             | Interval | Bytea => false,
             Struct(t) => t.fields.iter().all(|dt| dt.mem_cmp_eq_value_enc()),
             List { datatype } => datatype.mem_cmp_eq_value_enc(),
@@ -379,8 +379,8 @@ impl DataType {
             DataType::Timestamp => {
                 ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::MIN))
             }
-            // FIXME(yuhao): Add a timestampz scalar.
-            DataType::Timestampz => ScalarImpl::Int64(i64::MIN),
+            // FIXME(yuhao): Add a timestamptz scalar.
+            DataType::Timestamptz => ScalarImpl::Int64(i64::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
             DataType::Interval => ScalarImpl::Interval(IntervalUnit::MIN),
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
@@ -548,7 +548,7 @@ pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
 // TODO: specify `NULL FIRST` or `NULL LAST`.
-pub fn serialize_datum_into(
+pub fn memcmp_serialize_datum_into(
     datum: impl ToDatumRef,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
@@ -563,7 +563,8 @@ pub fn serialize_datum_into(
 }
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
-pub fn serialize_datum_not_null_into(
+#[cfg_attr(not(test), expect(dead_code))]
+fn memcmp_serialize_datum_not_null_into(
     datum: impl ToDatumRef,
     serializer: &mut memcomparable::Serializer<impl BufMut>,
 ) -> memcomparable::Result<()> {
@@ -575,7 +576,7 @@ pub fn serialize_datum_not_null_into(
 }
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
-pub fn deserialize_datum_from(
+pub fn memcmp_deserialize_datum_from(
     ty: &DataType,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,
 ) -> memcomparable::Result<Datum> {
@@ -588,7 +589,8 @@ pub fn deserialize_datum_from(
 }
 
 // TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
-pub fn deserialize_datum_not_null_from(
+#[cfg_attr(not(test), expect(dead_code))]
+fn memcmp_deserialize_datum_not_null_from(
     ty: &DataType,
     deserializer: &mut memcomparable::Deserializer<impl Buf>,
 ) -> memcomparable::Result<Datum> {
@@ -623,6 +625,12 @@ impl ToDatumRef for &Datum {
     #[inline(always)]
     fn to_datum_ref(&self) -> DatumRef<'_> {
         self.as_ref().map(|d| d.as_scalar_ref_impl())
+    }
+}
+impl ToDatumRef for Option<&ScalarImpl> {
+    #[inline(always)]
+    fn to_datum_ref(&self) -> DatumRef<'_> {
+        self.map(|d| d.as_scalar_ref_impl())
     }
 }
 impl ToDatumRef for DatumRef<'_> {
@@ -823,12 +831,12 @@ pub fn hash_datum(datum: impl ToDatumRef, state: &mut impl std::hash::Hasher) {
 impl ScalarRefImpl<'_> {
     /// Encode the scalar to postgresql binary format.
     /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
-    pub fn binary_format(&self) -> RwResult<Bytes> {
-        self.to_binary().transpose().unwrap()
+    pub fn binary_format(&self, data_type: &DataType) -> RwResult<Bytes> {
+        self.to_binary_with_type(data_type).transpose().unwrap()
     }
 
-    pub fn text_format(&self) -> String {
-        self.to_text()
+    pub fn text_format(&self, data_type: &DataType) -> String {
+        self.to_text_with_type(data_type)
     }
 
     /// Serialize the scalar.
@@ -856,8 +864,8 @@ impl ScalarRefImpl<'_> {
                 v.0.num_seconds_from_midnight().serialize(&mut *ser)?;
                 v.0.nanosecond().serialize(ser)?;
             }
-            Self::Struct(v) => v.serialize(ser)?,
-            Self::List(v) => v.serialize(ser)?,
+            Self::Struct(v) => v.memcmp_serialize(ser)?,
+            Self::List(v) => v.memcmp_serialize(ser)?,
         };
         Ok(())
     }
@@ -885,6 +893,7 @@ impl ScalarImpl {
             Ty::Float32 => Self::Float32(f32::deserialize(de)?.into()),
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
             Ty::Varchar => Self::Utf8(Box::<str>::deserialize(de)?),
+            Ty::Bytea => Self::Bytea(Box::<[u8]>::deserialize(de)?),
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
             Ty::Decimal => Self::Decimal(de.deserialize_decimal()?.into()),
             Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
@@ -898,15 +907,13 @@ impl ScalarImpl {
                 let nsecs = u32::deserialize(de)?;
                 NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)?
             }),
-            Ty::Timestampz => Self::Int64(i64::deserialize(de)?),
+            Ty::Timestamptz => Self::Int64(i64::deserialize(de)?),
             Ty::Date => Self::NaiveDate({
                 let days = i32::deserialize(de)?;
                 NaiveDateWrapper::with_days(days)?
             }),
-            Ty::Struct(t) => StructValue::deserialize(&t.fields, de)?.to_scalar_value(),
-            Ty::List { datatype } => ListValue::deserialize(datatype, de)?.to_scalar_value(),
-            // TODO: Consider directly use get bytes
-            Ty::Bytea => Self::Bytea(Bytes::deserialize(de)?.to_vec().into()),
+            Ty::Struct(t) => StructValue::memcmp_deserialize(&t.fields, de)?.to_scalar_value(),
+            Ty::List { datatype } => ListValue::memcmp_deserialize(datatype, de)?.to_scalar_value(),
         })
     }
 
@@ -934,7 +941,7 @@ impl ScalarImpl {
                     DataType::Date => size_of::<NaiveDateWrapper>(),
                     DataType::Time => size_of::<NaiveTimeWrapper>(),
                     DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
-                    DataType::Timestampz => size_of::<i64>(),
+                    DataType::Timestamptz => size_of::<i64>(),
                     DataType::Boolean => size_of::<u8>(),
                     // IntervalUnit is serialized as (i32, i32, i64)
                     DataType::Interval => size_of::<(i32, i32, i64)>(),
@@ -983,7 +990,7 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
                     | (DataType::Date, ScalarImpl::NaiveDate(_))
                     | (DataType::Time, ScalarImpl::NaiveTime(_))
                     | (DataType::Timestamp, ScalarImpl::NaiveDateTime(_))
-                    | (DataType::Timestampz, ScalarImpl::Int64(_))
+                    | (DataType::Timestamptz, ScalarImpl::Int64(_))
                     | (DataType::Decimal, ScalarImpl::Decimal(_))
                     | (DataType::Interval, ScalarImpl::Interval(_))
                     | (DataType::Struct { .. }, ScalarImpl::Struct(_))
@@ -1008,7 +1015,8 @@ mod tests {
 
     fn serialize_datum_not_null_into_vec(data: i64) -> Vec<u8> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        serialize_datum_not_null_into(&Some(ScalarImpl::Int64(data)), &mut serializer).unwrap();
+        memcmp_serialize_datum_not_null_into(&Some(ScalarImpl::Int64(data)), &mut serializer)
+            .unwrap();
         serializer.into_inner()
     }
 
@@ -1034,14 +1042,15 @@ mod tests {
 
         fn serialize(f: OrderedF32) -> Vec<u8> {
             let mut serializer = memcomparable::Serializer::new(vec![]);
-            serialize_datum_not_null_into(&Some(f.into()), &mut serializer).unwrap();
+            memcmp_serialize_datum_not_null_into(&Some(f.into()), &mut serializer).unwrap();
             serializer.into_inner()
         }
 
         fn deserialize(data: Vec<u8>) -> OrderedF32 {
             let mut deserializer = memcomparable::Deserializer::new(data.as_slice());
             let datum =
-                deserialize_datum_not_null_from(&DataType::Float32, &mut deserializer).unwrap();
+                memcmp_deserialize_datum_not_null_from(&DataType::Float32, &mut deserializer)
+                    .unwrap();
             datum.unwrap().try_into().unwrap()
         }
 
@@ -1180,7 +1189,7 @@ mod tests {
                     )),
                     DataType::Timestamp,
                 ),
-                DataTypeName::Timestampz => (ScalarImpl::Int64(233333333), DataType::Timestampz),
+                DataTypeName::Timestamptz => (ScalarImpl::Int64(233333333), DataType::Timestamptz),
                 DataTypeName::Interval => (
                     ScalarImpl::Interval(IntervalUnit::new(2, 3, 3333)),
                     DataType::Interval,
@@ -1295,19 +1304,19 @@ mod tests {
 
         assert_eq!(
             DataType::from_str("timestamptz").unwrap(),
-            DataType::Timestampz
+            DataType::Timestamptz
         );
         assert_eq!(
             DataType::from_str("timestamp with time zone").unwrap(),
-            DataType::Timestampz
+            DataType::Timestamptz
         );
         assert_eq!(
             DataType::from_str("TIMESTAMPTZ").unwrap(),
-            DataType::Timestampz
+            DataType::Timestamptz
         );
         assert_eq!(
             DataType::from_str("TIMESTAMP WITH TIME ZONE").unwrap(),
-            DataType::Timestampz
+            DataType::Timestamptz
         );
 
         assert_eq!(DataType::from_str("interval").unwrap(), DataType::Interval);
@@ -1376,7 +1385,7 @@ mod tests {
         assert_eq!(
             DataType::from_str("timestamptz[]").unwrap(),
             DataType::List {
-                datatype: Box::new(DataType::Timestampz)
+                datatype: Box::new(DataType::Timestamptz)
             }
         );
         assert_eq!(

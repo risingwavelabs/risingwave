@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,7 +22,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{Row, Row2, RowExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 
 use crate::error::StorageResult;
@@ -58,7 +58,7 @@ impl Distribution {
     pub fn all_vnodes(dist_key_indices: Vec<usize>) -> Self {
         /// A bitmap that all vnodes are set.
         static ALL_VNODES: LazyLock<Arc<Bitmap>> =
-            LazyLock::new(|| Bitmap::all_high_bits(VirtualNode::COUNT).into());
+            LazyLock::new(|| Bitmap::ones(VirtualNode::COUNT).into());
         Self {
             dist_key_indices,
             vnodes: ALL_VNODES.clone(),
@@ -69,7 +69,7 @@ impl Distribution {
 // TODO: GAT-ify this trait or remove this trait
 #[async_trait::async_trait]
 pub trait TableIter: Send {
-    async fn next_row(&mut self) -> StorageResult<Option<Row>>;
+    async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;
 
     async fn collect_data_chunk(
         &mut self,
@@ -108,7 +108,7 @@ pub trait TableIter: Send {
 }
 
 /// Get vnode value with `indices` on the given `row`.
-pub fn compute_vnode(row: impl Row2, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
+pub fn compute_vnode(row: impl Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
     let vnode = if indices.is_empty() {
         DEFAULT_VNODE
     } else {

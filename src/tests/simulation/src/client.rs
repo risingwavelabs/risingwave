@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -71,36 +71,63 @@ impl Drop for RisingWave {
 impl sqllogictest::AsyncDB for RisingWave {
     type Error = tokio_postgres::error::Error;
 
-    async fn run(&mut self, sql: &str) -> Result<String, Self::Error> {
-        use std::fmt::Write;
+    async fn run(&mut self, sql: &str) -> Result<sqllogictest::DBOutput, Self::Error> {
+        use sqllogictest::{ColumnType, DBOutput};
 
         if self.client.is_closed() {
             // connection error, reset the client
             *self = Self::connect(self.host.clone(), self.dbname.clone()).await?;
         }
 
-        let mut output = String::new();
+        let mut output = vec![];
+
+        let is_query_sql = {
+            let lower_sql = sql.trim_start().to_ascii_lowercase();
+            lower_sql.starts_with("select")
+                || lower_sql.starts_with("values")
+                || lower_sql.starts_with("show")
+                || lower_sql.starts_with("with")
+                || lower_sql.starts_with("describe")
+        };
+
         let rows = self.client.simple_query(sql).await?;
         for row in rows {
+            let mut row_vec = vec![];
+
             match row {
                 tokio_postgres::SimpleQueryMessage::Row(row) => {
                     for i in 0..row.len() {
-                        if i != 0 {
-                            write!(output, " ").unwrap();
-                        }
                         match row.get(i) {
-                            Some(v) if v.is_empty() => write!(output, "(empty)").unwrap(),
-                            Some(v) => write!(output, "{}", v).unwrap(),
-                            None => write!(output, "NULL").unwrap(),
+                            Some(v) if v.is_empty() => row_vec.push("(empty)".to_string()),
+                            Some(v) => row_vec.push(v.to_string()),
+                            None => row_vec.push("NULL".to_string()),
                         }
                     }
                 }
-                tokio_postgres::SimpleQueryMessage::CommandComplete(_) => {}
+                tokio_postgres::SimpleQueryMessage::CommandComplete(cnt) => {
+                    if is_query_sql {
+                        break;
+                    } else {
+                        return Ok(DBOutput::StatementComplete(cnt));
+                    }
+                }
                 _ => unreachable!(),
             }
-            writeln!(output).unwrap();
+            output.push(row_vec);
         }
-        Ok(output)
+
+        if output.is_empty() {
+            let stmt = self.client.prepare(sql).await?;
+            Ok(DBOutput::Rows {
+                types: vec![ColumnType::Any; stmt.columns().len()],
+                rows: vec![],
+            })
+        } else {
+            Ok(DBOutput::Rows {
+                types: vec![ColumnType::Any; output[0].len()],
+                rows: output,
+            })
+        }
     }
 
     fn engine_name(&self) -> &str {

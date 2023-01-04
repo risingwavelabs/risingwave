@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,15 +15,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::stream::BoxStream;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo, SstIdRange};
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion,
-    SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, CompactTaskProgress, CompactionGroup, HummockSnapshot, HummockVersion, VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
-use risingwave_rpc_client::{HummockMetaClient, MetaClient};
-use tonic::Streaming;
+use risingwave_rpc_client::{CompactTaskItem, HummockMetaClient, MetaClient};
 
 use crate::hummock::{HummockEpoch, HummockVersionId};
 use crate::monitor::HummockMetrics;
@@ -123,7 +122,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     async fn subscribe_compact_tasks(
         &self,
         max_concurrent_task_number: u64,
-    ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+    ) -> Result<BoxStream<'static, CompactTaskItem>> {
         self.meta_client
             .subscribe_compact_tasks(max_concurrent_task_number)
             .await
@@ -165,5 +164,9 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client
             .trigger_full_gc(sst_retention_time_sec)
             .await
+    }
+
+    async fn update_current_epoch(&self, epoch: HummockEpoch) -> Result<()> {
+        self.meta_client.update_current_epoch(epoch).await
     }
 }

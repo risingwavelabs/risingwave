@@ -1,6 +1,17 @@
-query TIR rowsort
-select * from ch_benchmark_q22;
+query TIR
+select * from ch_benchmark_q22
+order by country;
 ----
-g 1 1000
-i 1 1000
-y 1 1000
+2             1      70777
+7             1      84631
+A             1      60247
+H             2     127428
+K             1      60478
+P             1      74144
+R             1      52923
+T             1      87668
+Y             1      74439
+Z             1      72966
+e             2     143868
+g             1      66072
+r             1      67979

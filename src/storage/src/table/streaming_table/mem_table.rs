@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -43,7 +43,7 @@ pub enum MemTableError {
     },
 }
 
-type Result<T> = std::result::Result<T, MemTableError>;
+type Result<T> = std::result::Result<T, Box<MemTableError>>;
 
 impl Default for MemTable {
     fn default() -> Self {
@@ -85,7 +85,8 @@ impl MemTable {
                     key: e.key().clone(),
                     prev: e.get().clone(),
                     new: RowOp::Insert(value),
-                }),
+                }
+                .into()),
             },
         }
     }
@@ -107,7 +108,8 @@ impl MemTable {
                     key: e.key().clone(),
                     prev: e.get().clone(),
                     new: RowOp::Delete(old_value),
-                }),
+                }
+                .into()),
                 RowOp::Update(value) => {
                     let (original_old_value, original_new_value) = std::mem::take(value);
                     debug_assert_eq!(original_new_value, old_value);
@@ -135,7 +137,8 @@ impl MemTable {
                     key: e.key().clone(),
                     prev: e.get().clone(),
                     new: RowOp::Update((old_value, new_value)),
-                }),
+                }
+                .into()),
                 RowOp::Update(value) => {
                     let (original_old_value, original_new_value) = std::mem::take(value);
                     debug_assert_eq!(original_new_value, old_value);

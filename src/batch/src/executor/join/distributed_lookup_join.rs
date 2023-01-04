@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,15 +20,15 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
 use risingwave_common::error::Result;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::expr_unary::new_unary_expr;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, LiteralExpression};
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
+use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -213,7 +213,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-
+        let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(
                 state_store,
@@ -225,6 +225,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 distribution,
                 table_option,
                 value_indices,
+                prefix_hint_len,
             );
 
             let inner_side_builder = InnerSideExecutorBuilder::new(
@@ -313,8 +314,8 @@ struct InnerSideExecutorBuilder<S: StateStore> {
     outer_side_key_types: Vec<DataType>,
     inner_side_key_types: Vec<DataType>,
     lookup_prefix_len: usize,
-    epoch: u64,
-    row_list: Vec<Row>,
+    epoch: BatchQueryEpoch,
+    row_list: Vec<OwnedRow>,
     table: StorageTable<S>,
     chunk_size: usize,
 }
@@ -324,8 +325,8 @@ impl<S: StateStore> InnerSideExecutorBuilder<S> {
         outer_side_key_types: Vec<DataType>,
         inner_side_key_types: Vec<DataType>,
         lookup_prefix_len: usize,
-        epoch: u64,
-        row_list: Vec<Row>,
+        epoch: BatchQueryEpoch,
+        row_list: Vec<OwnedRow>,
         table: StorageTable<S>,
         chunk_size: usize,
     ) -> Self {
@@ -373,18 +374,18 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
                     Box::new(LiteralExpression::new(outer_type.clone(), datum.clone())),
                 )?;
 
-                cast_expr.eval_row(Row::empty())?
+                cast_expr.eval_row(OwnedRow::empty())?
             };
 
             scan_range.eq_conds.push(datum);
         }
 
-        let pk_prefix = Row::new(scan_range.eq_conds);
+        let pk_prefix = OwnedRow::new(scan_range.eq_conds);
 
         if self.lookup_prefix_len == self.table.pk_indices().len() {
             let row = self
                 .table
-                .get_row(&pk_prefix, HummockReadEpoch::Committed(self.epoch))
+                .get_row(&pk_prefix, self.epoch.clone().into())
                 .await?;
 
             if let Some(row) = row {
@@ -393,7 +394,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         } else {
             let iter = self
                 .table
-                .batch_iter_with_pk_bounds(HummockReadEpoch::Committed(self.epoch), &pk_prefix, ..)
+                .batch_iter_with_pk_bounds(self.epoch.clone().into(), &pk_prefix, .., false)
                 .await?;
 
             pin_mut!(iter);

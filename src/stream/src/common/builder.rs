@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::array::{ArrayBuilderImpl, Op, RowRef, StreamChunk};
+use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
 
@@ -124,15 +124,15 @@ impl StreamChunkBuilder {
     pub fn append_row(
         &mut self,
         op: Op,
-        row_update: &RowRef<'_>,
-        row_matched: &Row,
+        row_update: impl Row,
+        row_matched: impl Row,
     ) -> Option<StreamChunk> {
         self.ops.push(op);
         for &(update_idx, output_idx) in &self.update_to_output {
-            self.column_builders[output_idx].append_datum(row_update.value_at(update_idx));
+            self.column_builders[output_idx].append_datum(row_update.datum_at(update_idx));
         }
         for &(matched_idx, output_idx) in &self.matched_to_output {
-            self.column_builders[output_idx].append_datum(&row_matched[matched_idx]);
+            self.column_builders[output_idx].append_datum(row_matched.datum_at(matched_idx));
         }
 
         self.inc_size()
@@ -142,10 +142,10 @@ impl StreamChunkBuilder {
     ///
     /// A [`StreamChunk`] will be returned when `size == capacity`
     #[must_use]
-    pub fn append_row_update(&mut self, op: Op, row_update: RowRef<'_>) -> Option<StreamChunk> {
+    pub fn append_row_update(&mut self, op: Op, row_update: impl Row) -> Option<StreamChunk> {
         self.ops.push(op);
         for &(update_idx, output_idx) in &self.update_to_output {
-            self.column_builders[output_idx].append_datum(row_update.value_at(update_idx));
+            self.column_builders[output_idx].append_datum(row_update.datum_at(update_idx));
         }
         for &(_matched_idx, output_idx) in &self.matched_to_output {
             self.column_builders[output_idx].append_datum(Datum::None);
@@ -158,13 +158,13 @@ impl StreamChunkBuilder {
     ///
     /// A [`StreamChunk`] will be returned when `size == capacity`
     #[must_use]
-    pub fn append_row_matched(&mut self, op: Op, row_matched: &Row) -> Option<StreamChunk> {
+    pub fn append_row_matched(&mut self, op: Op, row_matched: impl Row) -> Option<StreamChunk> {
         self.ops.push(op);
         for &(_update_idx, output_idx) in &self.update_to_output {
             self.column_builders[output_idx].append_datum(Datum::None);
         }
         for &(matched_idx, output_idx) in &self.matched_to_output {
-            self.column_builders[output_idx].append_datum(&row_matched[matched_idx]);
+            self.column_builders[output_idx].append_datum(row_matched.datum_at(matched_idx));
         }
 
         self.inc_size()

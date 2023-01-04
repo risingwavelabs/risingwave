@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@ pub mod utils;
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, FilterExecutor};
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
+use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::Datum as ProstDatum;
@@ -55,7 +55,7 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ProstDatum {
-                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(2)).as_ref()),
+                body: serialize_datum(Some(ScalarImpl::Int64(2)).as_ref()),
             })),
         };
 
@@ -78,7 +78,7 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ProstDatum {
-                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(0)).as_ref()),
+                body: serialize_datum(Some(ScalarImpl::Int64(0)).as_ref()),
             })),
         };
 

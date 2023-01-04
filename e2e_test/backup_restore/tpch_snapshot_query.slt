@@ -1,0 +1,3 @@
+# Test each query
+include ../streaming/tpch/q7.slt.part
+

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,7 +22,7 @@ use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{
     HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode, VnodeMapping,
 };
-use risingwave_common::row::Row;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::scan_range::ScanRange;
@@ -36,7 +36,7 @@ use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeNode, ExchangeSource as ProstExchangeSource, LocalExecutePlan,
     PlanFragment, PlanNode, RowSeqScanNode, TaskId as ProstTaskId, TaskOutputId,
 };
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::StorageTableDesc;
 use uuid::Uuid;
@@ -58,7 +58,7 @@ struct InnerSideExecutorBuilder<C> {
     lookup_prefix_len: usize,
     context: C,
     task_id: TaskId,
-    epoch: u64,
+    epoch: BatchQueryEpoch,
     pu_to_worker_mapping: HashMap<ParallelUnitId, WorkerNode>,
     pu_to_scan_range_mapping: HashMap<ParallelUnitId, Vec<(ScanRange, VirtualNode)>>,
     chunk_size: usize,
@@ -112,6 +112,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             table_desc: Some(self.table_desc.clone()),
             column_ids: self.inner_side_column_ids.clone(),
             scan_ranges,
+            ordered: false,
             vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
         });
 
@@ -136,7 +137,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
                     ..Default::default()
                 }),
             }),
-            epoch: self.epoch,
+            epoch: Some(self.epoch.clone()),
         };
 
         let prost_exchange_source = ProstExchangeSource {
@@ -192,7 +193,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
                     Box::new(LiteralExpression::new(outer_type.clone(), datum.clone())),
                 )?;
 
-                cast_expr.eval_row(Row::empty())?
+                cast_expr.eval_row(OwnedRow::empty())?
             };
 
             scan_range.eq_conds.push(datum);
@@ -237,8 +238,12 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
 
         let task_id = self.task_id.clone();
 
-        let executor_builder =
-            ExecutorBuilder::new(&plan_node, &task_id, self.context.clone(), self.epoch);
+        let executor_builder = ExecutorBuilder::new(
+            &plan_node,
+            &task_id,
+            self.context.clone(),
+            self.epoch.clone(),
+        );
 
         executor_builder.build().await
     }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,7 +16,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
-use risingwave_common::config::StorageConfig;
+use risingwave_common::config::RwConfig;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_object_store::object::{
@@ -24,6 +24,7 @@ use risingwave_object_store::object::{
 };
 
 use crate::error::StorageResult;
+use crate::hummock::backup_reader::{parse_meta_snapshot_storage, BackupReader};
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
@@ -409,7 +410,7 @@ pub mod verify {
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
         type Local = VerifyStateStore<A::Local, E::Local>;
 
-        type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send;
+        type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
         define_state_store_associated_type!();
 
@@ -464,13 +465,14 @@ impl StateStoreImpl {
     pub async fn new(
         s: &str,
         file_cache_dir: &str,
-        config: Arc<StorageConfig>,
+        rw_config: &RwConfig,
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
         state_store_stats: Arc<StateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
         tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
         tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> StorageResult<Self> {
+        let config = Arc::new(rw_config.storage.clone());
         #[cfg(not(target_os = "linux"))]
         let tiered_cache = TieredCache::none();
 
@@ -508,6 +510,7 @@ impl StateStoreImpl {
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     config.object_store_use_batch_delete,
+                    "Hummock",
                 )
                 .await;
                 let object_store = if config.enable_local_spill {
@@ -531,9 +534,12 @@ impl StateStoreImpl {
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
 
                 if !config.enable_state_store_v1 {
+                    let backup_store = parse_meta_snapshot_storage(rw_config).await?;
+                    let backup_reader = BackupReader::new(backup_store);
                     let inner = HummockStorage::new(
                         config.clone(),
                         sstable_store,
+                        backup_reader,
                         hummock_meta_client.clone(),
                         notification_client,
                         state_store_stats.clone(),

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -30,12 +30,13 @@ pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
 pub use crate::constants::hummock;
 use crate::error::Result;
-use crate::row::Row;
+use crate::row::OwnedRow;
 
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
 pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
 pub const INFORMATION_SCHEMA_SCHEMA_NAME: &str = "information_schema";
+pub const RW_CATALOG_SCHEMA_NAME: &str = "rw_catalog";
 pub const RESERVED_PG_SCHEMA_PREFIX: &str = "pg_";
 pub const DEFAULT_SUPER_USER: &str = "root";
 pub const DEFAULT_SUPER_USER_ID: u32 = 1;
@@ -46,10 +47,16 @@ pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 pub const NON_RESERVED_USER_ID: i32 = 11;
 pub const NON_RESERVED_PG_CATALOG_TABLE_ID: i32 = 1001;
 
+pub const SYSTEM_SCHEMAS: [&str; 3] = [
+    PG_CATALOG_SCHEMA_NAME,
+    INFORMATION_SCHEMA_SCHEMA_NAME,
+    RW_CATALOG_SCHEMA_NAME,
+];
+
 /// The local system catalog reader in the frontend node.
 #[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {
-    async fn read_table(&self, table_id: &TableId) -> Result<Vec<Row>>;
+    async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>>;
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;

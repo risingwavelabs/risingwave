@@ -29,4 +29,3 @@ drop table integers;
 
 statement ok
 drop table integers2;
-

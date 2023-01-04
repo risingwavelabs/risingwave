@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,7 +21,7 @@ use risingwave_sqlparser::ast::{CreateUserStatement, UserOption, UserOptions};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
-use crate::session::OptimizerContext;
+use crate::handler::HandlerArgs;
 use crate::user::user_authentication::encrypted_password;
 
 fn make_prost_user_info(
@@ -81,10 +81,10 @@ fn make_prost_user_info(
 }
 
 pub async fn handle_create_user(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     stmt: CreateUserStatement,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let user_info = {
         let user_name = Binder::resolve_user_name(stmt.user_name)?;
         let user_reader = session.env().user_info_reader().read_guard();

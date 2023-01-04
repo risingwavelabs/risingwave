@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,15 +14,11 @@
 
 use std::collections::HashMap;
 
-use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::source_info::SourceInfo;
-use risingwave_pb::catalog::Source as ProstSource;
+use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
 
 use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, SourceId};
 use crate::WithOptions;
-
-pub const KAFKA_CONNECTOR: &str = "kafka";
 
 /// This struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
@@ -36,24 +32,9 @@ pub struct SourceCatalog {
     pub pk_col_ids: Vec<ColumnId>,
     pub append_only: bool,
     pub owner: u32,
-    pub info: SourceInfo,
+    pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
     pub properties: HashMap<String, String>,
-}
-
-#[derive(PartialEq, Eq)]
-pub enum SourceKind {
-    Table,
-    Stream,
-}
-
-impl SourceCatalog {
-    pub fn kind(&self) -> SourceKind {
-        match self.info {
-            SourceInfo::StreamSource(_) => SourceKind::Stream,
-            SourceInfo::TableSource(_) => SourceKind::Table,
-        }
-    }
 }
 
 impl From<&ProstSource> for SourceCatalog {
@@ -68,18 +49,13 @@ impl From<&ProstSource> for SourceCatalog {
             .map(Into::into)
             .collect();
         let with_options = WithOptions::new(prost.properties.clone());
-        let info = match &prost.info {
-            Some(Info::StreamSource(info_inner)) => SourceInfo::StreamSource(info_inner.clone()),
-            Some(Info::TableSource(info_inner)) => SourceInfo::TableSource(info_inner.clone()),
-            None => unreachable!(),
-        };
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
         let row_id_index = prost
             .row_id_index
             .clone()
             .map(|row_id_index| row_id_index.index as _);
 
-        let append_only = with_options.append_only();
+        let append_only = row_id_index.is_some();
         let owner = prost.owner;
 
         Self {
@@ -89,7 +65,7 @@ impl From<&ProstSource> for SourceCatalog {
             pk_col_ids,
             append_only,
             owner,
-            info,
+            info: prost.info.clone().unwrap(),
             row_id_index,
             properties: with_options.into_inner(),
         }

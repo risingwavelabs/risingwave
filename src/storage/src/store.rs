@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -96,9 +96,9 @@ pub trait StateStoreRead: StaticSendSync {
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
-    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included in
-    /// `key_range`) The returned iterator will iterate data based on a snapshot corresponding to
-    /// the given `epoch`.
+    /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
+    /// in `key_range`) The returned iterator will iterate data based on a snapshot
+    /// corresponding to the given `epoch`.
     fn iter(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
@@ -282,6 +282,9 @@ pub struct ReadOptions {
 
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,
+    /// Read from historical hummock version of meta snapshot backup.
+    /// It should only be used by `StorageTable` for batch query.
+    pub read_version_from_backup: bool,
 }
 
 pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {

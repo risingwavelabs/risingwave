@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,7 +21,8 @@ use risingwave_sqlparser::ast::{GrantObjects, Privileges, Statement};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::session::{OptimizerContext, SessionImpl};
+use crate::handler::HandlerArgs;
+use crate::session::SessionImpl;
 use crate::user::user_privilege::{
     available_privilege_actions, check_privilege_type, get_prost_action,
 };
@@ -127,10 +128,10 @@ fn make_prost_privilege(
 }
 
 pub async fn handle_grant_privilege(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     stmt: Statement,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let Statement::Grant {
         privileges,
         objects,
@@ -166,10 +167,10 @@ pub async fn handle_grant_privilege(
 }
 
 pub async fn handle_revoke_privilege(
-    context: OptimizerContext,
+    handler_args: HandlerArgs,
     stmt: Statement,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx;
+    let session = handler_args.session;
     let Statement::Revoke {
         privileges,
         objects,

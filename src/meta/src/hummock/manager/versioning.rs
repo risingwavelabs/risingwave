@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,21 +27,31 @@ use risingwave_pb::hummock::{
     HummockVersionStats,
 };
 
+use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{read_lock, write_lock};
+use crate::hummock::metrics_utils::trigger_safepoint_stat;
 use crate::hummock::HummockManager;
 use crate::storage::MetaStore;
 
 /// `HummockVersionSafePoint` prevents hummock versions GE than it from being GC.
 /// It's used by meta node itself to temporarily pin versions.
-#[derive(Clone, PartialEq, Eq)]
 pub struct HummockVersionSafePoint {
-    id: HummockVersionId,
+    pub id: HummockVersionId,
+    event_sender: HummockManagerEventSender,
 }
 
 impl Drop for HummockVersionSafePoint {
     fn drop(&mut self) {
-        // TODO #6482: invoke unregister_safe_point
-        todo!()
+        if let Err(e) = self
+            .event_sender
+            .send(HummockManagerEvent::DropSafePoint(self.id))
+        {
+            tracing::debug!(
+                "failed to drop hummock version safe point {}. {}",
+                self.id,
+                e
+            );
+        }
     }
 }
 
@@ -68,7 +78,7 @@ pub struct Versioning {
         BTreeMap<HummockSstableId, HashMap<CompactionGroupId, /* divide version */ u64>>,
     /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
     /// Hummock versions GE than min(safe_point) should not be GCed.
-    pub version_safe_points: Vec<HummockVersionSafePoint>,
+    pub version_safe_points: Vec<HummockVersionId>,
 
     // Persistent states below
     /// Mapping from id of each hummock version which succeeds checkpoint to its
@@ -88,7 +98,7 @@ impl Versioning {
             .pinned_versions
             .values()
             .map(|v| v.min_pinned_id)
-            .chain(self.version_safe_points.iter().map(|v| v.id))
+            .chain(self.version_safe_points.iter().cloned())
         {
             min_pinned_version_id = cmp::min(id, min_pinned_version_id);
         }
@@ -168,33 +178,34 @@ where
         let mut wl = write_lock!(self, versioning).await;
         let safe_point = HummockVersionSafePoint {
             id: wl.current_version.id,
+            event_sender: self.event_sender.clone(),
         };
-        wl.version_safe_points.push(safe_point.clone());
+        wl.version_safe_points.push(safe_point.id);
+        trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
         safe_point
     }
 
     #[named]
-    pub async fn unregister_safe_point(&self, safe_point: HummockVersionSafePoint) {
+    pub async fn unregister_safe_point(&self, safe_point: HummockVersionId) {
         let mut wl = write_lock!(self, versioning).await;
-        for (idx, sp) in wl.version_safe_points.iter().enumerate() {
-            if *sp == safe_point {
-                wl.version_safe_points.remove(idx);
-                break;
-            }
+        let version_safe_points = &mut wl.version_safe_points;
+        if let Some(pos) = version_safe_points.iter().position(|sp| *sp == safe_point) {
+            version_safe_points.remove(pos);
         }
+        trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::hummock::HummockVersionDelta;
+    use risingwave_hummock_sdk::HummockVersionId;
+    use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionDelta};
 
     use crate::hummock::manager::versioning::Versioning;
 
     #[tokio::test]
     async fn test_extend_ssts_to_delete_from_deltas_trivial_move() {
         let mut versioning = Versioning::default();
-
         // trivial_move
         versioning.hummock_version_deltas.insert(
             2,
@@ -208,5 +219,25 @@ mod tests {
         assert_eq!(versioning.deltas_to_delete.len(), 0);
         versioning.extend_ssts_to_delete_from_deltas(1..=2);
         assert_eq!(versioning.deltas_to_delete.len(), 1);
+    }
+
+    #[test]
+    fn test_min_pinned_version_id() {
+        let mut versioning = Versioning::default();
+        assert_eq!(versioning.min_pinned_version_id(), HummockVersionId::MAX);
+        versioning.pinned_versions.insert(
+            1,
+            HummockPinnedVersion {
+                context_id: 1,
+                min_pinned_id: 10,
+            },
+        );
+        assert_eq!(versioning.min_pinned_version_id(), 10);
+        versioning.version_safe_points.push(5);
+        assert_eq!(versioning.min_pinned_version_id(), 5);
+        versioning.version_safe_points.clear();
+        assert_eq!(versioning.min_pinned_version_id(), 10);
+        versioning.pinned_versions.clear();
+        assert_eq!(versioning.min_pinned_version_id(), HummockVersionId::MAX);
     }
 }

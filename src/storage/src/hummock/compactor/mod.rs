@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,7 +33,7 @@ pub use compaction_filter::{
 };
 pub use context::{CompactorContext, Context};
 use futures::future::try_join_all;
-use futures::{stream, StreamExt, TryFutureExt};
+use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
 use risingwave_common::constants::hummock::CompactionFilterFlag;
@@ -220,7 +220,7 @@ impl Compactor {
             need_quota
         );
 
-        let multi_filter = build_multi_compaction_filter(&compact_task);
+        let mut multi_filter = build_multi_compaction_filter(&compact_task);
 
         let multi_filter_key_extractor = context
             .filter_key_extractor_manager
@@ -241,6 +241,7 @@ impl Compactor {
         let delete_range_agg = match CompactorRunner::build_delete_range_iter(
             &compact_task,
             &compactor_context.sstable_store,
+            &mut multi_filter,
         )
         .await
         {
@@ -441,7 +442,7 @@ impl Compactor {
                             }
                             continue;
                         }
-                        message = stream.message() => {
+                        message = stream.next() => {
                             message
                         },
                         _ = &mut shutdown_rx => {
@@ -450,7 +451,7 @@ impl Compactor {
                         }
                     };
                     match message {
-                        Ok(Some(SubscribeCompactTasksResponse { task })) => {
+                        Some(Ok(SubscribeCompactTasksResponse { task })) => {
                             let task = match task {
                                 Some(task) => task,
                                 None => continue 'consume_stream,
@@ -516,7 +517,7 @@ impl Compactor {
                                 }
                             });
                         }
-                        Err(e) => {
+                        Some(Err(e)) => {
                             tracing::warn!("Failed to consume stream. {}", e.message());
                             continue 'start_stream;
                         }
@@ -736,25 +737,23 @@ impl Compactor {
 
             let tracker_cloned = task_progress.clone();
             let context_cloned = self.context.clone();
-            upload_join_handles.push(
+            upload_join_handles.push(async move {
                 upload_join_handle
-                    .map_err(HummockError::sstable_upload_error)
-                    .and_then(move |upload_result| async move {
-                        upload_result?;
-                        if let Some(tracker) = tracker_cloned {
-                            tracker.inc_ssts_uploaded();
-                        }
-                        if context_cloned.is_share_buffer_compact {
-                            context_cloned
-                                .stats
-                                .shared_buffer_to_sstable_size
-                                .observe(sst_size as _);
-                        } else {
-                            context_cloned.stats.compaction_upload_sst_counts.inc();
-                        }
-                        Ok(())
-                    }),
-            );
+                    .await
+                    .map_err(HummockError::sstable_upload_error)??;
+                if let Some(tracker) = tracker_cloned {
+                    tracker.inc_ssts_uploaded();
+                }
+                if context_cloned.is_share_buffer_compact {
+                    context_cloned
+                        .stats
+                        .shared_buffer_to_sstable_size
+                        .observe(sst_size as _);
+                } else {
+                    context_cloned.stats.compaction_upload_sst_counts.inc();
+                }
+                Ok::<_, HummockError>(())
+            });
         }
 
         // Check if there are any failed uploads. Report all of those SSTs.

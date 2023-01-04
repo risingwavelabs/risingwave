@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -40,7 +40,7 @@ pub mod handler;
 pub use handler::PgResponseStream;
 mod observer;
 mod optimizer;
-pub use optimizer::PlanRef;
+pub use optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
 mod planner;
 pub use planner::Planner;
 #[expect(dead_code)]
@@ -94,7 +94,7 @@ pub struct FrontendOpts {
     #[clap(long, default_value = "0")]
     pub metrics_level: u32,
 
-    /// Te path of `risingwave.toml` configuration file.
+    /// The path of `risingwave.toml` configuration file.
     ///
     /// If empty, default configuration values will be used.
     ///

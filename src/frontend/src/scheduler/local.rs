@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -39,11 +39,10 @@ use tracing::debug;
 use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
-use super::HummockSnapshotGuard;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::SchedulerResult;
+use crate::scheduler::{PinnedHummockSnapshot, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
 pub struct LocalQueryStream {
@@ -72,7 +71,7 @@ pub struct LocalQueryExecution {
     query: Query,
     front_env: FrontendEnv,
     // The snapshot will be released when LocalQueryExecution is dropped.
-    snapshot: HummockSnapshotGuard,
+    snapshot: PinnedHummockSnapshot,
     auth_context: Arc<AuthContext>,
 }
 
@@ -81,7 +80,7 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        snapshot: HummockSnapshotGuard,
+        snapshot: PinnedHummockSnapshot,
         auth_context: Arc<AuthContext>,
     ) -> Self {
         Self {
@@ -115,8 +114,7 @@ impl LocalQueryExecution {
             &plan_node,
             &task_id,
             context,
-            // TODO: Add support to use current epoch when needed
-            self.snapshot.get_committed_epoch(),
+            self.snapshot.get_batch_query_epoch(),
         );
         let executor = executor.build().await?;
 
@@ -246,8 +244,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            // TODO: Add support to use current epoch when needed
-                            epoch: self.snapshot.get_committed_epoch(),
+                            epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
@@ -279,8 +276,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            // TODO: Add support to use current epoch when needed
-                            epoch: self.snapshot.get_committed_epoch(),
+                            epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         // NOTE: select a random work node here.
                         let worker_node = self.front_env.worker_node_manager().next_random()?;
@@ -312,8 +308,7 @@ impl LocalQueryExecution {
 
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
-                        // TODO: Add support to use current epoch when needed
-                        epoch: self.snapshot.get_committed_epoch(),
+                        epoch: Some(self.snapshot.get_batch_query_epoch()),
                     };
 
                     let workers = if second_stage.parallelism == 1 {

@@ -2,7 +2,7 @@ I hereby agree to the terms of the [Singularity Data, Inc. Contributor License A
 
 ## What's changed and what's your intention?
 
-***PLEASE DO NOT LEAVE THIS EMPTY !!!***
+**This section will be used as the commit message. Please do not leave this empty!**
 
 Please explain **IN DETAIL** what the changes are in this PR and why they are needed:
 

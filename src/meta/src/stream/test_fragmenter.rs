@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,8 +29,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFr
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     agg_call_state, AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode,
-    FragmentType, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph,
-    StreamNode,
+    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph,
+    StreamNode, StreamSource,
 };
 
 use crate::manager::MetaSrvEnv;
@@ -182,10 +182,12 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         .collect_vec();
     let source_node = StreamNode {
         node_body: Some(NodeBody::Source(SourceNode {
-            source_id: 1,
-            state_table: Some(make_source_internal_table(1)),
-            columns,
-            ..Default::default()
+            source_inner: Some(StreamSource {
+                source_id: 1,
+                state_table: Some(make_source_internal_table(1)),
+                columns,
+                ..Default::default()
+            }),
         })),
         stream_key: vec![2],
         ..Default::default()
@@ -193,7 +195,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     fragments.push(StreamFragment {
         fragment_id: 2,
         node: Some(source_node),
-        fragment_type: FragmentType::Source as i32,
+        fragment_type_mask: FragmentTypeFlag::Source as u32,
         is_singleton: false,
         table_ids_cnt: 0,
         upstream_table_ids: vec![],
@@ -262,7 +264,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     fragments.push(StreamFragment {
         fragment_id: 1,
         node: Some(simple_agg_node),
-        fragment_type: FragmentType::Others as i32,
+        fragment_type_mask: FragmentTypeFlag::FragmentUnspecified as u32,
         is_singleton: false,
         table_ids_cnt: 0,
         upstream_table_ids: vec![],
@@ -347,7 +349,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
     fragments.push(StreamFragment {
         fragment_id: 0,
         node: Some(mview_node),
-        fragment_type: FragmentType::Mview as i32,
+        fragment_type_mask: FragmentTypeFlag::Mview as u32,
         is_singleton: true,
         table_ids_cnt: 0,
         upstream_table_ids: vec![],
@@ -408,11 +410,11 @@ async fn test_fragmenter() -> MetaResult<()> {
 
     let table_fragments = TableFragments::new(TableId::default(), graph);
     let actors = table_fragments.actors();
-    let source_actor_ids = table_fragments.source_actor_ids();
+    let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
     let sink_actor_ids = table_fragments.mview_actor_ids();
     let internal_table_ids = ctx.internal_table_ids();
     assert_eq!(actors.len(), 9);
-    assert_eq!(source_actor_ids, vec![6, 7, 8, 9]);
+    assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
     assert_eq!(2, internal_table_ids.len());
 

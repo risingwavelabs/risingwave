@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,11 +20,12 @@ use risingwave_sqlparser::ast::{
     TableWithJoins,
 };
 
-use super::create_mv::{check_column_names, get_column_names};
+use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::optimizer::PlanRef;
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::handler::HandlerArgs;
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::Planner;
 
@@ -39,7 +40,7 @@ fn into_sink_prost(table: Table) -> ProstSink {
         dependent_relations: table.dependent_relations,
         distribution_key: table.distribution_key,
         stream_key: table.stream_key,
-        appendonly: table.appendonly,
+        append_only: table.append_only,
         properties: table.properties,
         owner: table.owner,
         definition: table.definition,
@@ -88,7 +89,7 @@ pub fn gen_sink_plan(
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name)?;
 
-    let definition = query.to_string();
+    let definition = context.normalized_sql().to_owned();
 
     let bound = {
         let mut binder = Binder::new(session);
@@ -98,25 +99,14 @@ pub fn gen_sink_plan(
     // If colume names not specified, use the name in materialized view.
     let col_names = get_column_names(&bound, session, stmt.columns)?;
 
-    let properties = context.inner().with_options.clone();
+    let properties = context.with_options().clone();
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
-    let col_names = if let Some(col_names) = col_names {
-        // Check the col_names match number of columns in the query.
-        check_column_names(&col_names, &plan_root)?;
-        col_names
-    } else {
-        plan_root
-            .schema()
-            .fields()
-            .iter()
-            .cloned()
-            .map(|field| field.name)
-            .collect()
+    if let Some(col_names) = col_names {
+        plan_root.set_out_names(col_names)?;
     };
 
-    let sink_plan =
-        plan_root.gen_create_sink_plan(sink_table_name, definition, col_names, properties)?;
+    let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, properties)?;
 
     let sink_catalog_prost = sink_plan
         .sink_catalog()
@@ -138,14 +128,15 @@ pub fn gen_sink_plan(
 }
 
 pub async fn handle_create_sink(
-    context: OptimizerContext,
+    handle_args: HandlerArgs,
     stmt: CreateSinkStatement,
 ) -> Result<RwPgResponse> {
-    let session = context.session_ctx.clone();
+    let session = handle_args.session.clone();
 
     session.check_relation_name_duplicated(stmt.sink_name.clone())?;
 
     let (sink, graph) = {
+        let context = OptimizerContext::from_handler_args(handle_args);
         let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
 
         (sink, build_graph(plan))

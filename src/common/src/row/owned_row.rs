@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,23 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! An owned row type with a `Vec<Datum>`.
-
 use std::ops;
 
-use super::{Row2, RowExt};
+use super::Row;
 use crate::collection::estimate_size::EstimateSize;
 use crate::types::{DataType, Datum, DatumRef, ToDatumRef};
-use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
 use crate::util::value_encoding::deserialize_datum;
 
-/// TODO(row trait): rename to `OwnedRow`.
+/// An owned row type with a `Vec<Datum>`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct Row(Vec<Datum>); // made private to avoid abuse
+pub struct OwnedRow(Vec<Datum>); // made private to avoid abuse
 
 /// Do not implement `IndexMut` to make it immutable.
-impl ops::Index<usize> for Row {
+impl ops::Index<usize> for OwnedRow {
     type Output = Datum;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -36,7 +33,7 @@ impl ops::Index<usize> for Row {
     }
 }
 
-impl PartialOrd for Row {
+impl PartialOrd for OwnedRow {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         if self.0.len() != other.0.len() {
             return None;
@@ -45,7 +42,7 @@ impl PartialOrd for Row {
     }
 }
 
-impl Ord for Row {
+impl Ord for OwnedRow {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.partial_cmp(other).unwrap_or_else(|| {
             panic!("cannot compare rows with different lengths:\n left: {self:?}\nright: {other:?}")
@@ -53,8 +50,8 @@ impl Ord for Row {
     }
 }
 
-impl Row {
-    pub fn new(values: Vec<Datum>) -> Self {
+impl OwnedRow {
+    pub const fn new(values: Vec<Datum>) -> Self {
         Self(values)
     }
 
@@ -67,33 +64,20 @@ impl Row {
     ///
     /// Note: use [`empty`](super::empty) if possible.
     pub fn empty<'a>() -> &'a Self {
-        static EMPTY_ROW: Row = Row(Vec::new());
+        static EMPTY_ROW: OwnedRow = OwnedRow(Vec::new());
         &EMPTY_ROW
-    }
-
-    /// Serialize part of the row into memcomparable bytes.
-    ///
-    /// TODO(row trait): introduce `Row::memcmp_serialize`.
-    pub fn extract_memcomparable_by_indices(
-        &self,
-        serializer: &OrderedRowSerde,
-        key_indices: &[usize],
-    ) -> Vec<u8> {
-        let mut bytes = vec![];
-        serializer.serialize((&self).project(key_indices), &mut bytes);
-        bytes
     }
 }
 
-impl EstimateSize for Row {
+impl EstimateSize for OwnedRow {
     fn estimated_heap_size(&self) -> usize {
         // FIXME(bugen): this is not accurate now as the heap size of some `Scalar` is not counted.
         self.0.capacity() * std::mem::size_of::<Datum>()
     }
 }
 
-impl Row2 for Row {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+impl Row for OwnedRow {
+    type Iter<'a> = std::iter::Map<std::slice::Iter<'a, Datum>, fn(&'a Datum) -> DatumRef<'a>>
     where
         Self: 'a;
 
@@ -114,21 +98,21 @@ impl Row2 for Row {
 
     #[inline]
     fn iter(&self) -> Self::Iter<'_> {
-        Iterator::map(self.0.iter(), ToDatumRef::to_datum_ref)
+        self.0.iter().map(ToDatumRef::to_datum_ref)
     }
 
     #[inline]
-    fn to_owned_row(&self) -> Row {
+    fn to_owned_row(&self) -> OwnedRow {
         self.clone()
     }
 
     #[inline]
-    fn into_owned_row(self) -> Row {
+    fn into_owned_row(self) -> OwnedRow {
         self
     }
 }
 
-/// Deserializer of the `Row`.
+/// Deserializer of the [`OwnedRow`].
 #[derive(Clone, Debug)]
 pub struct RowDeserializer<D: AsRef<[DataType]> = Vec<DataType>> {
     data_types: D,
@@ -141,12 +125,12 @@ impl<D: AsRef<[DataType]>> RowDeserializer<D> {
     }
 
     /// Deserialize the row from value encoding bytes.
-    pub fn deserialize(&self, mut data: impl bytes::Buf) -> value_encoding::Result<Row> {
+    pub fn deserialize(&self, mut data: impl bytes::Buf) -> value_encoding::Result<OwnedRow> {
         let mut values = Vec::with_capacity(self.data_types().len());
         for typ in self.data_types() {
             values.push(deserialize_datum(&mut data, typ)?);
         }
-        Ok(Row(values))
+        Ok(OwnedRow(values))
     }
 
     pub fn data_types(&self) -> &[DataType] {
@@ -159,12 +143,13 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
+    use crate::row::RowExt;
     use crate::types::{DataType as Ty, IntervalUnit, ScalarImpl};
     use crate::util::hash_util::Crc32FastBuilder;
 
     #[test]
     fn row_value_encode_decode() {
-        let row = Row::new(vec![
+        let row = OwnedRow::new(vec![
             Some(ScalarImpl::Utf8("string".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Int16(1)),
@@ -197,7 +182,7 @@ mod tests {
     fn test_hash_row() {
         let hash_builder = Crc32FastBuilder;
 
-        let row1 = Row::new(vec![
+        let row1 = OwnedRow::new(vec![
             Some(ScalarImpl::Utf8("string".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Int16(1)),
@@ -208,7 +193,7 @@ mod tests {
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
         ]);
-        let row2 = Row::new(vec![
+        let row2 = OwnedRow::new(vec![
             Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
             Some(ScalarImpl::Utf8("string".into())),
             Some(ScalarImpl::Bool(true)),
@@ -221,7 +206,7 @@ mod tests {
         ]);
         assert_ne!(row1.hash(hash_builder), row2.hash(hash_builder));
 
-        let row_default = Row::default();
+        let row_default = OwnedRow::default();
         assert_eq!(row_default.hash(hash_builder).0, 0);
     }
 }

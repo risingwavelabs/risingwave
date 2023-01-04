@@ -1,17 +1,18 @@
-# `src/risedevtool/risedev-schema.json` defines the schema for risedev.yml
+# The schema for RiseDev configuration files is defined under `src/risedevtool/schemas`.
 #
 # You can add the following section to `.vscode/settings.json` to get hover support in VS Code:
 #
 # ```
 #     "yaml.schemas": {
-#         "src/risedevtool/risedev-schema.json": "risedev.yml"
+#         "src/risedevtool/schemas/risedev.json": "risedev.yml",
+#         "src/risedevtool/schemas/risedev-profiles.user.json": "risedev-profiles.user.yml"
 #     }
 # ```
 
-risedev:
-  #########################################
-  ### Configurations used by developers ###
-  #########################################
+profile:
+  #################################################
+  ### Configuration profiles used by developers ###
+  #################################################
 
   # The default configuration will start 1 compute node, 1 meta node and 1 frontend.
   default:
@@ -100,23 +101,6 @@ risedev:
   full:
     steps:
       - use: minio
-      - use: etcd
-      - use: meta-node
-      - use: compute-node
-      - use: frontend
-      - use: compactor
-      - use: prometheus
-      - use: grafana
-      - use: zookeeper
-        persist-data: true
-      - use: kafka
-        persist-data: true
-
-  full-compaction-test:
-    config-path: src/config/compaction-test.toml
-    steps:
-      - use: aws-s3
-        bucket: some-bucket # configure a valid bucket name
       - use: etcd
       - use: meta-node
       - use: compute-node
@@ -552,6 +536,27 @@ risedev:
       - use: frontend
       - use: compactor
 
+  ci-meta-backup-test:
+    config-path: src/config/ci-meta-backup-test.toml
+    steps:
+      - use: etcd
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+
+  ci-meta-backup-test-restore:
+    config-path: src/config/ci-meta-backup-test.toml
+    steps:
+      - use: etcd
+      - use: minio
+
+  ci-delete-range-test:
+    config-path: src/config/ci-delete-range-test.toml
+    steps:
+      - use: minio
+
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"
@@ -692,6 +697,9 @@ template:
 
     # Id of this instance
     id: meta-node-${port}
+
+    # RPC endpoint for connector node colocated with Meta
+    connector-rpc-endpoint: "127.0.0.1:60061"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false

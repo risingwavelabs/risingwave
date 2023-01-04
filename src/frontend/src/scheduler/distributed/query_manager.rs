@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -34,7 +34,7 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::{
-    ExecutionContextRef, HummockSnapshotGuard, HummockSnapshotManagerRef, SchedulerResult,
+    ExecutionContextRef, HummockSnapshotManagerRef, PinnedHummockSnapshot, SchedulerResult,
 };
 
 pub struct DistributedQueryStream {
@@ -160,7 +160,7 @@ impl QueryManager {
         &self,
         context: ExecutionContextRef,
         query: Query,
-        pinned_snapshot: HummockSnapshotGuard,
+        pinned_snapshot: PinnedHummockSnapshot,
     ) -> SchedulerResult<DistributedQueryStream> {
         let query_id = query.query_id.clone();
         let query_execution = Arc::new(QueryExecution::new(query, context.session().id()));

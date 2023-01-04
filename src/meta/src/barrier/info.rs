@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,7 +28,7 @@ pub struct BarrierActorInfo {
     /// node_id => actors
     pub actor_map: HashMap<WorkerId, Vec<ActorId>>,
 
-    /// node_id => source actors
+    /// node_id => barrier inject actors
     pub actor_map_to_send: HashMap<WorkerId, Vec<ActorId>>,
 }
 
@@ -47,7 +47,7 @@ impl BarrierActorInfo {
         Self {
             node_map,
             actor_map: actor_infos.actor_maps,
-            actor_map_to_send: actor_infos.source_actor_maps,
+            actor_map_to_send: actor_infos.barrier_inject_actor_maps,
         }
     }
 

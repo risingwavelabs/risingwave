@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures::stream::BoxStream;
 use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
@@ -26,12 +27,15 @@ use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
     SstIdRange,
 };
+use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
+use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
     Source as ProstSource, Table as ProstTable, View as ProstView,
 };
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
+use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
@@ -56,7 +60,7 @@ use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
 
 use crate::error::Result;
-use crate::hummock_meta_client::HummockMetaClient;
+use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
 use crate::{rpc_client_method_impl, ExtraInfoSourceRef};
 
 type DatabaseId = u32;
@@ -226,20 +230,20 @@ impl MetaClient {
         Ok((resp.sink_id, resp.version))
     }
 
-    pub async fn create_materialized_source(
+    pub async fn create_table(
         &self,
-        source: ProstSource,
+        source: Option<ProstSource>,
         table: ProstTable,
         graph: StreamFragmentGraph,
-    ) -> Result<(TableId, u32, CatalogVersion)> {
-        let request = CreateMaterializedSourceRequest {
+    ) -> Result<(TableId, CatalogVersion)> {
+        let request = CreateTableRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
-            source: Some(source),
+            source,
         };
-        let resp = self.inner.create_materialized_source(request).await?;
+        let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.table_id.into(), resp.source_id, resp.version))
+        Ok((resp.table_id.into(), resp.version))
     }
 
     pub async fn create_view(&self, view: ProstView) -> Result<(u32, CatalogVersion)> {
@@ -265,17 +269,17 @@ impl MetaClient {
         Ok((resp.index_id.into(), resp.version))
     }
 
-    pub async fn drop_materialized_source(
+    pub async fn drop_table(
         &self,
-        source_id: u32,
+        source_id: Option<u32>,
         table_id: TableId,
     ) -> Result<CatalogVersion> {
-        let request = DropMaterializedSourceRequest {
-            source_id,
+        let request = DropTableRequest {
+            source_id: source_id.map(SourceId::Id),
             table_id: table_id.table_id(),
         };
 
-        let resp = self.inner.drop_materialized_source(request).await?;
+        let resp = self.inner.drop_table(request).await?;
         Ok(resp.version)
     }
 
@@ -646,6 +650,32 @@ impl MetaClient {
         let _resp = self.inner.rise_ctl_update_compaction_config(req).await?;
         Ok(())
     }
+
+    pub async fn backup_meta(&self) -> Result<u64> {
+        let req = BackupMetaRequest {};
+        let resp = self.inner.backup_meta(req).await?;
+        Ok(resp.job_id)
+    }
+
+    pub async fn get_backup_job_status(&self, job_id: u64) -> Result<BackupJobStatus> {
+        let req = GetBackupJobStatusRequest { job_id };
+        let resp = self.inner.get_backup_job_status(req).await?;
+        Ok(resp.job_status())
+    }
+
+    pub async fn delete_meta_snapshot(&self, snapshot_ids: &[u64]) -> Result<()> {
+        let req = DeleteMetaSnapshotRequest {
+            snapshot_ids: snapshot_ids.to_vec(),
+        };
+        let _resp = self.inner.delete_meta_snapshot(req).await?;
+        Ok(())
+    }
+
+    pub async fn get_meta_snapshot_manifest(&self) -> Result<MetaSnapshotManifest> {
+        let req = GetMetaSnapshotManifestRequest {};
+        let resp = self.inner.get_meta_snapshot_manifest(req).await?;
+        Ok(resp.manifest.expect("should exist"))
+    }
 }
 
 #[async_trait]
@@ -734,15 +764,20 @@ impl HummockMetaClient for MetaClient {
         panic!("Only meta service can commit_epoch in production.")
     }
 
+    async fn update_current_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
+        panic!("Only meta service can update_current_epoch in production.")
+    }
+
     async fn subscribe_compact_tasks(
         &self,
         max_concurrent_task_number: u64,
-    ) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+    ) -> Result<BoxStream<'static, CompactTaskItem>> {
         let req = SubscribeCompactTasksRequest {
             context_id: self.worker_id(),
             max_concurrent_task_number,
         };
-        self.inner.subscribe_compact_tasks(req).await
+        let stream = self.inner.subscribe_compact_tasks(req).await?;
+        Ok(Box::pin(stream))
     }
 
     async fn report_compaction_task_progress(
@@ -819,6 +854,7 @@ struct GrpcMetaClient {
     stream_client: StreamManagerServiceClient<Channel>,
     user_client: UserServiceClient<Channel>,
     scale_client: ScaleServiceClient<Channel>,
+    backup_client: BackupServiceClient<Channel>,
 }
 
 impl GrpcMetaClient {
@@ -871,7 +907,8 @@ impl GrpcMetaClient {
         let notification_client = NotificationServiceClient::new(channel.clone());
         let stream_client = StreamManagerServiceClient::new(channel.clone());
         let user_client = UserServiceClient::new(channel.clone());
-        let scale_client = ScaleServiceClient::new(channel);
+        let scale_client = ScaleServiceClient::new(channel.clone());
+        let backup_client = BackupServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
@@ -881,6 +918,7 @@ impl GrpcMetaClient {
             stream_client,
             user_client,
             scale_client,
+            backup_client,
         })
     }
 
@@ -903,7 +941,7 @@ macro_rules! for_all_meta_rpc {
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
-            ,{ ddl_client, create_materialized_source, CreateMaterializedSourceRequest, CreateMaterializedSourceResponse }
+            ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
@@ -911,7 +949,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
             ,{ ddl_client, create_index, CreateIndexRequest, CreateIndexResponse }
-            ,{ ddl_client, drop_materialized_source, DropMaterializedSourceRequest, DropMaterializedSourceResponse }
+            ,{ ddl_client, drop_table, DropTableRequest, DropTableResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_view, DropViewRequest, DropViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
@@ -958,6 +996,10 @@ macro_rules! for_all_meta_rpc {
             ,{ scale_client, get_cluster_info, GetClusterInfoRequest, GetClusterInfoResponse }
             ,{ scale_client, reschedule, RescheduleRequest, RescheduleResponse }
             ,{ notification_client, subscribe, SubscribeRequest, Streaming<SubscribeResponse> }
+            ,{ backup_client, backup_meta, BackupMetaRequest, BackupMetaResponse }
+            ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
+            ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
+            ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
         }
     };
 }

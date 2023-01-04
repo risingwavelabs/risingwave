@@ -1,7 +1,7 @@
 statement ok
 create materialized view ch_benchmark_q6 as
-select sum(ol_amount) as revenue
+select round(sum(ol_amount)::decimal, 2) as revenue
 from orderline
 where ol_delivery_d >= '1999-01-01 00:00:00.000000'
-     and ol_delivery_d < '2020-01-01 00:00:00.000000'
+     and ol_delivery_d < '2199-01-01 00:00:00.000000'
      and ol_quantity between 1 and 100000;
