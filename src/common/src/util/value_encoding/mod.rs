@@ -28,6 +28,7 @@ use crate::types::{
 
 pub mod error;
 use error::ValueEncodingError;
+use crate::row::Row;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
@@ -56,7 +57,7 @@ pub fn deserialize_datum(mut data: impl Buf, ty: &DataType) -> Result<Datum> {
 // prevent recursive use of &mut
 #[inline(always)]
 fn inner_deserialize_datum(data: &mut impl Buf, ty: &DataType) -> Result<Datum> {
-    let mut s = vec![];
+    let mut s = vec![123; 1000];
     data.copy_to_slice(&mut s);
     println!("data: {:?}", s);
     println!("datatype: {:?}", ty);
