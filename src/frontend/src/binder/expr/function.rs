@@ -509,7 +509,7 @@ impl Binder {
             )
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
-                "For creation of MV, `now` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
+                "For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
                 self.context.clause
             ))
             .into());
