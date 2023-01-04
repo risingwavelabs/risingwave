@@ -646,6 +646,7 @@ impl HummockVersionReader {
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await
                 };
+                // use `buffer_unordered` to simulate `try_join_all` by assigning an index
                 flatten_reqs
                     .push(async move { capture_ref.await.map(|result| (inner_req_count, result)) });
                 req_count += 1;
