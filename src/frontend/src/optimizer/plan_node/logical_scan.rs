@@ -67,6 +67,13 @@ impl LogicalScan {
         // table_idx will not change. And the `required_col_idx` is the `table_idx` of the
         // required columns, i.e., the mapping from operator_idx to table_idx.
 
+        if ctx.is_explain_trace() {
+            ctx.trace(format!("Conditions: {:?}", predicate.clone()));
+            for conjunctions in &predicate.conjunctions {
+                ctx.trace(format!("Datatype: {:?}", conjunctions.as_eq_const().unwrap().0.data_type));
+            }
+        }
+
         let mut required_col_idx = output_col_idx.clone();
         let mut visitor =
             CollectInputRef::new(FixedBitSet::with_capacity(table_desc.columns.len()));

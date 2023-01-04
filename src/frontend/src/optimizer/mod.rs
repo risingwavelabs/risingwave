@@ -237,6 +237,9 @@ impl PlanRoot {
             vec![UnionMergeRule::create()],
             ApplyOrder::BottomUp,
         );
+        if explain_trace {
+            ctx.trace("Predicate Push Down Start:");
+        }
 
         // Predicate push down before translate apply, because we need to calculate the domain
         // and predicate push down can reduce the size of domain.
