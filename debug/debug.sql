@@ -189,7 +189,7 @@ WITH with_0 AS (
 )
 
 SELECT
-    TIMESTAMP '2022-09-30 17:50:31' AS col_0
+    1
 FROM
     with_0,
     hop(
