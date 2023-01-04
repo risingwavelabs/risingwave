@@ -293,7 +293,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 // previous agg result from the result table.
                 let agg_group = {
                     match agg_group {
-                        Some(mgr) => mgr.unwrap(),
+                        Some(ag) => ag.unwrap(),
                         None => {
                             lookup_miss_count.fetch_add(1, Ordering::Relaxed);
                             Box::new(
@@ -434,7 +434,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 for key in batch {
                     let agg_group = agg_groups
                         .pop(&key)
-                        .expect("changed group must have corresponding AggState")
+                        .expect("changed group must have corresponding AggGroup")
                         .unwrap();
                     agg_group.flush_state_if_needed(storages).await?;
                     agg_tasks.push((key, agg_group));
