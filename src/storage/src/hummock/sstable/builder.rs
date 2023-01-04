@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use bytes::BytesMut;
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::{
@@ -31,7 +32,7 @@ use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
 use super::{
     BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, SstableWriter, DEFAULT_BLOCK_SIZE,
-    DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
+    DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{DeleteRangeTombstone, HummockResult};
@@ -100,7 +101,7 @@ pub struct SstableBuilder<W: SstableWriter> {
     /// `table_id` of added keys.
     table_ids: BTreeSet<u32>,
     /// Hashes of user keys.
-    user_key_hashes: Vec<u32>,
+    user_key_hashes: HashMap<u32, Vec<u32>>,
     last_full_key: Vec<u8>,
     last_extract_key: Vec<u8>,
     /// Buffer for encoded key and value to avoid allocation.
@@ -148,7 +149,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             }),
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             table_ids: BTreeSet::new(),
-            user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
+            user_key_hashes: HashMap::new(),
             last_table_id: None,
             raw_key: BytesMut::new(),
             raw_value: BytesMut::new(),
@@ -210,9 +211,21 @@ impl<W: SstableWriter> SstableBuilder<W> {
             // add bloom_filter check
             // 1. not empty_key
             // 2. extract_key key is not duplicate
+
             if !extract_key.is_empty() && extract_key != self.last_extract_key.as_slice() {
                 // avoid duplicate add to bloom filter
-                self.user_key_hashes.push(xxh32::xxh32(extract_key, 0));
+                let key_hash = xxh32::xxh32(extract_key, 0);
+                if self.user_key_hashes.contains_key(&table_id) {
+                    let mut current_key_hashes =
+                        self.user_key_hashes.get(&table_id).unwrap().clone();
+                    current_key_hashes.push(key_hash);
+                    self.user_key_hashes.remove(&table_id);
+                    self.user_key_hashes
+                        .insert(table_id, current_key_hashes.to_vec());
+                } else {
+                    self.user_key_hashes.insert(table_id, vec![key_hash]);
+                }
+
                 self.last_extract_key.clear();
                 self.last_extract_key.extend_from_slice(extract_key);
             }
@@ -292,18 +305,27 @@ impl<W: SstableWriter> SstableBuilder<W> {
         }
         self.total_key_count += self.range_tombstones.len() as u64;
         self.stale_key_count += self.range_tombstones.len() as u64;
-
-        let mut meta = SstableMeta {
-            block_metas: self.block_metas,
-            bloom_filter: if self.options.bloom_false_positive > 0.0 {
+        let table_ids = self.table_ids.iter().collect_vec();
+        let mut bloom_filter = BTreeMap::new();
+        for table_id in table_ids {
+            if let Some(per_table_user_key_hashes) = self.user_key_hashes.get(table_id) && self.options.bloom_false_positive > 0.0   {
                 let bits_per_key = Bloom::bloom_bits_per_key(
-                    self.user_key_hashes.len(),
+                    per_table_user_key_hashes.len(),
                     self.options.bloom_false_positive,
                 );
-                Bloom::build_from_key_hashes(&self.user_key_hashes, bits_per_key)
-            } else {
-                vec![]
-            },
+
+                bloom_filter.insert(
+                    *table_id,
+                    Bloom::build_from_key_hashes(
+                        self.user_key_hashes.get(table_id).unwrap(),
+                        bits_per_key,
+                    ),
+                );
+            }
+        }
+        let mut meta = SstableMeta {
+            block_metas: self.block_metas,
+            bloom_filter,
             estimated_size: 0,
             key_count: self.total_key_count as u32,
             smallest_key,

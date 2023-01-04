@@ -553,10 +553,22 @@ impl HummockVersionReader {
                 .sstable(sstable_info, &mut local_stats)
                 .in_span(Span::enter_with_local_parent("get_sstable"))
                 .await?;
-            if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
-                if !hit_sstable_bloom_filter(table_holder.value(), *prefix_hash, &mut local_stats) {
-                    continue;
+            let mut hit_bloom_filter = false;
+            for table_id in &sstable_info.table_ids {
+                if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
+                    if !hit_sstable_bloom_filter(
+                        table_holder.value(),
+                        *prefix_hash,
+                        &mut local_stats,
+                        *table_id,
+                    ) {
+                        hit_bloom_filter = true;
+                        break;
+                    }
                 }
+            }
+            if hit_bloom_filter {
+                continue;
             }
 
             if !table_holder.value().meta.range_tombstone_list.is_empty()
@@ -624,10 +636,22 @@ impl HummockVersionReader {
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
 
-                    if let Some(key_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(sstable.value(), *key_hash, &mut local_stats) {
-                            continue;
+                    let mut hit_bloom_filter = false;
+                    for table_id in &sstable_info.table_ids {
+                        if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
+                            if !hit_sstable_bloom_filter(
+                                sstable.value(),
+                                *prefix_hash,
+                                &mut local_stats,
+                                *table_id,
+                            ) {
+                                hit_bloom_filter = true;
+                                break;
+                            }
                         }
+                    }
+                    if hit_bloom_filter {
+                        continue;
                     }
                     if !sstable.value().meta.range_tombstone_list.is_empty()
                         && !read_options.ignore_range_tombstone
@@ -654,15 +678,28 @@ impl HummockVersionReader {
                 }
                 // Overlapping
                 let mut iters = Vec::new();
+                let mut hit_bloom_filter = false;
                 for table_info in table_infos.into_iter().rev() {
                     let sstable = self
                         .sstable_store
                         .sstable(table_info, &mut local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
-                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
-                        {
+
+                    for table_id in &table_info.table_ids {
+                        if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
+                            if !hit_sstable_bloom_filter(
+                                sstable.value(),
+                                *prefix_hash,
+                                &mut local_stats,
+                                *table_id,
+                            ) {
+                                hit_bloom_filter = true;
+                                break;
+                            }
+                        }
+
+                        if hit_bloom_filter {
                             continue;
                         }
                     }

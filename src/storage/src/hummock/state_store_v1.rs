@@ -336,10 +336,16 @@ impl HummockStorageV1 {
                             .sstable(sstable_info, &mut local_stats)
                             .in_span(Span::enter_with_local_parent("get_sstable"))
                             .await?;
-
-                        if hit_sstable_bloom_filter(sstable.value(), *prefix_hash, &mut local_stats)
-                        {
-                            sstables.push((*sstable_info).clone());
+                        for table_id in &sstable_info.table_ids {
+                            if hit_sstable_bloom_filter(
+                                sstable.value(),
+                                *prefix_hash,
+                                &mut local_stats,
+                                *table_id,
+                            ) {
+                                sstables.push((*sstable_info).clone());
+                                break;
+                            }
                         }
                     } else {
                         sstables.push((*sstable_info).clone());
@@ -362,12 +368,15 @@ impl HummockStorageV1 {
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
                     if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(
-                            sstable.value(),
-                            *prefix_hash,
-                            &mut local_stats,
-                        ) {
-                            continue;
+                        for table_id in &table_info.table_ids {
+                            if !hit_sstable_bloom_filter(
+                                sstable.value(),
+                                *prefix_hash,
+                                &mut local_stats,
+                                *table_id,
+                            ) {
+                                continue;
+                            }
                         }
                     }
 

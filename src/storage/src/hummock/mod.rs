@@ -333,6 +333,7 @@ pub async fn get_from_sstable_info(
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
+    let table_id = full_key.user_key.table_id.table_id();
     let ukey = &full_key.user_key;
     let delete_epoch = if read_options.ignore_range_tombstone {
         None
@@ -343,7 +344,7 @@ pub async fn get_from_sstable_info(
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
     if read_options.check_bloom_filter
-        && !hit_sstable_bloom_filter(sstable.value(), dist_key_hash, local_stats)
+        && !hit_sstable_bloom_filter(sstable.value(), dist_key_hash, local_stats, table_id)
     {
         if delete_epoch.is_some() {
             return Ok(Some(HummockValue::Delete));
@@ -391,9 +392,10 @@ pub fn hit_sstable_bloom_filter(
     sstable_info_ref: &Sstable,
     prefix_hash: u32,
     local_stats: &mut StoreLocalStatistic,
+    table_id: u32,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
-    let surely_not_have = sstable_info_ref.surely_not_have_hashvalue(prefix_hash);
+    let surely_not_have = sstable_info_ref.surely_not_have_hashvalue(prefix_hash, table_id);
 
     if surely_not_have {
         local_stats.bloom_filter_true_negative_count += 1;

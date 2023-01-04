@@ -17,6 +17,7 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 mod block;
 
+use std::collections::BTreeMap;
 use std::fmt::{Debug, Formatter};
 
 pub use block::*;
@@ -147,7 +148,7 @@ impl Sstable {
         };
         if enable_bloom_filter() && self.has_bloom_filter() {
             let hash = xxh32::xxh32(dist_key, 0);
-            self.surely_not_have_hashvalue(hash)
+            self.surely_not_have_hashvalue(hash, 0_u32)
         } else {
             false
         }
@@ -159,9 +160,15 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn surely_not_have_hashvalue(&self, hash: u32) -> bool {
-        let bloom = Bloom::new(&self.meta.bloom_filter);
-        bloom.surely_not_have_hash(hash)
+    pub fn surely_not_have_hashvalue(&self, hash: u32, table_id: u32) -> bool {
+        let bloom_filter_key = self.meta.bloom_filter.get(&table_id);
+        match bloom_filter_key {
+            Some(bloom_filter_key) => {
+                let bloom = Bloom::new(bloom_filter_key);
+                bloom.surely_not_have_hash(hash)
+            }
+            None => false,
+        }
     }
 
     pub fn block_count(&self) -> usize {
@@ -235,7 +242,7 @@ impl BlockMeta {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct SstableMeta {
     pub block_metas: Vec<BlockMeta>,
-    pub bloom_filter: Vec<u8>,
+    pub bloom_filter: BTreeMap<u32, Vec<u8>>,
     pub estimated_size: u32,
     pub key_count: u32,
     pub smallest_key: Vec<u8>,
@@ -271,7 +278,11 @@ impl SstableMeta {
         for block_meta in &self.block_metas {
             block_meta.encode(buf);
         }
-        put_length_prefixed_slice(buf, &self.bloom_filter);
+        buf.put_u32_le(self.bloom_filter.len() as u32);
+        for (table_id, bloom_filter_key) in &self.bloom_filter {
+            buf.put_u32_le(*table_id);
+            put_length_prefixed_slice(buf, bloom_filter_key);
+        }
         buf.put_u32_le(self.estimated_size);
         buf.put_u32_le(self.key_count);
         put_length_prefixed_slice(buf, &self.smallest_key);
@@ -312,7 +323,14 @@ impl SstableMeta {
         for _ in 0..block_meta_count {
             block_metas.push(BlockMeta::decode(buf));
         }
-        let bloom_filter = get_length_prefixed_slice(buf);
+        let bloom_filter_count = buf.get_u32_le() as usize;
+        let mut bloom_filter = BTreeMap::new();
+        for _ in 0..bloom_filter_count {
+            let table_id = buf.get_u32_le();
+            let bloom_filter_key = get_length_prefixed_slice(buf);
+            bloom_filter.insert(table_id, bloom_filter_key);
+        }
+
         let estimated_size = buf.get_u32_le();
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
@@ -353,7 +371,8 @@ impl SstableMeta {
             .map(| tombstone| 16 + tombstone.start_user_key.encoded_len() + tombstone.end_user_key.encoded_len())
             .sum::<usize>()
             + 4 // bloom filter len
-            + self.bloom_filter.len()
+            + 8 * self.bloom_filter.len()
+            + self.bloom_filter.values().map(| bloom_filter_key|bloom_filter_key.len()).sum::<usize>()
             + 4 // estimated size
             + 4 // key count
             + 4 // key len
@@ -378,6 +397,11 @@ mod tests {
 
     #[test]
     pub fn test_sstable_meta_enc_dec() {
+        let mut bloom_filter = BTreeMap::new();
+        bloom_filter.insert(0_u32, b"0123456789".to_vec());
+        bloom_filter.insert(1_u32, b"987654321".to_vec());
+        bloom_filter.insert(2_u32, b"abcde".to_vec());
+        bloom_filter.insert(3_u32, b"xyz".to_vec());
         let meta = SstableMeta {
             block_metas: vec![
                 BlockMeta {
@@ -393,7 +417,8 @@ mod tests {
                     uncompressed_size: 0,
                 },
             ],
-            bloom_filter: b"0123456789".to_vec(),
+
+            bloom_filter,
             estimated_size: 123,
             key_count: 123,
             smallest_key: b"0-smallest-key".to_vec(),

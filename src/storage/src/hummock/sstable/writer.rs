@@ -73,6 +73,8 @@ impl SstableWriter for InMemWriter {
 #[cfg(test)]
 mod tests {
 
+    use std::collections::BTreeMap;
+
     use bytes::Bytes;
     use itertools::Itertools;
     use rand::{Rng, SeedableRng};
@@ -100,7 +102,7 @@ mod tests {
         }
         let meta = SstableMeta {
             block_metas,
-            bloom_filter: Vec::new(),
+            bloom_filter: BTreeMap::new(),
             estimated_size: 0,
             key_count: 0,
             smallest_key: Vec::new(),
