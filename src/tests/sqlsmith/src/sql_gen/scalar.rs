@@ -22,7 +22,6 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
 
 use crate::sql_gen::expr::sql_null;
-use crate::sql_gen::types::data_type_to_ast_data_type;
 use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
@@ -73,16 +72,17 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 value: self.gen_temporal_scalar(typ),
             },
             T::List { datatype: ref ty } => {
-                let n = self.rng.gen_range(1..=100); // Avoid ambiguous type
+                let n = self.rng.gen_range(0..=100); // Avoid ambiguous type
                 Expr::Array(self.gen_simple_scalar_list(ty, n))
             }
-            T::Struct(ref inner) => Expr::Row(
-                inner
-                    .fields
-                    .iter()
-                    .map(|typ| self.gen_simple_scalar(typ))
-                    .collect(),
-            ),
+            // TODO(Noel): Renable after https://github.com/risingwavelabs/risingwave/issues/7189
+            // T::Struct(ref inner) => Expr::Row(
+            //     inner
+            //         .fields
+            //         .iter()
+            //         .map(|typ| self.gen_simple_scalar(typ))
+            //         .collect(),
+            // ),
             _ => sql_null(),
         }
     }
