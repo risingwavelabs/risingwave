@@ -115,6 +115,7 @@ impl StreamMaterialize {
             false,
             None,
             table_type,
+            None,
         )?;
 
         Ok(Self::new(input, table))
@@ -135,6 +136,7 @@ impl StreamMaterialize {
         definition: String,
         handle_pk_conflict: bool,
         row_id_index: Option<usize>,
+        version: Option<TableVersion>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
@@ -147,6 +149,7 @@ impl StreamMaterialize {
             handle_pk_conflict,
             row_id_index,
             TableType::Table,
+            version,
         )?;
 
         Ok(Self::new(input, table))
@@ -194,6 +197,7 @@ impl StreamMaterialize {
         handle_pk_conflict: bool,
         row_id_index: Option<usize>,
         table_type: TableType,
+        version: Option<TableVersion>,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
@@ -236,10 +240,6 @@ impl StreamMaterialize {
             in_order.insert(idx);
         }
 
-        // Always use the initial version for now.
-        let max_column_id = columns.iter().map(|c| c.column_id()).max().unwrap();
-        let initial_version = TableVersion::initial(max_column_id);
-
         let distribution_key = distribution.dist_column_indices().to_vec();
         let properties = input.ctx().with_options().internal_table_subset(); // TODO: remove this
         let read_prefix_len_hint = pk_indices.len();
@@ -264,7 +264,7 @@ impl StreamMaterialize {
             definition,
             handle_pk_conflict,
             read_prefix_len_hint,
-            version: Some(initial_version),
+            version,
         })
     }
 

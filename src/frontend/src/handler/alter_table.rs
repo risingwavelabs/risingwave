@@ -1,4 +1,4 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,15 +15,15 @@
 use anyhow::Context;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{ColumnDef, Ident, ObjectName, Statement};
+use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 
-use super::create_table::{gen_create_table_plan, ColumnIdGenerator};
+use super::create_table::{gen_create_table_plan, VersionedTableColumnIdGenerator};
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::Relation;
-use crate::{build_graph, Binder, OptimizerContext};
+use crate::{build_graph, Binder, OptimizerContext, TableCatalog};
 
-#[expect(clippy::unused_async)]
+#[allow(clippy::unused_async)]
 pub async fn handle_add_column(
     handler_args: HandlerArgs,
     table_name: ObjectName,
@@ -31,7 +31,7 @@ pub async fn handle_add_column(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
 
-    let catalog = {
+    let original_catalog = {
         let relation = Binder::new(&session).bind_relation_by_name(table_name.clone(), None)?;
         match relation {
             Relation::BaseTable(table) if table.table_catalog.is_table() => table.table_catalog,
@@ -41,12 +41,21 @@ pub async fn handle_add_column(
         }
     };
 
-    let [mut definition]: [_; 1] = Parser::parse_sql(&catalog.definition)
+    // Do not allow altering a table with a connector.
+    if original_catalog.associated_source_id().is_some() {
+        Err(ErrorCode::InvalidInputSyntax(format!(
+            "cannot alter table \"{}\" because it has a connector",
+            table_name
+        )))?
+    }
+
+    // Retrieve the original table definition and parse it to AST.
+    let [mut definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)
         .context("unable to parse original table definition")?
         .try_into()
         .unwrap();
     let Statement::CreateTable { columns, .. } = &mut definition else {
-        panic!()
+        panic!("unexpected statement: {:?}", definition);
     };
 
     // Duplicated names can actually be checked by `StreamMaterialize`. We do here for better error
@@ -61,27 +70,14 @@ pub async fn handle_add_column(
             new_column_name, table_name
         )))?
     }
-
+    // Add the new column to the table definition.
     columns.push(new_column);
 
+    // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &definition, "")?;
-    let mut col_id_gen = ColumnIdGenerator::new(
-        catalog.columns(),
-        catalog.version.as_ref().unwrap().next_column_id,
-    );
-    let Statement::CreateTable {
-        columns,
-        constraints,
-        ..
-    } = definition else {
-        panic!();
-    };
-
-    let new_name = {
-        let mut idents = table_name.0;
-        let last_ident = idents.last_mut().unwrap();
-        *last_ident = Ident::new(format!("{}_add_column_{}", last_ident, new_column_name));
-        ObjectName(idents)
+    let col_id_gen = VersionedTableColumnIdGenerator::for_alter_table(&original_catalog);
+    let Statement::CreateTable { columns, constraints, .. } = definition else {
+        panic!("unexpected statement type: {:?}", definition);
     };
 
     let (graph, source, table) = {
@@ -89,24 +85,47 @@ pub async fn handle_add_column(
         let (plan, source, table) = gen_create_table_plan(
             &session,
             context.into(),
-            new_name,
+            table_name,
             columns,
             constraints,
-            &mut col_id_gen,
+            col_id_gen,
         )?;
+
+        // TODO: avoid this backward conversion.
+        if TableCatalog::from(&table).pk_column_ids() != original_catalog.pk_column_ids() {
+            Err(ErrorCode::InvalidInputSyntax(
+                "alter primary key of table is not supported".to_owned(),
+            ))?
+        }
+
         let graph = build_graph(plan);
 
         (graph, source, table)
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    // TODO: for test purpose only, we drop the original table and create a new one. This is wrong
+    // and really dangerous in production.
+    #[cfg(debug_assertions)]
+    {
+        let catalog_writer = session.env().catalog_writer();
 
-    catalog_writer.create_table(source, table, graph).await?;
+        catalog_writer
+            .drop_table(None, original_catalog.id())
+            .await?;
+        catalog_writer.create_table(source, table, graph).await?;
 
-    Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
+        Ok(PgResponse::empty_result_with_notice(
+            StatementType::ALTER_TABLE,
+            "The `ALTER TABLE` feature is incomplete and not data is preserved! This feature is not available in production.".to_owned(),
+        ))
+    }
 
-    // Err(ErrorCode::NotImplemented(
-    //     "ADD COLUMN".to_owned(),
-    //     6903.into(),
-    // ))?
+    #[cfg(not(debug_assertions))]
+    {
+        let (_, _, _) = (graph, source, table);
+        Err(ErrorCode::NotImplemented(
+            "ADD COLUMN".to_owned(),
+            6903.into(),
+        ))?
+    }
 }

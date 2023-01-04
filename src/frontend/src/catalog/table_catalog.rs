@@ -163,29 +163,30 @@ impl TableType {
 /// The version of a table, used by schema change. See [`ProstTableVersion`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableVersion {
-    pub version: u64,
+    pub version_id: u64,
     pub next_column_id: ColumnId,
 }
 
 impl TableVersion {
     /// Create an initial version for a table, with the given max column id.
-    pub fn initial(max_column_id: ColumnId) -> Self {
+    #[cfg(test)]
+    pub fn initial_for_test(max_column_id: ColumnId) -> Self {
         Self {
-            version: 0,
+            version_id: 0,
             next_column_id: max_column_id.next(),
         }
     }
 
     pub fn from_prost(prost: ProstTableVersion) -> Self {
         Self {
-            version: prost.version,
+            version_id: prost.version,
             next_column_id: ColumnId::from(prost.next_column_id),
         }
     }
 
     pub fn to_prost(&self) -> ProstTableVersion {
         ProstTableVersion {
-            version: self.version,
+            version: self.version_id,
             next_column_id: self.next_column_id.into(),
         }
     }
@@ -238,6 +239,14 @@ impl TableCatalog {
         self.pk.as_ref()
     }
 
+    /// Get the column IDs of the primary key.
+    pub fn pk_column_ids(&self) -> Vec<ColumnId> {
+        self.pk
+            .iter()
+            .map(|f| self.columns[f.index].column_id())
+            .collect()
+    }
+
     /// Get a [`TableDesc`] of the table.
     pub fn table_desc(&self) -> TableDesc {
         use risingwave_common::catalog::TableOption;
@@ -279,6 +288,11 @@ impl TableCatalog {
     /// Returns the SQL statement that can be used to create this table.
     pub fn create_sql(&self) -> String {
         self.definition.clone()
+    }
+
+    /// Get a reference to the table catalog's version.
+    pub fn version(&self) -> Option<&TableVersion> {
+        self.version.as_ref()
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
@@ -517,7 +531,7 @@ mod tests {
                 definition: "".into(),
                 handle_pk_conflict: false,
                 read_prefix_len_hint: 0,
-                version: Some(TableVersion::initial(ColumnId::new(1))),
+                version: Some(TableVersion::initial_for_test(ColumnId::new(1))),
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

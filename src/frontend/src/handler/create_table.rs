@@ -31,6 +31,7 @@ use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, ColumnId, USER_COLUMN_ID_OFFSET};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
@@ -38,7 +39,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::Binder;
+use crate::{Binder, TableCatalog};
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum DmlFlag {
@@ -50,27 +51,34 @@ pub enum DmlFlag {
     AppendOnly,
 }
 
-pub struct ColumnIdGenerator {
+pub struct VersionedTableColumnIdGenerator {
     pub existing: HashMap<String, ColumnId>,
-    pub next_id: ColumnId,
+    pub next_column_id: ColumnId,
+    pub version_id: u64,
 }
 
-impl ColumnIdGenerator {
-    pub fn new(existing_columns: &[ColumnCatalog], next_column_id: ColumnId) -> Self {
-        let existing = existing_columns
+impl VersionedTableColumnIdGenerator {
+    pub fn for_alter_table(original: &TableCatalog) -> Self {
+        let existing = original
+            .columns()
             .iter()
             .map(|col| (col.name().to_owned(), col.column_id()))
             .collect();
+
+        let version = original.version().expect("version field not set");
+
         Self {
             existing,
-            next_id: next_column_id,
+            next_column_id: version.next_column_id,
+            version_id: version.version_id + 1,
         }
     }
 
     pub fn initial() -> Self {
         Self {
             existing: HashMap::new(),
-            next_id: ColumnId::from(USER_COLUMN_ID_OFFSET),
+            next_column_id: ColumnId::from(USER_COLUMN_ID_OFFSET),
+            version_id: 0,
         }
     }
 
@@ -78,9 +86,16 @@ impl ColumnIdGenerator {
         if let Some(id) = self.existing.get(name) {
             *id
         } else {
-            let id = self.next_id;
-            self.next_id = self.next_id.next();
+            let id = self.next_column_id;
+            self.next_column_id = self.next_column_id.next();
             id
+        }
+    }
+
+    pub fn into_version(self) -> TableVersion {
+        TableVersion {
+            version_id: self.version_id,
+            next_column_id: self.next_column_id,
         }
     }
 }
@@ -90,7 +105,7 @@ impl ColumnIdGenerator {
 /// This primary key is not combined with table constraints yet.
 pub fn bind_sql_columns(
     columns: Vec<ColumnDef>,
-    col_id_gen: &mut ColumnIdGenerator,
+    col_id_gen: &mut VersionedTableColumnIdGenerator,
 ) -> Result<(Vec<ColumnDesc>, Option<ColumnId>)> {
     // In `ColumnDef`, pk can contain only one column. So we use `Option` rather than `Vec`.
     let mut pk_column_id = None;
@@ -256,10 +271,10 @@ pub(crate) fn gen_create_table_plan(
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    col_id_gen: &mut ColumnIdGenerator,
+    mut col_id_gen: VersionedTableColumnIdGenerator,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let definition = context.normalized_sql().to_owned();
-    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, col_id_gen)?;
+    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
     gen_create_table_plan_without_bind(
         session,
         context,
@@ -268,9 +283,11 @@ pub(crate) fn gen_create_table_plan(
         pk_column_id_from_columns,
         constraints,
         definition,
+        Some(col_id_gen.into_version()),
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_create_table_plan_without_bind(
     session: &SessionImpl,
     context: OptimizerContextRef,
@@ -279,6 +296,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     pk_column_id_from_columns: Option<ColumnId>,
     constraints: Vec<TableConstraint>,
     definition: String,
+    version: Option<TableVersion>,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
@@ -363,6 +381,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         handle_pk_conflict,
         row_id_index,
         dml_flag,
+        version,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -430,6 +449,7 @@ pub(crate) fn gen_materialize_plan(
             handle_pk_conflict,
             row_id_index,
             DmlFlag::Disable,
+            None,
         )?
     };
     let mut table = materialize
@@ -467,7 +487,7 @@ pub async fn handle_create_table(
             table_name.clone(),
             columns,
             constraints,
-            &mut ColumnIdGenerator::initial(),
+            VersionedTableColumnIdGenerator::initial(),
         )?;
         let graph = build_graph(plan);
 
@@ -581,7 +601,7 @@ mod tests {
                 } = ast.remove(0) else { panic!("test case should be create table") };
             let actual: Result<_> = (|| {
                 let (column_descs, pk_column_id_from_columns) =
-                    bind_sql_columns(columns, &mut ColumnIdGenerator::initial())?;
+                    bind_sql_columns(columns, &mut VersionedTableColumnIdGenerator::initial())?;
                 let (_, pk_column_ids, _) = bind_sql_table_constraints(
                     column_descs,
                     pk_column_id_from_columns,

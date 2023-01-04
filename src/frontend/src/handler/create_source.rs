@@ -32,7 +32,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::ColumnId;
-use crate::handler::create_table::ColumnIdGenerator;
+use crate::handler::create_table::VersionedTableColumnIdGenerator;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::optimizer::OptimizerContext;
@@ -97,8 +97,10 @@ pub async fn handle_create_source(
         .to_lowercase()
         .eq("kafka");
 
-    let (mut column_descs, pk_column_id_from_columns) =
-        bind_sql_columns(stmt.columns, &mut ColumnIdGenerator::initial())?;
+    let (mut column_descs, pk_column_id_from_columns) = bind_sql_columns(
+        stmt.columns,
+        &mut VersionedTableColumnIdGenerator::initial(),
+    )?;
 
     // Add hidden column `_rw_kafka_timestamp` to each message
     if is_kafka && !is_materialized {

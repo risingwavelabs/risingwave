@@ -22,7 +22,7 @@ use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
-use super::create_table::{gen_create_table_plan, ColumnIdGenerator};
+use super::create_table::{gen_create_table_plan, VersionedTableColumnIdGenerator};
 use super::query::gen_batch_query_plan;
 use super::RwPgResponse;
 use crate::handler::HandlerArgs;
@@ -70,7 +70,7 @@ pub fn handle_explain(
                 name,
                 columns,
                 constraints,
-                &mut ColumnIdGenerator::initial(),
+                VersionedTableColumnIdGenerator::initial(),
             )?
             .0
         }
