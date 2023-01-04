@@ -25,9 +25,10 @@ pub struct EqJoinPredicate {
     /// Other conditions, linked with `AND` conjunction.
     other_cond: Condition,
 
-    /// The equal columns indexes(in the input schema) both sides,
-    /// the first is from the left table and the second is from the right table.
-    /// The third is `null_safe` flag.
+    /// `Vec` of `(left_col_index, right_col_index, null_safe)`,
+    /// representing a conjunction of `left_col_index = right_col_index`
+    ///
+    /// Note: `right_col_index` starts from `left_cols_num`
     eq_keys: Vec<(InputRef, InputRef, bool)>,
 
     left_cols_num: usize,
@@ -159,6 +160,9 @@ impl EqJoinPredicate {
         self.eq_keys.as_ref()
     }
 
+    /// `Vec` of `(left_col_index, right_col_index)`.
+    ///
+    /// Note: `right_col_index` starts from `0`
     pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
         self.eq_keys
             .iter()
@@ -173,7 +177,7 @@ impl EqJoinPredicate {
             .collect()
     }
 
-    /// return the eq keys column index **based on the right input schema**
+    /// Note: `right_col_index` starts from `0`
     pub fn right_eq_indexes(&self) -> Vec<usize> {
         self.eq_keys
             .iter()
