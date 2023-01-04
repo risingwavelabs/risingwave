@@ -814,12 +814,10 @@ fn is_pure_fn_except_for_input_ref(expr: &ExprImpl) -> bool {
 /// Suppose we derive a predicate from the left side to be pushed to the right side.
 /// * `expr`: An expr from the left side.
 /// * `col_num`: The number of columns in the left side.
-/// * `other_size_schema`: The right side's schema.
 fn derive_predicate_from_eq_condition(
     expr: &ExprImpl,
     eq_condition: &EqJoinPredicate,
     col_num: usize,
-    other_size_schema: &Schema,
     expr_is_left: bool,
 ) -> Option<ExprImpl> {
     if !is_pure_fn_except_for_input_ref(expr) {
@@ -840,29 +838,28 @@ fn derive_predicate_from_eq_condition(
     }
     // The function is pure except for `InputRef` and all `InputRef`s are `eq_condition` indices.
     // Hence, we can substitute those `InputRef`s with indices from the other side.
-    let other_side_mapping = if expr_is_left {
-        eq_condition.eq_indexes().into_iter().collect()
-    } else {
-        eq_condition
-            .eq_indexes()
-            .into_iter()
-            .map(|(x, y)| (y, x))
-            .collect()
-    };
-    struct InputRefsRewriter<'a> {
-        mapping: HashMap<usize, usize>,
-        schema: &'a Schema,
+    let other_side_mapping = eq_condition
+        .eq_keys()
+        .iter()
+        .map(|(left, right, _)| {
+            if expr_is_left {
+                (left.index, right.clone())
+            } else {
+                (right.index, left.clone())
+            }
+        })
+        .collect();
+    struct InputRefsRewriter {
+        mapping: HashMap<usize, InputRef>,
     }
-    impl<'a> ExprRewriter for InputRefsRewriter<'a> {
+    impl ExprRewriter for InputRefsRewriter {
         fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-            let other_side_index = self.mapping[&input_ref.index];
-            InputRef::new(other_side_index, self.schema[other_side_index].data_type()).into()
+            self.mapping[&input_ref.index].clone().into()
         }
     }
     Some(
         InputRefsRewriter {
             mapping: other_side_mapping,
-            schema: other_size_schema,
         }
         .rewrite_expr(expr.clone()),
     )
@@ -945,13 +942,7 @@ impl PredicatePushdown for LogicalJoin {
                     .conjunctions
                     .iter()
                     .filter_map(|expr| {
-                        derive_predicate_from_eq_condition(
-                            expr,
-                            &eq_condition,
-                            left_col_num,
-                            self.right().schema(),
-                            true,
-                        )
+                        derive_predicate_from_eq_condition(expr, &eq_condition, left_col_num, true)
                     })
                     .collect(),
             }
@@ -973,7 +964,6 @@ impl PredicatePushdown for LogicalJoin {
                             expr,
                             &eq_condition,
                             right_col_num,
-                            self.left().schema(),
                             false,
                         )
                     })
