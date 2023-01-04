@@ -243,17 +243,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "arrow-flight-client"
-version = "0.1.0"
-dependencies = [
- "arrow-array 30.0.0",
- "arrow-flight",
- "arrow-schema 30.0.0",
- "futures-util",
- "tokio",
-]
-
-[[package]]
 name = "arrow-ipc"
 version = "30.0.0"
 source = "git+https://github.com/apache/arrow-rs?rev=6139d898#6139d8984ca702fa744aaf3b0b2193dd85468cf7"
@@ -6483,6 +6472,17 @@ dependencies = [
  "rand 0.8.5",
  "tracing",
  "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_udf"
+version = "0.1.0"
+dependencies = [
+ "arrow-array 30.0.0",
+ "arrow-flight",
+ "arrow-schema 30.0.0",
+ "futures-util",
+ "tokio",
 ]
 
 [[package]]

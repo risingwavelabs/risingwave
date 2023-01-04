@@ -35,6 +35,7 @@ members = [
   "src/tests/simulation",
   "src/tests/sqlsmith",
   "src/tracing",
+  "src/udf",
   "src/utils/async_stack_trace",
   "src/utils/local_stats_alloc",
   "src/utils/pgwire",
@@ -42,7 +43,6 @@ members = [
   "src/utils/sync-point",
   "src/utils/workspace-config",
   "src/workspace-hack",
-  "src/udf/arrow-flight-client",
 ]
 
 [workspace.package]
