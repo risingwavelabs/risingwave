@@ -14,9 +14,14 @@ async fn main() {
     let mut client = FlightServiceClient::connect(addr).await.unwrap();
 
     // build `RecordBatch` to send (equivalent to our `DataChunk`)
-    let array = Int32Array::from_iter(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-    let schema = Schema::new(vec![Field::new("id", DataType::Int32, false)]);
-    let batch = RecordBatch::try_new(Arc::new(schema), vec![Arc::new(array)]).unwrap();
+    let array1 = Int32Array::from_iter(vec![1, 6, 10]);
+    let array2 = Int32Array::from_iter(vec![3, 4, 15]);
+    let schema = Schema::new(vec![
+        Field::new("a", DataType::Int32, false),
+        Field::new("b", DataType::Int32, false),
+    ]);
+    let batch =
+        RecordBatch::try_new(Arc::new(schema), vec![Arc::new(array1), Arc::new(array2)]).unwrap();
 
     // build `FlightData` stream
     let input_stream = stream::iter(vec![Ok(batch)]);
