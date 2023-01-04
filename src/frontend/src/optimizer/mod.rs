@@ -39,17 +39,16 @@ use self::plan_node::{
     StreamSink,
 };
 use self::plan_visitor::{
-    has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_batch_source,
-    has_logical_apply, has_logical_over_agg, HasMaxOneRowApply,has_batch_delete, has_batch_insert, has_batch_update, 
+    has_batch_delete, has_batch_exchange, has_batch_insert, has_batch_seq_scan,
+    has_batch_seq_scan_where, has_batch_source, has_batch_update, has_logical_apply,
+    has_logical_over_agg, HasMaxOneRowApply,
 };
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::handler::create_table::DmlFlag;
-use crate::optimizer::plan_node::{
-    BatchExchange, ColumnPruningContext, PredicatePushdownContext,
-};
+use crate::optimizer::plan_node::{BatchExchange, ColumnPruningContext, PredicatePushdownContext};
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 use crate::WithOptions;
