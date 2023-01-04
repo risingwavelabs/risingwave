@@ -136,62 +136,10 @@ CREATE MATERIALIZED VIEW m6 AS SELECT REAL '542102839.6598799' * (REAL '21474836
 CREATE MATERIALIZED VIEW m7 AS SELECT TIMESTAMP '2022-09-30 17:49:14' AS col_0, t_0.col_2 AS col_1, INT '2147483647' AS col_2 FROM m4 AS t_0 GROUP BY t_0.col_3, t_0.col_0, t_0.col_2, t_0.col_1;
 CREATE MATERIALIZED VIEW m8 AS SELECT SMALLINT '32767' AS col_0 FROM partsupp AS t_0 WHERE false GROUP BY t_0.ps_partkey, t_0.ps_suppkey, t_0.ps_supplycost HAVING true;
 CREATE MATERIALIZED VIEW m9 AS WITH with_0 AS (SELECT SMALLINT '10701' AS col_0, SMALLINT '21526' AS col_1, FLOAT '2147483647' AS col_2 FROM bid AS t_1 GROUP BY t_1.url, t_1.auction, t_1.price HAVING (0 + SMALLINT '32767') < FLOAT '0') SELECT TIMESTAMP '2022-09-30 18:49:14' AS col_0 FROM with_0;
-WITH with_0 AS (
-    SELECT
-        t_5.date_time AS col_0,
-        false AS col_1,
-        DATE '2022-09-30' AS col_2,
-        false AS col_3
-    FROM
-        region AS t_1,
-        m3 AS t_2,
-        region AS t_3,
-        supplier AS t_4,
-        auction AS t_5,
-        customer AS t_8,
-        m2 AS t_9,
-        supplier AS t_10,
-        lineitem AS t_11,
-        m9 AS t_12,
-        partsupp AS t_13,
-        lineitem AS t_14
-    WHERE
-        true
-    GROUP BY
-        t_10.s_name,
-        t_10.s_acctbal,
-        t_1.r_name,
-        t_5.expires,
-        t_4.s_comment,
-        t_14.l_returnflag,
-        t_10.s_phone,
-        t_8.c_mktsegment,
-        t_14.l_tax,
-        t_4.s_phone,
-        t_11.l_linenumber,
-        t_8.c_acctbal,
-        t_14.l_shipinstruct,
-        t_14.l_extendedprice,
-        t_9.col_0,
-        t_5.date_time,
-        t_11.l_linestatus,
-        t_13.ps_availqty,
-        t_5.item_name,
-        t_14.l_orderkey,
-        t_1.r_regionkey,
-        t_4.s_name,
-        t_14.l_shipmode,
-        t_14.l_quantity,
-        t_14.l_linenumber,
-        t_11.l_suppkey,
-        t_14.l_linestatus,
-        t_3.r_name
-)
 
 SELECT
     1
 FROM
-    with_0,
     hop(
             auction, auction.date_time, INTERVAL '1',
             INTERVAL '60'
