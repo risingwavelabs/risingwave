@@ -44,6 +44,7 @@ macro_rules! for_all_metrics {
             iter_size: Histogram,
             iter_item: Histogram,
             iter_duration: Histogram,
+            iter_fetch_meta_duration: Histogram,
             iter_scan_duration: Histogram,
             iter_in_process_counts: GenericCounter<AtomicU64>,
             iter_scan_key_counts: GenericCounterVec<AtomicU64>,
@@ -202,6 +203,13 @@ impl StateStoreMetrics {
             exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
         let iter_duration = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
+            "state_store_iter_fetch_meta_duration",
+            "Histogram of iterator fetch SST meta time that have been issued to state store",
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+        );
+        let iter_fetch_meta_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
             "state_store_iter_scan_duration",
@@ -439,6 +447,7 @@ impl StateStoreMetrics {
             iter_size,
             iter_item,
             iter_duration,
+            iter_fetch_meta_duration,
             iter_scan_duration,
             iter_in_process_counts,
             iter_scan_key_counts,
