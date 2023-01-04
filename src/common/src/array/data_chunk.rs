@@ -484,6 +484,7 @@ impl DataChunkTestExt for DataChunk {
                 "F" => DataType::Float64,
                 "f" => DataType::Float32,
                 "TS" => DataType::Timestamp,
+                "TSZ" => DataType::Timestamptz,
                 "T" => DataType::Varchar,
                 array if array.starts_with('{') && array.ends_with('}') => {
                     DataType::Struct(Arc::new(StructType {
