@@ -221,6 +221,13 @@ impl ToBatchProst for BatchSeqScan {
             .map(ProstColumnDesc::from)
             .collect();
 
+        for col in &column_descs {
+            println!("col: {:?}", col);
+        }
+
+        println!("table_name: {:?}", self.logical.table_desc());
+        println!("table_name: {:?}", self.logical.table_desc());
+
         if self.logical.is_sys_table() {
             NodeBody::SysRowSeqScan(SysRowSeqScanNode {
                 table_id: self.logical.table_desc().table_id.table_id,
