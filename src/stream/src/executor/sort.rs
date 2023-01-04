@@ -211,7 +211,7 @@ impl<S: StateStore> SortExecutor<S> {
                     } else {
                         // If the barrier is not a checkpoint, then there is no actual data to
                         // commit. Therefore, we simply update the epoch of state table.
-                        self.state_table.commit_no_data_expected(barrier.epoch);
+                        self.state_table.commit_no_data_expected(barrier.epoch).await;
                     }
 
                     // Update the vnode bitmap for the state table if asked. Also update the buffer.

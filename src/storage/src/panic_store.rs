@@ -83,6 +83,7 @@ impl LocalStateStore for PanicStateStore {
 
     type GetFuture<'a> = impl GetFutureTrait<'a>;
     type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+    type SealEpochFuture<'a> = impl Future<Output = StorageResult<()>> + 'a;
 
     fn get<'a>(&'a self, _key: &'a [u8], _read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
@@ -113,12 +114,26 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
+    fn epoch(&self) -> u64 {
+        panic!("should not operate on the panic state store!");
+    }
+
+    fn is_dirty(&self) -> bool {
+        panic!("should not operate on the panic state store!");
+    }
+
     fn init(&mut self, _epoch: u64) {
         panic!("should not operate on the panic state store!");
     }
 
-    fn advance_epoch(&mut self, _new_epoch: u64) {
-        panic!("should not operate on the panic state store!");
+    fn seal_current_epoch(
+        &mut self,
+        _next_epoch: u64,
+        _delete_ranges: Vec<(Bytes, Bytes)>,
+    ) -> Self::SealEpochFuture<'_> {
+        async {
+            panic!("should not operate on the panic state store!");
+        }
     }
 }
 

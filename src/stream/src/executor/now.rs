@@ -140,7 +140,7 @@ impl<S: StateStore> NowExecutor<S> {
 
                 state_table.commit(barrier.epoch).await?;
             } else {
-                state_table.commit_no_data_expected(barrier.epoch);
+                state_table.commit_no_data_expected(barrier.epoch).await;
             }
             if let Some(mutation) = barrier.mutation.as_deref() {
                 match mutation {

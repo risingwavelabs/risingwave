@@ -219,7 +219,7 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                         }
                         table.commit(barrier.epoch).await?;
                     } else {
-                        table.commit_no_data_expected(barrier.epoch);
+                        table.commit_no_data_expected(barrier.epoch).await;
                     }
 
                     yield Message::Barrier(barrier);

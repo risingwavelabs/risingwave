@@ -390,6 +390,7 @@ pub mod verify {
         type GetFuture<'a> = impl GetFutureTrait<'a>;
         type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
         type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+        type SealEpochFuture<'a> = impl Future<Output = StorageResult<()>> + 'a;
 
         fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
             async move {
@@ -451,11 +452,39 @@ pub mod verify {
             }
         }
 
-        fn advance_epoch(&mut self, new_epoch: u64) {
-            self.actual.advance_epoch(new_epoch);
-            if let Some(expected) = &mut self.expected {
-                expected.advance_epoch(new_epoch);
+        fn seal_current_epoch(
+            &mut self,
+            next_epoch: u64,
+            delete_ranges: Vec<(Bytes, Bytes)>,
+        ) -> Self::SealEpochFuture<'_> {
+            async move {
+                if let Some(expected) = &mut self.expected {
+                    expected
+                        .seal_current_epoch(next_epoch, delete_ranges.clone())
+                        .await?;
+                }
+                self.actual
+                    .seal_current_epoch(next_epoch, delete_ranges)
+                    .await?;
+
+                Ok(())
             }
+        }
+
+        fn epoch(&self) -> u64 {
+            let epoch = self.actual.epoch();
+            if let Some(expected) = &self.expected {
+                assert_eq!(epoch, expected.epoch());
+            }
+            epoch
+        }
+
+        fn is_dirty(&self) -> bool {
+            let ret = self.actual.is_dirty();
+            if let Some(expected) = &self.expected {
+                assert_eq!(ret, expected.is_dirty());
+            }
+            ret
         }
     }
 
@@ -797,9 +826,17 @@ pub mod boxed_state_store {
 
         fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
 
+        fn epoch(&self) -> u64;
+
+        fn is_dirty(&self) -> bool;
+
         fn init(&mut self, epoch: u64);
 
-        fn advance_epoch(&mut self, new_epoch: u64);
+        async fn seal_current_epoch(
+            &mut self,
+            next_epoch: u64,
+            delete_ranges: Vec<(Bytes, Bytes)>,
+        ) -> StorageResult<()>;
     }
 
     #[async_trait::async_trait]
@@ -833,12 +870,24 @@ pub mod boxed_state_store {
             self.delete(key, old_val)
         }
 
+        fn epoch(&self) -> u64 {
+            self.epoch()
+        }
+
+        fn is_dirty(&self) -> bool {
+            self.is_dirty()
+        }
+
         fn init(&mut self, epoch: u64) {
             self.init(epoch)
         }
 
-        fn advance_epoch(&mut self, new_epoch: u64) {
-            self.advance_epoch(new_epoch)
+        async fn seal_current_epoch(
+            &mut self,
+            next_epoch: u64,
+            delete_ranges: Vec<(Bytes, Bytes)>,
+        ) -> StorageResult<()> {
+            self.seal_current_epoch(next_epoch, delete_ranges).await
         }
     }
 
@@ -849,6 +898,7 @@ pub mod boxed_state_store {
 
         type GetFuture<'a> = impl GetFutureTrait<'a>;
         type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+        type SealEpochFuture<'a> = impl Future<Output = StorageResult<()>> + 'a;
 
         fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
             self.deref().get(key, read_options)
@@ -875,12 +925,25 @@ pub mod boxed_state_store {
             self.deref_mut().delete(key, old_val)
         }
 
+        fn epoch(&self) -> u64 {
+            self.deref().epoch()
+        }
+
+        fn is_dirty(&self) -> bool {
+            self.deref().is_dirty()
+        }
+
         fn init(&mut self, epoch: u64) {
             self.deref_mut().init(epoch)
         }
 
-        fn advance_epoch(&mut self, new_epoch: u64) {
-            self.deref_mut().advance_epoch(new_epoch)
+        fn seal_current_epoch(
+            &mut self,
+            next_epoch: u64,
+            delete_ranges: Vec<(Bytes, Bytes)>,
+        ) -> Self::SealEpochFuture<'_> {
+            self.deref_mut()
+                .seal_current_epoch(next_epoch, delete_ranges)
         }
     }
 

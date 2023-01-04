@@ -176,6 +176,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     type GetFuture<'a> = impl GetFutureTrait<'a>;
     type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
     type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+    type SealEpochFuture<'a> = impl Future<Output = StorageResult<()>> + 'a;
 
     fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
         // TODO: collect metrics
@@ -201,14 +202,26 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner.delete(key, old_val)
     }
 
+    fn epoch(&self) -> u64 {
+        self.inner.epoch()
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.inner.is_dirty()
+    }
+
     fn init(&mut self, epoch: u64) {
         // TODO: may collect metrics
         self.inner.init(epoch)
     }
 
-    fn advance_epoch(&mut self, new_epoch: u64) {
+    fn seal_current_epoch(
+        &mut self,
+        next_epoch: u64,
+        delete_ranges: Vec<(Bytes, Bytes)>,
+    ) -> Self::SealEpochFuture<'_> {
         // TODO: may collect metrics
-        self.inner.advance_epoch(new_epoch)
+        self.inner.seal_current_epoch(next_epoch, delete_ranges)
     }
 }
 

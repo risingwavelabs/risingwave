@@ -425,12 +425,12 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                             }
                             self.right_table.commit(barrier.epoch).await?;
                         } else {
-                            self.right_table.commit_no_data_expected(barrier.epoch);
+                            self.right_table.commit_no_data_expected(barrier.epoch).await;
                         }
                         // Update the last committed row since it has changed
                         last_committed_epoch_row = current_epoch_row.clone();
                     } else {
-                        self.right_table.commit_no_data_expected(barrier.epoch);
+                        self.right_table.commit_no_data_expected(barrier.epoch).await;
                     }
 
                     self.left_table.commit(barrier.epoch).await?;

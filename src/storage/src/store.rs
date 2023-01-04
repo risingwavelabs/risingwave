@@ -21,7 +21,7 @@ use bytes::Bytes;
 use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
@@ -253,6 +253,7 @@ pub trait LocalStateStore: StaticSendSync {
 
     type GetFuture<'a>: GetFutureTrait<'a>;
     type IterFuture<'a>: Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+    type SealEpochFuture<'a>: Future<Output = StorageResult<()>> + Send + 'a;
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -276,18 +277,26 @@ pub trait LocalStateStore: StaticSendSync {
     /// than the given `epoch` will be deleted.
     fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
 
+    fn epoch(&self) -> u64;
+
+    fn is_dirty(&self) -> bool;
+
     fn init(&mut self, epoch: u64);
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
-    fn advance_epoch(&mut self, new_epoch: u64);
+    fn seal_current_epoch(
+        &mut self,
+        next_epoch: u64,
+        delete_ranges: Vec<(Bytes, Bytes)>,
+    ) -> Self::SealEpochFuture<'_>;
 }
 
 pub struct BatchWriteLocalStateStore<S: StateStoreWrite + StateStoreRead> {
     mem_table: MemTable,
     inner: S,
-    epoch: u64,
+    epoch: Option<u64>,
     table_id: TableId,
 }
 
@@ -382,7 +391,7 @@ impl<S: StateStoreWrite + StateStoreRead> BatchWriteLocalStateStore<S> {
         Self {
             inner,
             mem_table: MemTable::new(),
-            epoch: INVALID_EPOCH,
+            epoch: None,
             table_id,
         }
     }
@@ -392,9 +401,10 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for BatchWriteLocalSta
     type GetFuture<'a> = impl GetFutureTrait<'a>;
     type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
     type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+    type SealEpochFuture<'a> = impl Future<Output = StorageResult<()>> + 'a;
 
     fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
-        async move { self.inner.get(key, self.epoch, read_options).await }
+        async move { self.inner.get(key, self.epoch(), read_options).await }
     }
 
     fn iter(
@@ -405,7 +415,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for BatchWriteLocalSta
         async move {
             let stream = self
                 .inner
-                .iter(key_range.clone(), self.epoch, read_options)
+                .iter(key_range.clone(), self.epoch(), read_options)
                 .await?;
             let (l, r) = key_range;
             let key_range = (l.map(Bytes::from), r.map(Bytes::from));
@@ -413,7 +423,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for BatchWriteLocalSta
                 self.mem_table.iter(key_range),
                 stream,
                 self.table_id,
-                self.epoch,
+                self.epoch(),
             ))
             // Ok(self.merge_stream(stream))
         }
@@ -430,12 +440,84 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for BatchWriteLocalSta
         Ok(self.mem_table.delete(key, old_val)?)
     }
 
-    fn init(&mut self, epoch: u64) {
-        self.epoch = epoch;
+    fn epoch(&self) -> u64 {
+        self.epoch.expect("should have set the epoch")
     }
 
-    fn advance_epoch(&mut self, new_epoch: u64) {
-        self.epoch = new_epoch;
+    fn is_dirty(&self) -> bool {
+        self.mem_table.is_dirty()
+    }
+
+    fn init(&mut self, epoch: u64) {
+        assert!(
+            self.epoch.replace(epoch).is_none(),
+            "local state store of table id {:?} is init for more than once",
+            self.table_id
+        );
+    }
+
+    fn seal_current_epoch(
+        &mut self,
+        next_epoch: u64,
+        delete_ranges: Vec<(Bytes, Bytes)>,
+    ) -> Self::SealEpochFuture<'_> {
+        async move {
+            debug_assert!(delete_ranges.iter().map(|(key, _)| key).is_sorted());
+            let buffer = self.mem_table.drain().into_parts();
+            let mut kv_pairs = Vec::with_capacity(buffer.len());
+            for (key, key_op) in buffer {
+                // TODO: filter by delete range
+                //         if let Some(ref range_end) = range_end_suffix && &pk[VirtualNode::SIZE..]
+                // < range_end.as_slice() {             continue;
+                //         }
+                match key_op {
+                    // Currently, some executors do not strictly comply with these semantics. As
+                    // a workaround you may call disable the check by initializing the
+                    // state store with `disable_sanity_check=true`.
+                    KeyOp::Insert(value) => {
+                        // if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        //     self.do_insert_sanity_check(&pk, &row, epoch).await?;
+                        // }
+                        kv_pairs.push((key, StorageValue::new_put(value)));
+                    }
+                    KeyOp::Delete(_) => {
+                        // if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        //     self.do_delete_sanity_check(&pk, &row, epoch).await?;
+                        // }
+                        kv_pairs.push((key, StorageValue::new_delete()));
+                    }
+                    KeyOp::Update((_, new_value)) => {
+                        // if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
+                        //     self.do_update_sanity_check(&pk, &old_row, &new_row, epoch)
+                        //         .await?;
+                        // }
+                        kv_pairs.push((key, StorageValue::new_put(new_value)));
+                    }
+                }
+            }
+            self.inner
+                .ingest_batch(
+                    kv_pairs,
+                    delete_ranges,
+                    WriteOptions {
+                        epoch: self.epoch(),
+                        table_id: self.table_id,
+                    },
+                )
+                .await?;
+
+            let prev_epoch = self
+                .epoch
+                .replace(next_epoch)
+                .expect("should have init epoch before seal the first epoch");
+            assert!(
+                next_epoch > prev_epoch,
+                "new epoch {} should be greater than current epoch: {}",
+                next_epoch,
+                prev_epoch
+            );
+            Ok(())
+        }
     }
 }
 

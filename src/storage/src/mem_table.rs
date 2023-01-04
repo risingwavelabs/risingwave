@@ -13,6 +13,7 @@
 // limitations under the License.
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::mem::swap;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
@@ -53,6 +54,12 @@ impl MemTable {
         Self {
             buffer: BTreeMap::new(),
         }
+    }
+
+    pub fn drain(&mut self) -> Self {
+        let mut temp = Self::new();
+        swap(&mut temp, self);
+        temp
     }
 
     pub fn is_dirty(&self) -> bool {

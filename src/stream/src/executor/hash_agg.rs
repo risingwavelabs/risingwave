@@ -497,16 +497,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         } else {
             // Nothing to flush.
             // Call commit on state table to increment the epoch.
-            iter_table_storage(storages).for_each(|state_table| {
+            stream::iter(iter_table_storage(storages)).for_each(|state_table| async {
                 if let Some(watermark) = state_clean_watermark.as_ref() {
                     state_table.update_watermark(watermark.clone())
                 };
-                state_table.commit_no_data_expected(epoch);
-            });
+                state_table.commit_no_data_expected(epoch).await;
+            }).await;
             if let Some(watermark) = state_clean_watermark.as_ref() {
                 result_table.update_watermark(watermark.clone());
             };
-            result_table.commit_no_data_expected(epoch);
+            result_table.commit_no_data_expected(epoch).await;
             return Ok(());
         }
     }
