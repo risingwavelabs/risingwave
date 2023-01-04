@@ -855,11 +855,8 @@ fn derive_predicate_from_eq_condition(
     }
     impl<'a> ExprRewriter for InputRefsRewriter<'a> {
         fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-            InputRef::new(
-                *self.mapping.get(&input_ref.index).unwrap(),
-                self.schema[input_ref.index].data_type().clone(),
-            )
-            .into()
+            let other_side_index = self.mapping[&input_ref.index];
+            InputRef::new(other_side_index, self.schema[other_side_index].data_type()).into()
         }
     }
     Some(

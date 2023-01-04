@@ -38,3 +38,39 @@ GROUP BY
 HAVING
     SMALLINT '27538' = m5.col_0;
 ----
+
+statement ok
+DROP MATERIALIZED VIEW m5;
+
+statement ok
+DROP TABLE orders;
+
+statement ok
+DROP TABLE partsupp;
+
+# A smaller repro, cause lookup join to panic
+
+statement ok
+CREATE TABLE t1 ();
+
+statement ok
+CREATE TABLE t2 (x BIGINT);
+
+statement ok
+CREATE MATERIALIZED VIEW m AS SELECT 0::int AS y FROM t1;
+
+query I
+SELECT
+    1
+FROM
+    m JOIN t2 ON m.y = t2.x AND m.y=1;
+----
+
+statement ok
+DROP MATERIALIZED VIEW m;
+
+statement ok
+DROP TABLE t2;
+
+statement ok
+DROP TABLE t1;
