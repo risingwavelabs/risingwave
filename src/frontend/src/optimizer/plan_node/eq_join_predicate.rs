@@ -178,7 +178,7 @@ impl EqJoinPredicate {
             .iter()
             .cloned()
             .map(|(left, mut right, _)| {
-                right.index = right.index - self.left_cols_num;
+                right.index -= self.left_cols_num;
                 (left, right)
             })
             .collect()
