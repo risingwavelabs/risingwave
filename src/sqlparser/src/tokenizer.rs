@@ -381,7 +381,7 @@ impl<'a> Tokenizer<'a> {
                     match chars.peek() {
                         Some('\'') => {
                             // E'...' - a <character string literal>
-                            let s = self.tokenize_single_quoted_string(chars)?;
+                            let s = self.tokenize_single_quoted_string_with_escape(chars)?;
                             Ok(Some(Token::CstyleEscapesString(s)))
                         }
                         _ => {
@@ -664,6 +664,46 @@ impl<'a> Tokenizer<'a> {
                 '\\' => {
                     s.push(ch);
                     chars.next();
+                }
+                _ => {
+                    chars.next(); // consume
+                    s.push(ch);
+                }
+            }
+        }
+        self.tokenizer_error("Unterminated string literal")
+    }
+
+    /// Read a single qutoed string with escape
+    fn tokenize_single_quoted_string_with_escape(
+        &self,
+        chars: &mut Peekable<Chars<'_>>,
+    ) -> Result<String, TokenizerError> {
+        let mut s = String::new();
+        chars.next(); // consume the opening quote
+
+        while let Some(&ch) = chars.peek() {
+            match ch {
+                '\'' => {
+                    chars.next(); // consume
+                    if chars.peek().map(|c| *c == '\'').unwrap_or(false) {
+                        s.push('\\');
+                        s.push(ch);
+                        chars.next();
+                    } else {
+                        return Ok(s);
+                    }
+                }
+                '\\' => {
+                    s.push(ch);
+                    chars.next();
+                    if chars
+                        .peek()
+                        .map(|c| *c == '\'' || *c == '\\')
+                        .unwrap_or(false)
+                    {
+                        s.push(chars.next().unwrap());
+                    }
                 }
                 _ => {
                     chars.next(); // consume

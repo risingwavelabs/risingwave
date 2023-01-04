@@ -1,32 +1,42 @@
-query II
+query T
 select e'\ta'
 ----
     a
 
-query III 
+query T
 select e'hello\x3fworld'
 ----
 hello?world
 
-query IIII
+query T
 select e'\u003f'
 ----
 ?
 
-query IV
+query T
 select e'\55p'
 ----
 -p 
 
-query V
+query T
 select e'\pp'
 ----
 pp
 
-query VI
+query T
 select e'\45pp'
 ----
 %pp
+
+query T
+select e'a\'''z'
+----
+a''z
+
+query T
+select e'\\'
+----
+\
 
 statement error 
 select e'\x80'
