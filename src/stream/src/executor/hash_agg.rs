@@ -458,19 +458,16 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 // the read ref anymore.
                 drop(buffered);
 
-                for (key, mut agg_group, output) in precalculated_batch {
+                for (key, mut agg_group, outputs) in precalculated_batch {
                     let AggChangesInfo {
                         n_appended_ops,
                         result_row,
                         prev_outputs,
-                    } = agg_group
-                        .build_changes(
-                            &mut builders[group_key_indices.len()..],
-                            &mut new_ops,
-                            storages,
-                            Some(output),
-                        )
-                        .await?;
+                    } = agg_group.build_changes(
+                        outputs,
+                        &mut builders[group_key_indices.len()..],
+                        &mut new_ops,
+                    )?;
 
                     if n_appended_ops != 0 {
                         for _ in 0..n_appended_ops {
