@@ -68,9 +68,10 @@ impl LogicalScan {
         // required columns, i.e., the mapping from operator_idx to table_idx.
 
         if ctx.is_explain_trace() {
+            ctx.trace(format!("LogicalScan"));
             ctx.trace(format!("Conditions: {:?}", predicate.clone()));
             for conjunctions in &predicate.conjunctions {
-                ctx.trace(format!("Datatype: {:?}", conjunctions.as_eq_const().unwrap().0.data_type));
+                ctx.trace(format!("Datatype: {:?}", conjunctions.as_eq_const().unwrap().0.data_type)); // 0 is input ref.
             }
         }
 
