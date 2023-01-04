@@ -652,6 +652,7 @@ impl HummockVersionReader {
                 req_count += 1;
             }
         }
+        let timer = self.stats.iter_fetch_meta_duration.start_timer();
         let mut flatten_resps = vec![None; req_count];
         let mut buffered = stream::iter(flatten_reqs).buffer_unordered(10);
         while let Some(result) = buffered.next().await {
@@ -659,6 +660,7 @@ impl HummockVersionReader {
             flatten_resps[req_count - req_index - 1] = Some(resp);
         }
         drop(buffered);
+        timer.observe_duration();
 
         for (level_type, fetch_meta_req) in fetch_meta_reqs {
             if level_type == LevelType::Nonoverlapping as i32 {
