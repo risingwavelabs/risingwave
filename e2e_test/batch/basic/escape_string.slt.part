@@ -1,0 +1,35 @@
+query II
+select e'\ta'
+----
+    a
+
+query III 
+select e'hello\x3fworld'
+----
+hello?world
+
+query IIII
+select e'\u003f'
+----
+?
+
+query IV
+select e'\55p'
+----
+-p 
+
+query V
+select e'\pp'
+----
+pp
+
+query VI
+select e'\45pp'
+----
+%pp
+
+statement error 
+select e'\x80'
+
+statement error 
+select e'\200'
