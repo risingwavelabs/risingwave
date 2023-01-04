@@ -131,7 +131,9 @@ CREATE MATERIALIZED VIEW m1 AS SELECT TIMESTAMP '2022-09-30 17:49:11' AS col_0, 
 CREATE MATERIALIZED VIEW m2 AS SELECT SMALLINT '676' AS col_0, SMALLINT '0' << t_0.ps_suppkey AS col_1 FROM partsupp AS t_0 WHERE true GROUP BY t_0.ps_supplycost, t_0.ps_partkey, t_0.ps_suppkey, t_0.ps_availqty, t_0.ps_comment;
 CREATE MATERIALIZED VIEW m3 AS WITH with_0 AS (SELECT coalesce(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, TIME '18:49:12', NULL) AS col_0 FROM hop(auction, auction.date_time, INTERVAL '1', INTERVAL '604800') AS hop_1 WHERE SMALLINT '29336' <> hop_1.initial_bid GROUP BY hop_1.id) SELECT SMALLINT '16987' AS col_0 FROM with_0;
 CREATE MATERIALIZED VIEW m4 AS SELECT (INTERVAL '1' / t_0.o_totalprice) * t_0.o_shippriority AS col_0, DATE '2022-09-29' AS col_1, 'O27Kz64zOz' AS col_2, coalesce(NULL, REAL '1', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL) AS col_3 FROM orders AS t_0 GROUP BY t_0.o_totalprice, t_0.o_orderkey, t_0.o_orderpriority, t_0.o_shippriority, t_0.o_comment;
+
 CREATE MATERIALIZED VIEW m5 AS SELECT 0 AS col_0 FROM partsupp AS t_0 GROUP BY t_0.ps_suppkey HAVING INTERVAL '733678' <> TIME '17:49:13';
+
 CREATE MATERIALIZED VIEW m6 AS SELECT REAL '542102839.6598799' * (REAL '2147483647' * INTERVAL '604800') AS col_0, INT '0' AS col_1 FROM m1 AS t_0 WHERE false GROUP BY t_0.col_0, t_0.col_1 HAVING SMALLINT '32767' > (CASE WHEN true THEN REAL '2147483647' WHEN false THEN REAL '466745366.7850032' WHEN false THEN REAL '1846741975.811943' WHEN false THEN REAL '0' + REAL '1640066110.8567863' WHEN false THEN REAL '1596143087.178205' WHEN true THEN REAL '2147483647' WHEN true THEN REAL '1' ELSE REAL '1971861147.251753' END - REAL '582656508.903337');
 CREATE MATERIALIZED VIEW m7 AS SELECT TIMESTAMP '2022-09-30 17:49:14' AS col_0, t_0.col_2 AS col_1, INT '2147483647' AS col_2 FROM m4 AS t_0 GROUP BY t_0.col_3, t_0.col_0, t_0.col_2, t_0.col_1;
 CREATE MATERIALIZED VIEW m8 AS SELECT SMALLINT '32767' AS col_0 FROM partsupp AS t_0 WHERE false GROUP BY t_0.ps_partkey, t_0.ps_suppkey, t_0.ps_supplycost HAVING true;
@@ -140,39 +142,10 @@ CREATE MATERIALIZED VIEW m9 AS WITH with_0 AS (SELECT SMALLINT '10701' AS col_0,
 SELECT
     1
 FROM
-    hop(
-            auction, auction.date_time, INTERVAL '1',
-            INTERVAL '60'
-        ) AS hop_15,
-    m4 AS t_16,
-    nation AS t_17,
-    m6 AS t_18,
-    m9 AS t_19,
     m5 AS t_20
-        JOIN orders AS t_21 ON t_20.col_0 = t_21.o_orderkey,
-    m1 AS t_22,
-    customer AS t_25,
-    m0 AS t_26,
-    m9 AS t_27
+        JOIN orders AS t_21 ON t_20.col_0 = t_21.o_orderkey
 GROUP BY
-    t_26.col_1,
-    t_17.n_comment,
-    t_25.c_custkey,
     t_20.col_0,
-    t_21.o_orderstatus,
-    t_25.c_nationkey,
-    t_17.n_regionkey,
-    hop_15.date_time,
-    t_18.col_1,
-    t_25.c_comment,
-    hop_15.item_name,
-    t_16.col_3,
-    t_21.o_orderpriority,
-    t_18.col_0,
-    t_16.col_0,
-    t_25.c_address,
-    t_21.o_totalprice,
-    t_25.c_mktsegment,
-    t_25.c_name
+    t_21.o_totalprice
 HAVING
     SMALLINT '27538' = t_20.col_0;
