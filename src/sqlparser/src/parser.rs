@@ -1736,7 +1736,47 @@ impl Parser {
     }
 
     pub fn parse_drop(&mut self) -> Result<Statement, ParserError> {
+        if self.parse_keyword(Keyword::FUNCTION) {
+            return self.parse_drop_function();
+        }
         Ok(Statement::Drop(DropStatement::parse_to(self)?))
+    }
+
+    /// ```sql
+    /// DROP FUNCTION [ IF EXISTS ] name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ] [, ...]
+    /// [ CASCADE | RESTRICT ]
+    /// ```
+    fn parse_drop_function(&mut self) -> Result<Statement, ParserError> {
+        let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
+        let func_desc = self.parse_comma_separated(Parser::parse_drop_function_desc)?;
+        let option = match self.parse_one_of_keywords(&[Keyword::CASCADE, Keyword::RESTRICT]) {
+            Some(Keyword::CASCADE) => Some(ReferentialAction::Cascade),
+            Some(Keyword::RESTRICT) => Some(ReferentialAction::Restrict),
+            _ => None,
+        };
+        Ok(Statement::DropFunction {
+            if_exists,
+            func_desc,
+            option,
+        })
+    }
+
+    fn parse_drop_function_desc(&mut self) -> Result<DropFunctionDesc, ParserError> {
+        let name = self.parse_object_name()?;
+
+        let args = if self.consume_token(&Token::LParen) {
+            if self.consume_token(&Token::RParen) {
+                None
+            } else {
+                let args = self.parse_comma_separated(Parser::parse_function_arg)?;
+                self.expect_token(&Token::RParen)?;
+                Some(args)
+            }
+        } else {
+            None
+        };
+
+        Ok(DropFunctionDesc { name, args })
     }
 
     pub fn parse_create_index(&mut self, unique: bool) -> Result<Statement, ParserError> {

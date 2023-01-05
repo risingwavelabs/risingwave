@@ -968,6 +968,14 @@ pub enum Statement {
     },
     /// DROP
     Drop(DropStatement),
+    /// DROP Function
+    DropFunction {
+        if_exists: bool,
+        /// One or more function to drop
+        func_desc: Vec<DropFunctionDesc>,
+        /// `CASCADE` or `RESTRICT`
+        option: Option<ReferentialAction>,
+    },
     /// SET <variable>
     ///
     /// Note: this is not a standard SQL statement, but it is supported by at
@@ -1319,6 +1327,22 @@ impl fmt::Display for Statement {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
+            Statement::DropFunction {
+                if_exists,
+                func_desc,
+                option,
+            } => {
+                write!(
+                    f,
+                    "DROP FUNCTION{} {}",
+                    if *if_exists { " IF EXISTS" } else { "" },
+                    display_comma_separated(func_desc),
+                )?;
+                if let Some(op) = option {
+                    write!(f, " {}", op)?;
+                }
+                Ok(())
+            }
             Statement::SetVariable {
                 local,
                 variable,
@@ -1948,6 +1972,42 @@ impl fmt::Display for ShowStatementFilter {
             ILike(pattern) => write!(f, "ILIKE {}", value::escape_single_quote_string(pattern)),
             Where(expr) => write!(f, "WHERE {}", expr),
         }
+    }
+}
+
+/// Function describe in DROP FUNCTION.
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DropFunctionOption {
+    Restrict,
+    Cascade,
+}
+
+impl fmt::Display for DropFunctionOption {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DropFunctionOption::Restrict => write!(f, "RESTRICT "),
+            DropFunctionOption::Cascade => write!(f, "CASCADE  "),
+        }
+    }
+}
+
+/// Function describe in DROP FUNCTION.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub struct DropFunctionDesc {
+    pub name: ObjectName,
+    pub args: Option<Vec<OperateFunctionArg>>,
+}
+
+impl fmt::Display for DropFunctionDesc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)?;
+        if let Some(args) = &self.args {
+            write!(f, "({})", display_comma_separated(args))?;
+        }
+        Ok(())
     }
 }
 

@@ -811,3 +811,75 @@ fn parse_create_function() {
         }
     );
 }
+
+#[test]
+fn parse_drop_function() {
+    let sql = "DROP FUNCTION IF EXISTS test_func";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::DropFunction {
+            if_exists: true,
+            func_desc: vec![DropFunctionDesc {
+                name: ObjectName(vec![Ident::new("test_func")]),
+                args: None
+            }],
+            option: None
+        }
+    );
+
+    let sql = "DROP FUNCTION IF EXISTS test_func(a INT, IN b INT = 1)";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::DropFunction {
+            if_exists: true,
+            func_desc: vec![DropFunctionDesc {
+                name: ObjectName(vec![Ident::new("test_func")]),
+                args: Some(vec![
+                    OperateFunctionArg::with_name("a", DataType::Int),
+                    OperateFunctionArg {
+                        mode: Some(ArgMode::In),
+                        name: Some("b".into()),
+                        data_type: DataType::Int,
+                        default_expr: Some(Expr::Value(Value::Number("1".into()))),
+                    }
+                ]),
+            }],
+            option: None
+        }
+    );
+
+    let sql = "DROP FUNCTION IF EXISTS test_func1(a INT, IN b INT = 1), test_func2(a CHARACTER VARYING, IN b INT = 1)";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::DropFunction {
+            if_exists: true,
+            func_desc: vec![
+                DropFunctionDesc {
+                    name: ObjectName(vec![Ident::new("test_func1")]),
+                    args: Some(vec![
+                        OperateFunctionArg::with_name("a", DataType::Int),
+                        OperateFunctionArg {
+                            mode: Some(ArgMode::In),
+                            name: Some("b".into()),
+                            data_type: DataType::Int,
+                            default_expr: Some(Expr::Value(Value::Number("1".into()))),
+                        }
+                    ]),
+                },
+                DropFunctionDesc {
+                    name: ObjectName(vec![Ident::new("test_func2")]),
+                    args: Some(vec![
+                        OperateFunctionArg::with_name("a", DataType::Varchar),
+                        OperateFunctionArg {
+                            mode: Some(ArgMode::In),
+                            name: Some("b".into()),
+                            data_type: DataType::Int,
+                            default_expr: Some(Expr::Value(Value::Number("1".into()))),
+                        }
+                    ]),
+                }
+            ],
+            option: None
+        }
+    );
+}
