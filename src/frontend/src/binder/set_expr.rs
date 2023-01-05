@@ -110,8 +110,9 @@ impl Binder {
                 match op {
                     SetOperator::Union => {
                         let left = Box::new(self.bind_set_expr(*left)?);
-                        // Reset context for right side.
-                        self.context = BindContext::default();
+                        // Reset context for right side, but keep `cte_to_relation`.
+                        let new_context = std::mem::take(&mut self.context);
+                        self.context.cte_to_relation = new_context.cte_to_relation;
                         let right = Box::new(self.bind_set_expr(*right)?);
 
                         if left.schema().fields.len() != right.schema().fields.len() {

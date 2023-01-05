@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -249,8 +250,10 @@ impl Binder {
                 let Cte { alias, query, .. } = cte_table;
                 let table_name = alias.name.real_value();
                 let bound_query = self.bind_query(query)?;
-                self.cte_to_relation
-                    .insert(table_name, (bound_query, alias));
+                let cte_id = self.next_cte_id();
+                self.context
+                    .cte_to_relation
+                    .insert(table_name, Rc::new((cte_id, bound_query, alias)));
             }
             Ok(())
         }

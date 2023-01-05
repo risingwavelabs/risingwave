@@ -1958,9 +1958,9 @@ fn parse_literal_decimal() {
 
 #[test]
 fn parse_literal_string() {
-    let sql = "SELECT 'one', N'national string', X'deadBEEF'";
+    let sql = r"SELECT 'one', N'national string', X'deadBEEF', E'c style escape string \x3f'";
     let select = verified_only_select(sql);
-    assert_eq!(3, select.projection.len());
+    assert_eq!(4, select.projection.len());
     assert_eq!(
         &Expr::Value(Value::SingleQuotedString("one".to_string())),
         expr_from_projection(&select.projection[0])
@@ -1972,6 +1972,12 @@ fn parse_literal_string() {
     assert_eq!(
         &Expr::Value(Value::HexStringLiteral("deadBEEF".to_string())),
         expr_from_projection(&select.projection[2])
+    );
+    assert_eq!(
+        &Expr::Value(Value::CstyleEscapesString(
+            r"c style escape string \x3f".to_string()
+        )),
+        expr_from_projection(&select.projection[3])
     );
 
     one_statement_parses_to("SELECT x'deadBEEF'", "SELECT X'deadBEEF'");
