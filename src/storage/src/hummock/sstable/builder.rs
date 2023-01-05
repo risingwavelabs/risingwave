@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use bytes::BytesMut;
@@ -101,7 +101,7 @@ pub struct SstableBuilder<W: SstableWriter> {
     /// `table_id` of added keys.
     table_ids: BTreeSet<u32>,
     /// Hashes of user keys.
-    user_key_hashes: HashMap<u32, Vec<u32>>,
+    user_key_hashes: BTreeMap<u32, Vec<u32>>,
     last_full_key: Vec<u8>,
     last_extract_key: Vec<u8>,
     /// Buffer for encoded key and value to avoid allocation.
@@ -149,7 +149,7 @@ impl<W: SstableWriter> SstableBuilder<W> {
             }),
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             table_ids: BTreeSet::new(),
-            user_key_hashes: HashMap::new(),
+            user_key_hashes: BTreeMap::new(),
             last_table_id: None,
             raw_key: BytesMut::new(),
             raw_value: BytesMut::new(),

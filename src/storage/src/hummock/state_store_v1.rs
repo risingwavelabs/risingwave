@@ -336,16 +336,14 @@ impl HummockStorageV1 {
                             .sstable(sstable_info, &mut local_stats)
                             .in_span(Span::enter_with_local_parent("get_sstable"))
                             .await?;
-                        for table_id in &sstable_info.table_ids {
-                            if hit_sstable_bloom_filter(
-                                sstable.value(),
-                                *prefix_hash,
-                                &mut local_stats,
-                                *table_id,
-                            ) {
-                                sstables.push((*sstable_info).clone());
-                                break;
-                            }
+
+                        if hit_sstable_bloom_filter(
+                            sstable.value(),
+                            *prefix_hash,
+                            &mut local_stats,
+                            table_id.table_id(),
+                        ) {
+                            sstables.push((*sstable_info).clone());
                         }
                     } else {
                         sstables.push((*sstable_info).clone());

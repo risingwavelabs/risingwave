@@ -546,29 +546,23 @@ impl HummockVersionReader {
             .prefix_hint
             .as_ref()
             .map(|hint| Sstable::hash_for_bloom_filter(hint));
-
+        let table_id = read_options.table_id.table_id();
         for sstable_info in &uncommitted_ssts {
             let table_holder = self
                 .sstable_store
                 .sstable(sstable_info, &mut local_stats)
                 .in_span(Span::enter_with_local_parent("get_sstable"))
                 .await?;
-            let mut hit_bloom_filter = false;
-            for table_id in &sstable_info.table_ids {
-                if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
-                    if !hit_sstable_bloom_filter(
-                        table_holder.value(),
-                        *prefix_hash,
-                        &mut local_stats,
-                        *table_id,
-                    ) {
-                        hit_bloom_filter = true;
-                        break;
-                    }
+
+            if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
+                if !hit_sstable_bloom_filter(
+                    table_holder.value(),
+                    *prefix_hash,
+                    &mut local_stats,
+                    table_id,
+                ) {
+                    continue;
                 }
-            }
-            if hit_bloom_filter {
-                continue;
             }
 
             if !table_holder.value().meta.range_tombstone_list.is_empty()
@@ -636,23 +630,17 @@ impl HummockVersionReader {
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await?;
 
-                    let mut hit_bloom_filter = false;
-                    for table_id in &sstable_info.table_ids {
-                        if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
-                            if !hit_sstable_bloom_filter(
-                                sstable.value(),
-                                *prefix_hash,
-                                &mut local_stats,
-                                *table_id,
-                            ) {
-                                hit_bloom_filter = true;
-                                break;
-                            }
+                    if let Some(prefix_hash) = bloom_filter_prefix_hash.as_ref() {
+                        if !hit_sstable_bloom_filter(
+                            sstable.value(),
+                            *prefix_hash,
+                            &mut local_stats,
+                            table_id,
+                        ) {
+                            continue;
                         }
                     }
-                    if hit_bloom_filter {
-                        continue;
-                    }
+
                     if !sstable.value().meta.range_tombstone_list.is_empty()
                         && !read_options.ignore_range_tombstone
                     {
