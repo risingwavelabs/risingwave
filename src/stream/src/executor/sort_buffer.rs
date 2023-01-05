@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::ops::Bound;
 
 use gen_iter::GenIter;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
@@ -22,10 +23,11 @@ use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_storage::StateStore;
 
-use super::{PkIndices, Watermark};
+use super::{Barrier, PkIndices, StreamExecutorResult, Watermark};
 use crate::common::table::state_table::StateTable;
 
 /// [`SortBufferKey`] contains a record's timestamp and pk.
+#[expect(dead_code)]
 type SortBufferKey = (ScalarImpl, OwnedRow);
 
 /// [`SortBufferValue`] contains a record's value and a flag indicating whether the record has been
@@ -35,12 +37,14 @@ type SortBufferKey = (ScalarImpl, OwnedRow);
 /// there are only a few rows that will be temporarily stored in the buffer during an epoch,
 /// [`OwnedRow`] will be more efficient instead due to no ser/de needed. So here we could do further
 /// optimizations.
+#[expect(dead_code)]
 type SortBufferValue = (OwnedRow, bool);
 
 /// [`SortBuffer`] is a common component that consume an unordered stream and produce an ordered
 /// stream by watermark. This component maintains a state table internally, which schema is same as
 /// its input and output. Generally, the component acts as a buffer that output the data it received
 /// with a delay.
+#[expect(dead_code)]
 pub struct SortBuffer<S: StateStore> {
     schema: Schema,
 
@@ -48,16 +52,36 @@ pub struct SortBuffer<S: StateStore> {
 
     sort_column_index: usize,
 
+    state_table: StateTable<S>,
+
     chunk_size: usize,
 
-    state_table: StateTable<S>,
+    last_watermark: Option<ScalarImpl>,
 
     buffer: BTreeMap<SortBufferKey, SortBufferValue>,
 }
 
 impl<S: StateStore> SortBuffer<S> {
+    pub fn new(
+        schema: Schema,
+        pk_indices: PkIndices,
+        sort_column_index: usize,
+        state_table: StateTable<S>,
+    ) -> Self {
+        Self {
+            schema,
+            pk_indices,
+            sort_column_index,
+            state_table,
+            chunk_size: 1024,
+            last_watermark: None,
+            buffer: BTreeMap::new(),
+        }
+    }
+
     /// Store all rows in one [`StreamChunk`] to the buffer.
     /// TODO: Only insertions are supported now.
+    #[expect(dead_code)]
     pub fn handle_chunk(&mut self, chunk: &StreamChunk) {
         for (op, row_ref) in chunk.rows() {
             assert_eq!(
@@ -76,27 +100,37 @@ impl<S: StateStore> SortBuffer<S> {
     }
 
     /// Handle the watermark and output a stream that is ordered by the sort key.
-    pub fn handle_watermark(
-        &mut self,
-        watermark: Watermark,
-    ) -> impl Iterator<Item = DataChunk> + '_ {
+    pub fn handle_watermark<'a, 'b: 'a>(
+        &'a mut self,
+        watermark: &'b Watermark,
+    ) -> impl Iterator<Item = DataChunk> + 'a {
+        let Watermark {
+            col_idx,
+            data_type: _,
+            val,
+        } = watermark;
+        let last_watermark = self.last_watermark.replace(val.clone());
         let g = move || {
-            let Watermark {
-                col_idx,
-                data_type: _,
-                val,
-            } = watermark;
-            if col_idx != self.sort_column_index {
+            if *col_idx != self.sort_column_index {
                 return;
             }
             let mut data_chunk_builder =
                 DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
             let watermark_value = val;
-            // Find out the records to send to downstream.
-            for (key, (row, _)) in &self.buffer {
+            // Only records with timestamp greater than the last watermark will be output, so
+            // records will only be emitted exactly once unless recovery.
+            let start_bound = if let Some(last_watermark) = last_watermark {
+                Bound::Excluded((last_watermark, OwnedRow::empty()))
+            } else {
+                Bound::Unbounded
+            };
+            // TODO: `end_bound` = `Bound::Inclusive((watermark_value + 1, OwnedRow::empty()))`, but
+            // it's hard to represent now, so we end the loop by an explicit break.
+            let end_bound = Bound::Unbounded;
+            for (key, (row, _)) in self.buffer.range((start_bound, end_bound)) {
                 // Only when a record's timestamp is prior to the watermark should it be
                 // sent to downstream.
-                if key.0 < watermark_value {
+                if &key.0 <= watermark_value {
                     // Add the record to stream chunk data. Note that we retrieve the
                     // record from a BTreeMap, so data in this chunk should be ordered
                     // by timestamp and pk.
@@ -137,5 +171,120 @@ impl<S: StateStore> SortBuffer<S> {
         if persisted {
             self.state_table.delete(&row);
         }
+    }
+
+    pub async fn handle_barrier(&mut self, barrier: &Barrier) -> StreamExecutorResult<()> {
+        if barrier.checkpoint {
+            // If the barrier is a checkpoint, then we should persist all records in
+            // buffer that have not been persisted before to state store.
+            for (row, persisted) in self.buffer.values_mut() {
+                if !*persisted {
+                    self.state_table.insert(&*row);
+                    // Update `persisted` so if the next barrier arrives before the
+                    // next watermark, this record will not be persisted redundantly.
+                    *persisted = true;
+                }
+            }
+            // Commit the epoch.
+            self.state_table.commit(barrier.epoch).await?;
+        } else {
+            // If the barrier is not a checkpoint, then there is no actual data to
+            // commit. Therefore, we simply update the epoch of state table.
+            self.state_table.commit_no_data_expected(barrier.epoch);
+        }
+
+        // TODO: Handle mutations.
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::{DataChunk, StreamChunk};
+    use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
+    use risingwave_common::row::{OwnedRow, Row};
+    use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+
+    use super::SortBuffer;
+    use crate::common::table::state_table::StateTable;
+    use crate::executor::{PkIndices, Watermark};
+
+    fn chunks_to_rows(chunks: impl Iterator<Item = DataChunk>) -> Vec<OwnedRow> {
+        let mut rows = vec![];
+        for chunk in chunks {
+            for row in chunk.rows() {
+                rows.push(row.into_owned_row());
+            }
+        }
+        rows
+    }
+
+    #[tokio::test]
+    async fn test_basic() {
+        let state_store = MemoryStateStore::default();
+        let pk_indices: PkIndices = vec![0];
+        let sort_column_index = 1;
+        let table_id = TableId::new(1);
+        let column_descs = vec![
+            // Pk
+            ColumnDesc::unnamed(0.into(), DataType::Int64),
+            // Sk
+            ColumnDesc::unnamed(1.into(), DataType::Int64),
+        ];
+        let fields: Vec<Field> = column_descs.iter().map(Into::into).collect();
+        let schema = Schema::new(fields);
+        let tys = schema.data_types();
+        let order_types = vec![OrderType::Ascending];
+        let state_table = StateTable::new_without_distribution(
+            state_store,
+            table_id,
+            column_descs,
+            order_types,
+            pk_indices.clone(),
+        )
+        .await;
+        let mut sort_buffer =
+            SortBuffer::new(schema.clone(), pk_indices, sort_column_index, state_table);
+
+        let chunk1 = StreamChunk::from_pretty(
+            " I I
+            + 1 1
+            + 2 2
+            + 3 6
+            + 4 7",
+        );
+        let watermark1 = Watermark::new(1, DataType::Int64, 3i64.into());
+        let chunk2 = StreamChunk::from_pretty(
+            " I  I
+            + 98 4
+            + 37 5
+            + 60 8",
+        );
+        let watermark2 = Watermark::new(1, DataType::Int64, 7i64.into());
+        sort_buffer.handle_chunk(&chunk1);
+        let output = sort_buffer.handle_watermark(&watermark1);
+        let output = chunks_to_rows(output);
+        assert_eq!(
+            output,
+            vec![
+                OwnedRow::from_pretty_with_tys(&tys, "1 1"),
+                OwnedRow::from_pretty_with_tys(&tys, "2 2"),
+            ]
+        );
+        sort_buffer.handle_chunk(&chunk2);
+        let output = sort_buffer.handle_watermark(&watermark2);
+        let output = chunks_to_rows(output);
+        assert_eq!(
+            output,
+            vec![
+                OwnedRow::from_pretty_with_tys(&tys, "98 4"),
+                OwnedRow::from_pretty_with_tys(&tys, "37 5"),
+                OwnedRow::from_pretty_with_tys(&tys, "3 6"),
+                OwnedRow::from_pretty_with_tys(&tys, "4 7"),
+            ]
+        );
     }
 }
