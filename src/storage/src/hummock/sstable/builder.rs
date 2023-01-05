@@ -215,6 +215,18 @@ impl<W: SstableWriter> SstableBuilder<W> {
             if !extract_key.is_empty() && extract_key != self.last_extract_key.as_slice() {
                 // avoid duplicate add to bloom filter
                 let key_hash = xxh32::xxh32(extract_key, 0);
+
+                let entry = self.user_key_hashes.entry(table_id);
+
+                match entry {
+                    std::collections::btree_map::Entry::Vacant(e) => {
+                        e.insert(vec![key_hash]);
+                    }
+                    std::collections::btree_map::Entry::Occupied(mut e) => {
+                        let current_key_hashes = e.get_mut();
+                        current_key_hashes.push(key_hash);
+                    }
+                };
                 if self.user_key_hashes.contains_key(&table_id) {
                     let mut current_key_hashes =
                         self.user_key_hashes.get(&table_id).unwrap().clone();

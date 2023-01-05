@@ -336,6 +336,7 @@ impl StreamChunkTestExt for StreamChunk {
     /// //     f: f32
     /// //     T: str
     /// //    TS: Timestamp
+    /// //   TSZ: Timestamptz
     /// // {i,f}: struct
     /// ```
     fn from_pretty(s: &str) -> Self {

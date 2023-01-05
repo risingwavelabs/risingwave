@@ -36,7 +36,7 @@ pub struct StreamNow {
 impl StreamNow {
     pub fn new(ctx: OptimizerContextRef) -> Self {
         let schema = Schema::new(vec![Field {
-            data_type: DataType::Timestamp,
+            data_type: DataType::Timestamptz,
             name: String::from("now"),
             sub_fields: vec![],
             type_name: String::default(),

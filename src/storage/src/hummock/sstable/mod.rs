@@ -148,6 +148,7 @@ impl Sstable {
         };
         if enable_bloom_filter() && self.has_bloom_filter() {
             let hash = xxh32::xxh32(dist_key, 0);
+            // The specified table_id 0 is only used in unit test.
             self.surely_not_have_hashvalue(hash, 0_u32)
         } else {
             false

@@ -110,9 +110,9 @@ message ExprNode {
     ARRAY_CAT = 531;
     ARRAY_APPEND = 532;
     ARRAY_PREPEND = 533;
-    // Search operator and Search ARGument
-    SEARCH = 998;
-    SARG = 999;
+
+    // Non-pure functions below (> 600)
+    // ------------------------
     // Internal functions
     VNODE = 1101;
     // Non-deterministic functions
