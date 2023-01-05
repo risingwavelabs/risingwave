@@ -5425,6 +5425,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
+ "chrono-tz",
  "comfy-table",
  "crc32fast",
  "criterion",

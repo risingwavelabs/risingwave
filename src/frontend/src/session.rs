@@ -370,7 +370,7 @@ impl SessionImpl {
             env,
             auth_context,
             user_authenticator,
-            config_map: RwLock::new(Default::default()),
+            config_map: RwLock::new(ConfigMap::new()),
             id,
         }
     }
@@ -385,7 +385,7 @@ impl SessionImpl {
                 DEFAULT_SUPER_USER_ID,
             )),
             user_authenticator: UserAuthenticator::None,
-            config_map: Default::default(),
+            config_map: ConfigMap::new(),
             // Mock session use non-sense id.
             id: (0, 0),
         }

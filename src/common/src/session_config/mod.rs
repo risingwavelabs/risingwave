@@ -22,6 +22,7 @@ use std::ops::Deref;
 use itertools::Itertools;
 pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
+use chrono_tz::Tz;
 
 use crate::error::{ErrorCode, RwError};
 use crate::session_config::transaction_isolation_level::IsolationLevel;
@@ -30,7 +31,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 13] = [
+const CONFIG_KEYS: [&str; 14] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -44,6 +45,7 @@ const CONFIG_KEYS: [&str; 13] = [
     "QUERY_EPOCH",
     "RW_BATCH_ENABLE_SORT_AGG",
     "VISIBILITY_MODE",
+    "TIMEZONE",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -61,6 +63,7 @@ const TRANSACTION_ISOLATION_LEVEL: usize = 9;
 const QUERY_EPOCH: usize = 10;
 const BATCH_ENABLE_SORT_AGG: usize = 11;
 const VISIBILITY_MODE: usize = 12;
+const TIMEZONE: usize = 13;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -254,6 +257,7 @@ type BatchEnableLookupJoin = ConfigBool<BATCH_ENABLE_LOOKUP_JOIN, true>;
 type BatchEnableSortAgg = ConfigBool<BATCH_ENABLE_SORT_AGG, true>;
 type MaxSplitRangeGap = ConfigI32<MAX_SPLIT_RANGE_GAP, 8>;
 type QueryEpoch = ConfigU64<QUERY_EPOCH, 0>;
+type Timezone = ConfigString<TIMEZONE>;
 
 #[derive(Default)]
 pub struct ConfigMap {
@@ -300,9 +304,19 @@ pub struct ConfigMap {
 
     /// select as of specific epoch
     query_epoch: QueryEpoch,
+
+    /// Session timezone. Defaults to UTC.
+    timezone: Timezone,
 }
 
 impl ConfigMap {
+    pub fn new() -> Self {
+        Self {
+            timezone: ConfigString::<TIMEZONE>("UTC".into()),
+            ..Default::default()
+        }
+    }
+
     pub fn set(&mut self, key: &str, val: Vec<String>) -> Result<(), RwError> {
         let val = val.iter().map(AsRef::as_ref).collect_vec();
         if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
@@ -329,6 +343,17 @@ impl ConfigMap {
             self.visibility_mode = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(QueryEpoch::entry_name()) {
             self.query_epoch = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(Timezone::entry_name()) {
+            let raw: Timezone = val.as_slice().try_into()?;
+            // Check if the provided string is a valid timezone.
+            Tz::from_str_insensitive(&raw.0)
+                .map_err(|_e| {
+                    ErrorCode::InvalidConfigValue {
+                        config_entry: Timezone::entry_name().to_string(),
+                        config_value: raw.0.to_string(),
+                    }
+                })?;
+            self.timezone = raw;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -363,6 +388,8 @@ impl ConfigMap {
             Ok(self.transaction_isolation_level.to_string())
         } else if key.eq_ignore_ascii_case(QueryEpoch::entry_name()) {
             Ok(self.query_epoch.to_string())
+        } else if key.eq_ignore_ascii_case(Timezone::entry_name()) {
+            Ok(self.timezone.clone())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -425,10 +452,15 @@ impl ConfigMap {
                 setting : self.visibility_mode.to_string(),
                 description : String::from("If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.")
             },
-            VariableInfo {
+            VariableInfo{
                 name: QueryEpoch::entry_name().to_lowercase(),
                 setting : self.query_epoch.to_string(),
                 description : String::from("Sets the historical epoch for querying data. If 0, querying latest data.")
+            },
+            VariableInfo{
+                name : Timezone::entry_name().to_lowercase(),
+                setting : self.timezone.to_string(),
+                description : String::from("The session timezone. This will affect how timestamps are cast into timestamps with timezone.")
             }
         ]
     }
@@ -486,5 +518,9 @@ impl ConfigMap {
             return Some((self.query_epoch.0).into());
         }
         None
+    }
+
+    pub fn get_timezone(&self) -> &str {
+        &self.timezone
     }
 }
