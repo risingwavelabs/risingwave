@@ -4,6 +4,7 @@ package catalog;
 
 import "expr.proto";
 import "plan_common.proto";
+import "data.proto";
 
 option optimize_for = SPEED;
 
@@ -80,6 +81,15 @@ message Function {
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
+  repeated FunctionArgument arguments = 5;
+  data.DataType return_type = 6;
+  string language = 7;
+  string path = 8;
+}
+
+message FunctionArgument {
+  string name = 1;
+  data.DataType type = 2;
 }
 
 // See `TableCatalog` struct in frontend crate for more information.

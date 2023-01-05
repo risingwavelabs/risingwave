@@ -323,7 +323,7 @@ impl MetaClient {
 
     pub async fn drop_function(&self, function_id: FunctionId) -> Result<CatalogVersion> {
         let request = DropFunctionRequest {
-            function_id: function_id.function_id,
+            function_id: function_id.0,
         };
         let resp = self.inner.drop_function(request).await?;
         Ok(resp.version)

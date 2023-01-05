@@ -172,15 +172,18 @@ pub async fn handle(
             args,
             return_type,
             params,
-        } => create_function::handle_create_function(
-            handler_args,
-            or_replace,
-            temporary,
-            name,
-            args,
-            return_type,
-            params,
-        ),
+        } => {
+            create_function::handle_create_function(
+                handler_args,
+                or_replace,
+                temporary,
+                name,
+                args,
+                return_type,
+                params,
+            )
+            .await
+        }
         Statement::CreateTable {
             name,
             columns,

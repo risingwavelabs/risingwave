@@ -197,7 +197,8 @@ impl CatalogWriter for CatalogWriterImpl {
     }
 
     async fn create_function(&self, function: ProstFunction) -> Result<()> {
-        todo!()
+        let (_, version) = self.meta_client.create_function(function).await?;
+        self.wait_version(version).await
     }
 
     async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
@@ -231,7 +232,8 @@ impl CatalogWriter for CatalogWriterImpl {
     }
 
     async fn drop_function(&self, function_id: FunctionId) -> Result<()> {
-        todo!()
+        let version = self.meta_client.drop_function(function_id).await?;
+        self.wait_version(version).await
     }
 
     async fn drop_schema(&self, schema_id: u32) -> Result<()> {
