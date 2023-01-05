@@ -32,7 +32,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
+use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -53,6 +53,7 @@ pub type SinkId = u32;
 pub type RelationId = u32;
 pub type IndexId = u32;
 pub type ViewId = u32;
+pub type FunctionId = u32;
 
 pub type UserId = u32;
 
@@ -447,6 +448,14 @@ where
         } else {
             Err(MetaError::catalog_id_not_found("view", view_id))
         }
+    }
+
+    pub async fn create_function(&self, function: &Function) -> MetaResult<NotificationVersion> {
+        todo!("create function")
+    }
+
+    pub async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
+        todo!("drop function")
     }
 
     pub async fn start_create_stream_job_procedure(
