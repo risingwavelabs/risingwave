@@ -1301,6 +1301,16 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_percentage(
+                    "Join Actor Match Duration Per Second",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_join_match_duration_ns')}[$__rate_interval]) / 1000000000",
+                            "{{actor_id}}.{{side}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_count(
                     "Join Cached Entries",
                     "",
