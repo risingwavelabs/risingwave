@@ -29,15 +29,14 @@ pub fn handle_set(
     value: Vec<SetVariableValue>,
 ) -> Result<RwPgResponse> {
     // Strip double and single quotes
-    let string_vals = value.into_iter().map(|v|
-        match v {
-            SetVariableValue::Literal(Value::DoubleQuotedString(s)) |
-            SetVariableValue::Literal(Value::SingleQuotedString(s)) => {
-                s
-            },
-            _ => v.to_string()
-        }
-    ).collect_vec();
+    let string_vals = value
+        .into_iter()
+        .map(|v| match v {
+            SetVariableValue::Literal(Value::DoubleQuotedString(s))
+            | SetVariableValue::Literal(Value::SingleQuotedString(s)) => s,
+            _ => v.to_string(),
+        })
+        .collect_vec();
 
     // Currently store the config variable simply as String -> ConfigEntry(String).
     // In future we can add converter/parser to make the API more robust.
