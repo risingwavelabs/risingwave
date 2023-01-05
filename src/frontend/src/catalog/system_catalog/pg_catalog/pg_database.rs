@@ -32,7 +32,7 @@ use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 /// (4 rows)
 /// ```
 ///
-/// Ref: [pg_database](`https://www.postgresql.org/docs/current/catalog-pg-database.html`)
+/// Ref: [`pg_database`](https://www.postgresql.org/docs/current/catalog-pg-database.html)
 
 pub const PG_DATABASE_TABLE_NAME: &str = "pg_database";
 
