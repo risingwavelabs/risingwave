@@ -51,6 +51,7 @@ impl Expression for NestedConstructExpression {
                 input.capacity(),
                 ArrayMeta::Struct {
                     children: t.fields.clone().into(),
+                    children_names: vec![].into(),
                 },
             );
             builder.append_array_refs(columns, input.capacity());

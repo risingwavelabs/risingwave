@@ -47,6 +47,7 @@ impl StructType {
     pub fn to_array_meta(&self) -> ArrayMeta {
         ArrayMeta::Struct {
             children: self.fields.clone().into(),
+            children_names: self.field_names.clone().into(),
         }
     }
 }
