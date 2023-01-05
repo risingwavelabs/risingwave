@@ -1079,10 +1079,9 @@ impl LogicalJoin {
 
     fn to_stream_dynamic_filter(
         &self,
-        predicate: EqJoinPredicate,
+        predicate: Condition,
         ctx: &mut ToStreamContext,
     ) -> Result<Option<PlanRef>> {
-        assert!(!predicate.has_eq());
         // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
         // join is a `Inner` join, we can convert the scalar subquery into a
         // `StreamDynamicFilter`
@@ -1096,26 +1095,35 @@ impl LogicalJoin {
         if !MaxOneRowVisitor.visit(self.right()) {
             return Ok(None);
         }
+        if self.right().schema().len() != 1 {
+            return Ok(None);
+        }
 
         // Check if the join condition is a correlated comparison
-        let conj = &predicate.other_cond().conjunctions;
-        let left_ref_index = if let [expr] = conj.as_slice() {
-            if let Some((left_ref, _, right_ref)) = expr.as_comparison_cond()
-                && left_ref.index < self.left().schema().len()
-                && right_ref.index >= self.left().schema().len()
-            {
-                let left_datatype = &self.left().schema().data_types()[left_ref.index];
-                let right_index = right_ref.index - self.left().schema().len();
-                let right_datatype = &self.right().schema().data_types()[right_index];
-                // We align input types on all join predicates with cmp operator
-                assert_eq!(left_datatype, right_datatype);
-                left_ref.index
-            } else {
-                return Ok(None);
-            }
-        } else {
+        if predicate.conjunctions.len() > 1 {
             return Ok(None);
+        }
+        let expr: ExprImpl = predicate.into();
+        let (left_ref, comparator, right_ref) = match expr.as_comparison_cond() {
+            Some(v) => v,
+            None => return Ok(None),
         };
+        let (left_ref, right_ref) = match left_ref.index < right_ref.index {
+            true => (left_ref, right_ref),
+            false => (right_ref, left_ref),
+        };
+
+        let condition_cross_inputs = left_ref.index < self.left().schema().len()
+            && right_ref.index == self.left().schema().len() /* right side has only one column */;
+        if !condition_cross_inputs {
+            // Maybe we should panic here because it means some predicates are not pushed down.
+            return Ok(None);
+        }
+
+        // We align input types on all join predicates with cmp operator
+        if left_ref.data_type != right_ref.data_type {
+            return Ok(None);
+        }
 
         // Check if non of the columns from the inner side is required to output
         let all_output_from_left = self
@@ -1127,7 +1135,6 @@ impl LogicalJoin {
         }
 
         let left = self.left().to_stream(ctx)?;
-
         let right = self.right().to_stream_with_dist_required(
             &RequiredDist::PhysicalDist(Distribution::Broadcast),
             ctx,
@@ -1139,9 +1146,7 @@ impl LogicalJoin {
             Distribution::Single
         );
 
-        let plan =
-            StreamDynamicFilter::new(left_ref_index, predicate.other_cond().clone(), left, right)
-                .into();
+        let plan = StreamDynamicFilter::new(left_ref.index, comparator, left, right).into();
 
         // TODO: `DynamicFilterExecutor` should support `output_indices` in `ChunkBuilder`
         if self
@@ -1270,7 +1275,9 @@ impl ToStream for LogicalJoin {
 
         if predicate.has_eq() {
             self.to_stream_hash_join(predicate, ctx)
-        } else if let Some(dynamic_filter) = self.to_stream_dynamic_filter(predicate, ctx)? {
+        } else if let Some(dynamic_filter) =
+            self.to_stream_dynamic_filter(self.on().clone(), ctx)?
+        {
             Ok(dynamic_filter)
         } else {
             Err(RwError::from(ErrorCode::NotImplemented(

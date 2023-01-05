@@ -307,21 +307,7 @@ impl ToStream for LogicalFilter {
                 });
                 cur_streaming = StreamDynamicFilter::new(
                     left_index,
-                    Condition {
-                        conjunctions: vec![ExprImpl::from(FunctionCall::new(
-                            now_cond.get_expr_type(),
-                            vec![
-                                ExprImpl::from(InputRef::new(
-                                    left_index,
-                                    self.schema().fields()[left_index].data_type(),
-                                )),
-                                ExprImpl::from(InputRef::new(
-                                    self.schema().len(),
-                                    rht.schema().fields()[0].data_type(),
-                                )),
-                            ],
-                        )?)],
-                    },
+                    now_cond.get_expr_type(),
                     cur_streaming,
                     rht,
                 )
