@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::binder::Relation;
+use crate::binder::{Relation, ShareId};
 
+/// Share a relation during binding and planning.
+/// It could be used to share a CTE, a source, a view and so on.
 #[derive(Debug, Clone)]
 pub struct BoundShare {
-    pub(crate) name: String,
+    pub(crate) share_id: ShareId,
     pub(crate) input: Relation,
 }

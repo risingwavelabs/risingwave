@@ -50,7 +50,7 @@ pub use values::BoundValues;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::session::{AuthContext, SessionImpl};
 
-pub type CteId = usize;
+pub type ShareId = usize;
 
 /// `Binder` binds the identifiers in AST to columns in relations
 pub struct Binder {
@@ -75,7 +75,9 @@ pub struct Binder {
 
     next_subquery_id: usize,
     next_values_id: usize,
-    next_cte_id: CteId,
+    /// The `ShareId` is used to identify the share relation which could be a CTE, a source, a view
+    /// and so on.
+    next_share_id: ShareId,
 
     search_path: SearchPath,
     /// Whether the Binder is binding an MV.
@@ -99,7 +101,7 @@ impl Binder {
             lateral_contexts: vec![],
             next_subquery_id: 0,
             next_values_id: 0,
-            next_cte_id: 0,
+            next_share_id: 0,
             search_path: session.config().get_search_path(),
             in_create_mv,
         }
@@ -182,9 +184,9 @@ impl Binder {
         id
     }
 
-    fn next_cte_id(&mut self) -> CteId {
-        let id = self.next_cte_id;
-        self.next_cte_id += 1;
+    fn next_share_id(&mut self) -> ShareId {
+        let id = self.next_share_id;
+        self.next_share_id += 1;
         id
     }
 }

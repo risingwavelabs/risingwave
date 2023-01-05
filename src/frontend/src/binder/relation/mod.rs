@@ -263,7 +263,7 @@ impl Binder {
         if schema_name.is_none() && let Some(item) = self.context.cte_to_relation.get(&table_name) {
             // Handles CTE
 
-            let (_cte_id, query, mut original_alias) = item.deref().clone();
+            let (share_id, query, mut original_alias) = item.deref().clone();
             debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.
 
             if let Some(from_alias) = alias {
@@ -287,8 +287,9 @@ impl Binder {
                 Some(original_alias),
             )?;
 
+            // Share the CTE.
             let input_relation = Relation::Subquery(Box::new(BoundSubquery { query }));
-            let share_relation = Relation::Share(Box::new(BoundShare { name: table_name, input: input_relation }));
+            let share_relation = Relation::Share(Box::new(BoundShare { share_id, input: input_relation }));
             Ok(share_relation)
         } else {
 

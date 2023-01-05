@@ -135,11 +135,12 @@ impl Planner {
     }
 
     pub(super) fn plan_share(&mut self, share: BoundShare) -> Result<PlanRef> {
-        match self.share_cache.get(&share.name) {
+        match self.share_cache.get(&share.share_id) {
             None => {
                 let result = self.plan_relation(share.input)?;
                 let logical_share = LogicalShare::create(result);
-                self.share_cache.insert(share.name, logical_share.clone());
+                self.share_cache
+                    .insert(share.share_id, logical_share.clone());
                 Ok(logical_share)
             }
             Some(result) => Ok(result.clone()),

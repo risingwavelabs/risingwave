@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use risingwave_common::error::Result;
 
-use crate::binder::BoundStatement;
+use crate::binder::{BoundStatement, ShareId};
 use crate::optimizer::{OptimizerContextRef, PlanRoot};
 
 mod delete;
@@ -36,7 +36,9 @@ use crate::PlanRef;
 /// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree
 pub struct Planner {
     ctx: OptimizerContextRef,
-    share_cache: HashMap<String, PlanRef>,
+    /// Mapping of `ShareId` to its share plan.
+    /// The share plan can be a CTE, a source, a view and so on.
+    share_cache: HashMap<ShareId, PlanRef>,
 }
 
 impl Planner {
