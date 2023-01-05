@@ -227,16 +227,6 @@ impl<W: SstableWriter> SstableBuilder<W> {
                         current_key_hashes.push(key_hash);
                     }
                 };
-                if self.user_key_hashes.contains_key(&table_id) {
-                    let mut current_key_hashes =
-                        self.user_key_hashes.get(&table_id).unwrap().clone();
-                    current_key_hashes.push(key_hash);
-                    self.user_key_hashes.remove(&table_id);
-                    self.user_key_hashes
-                        .insert(table_id, current_key_hashes.to_vec());
-                } else {
-                    self.user_key_hashes.insert(table_id, vec![key_hash]);
-                }
 
                 self.last_extract_key.clear();
                 self.last_extract_key.extend_from_slice(extract_key);
