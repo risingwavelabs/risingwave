@@ -13,405 +13,236 @@
 // limitations under the License.
 
 use std::borrow::BorrowMut;
-use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::anyhow;
-use etcd_client::{Client, ConnectOptions, Error, LeaseClient};
+use etcd_client::{Client, ConnectOptions, Error, GetOptions};
 use risingwave_pb::meta::MetaLeaderInfo;
-use tokio::sync::{oneshot, watch};
-use tokio::task::JoinHandle;
+use tokio::sync::{oneshot, watch, Mutex};
 use tokio::time;
 use tokio_stream::StreamExt;
 
-use crate::rpc::elections::run_elections;
-use crate::storage::MetaStore;
 use crate::MetaResult;
-const META_ELECTION_KEY: &str = "ELECTION";
 
-pub struct ElectionContext {
-    pub leader: MetaLeaderInfo,
-    pub events: watch::Receiver<Option<MetaLeaderInfo>>,
-    pub handle: JoinHandle<()>,
-    pub stop_sender: oneshot::Sender<()>,
-}
+const META_ELECTION_KEY: &str = "__meta_election";
 
 #[async_trait::async_trait]
-pub trait ElectionClient {
-    async fn start(&self, id: String, lease_ttl: i64) -> MetaResult<ElectionContext>;
+pub trait ElectionClient: Send + Sync + 'static {
+    async fn run_once(&self, ttl: i64, stop: watch::Receiver<()>) -> MetaResult<()>;
+    async fn leader(&self) -> MetaResult<Option<MetaLeaderInfo>>;
+    async fn get_members(&self) -> MetaResult<Vec<(String, i64, bool)>>;
+    async fn is_leader(&self) -> bool;
 }
 
 pub struct EtcdElectionClient {
     pub client: Client,
-}
-
-struct EtcdLeaseSession {
-    lease_id: i64,
-    ttl: i64,
-    handle: JoinHandle<()>,
-    client: LeaseClient,
-}
-
-impl EtcdLeaseSession {
-    async fn drop_session(mut self) {
-        let _ = self.client.revoke(self.lease_id).await;
-        self.handle.abort()
-    }
-
-    async fn replace_lease(&mut self, lease_id: i64) -> MetaResult<()> {
-        self.handle.abort();
-
-        let mut lease_client = self.client.clone();
-
-        let ttl = self.ttl;
-        let handle = tokio::spawn(async move {
-            Self::lease_keep_loop(
-                &mut lease_client,
-                lease_id,
-                Duration::from_secs((ttl / 2) as u64),
-            )
-            .await
-        });
-
-        self.lease_id = lease_id;
-        self.handle = handle;
-
-        Ok(())
-    }
-
-    pub async fn lease_keep_loop(
-        lease_client: &mut LeaseClient,
-        lease_id: i64,
-        period: Duration,
-    ) -> ! {
-        let mut ticker = time::interval(period);
-
-        let (mut lease_keeper, _lease_keep_alive_stream) =
-            lease_client.keep_alive(lease_id).await.unwrap();
-
-        loop {
-            ticker.tick().await;
-            if let Err(e) = lease_keeper.keep_alive().await {
-                tracing::error!("lease keeper failed {}, recreating", e);
-
-                let (new_keeper, _stream) = match lease_client.keep_alive(lease_id).await {
-                    Ok((a, b)) => (a, b),
-                    Err(e) => {
-                        tracing::error!("rebuild lease keeper failed {}", e);
-                        continue;
-                    }
-                };
-
-                lease_keeper = new_keeper;
-            }
-        }
-    }
+    is_leader: Mutex<bool>,
+    pub id: String,
 }
 
 impl EtcdElectionClient {
-    async fn lease_session(&self, ttl: i64) -> MetaResult<EtcdLeaseSession> {
-        let mut lease_client = self.client.lease_client();
-        let lease_id = lease_client.grant(ttl, None).await.unwrap();
-
-        let lease_id = lease_id.id();
-
-        let handle = tokio::spawn(async move {
-            EtcdLeaseSession::lease_keep_loop(
-                &mut lease_client,
-                lease_id,
-                Duration::from_secs((ttl / 2) as u64),
-            )
-            .await
-        });
-
-        Ok(EtcdLeaseSession {
-            lease_id,
-            ttl,
-            handle,
-            client: self.client.lease_client(),
-        })
-    }
-
-    fn value_to_address(value: &[u8]) -> String {
-        String::from_utf8_lossy(value).to_string()
-    }
-
-    async fn run(
-        &self,
-        stop: oneshot::Receiver<()>,
-        value: &[u8],
-        lease_ttl: i64,
-    ) -> MetaResult<(
-        JoinHandle<()>,
-        watch::Receiver<Option<MetaLeaderInfo>>,
-        MetaLeaderInfo,
-    )> {
-        #[derive(Debug, Clone, Copy)]
-        enum State {
-            Init,
-            Reconnect,
-            Campaign,
-            Observe,
-        }
-
-        let client = self.client.clone();
-        let mut stop = stop;
-
-        let mut lease_session = self
-            .lease_session(lease_ttl)
-            .await
-            .expect("lease session must available");
-
-        let (sender, receiver) = watch::channel::<Option<MetaLeaderInfo>>(None);
-
-        let id = value.to_vec();
-
-        let event_sender = sender;
-
-        let ticker_period = Duration::from_secs(1);
-        let join_handle = tokio::spawn(async move {
-            let mut state = State::Init;
-
-            let mut current_leader: Option<Vec<u8>> = None;
-
-            tracing::info!("init election with lease id {}", lease_session.lease_id);
-
-            let mut ticker = time::interval(ticker_period);
-            loop {
-                ticker.tick().await;
-
-                tracing::info!("current etcd election state {:?}", state);
-
-                match state {
-                    State::Init => {
-                        let leader_kv =
-                            match client.election_client().leader(META_ELECTION_KEY).await {
-                                Ok(mut leader) => match leader.take_kv() {
-                                    None => continue,
-                                    Some(kv) => kv,
-                                },
-                                Err(Error::GRpcStatus(e))
-                                    if e.message() == "election: no leader" =>
-                                {
-                                    tracing::info!("no leader now, run election");
-
-                                    // no leader now
-                                    state = State::Campaign;
-                                    continue;
-                                }
-                                Err(e) => {
-                                    tracing::error!("error happened when calling leader {}", e);
-
-                                    // todo, continue is ok?
-                                    state = State::Reconnect;
-                                    continue;
-                                }
-                            };
-
-                        let discovered_leader_id = leader_kv.value().to_vec();
-
-                        if match &mut current_leader {
-                            None => true,
-                            Some(leader_id) => *leader_id != discovered_leader_id,
-                        } {
-                            event_sender
-                                .send(Some(MetaLeaderInfo {
-                                    node_address: Self::value_to_address(leader_kv.value()),
-                                    lease_id: leader_kv.lease() as u64,
-                                }))
-                                .unwrap();
-
-                            current_leader = Some(discovered_leader_id.clone());
-                        }
-
-                        if leader_kv.value() == id.as_slice() {
-                            lease_session
-                                .replace_lease(leader_kv.lease())
-                                .await
-                                .unwrap();
-
-                            state = State::Observe
-                        } else {
-                            state = State::Campaign
-                        }
-                    }
-                    State::Campaign => {
-                        let mut election_client = client.election_client();
-                        tokio::select! {
-                            resp = election_client.campaign(META_ELECTION_KEY, id.clone(), lease_session.lease_id) => {
-                                match resp {
-                                    Ok(_) => {
-                                        tracing::info!("election campaign done, changing state to observe mode");
-                                        state = State::Observe;
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("election campaign failed due to {}, changing state to observe mode", e.to_string());
-                                        state = State::Reconnect;
-                                    }
-                                }
-                                continue
-                            }
-                            _ = stop.borrow_mut() => {
-                                tracing::info!("stopping election");
-                                lease_session.drop_session().await;
-                                return
-                            }
-                        }
-                    }
-                    State::Observe => {
-                        let mut observe_stream = client
-                            .election_client()
-                            .observe(META_ELECTION_KEY)
-                            .await
-                            .expect("creating observe stream failed, fail asap");
-
-                        loop {
-                            tokio::select! {
-                                _ = stop.borrow_mut() => {
-                                    lease_session.drop_session().await;
-                                    return
-                                }
-
-                                leader_resp = observe_stream.next() => {
-                                    let leader_resp =
-                                        leader_resp.expect("observe stream should never stop");
-
-                                    let leader_kv = match leader_resp {
-                                        Ok(mut leader) => match leader.take_kv() {
-                                            Some(kv) => kv,
-                                            None => continue,
-                                        },
-                                        Err(e) => {
-                                            tracing::error!("observing stream failed {}", e.to_string());
-                                            state = State::Reconnect;
-
-                                            break;
-                                        }
-                                    };
-
-                                    if leader_kv.value() != id.as_slice() {
-                                        panic!("leader changed!");
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    State::Reconnect => match client.maintenance_client().status().await {
-                        Ok(s) => {
-                            tracing::info!("etcd election server status is {:?}", s);
-                            state = State::Init;
-                            continue;
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                "etcd election server status is failed {}",
-                                e.to_string()
-                            );
-                        }
-                    },
-                }
-            }
-        });
-
-        let mut ticker = time::interval(ticker_period);
-
-        let leader_info = loop {
-            ticker.tick().await;
-            let leader_resp = self
-                .client
-                .election_client()
-                .leader(META_ELECTION_KEY)
-                .await;
-            match leader_resp {
-                Ok(mut leader) => {
-                    let kv = match leader.take_kv() {
-                        None => continue,
-                        Some(kv) => kv,
-                    };
-
-                    let meta_leader_info = MetaLeaderInfo {
-                        node_address: Self::value_to_address(kv.value()),
-                        lease_id: kv.lease() as u64,
-                    };
-                    break meta_leader_info;
-                }
-                Err(Error::GRpcStatus(e)) if e.message() == "election: no leader" => {
-                    tracing::info!("waiting for first leader");
-                    continue;
-                }
-                Err(e) => {
-                    tracing::error!("waiting for first leader failed {}", e.to_string());
-                    continue;
-                }
-            };
-        };
-
-        Ok((join_handle, receiver, leader_info))
+    async fn set_leader(&self, is_leader: bool) {
+        let mut guard = self.is_leader.lock().await;
+        *guard = is_leader;
     }
 }
 
 #[async_trait::async_trait]
 impl ElectionClient for EtcdElectionClient {
-    async fn start(&self, id: String, lease_ttl: i64) -> MetaResult<ElectionContext> {
-        let (stop_sender, stop_recv) = oneshot::channel::<()>();
+    async fn is_leader(&self) -> bool {
+        // self.is_leader.load(Ordering::Relaxed)
+        let guard = self.is_leader.lock().await;
+        *guard
+    }
 
-        let value = id.as_bytes().to_vec();
+    async fn leader(&self) -> MetaResult<Option<MetaLeaderInfo>> {
+        let mut election_client = self.client.election_client();
+        let leader = election_client.leader(META_ELECTION_KEY).await;
 
-        let (handle, receiver, leader) = self
-            .run(stop_recv, &value, lease_ttl)
-            .await
-            .map_err(|e| anyhow!(e))?;
+        let leader = match leader {
+            Ok(leader) => Ok(Some(leader)),
+            Err(Error::GRpcStatus(e)) if e.message() == "election: no leader" => Ok(None),
+            Err(e) => Err(e),
+        }?;
 
-        Ok(ElectionContext {
-            leader,
-            events: receiver,
-            handle,
-            stop_sender,
-        })
+        Ok(leader.and_then(|leader| {
+            leader.kv().map(|leader_kv| MetaLeaderInfo {
+                node_address: String::from_utf8_lossy(leader_kv.value()).to_string(),
+                lease_id: leader_kv.lease() as u64,
+            })
+        }))
+    }
+
+    async fn run_once(&self, ttl: i64, stop: watch::Receiver<()>) -> MetaResult<()> {
+        let mut lease_client = self.client.lease_client();
+        let mut election_client = self.client.election_client();
+        let mut stop = stop;
+
+        //        self.is_leader.store(false, Ordering::Relaxed);
+        self.set_leader(false).await;
+
+        let leader_resp = election_client.leader(META_ELECTION_KEY).await;
+
+        let mut lease_id = match leader_resp.map(|mut resp| resp.take_kv()) {
+            // leader exists
+            Ok(Some(leader_kv)) if leader_kv.value() == self.id.as_bytes() => Ok(leader_kv.lease()),
+
+            // leader kv not exists (may not happen)
+            Ok(_) => lease_client.grant(ttl, None).await.map(|resp| resp.id()),
+
+            // no leader
+            Err(Error::GRpcStatus(e)) if e.message() == "election: no leader" => {
+                lease_client.grant(ttl, None).await.map(|resp| resp.id())
+            }
+
+            // connection error
+            Err(e) => Err(e),
+        }?;
+
+        // try keep alive
+        let (mut keeper, mut resp_stream) = lease_client.keep_alive(lease_id).await.unwrap();
+        let _resp = keeper.keep_alive().await?;
+        let resp = resp_stream.message().await?;
+        if let Some(resp) = resp {
+            if resp.ttl() == 0 {
+                tracing::info!("lease {} expired or revoked, re-granting", lease_id);
+                // renew lease_id
+                lease_id = lease_client.grant(ttl, None).await.map(|resp| resp.id())?;
+                tracing::info!("lease {} re-granted", lease_id);
+            }
+        }
+
+        let (keep_alive_fail_tx, mut keep_alive_fail_rx) = oneshot::channel();
+
+        let mut lease_client = self.client.lease_client();
+
+        let mut stop_ = stop.clone();
+
+        let handle = tokio::spawn(async move {
+            let (mut keeper, mut resp_stream) = lease_client.keep_alive(lease_id).await.unwrap();
+
+            let mut ticker = time::interval(Duration::from_secs(1));
+
+            loop {
+                tokio::select! {
+                    biased;
+
+                    _ = ticker.tick() => {
+                        let resp = keeper.keep_alive().await;
+                        if let Err(err) = resp {
+                            tracing::error!("keep alive for lease {} failed {}", lease_id, err);
+                            keep_alive_fail_tx.send(()).unwrap();
+                            break;
+                        }
+
+                        if let Some(resp) = resp_stream.message().await.unwrap() {
+                            if resp.ttl() <= 0 {
+                                tracing::warn!("lease expired or revoked {}", lease_id);
+                                keep_alive_fail_tx.send(()).unwrap();
+                                break;
+                            }
+                        }
+                    }
+
+                    _ = stop_.changed() => {
+                        tracing::info!("stop signal received");
+                        break;
+                    }
+                }
+            }
+            tracing::info!("keep alive loop for lease {} stopped", lease_id);
+        });
+
+        let _guard = scopeguard::guard(handle, |handle| handle.abort());
+
+        tokio::select! {
+            biased;
+
+            _ = stop.changed() => {
+                tracing::info!("stop signal received");
+                return Ok(());
+            }
+
+            _ = election_client.campaign(META_ELECTION_KEY, self.id.as_bytes().to_vec(), lease_id) => {
+                tracing::info!("client {} wins election {}", self.id, META_ELECTION_KEY);
+            }
+        };
+
+        let mut observe_stream = election_client.observe(META_ELECTION_KEY).await?;
+
+        // self.is_leader.store(true, Ordering::Relaxed);
+        self.set_leader(true).await;
+
+        loop {
+            tokio::select! {
+                biased;
+                _ = stop.changed() => {
+                    tracing::info!("stop signal received");
+                    break;
+                },
+                _ = keep_alive_fail_rx.borrow_mut() => {
+                    tracing::error!("keep alive failed, stopping main loop");
+                    break;
+                },
+                resp = observe_stream.next() => {
+                    match resp {
+                        None => unreachable!(),
+                        Some(Ok(leader)) => {
+                            if let Some(kv) = leader.kv() && kv.value() != self.id.as_bytes() {
+                                tracing::warn!("leader has been changed to {}", String::from_utf8_lossy(kv.value()).to_string());
+                                break;
+                            }
+                        }
+                        Some(Err(e)) => {
+                            tracing::error!("error {} received from leader observe stream", e.to_string());
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        tracing::warn!("client {} lost leadership", self.id);
+
+        // self.is_leader.store(false, Ordering::Relaxed);
+        self.set_leader(false).await;
+
+        Ok(())
+    }
+
+    async fn get_members(&self) -> MetaResult<Vec<(String, i64, bool)>> {
+        let mut client = self.client.kv_client();
+        let keys = client
+            .get(META_ELECTION_KEY, Some(GetOptions::new().with_prefix()))
+            .await?;
+
+        // todo, sort by revision
+        Ok(keys
+            .kvs()
+            .iter()
+            .enumerate()
+            .map(|(i, kv)| {
+                (
+                    String::from_utf8_lossy(kv.value()).to_string(),
+                    kv.lease(),
+                    i == 0,
+                )
+            })
+            .collect())
     }
 }
 
 impl EtcdElectionClient {
-    #[allow(dead_code)]
     pub(crate) async fn new(
         endpoints: Vec<String>,
         options: Option<ConnectOptions>,
-        auth_enabled: bool,
+        id: String,
     ) -> MetaResult<Self> {
-        assert!(!auth_enabled, "auth not supported");
+        let client = Client::connect(&endpoints, options.clone()).await?;
 
-        let client = Client::connect(&endpoints, options.clone())
-            .await
-            .map_err(|e| anyhow::anyhow!(e))?;
-
-        Ok(Self { client })
-    }
-}
-
-pub struct KvBasedElectionClient<S: MetaStore> {
-    meta_store: Arc<S>,
-}
-
-impl<S: MetaStore> KvBasedElectionClient<S> {
-    pub fn new(meta_store: Arc<S>) -> KvBasedElectionClient<S> {
-        Self { meta_store }
-    }
-}
-
-#[async_trait::async_trait]
-impl<S: MetaStore> ElectionClient for KvBasedElectionClient<S> {
-    async fn start(&self, id: String, lease_ttl: i64) -> MetaResult<ElectionContext> {
-        let (leader, handle, stop_sender, events) =
-            run_elections(id, self.meta_store.clone(), lease_ttl as u64).await?;
-
-        let ctx = ElectionContext {
-            leader,
-            events,
-            handle,
-            stop_sender,
-        };
-
-        Ok(ctx)
+        Ok(Self {
+            client,
+            is_leader: Mutex::new(false),
+            id,
+        })
     }
 }

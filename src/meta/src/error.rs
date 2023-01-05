@@ -55,6 +55,9 @@ enum MetaErrorInner {
     #[error("Service unavailable: {0}")]
     Unavailable(String),
 
+    #[error("Election failed: {0}")]
+    Election(etcd_client::Error),
+
     #[error(transparent)]
     Internal(anyhow::Error),
 }
@@ -127,6 +130,12 @@ impl From<MetadataModelError> for MetaError {
 impl From<HummockError> for MetaError {
     fn from(e: HummockError) -> Self {
         MetaErrorInner::HummockError(e).into()
+    }
+}
+
+impl From<etcd_client::Error> for MetaError {
+    fn from(e: etcd_client::Error) -> Self {
+        MetaErrorInner::Election(e).into()
     }
 }
 

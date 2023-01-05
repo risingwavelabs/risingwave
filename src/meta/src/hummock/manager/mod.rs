@@ -23,7 +23,6 @@ use arc_swap::ArcSwap;
 use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
-use prost::Message;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
@@ -195,7 +194,6 @@ pub(crate) use start_measure_real_process_timer;
 use self::compaction_group_manager::CompactionGroupManagerInner;
 use super::Compactor;
 use crate::hummock::manager::worker::HummockManagerEventSender;
-use crate::rpc::{META_CF_NAME, META_LEADER_KEY};
 
 static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     [
@@ -491,9 +489,9 @@ where
     async fn commit_trx(
         &self,
         meta_store: &S,
-        mut trx: Transaction,
+        trx: Transaction,
         context_id: Option<HummockContextId>,
-        info: MetaLeaderInfo,
+        _info: MetaLeaderInfo,
     ) -> Result<()> {
         if let Some(context_id) = context_id {
             if context_id == META_NODE_ID {
@@ -504,11 +502,6 @@ where
             }
         }
 
-        trx.check_equal(
-            META_CF_NAME.to_owned(),
-            META_LEADER_KEY.as_bytes().to_vec(),
-            info.encode_to_vec(),
-        );
         meta_store.txn(trx).await.map_err(Into::into)
     }
 
