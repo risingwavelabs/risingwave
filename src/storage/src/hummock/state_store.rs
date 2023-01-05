@@ -14,7 +14,6 @@
 
 use std::future::Future;
 use std::ops::Bound;
-use std::sync::atomic::Ordering as MemOrdering;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -176,25 +175,15 @@ impl StateStore for HummockStorage {
 
     define_state_store_associated_type!();
 
-    /// Waits until the local hummock version contains the epoch. If `wait_epoch` is `Current`,
-    /// we will only check whether it is le `sealed_epoch` and won't wait.
+    /// Waits until local epoch becomes GE than `wait_epoch`.
     fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
-            // Ok(self.local_version_manager.try_wait_epoch(epoch).await?)
-            let wait_epoch = match wait_epoch {
-                HummockReadEpoch::Committed(epoch) => epoch,
+            let (wait_epoch, mut receiver) = match wait_epoch {
+                HummockReadEpoch::Committed(epoch) => {
+                    (epoch, self.version_update_notifier_tx.subscribe())
+                }
                 HummockReadEpoch::Current(epoch) => {
-                    // let sealed_epoch = self.local_version.read().get_sealed_epoch();
-                    let sealed_epoch = (*self.seal_epoch).load(MemOrdering::SeqCst);
-                    assert!(
-                        epoch <= sealed_epoch
-                            && epoch != HummockEpoch::MAX
-                        ,
-                        "current epoch can't read, because the epoch in storage is not updated, epoch{}, sealed epoch{}"
-                        ,epoch
-                        ,sealed_epoch
-                    );
-                    return Ok(());
+                    (epoch, self.seal_epoch_notifier_tx.subscribe())
                 }
                 HummockReadEpoch::NoWait(_) | HummockReadEpoch::Backup(_) => return Ok(()),
             };
@@ -202,10 +191,9 @@ impl StateStore for HummockStorage {
                 panic!("epoch should not be u64::MAX");
             }
 
-            let mut receiver = self.version_update_notifier_tx.subscribe();
             // avoid unnecessary check in the loop if the value does not change
-            let max_committed_epoch = *receiver.borrow_and_update();
-            if max_committed_epoch >= wait_epoch {
+            let new_epoch = *receiver.borrow_and_update();
+            if new_epoch >= wait_epoch {
                 return Ok(());
             }
             loop {
@@ -221,7 +209,7 @@ impl StateStore for HummockStorage {
                         // CN with the same distribution as the upstream MV.
                         // See #3845 for more details.
                         tracing::warn!(
-                            "wait_epoch {:?} timeout when waiting for version update elapsed {:?}s",
+                            "wait_epoch {:?} timeout when waiting for epoch update elapsed {:?}s",
                             wait_epoch,
                             elapsed
                         );
@@ -233,8 +221,8 @@ impl StateStore for HummockStorage {
                         ));
                     }
                     Ok(Ok(_)) => {
-                        let max_committed_epoch = *receiver.borrow();
-                        if max_committed_epoch >= wait_epoch {
+                        let new_epoch = *receiver.borrow();
+                        if new_epoch >= wait_epoch {
                             return Ok(());
                         }
                     }
@@ -268,9 +256,6 @@ impl StateStore for HummockStorage {
             warn!("sealing invalid epoch");
             return;
         }
-        // Update `seal_epoch` synchronously,
-        // as `HummockEvent::SealEpoch` is handled asynchronously.
-        self.seal_epoch.store(epoch, MemOrdering::SeqCst);
         self.hummock_event_sender
             .send(HummockEvent::SealEpoch {
                 epoch,
