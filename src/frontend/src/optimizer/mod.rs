@@ -412,6 +412,7 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
+        #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
         ctx.store_logical(plan.explain_to_string().unwrap());
@@ -435,6 +436,7 @@ impl PlanRoot {
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
+        #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
         assert!(*plan.distribution() == Distribution::Single, "{}", plan);
         assert!(!has_batch_exchange(plan.clone()), "{}", plan);
@@ -571,6 +573,7 @@ impl PlanRoot {
         //     ApplyOrder::BottomUp,
         // );
 
+        #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
         Ok(plan)
