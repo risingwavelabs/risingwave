@@ -38,7 +38,7 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     cargo make pre-start-dev
     cargo make link-all-in-one-binaries
 
-    echo "+++ Run sqlsmith tests"
+    echo "--- frontend, fuzzing"
     NEXTEST_PROFILE=ci cargo nextest run run_sqlsmith_on_frontend --features "failpoints sync_point enable_sqlsmith_unit_test" 2> >(tee);
 
     echo "--- e2e, ci-3cn-1fe, fuzzing"
@@ -47,7 +47,7 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
     chmod +x ./target/debug/sqlsmith
 
     cargo make ci-start ci-3cn-1fe
-    timeout 20m ./target/debug/sqlsmith test --count "$SQLSMITH_COUNT" --testdata ./src/tests/sqlsmith/tests/testdata
+    timeout 20m RUST_LOG=info ./target/debug/sqlsmith test --count "$SQLSMITH_COUNT" --testdata ./src/tests/sqlsmith/tests/testdata
 
     # Using `kill` instead of `ci-kill` avoids storing excess logs.
     # If there's errors, the failing query will be printed to stderr.
