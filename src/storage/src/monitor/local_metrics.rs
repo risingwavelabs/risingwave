@@ -68,6 +68,11 @@ impl StoreLocalStatistic {
         }
     }
 
+    pub fn apply_meta_fetch(&mut self, local_cache_meta_block_miss: u64) {
+        self.cache_meta_block_total += 1;
+        self.cache_meta_block_miss += local_cache_meta_block_miss;
+    }
+
     pub fn report(&self, metrics: &StateStoreMetrics) {
         if self.cache_data_block_total > 0 {
             metrics

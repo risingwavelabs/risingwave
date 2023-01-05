@@ -126,7 +126,7 @@ impl_primitive_for_others! {
 }
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PrimitiveArray<T: PrimitiveArrayItemType> {
     bitmap: Bitmap,
     data: Vec<T>,
