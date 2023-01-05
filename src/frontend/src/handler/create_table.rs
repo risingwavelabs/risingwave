@@ -38,7 +38,6 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
-use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::{Binder, TableCatalog, WithOptions};
 
@@ -269,7 +268,7 @@ pub fn bind_sql_table_constraints(
 /// `gen_create_table_plan_with_source` generates the plan for creating a table with an external
 /// stream source.
 pub(crate) async fn gen_create_table_plan_with_source(
-    handler_args: HandlerArgs,
+    context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
@@ -277,15 +276,13 @@ pub(crate) async fn gen_create_table_plan_with_source(
     mut col_id_gen: VersionedTableColumnIdGenerator,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (mut column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
-    let properties = handler_args.with_options.inner().clone();
+    let properties = context.with_options().inner();
 
     check_and_add_timestamp_column(&properties, &mut column_descs, true, &mut col_id_gen);
 
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
 
-    let session = handler_args.session.clone();
-    let context = OptimizerContext::from_handler_args(handler_args);
     let definition = context.normalized_sql().to_owned();
 
     let source_info = resolve_source_schema(
@@ -298,7 +295,6 @@ pub(crate) async fn gen_create_table_plan_with_source(
     .await?;
 
     gen_table_plan_inner(
-        &session,
         context.into(),
         table_name,
         columns,
@@ -313,8 +309,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
 /// `gen_create_table_plan` generates the plan for creating a table without an external stream
 /// source.
 pub(crate) fn gen_create_table_plan(
-    session: &SessionImpl,
-    context: OptimizerContextRef,
+    context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
@@ -323,7 +318,6 @@ pub(crate) fn gen_create_table_plan(
     let definition = context.normalized_sql().to_owned();
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
     gen_create_table_plan_without_bind(
-        session,
         context,
         table_name,
         column_descs,
@@ -336,8 +330,7 @@ pub(crate) fn gen_create_table_plan(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_create_table_plan_without_bind(
-    session: &SessionImpl,
-    context: OptimizerContextRef,
+    context: OptimizerContext,
     table_name: ObjectName,
     column_descs: Vec<ColumnDesc>,
     pk_column_id_from_columns: Option<ColumnId>,
@@ -349,8 +342,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
 
     gen_table_plan_inner(
-        session,
-        context,
+        context.into(),
         table_name,
         columns,
         pk_column_ids,
@@ -363,7 +355,6 @@ pub(crate) fn gen_create_table_plan_without_bind(
 
 #[allow(clippy::too_many_arguments)]
 fn gen_table_plan_inner(
-    session: &SessionImpl,
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
@@ -373,6 +364,7 @@ fn gen_table_plan_inner(
     definition: String,
     version: Option<TableVersion>,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
+    let session = context.session_ctx();
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
@@ -537,34 +529,31 @@ pub async fn handle_create_table(
         }
     }
 
-    let col_id_gen = VersionedTableColumnIdGenerator::initial();
-
     let (graph, source, table) = {
-        let (plan, source, table) =
-            match check_create_table_with_source(&handler_args.with_options, source_schema)? {
-                Some(source_schema) => {
-                    gen_create_table_plan_with_source(
-                        handler_args,
-                        table_name.clone(),
-                        columns,
-                        constraints,
-                        source_schema,
-                        col_id_gen,
-                    )
-                    .await?
-                }
-                None => {
-                    let context = OptimizerContext::from_handler_args(handler_args);
-                    gen_create_table_plan(
-                        &session,
-                        context.into(),
-                        table_name.clone(),
-                        columns,
-                        constraints,
-                        col_id_gen,
-                    )?
-                }
-            };
+        let context = OptimizerContext::from_handler_args(handler_args);
+        let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
+        let col_id_gen = VersionedTableColumnIdGenerator::initial();
+
+        let (plan, source, table) = match source_schema {
+            Some(source_schema) => {
+                gen_create_table_plan_with_source(
+                    context,
+                    table_name.clone(),
+                    columns,
+                    constraints,
+                    source_schema,
+                    col_id_gen,
+                )
+                .await?
+            }
+            None => gen_create_table_plan(
+                context,
+                table_name.clone(),
+                columns,
+                constraints,
+                col_id_gen,
+            )?,
+        };
 
         (build_graph(plan), source, table)
     };

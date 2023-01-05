@@ -76,8 +76,7 @@ pub fn handle_explain(
             }
             None => {
                 gen_create_table_plan(
-                    &session,
-                    context.into(),
+                    context,
                     name,
                     columns,
                     constraints,

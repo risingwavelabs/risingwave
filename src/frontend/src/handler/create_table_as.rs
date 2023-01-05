@@ -108,8 +108,7 @@ pub async fn handle_create_as(
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args.clone());
         let (plan, source, table) = gen_create_table_plan_without_bind(
-            &session,
-            context.into(),
+            context,
             table_name.clone(),
             column_descs,
             None,

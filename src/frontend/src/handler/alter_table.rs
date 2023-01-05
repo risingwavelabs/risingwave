@@ -82,14 +82,8 @@ pub async fn handle_add_column(
 
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let (plan, source, table) = gen_create_table_plan(
-            &session,
-            context.into(),
-            table_name,
-            columns,
-            constraints,
-            col_id_gen,
-        )?;
+        let (plan, source, table) =
+            gen_create_table_plan(context, table_name, columns, constraints, col_id_gen)?;
 
         // TODO: avoid this backward conversion.
         if TableCatalog::from(&table).pk_column_ids() != original_catalog.pk_column_ids() {
