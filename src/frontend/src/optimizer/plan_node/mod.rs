@@ -322,6 +322,10 @@ impl dyn PlanNode {
         &self.plan_base().functional_dependency
     }
 
+    pub fn watermark_columns(&self) -> &[usize] {
+        &self.plan_base().watermark_columns
+    }
+
     /// Serialize the plan node and its children to a stream plan proto.
     ///
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
