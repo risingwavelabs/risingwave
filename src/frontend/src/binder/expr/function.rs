@@ -20,7 +20,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
@@ -294,6 +294,12 @@ impl Binder {
             // non-deterministic
             "now" => {
                 self.ensure_now_function_allowed()?;
+                if !self.in_create_mv {
+                    inputs.push(ExprImpl::from(Literal::new(
+                        Some(ScalarImpl::Int64((self.bind_timestamp_ms * 1000) as i64)),
+                        DataType::Timestamptz,
+                    )));
+                }
                 ExprType::Now
             }
             _ => {
@@ -505,7 +511,7 @@ impl Binder {
             )
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
-                "For creation of MV, `now` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
+                "For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
                 self.context.clause
             ))
             .into());
