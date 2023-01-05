@@ -56,6 +56,8 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         .with_target("risingwave_frontend", Level::INFO)
         .with_target("risingwave_meta", Level::INFO)
         .with_target("risingwave_tracing", Level::INFO)
+        .with_target("risingwave_compute", Level::INFO)
+        .with_target("risingwave_compactor", Level::INFO)
         .with_target("pgwire", Level::ERROR)
         // disable events that are too verbose
         // if you want to enable any of them, find the target name and set it to `TRACE`

@@ -22,7 +22,9 @@ use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
-use super::create_table::{gen_create_table_plan, VersionedTableColumnIdGenerator};
+use super::create_table::{
+    check_create_table_with_source, gen_create_table_plan, VersionedTableColumnIdGenerator,
+};
 use super::query::gen_batch_query_plan;
 use super::RwPgResponse;
 use crate::handler::HandlerArgs;
@@ -38,7 +40,7 @@ pub fn handle_explain(
     options: ExplainOptions,
     analyze: bool,
 ) -> Result<RwPgResponse> {
-    let context = OptimizerContext::new(handler_args, options.clone());
+    let context = OptimizerContext::new(handler_args.clone(), options.clone());
 
     if analyze {
         return Err(ErrorCode::NotImplemented("explain analyze".to_string(), 4856.into()).into());
@@ -62,18 +64,28 @@ pub fn handle_explain(
             name,
             columns,
             constraints,
+            source_schema,
             ..
-        } => {
-            gen_create_table_plan(
-                &session,
-                context.into(),
-                name,
-                columns,
-                constraints,
-                VersionedTableColumnIdGenerator::initial(),
-            )?
-            .0
-        }
+        } => match check_create_table_with_source(&handler_args.with_options, source_schema)? {
+            Some(_) => {
+                return Err(ErrorCode::NotImplemented(
+                    "explain create table with a connector".to_string(),
+                    None.into(),
+                )
+                .into())
+            }
+            None => {
+                gen_create_table_plan(
+                    &session,
+                    context.into(),
+                    name,
+                    columns,
+                    constraints,
+                    VersionedTableColumnIdGenerator::initial(),
+                )?
+                .0
+            }
+        },
 
         Statement::CreateIndex {
             name,
