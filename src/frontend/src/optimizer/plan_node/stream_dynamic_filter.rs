@@ -22,11 +22,11 @@ use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::generic;
 use super::utils::IndicesDisplay;
-use crate::expr::{Expr};
+use crate::expr::Expr;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::{ConditionDisplay};
+use crate::utils::ConditionDisplay;
 
 #[derive(Clone, Debug)]
 pub struct StreamDynamicFilter {
@@ -110,12 +110,7 @@ impl PlanTreeNodeBinary for StreamDynamicFilter {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(
-            self.core.left_index,
-            self.core.comparator,
-            left,
-            right,
-        )
+        Self::new(self.core.left_index, self.core.comparator, left, right)
     }
 }
 
