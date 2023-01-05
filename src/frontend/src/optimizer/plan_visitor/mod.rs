@@ -19,7 +19,10 @@ mod plan_correlated_id_finder;
 pub use plan_correlated_id_finder::*;
 mod share_parent_counter;
 pub use share_parent_counter::*;
+
+#[cfg(debug_assertions)]
 mod input_ref_validator;
+#[cfg(debug_assertions)]
 pub use input_ref_validator::*;
 
 use crate::for_all_plan_nodes;
