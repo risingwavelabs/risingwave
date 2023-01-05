@@ -16,14 +16,15 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::{valid_table_name, IndexId, TableId};
+use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, TableId};
 use risingwave_pb::catalog::{
-    Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
-    Table as ProstTable, View as ProstView,
+    Function as ProstFunction, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
+    Source as ProstSource, Table as ProstTable, View as ProstView,
 };
 
 use super::source_catalog::SourceCatalog;
 use super::ViewId;
+use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
 use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
@@ -49,6 +50,9 @@ pub struct SchemaCatalog {
     indexes_by_table_id: HashMap<TableId, Vec<Arc<IndexCatalog>>>,
     view_by_name: HashMap<String, Arc<ViewCatalog>>,
     view_by_id: HashMap<ViewId, Arc<ViewCatalog>>,
+    // TODO: handle overload functions with the same name
+    function_by_name: HashMap<String, Arc<FunctionCatalog>>,
+    function_by_id: HashMap<FunctionId, Arc<FunctionCatalog>>,
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
@@ -182,6 +186,25 @@ impl SchemaCatalog {
         self.view_by_name.remove(&view_ref.name).unwrap();
     }
 
+    pub fn create_function(&mut self, prost: &ProstFunction) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let function = FunctionCatalog::from(prost);
+        let function_ref = Arc::new(function);
+
+        self.function_by_name
+            .try_insert(name, function_ref.clone())
+            .unwrap();
+        self.function_by_id
+            .try_insert(id.into(), function_ref)
+            .unwrap();
+    }
+
+    pub fn drop_function(&mut self, id: FunctionId) {
+        let function_ref = self.function_by_id.remove(&id).unwrap();
+        self.function_by_name.remove(&function_ref.name).unwrap();
+    }
+
     pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
@@ -310,6 +333,8 @@ impl From<&ProstSchema> for SchemaCatalog {
             system_table_by_name: HashMap::new(),
             view_by_name: HashMap::new(),
             view_by_id: HashMap::new(),
+            function_by_name: HashMap::new(),
+            function_by_id: HashMap::new(),
         }
     }
 }

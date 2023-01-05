@@ -85,6 +85,7 @@ message Function {
   data.DataType return_type = 6;
   string language = 7;
   string path = 8;
+  uint32 owner = 9;
 }
 
 message FunctionArgument {

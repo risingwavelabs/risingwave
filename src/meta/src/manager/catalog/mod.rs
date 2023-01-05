@@ -451,7 +451,26 @@ where
     }
 
     pub async fn create_function(&self, function: &Function) -> MetaResult<NotificationVersion> {
-        todo!("create function")
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(function.database_id)?;
+        database_core.ensure_schema_id(function.schema_id)?;
+
+        #[cfg(not(test))]
+        user_core.ensure_user_id(function.owner)?;
+
+        let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
+        functions.insert(function.id, function.clone());
+        commit_meta!(self, functions)?;
+
+        user_core.increase_ref(function.owner);
+
+        let version = self
+            .notify_frontend(Operation::Add, Info::Function(function.to_owned()))
+            .await;
+
+        Ok(version)
     }
 
     pub async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {

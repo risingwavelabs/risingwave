@@ -53,6 +53,7 @@ impl ObserverState for FrontendObserverNode {
             | Info::Source(_)
             | Info::Index(_)
             | Info::Sink(_)
+            | Info::Function(_)
             | Info::View(_) => {
                 self.handle_catalog_notification(resp);
             }
@@ -213,6 +214,15 @@ impl FrontendObserverNode {
                 Operation::Delete => {
                     catalog_guard.drop_view(view.database_id, view.schema_id, view.id)
                 }
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            Info::Function(function) => match resp.operation() {
+                Operation::Add => catalog_guard.create_function(function),
+                Operation::Delete => catalog_guard.drop_function(
+                    function.database_id,
+                    function.schema_id,
+                    function.id.into(),
+                ),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             _ => unreachable!(),

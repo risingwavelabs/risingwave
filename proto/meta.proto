@@ -230,6 +230,7 @@ message SubscribeResponse {
     catalog.Sink sink = 8;
     catalog.Index index = 9;
     catalog.View view = 10;
+    catalog.Function function = 18;
     user.UserInfo user = 11;
     common.ParallelUnitMapping parallel_unit_mapping = 12;
     common.WorkerNode node = 13;

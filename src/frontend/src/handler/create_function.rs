@@ -93,6 +93,7 @@ pub async fn handle_create_function(
         return_type: Some(bind_data_type(&return_type)?.into()),
         language,
         path: flight_server_addr,
+        owner: session.user_id(),
     };
 
     let catalog_writer = session.env().catalog_writer();
