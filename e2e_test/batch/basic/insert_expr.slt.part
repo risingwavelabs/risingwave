@@ -12,8 +12,10 @@ select * from t;
 ----
 3
 
-statement ok
-insert into t values (2+2);
+query I
+insert into t values (2+2) returning *;
+----
+4
 
 query I rowsort
 select * from t;
@@ -65,6 +67,16 @@ select * from t;
 7
 8
 9
+
+query I
+update t set v1=v1+2 where v1=3 returning *;
+----
+5
+
+query II
+delete from t where v1=5 returning *,2*v1;
+----
+5 10
 
 statement ok
 drop table t;

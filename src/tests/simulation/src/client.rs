@@ -88,6 +88,7 @@ impl sqllogictest::AsyncDB for RisingWave {
                 || lower_sql.starts_with("show")
                 || lower_sql.starts_with("with")
                 || lower_sql.starts_with("describe")
+                || lower_sql.contains("returning")
         };
 
         let rows = self.client.simple_query(sql).await?;
