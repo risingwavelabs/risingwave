@@ -44,6 +44,8 @@ impl StreamDynamicFilter {
             left.distribution().clone(),
             false, /* we can have a new abstraction for append only and monotonically increasing
                     * in the future */
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            vec![],
         );
         let core = generic::DynamicFilter {
             predicate,

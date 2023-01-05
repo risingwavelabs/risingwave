@@ -41,6 +41,8 @@ impl StreamExchange {
             input.functional_dependency().clone(),
             dist,
             input.append_only(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            vec![],
         );
         StreamExchange { base, input }
     }

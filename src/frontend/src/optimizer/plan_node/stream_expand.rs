@@ -45,6 +45,8 @@ impl StreamExpand {
             logical.functional_dependency().clone(),
             dist,
             logical.input().append_only(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            vec![],
         );
         StreamExpand { base, logical }
     }

@@ -43,6 +43,8 @@ impl StreamHopWindow {
             logical.functional_dependency().clone(),
             dist,
             logical.input().append_only(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            vec![],
         );
         Self { base, logical }
     }

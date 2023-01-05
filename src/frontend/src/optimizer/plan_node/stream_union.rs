@@ -47,6 +47,8 @@ impl StreamUnion {
             logical.functional_dependency().clone(),
             dist,
             logical.inputs().iter().all(|x| x.append_only()),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            vec![],
         );
         StreamUnion { base, logical }
     }

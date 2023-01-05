@@ -62,6 +62,8 @@ impl StreamDeltaJoin {
             logical.functional_dependency().clone(),
             dist,
             append_only,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            vec![],
         );
 
         Self {

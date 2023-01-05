@@ -39,6 +39,9 @@ pub struct PlanBase {
     /// means the stream contains only insert operation.
     pub append_only: bool,
     pub functional_dependency: FunctionalDependencySet,
+    /// The watermark column indices of the PlanNode's output. There could be watermark output from
+    /// this stream operator.
+    pub watermark_columns: Vec<usize>,
 }
 
 impl generic::GenericPlanRef for PlanBase {
@@ -82,6 +85,7 @@ impl PlanBase {
             // Logical plan node won't touch `append_only` field
             append_only: true,
             functional_dependency,
+            watermark_columns: vec![],
         }
     }
 
@@ -92,6 +96,7 @@ impl PlanBase {
         functional_dependency: FunctionalDependencySet,
         dist: Distribution,
         append_only: bool,
+        watermark_columns: Vec<usize>,
     ) -> Self {
         let id = ctx.next_plan_node_id();
         Self {
@@ -103,6 +108,7 @@ impl PlanBase {
             logical_pk,
             append_only,
             functional_dependency,
+            watermark_columns,
         }
     }
 
@@ -124,6 +130,7 @@ impl PlanBase {
             // Batch plan node won't touch `append_only` field
             append_only: true,
             functional_dependency,
+            watermark_columns: vec![],
         }
     }
 
@@ -135,6 +142,8 @@ impl PlanBase {
             plan_node.functional_dependency().clone(),
             plan_node.distribution().clone(),
             plan_node.append_only(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            vec![],
         )
     }
 }

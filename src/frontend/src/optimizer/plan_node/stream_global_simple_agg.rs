@@ -46,6 +46,8 @@ impl StreamGlobalSimpleAgg {
             logical.functional_dependency().clone(),
             dist,
             false,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            vec![],
         );
         StreamGlobalSimpleAgg { base, logical }
     }

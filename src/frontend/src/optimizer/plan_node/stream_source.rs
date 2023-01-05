@@ -43,6 +43,8 @@ impl StreamSource {
                 .catalog
                 .as_ref()
                 .map_or(true, |s| s.append_only),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            vec![],
         );
         Self { base, logical }
     }

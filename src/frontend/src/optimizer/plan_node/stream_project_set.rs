@@ -44,6 +44,8 @@ impl StreamProjectSet {
             logical.functional_dependency().clone(),
             distribution,
             logical.input().append_only(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            vec![],
         );
         StreamProjectSet { base, logical }
     }

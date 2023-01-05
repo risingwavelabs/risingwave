@@ -42,6 +42,8 @@ impl StreamGroupTopN {
             input.functional_dependency().clone(),
             input.distribution().clone(),
             false,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            vec![],
         );
         StreamGroupTopN {
             base,
