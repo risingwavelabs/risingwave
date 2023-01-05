@@ -20,7 +20,7 @@ pub async fn trigger_full_gc(
     context: &CtlContext,
     sst_retention_time_sec: u64,
 ) -> anyhow::Result<()> {
-    let meta_client = context.get_meta_client().await?;
+    let meta_client = context.meta_client().await?;
     let result = meta_client.trigger_full_gc(sst_retention_time_sec).await;
     println!("{:#?}", result);
     Ok(())

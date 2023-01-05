@@ -22,7 +22,7 @@ use risingwave_pb::meta::GetClusterInfoResponse;
 use crate::CtlContext;
 
 pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetClusterInfoResponse> {
-    let meta_client = context.get_meta_client().await?;
+    let meta_client = context.meta_client().await?;
     let response = meta_client.get_cluster_info().await?;
     Ok(response)
 }

@@ -18,7 +18,7 @@ use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_c
 use crate::CtlContext;
 
 pub async fn list_compaction_group(context: &CtlContext) -> anyhow::Result<()> {
-    let meta_client = context.get_meta_client().await?;
+    let meta_client = context.meta_client().await?;
     let result = meta_client.risectl_list_compaction_group().await?;
     println!("{:#?}", result);
     Ok(())
@@ -29,7 +29,7 @@ pub async fn update_compaction_config(
     ids: Vec<CompactionGroupId>,
     configs: Vec<MutableConfig>,
 ) -> anyhow::Result<()> {
-    let meta_client = context.get_meta_client().await?;
+    let meta_client = context.meta_client().await?;
     meta_client
         .risectl_update_compaction_config(ids.as_slice(), configs.as_slice())
         .await?;

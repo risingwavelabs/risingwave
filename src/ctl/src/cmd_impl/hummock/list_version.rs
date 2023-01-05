@@ -18,14 +18,14 @@ use risingwave_rpc_client::HummockMetaClient;
 use crate::CtlContext;
 
 pub async fn list_version(context: &CtlContext) -> anyhow::Result<()> {
-    let meta_client = context.get_meta_client().await?;
+    let meta_client = context.meta_client().await?;
     let version = meta_client.get_current_version().await?;
     println!("{:#?}", version);
     Ok(())
 }
 
 pub async fn list_pinned_versions(context: &CtlContext) -> anyhow::Result<()> {
-    let meta_client = context.get_meta_client().await?;
+    let meta_client = context.meta_client().await?;
     let PinnedVersionsSummary {
         mut pinned_versions,
         workers,
@@ -55,7 +55,7 @@ pub async fn list_pinned_versions(context: &CtlContext) -> anyhow::Result<()> {
 }
 
 pub async fn list_pinned_snapshots(context: &CtlContext) -> anyhow::Result<()> {
-    let meta_client = context.get_meta_client().await?;
+    let meta_client = context.meta_client().await?;
     let PinnedSnapshotsSummary {
         mut pinned_snapshots,
         workers,

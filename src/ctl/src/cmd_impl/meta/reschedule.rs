@@ -53,7 +53,7 @@ const RESCHEDULE_ADDED_KEY: &str = "added";
 //     },
 // }
 pub async fn reschedule(context: &CtlContext, mut plan: String, dry_run: bool) -> Result<()> {
-    let meta_client = context.get_meta_client().await?;
+    let meta_client = context.meta_client().await?;
 
     let regex = Regex::new(RESCHEDULE_MATCH_REGEXP)?;
     let mut reschedules = HashMap::new();

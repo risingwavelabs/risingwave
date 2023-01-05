@@ -19,7 +19,7 @@ pub async fn list_version_deltas(
     start_id: u64,
     num_epochs: u32,
 ) -> anyhow::Result<()> {
-    let meta_client = context.get_meta_client().await?;
+    let meta_client = context.meta_client().await?;
     let resp = meta_client
         .list_version_deltas(start_id, num_epochs, u64::MAX)
         .await?;

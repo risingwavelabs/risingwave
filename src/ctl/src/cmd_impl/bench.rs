@@ -72,8 +72,8 @@ impl InterestedMetrics {
 }
 
 pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
-    let meta = context.get_meta_client().await?;
-    let (hummock, metrics) = context.get_hummock_store_with_metrics().await?;
+    let meta = context.meta_client().await?;
+    let (hummock, metrics) = context.hummock_store_with_metrics().await?;
     let next_cnt = Arc::new(AtomicU64::new(0));
     let iter_cnt = Arc::new(AtomicU64::new(0));
     match cmd {

@@ -22,7 +22,7 @@ use risingwave_rpc_client::ComputeClientPool;
 use crate::CtlContext;
 
 pub async fn trace(context: &CtlContext) -> anyhow::Result<()> {
-    let meta_client = context.get_meta_client().await?;
+    let meta_client = context.meta_client().await?;
 
     let workers = meta_client.get_cluster_info().await?.worker_nodes;
     let compute_nodes = workers

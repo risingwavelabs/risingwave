@@ -19,7 +19,7 @@ use risingwave_pb::backup_service::BackupJobStatus;
 use crate::CtlContext;
 
 pub async fn backup_meta(context: &CtlContext) -> anyhow::Result<()> {
-    let meta_client = context.get_meta_client().await?;
+    let meta_client = context.meta_client().await?;
     let job_id = meta_client.backup_meta().await?;
     loop {
         let job_status = meta_client.get_backup_job_status(job_id).await?;
@@ -45,7 +45,7 @@ pub async fn delete_meta_snapshots(
     context: &CtlContext,
     snapshot_ids: &[u64],
 ) -> anyhow::Result<()> {
-    let meta_client = context.get_meta_client().await?;
+    let meta_client = context.meta_client().await?;
     meta_client.delete_meta_snapshot(snapshot_ids).await?;
     tracing::info!("delete meta snapshots succeeded: {:?}", snapshot_ids);
     Ok(())

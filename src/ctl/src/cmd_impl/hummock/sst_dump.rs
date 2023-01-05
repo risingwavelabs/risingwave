@@ -36,8 +36,8 @@ type TableData = HashMap<u32, TableCatalog>;
 
 pub async fn sst_dump(context: &CtlContext) -> anyhow::Result<()> {
     // Retrieves the Sstable store so we can access the SstableMeta
-    let meta_client = context.get_meta_client().await?;
-    let hummock = context.get_hummock_store().await?;
+    let meta_client = context.meta_client().await?;
+    let hummock = context.hummock_store().await?;
     let version = hummock.inner().get_pinned_version().version();
 
     let table_data = load_table_schemas(&meta_client).await?;

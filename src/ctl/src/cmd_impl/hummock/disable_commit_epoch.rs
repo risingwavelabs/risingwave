@@ -15,7 +15,7 @@
 use crate::CtlContext;
 
 pub async fn disable_commit_epoch(context: &CtlContext) -> anyhow::Result<()> {
-    let meta_client = context.get_meta_client().await?;
+    let meta_client = context.meta_client().await?;
     let version = meta_client.disable_commit_epoch().await?;
     println!(
         "Disabled.\

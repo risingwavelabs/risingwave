@@ -22,7 +22,7 @@ pub async fn trigger_manual_compaction(
     table_id: u32,
     level: u32,
 ) -> anyhow::Result<()> {
-    let meta_client = context.get_meta_client().await?;
+    let meta_client = context.meta_client().await?;
     let result = meta_client
         .trigger_manual_compaction(compaction_group_id, table_id, level)
         .await;

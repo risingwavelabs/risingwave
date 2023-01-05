@@ -17,7 +17,7 @@ use anyhow::Result;
 use crate::CtlContext;
 
 pub async fn list(context: &CtlContext) -> Result<()> {
-    let meta = context.get_meta_client().await?;
+    let meta = context.meta_client().await?;
     let mvs = meta.risectl_list_state_tables().await?;
     for mv in mvs {
         println!("#{}: {}", mv.id, mv.name);

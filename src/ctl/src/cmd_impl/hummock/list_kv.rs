@@ -20,7 +20,7 @@ use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
 use crate::CtlContext;
 
 pub async fn list_kv(context: &CtlContext, epoch: u64, table_id: u32) -> anyhow::Result<()> {
-    let hummock = context.get_hummock_store().await?;
+    let hummock = context.hummock_store().await?;
     if epoch == u64::MAX {
         tracing::info!("using u64::MAX as epoch");
     }
