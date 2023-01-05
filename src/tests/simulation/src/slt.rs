@@ -48,6 +48,11 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             // Simply ignore the tpch test cases when enable kill nodes.
             continue;
         }
+        if kill && path.ends_with("visibility_checkpoint.slt") {
+            // Simply ignore visibility_checkpoint because we already have visibility_all cases.
+            continue;
+        }
+
         // XXX: hack for kafka source test
         let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));
         let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
