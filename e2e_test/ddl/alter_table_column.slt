@@ -4,10 +4,11 @@ create table t (v int);
 statement ok
 create materialized view mv as select * from t;
 
+# Errors
 statement error column .* already exists
 alter table t add column v int;
 
-statement error add a primary key column
+statement error alter primary key
 alter table t add column v1 int primary key;
 
 statement error is not a table or cannot be altered
@@ -15,6 +16,31 @@ alter table mv add column v1 int;
 
 statement ok
 drop materialized view mv;
+
+# Add column
+statement ok
+alter table t add column r real;
+
+query IR
+select v, r from t;
+----
+
+query TT
+show create table t;
+----
+public.t CREATE TABLE t (v INT, r REAL)
+
+statement ok
+alter table t add column s varchar;
+
+query IRT
+select v, r, s from t;
+----
+
+query TT
+show create table t;
+----
+public.t CREATE TABLE t (v INT, r REAL, s CHARACTER VARYING)
 
 statement ok
 drop table t;
