@@ -380,7 +380,8 @@ fn gen_table_plan_inner(
     row_id_index: Option<usize>,
     source_info: Option<StreamSourceInfo>,
     definition: String,
-    version: Option<TableVersion>,
+    version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
+                                    * TABLE` for `CREATE TABLE AS`. */
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let session = context.session_ctx();
     let db_name = session.database();

@@ -114,7 +114,7 @@ pub async fn handle_create_as(
             None,
             vec![],
             "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
-            None,
+            None,          // TODO: support `ALTER TABLE` for `CREATE TABLE AS`
         )?;
         let graph = build_graph(plan);
 
