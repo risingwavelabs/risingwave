@@ -295,7 +295,47 @@ select regexp_match('abc', 'bc');
 {bc}
 
 query T
+select regexp_match('abc', 'Bc');
+----
+NULL
+
+query T
+select regexp_match('abc', 'Bc', 'i');
+----
+{bc}
+
+query T
+select regexp_match('abc', 'Bc', 'ic');
+----
+NULL
+
+query T
+select regexp_match('abc', 'Bc', 'ici');
+----
+{bc}
+
+query T
+select regexp_match('abc', '(?i)Bc');
+----
+{bc}
+
+query T
+select regexp_match('abc', '(?i)Bc', 'c');
+----
+{bc}
+
+query T
 select regexp_match('abc', 'd');
+----
+NULL
+
+query T
+select regexp_match('abc', NULL);
+----
+NULL
+
+query T
+select regexp_match('abc', 'a', NULL);
 ----
 NULL
 
@@ -310,6 +350,11 @@ select regexp_match('foobarbequebaz', 'bar(beque)');
 {beque}
 
 query T
+select regexp_match('foobarbequebaz', 'bar((be)|(bo))(que)');
+----
+{be,be,NULL,que}
+
+query T
 select regexp_match('foobarbequebaz', 'bar.*que');
 ----
 {barbeque}
@@ -322,5 +367,51 @@ select regexp_match('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
 query T
 select regexp_matches('foobarbequebazilbarfbonk', '(b[^b]+)(b[^b]+)', 'g');
 ----
- {bar,beque}
- {bazil,barf}
+{bar,beque}
+{bazil,barf}
+
+query T
+select regexp_matches('foobarbequebazfoobarbequebaz', 'bar((be)|(bo))(que)');
+----
+{be,be,NULL,que}
+{be,be,NULL,que}
+
+query T
+select regexp_matches('abcabc', 'Bc');
+----
+
+query T
+select regexp_matches('abcabc', 'Bc', 'i');
+----
+{bc}
+{bc}
+
+query T
+select regexp_matches('abcabc', 'Bc', 'ic');
+----
+
+query T
+select regexp_matches('abcabc', 'Bc', 'ici');
+----
+{bc}
+{bc}
+
+query T
+select regexp_matches('abcabc', '(?i)Bc');
+----
+{bc}
+{bc}
+
+query T
+select regexp_matches('abcabc', '(?i)Bc', 'c');
+----
+{bc}
+{bc}
+
+query T
+select regexp_matches('abcabc', NULL);
+----
+
+query T
+select regexp_matches('abcabc', 'a', NULL);
+----

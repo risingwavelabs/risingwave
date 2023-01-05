@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,23 +19,21 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::GetClusterInfoResponse;
 
-use crate::common::MetaServiceOpts;
+use crate::CtlContext;
 
-pub async fn get_cluster_info() -> anyhow::Result<GetClusterInfoResponse> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
-
+pub async fn get_cluster_info(context: &CtlContext) -> anyhow::Result<GetClusterInfoResponse> {
+    let meta_client = context.meta_client().await?;
     let response = meta_client.get_cluster_info().await?;
     Ok(response)
 }
 
-pub async fn cluster_info() -> anyhow::Result<()> {
+pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
     let GetClusterInfoResponse {
         worker_nodes,
         table_fragments,
         actor_splits: _,
         source_infos: _,
-    } = get_cluster_info().await?;
+    } = get_cluster_info(context).await?;
 
     // Fragment ID -> [Parallel Unit ID -> (Parallel Unit, Actor)]
     let mut fragments = BTreeMap::new();

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,8 +20,7 @@ use crate::catalog::SourceId;
 use crate::optimizer::plan_node::{
     LogicalShare, LogicalSource, PlanNodeId, PlanTreeNode, StreamShare,
 };
-use crate::optimizer::plan_rewriter::PlanRewriter;
-use crate::optimizer::PlanVisitor;
+use crate::optimizer::{PlanRewriter, PlanVisitor};
 use crate::PlanRef;
 
 #[derive(Debug, Clone, Default)]
@@ -93,7 +92,7 @@ impl PlanRewriter for ShareSourceRewriter {
                 let new_inputs = share
                     .inputs()
                     .into_iter()
-                    .map(|input| self.rewrite(input.clone()))
+                    .map(|input| self.rewrite(input))
                     .collect_vec();
                 let new_share = share.clone_with_inputs(&new_inputs);
                 self.share_map.insert(share.id(), new_share.clone());

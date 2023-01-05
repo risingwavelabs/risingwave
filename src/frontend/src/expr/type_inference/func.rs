@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,7 +16,7 @@ use itertools::Itertools as _;
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{DataType, DataTypeName};
+use risingwave_common::types::{DataType, DataTypeName, ScalarImpl};
 pub use risingwave_expr::sig::func::*;
 
 use super::{align_types, cast_ok_base, CastContext};
@@ -84,6 +84,17 @@ macro_rules! ensure_arity {
                 "Function `{}` takes {} arguments ({} given)",
                 $func,
                 $num,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
+    ($func:literal, | $inputs:ident | <= $upper:literal) => {
+        if !($inputs.len() <= $upper) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes at most {} arguments ({} given)",
+                $func,
+                $upper,
                 $inputs.len(),
             ))
             .into());
@@ -356,11 +367,44 @@ fn infer_type_for_special(
         ExprType::RegexpMatch => {
             ensure_arity!("regexp_match", 2 <= | inputs | <= 3);
             if inputs.len() == 3 {
-                return Err(ErrorCode::NotImplemented(
-                    "flag in regexp_match".to_string(),
-                    4545.into(),
-                )
-                .into());
+                match &inputs[2] {
+                    ExprImpl::Literal(flag) => {
+                        match flag.get_data() {
+                            Some(flag) => {
+                                let ScalarImpl::Utf8(flag) = flag else {
+                                    return Err(ErrorCode::BindError(
+                                        "flag in regexp_match must be a literal string".to_string(),
+                                    ).into());
+                                };
+                                for c in flag.chars() {
+                                    if c == 'g' {
+                                        return Err(ErrorCode::InvalidInputSyntax(
+                                            "regexp_match() does not support the \"global\" option. Use the regexp_matches function instead."
+                                                .to_string(),
+                                        )
+                                        .into());
+                                    }
+                                    if !"ic".contains(c) {
+                                        return Err(ErrorCode::NotImplemented(
+                                            format!("invalid regular expression option: \"{c}\""),
+                                            None.into(),
+                                        )
+                                        .into());
+                                    }
+                                }
+                            }
+                            None => {
+                                // flag is NULL. Will return NULL.
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(ErrorCode::BindError(
+                            "flag in regexp_match must be a literal string".to_string(),
+                        )
+                        .into())
+                    }
+                }
             }
             Ok(Some(DataType::List {
                 datatype: Box::new(DataType::Varchar),
@@ -434,8 +478,8 @@ fn infer_type_for_special(
             Ok(Some(DataType::Int16))
         }
         ExprType::Now => {
-            ensure_arity!("now", | inputs | == 0);
-            Ok(Some(DataType::Timestamp))
+            ensure_arity!("now", | inputs | <= 1);
+            Ok(Some(DataType::Timestamptz))
         }
         _ => Ok(None),
     }
