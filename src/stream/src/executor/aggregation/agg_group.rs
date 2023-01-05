@@ -165,8 +165,6 @@ impl<S: StateStore> AggGroup<S> {
 
     /// Reset all in-memory states to their initial state, i.e. to reset all agg state structs to
     /// the status as if they are just created, no input applied and no row in state table.
-    /// This is important because for some agg calls (e.g. `sum`), if no row is applied, they should
-    /// output NULL, for some other calls (e.g. `sum0`), they should output 0.
     fn reset(&mut self) {
         self.states.iter_mut().for_each(|state| state.reset());
     }
@@ -177,7 +175,7 @@ impl<S: StateStore> AggGroup<S> {
         &mut self,
         storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<OwnedRow> {
-        // row count doesn't need I/O, so the following statement is supposed to be fast
+        // Row count doesn't need I/O, so the following statement is supposed to be fast.
         let row_count = self.states[ROW_COUNT_COLUMN]
             .get_output(&storages[ROW_COUNT_COLUMN], self.group_key.as_ref())
             .await?
@@ -185,7 +183,9 @@ impl<S: StateStore> AggGroup<S> {
             .map(|x| *x.as_int64() as usize)
             .expect("row count should not be None");
         if row_count == 0 {
-            // reset all states (in fact only value states will be reset)
+            // Reset all states (in fact only value states will be reset).
+            // This is important because for some agg calls (e.g. `sum`), if no row is applied,
+            // they should output NULL, for some other calls (e.g. `sum0`), they should output 0.
             self.reset();
         }
         futures::future::try_join_all(

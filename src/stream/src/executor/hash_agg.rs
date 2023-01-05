@@ -304,7 +304,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             })
             .collect_vec(); // collect is necessary to avoid lifetime issue of `agg_groups`
         let mut buffered = stream::iter(futs).buffer_unordered(10).fuse();
-        while let Some(Ok((key, agg_group))) = buffered.next().await {
+        while let Some(result) = buffered.next().await {
+            let (key, agg_group) = result?;
             agg_groups.put(key, agg_group);
         }
         drop(buffered); // drop to avoid accidental use
