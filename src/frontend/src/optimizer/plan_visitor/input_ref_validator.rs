@@ -48,6 +48,7 @@ impl ExprVisitor<Option<String>> for ExprVis<'_> {
 pub struct InputRefValidator;
 
 impl InputRefValidator {
+    #[allow(dead_code)]
     #[track_caller]
     pub fn validate(mut self, plan: PlanRef) {
         if let Some(err) = self.visit(plan.clone()) {
