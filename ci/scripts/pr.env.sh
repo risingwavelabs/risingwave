@@ -7,6 +7,7 @@ set +e
 # Set features, depending on our workflow
 # If sqlsmith files are modified, we run tests with sqlsmith enabled.
 MATCHES="ci/scripts/pr.env.sh\
+\|ci/scripts/cron-fuzz-test.sh\
 \|ci/scripts/pr-fuzz-test.sh\
 \|ci/scripts/run-e2e-test.sh\
 \|ci/scripts/run-fuzz-test.sh\
