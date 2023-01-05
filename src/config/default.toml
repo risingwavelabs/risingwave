@@ -1,8 +1,3 @@
 [meta]
 disable_recovery = true
 max_heartbeat_interval_secs = 600
-
-[storage]
-block_size_kb = 64
-block_cache_capacity_mb = 512
-meta_cache_capacity_mb = 256
