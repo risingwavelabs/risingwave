@@ -508,7 +508,8 @@ impl Parser {
             Token::Number(_)
             | Token::SingleQuotedString(_)
             | Token::NationalStringLiteral(_)
-            | Token::HexStringLiteral(_) => {
+            | Token::HexStringLiteral(_)
+            | Token::CstyleEscapesString(_) => {
                 self.prev_token();
                 Ok(Expr::Value(self.parse_value()?))
             }
@@ -1758,6 +1759,14 @@ impl Parser {
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
         let with_options = self.parse_with_properties()?;
+
+        // Table can be created with an external stream source.
+        let source_schema = if self.parse_keywords(&[Keyword::ROW, Keyword::FORMAT]) {
+            Some(SourceSchema::parse_to(self)?)
+        } else {
+            None
+        };
+
         // Parse optional `AS ( query )`
         let query = if self.parse_keyword(Keyword::AS) {
             Some(Box::new(self.parse_query()?))
@@ -1773,6 +1782,7 @@ impl Parser {
             with_options,
             or_replace,
             if_not_exists,
+            source_schema,
             query,
         })
     }
@@ -2159,6 +2169,7 @@ impl Parser {
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
             Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string())),
+            Token::CstyleEscapesString(ref s) => Ok(Value::CstyleEscapesString(s.to_string())),
             Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
             unexpected => self.expected("a value", unexpected),

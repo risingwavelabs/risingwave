@@ -115,11 +115,11 @@ impl<S: StateStore> AggGroup<S> {
         self.group_key.as_ref()
     }
 
-    fn prev_row_count(&self) -> i64 {
+    fn prev_row_count(&self) -> usize {
         match &self.prev_outputs {
             Some(states) => states[ROW_COUNT_COLUMN]
                 .as_ref()
-                .map(|x| *x.as_int64())
+                .map(|x| *x.as_int64() as usize)
                 .unwrap_or(0),
             None => 0,
         }
@@ -163,12 +163,31 @@ impl<S: StateStore> AggGroup<S> {
         Ok(())
     }
 
+    /// Reset all in-memory states to their initial state, i.e. to reset all agg state structs to
+    /// the status as if they are just created, no input applied and no row in state table.
+    fn reset(&mut self) {
+        self.states.iter_mut().for_each(|state| state.reset());
+    }
+
     /// Get the outputs of all managed agg states.
     /// Possibly need to read/sync from state table if the state not cached in memory.
-    async fn get_outputs(
+    pub async fn get_outputs(
         &mut self,
         storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<OwnedRow> {
+        // Row count doesn't need I/O, so the following statement is supposed to be fast.
+        let row_count = self.states[ROW_COUNT_COLUMN]
+            .get_output(&storages[ROW_COUNT_COLUMN], self.group_key.as_ref())
+            .await?
+            .as_ref()
+            .map(|x| *x.as_int64() as usize)
+            .expect("row count should not be None");
+        if row_count == 0 {
+            // Reset all states (in fact only value states will be reset).
+            // This is important because for some agg calls (e.g. `sum`), if no row is applied,
+            // they should output NULL, for some other calls (e.g. `sum0`), they should output 0.
+            self.reset();
+        }
         futures::future::try_join_all(
             self.states
                 .iter_mut()
@@ -179,26 +198,15 @@ impl<S: StateStore> AggGroup<S> {
         .map(OwnedRow::new)
     }
 
-    /// Reset all in-memory states to their initial state, i.e. to reset all agg state structs to
-    /// the status as if they are just created, no input applied and no row in state table.
-    fn reset(&mut self) {
-        self.states.iter_mut().for_each(|state| state.reset());
-    }
-
     /// Build changes into `builders` and `new_ops`, according to previous and current agg outputs.
-    /// Note that for [`crate::executor::HashAggExecutor`].
-    ///
     /// Returns [`AggChangesInfo`] contains information about changes built.
-    ///
     /// The saved previous outputs will be updated to the latest outputs after building changes.
-    pub async fn build_changes(
+    pub fn build_changes(
         &mut self,
+        curr_outputs: OwnedRow,
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
-        storages: &[AggStateStorage<S>],
-    ) -> StreamExecutorResult<AggChangesInfo> {
-        let curr_outputs: OwnedRow = self.get_outputs(storages).await?;
-
+    ) -> AggChangesInfo {
         let row_count = curr_outputs[ROW_COUNT_COLUMN]
             .as_ref()
             .map(|x| *x.as_int64())
@@ -210,13 +218,6 @@ impl<S: StateStore> AggGroup<S> {
             prev_row_count,
             row_count
         );
-
-        let curr_outputs = if row_count == 0 && self.group_key().is_none() {
-            self.reset();
-            self.get_outputs(storages).await?
-        } else {
-            curr_outputs
-        };
 
         let n_appended_ops = match (
             prev_row_count,
@@ -299,10 +300,10 @@ impl<S: StateStore> AggGroup<S> {
             std::mem::replace(&mut self.prev_outputs, Some(curr_outputs))
         };
 
-        Ok(AggChangesInfo {
+        AggChangesInfo {
             n_appended_ops,
             result_row,
             prev_outputs,
-        })
+        }
     }
 }
