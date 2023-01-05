@@ -284,6 +284,8 @@ impl Binder {
                 };
             }
             "pg_table_is_visible" => return Ok(ExprImpl::literal_bool(true)),
+            "pg_encoding_to_char" => return Ok(ExprImpl::literal_varchar("UTF8".into())),
+            "has_database_privilege" => return Ok(ExprImpl::literal_bool(true)),
             // internal
             "rw_vnode" => ExprType::Vnode,
             // TODO: include version/tag/commit_id
