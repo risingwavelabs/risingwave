@@ -47,6 +47,12 @@ with t1 as (values(100, 200)) select * from public.t1;
 ----
 1 2
 
+query I rowsort
+with c as (values(1)) select * from (with c as (values(2)) select * from c) foo union all select * from c;
+----
+2
+1
+
 statement ok
 drop table t1;
 
