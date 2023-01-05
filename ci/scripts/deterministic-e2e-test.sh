@@ -15,7 +15,7 @@ mkdir -p ./test_data
 unzip -o test_data.zip -d .
 cd ../../
 
-export RUST_LOG=info
+export RUST_LOG="info,risingwave_sqlsmith=debug"
 export LOGDIR=.risingwave/log
 
 mkdir -p $LOGDIR

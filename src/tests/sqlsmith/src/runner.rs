@@ -84,7 +84,7 @@ async fn test_batch_queries<R: Rng>(
     let mut skipped = 0;
     for _ in 0..sample_size {
         let sql = sql_gen(rng, tables.clone());
-        tracing::info!("Executing: {}", sql);
+        tracing::debug!("Executing: {}", sql);
         let response = client.query(sql.as_str(), &[]).await;
         skipped += validate_response(setup_sql, &format!("{};", sql), response);
     }
@@ -102,7 +102,7 @@ async fn test_stream_queries<R: Rng>(
     let mut skipped = 0;
     for _ in 0..sample_size {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
-        tracing::info!("Executing: {}", sql);
+        tracing::debug!("Executing: {}", sql);
         let response = client.execute(&sql, &[]).await;
         skipped += validate_response(setup_sql, &format!("{};", sql), response);
         drop_mview_table(&table, client).await;
@@ -123,7 +123,7 @@ async fn create_tables(
     testdata: &str,
     client: &tokio_postgres::Client,
 ) -> (Vec<Table>, Vec<Table>, String) {
-    tracing::info!("Preparing tables...");
+    tracing::debug!("Preparing tables...");
 
     let mut setup_sql = String::with_capacity(1000);
     let sql = get_seed_table_sql(testdata);
@@ -144,7 +144,7 @@ async fn create_tables(
     for i in 0..10 {
         let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
         setup_sql.push_str(&format!("{};", &create_sql));
-        tracing::info!("Executing MView Setup: {}", &create_sql);
+        tracing::debug!("Executing MView Setup: {}", &create_sql);
         let response = client.execute(&create_sql, &[]).await;
         let skip_count = validate_response(&setup_sql, &create_sql, response);
         if skip_count == 0 {
@@ -168,7 +168,7 @@ async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
 
 /// Drops mview tables and seed tables
 async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::Client) {
-    tracing::info!("Cleaning tables...");
+    tracing::debug!("Cleaning tables...");
 
     for mview in mviews.iter().rev() {
         drop_mview_table(mview, client).await;
