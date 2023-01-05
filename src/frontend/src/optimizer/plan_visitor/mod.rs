@@ -12,7 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod max_one_row_visitor;
+pub use max_one_row_visitor::*;
+mod plan_correlated_id_finder;
+pub use plan_correlated_id_finder::*;
+mod share_parent_counter;
 use paste::paste;
+pub use share_parent_counter::*;
 
 use crate::for_all_plan_nodes;
 use crate::optimizer::plan_node::*;

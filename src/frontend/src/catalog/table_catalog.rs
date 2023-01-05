@@ -107,7 +107,7 @@ pub struct TableCatalog {
     /// is not supported yet and expected to be `[0..columns.len()]`
     pub value_indices: Vec<usize>,
 
-    /// Definition of the materialized view.
+    /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
     pub definition: String,
 
     pub handle_pk_conflict: bool,
@@ -238,6 +238,11 @@ impl TableCatalog {
             SchemaId::placeholder() as u32,
             DatabaseId::placeholder() as u32,
         )
+    }
+
+    /// Returns the SQL statement that can be used to create this table.
+    pub fn create_sql(&self) -> String {
+        self.definition.clone()
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {

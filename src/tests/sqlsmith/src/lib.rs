@@ -45,6 +45,7 @@ pub fn mview_sql_gen<R: Rng>(rng: &mut R, tables: Vec<Table>, name: &str) -> (St
 }
 
 /// Parse SQL
+/// FIXME(Noel): Introduce error type for sqlsmith for this.
 pub fn parse_sql(sql: &str) -> Vec<Statement> {
     Parser::parse_sql(sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql))
 }
@@ -56,6 +57,9 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
             name: name.0[0].real_value(),
             columns: columns.iter().map(|c| c.clone().into()).collect(),
         },
-        _ => panic!("Unexpected statement: {}", statement),
+        _ => panic!(
+            "Only CREATE TABLE statements permitted, received: {}",
+            statement
+        ),
     }
 }

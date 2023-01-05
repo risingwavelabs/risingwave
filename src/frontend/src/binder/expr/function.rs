@@ -20,7 +20,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
@@ -290,7 +290,16 @@ impl Binder {
             // TODO: choose which pg version we should return.
             "version" => return Ok(ExprImpl::literal_varchar("PostgreSQL 13.9-RW".to_string())),
             // non-deterministic
-            "now" => ExprType::Now,
+            "now" => {
+                self.ensure_now_function_allowed()?;
+                if !self.in_create_mv {
+                    inputs.push(ExprImpl::from(Literal::new(
+                        Some(ScalarImpl::Int64((self.bind_timestamp_ms * 1000) as i64)),
+                        DataType::Timestamptz,
+                    )));
+                }
+                ExprType::Now
+            }
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported function: {:?}", function_name),
@@ -488,6 +497,22 @@ impl Binder {
                     .into());
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn ensure_now_function_allowed(&self) -> Result<()> {
+        if self.in_create_mv
+            && !matches!(
+                self.context.clause,
+                Some(Clause::Where) | Some(Clause::Having)
+            )
+        {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
+                self.context.clause
+            ))
+            .into());
         }
         Ok(())
     }

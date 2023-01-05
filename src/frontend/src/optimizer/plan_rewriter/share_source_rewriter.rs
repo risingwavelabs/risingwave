@@ -20,8 +20,7 @@ use crate::catalog::SourceId;
 use crate::optimizer::plan_node::{
     LogicalShare, LogicalSource, PlanNodeId, PlanTreeNode, StreamShare,
 };
-use crate::optimizer::plan_rewriter::PlanRewriter;
-use crate::optimizer::PlanVisitor;
+use crate::optimizer::{PlanRewriter, PlanVisitor};
 use crate::PlanRef;
 
 #[derive(Debug, Clone, Default)]

@@ -23,7 +23,9 @@ use pgwire::pg_response::{PgResponse, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
+use risingwave_sqlparser::ast::{
+    CreateSinkStatement, CreateSourceStatement, DropStatement, ObjectType, Statement,
+};
 
 use self::util::DataChunkToRowSetAdapter;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
@@ -90,8 +92,58 @@ impl From<Vec<Row>> for PgResponseStream {
 #[derive(Clone)]
 pub struct HandlerArgs {
     pub session: Arc<SessionImpl>,
-    pub sql: Arc<str>,
+    pub sql: String,
+    pub normalized_sql: String,
     pub with_options: WithOptions,
+}
+
+impl HandlerArgs {
+    pub fn new(session: Arc<SessionImpl>, stmt: &Statement, sql: &str) -> Result<Self> {
+        Ok(Self {
+            session,
+            sql: sql.into(),
+            with_options: WithOptions::try_from(stmt)?,
+            normalized_sql: Self::normalize_sql(stmt),
+        })
+    }
+
+    /// Get normalized SQL from the statement.
+    ///
+    /// - Generally, the normalized SQL is the unparsed (and formatted) result of the statement.
+    /// - For `CREATE` statements, the clauses like `OR REPLACE` and `IF NOT EXISTS` are removed to
+    ///   make it suitable for the `SHOW CREATE` statements.
+    fn normalize_sql(stmt: &Statement) -> String {
+        let mut stmt = stmt.clone();
+        match &mut stmt {
+            Statement::CreateView { or_replace, .. } => {
+                *or_replace = false;
+            }
+            Statement::CreateTable {
+                or_replace,
+                if_not_exists,
+                ..
+            } => {
+                *or_replace = false;
+                *if_not_exists = false;
+            }
+            Statement::CreateIndex { if_not_exists, .. } => {
+                *if_not_exists = false;
+            }
+            Statement::CreateSource {
+                stmt: CreateSourceStatement { if_not_exists, .. },
+                ..
+            } => {
+                *if_not_exists = false;
+            }
+            Statement::CreateSink {
+                stmt: CreateSinkStatement { if_not_exists, .. },
+            } => {
+                *if_not_exists = false;
+            }
+            _ => {}
+        }
+        stmt.to_string()
+    }
 }
 
 pub async fn handle(
@@ -100,11 +152,7 @@ pub async fn handle(
     sql: &str,
     format: bool,
 ) -> Result<RwPgResponse> {
-    let handler_args = HandlerArgs {
-        session,
-        sql: sql.into(),
-        with_options: WithOptions::try_from(&stmt)?,
-    };
+    let handler_args = HandlerArgs::new(session, &stmt, sql)?;
     match stmt {
         Statement::Explain {
             statement,
@@ -127,6 +175,7 @@ pub async fn handle(
             or_replace,
             temporary,
             if_not_exists,
+            source_schema,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
@@ -158,6 +207,7 @@ pub async fn handle(
                 columns,
                 constraints,
                 if_not_exists,
+                source_schema,
             )
             .await
         }
