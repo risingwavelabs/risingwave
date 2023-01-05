@@ -19,10 +19,10 @@ mod visibility_mode;
 
 use std::ops::Deref;
 
+use chrono_tz::Tz;
 use itertools::Itertools;
 pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
-use chrono_tz::Tz;
 
 use crate::error::{ErrorCode, RwError};
 use crate::session_config::transaction_isolation_level::IsolationLevel;
@@ -346,13 +346,10 @@ impl ConfigMap {
         } else if key.eq_ignore_ascii_case(Timezone::entry_name()) {
             let raw: Timezone = val.as_slice().try_into()?;
             // Check if the provided string is a valid timezone.
-            Tz::from_str_insensitive(&raw.0)
-                .map_err(|_e| {
-                    ErrorCode::InvalidConfigValue {
-                        config_entry: Timezone::entry_name().to_string(),
-                        config_value: raw.0.to_string(),
-                    }
-                })?;
+            Tz::from_str_insensitive(&raw.0).map_err(|_e| ErrorCode::InvalidConfigValue {
+                config_entry: Timezone::entry_name().to_string(),
+                config_value: raw.0.to_string(),
+            })?;
             self.timezone = raw;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());

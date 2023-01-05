@@ -385,7 +385,7 @@ impl SessionImpl {
                 DEFAULT_SUPER_USER_ID,
             )),
             user_authenticator: UserAuthenticator::None,
-            config_map: ConfigMap::new(),
+            config_map: ConfigMap::new().into(),
             // Mock session use non-sense id.
             id: (0, 0),
         }
