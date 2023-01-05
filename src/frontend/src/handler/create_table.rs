@@ -688,10 +688,12 @@ mod tests {
 
     #[test]
     fn test_bind_primary_key() {
+        // Note: Column ID 0 is reserved for row ID column.
+
         for (sql, expected) in [
-            ("create table t (v1 int, v2 int)", Ok(&[2] as &[_])),
-            ("create table t (v1 int primary key, v2 int)", Ok(&[0])),
-            ("create table t (v1 int, v2 int primary key)", Ok(&[1])),
+            ("create table t (v1 int, v2 int)", Ok(&[0] as &[_])),
+            ("create table t (v1 int primary key, v2 int)", Ok(&[1])),
+            ("create table t (v1 int, v2 int primary key)", Ok(&[2])),
             (
                 "create table t (v1 int primary key, v2 int primary key)",
                 Err("multiple primary keys are not allowed"),
@@ -702,15 +704,15 @@ mod tests {
             ),
             (
                 "create table t (v1 int, v2 int, primary key (v1))",
-                Ok(&[0]),
-            ),
-            (
-                "create table t (v1 int, primary key (v2), v2 int)",
                 Ok(&[1]),
             ),
             (
+                "create table t (v1 int, primary key (v2), v2 int)",
+                Ok(&[2]),
+            ),
+            (
                 "create table t (primary key (v2, v1), v1 int, v2 int)",
-                Ok(&[1, 0]),
+                Ok(&[2, 1]),
             ),
             (
                 "create table t (v1 int, primary key (v1), v2 int, primary key (v1))",

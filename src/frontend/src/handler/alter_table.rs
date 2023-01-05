@@ -184,5 +184,15 @@ mod tests {
             columns[row_id_column_name().as_str()],
             altered_columns[row_id_column_name().as_str()]
         );
+
+        // Check the version is updated.
+        assert_eq!(
+            table.version.as_ref().unwrap().version_id + 1,
+            altered_table.version.as_ref().unwrap().version_id
+        );
+        assert_eq!(
+            table.version.as_ref().unwrap().next_column_id.next(),
+            altered_table.version.as_ref().unwrap().next_column_id
+        );
     }
 }
