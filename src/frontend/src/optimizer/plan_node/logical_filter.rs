@@ -27,7 +27,7 @@ use super::{
     ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{assert_input_ref, ExprImpl, FunctionCall, InputRef};
+use crate::expr::{assert_input_ref, ExprImpl, InputRef};
 use crate::optimizer::plan_node::stream_now::StreamNow;
 use crate::optimizer::plan_node::{
     BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
@@ -307,21 +307,7 @@ impl ToStream for LogicalFilter {
                 });
                 cur_streaming = StreamDynamicFilter::new(
                     left_index,
-                    Condition {
-                        conjunctions: vec![ExprImpl::from(FunctionCall::new(
-                            now_cond.get_expr_type(),
-                            vec![
-                                ExprImpl::from(InputRef::new(
-                                    left_index,
-                                    self.schema().fields()[left_index].data_type(),
-                                )),
-                                ExprImpl::from(InputRef::new(
-                                    self.schema().len(),
-                                    rht.schema().fields()[0].data_type(),
-                                )),
-                            ],
-                        )?)],
-                    },
+                    now_cond.get_expr_type(),
                     cur_streaming,
                     rht,
                 )
