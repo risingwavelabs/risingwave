@@ -18,8 +18,24 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
 /// The catalog `pg_database` stores database.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-database.html`]
+///
+/// Example from Postgres:
+///
+/// ```text
+/// dev=# select * from pg_catalog.pg_database;
+///   oid  |  datname  | datdba | encoding | datcollate | datctype | datistemplate | datallowconn | datconnlimit | datlastsysoid | datfrozenxid | datminmxid | dattablespace |         datacl
+/// -------+-----------+--------+----------+------------+----------+---------------+--------------+--------------+---------------+--------------+------------+---------------+-------------------------
+///  14021 | postgres  |     10 |        6 | C          | C        | f             | t            |           -1 |         14020 |          726 |          1 |          1663 |
+///  16384 | dev       |     10 |        6 | C          | C        | f             | t            |           -1 |         14020 |          726 |          1 |          1663 |
+///      1 | template1 |     10 |        6 | C          | C        | t             | t            |           -1 |         14020 |          726 |          1 |          1663 | {=c/eric,eric=CTc/eric}
+///  14020 | template0 |     10 |        6 | C          | C        | t             | f            |           -1 |         14020 |          726 |          1 |          1663 | {=c/eric,eric=CTc/eric}
+/// (4 rows)
+/// ```
+///
+/// Ref: [pg_database](`https://www.postgresql.org/docs/current/catalog-pg-database.html`)
+
 pub const PG_DATABASE_TABLE_NAME: &str = "pg_database";
+
 pub const PG_DATABASE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Varchar, "datname"),
@@ -31,6 +47,14 @@ pub const PG_DATABASE_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Varchar, "datcollate"),
     // 'C'
     (DataType::Varchar, "datctype"),
+    // false
+    (DataType::Boolean, "datistemplate"),
+    // true
+    (DataType::Boolean, "datallowconn"),
+    // -1
+    (DataType::Int32, "datconnlimit"),
+    // null
+    (DataType::Varchar, "datacl"),
 ];
 
 pub fn new_pg_database_row(id: u32, name: &str) -> OwnedRow {
@@ -41,5 +65,9 @@ pub fn new_pg_database_row(id: u32, name: &str) -> OwnedRow {
         Some(ScalarImpl::Int32(6)),
         Some(ScalarImpl::Utf8("C".into())),
         Some(ScalarImpl::Utf8("C".into())),
+        Some(ScalarImpl::Bool(false)),
+        Some(ScalarImpl::Bool(true)),
+        Some(ScalarImpl::Int32(-1)),
+        None,
     ])
 }
