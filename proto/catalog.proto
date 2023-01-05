@@ -75,6 +75,13 @@ message Index {
   repeated int32 original_columns = 9;
 }
 
+message Function {
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+}
+
 // See `TableCatalog` struct in frontend crate for more information.
 message Table {
   enum TableType {

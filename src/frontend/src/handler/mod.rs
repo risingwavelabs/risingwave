@@ -34,6 +34,7 @@ use crate::utils::WithOptions;
 
 pub mod alter_user;
 mod create_database;
+pub mod create_function;
 pub mod create_index;
 pub mod create_mv;
 pub mod create_schema;
@@ -164,6 +165,22 @@ pub async fn handle(
             stmt,
         } => create_source::handle_create_source(handler_args, is_materialized, stmt).await,
         Statement::CreateSink { stmt } => create_sink::handle_create_sink(handler_args, stmt).await,
+        Statement::CreateFunction {
+            or_replace,
+            temporary,
+            name,
+            args,
+            return_type,
+            params,
+        } => create_function::handle_create_function(
+            handler_args,
+            or_replace,
+            temporary,
+            name,
+            args,
+            return_type,
+            params,
+        ),
         Statement::CreateTable {
             name,
             columns,

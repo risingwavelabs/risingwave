@@ -344,6 +344,20 @@ where
         }))
     }
 
+    async fn create_function(
+        &self,
+        request: Request<CreateFunctionRequest>,
+    ) -> Result<Response<CreateFunctionResponse>, Status> {
+        todo!()
+    }
+
+    async fn drop_function(
+        &self,
+        request: Request<DropFunctionRequest>,
+    ) -> Result<Response<DropFunctionResponse>, Status> {
+        todo!()
+    }
+
     async fn create_table(
         &self,
         request: Request<CreateTableRequest>,

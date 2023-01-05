@@ -16,12 +16,13 @@ use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable, View as ProstView,
+    Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
+    Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
+    View as ProstView,
 };
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
@@ -47,7 +48,7 @@ impl CatalogReader {
     }
 }
 
-/// [`CatalogWriter`] initiate DDL operations (create table/schema/database).
+/// [`CatalogWriter`] initiate DDL operations (create table/schema/database/function).
 /// It will only send rpc to meta and get the catalog version as response.
 /// Then it will wait for the local catalog to be synced to the version, which is performed by
 /// [observer](`crate::observer::FrontendObserverNode`).
@@ -88,6 +89,8 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()>;
 
+    async fn create_function(&self, function: ProstFunction) -> Result<()>;
+
     async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()>;
 
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()>;
@@ -103,6 +106,8 @@ pub trait CatalogWriter: Send + Sync {
     async fn drop_schema(&self, schema_id: u32) -> Result<()>;
 
     async fn drop_index(&self, index_id: IndexId) -> Result<()>;
+
+    async fn drop_function(&self, function_id: FunctionId) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -191,6 +196,10 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    async fn create_function(&self, function: ProstFunction) -> Result<()> {
+        todo!()
+    }
+
     async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
         let version = self.meta_client.drop_table(source_id, table_id).await?;
         self.wait_version(version).await
@@ -219,6 +228,10 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn drop_index(&self, index_id: IndexId) -> Result<()> {
         let version = self.meta_client.drop_index(index_id).await?;
         self.wait_version(version).await
+    }
+
+    async fn drop_function(&self, function_id: FunctionId) -> Result<()> {
+        todo!()
     }
 
     async fn drop_schema(&self, schema_id: u32) -> Result<()> {
