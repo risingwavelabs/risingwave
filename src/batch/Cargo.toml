@@ -22,6 +22,7 @@ farmhash = "1"
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
+hytra = "0.1.2"
 itertools = "0.10"
 minitrace = "0.4"
 num-traits = "0.2"
@@ -42,6 +43,7 @@ serde-value = "0.7"
 serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
+task_stats_alloc = { path = "../utils/task_stats_alloc" }
 tempfile = "3"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [

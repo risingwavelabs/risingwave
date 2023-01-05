@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -297,7 +297,7 @@ impl ToStream for LogicalFilter {
                         Type::Now => PlanRef::from(StreamNow::new(self.ctx())),
                         Type::Add | Type::Subtract => {
                             let mut now_delta_expr = function_call.clone();
-                            now_delta_expr.inputs_mut()[0] = ExprImpl::from(InputRef::new(0, DataType::Timestamp));
+                            now_delta_expr.inputs_mut()[0] = ExprImpl::from(InputRef::new(0, DataType::Timestamptz));
                             // We cannot call `LogicalProject::to_stream()` here, because its input is already a stream.
                             StreamProject::new(LogicalProject::new(StreamNow::new(self.ctx()).into(), vec![ExprImpl::from(now_delta_expr)])).into()
                         },

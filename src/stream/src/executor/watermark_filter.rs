@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -105,9 +105,6 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             info,
             mut table,
         } = *self;
-
-        // Remove this after we have upsert.
-        table.disable_sanity_check();
 
         let watermark_type = watermark_expr.return_type();
         assert_eq!(
@@ -313,7 +310,9 @@ mod tests {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        StateTable::new_with_distribution(
+
+        // TODO: may enable sanity check for watermark filter after we have upsert.
+        StateTable::new_with_distribution_no_sanity_check(
             mem_state,
             TableId::new(table_id),
             column_descs,

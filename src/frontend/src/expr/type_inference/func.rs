@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -84,6 +84,17 @@ macro_rules! ensure_arity {
                 "Function `{}` takes {} arguments ({} given)",
                 $func,
                 $num,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
+    ($func:literal, | $inputs:ident | <= $upper:literal) => {
+        if !($inputs.len() <= $upper) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes at most {} arguments ({} given)",
+                $func,
+                $upper,
                 $inputs.len(),
             ))
             .into());
@@ -467,8 +478,8 @@ fn infer_type_for_special(
             Ok(Some(DataType::Int16))
         }
         ExprType::Now => {
-            ensure_arity!("now", | inputs | == 0);
-            Ok(Some(DataType::Timestamp))
+            ensure_arity!("now", | inputs | <= 1);
+            Ok(Some(DataType::Timestamptz))
         }
         _ => Ok(None),
     }

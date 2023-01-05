@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -131,6 +131,25 @@ impl<S: StateStore> StateTable<S> {
         store: S,
         vnodes: Option<Arc<Bitmap>>,
     ) -> Self {
+        Self::from_table_catalog_may_disable_sanity_check(table_catalog, store, vnodes, false).await
+    }
+
+    /// Create state table from table catalog and store with sanity check disabled.
+    pub async fn from_table_catalog_no_sanity_check(
+        table_catalog: &Table,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+    ) -> Self {
+        Self::from_table_catalog_may_disable_sanity_check(table_catalog, store, vnodes, true).await
+    }
+
+    /// Create state table from table catalog and store.
+    async fn from_table_catalog_may_disable_sanity_check(
+        table_catalog: &Table,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+        disable_sanity_check: bool,
+    ) -> Self {
         let table_id = TableId::new(table_catalog.id);
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
@@ -218,7 +237,7 @@ impl<S: StateStore> StateTable<S> {
             prefix_hint_len,
             vnodes,
             table_option: TableOption::build_table_option(table_catalog.get_properties()),
-            disable_sanity_check: false,
+            disable_sanity_check,
             vnode_col_idx_in_pk,
             value_indices,
             epoch: None,
@@ -244,6 +263,27 @@ impl<S: StateStore> StateTable<S> {
             pk_indices,
             Distribution::fallback(),
             None,
+        )
+        .await
+    }
+
+    /// Create a state table without distribution, used for unit tests.
+    pub async fn new_without_distribution_no_sanity_check(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_with_distribution_may_disable_sanity_check(
+            store,
+            table_id,
+            columns,
+            order_types,
+            pk_indices,
+            Distribution::fallback(),
+            None,
+            true,
         )
         .await
     }
@@ -277,11 +317,57 @@ impl<S: StateStore> StateTable<S> {
         table_columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
+        distribution: Distribution,
+        value_indices: Option<Vec<usize>>,
+    ) -> Self {
+        Self::new_with_distribution_may_disable_sanity_check(
+            store,
+            table_id,
+            table_columns,
+            order_types,
+            pk_indices,
+            distribution,
+            value_indices,
+            false,
+        )
+        .await
+    }
+
+    pub async fn new_with_distribution_no_sanity_check(
+        store: S,
+        table_id: TableId,
+        table_columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        distribution: Distribution,
+        value_indices: Option<Vec<usize>>,
+    ) -> Self {
+        Self::new_with_distribution_may_disable_sanity_check(
+            store,
+            table_id,
+            table_columns,
+            order_types,
+            pk_indices,
+            distribution,
+            value_indices,
+            true,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn new_with_distribution_may_disable_sanity_check(
+        store: S,
+        table_id: TableId,
+        table_columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
         Distribution {
             dist_key_indices,
             vnodes,
         }: Distribution,
         value_indices: Option<Vec<usize>>,
+        disable_sanity_check: bool,
     ) -> Self {
         let local_state_store = store.new_local(table_id).await;
 
@@ -311,7 +397,7 @@ impl<S: StateStore> StateTable<S> {
             prefix_hint_len: 0,
             vnodes,
             table_option: Default::default(),
-            disable_sanity_check: false,
+            disable_sanity_check,
             vnode_col_idx_in_pk: None,
             value_indices,
             epoch: None,
@@ -319,11 +405,6 @@ impl<S: StateStore> StateTable<S> {
             cur_watermark: None,
             num_wmked_commits_since_last_clean: 0,
         }
-    }
-
-    /// Disable sanity check on this storage table.
-    pub fn disable_sanity_check(&mut self) {
-        self.disable_sanity_check = true;
     }
 
     fn table_id(&self) -> TableId {
@@ -695,8 +776,8 @@ impl<S: StateStore> StateTable<S> {
             }
             match row_op {
                 // Currently, some executors do not strictly comply with these semantics. As a
-                // workaround you may call disable the check by calling `.disable_sanity_check()` on
-                // state table.
+                // workaround you may call disable the check by initializing the state store with
+                // `disable_sanity_check=true`.
                 RowOp::Insert(row) => {
                     if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
                         self.do_insert_sanity_check(&pk, &row, epoch).await?;
