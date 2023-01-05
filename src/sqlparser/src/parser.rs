@@ -2259,16 +2259,20 @@ impl Parser {
     }
 
     pub fn parse_function_definition(&mut self) -> Result<FunctionDefinition, ParserError> {
-        let peek_token = self.peek_token();
-        match peek_token {
-            // Token::DollarQuotedString(value) if dialect_of!(self is PostgreSqlDialect) => {
-            //     self.next_token();
-            //     Ok(FunctionDefinition::DoubleDollarDef(value.value))
-            // }
-            _ => Ok(FunctionDefinition::SingleQuotedDef(
-                self.parse_literal_string()?,
-            )),
-        }
+        Ok(FunctionDefinition::SingleQuotedDef(
+            self.parse_literal_string()?,
+        ))
+        // TODO: support dollar quoted string
+        // let peek_token = self.peek_token();
+        // match peek_token {
+        //     Token::DollarQuotedString(value) if dialect_of!(self is PostgreSqlDialect) => {
+        //         self.next_token();
+        //         Ok(FunctionDefinition::DoubleDollarDef(value.value))
+        //     }
+        //     _ => Ok(FunctionDefinition::SingleQuotedDef(
+        //         self.parse_literal_string()?,
+        //     )),
+        // }
     }
 
     /// Parse a literal string
