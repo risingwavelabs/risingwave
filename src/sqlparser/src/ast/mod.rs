@@ -939,10 +939,12 @@ pub enum Statement {
     /// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
     CreateFunction {
         or_replace: bool,
+        temporary: bool,
         name: ObjectName,
-        args: Option<Vec<CreateFunctionArg>>,
+        args: Option<Vec<OperateFunctionArg>>,
         return_type: Option<DataType>,
-        bodies: Vec<CreateFunctionBody>,
+        /// Optional parameters.
+        params: CreateFunctionBody,
     },
     /// ALTER TABLE
     AlterTable {
@@ -1181,14 +1183,16 @@ impl fmt::Display for Statement {
             }
             Statement::CreateFunction {
                 or_replace,
+                temporary,
                 name,
                 args,
                 return_type,
-                bodies,
+                params,
             } => {
                 write!(
                     f,
-                    "CREATE {or_replace}FUNCTION {name}",
+                    "CREATE {or_replace}{temp}FUNCTION {name}",
+                    temp = if *temporary { "TEMPORARY " } else { "" },
                     or_replace = if *or_replace { "OR REPLACE " } else { "" },
                 )?;
                 if let Some(args) = args {
@@ -1197,7 +1201,7 @@ impl fmt::Display for Statement {
                 if let Some(return_type) = return_type {
                     write!(f, " RETURNS {}", return_type)?;
                 }
-                write!(f, " {}", display_separated(bodies, " "))?;
+                write!(f, "{params}")?;
                 Ok(())
             }
             Statement::CreateView {
@@ -1950,14 +1954,14 @@ impl fmt::Display for ShowStatementFilter {
 /// Function argument in CREATE FUNCTION.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CreateFunctionArg {
+pub struct OperateFunctionArg {
     pub mode: Option<ArgMode>,
     pub name: Option<Ident>,
     pub data_type: DataType,
     pub default_expr: Option<Expr>,
 }
 
-impl CreateFunctionArg {
+impl OperateFunctionArg {
     /// Returns an unnamed argument.
     pub fn unnamed(data_type: DataType) -> Self {
         Self {
@@ -1979,7 +1983,7 @@ impl CreateFunctionArg {
     }
 }
 
-impl fmt::Display for CreateFunctionArg {
+impl fmt::Display for OperateFunctionArg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(mode) = &self.mode {
             write!(f, "{} ", mode)?;
@@ -2033,29 +2037,57 @@ impl fmt::Display for FunctionBehavior {
     }
 }
 
-/// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[non_exhaustive]
-pub enum CreateFunctionBody {
-    /// AS 'definition'
-    As(String),
+pub enum FunctionDefinition {
+    SingleQuotedDef(String),
+    DoubleDollarDef(String),
+}
+
+impl fmt::Display for FunctionDefinition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FunctionDefinition::SingleQuotedDef(s) => write!(f, "'{s}'")?,
+            FunctionDefinition::DoubleDollarDef(s) => write!(f, "$${s}$$")?,
+        }
+        Ok(())
+    }
+}
+
+/// Postgres specific feature.
+///
+/// See [Postgresdocs](https://www.postgresql.org/docs/15/sql-createfunction.html)
+/// for more details
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateFunctionBody {
     /// LANGUAGE lang_name
-    Language(Ident),
+    pub language: Option<Ident>,
     /// IMMUTABLE | STABLE | VOLATILE
-    Behavior(FunctionBehavior),
+    pub behavior: Option<FunctionBehavior>,
+    /// AS 'definition'
+    ///
+    /// Note that Hive's `AS class_name` is also parsed here.
+    pub as_: Option<FunctionDefinition>,
     /// RETURN expression
-    Return(Expr),
+    pub return_: Option<Expr>,
 }
 
 impl fmt::Display for CreateFunctionBody {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::As(definition) => write!(f, "AS '{definition}'"),
-            Self::Language(lang) => write!(f, "LANGUAGE {lang}"),
-            Self::Behavior(behavior) => write!(f, "{behavior}"),
-            Self::Return(expr) => write!(f, "RETURN {expr}"),
+        if let Some(language) = &self.language {
+            write!(f, " LANGUAGE {language}")?;
         }
+        if let Some(behavior) = &self.behavior {
+            write!(f, " {behavior}")?;
+        }
+        if let Some(definition) = &self.as_ {
+            write!(f, " AS {definition}")?;
+        }
+        if let Some(expr) = &self.return_ {
+            write!(f, " RETURN {expr}")?;
+        }
+        Ok(())
     }
 }
 

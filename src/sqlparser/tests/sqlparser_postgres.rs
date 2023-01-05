@@ -758,22 +758,26 @@ fn parse_comments() {
 #[test]
 fn parse_create_function() {
     let sql =
-        "CREATE FUNCTION add(INT, INT) RETURNS INT AS 'select $1 + $2;' LANGUAGE SQL IMMUTABLE";
+        "CREATE FUNCTION add(INT, INT) RETURNS INT LANGUAGE SQL IMMUTABLE AS 'select $1 + $2;'";
     assert_eq!(
         verified_stmt(sql),
         Statement::CreateFunction {
             or_replace: false,
+            temporary: false,
             name: ObjectName(vec![Ident::new("add")]),
             args: Some(vec![
-                CreateFunctionArg::unnamed(DataType::Int),
-                CreateFunctionArg::unnamed(DataType::Int),
+                OperateFunctionArg::unnamed(DataType::Int),
+                OperateFunctionArg::unnamed(DataType::Int),
             ]),
             return_type: Some(DataType::Int),
-            bodies: vec![
-                CreateFunctionBody::As("select $1 + $2;".into()),
-                CreateFunctionBody::Language("SQL".into()),
-                CreateFunctionBody::Behavior(FunctionBehavior::Immutable),
-            ],
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef(
+                    "select $1 + $2;".into()
+                )),
+                ..Default::default()
+            },
         }
     );
 
@@ -782,10 +786,11 @@ fn parse_create_function() {
         verified_stmt(sql),
         Statement::CreateFunction {
             or_replace: true,
+            temporary: false,
             name: ObjectName(vec![Ident::new("add")]),
             args: Some(vec![
-                CreateFunctionArg::with_name("a", DataType::Int),
-                CreateFunctionArg {
+                OperateFunctionArg::with_name("a", DataType::Int),
+                OperateFunctionArg {
                     mode: Some(ArgMode::In),
                     name: Some("b".into()),
                     data_type: DataType::Int,
@@ -793,15 +798,16 @@ fn parse_create_function() {
                 }
             ]),
             return_type: Some(DataType::Int),
-            bodies: vec![
-                CreateFunctionBody::Language("SQL".into()),
-                CreateFunctionBody::Behavior(FunctionBehavior::Immutable),
-                CreateFunctionBody::Return(Expr::BinaryOp {
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                behavior: Some(FunctionBehavior::Immutable),
+                return_: Some(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier("a".into())),
                     op: BinaryOperator::Plus,
                     right: Box::new(Expr::Identifier("b".into())),
                 }),
-            ],
+                ..Default::default()
+            },
         }
     );
 }
