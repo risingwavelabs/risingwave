@@ -2,7 +2,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -1085,17 +1085,7 @@ fn parse_cast() {
     assert_eq!(
         &Expr::Cast {
             expr: Box::new(Expr::Identifier(Ident::new("id"))),
-            data_type: DataType::BigInt(None)
-        },
-        expr_from_projection(only(&select.projection))
-    );
-
-    let sql = "SELECT CAST(id AS TINYINT) FROM customer";
-    let select = verified_only_select(sql);
-    assert_eq!(
-        &Expr::Cast {
-            expr: Box::new(Expr::Identifier(Ident::new("id"))),
-            data_type: DataType::TinyInt(None)
+            data_type: DataType::BigInt
         },
         expr_from_projection(only(&select.projection))
     );
@@ -1125,7 +1115,7 @@ fn parse_try_cast() {
     assert_eq!(
         &Expr::TryCast {
             expr: Box::new(Expr::Identifier(Ident::new("id"))),
-            data_type: DataType::BigInt(None)
+            data_type: DataType::BigInt
         },
         expr_from_projection(only(&select.projection))
     );
@@ -1236,7 +1226,7 @@ fn parse_create_table() {
                     ColumnDef::new("lng".into(), DataType::Double, None, vec![],),
                     ColumnDef::new(
                         "constrained".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![
                             ColumnOptionDef {
@@ -1263,7 +1253,7 @@ fn parse_create_table() {
                     ),
                     ColumnDef::new(
                         "ref".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -1277,7 +1267,7 @@ fn parse_create_table() {
                     ),
                     ColumnDef::new(
                         "ref2".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![ColumnOptionDef {
                             name: None,

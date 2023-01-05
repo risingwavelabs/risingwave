@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_stack_trace::StackTrace;
 use fixedbitset::FixedBitSet;
@@ -620,6 +621,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
                 }
                 AlignedMessage::Left(chunk) => {
+                    let mut left_time = Duration::from_nanos(0);
+                    let mut left_start_time = minstant::Instant::now();
                     #[for_await]
                     for chunk in Self::eq_join_oneside::<{ SideType::Left }>(
                         &self.ctx,
@@ -632,6 +635,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.append_only_optimize,
                         self.chunk_size,
                     ) {
+                        left_time += left_start_time.elapsed();
                         yield chunk.map(|v| match v {
                             Message::Watermark(_) => {
                                 todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
@@ -639,9 +643,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             Message::Chunk(chunk) => Message::Chunk(chunk),
                             barrier @ Message::Barrier(_) => barrier,
                         })?;
+                        left_start_time = minstant::Instant::now();
                     }
+                    left_time += left_start_time.elapsed();
+                    self.metrics
+                        .join_match_duration_ns
+                        .with_label_values(&[&actor_id_str, "left"])
+                        .inc_by(left_time.as_nanos() as u64);
                 }
                 AlignedMessage::Right(chunk) => {
+                    let mut right_time = Duration::from_nanos(0);
+                    let mut right_start_time = minstant::Instant::now();
                     #[for_await]
                     for chunk in Self::eq_join_oneside::<{ SideType::Right }>(
                         &self.ctx,
@@ -654,6 +666,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.append_only_optimize,
                         self.chunk_size,
                     ) {
+                        right_time += right_start_time.elapsed();
                         yield chunk.map(|v| match v {
                             Message::Watermark(_) => {
                                 todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
@@ -661,9 +674,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             Message::Chunk(chunk) => Message::Chunk(chunk),
                             barrier @ Message::Barrier(_) => barrier,
                         })?;
+                        right_start_time = minstant::Instant::now();
                     }
+                    right_time += right_start_time.elapsed();
+                    self.metrics
+                        .join_match_duration_ns
+                        .with_label_values(&[&actor_id_str, "right"])
+                        .inc_by(right_time.as_nanos() as u64);
                 }
                 AlignedMessage::Barrier(barrier) => {
+                    let barrier_start_time = minstant::Instant::now();
                     self.flush_data(barrier.epoch).await?;
 
                     // Update the vnode bitmap for state tables of both sides if asked.
@@ -696,6 +716,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         //     .set(ht.estimated_size() as i64);
                     }
 
+                    self.metrics
+                        .join_match_duration_ns
+                        .with_label_values(&[&actor_id_str, "barrier"])
+                        .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                     yield Message::Barrier(barrier);
                 }
             }

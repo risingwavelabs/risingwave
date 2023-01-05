@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -343,6 +343,14 @@ pub fn interval_to_time(elem: IntervalUnit) -> NaiveTimeWrapper {
 }
 
 #[inline(always)]
+pub fn timestamptz_to_timestamp(elem: i64) -> NaiveDateTimeWrapper {
+    NaiveDateTimeWrapper::from_timestamp_uncheck(
+        elem / 1_000_000,
+        (elem % 1_000_000 * 1_000) as u32,
+    )
+}
+
+#[inline(always)]
 pub fn try_cast<T1, T2>(elem: T1) -> Result<T2>
 where
     T1: TryInto<T2> + std::fmt::Debug + Copy,
@@ -483,7 +491,8 @@ macro_rules! for_all_cast_variants {
             { time, interval, cast::<NaiveTimeWrapper, IntervalUnit>, true },
             { timestamp, date, timestamp_to_date, true },
             { timestamp, time, timestamp_to_time, true },
-            { interval, time, interval_to_time, true }
+            { interval, time, interval_to_time, true },
+            { timestamptz, timestamp, timestamptz_to_timestamp, true }
         }
     };
 }

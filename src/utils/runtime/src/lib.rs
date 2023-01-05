@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -56,6 +56,8 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         .with_target("risingwave_frontend", Level::INFO)
         .with_target("risingwave_meta", Level::INFO)
         .with_target("risingwave_tracing", Level::INFO)
+        .with_target("risingwave_compute", Level::INFO)
+        .with_target("risingwave_compactor", Level::INFO)
         .with_target("pgwire", Level::ERROR)
         // disable events that are too verbose
         // if you want to enable any of them, find the target name and set it to `TRACE`

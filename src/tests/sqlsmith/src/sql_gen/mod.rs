@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,10 +15,11 @@
 //! Provides Data structures for query generation,
 //! and the interface for generating
 //! stream (MATERIALIZED VIEW) and batch query statements.
+
 use std::vec;
 
 use rand::Rng;
-use risingwave_common::types::DataTypeName;
+use risingwave_common::types::DataType;
 use risingwave_frontend::bind_data_type;
 use risingwave_sqlparser::ast::{ColumnDef, Expr, Ident, ObjectName, Statement};
 
@@ -29,6 +30,7 @@ mod query;
 mod relation;
 mod scalar;
 mod time_window;
+mod types;
 mod utils;
 
 #[derive(Clone, Debug)]
@@ -47,25 +49,24 @@ impl Table {
             .iter()
             .map(|c| Column {
                 name: format!("{}.{}", self.name, c.name),
-                data_type: c.data_type,
+                data_type: c.data_type.clone(),
             })
             .collect()
     }
 }
 
+/// Sqlsmith Column definition
 #[derive(Clone, Debug)]
 pub struct Column {
     name: String,
-    data_type: DataTypeName,
+    data_type: DataType,
 }
 
 impl From<ColumnDef> for Column {
     fn from(c: ColumnDef) -> Self {
         Self {
             name: c.name.real_value(),
-            data_type: bind_data_type(&c.data_type.expect("data type should not be none"))
-                .unwrap()
-                .into(),
+            data_type: bind_data_type(&c.data_type.expect("data type should not be none")).unwrap(),
         }
     }
 }
