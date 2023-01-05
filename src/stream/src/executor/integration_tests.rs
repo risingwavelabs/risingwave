@@ -145,7 +145,7 @@ async fn test_merger_sum_aggr() {
         merger.boxed(),
         vec![
             AggCall {
-                kind: AggKind::Sum,
+                kind: AggKind::Sum0,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 order_pairs: vec![],

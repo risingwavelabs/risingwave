@@ -106,9 +106,6 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             mut table,
         } = *self;
 
-        // Remove this after we have upsert.
-        table.disable_sanity_check();
-
         let watermark_type = watermark_expr.return_type();
         assert_eq!(
             watermark_type,
@@ -313,7 +310,9 @@ mod tests {
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        StateTable::new_with_distribution(
+
+        // TODO: may enable sanity check for watermark filter after we have upsert.
+        StateTable::new_with_distribution_no_sanity_check(
             mem_state,
             TableId::new(table_id),
             column_descs,
