@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::{StorageError, StorageResult};
-use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
+use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
 
@@ -229,8 +229,12 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
-    fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
-        MonitoredStateStore::new(self, stats)
+    fn monitored(
+        self,
+        state_store_metrics: Arc<StateStoreMetrics>,
+        storage_metrics: Arc<MonitoredStorageMetrics>,
+    ) -> MonitoredStateStore<Self> {
+        MonitoredStateStore::new(self, state_store_metrics, storage_metrics)
     }
 
     /// Clears contents in shared buffer.

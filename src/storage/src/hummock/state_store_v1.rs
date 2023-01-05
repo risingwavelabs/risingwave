@@ -101,7 +101,7 @@ impl HummockStorageV1 {
             )
             .await?;
             if let Some(v) = value {
-                local_stats.report(self.stats.as_ref());
+                local_stats.report(self.state_store_metrics.as_ref(), Some(table_id));
                 return Ok(v.into_user_value());
             }
             table_counts += table_count;
@@ -116,7 +116,7 @@ impl HummockStorageV1 {
             )
             .await?;
             if let Some(v) = value {
-                local_stats.report(self.stats.as_ref());
+                local_stats.report(self.state_store_metrics.as_ref(), Some(table_id));
                 return Ok(v.into_user_value());
             }
             table_counts += table_count;
@@ -149,7 +149,7 @@ impl HummockStorageV1 {
                         )
                         .await?
                         {
-                            local_stats.report(self.stats.as_ref());
+                            local_stats.report(self.state_store_metrics.as_ref(), Some(table_id));
                             return Ok(v.into_user_value());
                         }
                     }
@@ -185,15 +185,15 @@ impl HummockStorageV1 {
                     )
                     .await?
                     {
-                        local_stats.report(self.stats.as_ref());
+                        local_stats.report(self.state_store_metrics.as_ref(), Some(table_id));
                         return Ok(v.into_user_value());
                     }
                 }
             }
         }
 
-        local_stats.report(self.stats.as_ref());
-        self.stats
+        local_stats.report(self.state_store_metrics.as_ref(), Some(table_id));
+        self.state_store_metrics
             .iter_merge_sstable_counts
             .with_label_values(&["sub-iter"])
             .observe(table_counts as f64);
@@ -247,7 +247,6 @@ impl HummockStorageV1 {
                 build_ordered_merge_iter::<T>(
                     &uncommitted_data,
                     self.sstable_store.clone(),
-                    self.stats.clone(),
                     &mut local_stats,
                     iter_read_options.clone(),
                 )
@@ -262,7 +261,6 @@ impl HummockStorageV1 {
                 build_ordered_merge_iter::<T>(
                     &sync_uncommitted_data,
                     self.sstable_store.clone(),
-                    self.stats.clone(),
                     &mut local_stats,
                     iter_read_options.clone(),
                 )
@@ -272,7 +270,7 @@ impl HummockStorageV1 {
                 .await?,
             ))
         }
-        self.stats
+        self.state_store_metrics
             .iter_merge_sstable_counts
             .with_label_values(&["memory-iter"])
             .observe(overlapped_iters.len() as f64);
@@ -382,7 +380,7 @@ impl HummockStorageV1 {
             }
         }
 
-        self.stats
+        self.state_store_metrics
             .iter_merge_sstable_counts
             .with_label_values(&["sub-iter"])
             .observe(overlapped_iters.len() as f64);
@@ -406,10 +404,10 @@ impl HummockStorageV1 {
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
 
-        local_stats.report(self.stats.as_ref());
+        local_stats.report(self.state_store_metrics.as_ref(), Some(table_id));
         Ok(HummockStateStoreIter::new(
             user_iterator,
-            self.stats.clone(),
+            self.state_store_metrics.clone(),
         ))
     }
 }
@@ -632,6 +630,6 @@ impl Drop for HummockStateStoreIter {
     fn drop(&mut self) {
         let mut stats = StoreLocalStatistic::default();
         self.collect_local_statistic(&mut stats);
-        stats.report(&self.metrics);
+        stats.report(&self.metrics, None);
     }
 }

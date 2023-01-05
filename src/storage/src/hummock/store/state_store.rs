@@ -287,6 +287,7 @@ type HummockStorageIteratorPayload = UnorderedMergeIteratorInner<
 pub struct HummockStorageIterator {
     inner: UserIterator<HummockStorageIteratorPayload>,
     metrics: Arc<StateStoreMetrics>,
+    table_id: TableId,
 }
 
 impl StateStoreIter for HummockStorageIterator {
@@ -313,8 +314,13 @@ impl HummockStorageIterator {
     pub fn new(
         inner: UserIterator<HummockStorageIteratorPayload>,
         metrics: Arc<StateStoreMetrics>,
+        table_id: TableId,
     ) -> Self {
-        Self { inner, metrics }
+        Self {
+            inner,
+            metrics,
+            table_id,
+        }
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
@@ -326,6 +332,6 @@ impl Drop for HummockStorageIterator {
     fn drop(&mut self) {
         let mut stats = StoreLocalStatistic::default();
         self.collect_local_statistic(&mut stats);
-        stats.report(&self.metrics);
+        stats.report(&self.metrics, Some(self.table_id));
     }
 }

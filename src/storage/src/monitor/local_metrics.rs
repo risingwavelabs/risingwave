@@ -17,7 +17,10 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::monitor::StateStoreMetrics;
+use risingwave_common::catalog::TableId;
+
+use super::StateStoreMetrics;
+use crate::monitor::CompactorMetrics;
 
 #[derive(Default, Debug)]
 pub struct StoreLocalStatistic {
@@ -73,50 +76,104 @@ impl StoreLocalStatistic {
         self.cache_meta_block_miss += local_cache_meta_block_miss;
     }
 
-    pub fn report(&self, metrics: &StateStoreMetrics) {
+    pub fn report(&self, metrics: &StateStoreMetrics, table_id: Option<TableId>) {
+        let table_id_label = table_id.map_or("".to_string(), |table_id| table_id.to_string());
+
         if self.cache_data_block_total > 0 {
             metrics
                 .sst_store_block_request_counts
-                .with_label_values(&["data_total"])
+                .with_label_values(&[table_id_label.as_str(), "data_total"])
                 .inc_by(self.cache_data_block_total);
         }
 
         if self.cache_data_block_miss > 0 {
             metrics
                 .sst_store_block_request_counts
-                .with_label_values(&["data_miss"])
+                .with_label_values(&[table_id_label.as_str(), "data_miss"])
                 .inc_by(self.cache_data_block_miss);
         }
 
         if self.cache_meta_block_total > 0 {
             metrics
                 .sst_store_block_request_counts
-                .with_label_values(&["meta_total"])
+                .with_label_values(&[table_id_label.as_str(), "meta_total"])
                 .inc_by(self.cache_meta_block_total);
         }
 
         if self.cache_meta_block_miss > 0 {
             metrics
                 .sst_store_block_request_counts
-                .with_label_values(&["meta_miss"])
+                .with_label_values(&[table_id_label.as_str(), "meta_miss"])
                 .inc_by(self.cache_meta_block_miss);
         }
 
         if self.bloom_filter_true_negative_count > 0 {
             metrics
                 .bloom_filter_true_negative_counts
+                .with_label_values(&[table_id_label.as_str()])
                 .inc_by(self.bloom_filter_true_negative_count);
         }
 
         let t = self.remote_io_time.load(Ordering::Relaxed) as f64;
         if t > 0.0 {
-            metrics.remote_read_time.observe(t / 1000.0);
+            metrics
+                .remote_read_time
+                .with_label_values(&[table_id_label.as_str()])
+                .observe(t / 1000.0);
         }
 
         if self.bloom_filter_check_counts > 0 {
             metrics
                 .bloom_filter_check_counts
+                .with_label_values(&[table_id_label.as_str()])
                 .inc_by(self.bloom_filter_check_counts);
+        }
+
+        if self.processed_key_count > 0 {
+            metrics
+                .iter_scan_key_counts
+                .with_label_values(&[table_id_label.as_str(), "processed"])
+                .inc_by(self.processed_key_count);
+        }
+
+        if self.skip_multi_version_key_count > 0 {
+            metrics
+                .iter_scan_key_counts
+                .with_label_values(&[table_id_label.as_str(), "skip_multi_version"])
+                .inc_by(self.skip_multi_version_key_count);
+        }
+
+        if self.skip_delete_key_count > 0 {
+            metrics
+                .iter_scan_key_counts
+                .with_label_values(&[table_id_label.as_str(), "skip_delete"])
+                .inc_by(self.skip_delete_key_count);
+        }
+
+        if self.total_key_count > 0 {
+            metrics
+                .iter_scan_key_counts
+                .with_label_values(&[table_id_label.as_str(), "total"])
+                .inc_by(self.total_key_count);
+        }
+
+        if self.get_shared_buffer_hit_counts > 0 {
+            metrics
+                .get_shared_buffer_hit_counts
+                .with_label_values(&[table_id_label.as_str()])
+                .inc_by(self.get_shared_buffer_hit_counts);
+        }
+
+        #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
+        if self.reported.fetch_or(true, Ordering::Relaxed) || self.added.load(Ordering::Relaxed) {
+            tracing::error!("double reported\n{:#?}", self);
+        }
+    }
+
+    pub fn report_compactor(&self, metrics: &CompactorMetrics) {
+        let t = self.remote_io_time.load(Ordering::Relaxed) as f64;
+        if t > 0.0 {
+            metrics.remote_read_time.observe(t / 1000.0);
         }
         if self.processed_key_count > 0 {
             metrics
@@ -137,12 +194,6 @@ impl StoreLocalStatistic {
                 .iter_scan_key_counts
                 .with_label_values(&["skip_delete"])
                 .inc_by(self.skip_delete_key_count);
-        }
-
-        if self.get_shared_buffer_hit_counts > 0 {
-            metrics
-                .get_shared_buffer_hit_counts
-                .inc_by(self.get_shared_buffer_hit_counts);
         }
 
         if self.total_key_count > 0 {

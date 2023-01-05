@@ -38,7 +38,7 @@ use risingwave_storage::hummock::store::version::{
 };
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::{MemoryLimiter, SstableIdManager, SstableStore};
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::monitor::{CompactorMetrics, StateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     ReadOptions, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
@@ -71,7 +71,7 @@ pub async fn prepare_hummock_event_handler(
         opt.clone(),
         sstable_store_ref,
         hummock_meta_client,
-        Arc::new(StateStoreMetrics::unused()),
+        Arc::new(CompactorMetrics::unused()),
         sstable_id_manager,
         filter_key_extractor_manager,
     ));

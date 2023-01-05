@@ -14,12 +14,25 @@
 
 mod state_store_metrics;
 
+// use std::sync::Arc;
+
 pub use state_store_metrics::*;
 mod monitored_store;
 pub use monitored_store::*;
 mod hummock_metrics;
 pub use hummock_metrics::*;
 
+mod monitored_storage_metrics;
+pub use monitored_storage_metrics::*;
+
+mod compactor_metrics;
+pub use compactor_metrics::*;
+
 mod local_metrics;
-pub use local_metrics::StoreLocalStatistic;
+pub use local_metrics::*;
 pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+
+// pub struct MonitoredMetrics {
+//     storage_metrics: Arc<MonitoredStorageMetrics>,
+//     state_store_metrics: Arc<StateStoreMetrics>,
+// }

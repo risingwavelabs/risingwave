@@ -24,7 +24,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::*;
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::monitor::{CompactorMetrics, StateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
@@ -291,6 +291,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         get_test_notification_client(env, hummock_manager_ref, worker_node),
         Arc::new(StateStoreMetrics::unused()),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
+        Arc::new(CompactorMetrics::unused()),
     )
     .await
     .unwrap();

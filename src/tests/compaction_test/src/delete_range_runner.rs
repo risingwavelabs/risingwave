@@ -47,7 +47,7 @@ use risingwave_storage::hummock::{
     CompactorSstableStore, HummockStorage, MemoryLimiter, SstableIdManager, SstableStore,
     TieredCache,
 };
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::monitor::{CompactorMetrics, StateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
@@ -175,6 +175,7 @@ async fn compaction_test(
     let config = Arc::new(storage_config);
 
     let state_store_metrics = Arc::new(StateStoreMetrics::unused());
+    let compactor_metrics = Arc::new(CompactorMetrics::unused());
     let object_store_metrics = Arc::new(ObjectStoreMetrics::unused());
     let remote_object_store = parse_remote_object_store(
         state_store_type.strip_prefix("hummock+").unwrap(),
@@ -199,6 +200,7 @@ async fn compaction_test(
         get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
         state_store_metrics.clone(),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
+        compactor_metrics.clone(),
     )
     .await?;
     let sstable_id_manager = store.sstable_id_manager().clone();
@@ -222,7 +224,7 @@ async fn compaction_test(
         meta_client.clone(),
         filter_key_extractor_manager,
         sstable_id_manager,
-        state_store_metrics,
+        compactor_metrics,
     );
     run_compare_result(&store, meta_client.clone(), test_range, test_count)
         .await
@@ -580,7 +582,7 @@ fn run_compactor_thread(
     meta_client: Arc<MockHummockMetaClient>,
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
     sstable_id_manager: Arc<SstableIdManager>,
-    state_store_metrics: Arc<StateStoreMetrics>,
+    compactor_metrics: Arc<CompactorMetrics>,
 ) -> (
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Sender<()>,
@@ -594,7 +596,7 @@ fn run_compactor_thread(
         options: config,
         hummock_meta_client: meta_client.clone(),
         sstable_store,
-        stats: state_store_metrics,
+        compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
         filter_key_extractor_manager,

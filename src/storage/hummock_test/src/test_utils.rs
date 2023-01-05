@@ -46,7 +46,7 @@ use risingwave_storage::hummock::observer_manager::HummockObserverNode;
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::monitor::{CompactorMetrics, StateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 use risingwave_storage::{
@@ -291,6 +291,7 @@ pub async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHummockMeta
         get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
         Arc::new(StateStoreMetrics::unused()),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
+        Arc::new(CompactorMetrics::unused()),
     )
     .await
     .unwrap();

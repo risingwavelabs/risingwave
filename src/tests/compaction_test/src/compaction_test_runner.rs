@@ -35,7 +35,8 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
-    HummockMetrics, MonitoredStateStore, ObjectStoreMetrics, StateStoreMetrics,
+    CompactorMetrics, HummockMetrics, MonitoredStateStore, MonitoredStorageMetrics,
+    ObjectStoreMetrics, StateStoreMetrics,
 };
 use risingwave_storage::store::{ReadOptions, StateStoreRead};
 use risingwave_storage::{StateStore, StateStoreImpl};
@@ -663,6 +664,8 @@ struct StorageMetrics {
     pub hummock_metrics: Arc<HummockMetrics>,
     pub state_store_metrics: Arc<StateStoreMetrics>,
     pub object_store_metrics: Arc<ObjectStoreMetrics>,
+    pub storage_metrics: Arc<MonitoredStorageMetrics>,
+    pub compactor_metrics: Arc<CompactorMetrics>,
 }
 
 pub async fn create_hummock_store_with_metrics(
@@ -674,6 +677,8 @@ pub async fn create_hummock_store_with_metrics(
         hummock_metrics: Arc::new(HummockMetrics::unused()),
         state_store_metrics: Arc::new(StateStoreMetrics::unused()),
         object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
+        storage_metrics: Arc::new(MonitoredStorageMetrics::unused()),
+        compactor_metrics: Arc::new(CompactorMetrics::unused()),
     };
     let rw_config = RwConfig {
         storage: storage_config.deref().clone(),
@@ -692,13 +697,15 @@ pub async fn create_hummock_store_with_metrics(
         metrics.object_store_metrics.clone(),
         TieredCacheMetricsBuilder::unused(),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
+        metrics.storage_metrics.clone(),
+        metrics.compactor_metrics.clone(),
     )
     .await?;
 
     if let Some(hummock_state_store) = state_store_impl.as_hummock() {
         Ok(hummock_state_store
             .clone()
-            .monitored(metrics.state_store_metrics))
+            .monitored(metrics.state_store_metrics, metrics.storage_metrics))
     } else {
         Err(anyhow!("only Hummock state store is supported!"))
     }
