@@ -2716,6 +2716,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ff8ae62cd3a9102e5637afc8452c55acf3844001bd5374e0b0bd7b6616c038"
 
 [[package]]
+name = "hdfs-sys"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73dcfda0dbca0569e98b8bfb87028d83d2f07705587bac1fddea7dc9ee1eca13"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "hdrhistogram"
 version = "7.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2727,6 +2736,19 @@ dependencies = [
  "flate2",
  "nom 7.1.1",
  "num-traits",
+]
+
+[[package]]
+name = "hdrs"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "949814fc49979183bd43fcd899671f706f7246586738beb3f42fdafa528ec7f3"
+dependencies = [
+ "errno",
+ "futures-io",
+ "hdfs-sys",
+ "libc",
+ "log",
 ]
 
 [[package]]
@@ -4099,6 +4121,7 @@ dependencies = [
  "bytes",
  "flagset",
  "futures",
+ "hdrs",
  "http",
  "log",
  "md-5",

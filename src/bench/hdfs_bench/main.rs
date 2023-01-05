@@ -1,13 +1,11 @@
 use std::sync::Arc;
 
-use anyhow::Result;
+use opendal::raw::Accessor;
 use opendal::services::hdfs;
-use opendal::Accessor;
-use opendal::Object;
-use opendal::Operator;
+use opendal::{Object, Operator};
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
     // Create fs backend builder.
     let mut builder = hdfs::Builder::default();
     // Set the name node for hdfs.
@@ -18,10 +16,8 @@ async fn main() -> Result<()> {
     builder.root("/tmp");
 
     // `Accessor` provides the low level APIs, we will use `Operator` normally.
-    let op: Operator = Operator::new(builder.build()?);
+    let op: Operator = Operator::new(builder.build().unwrap());
 
     // Create an object handle to start operation on object.
     let _: Object = op.object("test_file");
-
-    Ok(())
 }
