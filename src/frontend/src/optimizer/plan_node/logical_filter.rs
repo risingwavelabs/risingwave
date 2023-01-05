@@ -27,7 +27,7 @@ use super::{
     ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{assert_input_ref, ExprImpl, FunctionCall, InputRef};
+use crate::expr::{assert_input_ref, ExprImpl, InputRef};
 use crate::optimizer::plan_node::stream_now::StreamNow;
 use crate::optimizer::plan_node::{
     BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,

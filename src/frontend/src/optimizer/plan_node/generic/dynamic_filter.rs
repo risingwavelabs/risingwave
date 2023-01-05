@@ -38,7 +38,7 @@ impl<PlanRef: GenericPlanRef> DynamicFilter<PlanRef> {
         Condition {
             conjunctions: vec![ExprImpl::from(
                 FunctionCall::new(
-                    self.comparator.clone(),
+                    self.comparator,
                     vec![
                         ExprImpl::from(InputRef::new(
                             self.left_index,
