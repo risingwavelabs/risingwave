@@ -33,7 +33,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::ColumnId;
-use crate::handler::create_table::{bind_sql_columns, VersionedTableColumnIdGenerator};
+use crate::handler::create_table::{bind_sql_columns, ColumnIdGenerator};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::optimizer::OptimizerContext;
@@ -223,12 +223,12 @@ pub(crate) fn check_and_add_timestamp_column(
     with_properties: &HashMap<String, String>,
     column_descs: &mut Vec<ColumnDesc>,
     is_materialized: bool,
-    col_id_gen: &mut VersionedTableColumnIdGenerator,
+    col_id_gen: &mut ColumnIdGenerator,
 ) {
     if is_kafka_source(with_properties) && !is_materialized {
         let kafka_timestamp_column = ColumnDesc {
             data_type: DataType::Timestamptz,
-            column_id: col_id_gen.gen(KAFKA_TIMESTAMP_COLUMN_NAME),
+            column_id: col_id_gen.generate(KAFKA_TIMESTAMP_COLUMN_NAME),
             name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
@@ -244,7 +244,7 @@ pub async fn handle_create_source(
 ) -> Result<RwPgResponse> {
     let with_properties = handler_args.with_options.inner().clone();
 
-    let mut col_id_gen = VersionedTableColumnIdGenerator::initial();
+    let mut col_id_gen = ColumnIdGenerator::new_initial();
 
     let (mut column_descs, pk_column_id_from_columns) =
         bind_sql_columns(stmt.columns, &mut col_id_gen)?;

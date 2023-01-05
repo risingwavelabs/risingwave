@@ -84,7 +84,10 @@ pub fn is_row_id_column_name(name: &str) -> bool {
 
 /// The column ID preserved for the row ID column.
 pub const ROW_ID_COLUMN_ID: ColumnId = ColumnId::new(0);
+
 /// The column ID offset for user-defined columns.
+///
+/// All IDs of user-defined columns must be greater or equal to this value.
 pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
 
 /// Creates a row ID column (for implicit primary key).

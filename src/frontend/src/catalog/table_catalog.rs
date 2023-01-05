@@ -170,7 +170,7 @@ pub struct TableVersion {
 impl TableVersion {
     /// Create an initial version for a table, with the given max column id.
     #[cfg(test)]
-    pub fn initial_for_test(max_column_id: ColumnId) -> Self {
+    pub fn new_initial_for_test(max_column_id: ColumnId) -> Self {
         Self {
             version_id: 0,
             next_column_id: max_column_id.next(),
@@ -531,7 +531,7 @@ mod tests {
                 definition: "".into(),
                 handle_pk_conflict: false,
                 read_prefix_len_hint: 0,
-                version: Some(TableVersion::initial_for_test(ColumnId::new(1))),
+                version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

@@ -23,7 +23,7 @@ use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
 use super::create_table::{
-    check_create_table_with_source, gen_create_table_plan, VersionedTableColumnIdGenerator,
+    check_create_table_with_source, gen_create_table_plan, ColumnIdGenerator,
 };
 use super::query::gen_batch_query_plan;
 use super::RwPgResponse;
@@ -80,7 +80,7 @@ pub fn handle_explain(
                     name,
                     columns,
                     constraints,
-                    VersionedTableColumnIdGenerator::initial(),
+                    ColumnIdGenerator::new_initial(),
                 )?
                 .0
             }

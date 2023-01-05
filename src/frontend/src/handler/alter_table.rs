@@ -18,7 +18,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 
-use super::create_table::{gen_create_table_plan, VersionedTableColumnIdGenerator};
+use super::create_table::{gen_create_table_plan, ColumnIdGenerator};
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::Relation;
 use crate::{build_graph, Binder, OptimizerContext, TableCatalog};
@@ -75,7 +75,7 @@ pub async fn handle_add_column(
 
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &definition, "")?;
-    let col_id_gen = VersionedTableColumnIdGenerator::for_alter_table(&original_catalog);
+    let col_id_gen = ColumnIdGenerator::new_alter(&original_catalog);
     let Statement::CreateTable { columns, constraints, .. } = definition else {
         panic!("unexpected statement type: {:?}", definition);
     };

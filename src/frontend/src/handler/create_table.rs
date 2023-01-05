@@ -51,14 +51,29 @@ pub enum DmlFlag {
     AppendOnly,
 }
 
-pub struct VersionedTableColumnIdGenerator {
+/// Column ID generator for a new table or a new version of an existing table to alter.
+pub struct ColumnIdGenerator {
+    /// Existing column names and their IDs.
+    ///
+    /// This is used for aligning column IDs between versions (`ALTER`s). If a column already
+    /// exists, its ID is reused. Otherwise, a new ID is generated.
+    ///
+    /// For a new table, this is empty.
     pub existing: HashMap<String, ColumnId>,
+
+    /// The next column ID to generate, used for new columns that do not exist in `existing`.
     pub next_column_id: ColumnId,
+
+    /// The version ID of the table to be created or altered.
+    ///
+    /// For a new table, this is 0. For altering an existing table, this is the **next** version ID
+    /// of the `version_id` field in the original table catalog.
     pub version_id: u64,
 }
 
-impl VersionedTableColumnIdGenerator {
-    pub fn for_alter_table(original: &TableCatalog) -> Self {
+impl ColumnIdGenerator {
+    /// Creates a new [`ColumnIdGenerator`] for altering an existing table.
+    pub fn new_alter(original: &TableCatalog) -> Self {
         let existing = original
             .columns()
             .iter()
@@ -74,7 +89,8 @@ impl VersionedTableColumnIdGenerator {
         }
     }
 
-    pub fn initial() -> Self {
+    /// Creates a new [`ColumnIdGenerator`] for a new table.
+    pub fn new_initial() -> Self {
         Self {
             existing: HashMap::new(),
             next_column_id: ColumnId::from(USER_COLUMN_ID_OFFSET),
@@ -82,7 +98,8 @@ impl VersionedTableColumnIdGenerator {
         }
     }
 
-    pub fn gen(&mut self, name: &str) -> ColumnId {
+    /// Generates a new [`ColumnId`] for a column with the given name.
+    pub fn generate(&mut self, name: &str) -> ColumnId {
         if let Some(id) = self.existing.get(name) {
             *id
         } else {
@@ -92,6 +109,7 @@ impl VersionedTableColumnIdGenerator {
         }
     }
 
+    /// Consume this generator and return a [`TableVersion`] for the table to be created or altered.
     pub fn into_version(self) -> TableVersion {
         TableVersion {
             version_id: self.version_id,
@@ -105,14 +123,14 @@ impl VersionedTableColumnIdGenerator {
 /// This primary key is not combined with table constraints yet.
 pub fn bind_sql_columns(
     columns: Vec<ColumnDef>,
-    col_id_gen: &mut VersionedTableColumnIdGenerator,
+    col_id_gen: &mut ColumnIdGenerator,
 ) -> Result<(Vec<ColumnDesc>, Option<ColumnId>)> {
     // In `ColumnDef`, pk can contain only one column. So we use `Option` rather than `Vec`.
     let mut pk_column_id = None;
     let mut column_descs = Vec::with_capacity(columns.len());
 
     for column in columns {
-        let column_id = col_id_gen.gen(&column.name.real_value());
+        let column_id = col_id_gen.generate(&column.name.real_value());
         // Destruct to make sure all fields are properly handled rather than ignored.
         // Do NOT use `..` to ignore fields you do not want to deal with.
         // Reject them with a clear NotImplemented error.
@@ -273,12 +291,12 @@ pub(crate) async fn gen_create_table_plan_with_source(
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     source_schema: SourceSchema,
-    mut col_id_gen: VersionedTableColumnIdGenerator,
+    mut col_id_gen: ColumnIdGenerator,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (mut column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
     let properties = context.with_options().inner();
 
-    check_and_add_timestamp_column(&properties, &mut column_descs, true, &mut col_id_gen);
+    check_and_add_timestamp_column(properties, &mut column_descs, true, &mut col_id_gen);
 
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
@@ -288,7 +306,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let source_info = resolve_source_schema(
         source_schema,
         &mut columns,
-        &properties,
+        properties,
         row_id_index,
         &pk_column_ids,
     )
@@ -313,7 +331,7 @@ pub(crate) fn gen_create_table_plan(
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    mut col_id_gen: VersionedTableColumnIdGenerator,
+    mut col_id_gen: ColumnIdGenerator,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let definition = context.normalized_sql().to_owned();
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
@@ -532,7 +550,7 @@ pub async fn handle_create_table(
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
-        let col_id_gen = VersionedTableColumnIdGenerator::initial();
+        let col_id_gen = ColumnIdGenerator::new_initial();
 
         let (plan, source, table) = match source_schema {
             Some(source_schema) => {
@@ -679,7 +697,7 @@ mod tests {
                 } = ast.remove(0) else { panic!("test case should be create table") };
             let actual: Result<_> = (|| {
                 let (column_descs, pk_column_id_from_columns) =
-                    bind_sql_columns(columns, &mut VersionedTableColumnIdGenerator::initial())?;
+                    bind_sql_columns(columns, &mut ColumnIdGenerator::new_initial())?;
                 let (_, pk_column_ids, _) = bind_sql_table_constraints(
                     column_descs,
                     pk_column_id_from_columns,
