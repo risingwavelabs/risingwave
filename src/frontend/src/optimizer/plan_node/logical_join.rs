@@ -1108,10 +1108,6 @@ impl LogicalJoin {
             Some(v) => v,
             None => return Ok(None),
         };
-        let (left_ref, right_ref) = match left_ref.index < right_ref.index {
-            true => (left_ref, right_ref),
-            false => (right_ref, left_ref),
-        };
 
         let condition_cross_inputs = left_ref.index < self.left().schema().len()
             && right_ref.index == self.left().schema().len() /* right side has only one column */;
@@ -1121,7 +1117,9 @@ impl LogicalJoin {
         }
 
         // We align input types on all join predicates with cmp operator
-        if left_ref.data_type != right_ref.data_type {
+        if self.left().schema().fields()[left_ref.index].data_type
+            != self.right().schema().fields()[0].data_type
+        {
             return Ok(None);
         }
 

@@ -45,8 +45,8 @@ impl<PlanRef: GenericPlanRef> DynamicFilter<PlanRef> {
                             self.left.schema().fields()[self.left_index].data_type(),
                         )),
                         ExprImpl::from(InputRef::new(
-                            self.left.schema().len() + 1,
-                            self.left.schema().fields()[0].data_type(),
+                            self.left.schema().len(),
+                            self.right.schema().fields()[0].data_type(),
                         )),
                     ],
                 )
