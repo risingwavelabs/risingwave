@@ -52,6 +52,7 @@ pub enum DmlFlag {
 }
 
 /// Column ID generator for a new table or a new version of an existing table to alter.
+#[derive(Debug)]
 pub struct ColumnIdGenerator {
     /// Existing column names and their IDs.
     ///
@@ -608,13 +609,47 @@ pub fn check_create_table_with_source(
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::catalog::{Field, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
     use super::*;
     use crate::catalog::root_catalog::SchemaPath;
     use crate::catalog::row_id_column_name;
     use crate::test_utils::LocalFrontend;
+
+    #[test]
+    fn test_col_id_gen() {
+        let mut gen = ColumnIdGenerator::new_initial();
+        assert_eq!(gen.generate("v1"), ColumnId::new(1));
+        assert_eq!(gen.generate("v2"), ColumnId::new(2));
+
+        let mut gen = ColumnIdGenerator::new_alter(&TableCatalog {
+            columns: vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field::with_name(DataType::Float32, "f32"),
+                        1,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field::with_name(DataType::Float64, "f64"),
+                        2,
+                    ),
+                    is_hidden: false,
+                },
+            ],
+            version: Some(TableVersion::new_initial_for_test(ColumnId::new(2))),
+            ..Default::default()
+        });
+
+        assert_eq!(gen.generate("v1"), ColumnId::new(3));
+        assert_eq!(gen.generate("v2"), ColumnId::new(4));
+        assert_eq!(gen.generate("f32"), ColumnId::new(1));
+        assert_eq!(gen.generate("f64"), ColumnId::new(2));
+        assert_eq!(gen.generate("v3"), ColumnId::new(5));
+    }
 
     #[tokio::test]
     async fn test_create_table_handler() {

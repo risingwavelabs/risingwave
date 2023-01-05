@@ -19,6 +19,7 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_table::{gen_create_table_plan, ColumnIdGenerator};
+use super::privilege::check_super_user;
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::Relation;
 use crate::{build_graph, Binder, OptimizerContext, TableCatalog};
@@ -41,11 +42,16 @@ pub async fn handle_add_column(
         }
     };
 
+    if !check_super_user(&session) && session.user_id() != original_catalog.owner {
+        Err(ErrorCode::PermissionDenied(format!(
+            "must be owner of table \"{table_name}\""
+        )))?
+    }
+
     // Do not allow altering a table with a connector.
     if original_catalog.associated_source_id().is_some() {
         Err(ErrorCode::InvalidInputSyntax(format!(
-            "cannot alter table \"{}\" because it has a connector",
-            table_name
+            "cannot alter table \"{table_name}\" because it has a connector"
         )))?
     }
 
@@ -66,8 +72,7 @@ pub async fn handle_add_column(
         .any(|c| c.name.real_value() == new_column_name)
     {
         Err(ErrorCode::InvalidInputSyntax(format!(
-            "column \"{}\" of table \"{}\" already exists",
-            new_column_name, table_name
+            "column \"{new_column_name}\" of table \"{table_name}\" already exists"
         )))?
     }
     // Add the new column to the table definition.
@@ -99,8 +104,7 @@ pub async fn handle_add_column(
 
     // TODO: for test purpose only, we drop the original table and create a new one. This is wrong
     // and really dangerous in production.
-    #[cfg(debug_assertions)]
-    {
+    if cfg!(debug_assertions) {
         let catalog_writer = session.env().catalog_writer();
 
         catalog_writer
@@ -112,14 +116,73 @@ pub async fn handle_add_column(
             StatementType::ALTER_TABLE,
             "The `ALTER TABLE` feature is incomplete and not data is preserved! This feature is not available in production.".to_owned(),
         ))
-    }
-
-    #[cfg(not(debug_assertions))]
-    {
-        let (_, _, _) = (graph, source, table);
+    } else {
         Err(ErrorCode::NotImplemented(
             "ADD COLUMN".to_owned(),
             6903.into(),
         ))?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::types::DataType;
+
+    use crate::catalog::root_catalog::SchemaPath;
+    use crate::catalog::row_id_column_name;
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_add_column_handler() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
+
+        let sql = "create table t (i int, r real);";
+        frontend.run_sql(sql).await.unwrap();
+
+        let get_table = || {
+            let catalog_reader = session.env().catalog_reader().read_guard();
+            catalog_reader
+                .get_table_by_name(DEFAULT_DATABASE_NAME, schema_path, "t")
+                .unwrap()
+                .0
+                .clone()
+        };
+
+        let table = get_table();
+
+        let columns: HashMap<_, _> = table
+            .columns
+            .iter()
+            .map(|col| (col.name(), (col.data_type().clone(), col.column_id())))
+            .collect();
+
+        // Alter the table.
+        let sql = "alter table t add column s text;";
+        frontend.run_sql(sql).await.unwrap();
+
+        let altered_table = get_table();
+
+        let altered_columns: HashMap<_, _> = altered_table
+            .columns
+            .iter()
+            .map(|col| (col.name(), (col.data_type().clone(), col.column_id())))
+            .collect();
+
+        // Check the new column.
+        assert_eq!(columns.len() + 1, altered_columns.len());
+        assert_eq!(altered_columns["s"].0, DataType::Varchar);
+
+        // Check the old columns and IDs are not changed.
+        assert_eq!(columns["i"], altered_columns["i"]);
+        assert_eq!(columns["r"], altered_columns["r"]);
+        assert_eq!(
+            columns[row_id_column_name().as_str()],
+            altered_columns[row_id_column_name().as_str()]
+        );
     }
 }
