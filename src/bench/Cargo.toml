@@ -25,6 +25,7 @@ minitrace = "0.4"
 minitrace-jaeger = "0.4"
 moka = { version = "0.9", features = ["future"] }
 nix = { version = "0.25", features = ["fs", "mman"] }
+opendal = "0.23"
 opentelemetry = { version = "0.17", optional = true, features = ["rt-tokio"] }
 opentelemetry-jaeger = { version = "0.16", optional = true, features = [
     "rt-tokio",
@@ -67,6 +68,10 @@ path = "file_cache_bench/main.rs"
 [[bin]]
 name = "s3-bench"
 path = "s3_bench/main.rs"
+
+[[bin]]
+name = "hdfs-bench"
+path = "hdfs_bench/main.rs"
 
 [features]
 bpf = ["bcc", "risingwave_storage/bpf"]
