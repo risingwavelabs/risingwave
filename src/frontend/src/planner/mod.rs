@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use risingwave_common::error::Result;
 
 use crate::binder::BoundStatement;
@@ -29,14 +31,20 @@ mod update;
 mod values;
 pub use query::LIMIT_ALL_COUNT;
 
+use crate::PlanRef;
+
 /// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree
 pub struct Planner {
     ctx: OptimizerContextRef,
+    share_cache: HashMap<String, PlanRef>,
 }
 
 impl Planner {
     pub fn new(ctx: OptimizerContextRef) -> Planner {
-        Planner { ctx }
+        Planner {
+            ctx,
+            share_cache: Default::default(),
+        }
     }
 
     /// Plan a [`BoundStatement`]. Need to bind a statement before plan.
