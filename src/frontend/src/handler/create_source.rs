@@ -207,7 +207,7 @@ pub(crate) async fn resolve_source_schema(
             }
         }
 
-        SourceSchema::CSV(csv_info) => StreamSourceInfo {
+        SourceSchema::Csv(csv_info) => StreamSourceInfo {
             row_format: RowFormatType::Csv as i32,
             csv_delimiter: csv_info.delimiter as i32,
             csv_has_header: csv_info.has_header,
