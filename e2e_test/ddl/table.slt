@@ -126,6 +126,13 @@ statement error
 create table t (v1 varchar collate "en_US");
 
 # Test create-table-as 
+statement error alias must be specified
+create table t as select 1;
+
+# FIXME: this should be supported
+statement error alias must be specified
+create table t(v1) as select 1;
+
 statement ok
 create table t (v1 int,v2 int);
 
@@ -188,14 +195,8 @@ insert into t values (1);
 statement ok
 insert into t values (2);
 
-statement error 
-create table n1 as select sum(v1) from t;
-
-statement error 
-create table n1(v1) as select sum(v1) from t;
-
 statement ok
-create table n1 as select sum(v1) as sum from t;
+create table n1 as select sum(v1) from t;
 
 statement ok
 flush;

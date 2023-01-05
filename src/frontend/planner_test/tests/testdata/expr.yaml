@@ -397,14 +397,14 @@
   sql: |
     create table t (v1 timestamp, v2 int);
     select sum(v2) as sum_v2 from t group by v1 >= now();
-  stream_error: 'Invalid input syntax: For creation of MV, `now` function is only allowed in `WHERE` and `HAVING`. Found in clause: Some(GroupBy)'
+  stream_error: 'Invalid input syntax: For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: Some(GroupBy)'
 - name: forbid now in select for stream
   sql: |
     create table t (v1 timestamp, v2 timestamp);
     select now() as n, * from t where v1 >= now();
-  stream_error: 'Invalid input syntax: For creation of MV, `now` function is only allowed in `WHERE` and `HAVING`. Found in clause: None'
+  stream_error: 'Invalid input syntax: For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: None'
 - name: forbid now in agg filter for stream
   sql: |
     create table t (v1 timestamp, v2 int);
     select sum(v2) filter (where v1 >= now()) as sum_v2 from t;
-  stream_error: 'Invalid input syntax: For creation of MV, `now` function is only allowed in `WHERE` and `HAVING`. Found in clause: Some(Filter)'
+  stream_error: 'Invalid input syntax: For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: Some(Filter)'

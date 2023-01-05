@@ -57,6 +57,9 @@ pub fn create_table_statement_to_table(statement: &Statement) -> Table {
             name: name.0[0].real_value(),
             columns: columns.iter().map(|c| c.clone().into()).collect(),
         },
-        _ => panic!("Unexpected statement: {}", statement),
+        _ => panic!(
+            "Only CREATE TABLE statements permitted, received: {}",
+            statement
+        ),
     }
 }

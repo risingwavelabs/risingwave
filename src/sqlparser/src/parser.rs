@@ -1759,6 +1759,14 @@ impl Parser {
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
         let with_options = self.parse_with_properties()?;
+
+        // Table can be created with an external stream source.
+        let source_schema = if self.parse_keywords(&[Keyword::ROW, Keyword::FORMAT]) {
+            Some(SourceSchema::parse_to(self)?)
+        } else {
+            None
+        };
+
         // Parse optional `AS ( query )`
         let query = if self.parse_keyword(Keyword::AS) {
             Some(Box::new(self.parse_query()?))
@@ -1774,6 +1782,7 @@ impl Parser {
             with_options,
             or_replace,
             if_not_exists,
+            source_schema,
             query,
         })
     }
@@ -2263,19 +2272,27 @@ impl Parser {
         match self.next_token() {
             Token::Word(w) => match w.keyword {
                 Keyword::BOOLEAN | Keyword::BOOL => Ok(DataType::Boolean),
-                Keyword::FLOAT => Ok(DataType::Float(self.parse_optional_precision()?)),
+                Keyword::FLOAT => {
+                    let precision = self.parse_optional_precision()?;
+                    match precision {
+                        Some(0) => Err(ParserError::ParserError(
+                            "precision for type float must be at least 1 bit".to_string(),
+                        )),
+                        Some(54..) => Err(ParserError::ParserError(
+                            "precision for type float must be less than 54 bits".to_string(),
+                        )),
+                        _ => Ok(DataType::Float(precision)),
+                    }
+                }
                 Keyword::REAL => Ok(DataType::Real),
                 Keyword::DOUBLE => {
                     let _ = self.parse_keyword(Keyword::PRECISION);
                     Ok(DataType::Double)
                 }
-                Keyword::TINYINT => Ok(DataType::TinyInt(self.parse_optional_precision()?)),
-                Keyword::SMALLINT => Ok(DataType::SmallInt(self.parse_optional_precision()?)),
-                Keyword::INT | Keyword::INTEGER => {
-                    Ok(DataType::Int(self.parse_optional_precision()?))
-                }
-                Keyword::BIGINT => Ok(DataType::BigInt(self.parse_optional_precision()?)),
-                Keyword::VARCHAR => Ok(DataType::Varchar),
+                Keyword::SMALLINT => Ok(DataType::SmallInt),
+                Keyword::INT | Keyword::INTEGER => Ok(DataType::Int),
+                Keyword::BIGINT => Ok(DataType::BigInt),
+                Keyword::STRING | Keyword::VARCHAR => Ok(DataType::Varchar),
                 Keyword::CHAR | Keyword::CHARACTER => {
                     if self.parse_keyword(Keyword::VARYING) {
                         Ok(DataType::Varchar)
@@ -2304,7 +2321,6 @@ impl Parser {
                 // parse_interval_literal for a taste.
                 Keyword::INTERVAL => Ok(DataType::Interval),
                 Keyword::REGCLASS => Ok(DataType::Regclass),
-                Keyword::STRING => Ok(DataType::String),
                 Keyword::TEXT => {
                     if self.consume_token(&Token::LBracket) {
                         // Note: this is postgresql-specific
