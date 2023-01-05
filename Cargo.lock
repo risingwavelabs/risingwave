@@ -5711,6 +5711,7 @@ dependencies = [
  "serde_json",
  "size",
  "tracing",
+ "uuid",
  "workspace-hack",
 ]
 
