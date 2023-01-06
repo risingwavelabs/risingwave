@@ -37,7 +37,7 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompactorSstableStore, CompressionAlgorithm, MemoryLimiter, SstableBuilder,
+    CachePolicy, CompressionAlgorithm, MemoryLimiter, SstableBuilder,
     SstableBuilderOptions, SstableIterator, SstableStore, SstableWriterOptions, TieredCache,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};

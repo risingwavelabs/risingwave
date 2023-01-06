@@ -25,20 +25,20 @@ use risingwave_pb::hummock::{CompactTask, LevelType};
 use super::task_progress::TaskProgress;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{
-    CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
+    CompactOutput, CompactionFilter, Compactor, CompactorContext,
 };
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
 use crate::hummock::{
     CachePolicy, CompressionAlgorithm, HummockResult, RangeTombstonesCollector,
-    SstableBuilderOptions,
+    SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::StoreLocalStatistic;
 
 pub struct CompactorRunner {
     compact_task: CompactTask,
     compactor: Compactor,
-    sstable_store: CompactorSstableStoreRef,
+    sstable_store: SstableStoreRef,
     key_range: KeyRange,
     split_index: usize,
 }
@@ -91,7 +91,7 @@ impl CompactorRunner {
         Self {
             compactor,
             compact_task: task,
-            sstable_store: context.sstable_store.clone(),
+            sstable_store: context.context.sstable_store.clone(),
             key_range,
             split_index,
         }
@@ -120,7 +120,7 @@ impl CompactorRunner {
 
     pub async fn build_delete_range_iter<F: CompactionFilter>(
         compact_task: &CompactTask,
-        sstable_store: &CompactorSstableStoreRef,
+        sstable_store: &SstableStoreRef,
         filter: &mut F,
     ) -> HummockResult<Arc<RangeTombstonesCollector>> {
         let mut builder = DeleteRangeAggregatorBuilder::default();
@@ -209,7 +209,7 @@ mod tests {
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_with_range_tombstone,
     };
-    use crate::hummock::{CompactorSstableStore, DeleteRangeTombstone, MemoryLimiter};
+    use crate::hummock::{SstableStore, DeleteRangeTombstone, MemoryLimiter};
 
     #[tokio::test]
     async fn test_delete_range_aggregator_with_filter() {

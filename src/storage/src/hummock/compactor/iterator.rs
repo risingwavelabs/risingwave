@@ -23,11 +23,10 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::SstableInfo;
 
-use super::sstable_store::BlockStream;
-use crate::hummock::compactor::CompactorSstableStoreRef;
+use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{BlockHolder, BlockIterator, HummockResult};
+use crate::hummock::{Block, BlockHolder, BlockIterator, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
 /// Iterates over the KV-pairs of an SST while downloading it.
@@ -108,7 +107,7 @@ impl SstableStreamIterator {
     async fn next_block(&mut self) -> HummockResult<()> {
         // Check if we want and if we can load the next block.
         if self.remaining_blocks > 0 && let Some(block) = self.download_next_block().await? {
-            let mut block_iter = BlockIterator::new(block);
+            let mut block_iter = BlockIterator::new(BlockHolder::from_owned_block(block));
             block_iter.seek_to_first();
 
             self.remaining_blocks -= 1;
@@ -122,7 +121,7 @@ impl SstableStreamIterator {
     }
 
     /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
-    async fn download_next_block(&mut self) -> HummockResult<Option<BlockHolder>> {
+    async fn download_next_block(&mut self) -> HummockResult<Option<Box<Block>>> {
         let now = Instant::now();
         let result = self.block_stream.next().await;
         let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
@@ -181,7 +180,7 @@ pub struct ConcatSstableIterator {
     /// All non-overlapping tables.
     tables: Vec<SstableInfo>,
 
-    sstable_store: CompactorSstableStoreRef,
+    sstable_store: SstableStoreRef,
 
     stats: StoreLocalStatistic,
 }
@@ -193,7 +192,7 @@ impl ConcatSstableIterator {
     pub fn new(
         tables: Vec<SstableInfo>,
         key_range: KeyRange,
-        sstable_store: CompactorSstableStoreRef,
+        sstable_store: SstableStoreRef,
     ) -> Self {
         Self {
             key_range,
@@ -383,10 +382,6 @@ mod tests {
             .await;
             table_infos.push(table.get_sstable_info());
         }
-        let compact_store = Arc::new(CompactorSstableStore::new(
-            sstable_store.clone(),
-            MemoryLimiter::unlimit(),
-        ));
         let start_index = 5000;
         let end_index = 25000;
 
@@ -395,7 +390,7 @@ mod tests {
             test_key_of(end_index).encode().into(),
         );
         let mut iter =
-            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), sstable_store.clone());
         iter.seek(FullKey::decode(&kr.left)).await.unwrap();
 
         for idx in start_index..end_index {

@@ -49,7 +49,7 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::{
-        CompactorSstableStore, HummockStorage as GlobalHummockStorage, MemoryLimiter,
+        HummockStorage as GlobalHummockStorage, MemoryLimiter,
         SstableIdManager,
     };
     use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -192,10 +192,6 @@ pub(crate) mod tests {
         });
         CompactorContext::new(
             context.clone(),
-            Arc::new(CompactorSstableStore::new(
-                context.sstable_store.clone(),
-                context.read_memory_limiter.clone(),
-            )),
         )
     }
 

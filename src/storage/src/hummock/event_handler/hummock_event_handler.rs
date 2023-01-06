@@ -18,16 +18,18 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use futures::future::{select, Either};
+use futures::future::{select, Either, try_join_all};
 use futures::FutureExt;
 use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::pin_version_response::Payload;
+use risingwave_pb::hummock::group_delta::DeltaType;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
+use risingwave_pb::hummock::SstableInfo;
 
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::hummock::compactor::{compact, Context};
@@ -43,6 +45,8 @@ use crate::hummock::store::version::{
 };
 use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
+use crate::hummock::sstable_store::SstableStoreRef;
+use crate::monitor::StoreLocalStatistic;
 use crate::store::SyncResult;
 
 #[derive(Clone)]
@@ -108,6 +112,7 @@ pub struct HummockEventHandler {
     last_instance_id: LocalInstanceId,
 
     sstable_id_manager: SstableIdManagerRef,
+    sstable_store: SstableStoreRef,
 }
 
 async fn flush_imms(
@@ -150,6 +155,7 @@ impl HummockEventHandler {
         let buffer_tracker = BufferTracker::from_storage_config(&compactor_context.options);
         let write_conflict_detector = ConflictDetector::new_from_config(&compactor_context.options);
         let sstable_id_manager = compactor_context.sstable_id_manager.clone();
+        let sstable_store =compactor_context.sstable_store.clone();
         let uploader = HummockUploader::new(
             pinned_version.clone(),
             Arc::new(move |payload, task_info| {
@@ -170,6 +176,7 @@ impl HummockEventHandler {
             uploader,
             last_instance_id: 0,
             sstable_id_manager,
+            sstable_store,
         }
     }
 

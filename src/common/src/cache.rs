@@ -575,6 +575,7 @@ pub struct LruCache<K: LruKey, T: LruValue> {
     shard_lru_usages: Vec<Arc<AtomicUsize>>,
 
     listener: Option<Arc<dyn LruCacheEventListener<K = K, T = T>>>,
+    capacity: usize,
 }
 
 // we only need a small object pool because when the cache reach the limit of capacity, it will
@@ -614,7 +615,6 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             shards,
             shard_usages,
             shard_lru_usages,
-
             listener,
         }
     }
