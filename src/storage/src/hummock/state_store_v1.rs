@@ -616,7 +616,7 @@ impl StateStoreIter for HummockStateStoreIter {
             let iter = &mut self.inner;
 
             if iter.is_valid() {
-                let kv = (iter.key().clone(), Bytes::copy_from_slice(iter.value()));
+                let kv = (iter.key().clone(), iter.value().clone());
                 iter.next().await?;
                 Ok(Some(kv))
             } else {

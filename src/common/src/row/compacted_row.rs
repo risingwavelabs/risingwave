@@ -35,7 +35,7 @@ impl CompactedRow {
 impl<R: Row> From<R> for CompactedRow {
     fn from(row: R) -> Self {
         Self {
-            row: Bytes::from(row.value_serialize()),
+            row: row.value_serialize_bytes(),
         }
     }
 }

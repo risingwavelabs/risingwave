@@ -103,7 +103,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             }
 
             if &self.last_key.user_key.as_ref() != key {
-                self.last_key = full_key.to_vec().into_bytes();
+                self.last_key = full_key.copy_into();
                 // handle delete operation
                 match self.iterator.value() {
                     HummockValue::Put(val) => {

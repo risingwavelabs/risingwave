@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::ops::Bound;
 use std::pin::Pin;
@@ -21,7 +20,6 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::StreamExt;
-use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
 use risingwave_common::catalog::TableId;
@@ -42,14 +40,12 @@ use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::backup_reader::BackupReader;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext, Context};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
-use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::{
     CompactorSstableStore, HummockStorage, MemoryLimiter, SstableIdManager, SstableStore,
     TieredCache,
 };
 use risingwave_storage::monitor::StateStoreMetrics;
-use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
+use risingwave_storage::store::{LocalStateStore, ReadOptions};
 use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
@@ -339,10 +335,8 @@ async fn run_compare_result(
 }
 
 struct NormalState {
-    storage: LocalHummockStorage,
-    cache: BTreeMap<Bytes, StorageValue>,
+    storage: <HummockStorage as StateStore>::Local,
     table_id: TableId,
-    epoch: u64,
 }
 
 struct DeleteRangeState {
@@ -361,6 +355,7 @@ impl DeleteRangeState {
 
 #[async_trait::async_trait]
 trait CheckState {
+    fn init(&mut self, epoch: u64);
     async fn delete_range(&mut self, left: &[u8], right: &[u8]);
     async fn get(&self, key: &[u8]) -> Option<Bytes>;
     async fn scan(&self, left: &[u8], right: &[u8]) -> Vec<(Bytes, Bytes)>;
@@ -371,13 +366,9 @@ trait CheckState {
 impl NormalState {
     async fn new(hummock: &HummockStorage, table_id: u32, epoch: u64) -> Self {
         let table_id = TableId::new(table_id);
-        let storage = hummock.new_local(table_id).await;
-        Self {
-            cache: BTreeMap::default(),
-            storage,
-            epoch,
-            table_id,
-        }
+        let mut storage = hummock.new_local(table_id).await;
+        storage.init(epoch);
+        Self { storage, table_id }
     }
 
     async fn commit_impl(
@@ -385,30 +376,17 @@ impl NormalState {
         delete_ranges: Vec<(Bytes, Bytes)>,
         epoch: u64,
     ) -> Result<(), String> {
-        let data = std::mem::take(&mut self.cache)
-            .into_iter()
-            .map(|(key, val)| (key, val))
-            .collect_vec();
         self.storage
-            .ingest_batch(
-                data,
-                delete_ranges,
-                WriteOptions {
-                    epoch,
-                    table_id: self.table_id,
-                },
-            )
+            .seal_current_epoch(epoch, delete_ranges)
             .await
             .map_err(|e| format!("{:?}", e))?;
-        self.epoch = epoch;
         Ok(())
     }
 
-    async fn get_from_storage(&self, key: &[u8], ignore_range_tombstone: bool) -> Option<Bytes> {
+    async fn get_impl(&self, key: &[u8], ignore_range_tombstone: bool) -> Option<Bytes> {
         self.storage
             .get(
                 key,
-                self.epoch,
                 ReadOptions {
                     prefix_hint: None,
                     ignore_range_tombstone,
@@ -420,13 +398,6 @@ impl NormalState {
             )
             .await
             .unwrap()
-    }
-
-    async fn get_impl(&self, key: &[u8], ignore_range_tombstone: bool) -> Option<Bytes> {
-        if let Some(val) = self.cache.get(key) {
-            return val.user_value.clone();
-        }
-        self.get_from_storage(key, ignore_range_tombstone).await
     }
 
     async fn scan_impl(
@@ -442,7 +413,6 @@ impl NormalState {
                         Bound::Included(left.to_vec()),
                         Bound::Excluded(right.to_vec()),
                     ),
-                    self.epoch,
                     ReadOptions {
                         prefix_hint: None,
                         ignore_range_tombstone,
@@ -459,25 +429,8 @@ impl NormalState {
         while let Some(item) = iter.next().await {
             let (full_key, val) = item.unwrap();
             let tkey = full_key.user_key.table_key.0.clone();
-            if let Some(cache_val) = self.cache.get(&tkey) {
-                if cache_val.user_value.is_some() {
-                    ret.push((tkey, cache_val.user_value.clone().unwrap()));
-                } else {
-                    continue;
-                }
-            } else {
-                ret.push((tkey, val));
-            }
+            ret.push((tkey, val));
         }
-        for (key, val) in self.cache.range((
-            Bound::Included(Bytes::from(left.to_vec())),
-            Bound::Excluded(Bytes::from(right.to_vec())),
-        )) {
-            if let Some(uval) = val.user_value.as_ref() {
-                ret.push((key.clone(), uval.clone()));
-            }
-        }
-        ret.sort_by(|a, b| a.0.cmp(&b.0));
         ret
     }
 }
@@ -485,8 +438,6 @@ impl NormalState {
 #[async_trait::async_trait]
 impl CheckState for NormalState {
     async fn delete_range(&mut self, left: &[u8], right: &[u8]) {
-        self.cache
-            .retain(|key: &Bytes, _| key.as_ref().lt(left) || key.as_ref().ge(right));
         let mut iter = Box::pin(
             self.storage
                 .iter(
@@ -494,7 +445,6 @@ impl CheckState for NormalState {
                         Bound::Included(left.to_vec()),
                         Bound::Excluded(right.to_vec()),
                     ),
-                    self.epoch,
                     ReadOptions {
                         prefix_hint: None,
                         ignore_range_tombstone: true,
@@ -507,18 +457,21 @@ impl CheckState for NormalState {
                 .await
                 .unwrap(),
         );
+        let mut delete_item = Vec::new();
         while let Some(item) = iter.next().await {
-            let (full_key, _) = item.unwrap();
-            self.cache
-                .insert(full_key.user_key.table_key.0, StorageValue::new_delete());
+            let (full_key, value) = item.unwrap();
+            delete_item.push((full_key.user_key.table_key.0, value));
+        }
+        drop(iter);
+        for (key, value) in delete_item {
+            self.storage.delete(key, value).unwrap();
         }
     }
 
     fn insert(&mut self, key: &[u8], val: &[u8]) {
-        self.cache.insert(
-            Bytes::from(key.to_vec()),
-            StorageValue::new_put(val.to_vec()),
-        );
+        self.storage
+            .insert(Bytes::from(key.to_vec()), Bytes::copy_from_slice(val), None)
+            .unwrap();
     }
 
     async fn get(&self, key: &[u8]) -> Option<Bytes> {
@@ -532,10 +485,18 @@ impl CheckState for NormalState {
     async fn commit(&mut self, epoch: u64) -> Result<(), String> {
         self.commit_impl(vec![], epoch).await
     }
+
+    fn init(&mut self, epoch: u64) {
+        self.storage.init(epoch);
+    }
 }
 
 #[async_trait::async_trait]
 impl CheckState for DeleteRangeState {
+    fn init(&mut self, epoch: u64) {
+        self.inner.init(epoch);
+    }
+
     async fn delete_range(&mut self, left: &[u8], right: &[u8]) {
         self.delete_ranges
             .push((Bytes::copy_from_slice(left), Bytes::copy_from_slice(right)));

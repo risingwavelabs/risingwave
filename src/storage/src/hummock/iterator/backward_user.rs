@@ -144,7 +144,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
 
             if epoch > self.min_epoch && epoch <= self.read_epoch {
                 if self.just_met_new_key {
-                    self.last_key = full_key.to_vec().into_bytes();
+                    self.last_key = full_key.copy_into();
                     self.just_met_new_key = false;
                     // If we encounter an out-of-range key, stop early.
                     if self.out_of_range(self.last_key.user_key.as_ref()) {
@@ -160,7 +160,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
                         return Ok(());
                     } else {
                         // 2(b)
-                        self.last_key = full_key.to_vec().into_bytes();
+                        self.last_key = full_key.copy_into();
                         // If we encounter an out-of-range key, stop early.
                         if self.out_of_range(self.last_key.user_key.as_ref()) {
                             self.out_of_range = true;
@@ -178,7 +178,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
                         // TODO: unconditionally set the last key may lead to redundant copies
-                        self.last_key = full_key.to_vec().into_bytes();
+                        self.last_key = full_key.copy_into();
                         self.last_val = Bytes::copy_from_slice(val);
                         self.last_delete = false;
                     }
