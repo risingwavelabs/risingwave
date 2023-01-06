@@ -353,7 +353,7 @@
     └─BatchValues { rows: [[]] }
 - name: now expression
   sql: |
-    create table t (v1 timestamp);
+    create table t (v1 timestamp with time zone);
     select * from t where v1 >= now();
   logical_plan: |
     LogicalProject { exprs: [t.v1] }
@@ -366,7 +366,7 @@
       └─StreamNow { output: [now] }
 - name: and of two now expression condition
   sql: |
-    create table t (v1 timestamp, v2 timestamp);
+    create table t (v1 timestamp with time zone, v2 timestamp with time zone);
     select * from t where v1 >= now() and v2 >= now();
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id] }
@@ -377,12 +377,12 @@
       └─StreamNow { output: [now] }
 - name: or of two now expression condition
   sql: |
-    create table t (v1 timestamp, v2 timestamp);
+    create table t (v1 timestamp with time zone, v2 timestamp with time zone);
     select * from t where v1 >= now() or v2 >= now();
   stream_error: 'Expr error: Invalid parameter now: now expression must be placed in a comparison'
 - name: now inside HAVING clause
   sql: |
-    create table t (v1 timestamp, v2 int);
+    create table t (v1 timestamp with time zone, v2 int);
     select max(v1) as max_time from t group by v2 having max(v1) >= now();
   stream_plan: |
     StreamMaterialize { columns: [max_time, t.v2(hidden)], pk_columns: [t.v2] }
@@ -395,16 +395,16 @@
         └─StreamNow { output: [now] }
 - name: forbid now in group by for stream
   sql: |
-    create table t (v1 timestamp, v2 int);
+    create table t (v1 timestamp with time zone, v2 int);
     select sum(v2) as sum_v2 from t group by v1 >= now();
   stream_error: 'Invalid input syntax: For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: Some(GroupBy)'
 - name: forbid now in select for stream
   sql: |
-    create table t (v1 timestamp, v2 timestamp);
+    create table t (v1 timestamp with time zone, v2 timestamp with time zone);
     select now() as n, * from t where v1 >= now();
   stream_error: 'Invalid input syntax: For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: None'
 - name: forbid now in agg filter for stream
   sql: |
-    create table t (v1 timestamp, v2 int);
+    create table t (v1 timestamp with time zone, v2 int);
     select sum(v2) filter (where v1 >= now()) as sum_v2 from t;
   stream_error: 'Invalid input syntax: For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: Some(Filter)'

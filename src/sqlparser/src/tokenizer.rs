@@ -47,6 +47,8 @@ pub enum Token {
     Char(char),
     /// Single quoted string: i.e: 'string'
     SingleQuotedString(String),
+    /// Single quoted string with c-style escapes: i.e: E'string'
+    CstyleEscapesString(String),
     /// "National" string literal: i.e: N'string'
     NationalStringLiteral(String),
     /// Hexadecimal string literal: i.e.: X'deadbeef'
@@ -150,6 +152,7 @@ impl fmt::Display for Token {
             Token::SingleQuotedString(ref s) => write!(f, "'{}'", s),
             Token::NationalStringLiteral(ref s) => write!(f, "N'{}'", s),
             Token::HexStringLiteral(ref s) => write!(f, "X'{}'", s),
+            Token::CstyleEscapesString(ref s) => write!(f, "E'{}'", s),
             Token::Comma => f.write_str(","),
             Token::Whitespace(ws) => write!(f, "{}", ws),
             Token::DoubleEq => f.write_str("=="),
@@ -369,6 +372,21 @@ impl<'a> Tokenizer<'a> {
                         _ => {
                             // regular identifier starting with an "N"
                             let s = self.tokenize_word('N', chars);
+                            Ok(Some(Token::make_word(&s, None)))
+                        }
+                    }
+                }
+                x @ 'e' | x @ 'E' => {
+                    chars.next(); // consume, to check the next char
+                    match chars.peek() {
+                        Some('\'') => {
+                            // E'...' - a <character string literal>
+                            let s = self.tokenize_single_quoted_string_with_escape(chars)?;
+                            Ok(Some(Token::CstyleEscapesString(s)))
+                        }
+                        _ => {
+                            // regular identifier starting with an "E"
+                            let s = self.tokenize_word(x, chars);
                             Ok(Some(Token::make_word(&s, None)))
                         }
                     }
@@ -646,6 +664,46 @@ impl<'a> Tokenizer<'a> {
                 '\\' => {
                     s.push(ch);
                     chars.next();
+                }
+                _ => {
+                    chars.next(); // consume
+                    s.push(ch);
+                }
+            }
+        }
+        self.tokenizer_error("Unterminated string literal")
+    }
+
+    /// Read a single qutoed string with escape
+    fn tokenize_single_quoted_string_with_escape(
+        &self,
+        chars: &mut Peekable<Chars<'_>>,
+    ) -> Result<String, TokenizerError> {
+        let mut s = String::new();
+        chars.next(); // consume the opening quote
+
+        while let Some(&ch) = chars.peek() {
+            match ch {
+                '\'' => {
+                    chars.next(); // consume
+                    if chars.peek().map(|c| *c == '\'').unwrap_or(false) {
+                        s.push('\\');
+                        s.push(ch);
+                        chars.next();
+                    } else {
+                        return Ok(s);
+                    }
+                }
+                '\\' => {
+                    s.push(ch);
+                    chars.next();
+                    if chars
+                        .peek()
+                        .map(|c| *c == '\'' || *c == '\\')
+                        .unwrap_or(false)
+                    {
+                        s.push(chars.next().unwrap());
+                    }
                 }
                 _ => {
                     chars.next(); // consume

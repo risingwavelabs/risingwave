@@ -14,14 +14,16 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::rc::Rc;
 
 use parse_display::Display;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_sqlparser::ast::TableAlias;
 
 type LiteResult<T> = std::result::Result<T, ErrorCode>;
 
-use crate::binder::COLUMN_GROUP_PREFIX;
+use crate::binder::{BoundQuery, CteId, COLUMN_GROUP_PREFIX};
 
 #[derive(Debug, Clone)]
 pub struct ColumnBinding {
@@ -71,6 +73,8 @@ pub struct BindContext {
     pub clause: Option<Clause>,
     // The `BindContext`'s data on its column groups
     pub column_group_context: ColumnGroupContext,
+    /// Map the cte's name to its Relation::Subquery.
+    pub cte_to_relation: HashMap<String, Rc<(CteId, BoundQuery, TableAlias)>>,
 }
 
 /// Holds the context for the `BindContext`'s `ColumnGroup`s.
