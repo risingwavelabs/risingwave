@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+#![cfg_attr(not(test), expect(dead_code))]
 
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -27,7 +28,6 @@ use super::{Barrier, PkIndices, StreamExecutorResult, Watermark};
 use crate::common::table::state_table::StateTable;
 
 /// [`SortBufferKey`] contains a record's timestamp and pk.
-#[expect(dead_code)]
 type SortBufferKey = (ScalarImpl, OwnedRow);
 
 /// [`SortBufferValue`] contains a record's value and a flag indicating whether the record has been
@@ -37,14 +37,12 @@ type SortBufferKey = (ScalarImpl, OwnedRow);
 /// there are only a few rows that will be temporarily stored in the buffer during an epoch,
 /// [`OwnedRow`] will be more efficient instead due to no ser/de needed. So here we could do further
 /// optimizations.
-#[expect(dead_code)]
 type SortBufferValue = (OwnedRow, bool);
 
 /// [`SortBuffer`] is a common component that consume an unordered stream and produce an ordered
 /// stream by watermark. This component maintains a state table internally, which schema is same as
 /// its input and output. Generally, the component acts as a buffer that output the data it received
 /// with a delay.
-#[expect(dead_code)]
 pub struct SortBuffer<S: StateStore> {
     schema: Schema,
 
@@ -81,7 +79,6 @@ impl<S: StateStore> SortBuffer<S> {
 
     /// Store all rows in one [`StreamChunk`] to the buffer.
     /// TODO: Only insertions are supported now.
-    #[expect(dead_code)]
     pub fn handle_chunk(&mut self, chunk: &StreamChunk) {
         for (op, row_ref) in chunk.rows() {
             assert_eq!(
@@ -205,12 +202,13 @@ mod tests {
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
+    use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::SortBuffer;
     use crate::common::table::state_table::StateTable;
-    use crate::executor::{PkIndices, Watermark};
+    use crate::executor::{PkIndices, Watermark, Barrier};
 
     fn chunks_to_rows(chunks: impl Iterator<Item = DataChunk>) -> Vec<OwnedRow> {
         let mut rows = vec![];
@@ -238,7 +236,7 @@ mod tests {
         let schema = Schema::new(fields);
         let tys = schema.data_types();
         let order_types = vec![OrderType::Ascending];
-        let state_table = StateTable::new_without_distribution(
+        let mut state_table = StateTable::new_without_distribution(
             state_store,
             table_id,
             column_descs,
@@ -246,6 +244,7 @@ mod tests {
             pk_indices.clone(),
         )
         .await;
+        state_table.init_epoch(EpochPair::new_test_epoch(2));
         let mut sort_buffer =
             SortBuffer::new(schema.clone(), pk_indices, sort_column_index, state_table);
 
@@ -264,11 +263,12 @@ mod tests {
             + 60 8",
         );
         let watermark2 = Watermark::new(1, DataType::Int64, 7i64.into());
+        let barrier1 = Barrier::new_test_barrier(3);
         sort_buffer.handle_chunk(&chunk1);
         let output = sort_buffer.handle_watermark(&watermark1);
-        let output = chunks_to_rows(output);
+        let rows1 = chunks_to_rows(output);
         assert_eq!(
-            output,
+            rows1,
             vec![
                 OwnedRow::from_pretty_with_tys(&tys, "1 1"),
                 OwnedRow::from_pretty_with_tys(&tys, "2 2"),
@@ -276,9 +276,9 @@ mod tests {
         );
         sort_buffer.handle_chunk(&chunk2);
         let output = sort_buffer.handle_watermark(&watermark2);
-        let output = chunks_to_rows(output);
+        let rows2 = chunks_to_rows(output);
         assert_eq!(
-            output,
+            rows2,
             vec![
                 OwnedRow::from_pretty_with_tys(&tys, "98 4"),
                 OwnedRow::from_pretty_with_tys(&tys, "37 5"),
@@ -286,5 +286,8 @@ mod tests {
                 OwnedRow::from_pretty_with_tys(&tys, "4 7"),
             ]
         );
+        sort_buffer.delete(&rows1[0]);
+        sort_buffer.delete(&rows1[1]);
+        sort_buffer.handle_barrier(&barrier1).await.unwrap();
     }
 }
