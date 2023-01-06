@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -19,28 +21,24 @@ use risingwave_common::types::DataType;
 use risingwave_pb::catalog::Function;
 
 use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
+use crate::catalog::function_catalog::FunctionCatalog;
 use crate::expr::{ExprDisplay, ExprType};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UserDefinedFunction {
-    pub name: String,
-    pub return_type: DataType,
     pub args: Vec<ExprImpl>,
+    pub catalog: Arc<FunctionCatalog>,
 }
 
 impl UserDefinedFunction {
-    pub fn new(name: &str, args: Vec<ExprImpl>, return_type: DataType) -> Self {
-        Self {
-            name: name.into(),
-            return_type,
-            args,
-        }
+    pub fn new(catalog: Arc<FunctionCatalog>, args: Vec<ExprImpl>) -> Self {
+        Self { args, catalog }
     }
 }
 
 impl Expr for UserDefinedFunction {
     fn return_type(&self) -> DataType {
-        self.return_type.clone()
+        self.catalog.return_type.clone()
     }
 
     fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
@@ -49,8 +47,17 @@ impl Expr for UserDefinedFunction {
         ExprNode {
             expr_type: Type::Udf.into(),
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
+            rex_node: Some(RexNode::Udf(UserDefinedFunction {
                 children: self.args.iter().map(Expr::to_expr_proto).collect(),
+                name: self.catalog.name.clone(),
+                arg_types: self
+                    .catalog
+                    .arg_types
+                    .iter()
+                    .map(|t| t.to_protobuf())
+                    .collect(),
+                language: self.catalog.language.clone(),
+                path: self.catalog.path.clone(),
             })),
         }
     }

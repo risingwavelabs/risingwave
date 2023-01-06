@@ -110,9 +110,7 @@ impl Binder {
                 &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
             )
         {
-            return Ok(
-                UserDefinedFunction::new(&func.name, inputs, func.return_type.clone()).into(),
-            );
+            return Ok(UserDefinedFunction::new(func.clone(), inputs).into());
         }
 
         // normal function

@@ -105,20 +105,11 @@ pub trait ExprRewriter {
         .into()
     }
     fn rewrite_user_defined_function(&mut self, udf: UserDefinedFunction) -> ExprImpl {
-        let UserDefinedFunction {
-            args,
-            return_type,
-            name,
-        } = udf;
+        let UserDefinedFunction { args, catalog } = udf;
         let args = args
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
-        UserDefinedFunction {
-            args,
-            return_type,
-            name,
-        }
-        .into()
+        UserDefinedFunction { args, catalog }.into()
     }
 }

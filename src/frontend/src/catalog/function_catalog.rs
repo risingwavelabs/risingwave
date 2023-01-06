@@ -16,7 +16,7 @@ use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::Function as ProstFunction;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct FunctionCatalog {
     pub id: FunctionId,
     pub name: String,
