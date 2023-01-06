@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -59,7 +59,7 @@ pub struct Reschedule {
     pub upstream_dispatcher_mapping: Option<ActorMapping>,
 
     /// The downstream fragments of this fragment.
-    pub downstream_fragment_id: Option<FragmentId>,
+    pub downstream_fragment_ids: Vec<FragmentId>,
 
     /// Reassigned splits for source actors
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
@@ -305,7 +305,7 @@ where
 
                 let mut merge_update = HashMap::new();
                 for (&fragment_id, reschedule) in reschedules {
-                    if let Some(downstream_fragment_id) = reschedule.downstream_fragment_id {
+                    for &downstream_fragment_id in &reschedule.downstream_fragment_ids {
                         // Find the actors of the downstream fragment.
                         let downstream_actor_ids = self
                             .fragment_manager

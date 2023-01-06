@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -639,7 +639,7 @@ where
                     vnode_bitmap_updates,
                     upstream_fragment_dispatcher_ids,
                     upstream_dispatcher_mapping,
-                    downstream_fragment_id,
+                    downstream_fragment_ids,
                     actor_splits,
                 } = reschedule;
 
@@ -742,7 +742,7 @@ where
                 }
 
                 // Update the merge executor of the downstream fragment.
-                if let Some(downstream_fragment_id) = downstream_fragment_id {
+                for &downstream_fragment_id in &downstream_fragment_ids {
                     let downstream_fragment = table_fragment
                         .fragments
                         .get_mut(&downstream_fragment_id)

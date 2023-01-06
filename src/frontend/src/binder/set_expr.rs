@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -110,8 +110,9 @@ impl Binder {
                 match op {
                     SetOperator::Union => {
                         let left = Box::new(self.bind_set_expr(*left)?);
-                        // Reset context for right side.
-                        self.context = BindContext::default();
+                        // Reset context for right side, but keep `cte_to_relation`.
+                        let new_context = std::mem::take(&mut self.context);
+                        self.context.cte_to_relation = new_context.cte_to_relation;
                         let right = Box::new(self.bind_set_expr(*right)?);
 
                         if left.schema().fields.len() != right.schema().fields.len() {

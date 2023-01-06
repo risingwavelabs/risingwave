@@ -195,6 +195,9 @@ CREATE SINK sink FROM mv WITH (connector='console', prefix='DEBUG', suffix='');
 statement error not found
 drop table sink;
 
+statement error sink properties not provided
+CREATE SINK sink FROM mv;
+
 # FIXME: improve the error message
 statement error not found
 drop materialized view sink;
@@ -293,16 +296,13 @@ statement error cannot change index
 delete from idx;
 
 # 6.4 materialized source
-# FIXME: what's this?
-statement error Get source table id not exists
+statement error cannot change materialized source
 insert into msrc values (1);
 
-# FIXME: what's this?
-statement error Get source table id not exists
+statement error cannot change materialized source
 update msrc set v = 2;
 
-# FIXME: what's this?
-statement error Get source table id not exists
+statement error cannot change materialized source
 delete from msrc;
 
 # 6.5 non-materialized source

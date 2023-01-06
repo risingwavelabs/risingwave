@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,8 +18,8 @@ use num_traits::FromPrimitive;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_expr::vector_op::cast::{
-    i64_to_timestamp, i64_to_timestampz, str_to_date, str_to_time, str_to_timestamp,
-    str_to_timestampz,
+    i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
+    str_to_timestamptz,
 };
 #[cfg(not(any(
     target_feature = "sse4.2",
@@ -74,10 +74,10 @@ fn do_parse_json_value(dtype: &DataType, v: &Value) -> Result<ScalarImpl> {
             Value::Number(_n) => i64_to_timestamp(ensure_int!(v, i64))?.into(),
             _ => anyhow::bail!("expect timestamp, but found {v}"),
         },
-        DataType::Timestampz => match v {
-            Value::String(s) => str_to_timestampz(s)?.into(),
-            Value::Number(_n) => i64_to_timestampz(ensure_int!(v, i64))?.into(),
-            _ => anyhow::bail!("expect timestampz, but found {v}"),
+        DataType::Timestamptz => match v {
+            Value::String(s) => str_to_timestamptz(s)?.into(),
+            Value::Number(_n) => i64_to_timestamptz(ensure_int!(v, i64))?.into(),
+            _ => anyhow::bail!("expect timestamptz, but found {v}"),
         },
         DataType::Struct(struct_type_info) => {
             let fields = struct_type_info
@@ -163,10 +163,10 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
             BorrowedValue::Static(_) => i64_to_timestamp(ensure_int!(v, i64))?.into(),
             _ => anyhow::bail!("expect timestamp, but found {v}"),
         },
-        DataType::Timestampz => match v {
-            BorrowedValue::String(s) => str_to_timestampz(s)?.into(),
-            BorrowedValue::Static(_) => i64_to_timestampz(ensure_int!(v, i64))?.into(),
-            _ => anyhow::bail!("expect timestampz, but found {v}"),
+        DataType::Timestamptz => match v {
+            BorrowedValue::String(s) => str_to_timestamptz(s)?.into(),
+            BorrowedValue::Static(_) => i64_to_timestamptz(ensure_int!(v, i64))?.into(),
+            _ => anyhow::bail!("expect timestamptz, but found {v}"),
         },
         DataType::Struct(struct_type_info) => {
             let fields = struct_type_info

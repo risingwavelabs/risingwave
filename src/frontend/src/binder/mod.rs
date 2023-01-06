@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::error::Result;
 use risingwave_common::session_config::SearchPath;
-use risingwave_sqlparser::ast::{Statement, TableAlias};
+use risingwave_sqlparser::ast::Statement;
 
 mod bind_context;
 mod delete;
@@ -38,7 +37,7 @@ pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundTableSource, BoundWatermark,
+    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundWatermark,
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use risingwave_common::error::ErrorCode;
@@ -51,6 +50,8 @@ pub use values::BoundValues;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::session::{AuthContext, SessionImpl};
 
+pub type CteId = usize;
+
 /// `Binder` binds the identifiers in AST to columns in relations
 pub struct Binder {
     // TODO: maybe we can only lock the database, but not the whole catalog.
@@ -58,6 +59,7 @@ pub struct Binder {
     db_name: String,
     context: BindContext,
     auth_context: Arc<AuthContext>,
+    bind_timestamp_ms: u64,
     /// A stack holding contexts of outer queries when binding a subquery.
     /// It also holds all of the lateral contexts for each respective
     /// subquery.
@@ -73,26 +75,42 @@ pub struct Binder {
 
     next_subquery_id: usize,
     next_values_id: usize,
-    /// Map the cte's name to its Relation::Subquery.
-    cte_to_relation: HashMap<String, (BoundQuery, TableAlias)>,
+    next_cte_id: CteId,
 
     search_path: SearchPath,
+    /// Whether the Binder is binding an MV.
+    in_create_mv: bool,
 }
 
 impl Binder {
-    pub fn new(session: &SessionImpl) -> Binder {
+    fn new_inner(session: &SessionImpl, in_create_mv: bool) -> Binder {
+        let now_ms = session
+            .env()
+            .hummock_snapshot_manager()
+            .latest_snapshot_current_epoch()
+            .as_unix_millis();
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
             db_name: session.database().to_string(),
             context: BindContext::new(),
             auth_context: session.auth_context(),
+            bind_timestamp_ms: now_ms,
             upper_subquery_contexts: vec![],
             lateral_contexts: vec![],
             next_subquery_id: 0,
             next_values_id: 0,
-            cte_to_relation: HashMap::new(),
+            next_cte_id: 0,
             search_path: session.config().get_search_path(),
+            in_create_mv,
         }
+    }
+
+    pub fn new(session: &SessionImpl) -> Binder {
+        Self::new_inner(session, false)
+    }
+
+    pub fn new_for_stream(session: &SessionImpl) -> Binder {
+        Self::new_inner(session, true)
     }
 
     /// Bind a [`Statement`].
@@ -102,6 +120,7 @@ impl Binder {
 
     fn push_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
+        self.context.cte_to_relation = new_context.cte_to_relation.clone();
         let new_lateral_contexts = std::mem::take(&mut self.lateral_contexts);
         self.upper_subquery_contexts
             .push((new_context, new_lateral_contexts));
@@ -119,6 +138,7 @@ impl Binder {
 
     fn push_lateral_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
+        self.context.cte_to_relation = new_context.cte_to_relation.clone();
         self.lateral_contexts.push(LateralBindContext {
             is_visible: false,
             context: new_context,
@@ -159,6 +179,12 @@ impl Binder {
     fn next_values_id(&mut self) -> usize {
         let id = self.next_values_id;
         self.next_values_id += 1;
+        id
+    }
+
+    fn next_cte_id(&mut self) -> CteId {
+        let id = self.next_cte_id;
+        self.next_cte_id += 1;
         id
     }
 }

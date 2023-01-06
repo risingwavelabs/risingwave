@@ -117,15 +117,21 @@ message ActorMapping {
   repeated uint32 data = 2;
 }
 
-message SourceNode {
-  uint32 source_id = 1; // use source_id to fetch SourceDesc from local source manager
+message StreamSource {
+  uint32 source_id = 1;
   catalog.Table state_table = 2;
   catalog.ColumnIndex row_id_index = 3;
   repeated plan_common.ColumnCatalog columns = 4;
   repeated int32 pk_column_ids = 5;
   map<string, string> properties = 6;
-  catalog.SourceInfo info = 7;
+  catalog.StreamSourceInfo info = 7;
   string source_name = 8;
+}
+
+message SourceNode {
+  // The source node can contain either a stream source or nothing. So here we extract all
+  // information about stream source to a message, and here it will be an `Option` in Rust.
+  StreamSource source_inner = 1;
 }
 
 message SinkNode {
@@ -526,7 +532,9 @@ message Dispatcher {
   // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-  // - For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+  // - For dispatchers within actors, the id is the same as its downstream fragment id.
+  //   We can't use the exchange operator id directly as the dispatch id, because an exchange
+  //   could belong to more than one downstream in DAG.
   // - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.

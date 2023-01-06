@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -168,7 +168,6 @@ impl StageExecution {
         ctx: ExecutionContextRef,
     ) -> Self {
         let tasks = (0..stage.parallelism)
-            .into_iter()
             .map(|task_id| (task_id, TaskStatusHolder::new(task_id)))
             .collect();
         Self {
@@ -548,9 +547,9 @@ impl StageRunner {
         let node_body = plan_node.node_body.as_ref().expect("fail to get node body");
 
         let vnode_mapping = match node_body {
-            Insert(insert_node) => self.get_vnode_mapping(&insert_node.associated_mview_id.into()),
-            Update(update_node) => self.get_vnode_mapping(&update_node.associated_mview_id.into()),
-            Delete(delete_node) => self.get_vnode_mapping(&delete_node.associated_mview_id.into()),
+            Insert(insert_node) => self.get_vnode_mapping(&insert_node.table_id.into()),
+            Update(update_node) => self.get_vnode_mapping(&update_node.table_id.into()),
+            Delete(delete_node) => self.get_vnode_mapping(&delete_node.table_id.into()),
             _ => {
                 if let Some(distributed_lookup_join_node) =
                     Self::find_distributed_lookup_join_node(plan_node)

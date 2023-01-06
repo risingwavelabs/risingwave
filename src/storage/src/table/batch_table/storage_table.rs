@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -321,7 +321,7 @@ impl<S: StateStore> StorageTable<S> {
                 // If `vnode_hint` is set, we can only access this single vnode.
                 Some(vnode) => Either::Left(std::iter::once(vnode)),
                 // Otherwise, we need to access all vnodes of this table.
-                None => Either::Right(self.vnodes.ones().map(VirtualNode::from_index)),
+                None => Either::Right(self.vnodes.iter_ones().map(VirtualNode::from_index)),
             };
             Either::Right(
                 vnodes.map(|vnode| prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes())),

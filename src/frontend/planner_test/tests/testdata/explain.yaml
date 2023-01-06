@@ -6,6 +6,11 @@
     LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 
+    Share Source:
+
+    LogicalProject { exprs: [1:Int32] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+
     Predicate Push Down:
 
     LogicalProject { exprs: [1:Int32] }
@@ -46,7 +51,7 @@
       "stages": {
         "0": {
           "root": {
-            "plan_node_id": 24,
+            "plan_node_id": 28,
             "plan_node_type": "BatchProject",
             "schema": [
               {
@@ -59,7 +64,7 @@
             ],
             "children": [
               {
-                "plan_node_id": 22,
+                "plan_node_id": 26,
                 "plan_node_type": "BatchValues",
                 "schema": [],
                 "children": [],
@@ -81,3 +86,86 @@
         "0": []
       }
     }
+- sql: |
+    create table t1(v1 int);
+    create table t2(v2 int);
+    explain (logical) select * from t1 join t2 on v1=v2;
+  explain_output: |
+    LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
+    ├─LogicalScan { table: t1, columns: [v1] }
+    └─LogicalScan { table: t2, columns: [v2] }
+- sql: |
+    create table t1(v1 int);
+    create table t2(v2 int);
+    explain (logical, trace) select * from t1 join t2 on v1=v2;
+  explain_output: |+
+    Begin:
+
+    LogicalProject { exprs: [t1.v1, t2.v2] }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id] }
+
+    Share Source:
+
+    LogicalProject { exprs: [t1.v1, t2.v2] }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id] }
+
+    Predicate Push Down:
+
+    LogicalProject { exprs: [t1.v1, t2.v2] }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id] }
+
+    Predicate Push Down:
+
+    LogicalProject { exprs: [t1.v1, t2.v2] }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id] }
+
+    Predicate Push Down:
+
+    LogicalProject { exprs: [t1.v1, t2.v2] }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id] }
+
+    Push Down the Calculation of Inputs of Join's Condition:
+
+    apply PushCalculationOfJoinRule 1 time(s)
+
+    LogicalProject { exprs: [t1.v1, t2.v2] }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
+      ├─LogicalScan { table: t1, columns: [v1, _row_id] }
+      └─LogicalScan { table: t2, columns: [v2, _row_id] }
+
+    Prune Columns:
+
+    LogicalProject { exprs: [t1.v1, t2.v2] }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
+      ├─LogicalScan { table: t1, columns: [v1] }
+      └─LogicalScan { table: t2, columns: [v2] }
+
+    Predicate Push Down:
+
+    LogicalProject { exprs: [t1.v1, t2.v2] }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
+      ├─LogicalScan { table: t1, columns: [v1] }
+      └─LogicalScan { table: t2, columns: [v2] }
+
+    Project Remove:
+
+    apply ProjectEliminateRule 1 time(s)
+
+    LogicalJoin { type: Inner, on: (t1.v1 = t2.v2) }
+    ├─LogicalScan { table: t1, columns: [v1] }
+    └─LogicalScan { table: t2, columns: [v2] }
+
+- sql: |
+    explain (logical) create table t1(v1 int);
+  explain_output: |
+    LogicalSource

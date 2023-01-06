@@ -2,7 +2,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -284,9 +284,10 @@ impl fmt::Display for Cte {
 pub enum SelectItem {
     /// Any expression, not followed by `[ AS ] alias`
     UnnamedExpr(Expr),
-    /// expr is a table or a column struct, object_name is field.
+    /// Expr is an arbitrary expression, returning either a table or a column.
+    /// Idents are the prefix of `*`, which are consecutive field accesses.
     /// e.g. `(table.v1).*` or `(table).v1.*`
-    ExprQualifiedWildcard(Expr, Option<ObjectName>),
+    ExprQualifiedWildcard(Expr, Vec<Ident>),
     /// An expression, followed by `[ AS ] alias`
     ExprWithAlias { expr: Expr, alias: Ident },
     /// `alias.*` or even `schema.table.*`
@@ -305,8 +306,8 @@ impl fmt::Display for SelectItem {
                 "({}){}.*",
                 expr,
                 prefix
-                    .as_ref()
-                    .map_or_else(|| "".to_string(), |p| format!(".{}", p))
+                    .iter()
+                    .format_with("", |i, f| f(&format_args!(".{i}")))
             ),
             SelectItem::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
             SelectItem::Wildcard => write!(f, "*"),

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -41,23 +41,21 @@ mod utils;
 
 pub use agg_call::AggCall;
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
-pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
-pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
-pub use literal::Literal;
-pub use subquery::{Subquery, SubqueryKind};
-pub use table_function::{TableFunction, TableFunctionType};
-pub use window_function::{WindowFunction, WindowFunctionType};
-
-pub type ExprType = risingwave_pb::expr::expr_node::Type;
-
 pub use expr_mutator::ExprMutator;
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
+pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
+pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
+pub use literal::Literal;
+pub use risingwave_pb::expr::expr_node::Type as ExprType;
+pub use subquery::{Subquery, SubqueryKind};
+pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{
     agg_func_sigs, align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_some_all,
     infer_type, least_restrictive, AggFuncSig, CastContext, CastSig, FuncSign,
 };
 pub use utils::*;
+pub use window_function::{WindowFunction, WindowFunctionType};
 
 /// the trait of bound expressions
 pub trait Expr: Into<ExprImpl> {

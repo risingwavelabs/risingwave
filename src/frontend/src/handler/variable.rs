@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -51,7 +51,7 @@ pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Re
 
     Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        Some(1),
+        None,
         vec![row].into(),
         vec![PgFieldDescriptor::new(
             name.to_ascii_lowercase(),
@@ -79,7 +79,7 @@ pub(super) fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse>
 
     Ok(RwPgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        Some(all_variables.len() as i32),
+        None,
         rows.into(),
         vec![
             PgFieldDescriptor::new(

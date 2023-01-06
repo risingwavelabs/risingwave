@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -58,7 +58,8 @@ use crate::WithOptions;
 ///
 /// - **Distribution Key**: the columns used to partition the data. It must be a subset of the order
 ///   key.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(Default, PartialEq))]
 pub struct TableCatalog {
     pub id: TableId,
 
@@ -106,7 +107,7 @@ pub struct TableCatalog {
     /// is not supported yet and expected to be `[0..columns.len()]`
     pub value_indices: Vec<usize>,
 
-    /// Definition of the materialized view.
+    /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
     pub definition: String,
 
     pub handle_pk_conflict: bool,
@@ -126,6 +127,7 @@ pub enum TableType {
     Internal,
 }
 
+#[cfg(test)]
 impl Default for TableType {
     fn default() -> Self {
         Self::Table
@@ -236,6 +238,11 @@ impl TableCatalog {
             SchemaId::placeholder() as u32,
             DatabaseId::placeholder() as u32,
         )
+    }
+
+    /// Returns the SQL statement that can be used to create this table.
+    pub fn create_sql(&self) -> String {
+        self.definition.clone()
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Distinct, Expr, Select, SelectItem};
+use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
@@ -180,21 +180,9 @@ impl Binder {
         for item in select_items {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
-                    let (select_expr, alias) = match &expr.clone() {
-                        Expr::Identifier(ident) => {
-                            (self.bind_expr(expr)?, Some(ident.real_value()))
-                        }
-                        Expr::CompoundIdentifier(idents) => (
-                            self.bind_expr(expr)?,
-                            idents.last().map(|ident| ident.real_value()),
-                        ),
-                        Expr::FieldIdentifier(field_expr, idents) => (
-                            self.bind_single_field_column(*field_expr.clone(), idents)?,
-                            idents.last().map(|ident| ident.real_value()),
-                        ),
-                        _ => (self.bind_expr(expr)?, None),
-                    };
-                    select_list.push(select_expr);
+                    let alias = derive_alias(&expr);
+                    let bound = self.bind_expr(expr)?;
+                    select_list.push(bound);
                     aliases.push(alias);
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
@@ -217,9 +205,8 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
-                SelectItem::ExprQualifiedWildcard(expr, idents) => {
-                    let idents = idents.map_or_else(Vec::new, |idents| idents.0);
-                    let (exprs, names) = self.bind_wildcard_field_column(expr, &idents)?;
+                SelectItem::ExprQualifiedWildcard(expr, prefix) => {
+                    let (exprs, names) = self.bind_wildcard_field_column(expr, prefix)?;
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
@@ -389,4 +376,54 @@ impl Binder {
             }
         })
     }
+}
+
+fn derive_alias(expr: &Expr) -> Option<String> {
+    match expr.clone() {
+        Expr::Identifier(ident) => Some(ident.real_value()),
+        Expr::CompoundIdentifier(idents) => idents.last().map(|ident| ident.real_value()),
+        Expr::FieldIdentifier(_, idents) => idents.last().map(|ident| ident.real_value()),
+        Expr::Function(func) => Some(func.name.real_value()),
+        Expr::Case { .. } => Some("case".to_string()),
+        Expr::Cast { expr, data_type } => {
+            derive_alias(&expr).or_else(|| data_type_to_alias(&data_type))
+        }
+        Expr::Row(_) => Some("row".to_string()),
+        Expr::Array(_) => Some("array".to_string()),
+        Expr::ArrayIndex { obj, index: _ } => derive_alias(&obj),
+        _ => None,
+    }
+}
+
+fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
+    let alias = match data_type {
+        AstDataType::Char(_) => "bpchar".to_string(),
+        AstDataType::Varchar => "varchar".to_string(),
+        AstDataType::Uuid => "uuid".to_string(),
+        AstDataType::Decimal(_, _) => "numeric".to_string(),
+        AstDataType::Real | AstDataType::Float(Some(1..=24)) => "float4".to_string(),
+        AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => "float8".to_string(),
+        AstDataType::Float(Some(0 | 54..)) => unreachable!(),
+        AstDataType::SmallInt => "int2".to_string(),
+        AstDataType::Int => "int4".to_string(),
+        AstDataType::BigInt => "int8".to_string(),
+        AstDataType::Boolean => "bool".to_string(),
+        AstDataType::Date => "date".to_string(),
+        AstDataType::Time(tz) => format!("time{}", if *tz { "z" } else { "" }),
+        AstDataType::Timestamp(tz) => {
+            format!("timestamp{}", if *tz { "tz" } else { "" })
+        }
+        AstDataType::Interval => "interval".to_string(),
+        AstDataType::Regclass => "regclass".to_string(),
+        AstDataType::Text => "text".to_string(),
+        AstDataType::Bytea => "bytea".to_string(),
+        AstDataType::Array(ty) => return data_type_to_alias(ty),
+        AstDataType::Custom(ty) => format!("{}", ty),
+        AstDataType::Struct(_) => {
+            // Note: Postgres doesn't have anonymous structs
+            return None;
+        }
+    };
+
+    Some(alias)
 }

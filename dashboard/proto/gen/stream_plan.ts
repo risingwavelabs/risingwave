@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { ColumnIndex, SourceInfo, Table } from "./catalog";
+import { ColumnIndex, StreamSourceInfo, Table } from "./catalog";
 import { Buffer } from "./common";
 import { DataType, Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
 import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem } from "./expr";
@@ -326,21 +326,28 @@ export interface ActorMapping {
   data: number[];
 }
 
-export interface SourceNode {
-  /** use source_id to fetch SourceDesc from local source manager */
+export interface StreamSource {
   sourceId: number;
   stateTable: Table | undefined;
   rowIdIndex: ColumnIndex | undefined;
   columns: ColumnCatalog[];
   pkColumnIds: number[];
   properties: { [key: string]: string };
-  info: SourceInfo | undefined;
+  info: StreamSourceInfo | undefined;
   sourceName: string;
 }
 
-export interface SourceNode_PropertiesEntry {
+export interface StreamSource_PropertiesEntry {
   key: string;
   value: string;
+}
+
+export interface SourceNode {
+  /**
+   * The source node can contain either a stream source or nothing. So here we extract all
+   * information about stream source to a message, and here it will be an `Option` in Rust.
+   */
+  sourceInner: StreamSource | undefined;
 }
 
 export interface SinkNode {
@@ -785,7 +792,9 @@ export interface Dispatcher {
     | undefined;
   /**
    * Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-   * - For dispatchers within actors, the id is the same as operator_id of the exchange plan node.
+   * - For dispatchers within actors, the id is the same as its downstream fragment id.
+   *   We can't use the exchange operator id directly as the dispatch id, because an exchange
+   *   could belong to more than one downstream in DAG.
    * - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
    */
   dispatcherId: number;
@@ -1635,7 +1644,7 @@ export const ActorMapping = {
   },
 };
 
-function createBaseSourceNode(): SourceNode {
+function createBaseStreamSource(): StreamSource {
   return {
     sourceId: 0,
     stateTable: undefined,
@@ -1648,8 +1657,8 @@ function createBaseSourceNode(): SourceNode {
   };
 }
 
-export const SourceNode = {
-  fromJSON(object: any): SourceNode {
+export const StreamSource = {
+  fromJSON(object: any): StreamSource {
     return {
       sourceId: isSet(object.sourceId) ? Number(object.sourceId) : 0,
       stateTable: isSet(object.stateTable) ? Table.fromJSON(object.stateTable) : undefined,
@@ -1662,12 +1671,12 @@ export const SourceNode = {
           return acc;
         }, {})
         : {},
-      info: isSet(object.info) ? SourceInfo.fromJSON(object.info) : undefined,
+      info: isSet(object.info) ? StreamSourceInfo.fromJSON(object.info) : undefined,
       sourceName: isSet(object.sourceName) ? String(object.sourceName) : "",
     };
   },
 
-  toJSON(message: SourceNode): unknown {
+  toJSON(message: StreamSource): unknown {
     const obj: any = {};
     message.sourceId !== undefined && (obj.sourceId = Math.round(message.sourceId));
     message.stateTable !== undefined &&
@@ -1690,13 +1699,13 @@ export const SourceNode = {
         obj.properties[k] = v;
       });
     }
-    message.info !== undefined && (obj.info = message.info ? SourceInfo.toJSON(message.info) : undefined);
+    message.info !== undefined && (obj.info = message.info ? StreamSourceInfo.toJSON(message.info) : undefined);
     message.sourceName !== undefined && (obj.sourceName = message.sourceName);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<SourceNode>, I>>(object: I): SourceNode {
-    const message = createBaseSourceNode();
+  fromPartial<I extends Exact<DeepPartial<StreamSource>, I>>(object: I): StreamSource {
+    const message = createBaseStreamSource();
     message.sourceId = object.sourceId ?? 0;
     message.stateTable = (object.stateTable !== undefined && object.stateTable !== null)
       ? Table.fromPartial(object.stateTable)
@@ -1716,33 +1725,58 @@ export const SourceNode = {
       {},
     );
     message.info = (object.info !== undefined && object.info !== null)
-      ? SourceInfo.fromPartial(object.info)
+      ? StreamSourceInfo.fromPartial(object.info)
       : undefined;
     message.sourceName = object.sourceName ?? "";
     return message;
   },
 };
 
-function createBaseSourceNode_PropertiesEntry(): SourceNode_PropertiesEntry {
+function createBaseStreamSource_PropertiesEntry(): StreamSource_PropertiesEntry {
   return { key: "", value: "" };
 }
 
-export const SourceNode_PropertiesEntry = {
-  fromJSON(object: any): SourceNode_PropertiesEntry {
+export const StreamSource_PropertiesEntry = {
+  fromJSON(object: any): StreamSource_PropertiesEntry {
     return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
   },
 
-  toJSON(message: SourceNode_PropertiesEntry): unknown {
+  toJSON(message: StreamSource_PropertiesEntry): unknown {
     const obj: any = {};
     message.key !== undefined && (obj.key = message.key);
     message.value !== undefined && (obj.value = message.value);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<SourceNode_PropertiesEntry>, I>>(object: I): SourceNode_PropertiesEntry {
-    const message = createBaseSourceNode_PropertiesEntry();
+  fromPartial<I extends Exact<DeepPartial<StreamSource_PropertiesEntry>, I>>(object: I): StreamSource_PropertiesEntry {
+    const message = createBaseStreamSource_PropertiesEntry();
     message.key = object.key ?? "";
     message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseSourceNode(): SourceNode {
+  return { sourceInner: undefined };
+}
+
+export const SourceNode = {
+  fromJSON(object: any): SourceNode {
+    return { sourceInner: isSet(object.sourceInner) ? StreamSource.fromJSON(object.sourceInner) : undefined };
+  },
+
+  toJSON(message: SourceNode): unknown {
+    const obj: any = {};
+    message.sourceInner !== undefined &&
+      (obj.sourceInner = message.sourceInner ? StreamSource.toJSON(message.sourceInner) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SourceNode>, I>>(object: I): SourceNode {
+    const message = createBaseSourceNode();
+    message.sourceInner = (object.sourceInner !== undefined && object.sourceInner !== null)
+      ? StreamSource.fromPartial(object.sourceInner)
+      : undefined;
     return message;
   },
 };

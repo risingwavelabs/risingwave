@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,9 +20,9 @@ use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::stream_plan::GroupTopNNode;
 
 use super::*;
-use crate::cache::LruManagerRef;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{ActorContextRef, GroupTopNExecutor};
+use crate::task::AtomicU64Ref;
 
 pub struct GroupTopNExecutorBuilder;
 
@@ -59,8 +59,7 @@ impl ExecutorBuilder for GroupTopNExecutorBuilder {
             executor_id: params.executor_id,
             group_by,
             state_table,
-            lru_manager: stream.context.lru_manager.clone(),
-            cache_size: 1 << 16,
+            watermark_epoch: stream.get_watermark_epoch(),
             with_ties: node.with_ties,
             group_key_types,
         };
@@ -77,8 +76,7 @@ struct GroupTopNExecutorDispatcherArgs<S: StateStore> {
     executor_id: u64,
     group_by: Vec<usize>,
     state_table: StateTable<S>,
-    lru_manager: Option<LruManagerRef>,
-    cache_size: usize,
+    watermark_epoch: AtomicU64Ref,
     with_ties: bool,
     group_key_types: Vec<DataType>,
 }
@@ -97,8 +95,7 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
                 self.executor_id,
                 self.group_by,
                 self.state_table,
-                self.lru_manager,
-                self.cache_size,
+                self.watermark_epoch,
             )?
             .boxed()),
             false => Ok(GroupTopNExecutor::<K, S, false>::new(
@@ -110,8 +107,7 @@ impl<S: StateStore> HashKeyDispatcher for GroupTopNExecutorDispatcherArgs<S> {
                 self.executor_id,
                 self.group_by,
                 self.state_table,
-                self.lru_manager,
-                self.cache_size,
+                self.watermark_epoch,
             )?
             .boxed()),
         }

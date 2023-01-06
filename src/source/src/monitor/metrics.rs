@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,6 +19,7 @@ use prometheus::{register_int_counter_vec_with_registry, Registry};
 pub struct SourceMetrics {
     pub registry: Registry,
     pub partition_input_count: GenericCounterVec<AtomicU64>,
+    pub partition_input_bytes: GenericCounterVec<AtomicU64>,
 }
 
 impl SourceMetrics {
@@ -30,9 +31,17 @@ impl SourceMetrics {
             registry
         )
         .unwrap();
+        let partition_input_bytes = register_int_counter_vec_with_registry!(
+            "partition_input_bytes",
+            "Total bytes that have been input from specific partition",
+            &["actor_id", "source_id", "partition"],
+            registry
+        )
+        .unwrap();
         SourceMetrics {
             registry,
             partition_input_count,
+            partition_input_bytes,
         }
     }
 

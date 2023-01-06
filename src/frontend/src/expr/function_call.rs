@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -247,8 +247,8 @@ impl FunctionCall {
         self.func_type
     }
 
+    /// Refer to [`ExprType`] for details.
     pub fn is_pure(&self) -> bool {
-        // See proto for details
         0 < self.func_type as i32 && self.func_type as i32 <= 600
     }
 
@@ -339,6 +339,9 @@ impl std::fmt::Debug for FunctionCallDisplay<'_> {
             }
             ExprType::BitwiseXor => {
                 explain_verbose_binary_op(f, "#", &that.inputs, self.input_schema)
+            }
+            ExprType::Now => {
+                write!(f, "{:?}", that.func_type)
             }
             _ => {
                 let func_name = format!("{:?}", that.func_type);

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,13 +19,21 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{Assignment, Expr, ObjectName};
 
-use super::{Binder, BoundTableSource, Relation};
+use super::{Binder, Relation};
+use crate::catalog::TableId;
 use crate::expr::{Expr as _, ExprImpl};
+use crate::user::UserId;
 
 #[derive(Debug)]
 pub struct BoundUpdate {
-    /// Used for injecting new chunks to the source.
-    pub table_source: BoundTableSource,
+    /// Id of the table to perform updating.
+    pub table_id: TableId,
+
+    /// Name of the table to perform updating.
+    pub table_name: String,
+
+    /// Owner of the table to perform updating.
+    pub owner: UserId,
 
     /// Used for scanning the records to update with the `selection`.
     pub table: Relation,
@@ -40,22 +48,18 @@ pub struct BoundUpdate {
 impl Binder {
     pub(super) fn bind_update(
         &mut self,
-        table_name: ObjectName,
+        name: ObjectName,
         assignments: Vec<Assignment>,
         selection: Option<Expr>,
     ) -> Result<BoundUpdate> {
-        let (schema_name, name) =
-            Self::resolve_schema_qualified_name(&self.db_name, table_name.clone())?;
-        let table_source = self.bind_table_source(schema_name.as_deref(), &name)?;
+        let (schema_name, table_name) =
+            Self::resolve_schema_qualified_name(&self.db_name, name.clone())?;
 
-        if table_source.append_only {
-            return Err(ErrorCode::BindError(
-                "Append-only table source doesn't support update".to_string(),
-            )
-            .into());
-        }
+        let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, false)?;
+        let table_id = table_catalog.id;
+        let owner = table_catalog.owner;
 
-        let table = self.bind_relation_by_name(table_name, None)?;
+        let table = self.bind_relation_by_name(name, None)?;
 
         let selection = selection.map(|expr| self.bind_expr(expr)).transpose()?;
 
@@ -114,7 +118,9 @@ impl Binder {
             .collect_vec();
 
         Ok(BoundUpdate {
-            table_source,
+            table_id,
+            table_name,
+            owner,
             table,
             selection,
             exprs,
