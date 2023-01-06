@@ -56,7 +56,7 @@ pub async fn handle_drop_index(
                 return match reader.get_table_by_name(db_name, schema_path, &index_name) {
                     Ok((table, _)) => match table.table_type() {
                         TableType::Index => unreachable!(),
-                        _ => return Err(table.bad_drop_error()),
+                        _ => Err(table.bad_drop_error()),
                     },
                     Err(e) => {
                         if if_exists {
