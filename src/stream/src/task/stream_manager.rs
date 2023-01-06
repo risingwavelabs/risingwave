@@ -496,6 +496,7 @@ impl LocalStreamManagerCore {
                     | NodeBody::Chain(_)
                     | NodeBody::DynamicFilter(_)
                     | NodeBody::GroupTopN(_)
+                    | NodeBody::Now(_)
             )
         }
         let is_stateful = is_stateful_executor(node);
