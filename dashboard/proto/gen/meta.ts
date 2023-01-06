@@ -79,13 +79,6 @@ export interface HeartbeatResponse {
   status: Status | undefined;
 }
 
-export interface LeaderRequest {
-}
-
-export interface LeaderResponse {
-  leaderAddr: HostAddress | undefined;
-}
-
 /** Fragments of a Streaming Job */
 export interface TableFragments {
   tableId: number;
@@ -615,51 +608,6 @@ export const HeartbeatResponse = {
     const message = createBaseHeartbeatResponse();
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
-      : undefined;
-    return message;
-  },
-};
-
-function createBaseLeaderRequest(): LeaderRequest {
-  return {};
-}
-
-export const LeaderRequest = {
-  fromJSON(_: any): LeaderRequest {
-    return {};
-  },
-
-  toJSON(_: LeaderRequest): unknown {
-    const obj: any = {};
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<LeaderRequest>, I>>(_: I): LeaderRequest {
-    const message = createBaseLeaderRequest();
-    return message;
-  },
-};
-
-function createBaseLeaderResponse(): LeaderResponse {
-  return { leaderAddr: undefined };
-}
-
-export const LeaderResponse = {
-  fromJSON(object: any): LeaderResponse {
-    return { leaderAddr: isSet(object.leaderAddr) ? HostAddress.fromJSON(object.leaderAddr) : undefined };
-  },
-
-  toJSON(message: LeaderResponse): unknown {
-    const obj: any = {};
-    message.leaderAddr !== undefined &&
-      (obj.leaderAddr = message.leaderAddr ? HostAddress.toJSON(message.leaderAddr) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<LeaderResponse>, I>>(object: I): LeaderResponse {
-    const message = createBaseLeaderResponse();
-    message.leaderAddr = (object.leaderAddr !== undefined && object.leaderAddr !== null)
-      ? HostAddress.fromPartial(object.leaderAddr)
       : undefined;
     return message;
   },
