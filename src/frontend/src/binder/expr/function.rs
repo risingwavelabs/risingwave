@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
@@ -127,7 +127,8 @@ impl Binder {
             "abs" => ExprType::Abs,
             "mod" => ExprType::Modulus,
             // temporal/chrono
-            "to_timestamp" => ExprType::ToTimestamp,
+            "to_timestamp" if inputs.len() == 1 => ExprType::ToTimestamp,
+            "to_timestamp" if inputs.len() == 2 => ExprType::ToTimestamp1,
             "date_trunc" => ExprType::DateTrunc,
             // string
             "substr" => ExprType::Substr,
@@ -283,13 +284,24 @@ impl Binder {
                 };
             }
             "pg_table_is_visible" => return Ok(ExprImpl::literal_bool(true)),
+            "pg_encoding_to_char" => return Ok(ExprImpl::literal_varchar("UTF8".into())),
+            "has_database_privilege" => return Ok(ExprImpl::literal_bool(true)),
             // internal
             "rw_vnode" => ExprType::Vnode,
             // TODO: include version/tag/commit_id
             // TODO: choose which pg version we should return.
             "version" => return Ok(ExprImpl::literal_varchar("PostgreSQL 13.9-RW".to_string())),
             // non-deterministic
-            "now" => ExprType::Now,
+            "now" => {
+                self.ensure_now_function_allowed()?;
+                if !self.in_create_mv {
+                    inputs.push(ExprImpl::from(Literal::new(
+                        Some(ScalarImpl::Int64((self.bind_timestamp_ms * 1000) as i64)),
+                        DataType::Timestamptz,
+                    )));
+                }
+                ExprType::Now
+            }
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported function: {:?}", function_name),
@@ -487,6 +499,22 @@ impl Binder {
                     .into());
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn ensure_now_function_allowed(&self) -> Result<()> {
+        if self.in_create_mv
+            && !matches!(
+                self.context.clause,
+                Some(Clause::Where) | Some(Clause::Having)
+            )
+        {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
+                self.context.clause
+            ))
+            .into());
         }
         Ok(())
     }

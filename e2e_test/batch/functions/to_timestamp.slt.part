@@ -1,0 +1,24 @@
+query T
+select to_timestamp('2022 12 25', 'YYYY MM DD');
+----
+2022-12-25 00:00:00
+
+query T
+select to_timestamp('2022/12/25 15:24:33', 'YYYY/MM/DD HH24:MI:SS');
+----
+2022-12-25 15:24:33
+
+query T
+select to_timestamp('2022/12/25 10:24:33', 'YYYY/MM/DD HH12:MI:SS');
+----
+2022-12-25 10:24:33
+
+query T
+select to_timestamp('2022/12/25 10:24:33', 'YYYY/MM/DD HH12:MI:SS');
+----
+2022-12-25 10:24:33
+
+query T
+select to_timestamp('2022/12/25 15', 'YYYY/MM/DD HH24');
+----
+2022-12-25 15:00:00

@@ -296,16 +296,13 @@ statement error cannot change index
 delete from idx;
 
 # 6.4 materialized source
-# FIXME: what's this?
-statement error Get source table id not exists
+statement error cannot change materialized source
 insert into msrc values (1);
 
-# FIXME: what's this?
-statement error
+statement error cannot change materialized source
 update msrc set v = 2;
 
-# FIXME: what's this?
-statement error
+statement error cannot change materialized source
 delete from msrc;
 
 # 6.5 non-materialized source

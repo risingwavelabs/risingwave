@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,7 +32,7 @@ use risingwave_expr::sig::cast::cast_sigs;
 use risingwave_expr::sig::func::func_sigs;
 use risingwave_expr::vector_op::agg::create_agg_state_unary;
 use risingwave_expr::ExprError;
-use risingwave_pb::expr::expr_node::Type as ExprType;
+use risingwave_pb::expr::expr_node::{RexNode, Type as ExprType};
 
 criterion_group!(benches, bench_expr, bench_raw);
 criterion_main!(benches);
@@ -108,7 +108,7 @@ fn bench_expr(c: &mut Criterion) {
                     .map(Some),
             )
             .into(),
-            // 18: extract field for timestampz
+            // 18: extract field for timestamptz
             Utf8Array::from_iter_display(["EPOCH"].into_iter().cycle().take(CHUNK_SIZE).map(Some))
                 .into(),
             // 19: boolean string
@@ -137,7 +137,7 @@ fn bench_expr(c: &mut Criterion) {
                     .take(CHUNK_SIZE),
             )
             .into(),
-            // 23: timestampz string
+            // 23: timestamptz string
             Utf8Array::from_iter_display(
                 [Some("2021-04-01 00:00:00+00:00")]
                     .into_iter()
@@ -151,15 +151,6 @@ fn bench_expr(c: &mut Criterion) {
                     .into_iter()
                     .cycle()
                     .take(CHUNK_SIZE),
-            )
-            .into(),
-            // 25: timestamp format
-            Utf8Array::from_iter_display(
-                ["HH12:MI:SS"]
-                    .into_iter()
-                    .cycle()
-                    .take(CHUNK_SIZE)
-                    .map(Some),
             )
             .into(),
         ],
@@ -176,7 +167,7 @@ fn bench_expr(c: &mut Criterion) {
         InputRefExpression::new(DataType::Date, 7),
         InputRefExpression::new(DataType::Time, 8),
         InputRefExpression::new(DataType::Timestamp, 9),
-        InputRefExpression::new(DataType::Timestampz, 10),
+        InputRefExpression::new(DataType::Timestamptz, 10),
         InputRefExpression::new(DataType::Interval, 11),
         InputRefExpression::new(DataType::Varchar, 12),
         InputRefExpression::new(DataType::Bytea, 13),
@@ -192,15 +183,14 @@ fn bench_expr(c: &mut Criterion) {
     const EXTRACT_FIELD_DATE: i32 = 16;
     const EXTRACT_FIELD_TIME: i32 = 17;
     const EXTRACT_FIELD_TIMESTAMP: i32 = 16;
-    const EXTRACT_FIELD_TIMESTAMPZ: i32 = 18;
+    const EXTRACT_FIELD_TIMESTAMPTZ: i32 = 18;
     const BOOL_STRING: i32 = 19;
     const NUMBER_STRING: i32 = 12;
     const DATE_STRING: i32 = 20;
     const TIME_STRING: i32 = 21;
     const TIMESTAMP_STRING: i32 = 22;
-    const TIMESTAMPZ_STRING: i32 = 23;
+    const TIMESTAMPTZ_STRING: i32 = 23;
     const INTERVAL_STRING: i32 = 24;
-    const TIMESTAMP_FORMAT: i32 = 25;
 
     c.bench_function("inputref", |bencher| {
         let inputref = inputrefs[0].clone().boxed();
@@ -224,7 +214,7 @@ fn bench_expr(c: &mut Criterion) {
             continue;
         }
 
-        let prost = make_expression(
+        let mut prost = make_expression(
             sig.func,
             &sig.inputs_type
                 .iter()
@@ -234,7 +224,6 @@ fn bench_expr(c: &mut Criterion) {
                 .iter()
                 .enumerate()
                 .map(|(idx, t)| match (sig.func, idx) {
-                    (ExprType::ToChar, 1) => TIMESTAMP_FORMAT,
                     (ExprType::AtTimeZone, 1) => TIMEZONE,
                     (ExprType::DateTrunc, 0) => TIME_FIELD,
                     (ExprType::DateTrunc, 2) => TIMEZONE,
@@ -242,13 +231,17 @@ fn bench_expr(c: &mut Criterion) {
                         DataTypeName::Date => EXTRACT_FIELD_DATE,
                         DataTypeName::Time => EXTRACT_FIELD_TIME,
                         DataTypeName::Timestamp => EXTRACT_FIELD_TIMESTAMP,
-                        DataTypeName::Timestampz => EXTRACT_FIELD_TIMESTAMPZ,
+                        DataTypeName::Timestamptz => EXTRACT_FIELD_TIMESTAMPTZ,
                         t => panic!("unexpected type: {t:?}"),
                     },
                     _ => inputref_for_type((*t).into()).index() as i32,
                 })
                 .collect_vec(),
         );
+        if sig.func == ExprType::ToChar {
+            let RexNode::FuncCall(f) = prost.rex_node.as_mut().unwrap() else { unreachable!() };
+            f.children[1] = make_string_literal("YYYY/MM/DD HH:MM:SS");
+        }
         let expr = match build_from_prost(&prost) {
             Ok(expr) => expr,
             Err(e) => {
@@ -296,7 +289,7 @@ fn bench_expr(c: &mut Criterion) {
                     Date => DATE_STRING,
                     Time => TIME_STRING,
                     Timestamp => TIMESTAMP_STRING,
-                    Timestampz => TIMESTAMPZ_STRING,
+                    Timestamptz => TIMESTAMPTZ_STRING,
                     Interval => INTERVAL_STRING,
                     Bytea => NUMBER_STRING, // any
                     _ => {

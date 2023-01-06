@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,6 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
-use risingwave_pb::catalog::SourceInfo;
 
 use super::{LogicalSource, PlanBase, PlanRef, ToBatchProst, ToDistributedBatch, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order};
@@ -39,6 +38,7 @@ impl BatchSource {
             Distribution::Single,
             Order::any(),
         );
+
         Self { base, logical }
     }
 
@@ -70,8 +70,9 @@ impl fmt::Display for BatchSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("BatchSource");
         builder
-            .field("source", &self.logical.source_catalog().name)
+            .field("source", &self.logical.source_catalog().unwrap().name)
             .field("columns", &self.column_names())
+            .field("filter", &self.logical.kafka_timestamp_range_value())
             .finish()
     }
 }
@@ -90,12 +91,10 @@ impl ToDistributedBatch for BatchSource {
 
 impl ToBatchProst for BatchSource {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let source_catalog = self.logical.source_catalog();
+        let source_catalog = self.logical.source_catalog().unwrap();
         NodeBody::Source(SourceNode {
             source_id: source_catalog.id,
-            info: Some(SourceInfo {
-                source_info: Some(source_catalog.info.clone()),
-            }),
+            info: Some(source_catalog.info.clone()),
             columns: source_catalog
                 .columns
                 .iter()

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -34,7 +34,12 @@ const UNPIN_INTERVAL_SECS: u64 = 10;
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
 pub enum PinnedHummockSnapshot {
-    FrontendPinned(HummockSnapshotGuard),
+    FrontendPinned(
+        HummockSnapshotGuard,
+        // `only_checkpoint_visible`.
+        // It's embedded here because we always use it together with snapshot.
+        bool,
+    ),
     /// Other arbitrary epoch, e.g. user specified.
     /// Availability and consistency of underlying data should be guaranteed accordingly.
     /// Currently it's only used for querying meta snapshot backup.
@@ -44,24 +49,13 @@ pub enum PinnedHummockSnapshot {
 impl PinnedHummockSnapshot {
     pub fn get_batch_query_epoch(&self) -> BatchQueryEpoch {
         match self {
-            PinnedHummockSnapshot::FrontendPinned(s) => {
-                // extend Epoch::Current here
-                BatchQueryEpoch {
-                    epoch: Some(batch_query_epoch::Epoch::Committed(
-                        s.snapshot.committed_epoch,
-                    )),
-                }
+            PinnedHummockSnapshot::FrontendPinned(s, checkpoint) => {
+                s.get_batch_query_epoch(*checkpoint)
             }
             PinnedHummockSnapshot::Other(e) => BatchQueryEpoch {
                 epoch: Some(batch_query_epoch::Epoch::Backup(e.0)),
             },
         }
-    }
-}
-
-impl From<HummockSnapshotGuard> for PinnedHummockSnapshot {
-    fn from(s: HummockSnapshotGuard) -> Self {
-        PinnedHummockSnapshot::FrontendPinned(s)
     }
 }
 
@@ -104,12 +98,13 @@ pub struct HummockSnapshotGuard {
 }
 
 impl HummockSnapshotGuard {
-    pub fn get_committed_epoch(&self) -> u64 {
-        self.snapshot.committed_epoch
-    }
-
-    pub fn get_current_epoch(&self) -> u64 {
-        self.snapshot.current_epoch
+    pub fn get_batch_query_epoch(&self, checkpoint: bool) -> BatchQueryEpoch {
+        let epoch = if checkpoint {
+            batch_query_epoch::Epoch::Committed(self.snapshot.committed_epoch)
+        } else {
+            batch_query_epoch::Epoch::Current(self.snapshot.current_epoch)
+        };
+        BatchQueryEpoch { epoch: Some(epoch) }
     }
 }
 
@@ -226,6 +221,10 @@ impl HummockSnapshotManager {
             committed_epoch: std::cmp::max(prev.committed_epoch, snapshot.committed_epoch),
             current_epoch: std::cmp::max(prev.current_epoch, snapshot.current_epoch),
         });
+    }
+
+    pub fn latest_snapshot_current_epoch(&self) -> Epoch {
+        self.latest_snapshot.load().current_epoch.into()
     }
 }
 

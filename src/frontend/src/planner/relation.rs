@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -74,7 +74,24 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        Ok(LogicalSource::new(Rc::new(source.catalog), self.ctx()).into())
+        let column_descs = source
+            .catalog
+            .columns
+            .iter()
+            .map(|column| column.column_desc.clone())
+            .collect_vec();
+        let pk_col_ids = source.catalog.pk_col_ids.clone();
+        let row_id_index = source.catalog.row_id_index;
+        let gen_row_id = source.catalog.append_only;
+        Ok(LogicalSource::new(
+            Some(Rc::new(source.catalog)),
+            column_descs,
+            pk_col_ids,
+            row_id_index,
+            gen_row_id,
+            self.ctx(),
+        )
+        .into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {

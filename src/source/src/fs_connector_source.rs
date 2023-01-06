@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -87,6 +87,12 @@ impl FsConnectorSourceReader {
 
                     // If a split is finished reading, recreate a parser
                     if content.len() + msg.offset >= msg.split_size {
+                        // the last record in a file may be missing the terminator,
+                        // so we need to pass an empty payload to inform the parser.
+                        if let Err(e) = parser.parse(&mut buff, builder.row_writer()).await {
+                            tracing::warn!("message parsing failed {}, skipping", e.to_string());
+                        }
+
                         parser = ByteStreamSourceParserImpl::create(
                             &self.format,
                             &self.properties,

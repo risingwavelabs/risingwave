@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,23 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::alloc::Allocator;
-use std::hash::{BuildHasher, Hash};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use lru::LruCache;
+use risingwave_batch::task::BatchManager;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_stream::executor::monitor::StreamingMetrics;
+use risingwave_stream::task::LocalStreamManager;
 use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 use tracing;
 
-use super::ManagedLruCache;
-use crate::executor::monitor::StreamingMetrics;
-
-/// When `enable_managed_cache` is set, compute node will launch a [`LruManager`] to limit the
-/// memory usage.
-pub struct LruManager {
+/// When `enable_managed_cache` is set, compute node will launch a [`GlobalMemoryManager`] to limit
+/// the memory usage.
+pub struct GlobalMemoryManager {
     /// All cached data before the watermark should be evicted.
     watermark_epoch: Arc<AtomicU64>,
     /// Total memory can be allocated by the process.
@@ -38,9 +35,9 @@ pub struct LruManager {
     metrics: Arc<StreamingMetrics>,
 }
 
-pub type LruManagerRef = Arc<LruManager>;
+pub type GlobalMemoryManagerRef = Arc<GlobalMemoryManager>;
 
-impl LruManager {
+impl GlobalMemoryManager {
     const EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
     const EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
 
@@ -61,32 +58,8 @@ impl LruManager {
         })
     }
 
-    pub fn create_cache<K: Hash + Eq, V>(&self) -> ManagedLruCache<K, V> {
-        ManagedLruCache {
-            inner: LruCache::unbounded(),
-            watermark_epoch: self.watermark_epoch.clone(),
-        }
-    }
-
-    pub fn create_cache_with_hasher_in<K: Hash + Eq, V, S: BuildHasher, A: Clone + Allocator>(
-        &self,
-        hasher: S,
-        alloc: A,
-    ) -> ManagedLruCache<K, V, S, A> {
-        ManagedLruCache {
-            inner: LruCache::unbounded_with_hasher_in(hasher, alloc),
-            watermark_epoch: self.watermark_epoch.clone(),
-        }
-    }
-
-    pub fn create_cache_with_hasher<K: Hash + Eq, V, S: BuildHasher>(
-        &self,
-        hasher: S,
-    ) -> ManagedLruCache<K, V, S> {
-        ManagedLruCache {
-            inner: LruCache::unbounded_with_hasher(hasher),
-            watermark_epoch: self.watermark_epoch.clone(),
-        }
+    pub fn get_watermark_epoch(&self) -> Arc<AtomicU64> {
+        self.watermark_epoch.clone()
     }
 
     fn set_watermark_time_ms(&self, time_ms: u64) {
@@ -95,7 +68,14 @@ impl LruManager {
         watermark_epoch.store(epoch, Ordering::Relaxed);
     }
 
-    pub async fn run(self: Arc<Self>) {
+    /// Memory manager will get memory usage from batch and streaming, and do some actions.
+    /// 1. if batch exceeds, kill running query.
+    /// 2. if streaming exceeds, evict cache by watermark.
+    pub async fn run(
+        self: Arc<Self>,
+        _batch_mgr: Arc<BatchManager>,
+        _stream_mgr: Arc<LocalStreamManager>,
+    ) {
         let mem_threshold_graceful =
             (self.total_memory_available_bytes as f64 * Self::EVICTION_THRESHOLD_GRACEFUL) as usize;
         let mem_threshold_aggressive = (self.total_memory_available_bytes as f64
@@ -185,28 +165,5 @@ impl LruManager {
 
             self.set_watermark_time_ms(watermark_time_ms);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::cache::EvictableHashMap;
-
-    #[test]
-    fn test_len_after_evict() {
-        let target_cap = 114;
-        let items_count = 514;
-        let mut map = EvictableHashMap::new(target_cap);
-
-        for i in 0..items_count {
-            map.put(i, ());
-        }
-        assert_eq!(map.len(), items_count);
-
-        map.evict_to_target_cap();
-        assert_eq!(map.len(), target_cap);
-
-        assert!(map.get(&(items_count - target_cap - 1)).is_none());
-        assert!(map.get(&(items_count - target_cap)).is_some());
     }
 }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::any::type_name;
+use std::fmt::Write;
 use std::str::FromStr;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
@@ -37,7 +38,7 @@ const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
 const ERROR_INT_TO_TIMESTAMP: &str = "Can't cast negative integer to timestamp";
-const PARSE_ERROR_STR_TO_TIMESTAMPZ: &str = concat!(
+const PARSE_ERROR_STR_TO_TIMESTAMPTZ: &str = concat!(
     "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)"
     , "\nFor example: '2021-04-01 00:00:00+00:00'"
 );
@@ -78,8 +79,8 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
         )
         .0)
     } else {
-        let res =
-            SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP))?;
+        let res = SpeedDate::parse_str(s)
+            .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP.into()))?;
         Ok(
             NaiveDateWrapper::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
                 .and_hms_micro_uncheck(0, 0, 0, 0)
@@ -124,7 +125,7 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
 /// ```
 #[inline]
 pub fn i64_to_timestamp(t: i64) -> Result<NaiveDateTimeWrapper> {
-    let us = i64_to_timestampz(t)?;
+    let us = i64_to_timestamptz(t)?;
     Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
         us / 1_000_000,
         (us % 1_000_000) as u32 * 1000,
@@ -133,13 +134,15 @@ pub fn i64_to_timestamp(t: i64) -> Result<NaiveDateTimeWrapper> {
 
 #[inline]
 fn parse_naive_date(s: &str) -> Result<NaiveDate> {
-    let res = SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_DATE))?;
+    let res =
+        SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_DATE.into()))?;
     Ok(NaiveDateWrapper::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32).0)
 }
 
 #[inline]
 fn parse_naive_time(s: &str) -> Result<NaiveTime> {
-    let res = SpeedTime::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIME))?;
+    let res =
+        SpeedTime::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIME.into()))?;
     Ok(NaiveTimeWrapper::from_hms_micro_uncheck(
         res.hour as u32,
         res.minute as u32,
@@ -150,10 +153,10 @@ fn parse_naive_time(s: &str) -> Result<NaiveTime> {
 }
 
 #[inline(always)]
-pub fn str_to_timestampz(elem: &str) -> Result<i64> {
+pub fn str_to_timestamptz(elem: &str) -> Result<i64> {
     elem.parse::<DateTime<Utc>>()
         .map(|ret| ret.timestamp_micros())
-        .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ))
+        .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPTZ.into()))
 }
 
 /// Converts UNIX epoch time to timestamp in microseconds.
@@ -167,7 +170,7 @@ pub fn str_to_timestampz(elem: &str) -> Result<i64> {
 ///
 /// This would cause no problem for timestamp in [1973-03-03 09:46:40, 5138-11-16 09:46:40).
 #[inline]
-pub fn i64_to_timestampz(t: i64) -> Result<i64> {
+pub fn i64_to_timestamptz(t: i64) -> Result<i64> {
     const E11: i64 = 100_000_000_000;
     const E14: i64 = 100_000_000_000_000;
     const E17: i64 = 100_000_000_000_000_000;
@@ -176,7 +179,7 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
         E11..E14 => Ok(t * 1_000),   // ms
         E14..E17 => Ok(t),           // us
         E17.. => Ok(t / 1_000),      // ns
-        _ => Err(ExprError::Parse(ERROR_INT_TO_TIMESTAMP)),
+        _ => Err(ExprError::Parse(ERROR_INT_TO_TIMESTAMP.into())),
     }
 }
 
@@ -184,7 +187,7 @@ pub fn i64_to_timestampz(t: i64) -> Result<i64> {
 pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
     // Padded with whitespace str is not allowed.
     if elem.starts_with(' ') && elem.trim().starts_with("\\x") {
-        Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA))
+        Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into()))
     } else if let Some(remainder) = elem.strip_prefix(r"\x") {
         Ok(parse_bytes_hex(remainder)?.into())
     } else {
@@ -201,7 +204,7 @@ pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
         b'a'..=b'f' => Ok(b - b'a' + 10),
         b'A'..=b'F' => Ok(b - b'A' + 10),
         b'0'..=b'9' => Ok(b - b'0'),
-        _ => Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+        _ => Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
     };
 
     let mut buf = vec![];
@@ -212,7 +215,7 @@ pub fn parse_bytes_hex(s: &str) -> Result<Vec<u8>> {
         }
         let n = decode_nibble(n)?;
         let n2 = match nibbles.next() {
-            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
             Some(n2) => decode_nibble(n2)?,
         };
         buf.push((n << 4) | n2);
@@ -233,22 +236,23 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
             continue;
         }
         match bytes.next() {
-            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+            None => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
             Some(b'\\') => out.push(b'\\'),
             b => match (b, bytes.next(), bytes.next()) {
                 (Some(d2 @ b'0'..=b'3'), Some(d1 @ b'0'..=b'7'), Some(d0 @ b'0'..=b'7')) => {
                     out.push(((d2 - b'0') << 6) + ((d1 - b'0') << 3) + (d0 - b'0'));
                 }
-                _ => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA)),
+                _ => return Err(ExprError::Parse(PARSE_ERROR_STR_TO_BYTEA.into())),
             },
         }
     }
     Ok(out)
 }
 
-pub fn timestampz_to_utc_string(elem: i64) -> Box<str> {
-    elem.to_text_with_type(&DataType::Timestampz)
-        .into_boxed_str()
+pub fn timestamptz_to_utc_string(elem: i64, mut writer: &mut dyn Write) -> Result<()> {
+    elem.write_with_type(&DataType::Timestamptz, &mut writer)
+        .unwrap();
+    Ok(())
 }
 
 #[inline(always)]
@@ -259,7 +263,7 @@ where
 {
     elem.trim()
         .parse()
-        .map_err(|_| ExprError::Parse(type_name::<T>()))
+        .map_err(|_| ExprError::Parse(type_name::<T>().into()))
 }
 
 /// Define the cast function to primitive types.
@@ -319,35 +323,49 @@ pub fn dec_to_i64(elem: Decimal) -> Result<i64> {
 
 /// In `PostgreSQL`, casting from timestamp to date discards the time part.
 #[inline(always)]
-pub fn timestamp_to_date(elem: NaiveDateTimeWrapper) -> Result<NaiveDateWrapper> {
-    Ok(NaiveDateWrapper(elem.0.date()))
+pub fn timestamp_to_date(elem: NaiveDateTimeWrapper) -> NaiveDateWrapper {
+    NaiveDateWrapper(elem.0.date())
 }
 
 /// In `PostgreSQL`, casting from timestamp to time discards the date part.
 #[inline(always)]
-pub fn timestamp_to_time(elem: NaiveDateTimeWrapper) -> Result<NaiveTimeWrapper> {
-    Ok(NaiveTimeWrapper(elem.0.time()))
+pub fn timestamp_to_time(elem: NaiveDateTimeWrapper) -> NaiveTimeWrapper {
+    NaiveTimeWrapper(elem.0.time())
 }
 
 /// In `PostgreSQL`, casting from interval to time discards the days part.
 #[inline(always)]
-pub fn interval_to_time(elem: IntervalUnit) -> Result<NaiveTimeWrapper> {
+pub fn interval_to_time(elem: IntervalUnit) -> NaiveTimeWrapper {
     let ms = elem.get_ms_of_day();
     let secs = (ms / 1000) as u32;
     let nano = (ms % 1000 * 1_000_000) as u32;
-    Ok(NaiveTimeWrapper::from_num_seconds_from_midnight_uncheck(
-        secs, nano,
-    ))
+    NaiveTimeWrapper::from_num_seconds_from_midnight_uncheck(secs, nano)
 }
 
 #[inline(always)]
-pub fn general_cast<T1, T2>(elem: T1) -> Result<T2>
+pub fn timestamptz_to_timestamp(elem: i64) -> NaiveDateTimeWrapper {
+    NaiveDateTimeWrapper::from_timestamp_uncheck(
+        elem / 1_000_000,
+        (elem % 1_000_000 * 1_000) as u32,
+    )
+}
+
+#[inline(always)]
+pub fn try_cast<T1, T2>(elem: T1) -> Result<T2>
 where
     T1: TryInto<T2> + std::fmt::Debug + Copy,
     <T1 as TryInto<T2>>::Error: std::fmt::Display,
 {
     elem.try_into()
         .map_err(|_| ExprError::CastOutOfRange(std::any::type_name::<T2>()))
+}
+
+#[inline(always)]
+pub fn cast<T1, T2>(elem: T1) -> T2
+where
+    T1: Into<T2>,
+{
+    elem.into()
 }
 
 #[inline(always)]
@@ -364,7 +382,7 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
     {
         Ok(false)
     } else {
-        Err(ExprError::Parse("Invalid bool"))
+        Err(ExprError::Parse("Invalid bool".into()))
     }
 }
 
@@ -374,18 +392,23 @@ pub fn int32_to_bool(input: i32) -> Result<bool> {
 
 // For most of the types, cast them to varchar is similar to return their text format.
 // So we use this function to cast type to varchar.
-pub fn general_to_text<T: ToText>(elem: T) -> Result<Box<str>> {
-    Ok(elem.to_text().into_boxed_str())
+pub fn general_to_text(elem: impl ToText, mut writer: &mut dyn Write) -> Result<()> {
+    elem.write(&mut writer).unwrap();
+    Ok(())
 }
 
-pub fn bool_to_varchar(input: bool) -> Result<Box<str>> {
-    Ok(if input { "true" } else { "false" }.into())
+pub fn bool_to_varchar(input: bool, writer: &mut dyn Write) -> Result<()> {
+    writer
+        .write_str(if input { "true" } else { "false" })
+        .unwrap();
+    Ok(())
 }
 
 /// `bool_out` is different from `general_to_string<bool>` to produce a single char. `PostgreSQL`
 /// uses different variants of bool-to-string in different situations.
-pub fn bool_out(input: bool) -> Result<Box<str>> {
-    Ok(if input { "t" } else { "f" }.into())
+pub fn bool_out(input: bool, writer: &mut dyn Write) -> Result<()> {
+    writer.write_str(if input { "t" } else { "f" }).unwrap();
+    Ok(())
 }
 
 /// It accepts a macro whose input is `{ $input:ident, $cast:ident, $func:expr }` tuples
@@ -394,80 +417,82 @@ pub fn bool_out(input: bool) -> Result<Box<str>> {
 /// * `$cast`: The cast type in that the operation will calculate
 /// * `$func`: The scalar function for expression, it's a generic function and specialized by the
 ///   type of `$input, $cast`
+/// * `$infallible`: Whether the cast is infallible
 #[macro_export]
 macro_rules! for_all_cast_variants {
     ($macro:ident) => {
         $macro! {
-            { varchar, date, str_to_date },
-            { varchar, time, str_to_time },
-            { varchar, interval, str_parse },
-            { varchar, timestamp, str_to_timestamp },
-            { varchar, timestampz, str_to_timestampz },
-            { varchar, int16, str_parse },
-            { varchar, int32, str_parse },
-            { varchar, int64, str_parse },
-            { varchar, float32, str_parse },
-            { varchar, float64, str_parse },
-            { varchar, decimal, str_parse },
-            { varchar, boolean, str_to_bool },
-            { varchar, bytea, str_to_bytea },
+            { varchar, date, str_to_date, false },
+            { varchar, time, str_to_time, false },
+            { varchar, interval, str_parse, false },
+            { varchar, timestamp, str_to_timestamp, false },
+            { varchar, timestamptz, str_to_timestamptz, false },
+            { varchar, int16, str_parse, false },
+            { varchar, int32, str_parse, false },
+            { varchar, int64, str_parse, false },
+            { varchar, float32, str_parse, false },
+            { varchar, float64, str_parse, false },
+            { varchar, decimal, str_parse, false },
+            { varchar, boolean, str_to_bool, false },
+            { varchar, bytea, str_to_bytea, false },
             // `str_to_list` requires `target_elem_type` and is handled elsewhere
 
-            { boolean, varchar, bool_to_varchar },
-            { int16, varchar, general_to_text },
-            { int32, varchar, general_to_text },
-            { int64, varchar, general_to_text },
-            { float32, varchar, general_to_text },
-            { float64, varchar, general_to_text },
-            { decimal, varchar, general_to_text },
-            { time, varchar, general_to_text },
-            { interval, varchar, general_to_text },
-            { date, varchar, general_to_text },
-            { timestamp, varchar, general_to_text },
-            { timestampz, varchar, |x| Ok(timestampz_to_utc_string(x)) },
-            { list, varchar, |x| general_to_text(x) },
+            { boolean, varchar, bool_to_varchar, false },
+            { int16, varchar, general_to_text, false },
+            { int32, varchar, general_to_text, false },
+            { int64, varchar, general_to_text, false },
+            { float32, varchar, general_to_text, false },
+            { float64, varchar, general_to_text, false },
+            { decimal, varchar, general_to_text, false },
+            { time, varchar, general_to_text, false },
+            { interval, varchar, general_to_text, false },
+            { date, varchar, general_to_text, false },
+            { timestamp, varchar, general_to_text, false },
+            { timestamptz, varchar, timestamptz_to_utc_string, false },
+            { list, varchar, |x, w| general_to_text(x, w), false },
 
-            { boolean, int32, general_cast },
-            { int32, boolean, int32_to_bool },
+            { boolean, int32, try_cast, false },
+            { int32, boolean, int32_to_bool, false },
 
-            { int16, int32, general_cast },
-            { int16, int64, general_cast },
-            { int16, float32, general_cast },
-            { int16, float64, general_cast },
-            { int16, decimal, general_cast },
-            { int32, int16, general_cast },
-            { int32, int64, general_cast },
-            { int32, float32, to_f32 }, // lossy
-            { int32, float64, general_cast },
-            { int32, decimal, general_cast },
-            { int64, int16, general_cast },
-            { int64, int32, general_cast },
-            { int64, float32, to_f32 }, // lossy
-            { int64, float64, to_f64 }, // lossy
-            { int64, decimal, general_cast },
+            { int16, int32, cast::<i16, i32>, true },
+            { int16, int64, cast::<i16, i64>, true },
+            { int16, float32, cast::<i16, OrderedF32>, true },
+            { int16, float64, cast::<i16, OrderedF64>, true },
+            { int16, decimal, cast::<i16, Decimal>, true },
+            { int32, int16, try_cast, false },
+            { int32, int64, cast::<i32, i64>, true },
+            { int32, float32, to_f32, false }, // lossy
+            { int32, float64, cast::<i32, OrderedF64>, true },
+            { int32, decimal, cast::<i32, Decimal>, true },
+            { int64, int16, try_cast, false },
+            { int64, int32, try_cast, false },
+            { int64, float32, to_f32, false }, // lossy
+            { int64, float64, to_f64, false }, // lossy
+            { int64, decimal, cast::<i64, Decimal>, true },
 
-            { float32, float64, general_cast },
-            { float32, decimal, general_cast },
-            { float32, int16, to_i16 },
-            { float32, int32, to_i32 },
-            { float32, int64, to_i64 },
-            { float64, decimal, general_cast },
-            { float64, int16, to_i16 },
-            { float64, int32, to_i32 },
-            { float64, int64, to_i64 },
-            { float64, float32, to_f32 }, // lossy
+            { float32, float64, cast::<OrderedF32, OrderedF64>, true },
+            { float32, decimal, cast::<OrderedF32, Decimal>, true },
+            { float32, int16, to_i16, false },
+            { float32, int32, to_i32, false },
+            { float32, int64, to_i64, false },
+            { float64, decimal, cast::<OrderedF64, Decimal>, true },
+            { float64, int16, to_i16, false },
+            { float64, int32, to_i32, false },
+            { float64, int64, to_i64, false },
+            { float64, float32, to_f32, false }, // lossy
 
-            { decimal, int16, dec_to_i16 },
-            { decimal, int32, dec_to_i32 },
-            { decimal, int64, dec_to_i64 },
-            { decimal, float32, to_f32 },
-            { decimal, float64, to_f64 },
+            { decimal, int16, dec_to_i16, false },
+            { decimal, int32, dec_to_i32, false },
+            { decimal, int64, dec_to_i64, false },
+            { decimal, float32, to_f32, false },
+            { decimal, float64, to_f64, false },
 
-            { date, timestamp, general_cast },
-            { time, interval, general_cast },
-            { timestamp, date, timestamp_to_date },
-            { timestamp, time, timestamp_to_time },
-            { interval, time, interval_to_time }
+            { date, timestamp, cast::<NaiveDateWrapper, NaiveDateTimeWrapper>, true },
+            { time, interval, cast::<NaiveTimeWrapper, IntervalUnit>, true },
+            { timestamp, date, timestamp_to_date, true },
+            { timestamp, time, timestamp_to_time, true },
+            { interval, time, interval_to_time, true },
+            { timestamptz, timestamp, timestamptz_to_timestamp, true }
         }
     };
 }
@@ -480,7 +505,7 @@ fn unnest(input: &str) -> Result<Vec<String>> {
 
     let mut chars = trimmed.chars();
     if chars.next() != Some('{') || chars.next_back() != Some('}') {
-        return Err(ExprError::Parse("Input must be braced"));
+        return Err(ExprError::Parse("Input must be braced".into()));
     }
 
     let mut items = Vec::new();
@@ -500,14 +525,20 @@ fn unnest(input: &str) -> Result<Vec<String>> {
                             c
                         }
                         None => {
-                            return Err(ExprError::Parse("Missing closing brace '}}' character"))
+                            return Err(ExprError::Parse(
+                                "Missing closing brace '}}' character".into(),
+                            ))
                         }
                     };
                     string.push(c);
                 }
                 items.push(string);
             }
-            '}' => return Err(ExprError::Parse("Unexpected closing brace '}}' character")),
+            '}' => {
+                return Err(ExprError::Parse(
+                    "Unexpected closing brace '}}' character".into(),
+                ))
+            }
             ',' => {}
             c if c.is_whitespace() => {}
             c => items.push(format!(
@@ -617,18 +648,36 @@ fn scalar_cast(
         ) => str_to_list(source.try_into()?, target_elem_type).map(Scalar::to_scalar_value),
         (source_type, target_type) => {
             macro_rules! gen_cast_impl {
-                ($( { $input:ident, $cast:ident, $func:expr } ),*) => {
+                ($( { $input:ident, $cast:ident, $func:expr, $infallible:ident } ),*) => {
                     match (source_type, target_type) {
                         $(
-                            ($input! { type_match_pattern }, $cast! { type_match_pattern }) => {
-                                let source: <$input! { type_array } as Array>::RefItem<'_> = source.try_into()?;
-                                let target: Result<<$cast! { type_array } as Array>::OwnedItem> = $func(source);
-                                target.map(Scalar::to_scalar_value)
-                            }
+                            ($input! { type_match_pattern }, $cast! { type_match_pattern }) => gen_cast_impl!(arm: $input, $cast, $func, $infallible),
                         )*
                         _ => {
                             return Err(ExprError::UnsupportedCast(source_type.clone(), target_type.clone()));
                         }
+                    }
+                };
+                (arm: $input:ident, varchar, $func:expr, false) => {
+                    {
+                        let source: <$input! { type_array } as Array>::RefItem<'_> = source.try_into()?;
+                        let mut writer = String::new();
+                        let target: Result<()> = $func(source, &mut writer);
+                        target.map(|_| Scalar::to_scalar_value(writer.into_boxed_str()))
+                    }
+                };
+                (arm: $input:ident, $cast:ident, $func:expr, false) => {
+                    {
+                        let source: <$input! { type_array } as Array>::RefItem<'_> = source.try_into()?;
+                        let target: Result<<$cast! { type_array } as Array>::OwnedItem> = $func(source);
+                        target.map(Scalar::to_scalar_value)
+                    }
+                };
+                (arm: $input:ident, $cast:ident, $func:expr, true) => {
+                    {
+                        let source: <$input! { type_array } as Array>::RefItem<'_> = source.try_into()?;
+                        let target: Result<<$cast! { type_array } as Array>::OwnedItem> = Ok($func(source));
+                        target.map(Scalar::to_scalar_value)
                     }
                 };
             }
@@ -647,8 +696,8 @@ mod tests {
     #[test]
     fn parse_str() {
         assert_eq!(
-            str_to_timestampz("2022-08-03 10:34:02Z").unwrap(),
-            str_to_timestampz("2022-08-03 02:34:02-08:00").unwrap()
+            str_to_timestamptz("2022-08-03 10:34:02Z").unwrap(),
+            str_to_timestamptz("2022-08-03 02:34:02-08:00").unwrap()
         );
         str_to_timestamp("1999-01-08 04:02").unwrap();
         str_to_timestamp("1999-01-08 04:05:06").unwrap();
@@ -661,16 +710,16 @@ mod tests {
         str_to_time("04:05:06").unwrap();
 
         assert_eq!(
-            str_to_timestampz("1999-01-08 04:05:06")
+            str_to_timestamptz("1999-01-08 04:05:06")
                 .unwrap_err()
                 .to_string(),
-            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPZ).to_string()
+            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPTZ.into()).to_string()
         );
         assert_eq!(
             str_to_timestamp("1999-01-08 04:05:06AA")
                 .unwrap_err()
                 .to_string(),
-            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP).to_string()
+            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP.into()).to_string()
         );
         assert_eq!(
             str_to_date("1999-01-08AA").unwrap_err().to_string(),
@@ -678,7 +727,7 @@ mod tests {
         );
         assert_eq!(
             str_to_time("AA04:05:06").unwrap_err().to_string(),
-            ExprError::Parse(PARSE_ERROR_STR_TO_TIME).to_string()
+            ExprError::Parse(PARSE_ERROR_STR_TO_TIME.into()).to_string()
         );
     }
 
@@ -695,8 +744,10 @@ mod tests {
         use super::*;
 
         macro_rules! test {
-            ($expr:expr, $right:literal) => {
-                assert_eq!($expr.unwrap().as_ref(), $right);
+            ($fn:ident($value:expr), $right:literal) => {
+                let mut writer = String::new();
+                $fn($value, &mut writer).unwrap();
+                assert_eq!(writer, $right);
             };
         }
 
@@ -729,19 +780,19 @@ mod tests {
     #[test]
     fn temporal_cast() {
         assert_eq!(
-            timestamp_to_date(str_to_timestamp("1999-01-08 04:02").unwrap()).unwrap(),
+            timestamp_to_date(str_to_timestamp("1999-01-08 04:02").unwrap()),
             str_to_date("1999-01-08").unwrap(),
         );
         assert_eq!(
-            timestamp_to_time(str_to_timestamp("1999-01-08 04:02").unwrap()).unwrap(),
+            timestamp_to_time(str_to_timestamp("1999-01-08 04:02").unwrap()),
             str_to_time("04:02").unwrap(),
         );
         assert_eq!(
-            interval_to_time(IntervalUnit::new(1, 2, 61003)).unwrap(),
+            interval_to_time(IntervalUnit::new(1, 2, 61003)),
             str_to_time("00:01:01.003").unwrap(),
         );
         assert_eq!(
-            interval_to_time(IntervalUnit::new(0, 0, -61003)).unwrap(),
+            interval_to_time(IntervalUnit::new(0, 0, -61003)),
             str_to_time("23:58:58.997").unwrap(),
         );
     }
@@ -960,16 +1011,21 @@ mod tests {
     }
 
     #[test]
-    fn test_timestampz() {
+    fn test_timestamptz() {
         let str1 = "0001-11-15 15:35:40.999999+08:00";
-        let str1_utc0 = "0001-11-15 07:35:40.999999+00:00";
-        let timestampz1 = str_to_timestampz(str1).unwrap();
-        assert_eq!(timestampz1, -62108094259000001);
-        assert_eq!(timestampz_to_utc_string(timestampz1).as_ref(), str1_utc0);
+        let timestamptz1 = str_to_timestamptz(str1).unwrap();
+        assert_eq!(timestamptz1, -62108094259000001);
+
+        let mut writer = String::new();
+        timestamptz_to_utc_string(timestamptz1, &mut writer).unwrap();
+        assert_eq!(writer, "0001-11-15 07:35:40.999999+00:00");
 
         let str2 = "1969-12-31 23:59:59.999999+00:00";
-        let timestampz2 = str_to_timestampz(str2).unwrap();
-        assert_eq!(timestampz2, -1);
-        assert_eq!(timestampz_to_utc_string(timestampz2).as_ref(), str2);
+        let timestamptz2 = str_to_timestamptz(str2).unwrap();
+        assert_eq!(timestamptz2, -1);
+
+        let mut writer = String::new();
+        timestamptz_to_utc_string(timestamptz2, &mut writer).unwrap();
+        assert_eq!(writer, str2);
     }
 }

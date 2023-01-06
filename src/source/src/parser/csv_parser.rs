@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,7 +19,7 @@ use futures::future::ready;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
-use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp, str_to_timestampz};
+use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp, str_to_timestamptz};
 
 use crate::{ByteStreamSourceParser, ParseFuture, SourceStreamChunkRowWriter, WriteGuard};
 
@@ -82,11 +82,8 @@ impl CsvParser {
                     let length = self.ends.len();
                     self.ends.resize(length * 2, 0);
                 }
-                csv_core::ReadRecordResult::End => {
-                    break Ok(None);
-                }
                 // Success cases
-                csv_core::ReadRecordResult::Record => {
+                csv_core::ReadRecordResult::Record | csv_core::ReadRecordResult::End => {
                     // skip the header
                     if self.next_row_is_header {
                         self.next_row_is_header = false;
@@ -94,6 +91,11 @@ impl CsvParser {
                         continue;
                     }
                     let ends_cursor = self.ends_cursor;
+                    // caller provides an empty chunk, and there is no data
+                    // in inner buffer
+                    if ends_cursor <= 1 {
+                        break Ok(None);
+                    }
                     self.reset_cursor();
 
                     let string_columns = (1..ends_cursor)
@@ -121,11 +123,6 @@ impl CsvParser {
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<Option<WriteGuard>> {
         let columns_string = match self.parse_columns_to_strings(payload)? {
-            // parse error, we should reset the internal state to skip this record
-            // Err(e) => {
-            //     self.reset_cursor();
-            //     return Err(e);
-            // }
             None => return Ok(None),
             Some(strings) => strings,
         };
@@ -177,7 +174,7 @@ fn parse_string(dtype: &DataType, v: String) -> Result<Datum> {
         DataType::Date => str_to_date(v.as_str())?.into(),
         DataType::Time => str_to_date(v.as_str())?.into(),
         DataType::Timestamp => str_to_timestamp(v.as_str())?.into(),
-        DataType::Timestampz => str_to_timestampz(v.as_str())?.into(),
+        DataType::Timestamptz => str_to_timestamptz(v.as_str())?.into(),
         _ => {
             return Err(RwError::from(InternalError(format!(
                 "CSV data source not support type {}",
@@ -193,17 +190,41 @@ mod tests {
 
     use super::*;
     #[tokio::test]
-    async fn test_csv_parser() {
+    async fn test_csv_parser_without_last_line_break() {
         let mut parser = CsvParser::new(b',', true).unwrap();
-        let data = b"name,age\npite,20\nalex,10\n";
+        let data = b"
+name,age
+pite,20
+alex,10";
         let mut part1 = &data[0..data.len() - 1];
         let mut part2 = &data[data.len() - 1..data.len()];
         let line1 = parser.parse_columns_to_strings(&mut part1).unwrap();
-        println!("{:?}", line1);
         assert!(line1.is_some());
+        println!("{:?}", line1);
         let line2 = parser.parse_columns_to_strings(&mut part1).unwrap();
         assert!(line2.is_none());
+        let line2 = parser.parse_columns_to_strings(&mut part2).unwrap();
+        assert!(line2.is_none());
+        let line2 = parser.parse_columns_to_strings(&mut part2).unwrap();
+        assert!(line2.is_some());
         println!("{:?}", line2);
+    }
+
+    #[tokio::test]
+    async fn test_csv_parser_with_last_line_break() {
+        let mut parser = CsvParser::new(b',', true).unwrap();
+        let data = b"
+name,age
+pite,20
+alex,10
+";
+        let mut part1 = &data[0..data.len() - 1];
+        let mut part2 = &data[data.len() - 1..data.len()];
+        let line1 = parser.parse_columns_to_strings(&mut part1).unwrap();
+        assert!(line1.is_some());
+        println!("{:?}", line1);
+        let line2 = parser.parse_columns_to_strings(&mut part1).unwrap();
+        assert!(line2.is_none());
         let line2 = parser.parse_columns_to_strings(&mut part2).unwrap();
         assert!(line2.is_some());
         println!("{:?}", line2);

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -83,9 +83,9 @@ pub(crate) fn resolve_privileges(stmt: &BoundStatement) -> Vec<ObjectCheckItem> 
     match stmt {
         BoundStatement::Insert(ref insert) => {
             let object = ObjectCheckItem {
-                owner: insert.table_source.owner,
+                owner: insert.owner,
                 action: ProstAction::Insert,
-                object: ProstObject::TableId(insert.table_source.source_id.table_id),
+                object: ProstObject::TableId(insert.table_id.table_id),
             };
             objects.push(object);
             if let crate::binder::BoundSetExpr::Select(select) = &insert.source.body {
@@ -96,17 +96,17 @@ pub(crate) fn resolve_privileges(stmt: &BoundStatement) -> Vec<ObjectCheckItem> 
         }
         BoundStatement::Delete(ref delete) => {
             let object = ObjectCheckItem {
-                owner: delete.table_source.owner,
+                owner: delete.owner,
                 action: ProstAction::Delete,
-                object: ProstObject::TableId(delete.table_source.source_id.table_id),
+                object: ProstObject::TableId(delete.table_id.table_id),
             };
             objects.push(object);
         }
         BoundStatement::Update(ref update) => {
             let object = ObjectCheckItem {
-                owner: update.table_source.owner,
+                owner: update.owner,
                 action: ProstAction::Update,
-                object: ProstObject::TableId(update.table_source.source_id.table_id),
+                object: ProstObject::TableId(update.table_id.table_id),
             };
             objects.push(object);
         }

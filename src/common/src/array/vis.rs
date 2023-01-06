@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -66,6 +66,22 @@ impl Vis {
         match self {
             Vis::Bitmap(b) => VisRef::Bitmap(b),
             Vis::Compact(c) => VisRef::Compact(*c),
+        }
+    }
+
+    /// Consumes this `Vis` and returns the inner `Bitmap` if not compact.
+    pub fn into_visibility(self) -> Option<Bitmap> {
+        match self {
+            Vis::Bitmap(b) => Some(b),
+            Vis::Compact(_) => None,
+        }
+    }
+
+    /// Returns a reference to the inner `Bitmap` if not compact.
+    pub fn as_visibility(&self) -> Option<&Bitmap> {
+        match self {
+            Vis::Bitmap(b) => Some(b),
+            Vis::Compact(_) => None,
         }
     }
 }

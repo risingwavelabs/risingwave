@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -49,6 +49,7 @@ pub struct StreamingMetrics {
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
+    pub join_match_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
     pub join_cached_entries: GenericGaugeVec<AtomicI64>,
     pub join_cached_rows: GenericGaugeVec<AtomicI64>,
@@ -271,6 +272,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let join_match_duration_ns = register_int_counter_vec_with_registry!(
+            "stream_join_match_duration_ns",
+            "Matching duration for each side",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "stream_join_barrier_align_duration",
             "Duration of join align barrier",
@@ -410,6 +419,7 @@ impl StreamingMetrics {
             join_lookup_miss_count,
             join_total_lookup_count,
             join_actor_input_waiting_duration_ns,
+            join_match_duration_ns,
             join_barrier_align_duration,
             join_cached_entries,
             join_cached_rows,

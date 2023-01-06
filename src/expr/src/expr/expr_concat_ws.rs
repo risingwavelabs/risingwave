@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::convert::TryFrom;
+use std::fmt::Write;
 use std::sync::Arc;
 
 use risingwave_common::array::{
@@ -74,15 +75,15 @@ impl Expression for ConcatWsExpression {
             let mut string_columns = string_columns_ref.iter();
             for string_column in string_columns.by_ref() {
                 if let Some(string) = string_column.value_at(row_idx) {
-                    writer.write_ref(string);
+                    writer.write_str(string).unwrap();
                     break;
                 }
             }
 
             for string_column in string_columns {
                 if let Some(string) = string_column.value_at(row_idx) {
-                    writer.write_ref(sep);
-                    writer.write_ref(string);
+                    writer.write_str(sep).unwrap();
+                    writer.write_str(string).unwrap();
                 }
             }
 

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,8 +24,11 @@ use super::{
 };
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalValues` builds rows according to a list of expressions
 #[derive(Debug, Clone)]
@@ -74,7 +77,7 @@ impl fmt::Display for LogicalValues {
 }
 
 impl ColPrunable for LogicalValues {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let rows = self
             .rows
             .iter()
@@ -89,7 +92,11 @@ impl ColPrunable for LogicalValues {
 }
 
 impl PredicatePushdown for LogicalValues {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        _ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }
@@ -101,14 +108,17 @@ impl ToBatch for LogicalValues {
 }
 
 impl ToStream for LogicalValues {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         Err(RwError::from(ErrorCode::NotImplemented(
             "Stream values executor is unimplemented!".to_string(),
             None.into(),
         )))
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         Err(RwError::from(ErrorCode::NotImplemented(
             "Stream values executor is unimplemented!".to_string(),
             None.into(),
@@ -147,17 +157,21 @@ mod tests {
             Field::with_name(DataType::Int32, "v3"),
         ]);
         // Values([[0, 1, 2], [3, 4, 5])
-        let values = LogicalValues::new(
+        let values: PlanRef = LogicalValues::new(
             vec![
                 vec![literal(0), literal(1), literal(2)],
                 vec![literal(3), literal(4), literal(5)],
             ],
             schema,
             ctx,
-        );
+        )
+        .into();
 
         let required_cols = vec![0, 2];
-        let pruned = values.prune_col(&required_cols);
+        let pruned = values.prune_col(
+            &required_cols,
+            &mut ColumnPruningContext::new(values.clone()),
+        );
 
         let values = pruned.as_logical_values().unwrap();
         let rows: &[Vec<ExprImpl>] = values.rows();

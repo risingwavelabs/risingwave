@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -36,11 +36,11 @@ use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::StateStore;
 
-use crate::cache::{cache_may_stale, EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::cache::{cache_may_stale, new_with_hasher_in, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
-use crate::task::ActorId;
+use crate::task::{ActorId, AtomicU64Ref};
 
 type DegreeType = u64;
 
@@ -230,8 +230,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        lru_manager: Option<LruManagerRef>,
-        cache_size: usize,
+        watermark_epoch: AtomicU64Ref,
         join_key_data_types: Vec<DataType>,
         state_all_data_types: Vec<DataType>,
         state_table: StateTable<S>,
@@ -270,17 +269,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             table: degree_table,
         };
 
-        let cache = if let Some(lru_manager) = lru_manager {
-            ExecutorCache::Managed(
-                lru_manager.create_cache_with_hasher_in(PrecomputedBuildHasher, alloc),
-            )
-        } else {
-            ExecutorCache::Local(EvictableHashMap::with_hasher_in(
-                cache_size,
-                PrecomputedBuildHasher,
-                alloc,
-            ))
-        };
+        let cache = ExecutorCache::new(new_with_hasher_in(
+            watermark_epoch,
+            PrecomputedBuildHasher,
+            alloc,
+        ));
 
         Self {
             inner: cache,
@@ -519,15 +512,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// Cached entry count for this hash table.
     pub fn entry_count(&self) -> usize {
         self.inner.len()
-    }
-
-    /// Estimated memory usage for this hash table.
-    #[expect(dead_code)]
-    pub fn estimated_size(&self) -> usize {
-        self.inner
-            .iter()
-            .map(|(k, v)| k.estimated_size() + v.estimated_size())
-            .sum()
     }
 
     pub fn null_matched(&self) -> &FixedBitSet {

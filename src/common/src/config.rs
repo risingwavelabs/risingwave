@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -336,22 +336,10 @@ pub struct DeveloperConfig {
     #[serde(default = "default::developer::stream_enable_executor_row_count")]
     pub stream_enable_executor_row_count: bool,
 
-    /// Whether to use a managed lru cache (evict by epoch)
-    #[serde(default = "default::developer::stream_enable_managed_cache")]
-    pub stream_enable_managed_cache: bool,
-
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
     /// `SourceExecutor`.
     #[serde(default = "default::developer::stream_connector_message_buffer_size")]
     pub stream_connector_message_buffer_size: usize,
-
-    /// Limit number of cached entries (one per group key).
-    #[serde(default = "default::developer::stream_unsafe_hash_agg_cache_size")]
-    pub unsafe_stream_hash_agg_cache_size: usize,
-
-    /// Limit number of the cached entries (one per join key) on each side.
-    #[serde(default = "default::developer::unsafe_stream_join_cache_size")]
-    pub unsafe_stream_join_cache_size: usize,
 
     /// Limit number of the cached entries in an extreme aggregation call.
     #[serde(default = "default::developer::unsafe_stream_extreme_cache_size")]
@@ -449,7 +437,7 @@ mod default {
         }
 
         pub fn block_size_kb() -> u32 {
-            1024
+            64
         }
 
         pub fn bloom_false_positive() -> f64 {
@@ -477,11 +465,11 @@ mod default {
         }
 
         pub fn block_cache_capacity_mb() -> usize {
-            256
+            512
         }
 
         pub fn meta_cache_capacity_mb() -> usize {
-            64
+            128
         }
 
         pub fn disable_remote_compactor() -> bool {
@@ -577,20 +565,8 @@ mod default {
             false
         }
 
-        pub fn stream_enable_managed_cache() -> bool {
-            true
-        }
-
         pub fn stream_connector_message_buffer_size() -> usize {
             16
-        }
-
-        pub fn stream_unsafe_hash_agg_cache_size() -> usize {
-            1 << 16
-        }
-
-        pub fn unsafe_stream_join_cache_size() -> usize {
-            1 << 16
         }
 
         pub fn unsafe_stream_extreme_cache_size() -> usize {

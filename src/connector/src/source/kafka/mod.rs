@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,6 +29,13 @@ pub const KAFKA_CONNECTOR: &str = "kafka";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct KafkaProperties {
+    /// This parameter is not intended to be exposed to users.
+    /// Since kafka source has no concept of splits and its parallelism
+    /// is determined by the compute node's parameter, this parameter specifies
+    /// the bytes per second in total across all the parallelism.
+    #[serde(rename = "bytes.per.second", alias = "kafka.bytes.per.second")]
+    pub bytes_per_second: Option<String>,
+
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
 
