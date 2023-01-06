@@ -426,9 +426,55 @@ impl Binder {
             return self.bind_array_cast(expr.clone(), data_type);
         }
         let lhs = self.bind_expr(expr)?;
-        lhs.cast_explicit(data_type)
+        if let Some(ret) = self.bind_cast_with_timezone(lhs.clone(), data_type)? {
+            Ok(ret)
+        } else {
+            lhs.cast_explicit(data_type)
+        }
+    }
+
+    fn bind_cast_with_timezone(&mut self, input: ExprImpl, data_type: DataType) -> Result<Option<ExprImpl>> {
+        if matches!(input.return_type(), DataType::Timestamptz) {
+            match data_type {
+                DataType::Date | DataType::Time => {
+                    let timestamp = self.at_session_time_zone(input);
+                    return Some(timestamp.cast_explicit(data_type));
+                },
+                DataType::Timestamp => {
+                    return Some(self.at_session_time_zone(input));
+                }
+            }
+        }
+        if matches!(data_type, DataType::Timestamptz) {
+            match input.return_type() {
+                DataType::Date => {
+                    let timestamp = input.cast_explicit(DataType::Timestamptz);
+                    return Ok(Some(self.at_session_time_zone(timestamp)));
+                }
+                DataType::Timestamp => {
+                    return Some(self.at_session_time_zone(input.clone()));
+                }
+                DataType::Varchar => 
+                _ => _,
+            }
+        }
+        None
+    }
+
+    fn at_session_time_zone(&self, input: ExprImpl) -> ExprImpl {
+        self.session_timezone.used = true;
+        ExprImpl::FunctionCall(
+            FunctionCall::new(
+                ExprType::AtTimeZone, 
+                vec![
+                    input, 
+                    ExprImpl::literal_varchar(self.session_timezone.zone)
+                ]
+            )
+        )
     }
 }
+
 
 /// Given a type `STRUCT<v1 int>`, this function binds the field `v1 int`.
 pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {

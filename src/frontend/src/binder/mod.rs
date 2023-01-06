@@ -80,6 +80,17 @@ pub struct Binder {
     search_path: SearchPath,
     /// Whether the Binder is binding an MV.
     in_create_mv: bool,
+
+    session_timezone: SessionTimezone,
+}
+
+/// `SessionTimezone` will be used by the binder to resolve
+/// session timezone-dependent casts, comparisons or arithmetic.
+/// To achieve this, we replace one of the inputs with an `AT TIME ZONE` conversion.
+pub struct SessionTimezone {
+    pub timezone: String,
+    /// Whether or not the binder used the session timezone 
+    pub used: bool,
 }
 
 impl Binder {
@@ -102,6 +113,10 @@ impl Binder {
             cte_to_relation: HashMap::new(),
             search_path: session.config().get_search_path(),
             in_create_mv,
+            session_timezone: SessionTimezone { 
+                timezone: session.config().get_timezone().into(),
+                used: false,
+            },
         }
     }
 
@@ -178,6 +193,10 @@ impl Binder {
         let id = self.next_values_id;
         self.next_values_id += 1;
         id
+    }
+
+    pub fn session_timezone() -> SessionTimezone {
+        self.session_timezone
     }
 }
 
