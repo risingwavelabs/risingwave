@@ -615,8 +615,9 @@ where
                 .await
                 .unwrap();
 
-            // When there's no actors exist in the cluster, we don't need to send the barrier. This
-            // is an advance optimization.
+            // When there's no actors exist in the cluster, we don't need to send the barrier but
+            // still have to update the current epoch in hummock manager, which will be used for
+            // batch `now()` in frontend. This is an advance optimization.
             if info.nothing_to_do() {
                 notifiers.into_iter().for_each(Notifier::notify_all);
                 let new_snapshot = self.hummock_manager.update_current_epoch(prev_epoch.0);
