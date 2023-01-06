@@ -38,6 +38,8 @@ pub(crate) mod view_catalog;
 pub use index_catalog::IndexCatalog;
 pub use table_catalog::TableCatalog;
 
+use crate::user::UserId;
+
 pub(crate) type SourceId = u32;
 pub(crate) type SinkId = u32;
 pub(crate) type ViewId = u32;
@@ -110,4 +112,8 @@ impl From<CatalogError> for RwError {
     fn from(e: CatalogError) -> Self {
         ErrorCode::CatalogError(Box::new(e)).into()
     }
+}
+
+pub trait RelationCatalog {
+    fn owner(&self) -> UserId;
 }

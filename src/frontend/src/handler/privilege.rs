@@ -17,6 +17,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::user::grant_privilege::{Action as ProstAction, Object as ProstObject};
 
 use crate::binder::{BoundStatement, Relation};
+use crate::catalog::RelationCatalog;
 use crate::session::SessionImpl;
 use crate::user::UserId;
 
@@ -121,19 +122,56 @@ pub(crate) fn resolve_privileges(stmt: &BoundStatement) -> Vec<ObjectCheckItem> 
     objects
 }
 
-pub(crate) fn check_super_user(session: &SessionImpl) -> bool {
-    let user_reader = session.env().user_info_reader();
-    let reader = user_reader.read_guard();
+impl SessionImpl {
+    /// Check whether the user of the current session has privileges in `items`.
+    pub fn check_privileges(&self, items: &[ObjectCheckItem]) -> Result<()> {
+        check_privileges(self, items)
+    }
 
-    if let Some(info) = reader.get_user_by_name(session.user_name()) {
-        info.is_super
-    } else {
-        false
+    /// Returns `true` if the user of the current session is a super user.
+    fn is_super_user(&self) -> bool {
+        let reader = self.env().user_info_reader().read_guard();
+
+        if let Some(info) = reader.get_user_by_name(self.user_name()) {
+            info.is_super
+        } else {
+            false
+        }
+    }
+
+    /// Check whether the user of the current session has the privilege to drop relation `relation`
+    /// in the schema with name `schema_name`.
+    pub fn check_privilege_for_drop_relation(
+        &self,
+        schema_name: &str,
+        relation: &impl RelationCatalog,
+    ) -> Result<()> {
+        let schema_owner = self
+            .env()
+            .catalog_reader()
+            .read_guard()
+            .get_schema_by_name(self.database(), schema_name)
+            .unwrap()
+            .owner();
+
+        // https://www.postgresql.org/docs/current/sql-droptable.html
+        if self.user_id() != relation.owner()
+            && self.user_id() != schema_owner
+            && !self.is_super_user()
+        {
+            return Err(PermissionDenied(
+                "Only the relation owner, the schema owner, and superuser can drop a relation."
+                    .to_string(),
+            )
+            .into());
+        }
+
+        Ok(())
     }
 }
 
 /// check whether user in `session` has privileges in `items`
-pub(crate) fn check_privileges(session: &SessionImpl, items: &Vec<ObjectCheckItem>) -> Result<()> {
+pub(crate) fn check_privileges(session: &SessionImpl, items: &[ObjectCheckItem]) -> Result<()> {
     let user_reader = session.env().user_info_reader();
     let reader = user_reader.read_guard();
 

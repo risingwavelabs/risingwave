@@ -13,18 +13,18 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::convert::Infallible;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{TableDesc, TableId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType as ProstTableType};
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
 use super::column_catalog::ColumnCatalog;
-use super::{DatabaseId, FragmentId, SchemaId};
+use super::{DatabaseId, FragmentId, RelationCatalog, SchemaId};
 use crate::optimizer::property::FieldOrder;
+use crate::user::UserId;
 use crate::WithOptions;
 
 /// Includes full information about a table.
@@ -89,7 +89,7 @@ pub struct TableCatalog {
     pub append_only: bool,
 
     /// Owner of the table.
-    pub owner: u32,
+    pub owner: UserId,
 
     /// Properties of the table. For example, `appendonly` or `retention_seconds`.
     pub properties: WithOptions,
@@ -358,6 +358,12 @@ impl From<ProstTable> for TableCatalog {
 impl From<&ProstTable> for TableCatalog {
     fn from(tb: &ProstTable) -> Self {
         tb.clone().into()
+    }
+}
+
+impl RelationCatalog for TableCatalog {
+    fn owner(&self) -> UserId {
+        self.owner
     }
 }
 

@@ -70,7 +70,7 @@ pub(crate) fn gen_create_index_plan(
 
     check_privileges(
         session,
-        &vec![ObjectCheckItem::new(
+        &[ObjectCheckItem::new(
             table.owner,
             Action::Select,
             Object::TableId(table.id.table_id),

@@ -51,7 +51,7 @@ use tokio::task::JoinHandle;
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
-use crate::catalog::root_catalog::{Catalog, SchemaPath};
+use crate::catalog::root_catalog::{Catalog};
 use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
 use crate::handler::privilege::{check_privileges, ObjectCheckItem};
 use crate::handler::util::to_pg_field;
@@ -68,7 +68,7 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::{FrontendOpts, PgResponseStream, TableCatalog};
+use crate::{FrontendOpts, PgResponseStream};
 
 /// The global environment for the frontend server.
 #[derive(Clone)]
@@ -463,7 +463,7 @@ impl SessionImpl {
         if schema.name() != DEFAULT_SCHEMA_NAME {
             check_privileges(
                 self,
-                &vec![ObjectCheckItem::new(
+                &[ObjectCheckItem::new(
                     schema.owner(),
                     Action::Create,
                     Object::SchemaId(schema.id()),

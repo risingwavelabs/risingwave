@@ -65,7 +65,7 @@ pub async fn handle_create_schema(
 
     check_privileges(
         &session,
-        &vec![ObjectCheckItem::new(
+        &[ObjectCheckItem::new(
             db_owner,
             Action::Create,
             Object::DatabaseId(db_id),
