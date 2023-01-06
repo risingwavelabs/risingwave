@@ -1,8 +1,0 @@
-# Simulate temporal filter
-statement ok
-create table t3 (ts timestamp);
-
-statement ok
-create table t4 (ts timestamp with time zone);
-
-select * from t3 join t4 
