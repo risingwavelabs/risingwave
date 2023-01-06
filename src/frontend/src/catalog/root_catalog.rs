@@ -63,6 +63,7 @@ impl<'a> SchemaPath<'a> {
 /// - catalog (root catalog)
 ///   - database catalog
 ///     - schema catalog
+///       - function catalog
 ///       - table/sink/source/index/view catalog
 ///        - column catalog
 pub struct Catalog {
