@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -41,6 +42,8 @@ impl StreamNow {
             sub_fields: vec![],
             type_name: String::default(),
         }]);
+        let mut watermark_cols = FixedBitSet::with_capacity(1);
+        watermark_cols.set(0, true);
         let base = PlanBase::new_stream(
             ctx,
             schema,
@@ -48,8 +51,7 @@ impl StreamNow {
             FunctionalDependencySet::default(),
             Distribution::Single,
             false,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            vec![],
+            watermark_cols,
         );
         Self { base }
     }

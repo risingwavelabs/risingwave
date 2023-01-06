@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
@@ -47,7 +48,7 @@ impl StreamGlobalSimpleAgg {
             dist,
             false,
             // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            vec![],
+            FixedBitSet::with_capacity(logical.schema().len()),
         );
         StreamGlobalSimpleAgg { base, logical }
     }

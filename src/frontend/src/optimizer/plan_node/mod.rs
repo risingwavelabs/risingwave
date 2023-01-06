@@ -34,6 +34,7 @@ use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
@@ -322,7 +323,7 @@ impl dyn PlanNode {
         &self.plan_base().functional_dependency
     }
 
-    pub fn watermark_columns(&self) -> &[usize] {
+    pub fn watermark_columns(&self) -> &FixedBitSet {
         &self.plan_base().watermark_columns
     }
 

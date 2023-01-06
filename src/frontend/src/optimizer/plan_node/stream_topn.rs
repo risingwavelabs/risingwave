@@ -44,8 +44,7 @@ impl StreamTopN {
             logical.functional_dependency().clone(),
             dist,
             false,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            vec![],
+            logical.input().watermark_columns().clone(),
         );
         StreamTopN { base, logical }
     }

@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
@@ -38,6 +39,19 @@ impl StreamDynamicFilter {
     pub fn new(left_index: usize, comparator: ExprType, left: PlanRef, right: PlanRef) -> Self {
         assert_eq!(right.schema().len(), 1);
 
+        let watermark_cols = {
+            let mut watermark_cols = FixedBitSet::with_capacity(left.schema().len());
+            if right.watermark_columns()[0] {
+                match comparator {
+                    ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
+                        watermark_cols.set(left_index, true)
+                    }
+                    _ => {}
+                }
+            }
+            watermark_cols
+        };
+
         // TODO: derive from input
         let base = PlanBase::new_stream(
             left.ctx(),
@@ -48,7 +62,7 @@ impl StreamDynamicFilter {
             false, /* we can have a new abstraction for append only and monotonically increasing
                     * in the future */
             // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            vec![],
+            watermark_cols,
         );
         let core = generic::DynamicFilter {
             comparator,

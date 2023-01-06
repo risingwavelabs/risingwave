@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::panic;
 use std::fmt;
+use std::ops::BitAnd;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
@@ -58,6 +60,17 @@ impl StreamHashJoin {
             logical.right().distribution(),
             &logical,
         );
+        let watermark_columns = {
+            let from_left = logical
+                .l2i_col_mapping()
+                .rewrite_bitset(logical.left().watermark_columns());
+
+            let from_right = logical
+                .r2i_col_mapping()
+                .rewrite_bitset(logical.right().watermark_columns());
+            let watermark_columns = from_left.bitand(&from_right);
+            logical.i2o_col_mapping().rewrite_bitset(&watermark_columns)
+        };
 
         // TODO: derive from input
         let base = PlanBase::new_stream(
@@ -67,8 +80,7 @@ impl StreamHashJoin {
             logical.functional_dependency().clone(),
             dist,
             append_only,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            vec![],
+            watermark_columns,
         );
 
         Self {

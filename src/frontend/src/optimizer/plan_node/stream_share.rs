@@ -47,7 +47,7 @@ impl StreamShare {
             dist,
             logical.input().append_only(),
             // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            vec![],
+            logical.input().watermark_columns().clone(),
         );
         StreamShare { base, logical }
     }
