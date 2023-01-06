@@ -20,6 +20,7 @@ mod visibility_mode;
 use std::ops::Deref;
 
 use chrono_tz::Tz;
+use derivative::{self, Derivative};
 use itertools::Itertools;
 pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
@@ -259,7 +260,8 @@ type MaxSplitRangeGap = ConfigI32<MAX_SPLIT_RANGE_GAP, 8>;
 type QueryEpoch = ConfigU64<QUERY_EPOCH, 0>;
 type Timezone = ConfigString<TIMEZONE>;
 
-#[derive(Default)]
+#[derive(Derivative)]
+#[derivative(Default)]
 pub struct ConfigMap {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
@@ -306,17 +308,11 @@ pub struct ConfigMap {
     query_epoch: QueryEpoch,
 
     /// Session timezone. Defaults to UTC.
+    #[derivative(Default(value = "ConfigString::<TIMEZONE>(String::from(\"UTC\"))"))]
     timezone: Timezone,
 }
 
 impl ConfigMap {
-    pub fn new() -> Self {
-        Self {
-            timezone: ConfigString::<TIMEZONE>("UTC".into()),
-            ..Default::default()
-        }
-    }
-
     pub fn set(&mut self, key: &str, val: Vec<String>) -> Result<(), RwError> {
         let val = val.iter().map(AsRef::as_ref).collect_vec();
         if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
