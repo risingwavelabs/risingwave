@@ -51,7 +51,7 @@ done
 wait
 
 echo "Fulfill kafka topics"
-for filename in "$SCRIPT_PATH"/test_data/*; do
+for filename in "$SCRIPT_PATH"/test_data/**/*; do
     ([ -e "$filename" ]
     base=$(basename "$filename")
     topic="${base%%.*}"
