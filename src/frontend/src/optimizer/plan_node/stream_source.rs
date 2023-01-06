@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
@@ -43,6 +44,7 @@ impl StreamSource {
                 .catalog
                 .as_ref()
                 .map_or(true, |s| s.append_only),
+            FixedBitSet::with_capacity(logical.schema().len()),
         );
         Self { base, logical }
     }
