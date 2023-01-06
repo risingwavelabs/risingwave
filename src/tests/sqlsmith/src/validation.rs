@@ -36,6 +36,13 @@ fn not_unique_error(db_error: &str) -> bool {
     db_error.contains("Bind error") && db_error.contains("is not unique")
 }
 
+/// Ignore broken channel error, since this can be triggered by upstream error,
+/// e.g. ExprError::NumericOutofRange.
+/// TODO(Noel): Should further verify logs to see that the upstream error type is one which is acceptable.
+fn is_broken_chan_error(db_error: &str) -> bool {
+    db_error.contains("broken") && db_error.contains("channel");
+}
+
 /// Certain errors are permitted to occur. This is because:
 /// 1. It is more complex to generate queries without these errors.
 /// 2. These errors seldom occur, skipping them won't affect overall effectiveness of sqlsmith.
@@ -44,4 +51,5 @@ pub fn is_permissible_error(db_error: &str) -> bool {
         || is_division_by_zero_err(db_error)
         || is_unimplemented_error(db_error)
         || not_unique_error(db_error)
+        || is_broken_chan_error(db_error)
 }
