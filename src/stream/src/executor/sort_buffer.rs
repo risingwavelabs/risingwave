@@ -16,10 +16,14 @@
 use std::collections::BTreeMap;
 use std::ops::Bound;
 
+use futures::stream::select_all;
+use futures::{stream, StreamExt, TryStreamExt};
+use futures_async_stream::for_await;
 use gen_iter::GenIter;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_storage::StateStore;
@@ -75,6 +79,51 @@ impl<S: StateStore> SortBuffer<S> {
             last_watermark: None,
             buffer: BTreeMap::new(),
         }
+    }
+
+    pub async fn recover(
+        schema: Schema,
+        pk_indices: PkIndices,
+        sort_column_index: usize,
+        state_table: StateTable<S>,
+    ) -> StreamExecutorResult<Self> {
+        let vnodes = state_table.vnode_bitmap().to_owned();
+        let mut buffer = BTreeMap::new();
+
+        let pk_range = (
+            Bound::<row::Empty>::Unbounded,
+            Bound::<row::Empty>::Unbounded,
+        );
+        let streams = stream::iter(vnodes.iter_ones())
+            .map(|vnode| {
+                let vnode = VirtualNode::from_index(vnode);
+                state_table.iter_with_pk_range(&pk_range, vnode)
+            })
+            .buffer_unordered(10)
+            .try_collect::<Vec<_>>()
+            .await?
+            .into_iter()
+            .map(Box::pin);
+
+        #[for_await]
+        for row in select_all(streams) {
+            let row = row?.to_owned_row();
+            let timestamp_datum = row.datum_at(sort_column_index).to_owned_datum().unwrap();
+            let pk = (&row).project(&pk_indices).into_owned_row();
+            // Null event time should not exist in the row since the `WatermarkFilter` before
+            // the `Sort` will filter out the Null event time.
+            buffer.insert((timestamp_datum, pk), (row, true));
+        }
+
+        Ok(Self {
+            schema,
+            pk_indices,
+            sort_column_index,
+            state_table,
+            chunk_size: 1024,
+            last_watermark: None,
+            buffer,
+        })
     }
 
     /// Store all rows in one [`StreamChunk`] to the buffer.
@@ -208,7 +257,7 @@ mod tests {
 
     use super::SortBuffer;
     use crate::common::table::state_table::StateTable;
-    use crate::executor::{PkIndices, Watermark, Barrier};
+    use crate::executor::{Barrier, PkIndices, Watermark};
 
     fn chunks_to_rows(chunks: impl Iterator<Item = DataChunk>) -> Vec<OwnedRow> {
         let mut rows = vec![];
