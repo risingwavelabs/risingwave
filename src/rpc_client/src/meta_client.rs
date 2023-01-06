@@ -33,13 +33,15 @@ use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
     Source as ProstSource, Table as ProstTable, View as ProstView,
 };
-use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::*;
+use risingwave_pb::leader::leader_service_client::LeaderServiceClient;
+use risingwave_pb::leader::LeaderRequest;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
@@ -873,14 +875,13 @@ impl GrpcMetaClient {
     // Max retry interval in ms for request to meta server.
     const REQUEST_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
-    /// Connect to the meta server `addr`.
-    pub async fn new(addr: &str) -> Result<Self> {
+    async fn get_channel(addr: &str) -> std::result::Result<Channel, tonic::transport::Error> {
         let endpoint = Endpoint::from_shared(addr.to_string())?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
         let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
             .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
             .map(jitter);
-        let channel = tokio_retry::Retry::spawn(retry_strategy, || async {
+        tokio_retry::Retry::spawn(retry_strategy, || async {
             let endpoint = endpoint.clone();
             endpoint
                 .http2_keep_alive_interval(Duration::from_secs(
@@ -898,7 +899,41 @@ impl GrpcMetaClient {
                     );
                 })
         })
-        .await?;
+        .await
+    }
+
+    /// Connect to the meta server `addr`.
+    pub async fn new(addr: &str) -> Result<Self> {
+        // TODO: Can I write this without marking channel as mut?
+        tracing::info!("Originally connect against {}", addr);
+        let mut channel = Self::get_channel(addr).await?;
+        let mut leader_client = LeaderServiceClient::new(channel.clone());
+        let resp = leader_client
+            .leader(LeaderRequest {})
+            .await
+            .expect("Expect that leader service always knows who leader is")
+            .into_inner();
+        let leader_addr: HostAddress = resp
+            .leader_addr
+            .expect("Expect that leader service always knows who leader is");
+        let tmp = addr.split("://").collect::<Vec<&str>>();
+        let protocol = if tmp.len() == 1 {
+            "".to_owned()
+        } else {
+            format!("{}://", tmp[0])
+        };
+        let leader_addr_str = format!(
+            "{}{}:{}",
+            protocol,
+            leader_addr.get_host(),
+            leader_addr.get_port()
+        );
+        tracing::info!("Current leader is {}", leader_addr_str);
+
+        if addr != leader_addr_str.as_str() {
+            tracing::info!("Connecting aginst {}", leader_addr_str);
+            channel = Self::get_channel(leader_addr_str.as_str()).await?;
+        }
 
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
