@@ -15,8 +15,8 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{process, thread};
 
 use prost::Message;
 use rand::rngs::StdRng;
@@ -287,7 +287,6 @@ pub async fn run_elections<S: MetaStore>(
     addr: String,
     meta_store: Arc<S>,
     lease_time_sec: u64,
-    panic_tx: WatchSender<()>,
 ) -> MetaResult<(
     MetaLeaderInfo,
     JoinHandle<()>,
@@ -400,8 +399,7 @@ pub async fn run_elections<S: MetaStore>(
                             // Leader lost leadership. Trigger fencing
                             if is_leader {
                                 tracing::error!("This node lost its leadership. Exiting node");
-                                panic_tx.send(()).expect("Panic receiver dropped"); 
-                                return;
+                                process::exit(0);
                             }
                             // leader failed. Elect new leader
                             continue 'election;
