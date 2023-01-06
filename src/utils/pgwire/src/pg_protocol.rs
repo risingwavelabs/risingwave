@@ -370,6 +370,7 @@ where
         tracing::trace!("(extended query)parse query: {}", sql);
 
         // Flag indicate whether statement is a query statement.
+        // TODO: regard DML with RETURNING as a query
         let is_query_sql = {
             let lower_sql = sql.to_ascii_lowercase();
             lower_sql.starts_with("select")
@@ -378,7 +379,6 @@ where
                 || lower_sql.starts_with("with")
                 || lower_sql.starts_with("describe")
                 || lower_sql.starts_with("explain")
-                || lower_sql.contains("returning")
         };
 
         let prepared_statement = PreparedStatement::parse_statement(sql.to_string(), msg.type_ids)?;

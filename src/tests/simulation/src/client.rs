@@ -81,6 +81,7 @@ impl sqllogictest::AsyncDB for RisingWave {
 
         let mut output = vec![];
 
+        // TODO: regard DML with RETURNING as a query
         let is_query_sql = {
             let lower_sql = sql.trim_start().to_ascii_lowercase();
             lower_sql.starts_with("select")
@@ -88,7 +89,6 @@ impl sqllogictest::AsyncDB for RisingWave {
                 || lower_sql.starts_with("show")
                 || lower_sql.starts_with("with")
                 || lower_sql.starts_with("describe")
-                || lower_sql.contains("returning")
         };
 
         let rows = self.client.simple_query(sql).await?;
