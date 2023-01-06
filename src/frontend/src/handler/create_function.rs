@@ -14,7 +14,7 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
-use risingwave_pb::catalog::{Function, FunctionArgument};
+use risingwave_pb::catalog::Function;
 use risingwave_sqlparser::ast::{
     CreateFunctionBody, DataType, FunctionDefinition, ObjectName, OperateFunctionArg,
 };
@@ -70,12 +70,9 @@ pub async fn handle_create_function(
             ErrorCode::InvalidParameterValue("return type must be specified".to_string()).into(),
         )
     };
-    let mut arguments = vec![];
+    let mut arg_types = vec![];
     for arg in args.unwrap_or_default() {
-        arguments.push(FunctionArgument {
-            name: arg.name.map_or(String::new(), |ident| ident.real_value()),
-            r#type: Some(bind_data_type(&arg.data_type)?.into()),
-        });
+        arg_types.push(bind_data_type(&arg.data_type)?.into());
     }
 
     // resolve database and schema id
@@ -89,7 +86,7 @@ pub async fn handle_create_function(
         schema_id,
         database_id,
         name: function_name,
-        arguments,
+        arg_types,
         return_type: Some(bind_data_type(&return_type)?.into()),
         language,
         path: flight_server_addr,

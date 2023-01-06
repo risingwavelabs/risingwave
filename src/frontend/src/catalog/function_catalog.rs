@@ -33,11 +33,7 @@ impl From<&ProstFunction> for FunctionCatalog {
             id: prost.id.into(),
             name: prost.name.clone(),
             owner: prost.owner,
-            arg_types: prost
-                .arguments
-                .iter()
-                .map(|arg| arg.r#type.as_ref().expect("no return type").into())
-                .collect(),
+            arg_types: prost.arg_types.iter().map(|arg| arg.into()).collect(),
             return_type: prost.return_type.as_ref().expect("no return type").into(),
             language: prost.language.clone(),
             path: prost.path.clone(),
