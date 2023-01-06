@@ -25,7 +25,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{
     Barrier, BoxedMessageStream, Executor, Message, Mutation, PkIndices, PkIndicesRef,
-    StreamExecutorError, Watermark,
+    StreamExecutorError,
 };
 use crate::common::table::state_table::StateTable;
 
@@ -119,11 +119,12 @@ impl<S: StateStore> NowExecutor<S> {
                 let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
                 yield Message::Chunk(stream_chunk);
 
-                yield Message::Watermark(Watermark::new(
-                    0,
-                    DataType::TIMESTAMPTZ,
-                    timestamp.as_ref().unwrap().clone(),
-                ));
+                // TODO: depends on "https://github.com/risingwavelabs/risingwave/issues/6042"
+                // yield Message::Watermark(Watermark::new(
+                // 0,
+                // DataType::TIMESTAMPTZ,
+                // timestamp.as_ref().unwrap().clone(),
+                // ));
 
                 if last_timestamp.is_some() {
                     state_table.delete(row::once(last_timestamp));
@@ -172,14 +173,14 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
     use super::NowExecutor;
     use crate::common::table::state_table::StateTable;
-    use crate::executor::{Barrier, BoxedMessageStream, Executor, Message, PkIndices, Watermark};
+    use crate::executor::{Barrier, BoxedMessageStream, Executor, PkIndices};
 
     #[tokio::test]
     async fn test_now() {
@@ -207,16 +208,16 @@ mod tests {
         );
 
         // Consume the watermark
-        let watermark = now_executor.next().await.unwrap().unwrap();
-
-        assert_eq!(
-            watermark,
-            Message::Watermark(Watermark::new(
-                0,
-                DataType::TIMESTAMPTZ,
-                ScalarImpl::Int64(1617235200001000)
-            ))
-        );
+        // let watermark = now_executor.next().await.unwrap().unwrap();
+        //
+        // assert_eq!(
+        // watermark,
+        // Message::Watermark(Watermark::new(
+        // 0,
+        // DataType::TIMESTAMPTZ,
+        // ScalarImpl::Int64(1617235200001000)
+        // ))
+        // );
 
         // Consume the barrier
         now_executor.next().await.unwrap().unwrap();
@@ -237,16 +238,16 @@ mod tests {
         );
 
         // Consume the watermark
-        let watermark = now_executor.next().await.unwrap().unwrap();
-
-        assert_eq!(
-            watermark,
-            Message::Watermark(Watermark::new(
-                0,
-                DataType::TIMESTAMPTZ,
-                ScalarImpl::Int64(1617235200002000)
-            ))
-        );
+        // let watermark = now_executor.next().await.unwrap().unwrap();
+        //
+        // assert_eq!(
+        // watermark,
+        // Message::Watermark(Watermark::new(
+        // 0,
+        // DataType::TIMESTAMPTZ,
+        // ScalarImpl::Int64(1617235200002000)
+        // ))
+        // );
 
         // Consume the barrier
         now_executor.next().await.unwrap().unwrap();
