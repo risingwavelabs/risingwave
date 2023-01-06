@@ -67,7 +67,7 @@ pub struct TableCatalog {
 
     pub name: String,
 
-    /// All columns in this table
+    /// All columns in this table.
     pub columns: Vec<ColumnCatalog>,
 
     /// Key used as materialize's storage key prefix, including MV order columns and stream_key.
@@ -76,14 +76,16 @@ pub struct TableCatalog {
     /// pk_indices of the corresponding materialize operator's output.
     pub stream_key: Vec<usize>,
 
-    /// Type of the table. Sink will
+    /// Type of the table. Used to distinguish user-created tables, materialized views, index
+    /// tables, and internal tables. Sinks will have a type of `TableType::Table` because there is
+    /// no need to distinguish sinks from other types of tables now.
     pub table_type: TableType,
 
     /// Distribution key column indices.
     pub distribution_key: Vec<usize>,
 
     /// The append-only attribute is derived from `StreamMaterialize` and `StreamTableScan` relies
-    /// on this to derive an append-only stream plan
+    /// on this to derive an append-only stream plan.
     pub append_only: bool,
 
     /// Owner of the table.
@@ -96,7 +98,7 @@ pub struct TableCatalog {
     pub fragment_id: FragmentId,
 
     /// An optional column index which is the vnode of each row computed by the table's consistent
-    /// hash distribution
+    /// hash distribution.
     pub vnode_col_index: Option<usize>,
 
     /// An optional column index of row id. If the primary key is specified by users, this will be
@@ -104,7 +106,7 @@ pub struct TableCatalog {
     pub row_id_index: Option<usize>,
 
     /// The column indices which are stored in the state store's value with row-encoding. Currently
-    /// is not supported yet and expected to be `[0..columns.len()]`
+    /// is not supported yet and expected to be `[0..columns.len()]`.
     pub value_indices: Vec<usize>,
 
     /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
