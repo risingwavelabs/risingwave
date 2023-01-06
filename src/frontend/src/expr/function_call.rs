@@ -208,8 +208,8 @@ impl FunctionCall {
         self.func_type
     }
 
+    /// Refer to [`ExprType`] for details.
     pub fn is_pure(&self) -> bool {
-        // See proto for details
         0 < self.func_type as i32 && self.func_type as i32 <= 600
     }
 
@@ -300,6 +300,9 @@ impl std::fmt::Debug for FunctionCallDisplay<'_> {
             }
             ExprType::BitwiseXor => {
                 explain_verbose_binary_op(f, "#", &that.inputs, self.input_schema)
+            }
+            ExprType::Now => {
+                write!(f, "{:?}", that.func_type)
             }
             _ => {
                 let func_name = format!("{:?}", that.func_type);

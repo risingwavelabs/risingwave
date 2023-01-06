@@ -13,13 +13,12 @@
 // limitations under the License.
 
 use async_stack_trace::StackTrace;
-use chrono::NaiveDateTime;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row;
-use risingwave_common::types::{DataType, NaiveDateTimeWrapper, ScalarImpl, ToDatumRef};
+use risingwave_common::types::{DataType, ScalarImpl, ToDatumRef};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -47,7 +46,7 @@ impl<S: StateStore> NowExecutor<S> {
         state_table: StateTable<S>,
     ) -> Self {
         let schema = Schema::new(vec![Field {
-            data_type: DataType::Timestamp,
+            data_type: DataType::Timestamptz,
             name: String::from("now"),
             sub_fields: vec![],
             type_name: String::default(),
@@ -98,13 +97,7 @@ impl<S: StateStore> NowExecutor<S> {
         while let Some(barrier) = barrier_receiver.recv().await {
             if !is_pausing {
                 let time_millis = Epoch::from(barrier.epoch.curr).as_unix_millis();
-                let timestamp = Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                    NaiveDateTime::from_timestamp_opt(
-                        (time_millis / 1000) as i64,
-                        (time_millis % 1000 * 1_000_000) as u32,
-                    )
-                    .unwrap(),
-                )));
+                let timestamp = Some(ScalarImpl::Int64((time_millis * 1000) as i64));
 
                 let data_chunk = DataChunk::from_rows(
                     &if last_timestamp.is_some() {
@@ -128,7 +121,7 @@ impl<S: StateStore> NowExecutor<S> {
 
                 yield Message::Watermark(Watermark::new(
                     0,
-                    DataType::TIMESTAMP,
+                    DataType::TIMESTAMPTZ,
                     timestamp.as_ref().unwrap().clone(),
                 ));
 
@@ -175,14 +168,11 @@ impl<S: StateStore> Executor for NowExecutor<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
-    use chrono::NaiveDateTime;
     use futures::StreamExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{DataType, NaiveDateTimeWrapper, ScalarImpl};
+    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -211,8 +201,8 @@ mod tests {
         assert_eq!(
             chunk_msg.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
-                " TS
-                + 2021-04-01T00:00:00.001"
+                " TSZ
+                + 1617235200001000"
             )
         );
 
@@ -223,10 +213,8 @@ mod tests {
             watermark,
             Message::Watermark(Watermark::new(
                 0,
-                DataType::TIMESTAMP,
-                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                    NaiveDateTime::from_str("2021-04-01T00:00:00.001").unwrap()
-                ))
+                DataType::TIMESTAMPTZ,
+                ScalarImpl::Int64(1617235200001000)
             ))
         );
 
@@ -242,9 +230,9 @@ mod tests {
         assert_eq!(
             chunk_msg.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
-                " TS
-                - 2021-04-01T00:00:00.001
-                + 2021-04-01T00:00:00.002"
+                " TSZ
+                - 1617235200001000
+                + 1617235200002000"
             )
         );
 
@@ -255,10 +243,8 @@ mod tests {
             watermark,
             Message::Watermark(Watermark::new(
                 0,
-                DataType::TIMESTAMP,
-                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                    NaiveDateTime::from_str("2021-04-01T00:00:00.002").unwrap()
-                ))
+                DataType::TIMESTAMPTZ,
+                ScalarImpl::Int64(1617235200002000)
             ))
         );
 
@@ -279,7 +265,7 @@ mod tests {
     async fn create_state_table() -> StateTable<MemoryStateStore> {
         let memory_state_store = MemoryStateStore::new();
         let table_id = TableId::new(1);
-        let column_descs = vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamp)];
+        let column_descs = vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamptz)];
         let order_types = create_order_types();
         let pk_indices = create_pk_indices();
         StateTable::new_without_distribution(
