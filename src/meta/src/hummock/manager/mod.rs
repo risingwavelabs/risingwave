@@ -1719,7 +1719,9 @@ where
             committed_epoch: snapshot.committed_epoch,
             current_epoch: max_current_epoch,
         });
-        assert!(prev_snapshot.current_epoch < max_current_epoch);
+        assert!(
+            prev_snapshot.current_epoch < max_current_epoch || max_current_epoch == INVALID_EPOCH
+        );
 
         tracing::trace!("new current epoch {}", max_current_epoch);
         HummockSnapshot {

@@ -600,13 +600,7 @@ where
             let info = self
                 .resolve_actor_info(&mut checkpoint_control, &command)
                 .await;
-            // When there's no actors exist in the cluster, we don't need to send the barrier. This
-            // is an advance optimization. Besides if another barrier comes immediately,
-            // it may send a same epoch and fail the epoch check.
-            if info.nothing_to_do() {
-                notifiers.into_iter().for_each(Notifier::notify_all);
-                continue;
-            }
+
             let prev_epoch = state.in_flight_prev_epoch;
             let new_epoch = prev_epoch.next();
             state.in_flight_prev_epoch = new_epoch;
@@ -620,6 +614,20 @@ where
                 .update_inflight_prev_epoch(self.env.meta_store())
                 .await
                 .unwrap();
+
+            // When there's no actors exist in the cluster, we don't need to send the barrier. This
+            // is an advance optimization.
+            if info.nothing_to_do() {
+                notifiers.into_iter().for_each(Notifier::notify_all);
+                let new_snapshot = self.hummock_manager.update_current_epoch(prev_epoch.0);
+                self.env
+                    .notification_manager()
+                    .notify_frontend_without_version(
+                        Operation::Update, // Frontends don't care about operation.
+                        Info::HummockSnapshot(new_snapshot),
+                    );
+                continue;
+            }
 
             let command_ctx = Arc::new(CommandContext::new(
                 self.fragment_manager.clone(),
