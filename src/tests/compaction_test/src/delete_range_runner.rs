@@ -44,8 +44,7 @@ use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContex
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::{
-    HummockStorage, MemoryLimiter, SstableIdManager, SstableStore,
-    TieredCache,
+    HummockStorage, MemoryLimiter, SstableIdManager, SstableStore, TieredCache,
 };
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;

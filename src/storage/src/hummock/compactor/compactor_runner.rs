@@ -24,9 +24,7 @@ use risingwave_pb::hummock::{CompactTask, LevelType};
 
 use super::task_progress::TaskProgress;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
-use crate::hummock::compactor::{
-    CompactOutput, CompactionFilter, Compactor, CompactorContext,
-};
+use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
 use crate::hummock::{
@@ -209,7 +207,7 @@ mod tests {
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_with_range_tombstone,
     };
-    use crate::hummock::{SstableStore, DeleteRangeTombstone, MemoryLimiter};
+    use crate::hummock::DeleteRangeTombstone;
 
     #[tokio::test]
     async fn test_delete_range_aggregator_with_filter() {
@@ -228,10 +226,6 @@ mod tests {
         )
         .await
         .get_sstable_info();
-        let compact_store = Arc::new(CompactorSstableStore::new(
-            sstable_store,
-            MemoryLimiter::unlimit(),
-        ));
         let compact_task = CompactTask {
             input_ssts: vec![InputLevel {
                 level_idx: 0,
@@ -246,7 +240,7 @@ mod tests {
         ));
         let collector = CompactorRunner::build_delete_range_iter(
             &compact_task,
-            &compact_store,
+            &sstable_store,
             &mut state_clean_up_filter,
         )
         .await

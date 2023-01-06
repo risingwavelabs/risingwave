@@ -102,10 +102,7 @@ impl CompactorContext {
         )
     }
 
-    pub fn with_config(
-        context: Arc<Context>,
-        config: CompactorRuntimeConfig,
-    ) -> Self {
+    pub fn with_config(context: Arc<Context>, config: CompactorRuntimeConfig) -> Self {
         Self {
             context,
             config: Arc::new(tokio::sync::Mutex::new(config)),

@@ -23,8 +23,8 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
 use crate::hummock::iterator::{Forward, HummockIterator};
+use crate::hummock::sstable_store::{BlockStream, SstableStoreRef};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{Block, BlockHolder, BlockIterator, HummockResult};
 use crate::monitor::StoreLocalStatistic;
@@ -350,7 +350,6 @@ impl HummockIterator for ConcatSstableIterator {
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
-    use std::sync::Arc;
 
     use risingwave_hummock_sdk::key::{next_full_key, prev_full_key, FullKey};
     use risingwave_hummock_sdk::key_range::KeyRange;
@@ -363,7 +362,6 @@ mod tests {
         default_builder_opt_for_test, gen_test_sstable, test_key_of, test_value_of, TEST_KEYS_COUNT,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CompactorSstableStore, MemoryLimiter};
 
     #[tokio::test]
     async fn test_concat_iterator() {
@@ -410,7 +408,7 @@ mod tests {
             test_key_of(40000).encode().into(),
         );
         let mut iter =
-            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), sstable_store.clone());
         iter.seek(FullKey::decode(&kr.left)).await.unwrap();
         assert!(!iter.is_valid());
         let kr = KeyRange::new(
@@ -418,7 +416,7 @@ mod tests {
             test_key_of(40000).encode().into(),
         );
         let mut iter =
-            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), sstable_store.clone());
         iter.seek(FullKey::decode(&kr.left)).await.unwrap();
         for idx in start_index..30000 {
             let key = iter.key();
@@ -438,7 +436,7 @@ mod tests {
             test_key_of(40000).encode().into(),
         );
         let mut iter =
-            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), sstable_store.clone());
         iter.seek(test_key_of(10000).to_ref()).await.unwrap();
         assert!(iter.is_valid() && iter.cur_idx == 1 && iter.key() == test_key_of(10000).to_ref());
         iter.seek(test_key_of(10001).to_ref()).await.unwrap();
@@ -458,7 +456,7 @@ mod tests {
             test_key_of(16000).encode().into(),
         );
         let mut iter =
-            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), sstable_store.clone());
         iter.seek(test_key_of(17000).to_ref()).await.unwrap();
         assert!(!iter.is_valid());
         iter.seek(test_key_of(1).to_ref()).await.unwrap();
@@ -482,10 +480,6 @@ mod tests {
             .await;
             table_infos.push(table.get_sstable_info());
         }
-        let compact_store = Arc::new(CompactorSstableStore::new(
-            sstable_store.clone(),
-            MemoryLimiter::unlimit(),
-        ));
 
         // Test seek_idx. Result is dominated by given seek key rather than key range.
         let kr = KeyRange::new(
@@ -493,7 +487,7 @@ mod tests {
             test_key_of(40000).encode().into(),
         );
         let mut iter =
-            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), sstable_store.clone());
         let sst = sstable_store
             .sstable(&iter.tables[0], &mut iter.stats)
             .await
@@ -525,7 +519,7 @@ mod tests {
             prev_full_key(&block_2_smallest_key).into(),
         );
         let mut iter =
-            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), compact_store.clone());
+            ConcatSstableIterator::new(table_infos.clone(), kr.clone(), sstable_store.clone());
         // Use block_2_smallest_key as seek key and result in invalid iterator.
         let seek_key = block_2_smallest_key.clone();
         assert!(KeyComparator::compare_encoded_full_key(&seek_key, &kr.right) == Ordering::Greater);

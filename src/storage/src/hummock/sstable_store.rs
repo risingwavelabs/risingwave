@@ -22,12 +22,12 @@ use itertools::Itertools;
 use risingwave_common::cache::LruCacheEventListener;
 use risingwave_hummock_sdk::{is_remote_sst_id, HummockSstableId};
 use risingwave_object_store::object::{
-    get_local_path, BlockLocation, ObjectMetadata, ObjectStoreRef, ObjectStreamingUploader,
+    get_local_path, BlockLocation, MonitoredStreamingReader, ObjectError, ObjectMetadata,
+    ObjectStoreRef, ObjectStreamingUploader,
 };
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
 use zstd::zstd_safe::WriteBuf;
-use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
 
 use super::utils::MemoryTracker;
 use super::{
@@ -380,9 +380,13 @@ impl SstableStore {
             .insert(sst_id, sst_id, charge, Box::new(sst));
     }
 
-    pub fn insert_block_cache(&self, sst_id: HummockSstableId, block_index: u64, block: Box<Block>) {
-        self.block_cache
-            .insert(sst_id, block_index, block);
+    pub fn insert_block_cache(
+        &self,
+        sst_id: HummockSstableId,
+        block_index: u64,
+        block: Box<Block>,
+    ) {
+        self.block_cache.insert(sst_id, block_index, block);
     }
 
     pub fn get_meta_memory_usage(&self) -> u64 {
@@ -821,7 +825,6 @@ impl BlockStream {
         Ok(Some(boxed_block))
     }
 }
-
 
 #[cfg(test)]
 mod tests {

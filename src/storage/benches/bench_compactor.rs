@@ -37,8 +37,8 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, CompressionAlgorithm, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableIterator, SstableStore, SstableWriterOptions, TieredCache,
+    CachePolicy, CompressionAlgorithm, SstableBuilder, SstableBuilderOptions, SstableIterator,
+    SstableStore, SstableWriterOptions, TieredCache,
 };
 use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
 
@@ -228,15 +228,11 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
             async move { compact(iter, sstable_store1).await }
         });
     });
-    let compact_store = Arc::new(CompactorSstableStore::new(
-        sstable_store.clone(),
-        MemoryLimiter::unlimit(),
-    ));
     c.bench_function("bench_merge_iterator", |b| {
         b.to_async(&runtime).iter(|| {
             let sub_iters = vec![
-                ConcatSstableIterator::new(level1.clone(), KeyRange::inf(), compact_store.clone()),
-                ConcatSstableIterator::new(level2.clone(), KeyRange::inf(), compact_store.clone()),
+                ConcatSstableIterator::new(level1.clone(), KeyRange::inf(), sstable_store.clone()),
+                ConcatSstableIterator::new(level2.clone(), KeyRange::inf(), sstable_store.clone()),
             ];
             let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
             let sstable_store1 = sstable_store.clone();
