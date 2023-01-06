@@ -179,17 +179,17 @@ CREATE TABLE limits_nulls AS (
 	FROM limits
 );
 
-query I rowsort
-SELECT * FROM limits_nulls;
+query I
+SELECT * FROM limits_nulls order by z;
 ----
-NULL
+102
+119
 134
+136
 151
 168
 185
-102
-119
-136
+NULL
 NULL
 
 query II
@@ -446,3 +446,22 @@ FROM many_values, many_bounds
 WHERE val BETWEEN lo AND hi;
 ----
 2001
+
+statement ok
+DROP TABLE many_values;
+
+statement ok
+DROP TABLE many_bounds;
+
+statement ok
+DROP TABLE limits_nulls;
+
+statement ok
+DROP TABLE wide_nulls;
+
+statement ok
+DROP TABLE wide;
+
+
+statement ok
+DROP TABLE limits;
