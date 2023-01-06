@@ -19,5 +19,14 @@ async fn main() {
     let op: Operator = Operator::new(builder.build().unwrap());
 
     // Create an object handle to start operation on object.
-    let _: Object = op.object("test_file");
+    op.object("test_file").write("Hello, world!").await.unwrap();
+
+    let content = op.object("test_file").read().await.unwrap();
+    println!("read: {:?}", String::from_utf8_lossy(&content));
+
+    let meta = op.object("test_file").metadata().await.unwrap();
+
+    println!("meta size = {:?}", meta.content_length());
+    op.object("test_file").delete().await.unwrap();
+
 }
