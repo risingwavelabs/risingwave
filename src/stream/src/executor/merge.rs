@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Reverse;
-use std::collections::{BTreeMap, BinaryHeap, VecDeque};
+use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -25,6 +24,7 @@ use risingwave_common::catalog::Schema;
 
 use super::error::StreamExecutorError;
 use super::exchange::input::BoxedInput;
+use super::watermark::*;
 use super::*;
 use crate::executor::exchange::input::new_input;
 use crate::executor::monitor::StreamingMetrics;
@@ -174,6 +174,14 @@ impl MergeExecutor {
 
                             // Add the new upstreams to select.
                             select_all.add_upstreams_from(select_new);
+
+                            // Add buffers to the buffered watermarks for all cols
+                            select_all
+                                .buffered_watermarks
+                                .values_mut()
+                                .for_each(|buffers| {
+                                    buffers.add_buffers(update.added_upstream_actor_id.clone())
+                                });
                         }
 
                         if !update.get_removed_upstream_actor_id().is_empty() {
@@ -182,12 +190,12 @@ impl MergeExecutor {
                                 &update.removed_upstream_actor_id.iter().copied().collect(),
                             );
 
-                            let col_idxes =
-                                select_all.buffered_watermarks.keys().cloned().collect_vec();
-                            for col_idx in col_idxes {
+                            for buffers in select_all.buffered_watermarks.values_mut() {
                                 // Call `check_heap` in case the only upstream(s) that does not have
                                 // watermark in heap is removed
-                                if let Some(watermark) = select_all.check_watermark_heap(col_idx) {
+                                if let Some(watermark) = buffers.remove_buffer(
+                                    update.removed_upstream_actor_id.iter().copied().collect(),
+                                ) {
                                     yield Message::Watermark(watermark);
                                 }
                             }
@@ -220,21 +228,6 @@ impl Executor for MergeExecutor {
     }
 }
 
-#[derive(Default)]
-struct StagedWatermarks {
-    in_heap: bool,
-    staged: VecDeque<Watermark>,
-}
-
-struct BufferedWatermarks {
-    /// We store the smallest watermark of each upstream, because the next watermark to emit is
-    /// among them.
-    pub first_buffered_watermarks: BinaryHeap<Reverse<(Watermark, ActorId)>>,
-    /// We buffer other watermarks of each upstream. The next-to-smallest one will become the
-    /// smallest when the smallest is emitted and be moved into heap.
-    pub other_buffered_watermarks: BTreeMap<ActorId, StagedWatermarks>,
-}
-
 /// A stream for merging messages from multiple upstreams.
 pub struct SelectReceivers {
     /// The barrier we're aligning to. If this is `None`, then `blocked_upstreams` is empty.
@@ -247,7 +240,7 @@ pub struct SelectReceivers {
     /// The actor id of this fragment.
     actor_id: u32,
     /// watermark column index -> `BufferedWatermarks`
-    buffered_watermarks: BTreeMap<usize, BufferedWatermarks>,
+    buffered_watermarks: BTreeMap<usize, BufferedWatermarks<ActorId>>,
 }
 
 impl Stream for SelectReceivers {
@@ -355,64 +348,28 @@ impl SelectReceivers {
             .extend(upstreams.into_iter().map(|s| s.into_future()));
     }
 
-    /// The number of upstreams.
-    fn len(&self) -> usize {
-        self.blocked.len() + self.active.len()
-    }
-
-    /// Check the watermark heap and decide whether to emit a watermark message.
-    fn check_watermark_heap(&mut self, col_idx: usize) -> Option<Watermark> {
-        let len = self.len();
-        let mut watermark_to_transfer = None;
-        let col_data = self.buffered_watermarks.get_mut(&col_idx).unwrap();
-        while !col_data.first_buffered_watermarks.is_empty()
-            && (col_data.first_buffered_watermarks.len() == len
-                || watermark_to_transfer.as_ref().map_or(false, |watermark| {
-                    watermark == &col_data.first_buffered_watermarks.peek().unwrap().0 .0
-                }))
-        {
-            let Reverse((watermark, actor_id)) = col_data.first_buffered_watermarks.pop().unwrap();
-            watermark_to_transfer = Some(watermark);
-            let staged = col_data
-                .other_buffered_watermarks
-                .get_mut(&actor_id)
-                .unwrap();
-            if let Some(first) = staged.staged.pop_front() {
-                col_data
-                    .first_buffered_watermarks
-                    .push(Reverse((first, actor_id)));
-            } else {
-                staged.in_heap = false;
-            }
-        }
-        watermark_to_transfer
+    fn actor_ids(&self) -> Vec<ActorId> {
+        self.blocked
+            .iter()
+            .map(|input| input.actor_id())
+            .chain(
+                self.active
+                    .iter()
+                    .map(|input| input.get_ref().unwrap().actor_id()),
+            )
+            .collect()
     }
 
     /// Handle a new watermark message. Optionally returns the watermark message to emit.
     fn handle_watermark(&mut self, actor_id: ActorId, watermark: Watermark) -> Option<Watermark> {
         let col_idx = watermark.col_idx;
-        let len = self.len();
-        let watermarks =
-            self.buffered_watermarks
-                .entry(col_idx)
-                .or_insert_with(|| BufferedWatermarks {
-                    first_buffered_watermarks: BinaryHeap::with_capacity(len),
-                    other_buffered_watermarks: BTreeMap::default(),
-                });
-        let staged = watermarks
-            .other_buffered_watermarks
-            .entry(actor_id)
-            .or_default();
-        if staged.in_heap {
-            staged.staged.push_back(watermark);
-            None
-        } else {
-            staged.in_heap = true;
-            watermarks
-                .first_buffered_watermarks
-                .push(Reverse((watermark, actor_id)));
-            self.check_watermark_heap(col_idx)
-        }
+        let actor_ids = self.actor_ids();
+        // Insert a buffer watermarks when first received from a column.
+        let watermarks = self
+            .buffered_watermarks
+            .entry(col_idx)
+            .or_insert_with(|| BufferedWatermarks::with_ids(actor_ids));
+        watermarks.handle_watermark(actor_id, watermark)
     }
 
     /// Consume `other` and add its upstreams to `self`. The two streams must be at the clean state
@@ -435,16 +392,6 @@ impl SelectReceivers {
             .map(|s| s.into_inner().unwrap())
             .filter(|u| !upstream_actor_ids.contains(&u.actor_id()));
         self.extend_active(new_upstreams);
-
-        for BufferedWatermarks {
-            first_buffered_watermarks,
-            other_buffered_watermarks,
-        } in self.buffered_watermarks.values_mut()
-        {
-            first_buffered_watermarks
-                .retain(|Reverse((_, actor_id))| !upstream_actor_ids.contains(actor_id));
-            other_buffered_watermarks.retain(|actor_id, _| !upstream_actor_ids.contains(actor_id));
-        }
     }
 }
 
