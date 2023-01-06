@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use futures::future::ready;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
@@ -96,9 +98,18 @@ impl JsonParser {
 
         let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let field_mapping: HashMap<String, String> = value
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|s| (s.to_lowercase(), s.to_string()))
+            .collect();
 
         writer.insert(|desc| {
-            simd_json_parse_value(&desc.data_type, value.get(desc.name.as_str())).map_err(|e| {
+            let field_value = field_mapping
+                .get(&desc.name.to_lowercase()).and_then(|k| value.get(k.as_str()));
+
+            simd_json_parse_value(&desc.data_type, field_value).map_err(|e| {
                 tracing::error!(
                     "failed to process value ({}): {}",
                     String::from_utf8_lossy(payload),
@@ -289,7 +300,7 @@ mod tests {
 
         let descs = vec![
             ColumnDesc::new_struct(
-                "data",
+                "Data",
                 0,
                 "",
                 vec![
@@ -304,10 +315,10 @@ mod tests {
                 5,
                 "",
                 vec![
-                    ColumnDesc::new_atomic(DataType::Timestamp, "created_at", 6),
+                    ColumnDesc::new_atomic(DataType::Timestamp, "Created_at", 6),
                     ColumnDesc::new_atomic(DataType::Varchar, "id", 7),
-                    ColumnDesc::new_atomic(DataType::Varchar, "name", 8),
-                    ColumnDesc::new_atomic(DataType::Varchar, "username", 9),
+                    ColumnDesc::new_atomic(DataType::Varchar, "Name", 8),
+                    ColumnDesc::new_atomic(DataType::Varchar, "Username", 9),
                 ],
             ),
         ]
