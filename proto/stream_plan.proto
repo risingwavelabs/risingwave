@@ -10,6 +10,7 @@ import "plan_common.proto";
 import "source.proto";
 
 option optimize_for = SPEED;
+option java_package = "com.risingwave.proto";
 
 message AddMutation {
   message Dispatchers {

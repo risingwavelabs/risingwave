@@ -3,6 +3,7 @@ syntax = "proto3";
 package source;
 
 option optimize_for = SPEED;
+option java_package = "com.risingwave.proto";
 
 message ConnectorSplit {
   string split_type = 1;

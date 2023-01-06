@@ -3,6 +3,7 @@ syntax = "proto3";
 package common;
 
 option optimize_for = SPEED;
+option java_package = "com.risingwave.proto";
 
 message Status {
   enum Code {

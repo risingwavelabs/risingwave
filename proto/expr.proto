@@ -6,6 +6,7 @@ import "data.proto";
 import "plan_common.proto";
 
 option optimize_for = SPEED;
+option java_package = "com.risingwave.proto";
 
 message ExprNode {
   // a "pure function" will be defined as having `1 < expr_node as i32 <= 600`.

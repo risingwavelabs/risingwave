@@ -6,6 +6,7 @@ import "expr.proto";
 import "plan_common.proto";
 
 option optimize_for = SPEED;
+option java_package = "com.risingwave.proto";
 
 // The rust prost library always treats uint64 as required and message as
 // optional. In order to allow `row_id_index` as optional field in

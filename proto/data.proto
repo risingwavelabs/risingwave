@@ -5,6 +5,7 @@ package data;
 import "common.proto";
 
 option optimize_for = SPEED;
+option java_package = "com.risingwave.proto";
 
 message IntervalUnit {
   int32 months = 1;

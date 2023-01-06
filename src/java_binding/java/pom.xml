@@ -7,7 +7,7 @@
     <artifactId>java-parent</artifactId>
     <version>1.0-SNAPSHOT</version>
     <modules>
-        <!--        <module>proto</module>-->
+        <module>proto</module>
         <module>java-binding</module>
     </modules>
     <packaging>pom</packaging>
@@ -44,11 +44,17 @@
                 <artifactId>java-binding</artifactId>
                 <version>${module.version}</version>
             </dependency>
-            <!--            <dependency>-->
-            <!--                <groupId>com.risingwave.connector</groupId>-->
-            <!--                <artifactId>connector-api</artifactId>-->
-            <!--                <version>${module.version}</version>-->
-            <!--            </dependency>-->
+            <dependency>
+                <groupId>com.risingwave.java</groupId>
+                <artifactId>proto</artifactId>
+                <version>${module.version}</version>
+            </dependency>
+            <dependency> <!-- necessary for Java 9+ -->
+                <groupId>org.apache.tomcat</groupId>
+                <artifactId>annotations-api</artifactId>
+                <version>6.0.53</version>
+                <scope>provided</scope>
+            </dependency>
             <dependency>
                 <groupId>junit</groupId>
                 <artifactId>junit</artifactId>
