@@ -16,7 +16,7 @@ For RisingWave, [feat: support heap profiling from risedev by fuyufjh · Pull Re
 
 Run a local cluster in EC2 instance with an additional environment variable `RISEDEV_ENABLE_HEAP_PROFILE`.
 
-```bash
+```shell
 RISEDEV_ENABLE_HEAP_PROFILE=1 ./risedev d full
 ```
 
@@ -46,7 +46,7 @@ Note that each of the `.heap` files are full snapshots instead of increments. He
 
 `jeprof` is already compiled in jemallocator and should be compiled by cargo, use it as follows:
 
-```bash
+```shell
 # find jeprof binary
 find . -name 'jeprof'
 
@@ -56,13 +56,13 @@ chmod +x ./target/release/build/tikv-jemalloc-sys-22f0d47d5c562226/out/build/bin
 
 Then
 
-```bash
+```shell
 jeprof --collapsed binary_file heap_file > heap_file.collapsed
 ```
 
 For example:
 
-```bash
+```shell
 ./target/release/build/tikv-jemalloc-sys-22f0d47d5c562226/out/build/bin/jeprof --collapsed /home/ubuntu/risingwave/.risingwave/bin/risingwave/compute-node /home/ubuntu/risingwave/jeprof.198272.1283.i1283.heap > jeprof.198272.1283.i1283.collapsed
 ```
 
@@ -70,7 +70,7 @@ For example:
 
 `jeprof` is very slow for large heap analysis, the bottleneck is `addr2line`, if you want to speed up from 30 minutes to 3s, please use :
 
-```bash
+```shell
 git clone https://github.com/gimli-rs/addr2line
 cd addr2line
 cargo b --examples -r
@@ -86,18 +86,18 @@ Download and unarchive [FlameGraph](https://github.com/brendangregg/FlameGraph) 
 
 Run
 
-```bash
+```shell
 ./flamegraph.pl --color=mem --countname=bytes heap_file.collapsed > flamegraph.svg
 ```
 
 Example:
 
-```bash
+```shell
 ./flamegraph.pl --color=mem --countname=bytes jeprof.198272.4741.i4741.collapsed > flamegraph.svg
 ```
 
 By the way, the step 2 and 3 can be written in one line with pipe:
 
-```bash
+```shell
 jeprof --collapsed target/release/risingwave compute-node.10404.2466.i2466.heap | ~/FlameGraph/flamegraph.pl --color=mem --countname=bytes > flamegraph.svg
 ```
