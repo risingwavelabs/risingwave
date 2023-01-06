@@ -875,6 +875,10 @@ impl GrpcMetaClient {
     // Max retry interval in ms for request to meta server.
     const REQUEST_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
+    /// get a channel against service at `addr`
+    /// 
+    /// ## Arguments:
+    /// addr: Should be formatted like http://127.0.0.1:1234 
     async fn get_channel(addr: &str) -> std::result::Result<Channel, tonic::transport::Error> {
         let endpoint = Endpoint::from_shared(addr.to_string())?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
