@@ -259,8 +259,8 @@ mod tests {
 
     use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
     use risingwave_pb::common::HostAddress;
+    use risingwave_pb::leader::LeaderRequest;
     use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
-    use risingwave_pb::meta::LeaderRequest;
     use tokio::time::sleep;
     use tonic::transport::{Channel, Endpoint};
 
@@ -439,7 +439,7 @@ mod tests {
     /// None if it can not reach the node at localhost: `meta_port`, else the reported leader
     /// address
     async fn get_leader_addr(meta_port: u16) -> Option<HostAddress> {
-        use risingwave_pb::meta::leader_service_client::LeaderServiceClient;
+        use risingwave_pb::leader::leader_service_client::LeaderServiceClient;
 
         let port = meta_port;
         let meta_addr = format!("http://127.0.0.1:{}", port);
