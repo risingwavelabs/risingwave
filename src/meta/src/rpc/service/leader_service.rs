@@ -14,8 +14,9 @@
 
 use risingwave_common::util::addr::leader_info_to_host_addr;
 use risingwave_pb::common::HostAddress;
-use risingwave_pb::meta::leader_service_server::LeaderService;
-use risingwave_pb::meta::{LeaderRequest, LeaderResponse, MetaLeaderInfo};
+use risingwave_pb::leader::leader_service_server::LeaderService;
+use risingwave_pb::leader::{LeaderRequest, LeaderResponse};
+use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::watch::Receiver;
 use tonic::{Request, Response, Status};
 

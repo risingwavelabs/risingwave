@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_pb::health::health_server::HealthServer;
-use risingwave_pb::meta::leader_service_server::LeaderServiceServer;
+use risingwave_pb::leader::leader_service_server::LeaderServiceServer;
 use risingwave_pb::meta::MetaLeaderInfo;
 use tokio::sync::oneshot::Receiver as OneReceiver;
 use tokio::sync::watch::Receiver as WatchReceiver;

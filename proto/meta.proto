@@ -31,16 +31,6 @@ service HeartbeatService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
 }
 
-message LeaderRequest {}
-
-message LeaderResponse {
-  common.HostAddress leader_addr = 1;
-}
-
-service LeaderService {
-  rpc Leader(LeaderRequest) returns (LeaderResponse);
-}
-
 // Fragments of a Streaming Job
 message TableFragments {
   // The state of the fragments of this table
