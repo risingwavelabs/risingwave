@@ -47,6 +47,8 @@ pub use expr_literal::*;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common::{bail, try_match_expand};
+use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ExprNode;
 
 use super::Result;
@@ -148,6 +150,16 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             ArrayConcatExpression::try_from(prost).map(Expression::boxed)
         }
         Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
+        Now => {
+            let rex_node = try_match_expand!(prost.get_rex_node(), Ok)?;
+            let RexNode::FuncCall(func_call_node) = rex_node else {
+                bail!("Expected RexNode::FuncCall in Now");
+            };
+            let Some(bind_timestamp) = func_call_node.children.first() else {
+                bail!("Expected epoch timestamp bound into Now");
+            };
+            LiteralExpression::try_from(bind_timestamp).map(Expression::boxed)
+        }
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",
             prost.get_expr_type()

@@ -28,9 +28,12 @@ fn main() {
         }
 
         let tokens = Tokenizer::new(&sql).tokenize().unwrap();
-        println!("{:?}", tokens);
+        println!("tokens: {:?}", tokens);
         let ast = Parser::parse_sql(&sql).unwrap();
-        println!("{:?}", ast);
+        println!("ast: {:?}", ast);
+        for stmt in ast {
+            println!("unparse: {}", stmt);
+        }
 
         sql = String::new();
     }

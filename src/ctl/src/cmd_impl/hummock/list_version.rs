@@ -15,19 +15,17 @@
 use risingwave_pb::hummock::{PinnedSnapshotsSummary, PinnedVersionsSummary};
 use risingwave_rpc_client::HummockMetaClient;
 
-use crate::common::MetaServiceOpts;
+use crate::CtlContext;
 
-pub async fn list_version() -> anyhow::Result<()> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
+pub async fn list_version(context: &CtlContext) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
     let version = meta_client.get_current_version().await?;
     println!("{:#?}", version);
     Ok(())
 }
 
-pub async fn list_pinned_versions() -> anyhow::Result<()> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
+pub async fn list_pinned_versions(context: &CtlContext) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
     let PinnedVersionsSummary {
         mut pinned_versions,
         workers,
@@ -56,9 +54,8 @@ pub async fn list_pinned_versions() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn list_pinned_snapshots() -> anyhow::Result<()> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
+pub async fn list_pinned_snapshots(context: &CtlContext) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
     let PinnedSnapshotsSummary {
         mut pinned_snapshots,
         workers,

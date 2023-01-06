@@ -276,6 +276,7 @@ pub mod agg_executor {
             AggKind::Min /* append only */
             | AggKind::Max /* append only */
             | AggKind::Sum
+            | AggKind::Sum0
             | AggKind::Count
             | AggKind::Avg
             | AggKind::ApproxCountDistinct => {

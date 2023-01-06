@@ -48,7 +48,7 @@ fn parse_create_table_with_defaults() {
                 vec![
                     ColumnDef::new(
                         "customer_id".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -59,7 +59,7 @@ fn parse_create_table_with_defaults() {
                     ),
                     ColumnDef::new(
                         "store_id".into(),
-                        DataType::SmallInt(None),
+                        DataType::SmallInt,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -87,7 +87,7 @@ fn parse_create_table_with_defaults() {
                     ColumnDef::new("email".into(), DataType::Varchar, None, vec![],),
                     ColumnDef::new(
                         "address_id".into(),
-                        DataType::SmallInt(None),
+                        DataType::SmallInt,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -141,7 +141,7 @@ fn parse_create_table_with_defaults() {
                     ),
                     ColumnDef::new(
                         "active".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -593,7 +593,7 @@ fn parse_prepare() {
             ..
         } => {
             assert_eq!(name, "a".into());
-            assert_eq!(data_types, vec![DataType::Int(None), DataType::Text]);
+            assert_eq!(data_types, vec![DataType::Int, DataType::Text]);
 
             statement
         }
@@ -765,10 +765,10 @@ fn parse_create_function() {
             or_replace: false,
             name: ObjectName(vec![Ident::new("add")]),
             args: Some(vec![
-                CreateFunctionArg::unnamed(DataType::Int(None)),
-                CreateFunctionArg::unnamed(DataType::Int(None)),
+                CreateFunctionArg::unnamed(DataType::Int),
+                CreateFunctionArg::unnamed(DataType::Int),
             ]),
-            return_type: Some(DataType::Int(None)),
+            return_type: Some(DataType::Int),
             bodies: vec![
                 CreateFunctionBody::As("select $1 + $2;".into()),
                 CreateFunctionBody::Language("SQL".into()),
@@ -784,15 +784,15 @@ fn parse_create_function() {
             or_replace: true,
             name: ObjectName(vec![Ident::new("add")]),
             args: Some(vec![
-                CreateFunctionArg::with_name("a", DataType::Int(None)),
+                CreateFunctionArg::with_name("a", DataType::Int),
                 CreateFunctionArg {
                     mode: Some(ArgMode::In),
                     name: Some("b".into()),
-                    data_type: DataType::Int(None),
+                    data_type: DataType::Int,
                     default_expr: Some(Expr::Value(Value::Number("1".into()))),
                 }
             ]),
-            return_type: Some(DataType::Int(None)),
+            return_type: Some(DataType::Int),
             bodies: vec![
                 CreateFunctionBody::Language("SQL".into()),
                 CreateFunctionBody::Behavior(FunctionBehavior::Immutable),

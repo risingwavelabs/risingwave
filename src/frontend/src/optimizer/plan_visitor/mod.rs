@@ -12,13 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use paste::paste;
 mod max_one_row_visitor;
 pub use max_one_row_visitor::*;
 mod plan_correlated_id_finder;
 pub use plan_correlated_id_finder::*;
 mod share_parent_counter;
-use paste::paste;
 pub use share_parent_counter::*;
+
+#[cfg(debug_assertions)]
+mod input_ref_validator;
+#[cfg(debug_assertions)]
+pub use input_ref_validator::*;
 
 use crate::for_all_plan_nodes;
 use crate::optimizer::plan_node::*;
