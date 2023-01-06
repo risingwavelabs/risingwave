@@ -17,12 +17,14 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::{TableDesc, TableId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType as ProstTableType};
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
 use super::column_catalog::ColumnCatalog;
-use super::{DatabaseId, FragmentId, SchemaId};
+use super::{DatabaseId, FragmentId, RelationCatalog, SchemaId};
 use crate::optimizer::property::FieldOrder;
+use crate::user::UserId;
 use crate::WithOptions;
 
 /// Includes full information about a table.
@@ -32,7 +34,7 @@ use crate::WithOptions;
 /// - a materialized view
 /// - an index
 ///
-/// Use `self.kind()` to determine the type of the table.
+/// Use `self.table_type()` to determine the type of the table.
 ///
 /// # Column ID & Column Index
 ///
@@ -87,7 +89,7 @@ pub struct TableCatalog {
     pub append_only: bool,
 
     /// Owner of the table.
-    pub owner: u32,
+    pub owner: UserId,
 
     /// Properties of the table. For example, `appendonly` or `retention_seconds`.
     pub properties: WithOptions,
@@ -184,6 +186,29 @@ impl TableCatalog {
 
     pub fn is_index(&self) -> bool {
         self.table_type == TableType::Index
+    }
+
+    /// Returns an error if `DROP` statements are used on the wrong type of table.
+    #[must_use]
+    pub fn bad_drop_error(&self) -> RwError {
+        let msg = match self.table_type {
+            TableType::MaterializedView => {
+                "Use `DROP MATERIALIZED VIEW` to drop a materialized view."
+            }
+            TableType::Index => "Use `DROP INDEX` to drop an index.",
+            TableType::Table => {
+                // TODO(Yuanxin): Remove this after unsupporting `CREATE MATERIALIZED SOURCE`.
+                // Note(bugen): may make this a method on `TableType` instead.
+                if self.associated_source_id().is_some() {
+                    "Use `DROP SOURCE` to drop a source."
+                } else {
+                    "Use `DROP TABLE` to drop a table."
+                }
+            }
+            TableType::Internal => "Internal tables cannot be dropped.",
+        };
+
+        ErrorCode::InvalidInputSyntax(msg.to_owned()).into()
     }
 
     /// Get the table catalog's associated source id.
@@ -335,6 +360,12 @@ impl From<ProstTable> for TableCatalog {
 impl From<&ProstTable> for TableCatalog {
     fn from(tb: &ProstTable) -> Self {
         tb.clone().into()
+    }
+}
+
+impl RelationCatalog for TableCatalog {
+    fn owner(&self) -> UserId {
+        self.owner
     }
 }
 
