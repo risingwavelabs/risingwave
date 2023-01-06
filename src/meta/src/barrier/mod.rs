@@ -600,13 +600,7 @@ where
             let info = self
                 .resolve_actor_info(&mut checkpoint_control, &command)
                 .await;
-            // When there's no actors exist in the cluster, we don't need to send the barrier. This
-            // is an advance optimization. Besides if another barrier comes immediately,
-            // it may send a same epoch and fail the epoch check.
-            if info.nothing_to_do() {
-                notifiers.into_iter().for_each(Notifier::notify_all);
-                continue;
-            }
+
             let prev_epoch = state.in_flight_prev_epoch;
             let new_epoch = prev_epoch.next();
             state.in_flight_prev_epoch = new_epoch;
