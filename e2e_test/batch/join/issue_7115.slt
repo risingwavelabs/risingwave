@@ -17,3 +17,5 @@ select * from v join (select count(*) from t) T;
 # query I
 # select * from v join (select count(*) from t) T;
 # ----
+
+DROP table t;
