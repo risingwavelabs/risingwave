@@ -12,18 +12,6 @@ FROM
         SELECT
                 TRUE AS col_0
         FROM
-            hop(
-                    bid, bid.date_time, INTERVAL '1', INTERVAL '651716'
-                ) AS hop_4,
-            m5 AS t_5,
-            region AS t_6,
-            hop(
-                    person, person.date_time, INTERVAL '1',
-                    INTERVAL '1'
-                ) AS hop_7,
-            partsupp AS t_8,
-            nation AS t_9,
-            m9 AS t_10,
             (
                 SELECT
                     hop_13.c15 AS col_0,
