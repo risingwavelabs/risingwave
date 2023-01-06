@@ -423,7 +423,7 @@ pub fn to_stream_prost_body(
             use generic::dynamic_filter::*;
             let me = &me.core;
             let condition = me
-                .predicate
+                .predicate()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto());
             let left_table = infer_left_internal_table_catalog(base, me.left_index)

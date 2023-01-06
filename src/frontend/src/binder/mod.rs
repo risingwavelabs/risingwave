@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::error::Result;
 use risingwave_common::session_config::SearchPath;
-use risingwave_sqlparser::ast::{Statement, TableAlias};
+use risingwave_sqlparser::ast::Statement;
 
 mod bind_context;
 mod delete;
@@ -51,6 +50,8 @@ pub use values::BoundValues;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::session::{AuthContext, SessionImpl};
 
+pub type CteId = usize;
+
 /// `Binder` binds the identifiers in AST to columns in relations
 pub struct Binder {
     // TODO: maybe we can only lock the database, but not the whole catalog.
@@ -74,8 +75,7 @@ pub struct Binder {
 
     next_subquery_id: usize,
     next_values_id: usize,
-    /// Map the cte's name to its Relation::Subquery.
-    cte_to_relation: HashMap<String, (BoundQuery, TableAlias)>,
+    next_cte_id: CteId,
 
     search_path: SearchPath,
     /// Whether the Binder is binding an MV.
@@ -110,7 +110,7 @@ impl Binder {
             lateral_contexts: vec![],
             next_subquery_id: 0,
             next_values_id: 0,
-            cte_to_relation: HashMap::new(),
+            next_cte_id: 0,
             search_path: session.config().get_search_path(),
             in_create_mv,
             session_timezone: SessionTimezone { 
@@ -135,6 +135,7 @@ impl Binder {
 
     fn push_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
+        self.context.cte_to_relation = new_context.cte_to_relation.clone();
         let new_lateral_contexts = std::mem::take(&mut self.lateral_contexts);
         self.upper_subquery_contexts
             .push((new_context, new_lateral_contexts));
@@ -152,6 +153,7 @@ impl Binder {
 
     fn push_lateral_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
+        self.context.cte_to_relation = new_context.cte_to_relation.clone();
         self.lateral_contexts.push(LateralBindContext {
             is_visible: false,
             context: new_context,
@@ -198,6 +200,11 @@ impl Binder {
     pub fn session_timezone(&self) -> SessionTimezone {
         self.session_timezone
     }
+
+    fn next_cte_id(&mut self) -> CteId {
+        let id = self.next_cte_id;
+        self.next_cte_id += 1;
+        id
 }
 
 #[cfg(test)]
