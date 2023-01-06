@@ -35,6 +35,8 @@ impl StreamRowIdGen {
             input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            input.watermark_columns().clone(),
         );
         Self {
             base,
