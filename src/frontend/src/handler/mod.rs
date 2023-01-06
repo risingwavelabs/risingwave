@@ -46,6 +46,7 @@ pub mod create_user;
 mod create_view;
 mod describe;
 mod drop_database;
+pub mod drop_function;
 mod drop_index;
 pub mod drop_mv;
 mod drop_schema;
@@ -303,6 +304,11 @@ pub async fn handle(
             ))
             .into()),
         },
+        Statement::DropFunction {
+            if_exists,
+            func_desc,
+            option,
+        } => drop_function::handle_drop_function(handler_args, if_exists, func_desc, option).await,
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }

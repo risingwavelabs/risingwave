@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::{
@@ -63,13 +64,25 @@ impl From<&ProstFunctionArgument> for FunctionArgument {
 }
 
 impl FunctionCatalog {
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    /// Returns the SQL statement that can be used to create this view.
+    /// Returns the SQL statement that can be used to create this function.
+    #[allow(dead_code)]
     pub fn create_sql(&self) -> String {
-        todo!();
-        format!("CREATE FUNCTION {}", self.name)
+        format!(
+            "CREATE FUNCTION {}({}) RETURNS {} LANGUAGE {} AS '{}'",
+            self.name,
+            self.arguments.iter().map(|arg| arg.create_sql()).join(","),
+            self.return_type,
+            self.language,
+            self.path
+        )
+    }
+}
+
+impl FunctionArgument {
+    fn create_sql(&self) -> String {
+        match &self.name {
+            Some(name) => format!("{} {}", name, self.data_type),
+            None => format!("{}", self.data_type),
+        }
     }
 }
