@@ -615,21 +615,6 @@ where
                 .await
                 .unwrap();
 
-            // When there's no actors exist in the cluster, we don't need to send the barrier but
-            // still have to update the current epoch in hummock manager, which will be used for
-            // batch `now()` in frontend. This is an advance optimization.
-            if info.nothing_to_do() {
-                notifiers.into_iter().for_each(Notifier::notify_all);
-                let new_snapshot = self.hummock_manager.update_current_epoch(prev_epoch.0);
-                self.env
-                    .notification_manager()
-                    .notify_frontend_without_version(
-                        Operation::Update, // Frontends don't care about operation.
-                        Info::HummockSnapshot(new_snapshot),
-                    );
-                continue;
-            }
-
             let command_ctx = Arc::new(CommandContext::new(
                 self.fragment_manager.clone(),
                 self.snapshot_manager.clone(),
