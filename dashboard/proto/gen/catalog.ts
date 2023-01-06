@@ -206,7 +206,7 @@ export interface Table_TableVersion {
   version: number;
   /**
    * The ID of the next column to be added, which is used to make all columns
-   * in the table have unique IDs, even if some columns has been dropped.
+   * in the table have unique IDs, even if some columns have been dropped.
    */
   nextColumnId: number;
 }

@@ -89,7 +89,7 @@ message Table {
     // each schema change in the frontend.
     uint64 version = 1;
     // The ID of the next column to be added, which is used to make all columns
-    // in the table have unique IDs, even if some columns has been dropped.
+    // in the table have unique IDs, even if some columns have been dropped.
     int32 next_column_id = 2;
   }
 
