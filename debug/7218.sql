@@ -10,30 +10,7 @@ FROM
     m2 AS t_3,
     (
         SELECT
-            EXISTS (
-                    SELECT
-                        TIMESTAMP '2022-03-06 04:11:37' AS col_0,
-                        TIME '04:11:37' AS col_1,
-                        false AS col_2,
-                    INT '0' + INT '1' AS col_3
-                    FROM
-                    alltypes2 AS t_34
-                    JOIN m4 AS t_35 ON t_34.c15 = t_35.col_0,
-                    m6 AS t_36,
-                    tumble(
-                            person, person.date_time, INTERVAL '19555'
-                        ) AS tumble_37,
-                    partsupp AS t_38,
-                    tumble(m4, m4.col_3, INTERVAL '86400') AS tumble_39,
-                    bid AS t_40
-                    JOIN m1 AS t_41 ON t_40.date_time = t_41.col_0,
-                    lineitem AS t_42,
-                    alltypes1 AS t_43,
-                    m7 AS t_44
-                    JOIN alltypes2 AS t_45 ON t_44.col_0 = t_45.c4,
-                    supplier AS t_46,
-                    customer AS t_47
-                ) AS col_0
+                TRUE AS col_0
         FROM
             hop(
                     bid, bid.date_time, INTERVAL '1', INTERVAL '651716'
