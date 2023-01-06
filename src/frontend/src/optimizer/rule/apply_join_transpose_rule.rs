@@ -342,7 +342,7 @@ impl ApplyJoinTransposeRule {
                     join_left_len: apply_left_len,
                     join_left_offset: 0,
                     join_right_offset: -(join_left_len as isize),
-                    index_mapping: ColIndexMapping::empty(0),
+                    index_mapping: ColIndexMapping::empty(0, 0),
                     correlated_id,
                 };
 
@@ -477,7 +477,7 @@ impl ApplyJoinTransposeRule {
                     join_left_len: apply_left_len,
                     join_left_offset: 0,
                     join_right_offset: -(join_left_len as isize),
-                    index_mapping: ColIndexMapping::empty(0),
+                    index_mapping: ColIndexMapping::empty(0, 0),
                     correlated_id,
                 };
 

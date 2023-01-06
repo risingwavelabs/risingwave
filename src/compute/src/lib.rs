@@ -108,7 +108,12 @@ fn validate_opts(opts: &ComputeNodeOpts) {
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
-    let total_cpu_available = total_cpu_available() as usize;
+    if opts.parallelism == 0 {
+        let error_msg = "parallelism should not be zero";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+    let total_cpu_available = total_cpu_available().ceil() as usize;
     if opts.parallelism > total_cpu_available {
         let error_msg = format!(
             "parallelism {} is larger than the total cpu available {} that can be acquired.",
@@ -160,5 +165,5 @@ fn default_total_memory_bytes() -> usize {
 }
 
 fn default_parallelism() -> usize {
-    total_cpu_available() as usize
+    total_cpu_available().ceil() as usize
 }
