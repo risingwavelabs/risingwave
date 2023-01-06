@@ -438,40 +438,40 @@ impl Binder {
             match data_type {
                 DataType::Date | DataType::Time => {
                     let timestamp = self.at_session_time_zone(input);
-                    return Some(timestamp.cast_explicit(data_type));
+                    return Ok(Some(timestamp.cast_explicit(data_type)?));
                 },
                 DataType::Timestamp => {
-                    return Some(self.at_session_time_zone(input));
+                    return Ok(Some(self.at_session_time_zone(input)));
                 }
+                _ => _,
             }
         }
         if matches!(data_type, DataType::Timestamptz) {
             match input.return_type() {
                 DataType::Date => {
-                    let timestamp = input.cast_explicit(DataType::Timestamptz);
+                    let timestamp = input.cast_explicit(DataType::Timestamptz)?;
                     return Ok(Some(self.at_session_time_zone(timestamp)));
                 }
                 DataType::Timestamp => {
-                    return Some(self.at_session_time_zone(input.clone()));
+                    return Ok(Some(self.at_session_time_zone(input.clone())));
                 }
-                DataType::Varchar => 
                 _ => _,
             }
         }
-        None
+        Ok(None)
     }
 
     fn at_session_time_zone(&self, input: ExprImpl) -> ExprImpl {
         self.session_timezone.used = true;
         ExprImpl::FunctionCall(
-            FunctionCall::new(
+            Box::new(FunctionCall::new(
                 ExprType::AtTimeZone, 
                 vec![
                     input, 
-                    ExprImpl::literal_varchar(self.session_timezone.zone)
+                    ExprImpl::literal_varchar(self.session_timezone.timezone)
                 ]
-            )
-        )
+            ).unwrap()
+        ))
     }
 }
 

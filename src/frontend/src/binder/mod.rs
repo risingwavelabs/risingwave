@@ -195,7 +195,7 @@ impl Binder {
         id
     }
 
-    pub fn session_timezone() -> SessionTimezone {
+    pub fn session_timezone(&self) -> SessionTimezone {
         self.session_timezone
     }
 }
