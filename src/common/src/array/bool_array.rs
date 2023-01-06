@@ -18,7 +18,7 @@ use super::{Array, ArrayBuilder, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoolArray {
     bitmap: Bitmap,
     data: Bitmap,

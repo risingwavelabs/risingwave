@@ -797,55 +797,62 @@ fn is_pure_fn_except_for_input_ref(expr: &ExprImpl) -> bool {
     }
 }
 
-// We are trying to derive a predicate to apply to the other side of a join if all
-// the `InputRef`s in the predicate are eq condition columns, and can hence be substituted
-// with the corresponding eq condition columns of the other side.
-//
-// Strategy:
-// 1. If the function is pure except for any `InputRef`, then we proceed. Else abort.
-// 2. Then, we collect `InputRef`s in the conjunction.
-// 3. If they are all columns in the given side of join eq condition, then we proceed. Else abort.
-// 4. We then rewrite the `ExprImpl`, by replacing `InputRef` column indices with
-//    the equivalent in the other side.
+/// We are trying to derive a predicate to apply to the other side of a join if all
+/// the `InputRef`s in the predicate are eq condition columns, and can hence be substituted
+/// with the corresponding eq condition columns of the other side.
+///
+/// Strategy:
+/// 1. If the function is pure except for any `InputRef` (which may refer to impure computation),
+///    then we proceed. Else abort.
+/// 2. Then, we collect `InputRef`s in the conjunction.
+/// 3. If they are all columns in the given side of join eq condition, then we proceed. Else abort.
+/// 4. We then rewrite the `ExprImpl`, by replacing `InputRef` column indices with
+///    the equivalent in the other side.
+///
+/// # Arguments
+///
+/// Suppose we derive a predicate from the left side to be pushed to the right side.
+/// * `expr`: An expr from the left side.
+/// * `col_num`: The number of columns in the left side.
 fn derive_predicate_from_eq_condition(
     expr: &ExprImpl,
     eq_condition: &EqJoinPredicate,
-    cols_num: usize,
+    col_num: usize,
     expr_is_left: bool,
 ) -> Option<ExprImpl> {
     if !is_pure_fn_except_for_input_ref(expr) {
         return None;
     }
-    let input_ref_indices = expr.collect_input_refs(cols_num);
-    let eq_predicate_indices = if expr_is_left {
+    let eq_indices = if expr_is_left {
         eq_condition.left_eq_indexes()
     } else {
         eq_condition.right_eq_indexes()
     };
-    let only_eq_indices = input_ref_indices
+    if expr
+        .collect_input_refs(col_num)
         .ones()
-        .all(|index| eq_predicate_indices.contains(&index));
-    if !only_eq_indices {
+        .any(|index| !eq_indices.contains(&index))
+    {
+        // expr contains an InputRef not in eq_condition
         return None;
     }
     // The function is pure except for `InputRef` and all `InputRef`s are `eq_condition` indices.
     // Hence, we can substitute those `InputRef`s with indices from the other side.
     let other_side_mapping = if expr_is_left {
-        eq_condition.eq_indexes().into_iter().collect()
+        eq_condition.eq_indexes_typed().into_iter().collect()
     } else {
         eq_condition
-            .eq_indexes()
+            .eq_indexes_typed()
             .into_iter()
             .map(|(x, y)| (y, x))
             .collect()
     };
     struct InputRefsRewriter {
-        mapping: HashMap<usize, usize>,
+        mapping: HashMap<InputRef, InputRef>,
     }
     impl ExprRewriter for InputRefsRewriter {
-        fn rewrite_input_ref(&mut self, mut input_ref: InputRef) -> ExprImpl {
-            input_ref.index = *self.mapping.get(&input_ref.index).unwrap();
-            input_ref.into()
+        fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+            self.mapping[&input_ref].clone().into()
         }
     }
     Some(
@@ -921,12 +928,10 @@ impl PredicatePushdown for LogicalJoin {
         let right_predicate = right_from_filter.and(right_from_on);
 
         // Derive conditions to push to the other side based on eq condition columns
-        let left_cols_num = self.left().schema().len();
-        let right_cols_num = self.right().schema().len();
-        let eq_condition = EqJoinPredicate::create(left_cols_num, right_cols_num, new_on.clone());
+        let eq_condition = EqJoinPredicate::create(left_col_num, right_col_num, new_on.clone());
 
         // Only push to RHS if RHS is inner side of a join (RHS requires match on LHS)
-        let right_derived_predicate = if matches!(
+        let right_from_left = if matches!(
             join_type,
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi | JoinType::LeftSemi
         ) {
@@ -935,7 +940,7 @@ impl PredicatePushdown for LogicalJoin {
                     .conjunctions
                     .iter()
                     .filter_map(|expr| {
-                        derive_predicate_from_eq_condition(expr, &eq_condition, left_cols_num, true)
+                        derive_predicate_from_eq_condition(expr, &eq_condition, left_col_num, true)
                     })
                     .collect(),
             }
@@ -944,7 +949,7 @@ impl PredicatePushdown for LogicalJoin {
         };
 
         // Only push to LHS if LHS is inner side of a join (LHS requires match on RHS)
-        let left_derived_predicate = if matches!(
+        let left_from_right = if matches!(
             join_type,
             JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi | JoinType::RightSemi
         ) {
@@ -956,7 +961,7 @@ impl PredicatePushdown for LogicalJoin {
                         derive_predicate_from_eq_condition(
                             expr,
                             &eq_condition,
-                            right_cols_num,
+                            right_col_num,
                             false,
                         )
                     })
@@ -966,8 +971,8 @@ impl PredicatePushdown for LogicalJoin {
             Condition::true_cond()
         };
 
-        let left_predicate = left_predicate.and(left_derived_predicate);
-        let right_predicate = right_predicate.and(right_derived_predicate);
+        let left_predicate = left_predicate.and(left_from_right);
+        let right_predicate = right_predicate.and(right_from_left);
 
         let new_left = self.left().predicate_pushdown(left_predicate, ctx);
         let new_right = self.right().predicate_pushdown(right_predicate, ctx);
@@ -1074,10 +1079,9 @@ impl LogicalJoin {
 
     fn to_stream_dynamic_filter(
         &self,
-        predicate: EqJoinPredicate,
+        predicate: Condition,
         ctx: &mut ToStreamContext,
     ) -> Result<Option<PlanRef>> {
-        assert!(!predicate.has_eq());
         // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
         // join is a `Inner` join, we can convert the scalar subquery into a
         // `StreamDynamicFilter`
@@ -1091,26 +1095,33 @@ impl LogicalJoin {
         if !MaxOneRowVisitor.visit(self.right()) {
             return Ok(None);
         }
+        if self.right().schema().len() != 1 {
+            return Ok(None);
+        }
 
         // Check if the join condition is a correlated comparison
-        let conj = &predicate.other_cond().conjunctions;
-        let left_ref_index = if let [expr] = conj.as_slice() {
-            if let Some((left_ref, _, right_ref)) = expr.as_comparison_cond()
-                && left_ref.index < self.left().schema().len()
-                && right_ref.index >= self.left().schema().len()
-            {
-                let left_datatype = &self.left().schema().data_types()[left_ref.index];
-                let right_index = right_ref.index - self.left().schema().len();
-                let right_datatype = &self.right().schema().data_types()[right_index];
-                // We align input types on all join predicates with cmp operator
-                assert_eq!(left_datatype, right_datatype);
-                left_ref.index
-            } else {
-                return Ok(None);
-            }
-        } else {
+        if predicate.conjunctions.len() > 1 {
             return Ok(None);
+        }
+        let expr: ExprImpl = predicate.into();
+        let (left_ref, comparator, right_ref) = match expr.as_comparison_cond() {
+            Some(v) => v,
+            None => return Ok(None),
         };
+
+        let condition_cross_inputs = left_ref.index < self.left().schema().len()
+            && right_ref.index == self.left().schema().len() /* right side has only one column */;
+        if !condition_cross_inputs {
+            // Maybe we should panic here because it means some predicates are not pushed down.
+            return Ok(None);
+        }
+
+        // We align input types on all join predicates with cmp operator
+        if self.left().schema().fields()[left_ref.index].data_type
+            != self.right().schema().fields()[0].data_type
+        {
+            return Ok(None);
+        }
 
         // Check if non of the columns from the inner side is required to output
         let all_output_from_left = self
@@ -1122,7 +1133,6 @@ impl LogicalJoin {
         }
 
         let left = self.left().to_stream(ctx)?;
-
         let right = self.right().to_stream_with_dist_required(
             &RequiredDist::PhysicalDist(Distribution::Broadcast),
             ctx,
@@ -1134,9 +1144,7 @@ impl LogicalJoin {
             Distribution::Single
         );
 
-        let plan =
-            StreamDynamicFilter::new(left_ref_index, predicate.other_cond().clone(), left, right)
-                .into();
+        let plan = StreamDynamicFilter::new(left_ref.index, comparator, left, right).into();
 
         // TODO: `DynamicFilterExecutor` should support `output_indices` in `ChunkBuilder`
         if self
@@ -1265,7 +1273,9 @@ impl ToStream for LogicalJoin {
 
         if predicate.has_eq() {
             self.to_stream_hash_join(predicate, ctx)
-        } else if let Some(dynamic_filter) = self.to_stream_dynamic_filter(predicate, ctx)? {
+        } else if let Some(dynamic_filter) =
+            self.to_stream_dynamic_filter(self.on().clone(), ctx)?
+        {
             Ok(dynamic_filter)
         } else {
             Err(RwError::from(ErrorCode::NotImplemented(

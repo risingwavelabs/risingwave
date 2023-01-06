@@ -466,13 +466,14 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
     };
     let data_type = match data_type {
         AstDataType::Boolean => DataType::Boolean,
-        AstDataType::SmallInt(None) => DataType::Int16,
-        AstDataType::Int(None) => DataType::Int32,
-        AstDataType::BigInt(None) => DataType::Int64,
+        AstDataType::SmallInt => DataType::Int16,
+        AstDataType::Int => DataType::Int32,
+        AstDataType::BigInt => DataType::Int64,
         AstDataType::Real | AstDataType::Float(Some(1..=24)) => DataType::Float32,
         AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => DataType::Float64,
+        AstDataType::Float(Some(0 | 54..)) => unreachable!(),
         AstDataType::Decimal(None, None) => DataType::Decimal,
-        AstDataType::Varchar | AstDataType::String | AstDataType::Text => DataType::Varchar,
+        AstDataType::Varchar | AstDataType::Text => DataType::Varchar,
         AstDataType::Date => DataType::Date,
         AstDataType::Time(false) => DataType::Time,
         AstDataType::Timestamp(false) => DataType::Timestamp,
@@ -509,7 +510,11 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
             }
         }
         AstDataType::Bytea => DataType::Bytea,
-        _ => return Err(new_err().into()),
+        AstDataType::Regclass
+        | AstDataType::Uuid
+        | AstDataType::Custom(_)
+        | AstDataType::Decimal(_, _)
+        | AstDataType::Time(true) => return Err(new_err().into()),
     };
     Ok(data_type)
 }
