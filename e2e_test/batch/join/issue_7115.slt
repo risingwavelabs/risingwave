@@ -18,4 +18,8 @@ select * from v join (select count(*) from t) T;
 # select * from v join (select count(*) from t) T;
 # ----
 
-DROP table t;
+statement ok
+DROP MATERIALIZED VIEW v;
+
+statement ok
+DROP TABLE t;
