@@ -510,7 +510,9 @@ impl PlanRoot {
                 .inputs()
                 .into_iter()
                 .map(|input| {
-                    if input.node_type() == PlanNodeType::BatchSeqScan {
+                    if input.node_type() == PlanNodeType::BatchSeqScan
+                        && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table())
+                    {
                         let order = input.order().clone();
                         BatchExchange::new(input, order, Distribution::Single).into()
                     } else {
