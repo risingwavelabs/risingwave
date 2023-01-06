@@ -15,8 +15,8 @@
     └─BatchSimpleAgg { aggs: [max(s.v)] }
       └─BatchScan { table: s, columns: [s.v], distribution: Single }
   batch_local_plan: |
-    BatchExchange { order: [], dist: Single }
-    └─BatchSimpleAgg { aggs: [max(s.v)] }
+    BatchSimpleAgg { aggs: [max(s.v)] }
+    └─BatchExchange { order: [], dist: Single }
       └─BatchScan { table: s, columns: [s.v], distribution: Single }
 - id: extreme_on_T
   before:
@@ -162,7 +162,7 @@
         └─BatchExchange { order: [], dist: HashShard(s.k) }
           └─BatchScan { table: s, columns: [s.k, s.v], distribution: Single }
   batch_local_plan: |
-    BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [max(s.v)] }
-      └─BatchHashAgg { group_key: [s.k], aggs: [max(s.v)] }
+    BatchProject { exprs: [max(s.v)] }
+    └─BatchHashAgg { group_key: [s.k], aggs: [max(s.v)] }
+      └─BatchExchange { order: [], dist: Single }
         └─BatchScan { table: s, columns: [s.k, s.v], distribution: Single }

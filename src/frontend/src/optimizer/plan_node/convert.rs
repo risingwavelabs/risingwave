@@ -132,10 +132,35 @@ pub trait ToLocalBatch {
     /// Convert the plan to batch local physical plan and satisfy the required Order
     fn to_local_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
         let ret = self.to_local()?;
-        required_order.enforce_if_not_satisfies(ret)
+        let ret = required_order.enforce_if_not_satisfies(ret)?;
+        Ok(enforce_exchange_above_table_scan(ret))
     }
 }
 
+/// Auxiliary function to ensure there is **exchange directly before table scan**,
+/// so that it will be pushed to compute node.
+fn enforce_exchange_above_table_scan(plan: PlanRef) -> PlanRef {
+    if plan.node_type() != PlanNodeType::BatchExchange
+        && plan.node_type() != PlanNodeType::BatchSeqScan
+    {
+        println!("plan type: {:?}", plan.node_type());
+        let new_inputs = plan
+            .inputs()
+            .into_iter()
+            .map(|input| {
+                if input.node_type() == PlanNodeType::BatchSeqScan {
+                    let order = input.order().clone();
+                    BatchExchange::new(input, order, Distribution::Single).into()
+                } else {
+                    enforce_exchange_above_table_scan(input)
+                }
+            })
+            .collect_vec();
+        plan.clone_with_inputs(&new_inputs)
+    } else {
+        plan
+    }
+}
 /// `ToDistributedBatch` allows to convert a batch physical plan to distributed batch plan, by
 /// insert exchange node, with an optional required order and distributed.
 ///

@@ -25,8 +25,8 @@
       └─BatchExchange { order: [], dist: UpstreamHashShard(mv.v) }
         └─BatchScan { table: mv, columns: [mv.v], distribution: Single }
   batch_local_plan: |
-    BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v] }
+    BatchLookupJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v] }
+    └─BatchExchange { order: [mv.v ASC], dist: Single }
       └─BatchScan { table: mv, columns: [mv.v], distribution: Single }
 - id: select_from_singleton_mv_join_top_n
   before:
@@ -43,8 +43,8 @@
               └─BatchScan { table: mv, columns: [mv.v], distribution: Single }
   batch_local_plan: |
     BatchProject { exprs: [mv.v] }
-    └─BatchExchange { order: [mv.v ASC], dist: Single }
+    └─BatchTopN { order: "[mv.v ASC]", limit: 10, offset: 0 }
       └─BatchTopN { order: "[mv.v ASC]", limit: 10, offset: 0 }
-        └─BatchTopN { order: "[mv.v ASC]", limit: 10, offset: 0 }
-          └─BatchLookupJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v, mv.v] }
+        └─BatchLookupJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v, mv.v] }
+          └─BatchExchange { order: [mv.v ASC], dist: Single }
             └─BatchScan { table: mv, columns: [mv.v], distribution: Single }
