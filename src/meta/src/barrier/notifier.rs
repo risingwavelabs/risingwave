@@ -61,10 +61,4 @@ impl Notifier {
             tx.send(()).ok();
         }
     }
-
-    pub fn notify_all(mut self) {
-        self.notify_to_send();
-        self.notify_collected();
-        self.notify_finished();
-    }
 }
