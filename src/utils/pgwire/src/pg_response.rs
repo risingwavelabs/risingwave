@@ -161,7 +161,11 @@ where
             row_cnt,
             values_stream: None,
             row_desc: vec![],
-            notice: if !notice.is_empty() { Some(notice) } else { None },
+            notice: if !notice.is_empty() {
+                Some(notice)
+            } else {
+                None
+            },
         }
     }
 
@@ -186,7 +190,11 @@ where
             row_cnt,
             values_stream,
             row_desc,
-            if !notice.is_empty() { Some(notice) } else { None },
+            if !notice.is_empty() {
+                Some(notice)
+            } else {
+                None
+            },
         )
     }
 
