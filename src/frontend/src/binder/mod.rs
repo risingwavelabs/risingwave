@@ -89,7 +89,7 @@ pub struct Binder {
 /// To achieve this, we replace one of the inputs with an `AT TIME ZONE` conversion.
 pub struct SessionTimezone {
     pub timezone: String,
-    /// Whether or not the binder used the session timezone 
+    /// Whether or not the binder used the session timezone
     pub used: bool,
 }
 
@@ -113,7 +113,7 @@ impl Binder {
             next_cte_id: 0,
             search_path: session.config().get_search_path(),
             in_create_mv,
-            session_timezone: SessionTimezone { 
+            session_timezone: SessionTimezone {
                 timezone: session.config().get_timezone().into(),
                 used: false,
             },

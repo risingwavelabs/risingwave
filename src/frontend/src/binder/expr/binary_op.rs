@@ -67,18 +67,39 @@ impl Binder {
 
     fn bind_binary_op_with_timezone(
         &mut self,
-        func_type: ExprType, 
-        bound_left: &mut ExprImpl, 
-        bound_right: &mut ExprImpl
+        func_type: ExprType,
+        bound_left: &mut ExprImpl,
+        bound_right: &mut ExprImpl,
     ) -> Result<()> {
-        if matches!(func_type, ExprType::Equal | ExprType::LessThan | ExprType::LessThanOrEqual | ExprType::GreaterThan | ExprType::GreaterThanOrEqual) {
-            if matches!(bound_left.return_type(), DataType::Timestamptz) && matches!(bound_right.return_type(), DataType::Date | DataType::Timestamp) {
-                if let Some(bound) = self.bind_cast_with_timezone(bound_right.clone(), DataType::Timestamptz)? {
+        if matches!(
+            func_type,
+            ExprType::Equal
+                | ExprType::LessThan
+                | ExprType::LessThanOrEqual
+                | ExprType::GreaterThan
+                | ExprType::GreaterThanOrEqual
+        ) {
+            if matches!(bound_left.return_type(), DataType::Timestamptz)
+                && matches!(
+                    bound_right.return_type(),
+                    DataType::Date | DataType::Timestamp
+                )
+            {
+                if let Some(bound) =
+                    self.bind_cast_with_timezone(bound_right.clone(), DataType::Timestamptz)?
+                {
                     *bound_right = bound;
                 }
             }
-            if matches!(bound_right.return_type(), DataType::Timestamptz) && matches!(bound_left.return_type(), DataType::Date | DataType::Timestamp) {
-                if let Some(bound) = self.bind_cast_with_timezone(bound_left.clone(), DataType::Timestamptz)? {
+            if matches!(bound_right.return_type(), DataType::Timestamptz)
+                && matches!(
+                    bound_left.return_type(),
+                    DataType::Date | DataType::Timestamp
+                )
+            {
+                if let Some(bound) =
+                    self.bind_cast_with_timezone(bound_left.clone(), DataType::Timestamptz)?
+                {
                     *bound_left = bound;
                 }
             }

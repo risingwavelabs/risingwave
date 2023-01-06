@@ -161,7 +161,7 @@ where
             row_cnt,
             values_stream: None,
             row_desc: vec![],
-            notice: if notice.len() > 0 { Some(notice) } else { None },
+            notice: if !notice.is_empty() { Some(notice) } else { None },
         }
     }
 
@@ -181,7 +181,13 @@ where
         row_desc: Vec<PgFieldDescriptor>,
         notice: String,
     ) -> Self {
-        Self::new_for_stream_inner(stmt_type, row_cnt, values_stream, row_desc, if notice.len() > 0 { Some(notice) } else { None })
+        Self::new_for_stream_inner(
+            stmt_type,
+            row_cnt,
+            values_stream,
+            row_desc,
+            if !notice.is_empty() { Some(notice) } else { None },
+        )
     }
 
     fn new_for_stream_inner(
@@ -234,13 +240,5 @@ where
                 .as_mut()
                 .expect("getting values from empty result"),
         )
-    }
-
-    pub fn append_notice(&mut self, notice: String) {
-        if let Some(prev) = &mut self.notice {
-            prev.push_str(&notice);
-        } else {
-            self.notice = Some(notice);
-        }
     }
 }

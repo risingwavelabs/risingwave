@@ -107,7 +107,8 @@ pub async fn handle_query(
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, query_mode, output_schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt, &mut notice)?;
+        let (plan, query_mode, schema) =
+            gen_batch_query_plan(&session, context.into(), stmt, &mut notice)?;
 
         tracing::trace!(
             "Generated query plan: {:?}, query_mode:{:?}",

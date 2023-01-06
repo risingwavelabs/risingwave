@@ -434,13 +434,17 @@ impl Binder {
     }
 
     // Certain casts require the use of session timezone. We bind them over here.
-    fn bind_cast_with_timezone(&mut self, input: ExprImpl, ret_data_type: DataType) -> Result<Option<ExprImpl>> {
+    fn bind_cast_with_timezone(
+        &mut self,
+        input: ExprImpl,
+        ret_data_type: DataType,
+    ) -> Result<Option<ExprImpl>> {
         if matches!(input.return_type(), DataType::Timestamptz) {
             match ret_data_type {
                 DataType::Date | DataType::Time => {
                     let timestamp = self.at_session_time_zone(input);
                     return Ok(Some(timestamp.cast_explicit(ret_data_type)?));
-                },
+                }
                 DataType::Timestamp => {
                     return Ok(Some(self.at_session_time_zone(input)));
                 }
@@ -454,7 +458,7 @@ impl Binder {
                     return Ok(Some(self.at_session_time_zone(timestamp)));
                 }
                 DataType::Timestamp => {
-                    return Ok(Some(self.at_session_time_zone(input.clone())));
+                    return Ok(Some(self.at_session_time_zone(input)));
                 }
                 _ => (),
             }
@@ -464,18 +468,18 @@ impl Binder {
 
     fn at_session_time_zone(&mut self, input: ExprImpl) -> ExprImpl {
         self.session_timezone.used = true;
-        ExprImpl::FunctionCall(
-            Box::new(FunctionCall::new(
-                ExprType::AtTimeZone, 
+        ExprImpl::FunctionCall(Box::new(
+            FunctionCall::new(
+                ExprType::AtTimeZone,
                 vec![
-                    input, 
-                    ExprImpl::literal_varchar(self.session_timezone.timezone.clone())
-                ]
-            ).unwrap()
+                    input,
+                    ExprImpl::literal_varchar(self.session_timezone.timezone.clone()),
+                ],
+            )
+            .unwrap(),
         ))
     }
 }
-
 
 /// Given a type `STRUCT<v1 int>`, this function binds the field `v1 int`.
 pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
