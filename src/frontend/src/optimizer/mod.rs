@@ -500,12 +500,39 @@ impl PlanRoot {
         Ok(plan)
     }
 
+    /// Auxiliary function to ensure there is **exchange directly before table scan**,
+    /// so that it will be pushed to compute node.
+    fn enforce_exchange_above_table_scan(plan: PlanRef) -> PlanRef {
+        if plan.node_type() != PlanNodeType::BatchExchange
+            && plan.node_type() != PlanNodeType::BatchSeqScan
+        {
+            let new_inputs = plan
+                .inputs()
+                .into_iter()
+                .map(|input| {
+                    if input.node_type() == PlanNodeType::BatchSeqScan {
+                        let order = input.order().clone();
+                        BatchExchange::new(input, order, Distribution::Single).into()
+                    } else {
+                        Self::enforce_exchange_above_table_scan(input)
+                    }
+                })
+                .collect_vec();
+            plan.clone_with_inputs(&new_inputs)
+        } else {
+            plan
+        }
+    }
+
     /// Optimize and generate a batch query plan for local execution.
     pub fn gen_batch_local_plan(&mut self) -> Result<PlanRef> {
         let mut plan = self.gen_batch_plan()?;
 
         // Convert to local plan node
         plan = plan.to_local_with_order_required(&self.required_order)?;
+
+        // Ensure there is exchange before all seq scan.
+        plan = Self::enforce_exchange_above_table_scan(plan);
 
         // We remark that since the `to_local_with_order_required` does not enforce single
         // distribution, we enforce at the root if needed.
