@@ -544,6 +544,7 @@ mod tests {
             0,
             ArrayMeta::Struct {
                 children: Arc::new([DataType::Varchar, DataType::Float32]),
+                children_names: vec![].into(),
             },
         );
         let mut list_builder = ListArrayBuilder::with_meta(
@@ -612,6 +613,7 @@ mod tests {
             0,
             ArrayMeta::Struct {
                 children: Arc::new([DataType::Varchar, DataType::Float32]),
+                children_names: vec![].into(),
             },
         );
         let mut list_builder = ListArrayBuilder::with_meta(

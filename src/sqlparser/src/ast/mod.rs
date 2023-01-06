@@ -911,6 +911,8 @@ pub enum Statement {
         columns: Vec<ColumnDef>,
         constraints: Vec<TableConstraint>,
         with_options: Vec<SqlOption>,
+        /// Optional schema of the external source with which the table is created
+        source_schema: Option<SourceSchema>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
     },
@@ -1229,6 +1231,7 @@ impl fmt::Display for Statement {
                 or_replace,
                 if_not_exists,
                 temporary,
+                source_schema,
                 query,
             } => {
                 // We want to allow the following options
@@ -1258,6 +1261,9 @@ impl fmt::Display for Statement {
                 }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
+                }
+                if let Some(source_schema) = source_schema {
+                    write!(f, " ROW FORMAT {}", source_schema)?;
                 }
                 if let Some(query) = query {
                     write!(f, " AS {}", query)?;
