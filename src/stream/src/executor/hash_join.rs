@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_stack_trace::StackTrace;
 use fixedbitset::FixedBitSet;
-use futures::{pin_mut, StreamExt};
+use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
@@ -742,14 +742,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
     /// the data the hash table and match the coming
     /// data chunk with the executor state
-    async fn hash_eq_match(
-        key: &K,
-        ht: &mut JoinHashMap<K, S>,
-    ) -> StreamExecutorResult<Option<HashValueType>> {
+    fn hash_eq_match(key: &K, ht: &mut JoinHashMap<K, S>) -> Option<Option<HashValueType>> {
         if !key.null_bitmap().is_subset(ht.null_matched()) {
-            Ok(None)
+            None
         } else {
-            ht.take_state(key).await.map(Some)
+            Some(ht.take_state(key))
         }
     }
 
@@ -821,14 +818,43 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         };
 
         let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
+        let mut key2matched_rows = HashMap::new();
+        let mut cache_miss_keys = HashSet::new();
+        for key in &keys {
+            if !key2matched_rows.contains_key(key) {
+                let matched_rows = Self::hash_eq_match(key, &mut side_match.ht);
+                match matched_rows {
+                    Some(Some(join_entry_state)) => {
+                        key2matched_rows.insert(key, Some(join_entry_state));
+                    }
+                    Some(None) => {
+                        cache_miss_keys.insert(key.clone());
+                        // placeholder `None`, will soon be replaced
+                        key2matched_rows.insert(key, None);
+                    }
+                    None => {
+                        key2matched_rows.insert(key, None);
+                    }
+                };
+            }
+        }
+        let futs = cache_miss_keys
+            .into_iter()
+            .map(|key| side_match.ht.fetch_cached_state(key));
+        let mut buffered = stream::iter(futs).buffer_unordered(10);
+        while let Some(result) = buffered.next().await {
+            let (key, join_entry_state) = result?;
+            *key2matched_rows.get_mut(&key).unwrap() = Some(join_entry_state.into());
+        }
+        drop(buffered);
+
         for ((op, row), key) in chunk.rows().zip_eq(keys.iter()) {
-            let matched_rows: Option<HashValueType> =
-                Self::hash_eq_match(key, &mut side_match.ht).await?;
+            let matched_rows = key2matched_rows.get_mut(key).unwrap();
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     let mut degree = 0;
                     let mut append_only_matched_row = None;
-                    if let Some(mut matched_rows) = matched_rows {
+                    if let Some(matched_rows) = matched_rows.as_mut() {
                         for (matched_row_ref, matched_row) in
                             matched_rows.values_mut(&side_match.all_data_types)
                         {
@@ -867,8 +893,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         {
                             yield Message::Chunk(chunk);
                         }
-                        // Insert back the state taken from ht.
-                        side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
                         hashjoin_chunk_builder.forward_if_not_matched(op, row)
                     {
@@ -876,7 +900,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     }
 
                     if append_only_optimize && let Some(row) = append_only_matched_row {
-                        side_match.ht.delete(key, row);
+                        side_match.ht.delete(key, row, matched_rows.as_mut());
                     } else if side_update.need_degree_table {
                         side_update.ht.insert(key, JoinRow::new(row, degree));
                     } else {
@@ -885,7 +909,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 }
                 Op::Delete | Op::UpdateDelete => {
                     let mut degree = 0;
-                    if let Some(mut matched_rows) = matched_rows {
+                    if let Some(matched_rows) = matched_rows.as_mut() {
                         for (matched_row_ref, matched_row) in
                             matched_rows.values_mut(&side_match.all_data_types)
                         {
@@ -915,8 +939,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         {
                             yield Message::Chunk(chunk);
                         }
-                        // Insert back the state taken from ht.
-                        side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
                         hashjoin_chunk_builder.forward_if_not_matched(op, row)
                     {
@@ -925,7 +947,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     if append_only_optimize {
                         unreachable!();
                     } else if side_update.need_degree_table {
-                        side_update.ht.delete(key, JoinRow::new(row, degree));
+                        side_update.ht.delete(key, JoinRow::new(row, degree), None);
                     } else {
                         side_update.ht.delete_row(key, row);
                     };
@@ -934,6 +956,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         }
         if let Some(chunk) = hashjoin_chunk_builder.take() {
             yield Message::Chunk(chunk);
+        }
+        // Insert back the state taken from ht.
+        for (key, matched_rows) in key2matched_rows {
+            if let Some(join_entry_state) = matched_rows {
+                side_match.ht.update_state(key, join_entry_state);
+            }
         }
     }
 }

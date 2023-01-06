@@ -319,23 +319,26 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     /// returned.
     ///
     /// Note: This will NOT remove anything from remote storage.
-    pub async fn take_state<'a>(&mut self, key: &K) -> StreamExecutorResult<HashValueType> {
+    pub fn take_state(&mut self, key: &K) -> Option<HashValueType> {
         // Do not update the LRU statistics here with `peek_mut` since we will put the state back.
         let state = self.inner.peek_mut(key);
         self.metrics.total_lookup_count += 1;
-        Ok(match state {
-            Some(state) => state.take(),
+        match state {
+            Some(state) => Some(state.take()),
             None => {
                 self.metrics.lookup_miss_count += 1;
-                self.fetch_cached_state(key).await?.into()
+                None
             }
-        })
+        }
     }
 
     /// Fetch cache from the state store. Should only be called if the key does not exist in memory.
     /// Will return a empty `JoinEntryState` even when state does not exist in remote.
-    async fn fetch_cached_state(&self, key: &K) -> StreamExecutorResult<JoinEntryState> {
-        let key = key.deserialize(&self.join_key_data_types)?;
+    pub async fn fetch_cached_state(
+        &self,
+        original_key: K,
+    ) -> StreamExecutorResult<(K, JoinEntryState)> {
+        let key = original_key.deserialize(&self.join_key_data_types)?;
 
         let mut entry_state = JoinEntryState::default();
 
@@ -380,7 +383,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             }
         };
 
-        Ok(entry_state)
+        Ok((original_key, entry_state))
     }
 
     pub async fn flush(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -419,8 +422,17 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Delete a join row
-    pub fn delete(&mut self, key: &K, value: JoinRow<impl Row>) {
-        if let Some(entry) = self.inner.get_mut(key) {
+    pub fn delete(
+        &mut self,
+        key: &K,
+        value: JoinRow<impl Row>,
+        extern_join_entry_state: Option<&mut Box<JoinEntryState>>,
+    ) {
+        let entry = match extern_join_entry_state {
+            Some(entry) => Some(entry),
+            None => self.inner.get_mut(key).map(|wrapper| wrapper.deref_mut()),
+        };
+        if let Some(entry) = entry {
             let pk = (&value.row)
                 .project(&self.state.pk_indices)
                 .memcmp_serialize(&self.pk_serializer);
