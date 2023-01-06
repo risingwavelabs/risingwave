@@ -370,7 +370,7 @@ impl SessionImpl {
             env,
             auth_context,
             user_authenticator,
-            config_map: RwLock::new(Default::default()),
+            config_map: Default::default(),
             id,
         }
     }

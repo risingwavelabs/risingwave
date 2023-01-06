@@ -1157,6 +1157,9 @@ impl ActorGraphBuilder {
             NodeBody::TopN(node) => {
                 vec![node.table.as_ref().unwrap().id]
             }
+            NodeBody::Now(node) => {
+                vec![node.state_table.as_ref().unwrap().id]
+            }
             _ => {
                 vec![]
             }

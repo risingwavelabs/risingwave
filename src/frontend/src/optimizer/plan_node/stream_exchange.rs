@@ -41,6 +41,7 @@ impl StreamExchange {
             input.functional_dependency().clone(),
             dist,
             input.append_only(),
+            input.watermark_columns().clone(),
         );
         StreamExchange { base, input }
     }

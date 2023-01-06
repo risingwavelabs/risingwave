@@ -238,8 +238,8 @@
     └─LogicalScan { table: t2, columns: [] }
 - name: now() pushdown with delta expression
   sql: |
-    create table t1(v1 timestamp);
-    create table t2(v2 timestamp);
+    create table t1(v1 timestamp with time zone);
+    create table t2(v2 timestamp with time zone);
     select * from t1 join t2 where v1 = v2 and v1 > now() + '1 hr';
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
@@ -258,8 +258,8 @@
         └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: now() in a complex cmp expr does not get pushed down
   sql: |
-    create table t1(v1 timestamp);
-    create table t2(v2 timestamp, v3 interval);
+    create table t1(v1 timestamp with time zone);
+    create table t2(v2 timestamp with time zone, v3 interval);
     select * from t1, t2 where v1 = v2 and v1 > now() + v3;
   optimized_logical_plan: |
     LogicalFilter { predicate: (t1.v1 > (Now + t2.v3)) }
@@ -269,8 +269,8 @@
   stream_error: 'Expr error: Invalid parameter now: expressions containing now must be of the form `col [cmp] now() +- [literal]`'
 - name: now() in complex cmp expr pushed onto join ON clause results in dynamic filter
   sql: |
-    create table t1(v1 timestamp);
-    create table t2(v2 timestamp, v3 interval);
+    create table t1(v1 timestamp with time zone);
+    create table t2(v2 timestamp with time zone, v3 interval);
     select * from t1 join t2 where v1 = v2 and v1 > now() + v3;
   optimized_logical_plan: |
     LogicalFilter { predicate: (t1.v1 > (Now + t2.v3)) }
@@ -280,7 +280,7 @@
   stream_error: 'Expr error: Invalid parameter now: expressions containing now must be of the form `col [cmp] now() +- [literal]`'
 - name: now() does not get pushed to scan, but others do
   sql: |
-    create table t1(v1 timestamp, v2 int);
+    create table t1(v1 timestamp with time zone, v2 int);
     select * from t1 where v1 > now() + '30 min' and v2 > 5;
   optimized_logical_plan: |
     LogicalFilter { predicate: (t1.v1 > (Now + '30 min':Varchar::Interval)) }
@@ -322,8 +322,8 @@
       └─LogicalScan { table: t2, columns: [t2.v1, t2.v2], predicate: IsNotNull((t2.v1 + 5:Int32)) }
 - name: eq-predicate derived condition is banned for impure function e.g. `now()`
   sql: |
-    create table t1(v1 timestamp);
-    create table t2(v2 timestamp);
+    create table t1(v1 timestamp with time zone);
+    create table t2(v2 timestamp with time zone);
     select * from t1 join t2 where v1 = v2 and v1 > now();
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
