@@ -75,30 +75,9 @@ pub async fn handle_drop_mv(
             return Err(PermissionDenied("Do not have the privilege".to_string()).into());
         }
 
-        // If associated source is `Some`, then it is actually a materialized source / table v2.
         match table.table_type() {
             TableType::MaterializedView => {}
-            TableType::Table => {
-                // TODO(Yuanxin): Remove this after unsupporting `CREATE MATERIALIZED SOURCE`.
-                if table.associated_source_id().is_some() {
-                    return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                        "Use `DROP SOURCE` to drop a source.".to_owned(),
-                    )));
-                }
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Use `DROP TABLE` to drop a table.".to_owned(),
-                )));
-            }
-            TableType::Index => {
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Use `DROP INDEX` to drop an index.".to_owned(),
-                )));
-            }
-            TableType::Internal => {
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Internal tables cannot be dropped.".to_owned(),
-                )));
-            }
+            _ => return Err(table.bad_drop_error()),
         }
 
         // If the name is not valid, then it is actually an internal table.

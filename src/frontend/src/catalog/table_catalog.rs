@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::convert::Infallible;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{TableDesc, TableId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType as ProstTableType};
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
@@ -32,7 +34,7 @@ use crate::WithOptions;
 /// - a materialized view
 /// - an index
 ///
-/// Use `self.kind()` to determine the type of the table.
+/// Use `self.table_type()` to determine the type of the table.
 ///
 /// # Column ID & Column Index
 ///
@@ -184,6 +186,27 @@ impl TableCatalog {
 
     pub fn is_index(&self) -> bool {
         self.table_type == TableType::Index
+    }
+
+    pub fn bad_drop_error(&self) -> RwError {
+        let msg = match self.table_type {
+            TableType::MaterializedView => {
+                "Use `DROP MATERIALIZED VIEW` to drop a materialized view."
+            }
+            TableType::Index => "Use `DROP INDEX` to drop an index.",
+            TableType::Table => {
+                // TODO(Yuanxin): Remove this after unsupporting `CREATE MATERIALIZED SOURCE`.
+                // Note(bugen): may make this a method on `TableType` instead.
+                if self.associated_source_id().is_some() {
+                    "Use `DROP SOURCE` to drop a source."
+                } else {
+                    "Use `DROP TABLE` to drop a table."
+                }
+            }
+            TableType::Internal => "Internal tables cannot be dropped.",
+        };
+
+        ErrorCode::InvalidInputSyntax(msg.to_owned()).into()
     }
 
     /// Get the table catalog's associated source id.

@@ -66,29 +66,9 @@ pub async fn handle_drop_table(
         }
 
         match table.table_type() {
-            TableType::MaterializedView => {
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
-                )));
-            }
-            TableType::Index => {
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Use `DROP INDEX` to drop an index.".to_owned(),
-                )));
-            }
-            TableType::Internal => {
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "Internal tables cannot be dropped.".to_owned(),
-                )));
-            }
-            TableType::Table => {
-                // TODO(Yuanxin): Remove this after unsupporting `CREATE MATERIALIZED SOURCE`.
-                if table.associated_source_id().is_some() {
-                    return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                        "Use `DROP SOURCE` to drop a source.".to_owned(),
-                    )));
-                }
-            }
+            // TODO(Yuanxin): Remove this `if` after unsupporting `CREATE MATERIALIZED SOURCE`.
+            TableType::Table if table.associated_source_id().is_none() => {}
+            _ => return Err(table.bad_drop_error()),
         }
 
         (table.associated_source_id(), table.id())

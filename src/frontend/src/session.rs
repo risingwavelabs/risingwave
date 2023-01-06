@@ -474,40 +474,6 @@ impl SessionImpl {
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
         Ok((db_id, schema.id()))
     }
-
-    /// Also check if the user has the privilege to create in the schema.
-    pub fn get_table_catalog_for_create(
-        &self,
-        schema_name: Option<String>,
-        table_name: &str,
-    ) -> Result<(DatabaseId, SchemaId, Arc<TableCatalog>)> {
-        let db_name = self.database();
-
-        let search_path = self.config().get_search_path();
-        let user_name = &self.auth_context().user_name;
-        let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
-
-        let catalog_reader = self.env().catalog_reader().read_guard();
-        let (table, schema_name) =
-            catalog_reader.get_table_by_name(db_name, schema_path, table_name)?;
-
-        let schema = catalog_reader.get_schema_by_name(db_name, schema_name)?;
-
-        check_schema_writable(schema_name)?;
-        if schema_name != DEFAULT_SCHEMA_NAME {
-            check_privileges(
-                self,
-                &vec![ObjectCheckItem::new(
-                    schema.owner(),
-                    Action::Create,
-                    Object::SchemaId(schema.id()),
-                )],
-            )?;
-        }
-
-        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
-        Ok((db_id, schema.id(), table.clone()))
-    }
 }
 
 pub struct SessionManagerImpl {
