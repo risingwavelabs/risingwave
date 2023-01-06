@@ -1,4 +1,4 @@
-package com.risingwave.binding;
+package com.risingwave.java.binding;
 
 public class Iterator implements AutoCloseable {
     final long pointer;

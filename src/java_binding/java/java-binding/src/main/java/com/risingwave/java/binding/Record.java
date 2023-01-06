@@ -1,4 +1,4 @@
-package com.risingwave.binding;
+package com.risingwave.java.binding;
 
 public class Record implements AutoCloseable {
     final long pointer;

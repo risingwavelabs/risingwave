@@ -2,16 +2,16 @@
 description = "Generate the java binding C header file"
 script = '''
 #!/bin/bash
-set -e
+set -ex
 cd src/java_binding/java
-javac -h . -cp src/main/java/ src/main/java/com/risingwave/binding/Binding.java
+javac -h . -cp java-binding/src/main/java/ java-binding/src/main/java/com/risingwave/java/binding/Binding.java
 '''
 
 [tasks.build-java-binding-rust]
 description = "Build the java binding rust code"
 script = '''
 #!/bin/bash
-set -e
+set -ex
 cargo build -p risingwave_java_binding
 '''
 
@@ -19,7 +19,7 @@ cargo build -p risingwave_java_binding
 description = "Build the java binding java code"
 script = '''
 #!/bin/bash
-set -e
+set -ex
 cd src/java_binding/java
 mvn clean package
 '''
@@ -32,10 +32,10 @@ dependencies = [
 ]
 script = '''
 #!/bin/bash
-set -e
+set -ex
 RISINGWAVE_ROOT=.
 JAVA_BINDING_ROOT=${RISINGWAVE_ROOT}/src/java_binding
-java -cp ${JAVA_BINDING_ROOT}/java/target/java-binding-1.0-SNAPSHOT.jar \
+java -cp ${JAVA_BINDING_ROOT}/java/java-binding/target/java-binding-1.0-SNAPSHOT.jar \
     -Djava.library.path=${RISINGWAVE_ROOT}/target/debug \
-    com.risingwave.binding.Main
+    com.risingwave.java.Demo
 '''

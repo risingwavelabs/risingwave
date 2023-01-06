@@ -7,7 +7,7 @@ use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::TableId;
-use risingwave_common::row::{Row, RowDeserializer};
+use risingwave_common::row::{OwnedRow, RowDeserializer};
 use risingwave_common::types::{DataType, ScalarImpl, ScalarRef};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
@@ -32,7 +32,7 @@ pub struct Iterator {
 
 pub struct Record {
     key: Vec<u8>,
-    row: Row,
+    row: OwnedRow,
 }
 
 impl Record {
@@ -68,12 +68,12 @@ fn gen_mock_schema() -> Vec<DataType> {
 
 fn gen_mock_imm_lists() -> Vec<SharedBufferBatch> {
     let rows = vec![
-        Row::new(vec![
+        OwnedRow::new(vec![
             Some(ScalarImpl::Int64(100)),
             Some(ScalarImpl::Utf8("value_of_100".to_owned_scalar())),
             None,
         ]),
-        Row::new(vec![
+        OwnedRow::new(vec![
             Some(ScalarImpl::Int64(101)),
             Some(ScalarImpl::Utf8("value_of_101".to_owned_scalar())),
             Some(ScalarImpl::Int64(2333)),
@@ -133,6 +133,7 @@ impl Iterator {
                         check_bloom_filter: false,
                         retention_seconds: None,
                         table_id: TEST_TABLE_ID,
+                        read_version_from_backup: false,
                     },
                     (
                         gen_mock_imm_lists(),

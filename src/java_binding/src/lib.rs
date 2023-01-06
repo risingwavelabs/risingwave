@@ -149,14 +149,14 @@ where
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_binding_Binding_iteratorNew(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNew(
     env: EnvParam<'_>,
 ) -> Pointer<'static, Iterator> {
     execute_and_catch(env, move || Ok(Iterator::new()?.into()))
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_binding_Binding_iteratorNext<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>(
     env: EnvParam<'a>,
     mut pointer: Pointer<'a, Iterator>,
 ) -> Pointer<'static, Record> {
@@ -167,7 +167,7 @@ pub extern "system" fn Java_com_risingwave_binding_Binding_iteratorNext<'a>(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_binding_Binding_iteratorClose(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorClose(
     _env: EnvParam<'_>,
     pointer: Pointer<'_, Iterator>,
 ) {
@@ -175,7 +175,7 @@ pub extern "system" fn Java_com_risingwave_binding_Binding_iteratorClose(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_binding_Binding_recordGetKey<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_recordGetKey<'a>(
     env: EnvParam<'a>,
     pointer: Pointer<'a, Record>,
 ) -> ByteArray<'a> {
@@ -187,7 +187,7 @@ pub extern "system" fn Java_com_risingwave_binding_Binding_recordGetKey<'a>(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_binding_Binding_recordIsNull<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_recordIsNull<'a>(
     env: EnvParam<'a>,
     pointer: Pointer<'a, Record>,
     idx: jint,
@@ -199,7 +199,7 @@ pub extern "system" fn Java_com_risingwave_binding_Binding_recordIsNull<'a>(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_binding_Binding_recordGetInt64Value<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_recordGetInt64Value<'a>(
     env: EnvParam<'a>,
     pointer: Pointer<'a, Record>,
     idx: jint,
@@ -208,7 +208,7 @@ pub extern "system" fn Java_com_risingwave_binding_Binding_recordGetInt64Value<'
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_binding_Binding_recordGetStringValue<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_recordGetStringValue<'a>(
     env: EnvParam<'a>,
     pointer: Pointer<'a, Record>,
     idx: jint,
@@ -219,7 +219,7 @@ pub extern "system" fn Java_com_risingwave_binding_Binding_recordGetStringValue<
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_binding_Binding_recordClose<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_recordClose<'a>(
     _env: EnvParam<'a>,
     pointer: Pointer<'a, Record>,
 ) {
