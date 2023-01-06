@@ -197,14 +197,23 @@ impl Binder {
         id
     }
 
-    pub fn session_timezone(&self) -> SessionTimezone {
-        self.session_timezone
-    }
-
     fn next_cte_id(&mut self) -> CteId {
         let id = self.next_cte_id;
         self.next_cte_id += 1;
         id
+    }
+
+    pub fn append_notice(&self, notice: &mut String) {
+        if self.session_timezone.used {
+            notice.push_str(
+                &format!("Your session timezone is {}. It was used \
+                in the interpretation of timestamps and dates in your query. If this is unintended,
+                change your timezone to match that of your data's with `set timezone = [timezone]` or 
+                rewrite your query with an explicit timezone conversion, e.g. with `AT TIME ZONE`.\n", 
+                self.session_timezone.timezone)
+            );
+        }
+    }
 }
 
 #[cfg(test)]

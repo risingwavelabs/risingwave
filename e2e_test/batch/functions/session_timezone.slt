@@ -1,0 +1,32 @@
+statement ok
+set timezone = "us/pacific";
+
+# Cast date to timestamptz
+query T
+select '2022-01-01'::date::timestamp with time zone;
+----
+2022-01-01 08:00:00+00:00
+
+# Cast timestamp to timestamptz
+query T
+select '2022-01-01 00:00:00'::timestamp::timestamp with time zone;
+----
+2022-01-01 08:00:00+00:00
+
+# Cast timestamptz to timestamp
+query T
+select '2022-01-01 00:00:00+00:00'::timestamp with time zone::timestamp;
+----
+2021-12-31 16:00:00
+
+# Cast timestamptz to date
+query T
+select '2022-01-01 00:00:00+00:00'::timestamp with time zone::date;
+----
+2021-12-31
+
+# Cast timestamptz to time
+query T
+select '2022-01-01 00:00:00+00:00'::timestamp with time zone::time;
+----
+16:00:00

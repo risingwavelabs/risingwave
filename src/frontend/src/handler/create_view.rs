@@ -50,6 +50,7 @@ pub async fn handle_create_view(
             &session,
             context.into(),
             Statement::Query(Box::new(query.clone())),
+            &mut String::new(),
         )?;
 
         let mut visitor = CollectTableIds {

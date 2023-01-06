@@ -45,12 +45,15 @@ pub fn gen_batch_query_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: Statement,
+    notice: &mut String,
 ) -> Result<(PlanRef, QueryMode, Schema)> {
     let stmt_type = to_statement_type(&stmt)?;
 
     let bound = {
         let mut binder = Binder::new(session);
-        binder.bind(stmt)?
+        let bound = binder.bind(stmt)?;
+        binder.append_notice(notice);
+        bound
     };
 
     let check_items = resolve_privileges(&bound);
@@ -99,11 +102,12 @@ pub async fn handle_query(
     let session = handler_args.session.clone();
     let query_start_time = Instant::now();
     let only_checkpoint_visible = handler_args.session.config().only_checkpoint_visible();
+    let mut notice = String::new();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, query_mode, output_schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
+        let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt, &mut notice)?;
 
         tracing::trace!(
             "Generated query plan: {:?}, query_mode:{:?}",
@@ -209,8 +213,8 @@ pub async fn handle_query(
             .inc();
     }
 
-    Ok(PgResponse::new_for_stream(
-        stmt_type, rows_count, row_stream, pg_descs,
+    Ok(PgResponse::new_for_stream_with_notice(
+        stmt_type, rows_count, row_stream, pg_descs, notice,
     ))
 }
 

@@ -426,49 +426,50 @@ impl Binder {
             return self.bind_array_cast(expr.clone(), data_type);
         }
         let lhs = self.bind_expr(expr)?;
-        if let Some(ret) = self.bind_cast_with_timezone(lhs.clone(), data_type)? {
+        if let Some(ret) = self.bind_cast_with_timezone(lhs.clone(), data_type.clone())? {
             Ok(ret)
         } else {
             lhs.cast_explicit(data_type)
         }
     }
 
-    fn bind_cast_with_timezone(&mut self, input: ExprImpl, data_type: DataType) -> Result<Option<ExprImpl>> {
+    // Certain casts require the use of session timezone. We bind them over here.
+    fn bind_cast_with_timezone(&mut self, input: ExprImpl, ret_data_type: DataType) -> Result<Option<ExprImpl>> {
         if matches!(input.return_type(), DataType::Timestamptz) {
-            match data_type {
+            match ret_data_type {
                 DataType::Date | DataType::Time => {
                     let timestamp = self.at_session_time_zone(input);
-                    return Ok(Some(timestamp.cast_explicit(data_type)?));
+                    return Ok(Some(timestamp.cast_explicit(ret_data_type)?));
                 },
                 DataType::Timestamp => {
                     return Ok(Some(self.at_session_time_zone(input)));
                 }
-                _ => _,
+                _ => (),
             }
         }
-        if matches!(data_type, DataType::Timestamptz) {
+        if matches!(ret_data_type, DataType::Timestamptz) {
             match input.return_type() {
                 DataType::Date => {
-                    let timestamp = input.cast_explicit(DataType::Timestamptz)?;
+                    let timestamp = input.cast_explicit(DataType::Timestamp)?;
                     return Ok(Some(self.at_session_time_zone(timestamp)));
                 }
                 DataType::Timestamp => {
                     return Ok(Some(self.at_session_time_zone(input.clone())));
                 }
-                _ => _,
+                _ => (),
             }
         }
         Ok(None)
     }
 
-    fn at_session_time_zone(&self, input: ExprImpl) -> ExprImpl {
+    fn at_session_time_zone(&mut self, input: ExprImpl) -> ExprImpl {
         self.session_timezone.used = true;
         ExprImpl::FunctionCall(
             Box::new(FunctionCall::new(
                 ExprType::AtTimeZone, 
                 vec![
                     input, 
-                    ExprImpl::literal_varchar(self.session_timezone.timezone)
+                    ExprImpl::literal_varchar(self.session_timezone.timezone.clone())
                 ]
             ).unwrap()
         ))
