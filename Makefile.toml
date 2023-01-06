@@ -387,7 +387,7 @@ cat <<\EOF > "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/risedev-profiles.user.ym
 # - develop the cluster with the new profiles by `./risedev dev <new-profile-name>`
 
 my-default-example:
-  config-path: src/config/default.toml
+  config-path: src/config/my_config.toml
   steps:
     - use: meta-node
     - use: compute-node
