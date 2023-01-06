@@ -437,7 +437,7 @@ mod default {
         }
 
         pub fn block_size_kb() -> u32 {
-            1024
+            64
         }
 
         pub fn bloom_false_positive() -> f64 {
@@ -465,11 +465,11 @@ mod default {
         }
 
         pub fn block_cache_capacity_mb() -> usize {
-            256
+            512
         }
 
         pub fn meta_cache_capacity_mb() -> usize {
-            64
+            128
         }
 
         pub fn disable_remote_compactor() -> bool {

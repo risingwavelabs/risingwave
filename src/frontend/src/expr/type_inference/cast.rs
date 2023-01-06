@@ -154,7 +154,7 @@ fn cast_ok_struct(source: &DataType, target: &DataType, allows: CastContext) -> 
             lty.fields
                 .iter()
                 .zip_eq(rty.fields.iter())
-                .all(|(src, dst)| cast_ok(src, dst, allows))
+                .all(|(src, dst)| src == dst || cast_ok(src, dst, allows))
         }
         // The automatic casts to string types are treated as assignment casts, while the automatic
         // casts from string types are explicit-only.

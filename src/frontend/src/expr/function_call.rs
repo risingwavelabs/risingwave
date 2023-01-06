@@ -301,6 +301,9 @@ impl std::fmt::Debug for FunctionCallDisplay<'_> {
             ExprType::BitwiseXor => {
                 explain_verbose_binary_op(f, "#", &that.inputs, self.input_schema)
             }
+            ExprType::Now => {
+                write!(f, "{:?}", that.func_type)
+            }
             _ => {
                 let func_name = format!("{:?}", that.func_type);
                 let mut builder = f.debug_tuple(&func_name);

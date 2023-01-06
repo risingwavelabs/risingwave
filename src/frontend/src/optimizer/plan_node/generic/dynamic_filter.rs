@@ -13,7 +13,10 @@
 // limitations under the License.
 
 use risingwave_common::util::sort_util::OrderType;
+pub use risingwave_pb::expr::expr_node::Type as ExprType;
 
+use super::GenericPlanRef;
+use crate::expr::{ExprImpl, FunctionCall, InputRef};
 use crate::optimizer::plan_node::stream;
 use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::utils::Condition;
@@ -22,11 +25,35 @@ use crate::TableCatalog;
 #[derive(Clone, Debug)]
 pub struct DynamicFilter<PlanRef> {
     /// The predicate (formed with exactly one of < , <=, >, >=)
-    pub predicate: Condition,
-    // dist_key_l: Distribution,
+    pub comparator: ExprType,
     pub left_index: usize,
     pub left: PlanRef,
+    /// The right input can only have one column.
     pub right: PlanRef,
+}
+
+impl<PlanRef: GenericPlanRef> DynamicFilter<PlanRef> {
+    /// normalize to the join predicate
+    pub fn predicate(&self) -> Condition {
+        Condition {
+            conjunctions: vec![ExprImpl::from(
+                FunctionCall::new(
+                    self.comparator,
+                    vec![
+                        ExprImpl::from(InputRef::new(
+                            self.left_index,
+                            self.left.schema().fields()[self.left_index].data_type(),
+                        )),
+                        ExprImpl::from(InputRef::new(
+                            self.left.schema().len(),
+                            self.right.schema().fields()[0].data_type(),
+                        )),
+                    ],
+                )
+                .unwrap(),
+            )],
+        }
+    }
 }
 
 pub fn infer_left_internal_table_catalog(

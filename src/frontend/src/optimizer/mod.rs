@@ -38,6 +38,8 @@ use self::plan_node::{
     BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamRowIdGen,
     StreamSink,
 };
+#[cfg(debug_assertions)]
+use self::plan_visitor::InputRefValidator;
 use self::plan_visitor::{
     has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_batch_source,
     has_logical_apply, has_logical_over_agg, HasMaxOneRowApply,
@@ -412,6 +414,9 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
+        #[cfg(debug_assertions)]
+        InputRefValidator.validate(plan.clone());
+
         ctx.store_logical(plan.explain_to_string().unwrap());
 
         Ok(plan)
@@ -433,6 +438,8 @@ impl PlanRoot {
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
+        #[cfg(debug_assertions)]
+        InputRefValidator.validate(plan.clone());
         assert!(*plan.distribution() == Distribution::Single, "{}", plan);
         assert!(!has_batch_exchange(plan.clone()), "{}", plan);
 
@@ -567,6 +574,9 @@ impl PlanRoot {
         //     vec![IndexDeltaJoinRule::create()],
         //     ApplyOrder::BottomUp,
         // );
+
+        #[cfg(debug_assertions)]
+        InputRefValidator.validate(plan.clone());
 
         Ok(plan)
     }
