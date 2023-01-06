@@ -71,10 +71,10 @@ impl<'a> StateCacheFiller<'a> {
     pub fn insert(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>) {
         self.cache.insert_unchecked(key, value)
     }
-}
 
-impl<'a> Drop for StateCacheFiller<'a> {
-    fn drop(&mut self) {
+    /// Finish the cache filling process.
+    /// Must be called after inserting all entries to mark the cache as synced.
+    pub fn finish(self) {
         self.cache.set_synced();
     }
 }

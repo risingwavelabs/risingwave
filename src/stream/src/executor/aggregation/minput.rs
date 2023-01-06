@@ -208,6 +208,7 @@ impl<S: StateStore> MaterializedInputState<S> {
                     .collect();
                 cache_filler.insert(cache_key, cache_value);
             }
+            cache_filler.finish();
         }
         assert!(self.cache.is_synced());
         Ok(self.cache.get_output())
