@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
+use std::ops::Deref;
 use std::str::FromStr;
 
 use itertools::Itertools;
@@ -256,10 +257,10 @@ impl Binder {
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
-        if schema_name.is_none() && let Some(bound_query) = self.cte_to_relation.get(&table_name) {
+        if schema_name.is_none() && let Some(item) = self.context.cte_to_relation.get(&table_name) {
             // Handles CTE
 
-            let (query, mut original_alias) = bound_query.clone();
+            let (_cte_id, query, mut original_alias) = item.deref().clone();
             debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.
 
             if let Some(from_alias) = alias {
