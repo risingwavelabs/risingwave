@@ -1,0 +1,19 @@
+# https://github.com/risingwavelabs/risingwave/issues/7115
+
+statement ok
+create table t (id int);
+
+statement ok
+create materialized view v as select count(*) cnt from t;
+
+query I
+select * from v join (select count(*) from t) T;
+----
+
+# FIXME(Noel): Distributed mode not debugged yet.
+# statement ok
+# SET query_mode TO distributed;
+#
+# query I
+# select * from v join (select count(*) from t) T;
+# ----
