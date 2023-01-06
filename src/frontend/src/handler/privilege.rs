@@ -175,7 +175,7 @@ impl SessionImpl {
     /// > The right to drop an object, or to alter its definition in any way, is not treated as a
     /// > grantable privilege; it is inherent in the owner, and cannot be granted or revoked.
     /// >
-    /// > Reference: https://www.postgresql.org/docs/current/sql-grant.html
+    /// > Reference: <https://www.postgresql.org/docs/current/sql-grant.html>
     pub fn check_privilege_for_drop_alter(
         &self,
         schema_name: &str,

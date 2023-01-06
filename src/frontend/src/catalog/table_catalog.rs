@@ -188,6 +188,8 @@ impl TableCatalog {
         self.table_type == TableType::Index
     }
 
+    /// Returns an error if `DROP` statements are used on the wrong type of table.
+    #[must_use]
     pub fn bad_drop_error(&self) -> RwError {
         let msg = match self.table_type {
             TableType::MaterializedView => {
