@@ -79,18 +79,18 @@ CREATE TABLE limits AS (
 	FROM range(1, 10, 1) tbl(i)
 );
 
-query I rowsort
-SELECT z FROM limits;
+query I
+SELECT z FROM limits order by z;
 ----
+102
 117
+119
 134
+136
 151
+153
 168
 185
-102
-119
-136
-153
 
 query II
 SELECT i, z
