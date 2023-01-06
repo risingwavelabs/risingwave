@@ -189,7 +189,7 @@ pub(crate) mod tests {
             )),
             task_progress_manager: Default::default(),
         });
-        CompactorContext::new(context.clone())
+        CompactorContext::new(context)
     }
 
     #[tokio::test]
