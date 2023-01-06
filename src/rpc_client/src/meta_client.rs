@@ -876,9 +876,9 @@ impl GrpcMetaClient {
     const REQUEST_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
     /// get a channel against service at `addr`
-    /// 
+    ///
     /// ## Arguments:
-    /// addr: Should be formatted like http://127.0.0.1:1234 
+    /// addr: Should be formatted like http://127.0.0.1:1234
     async fn get_channel(addr: &str) -> std::result::Result<Channel, tonic::transport::Error> {
         let endpoint = Endpoint::from_shared(addr.to_string())?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
@@ -908,9 +908,8 @@ impl GrpcMetaClient {
 
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
-        // TODO: Can I write this without marking channel as mut?
         tracing::info!("Originally connect against {}", addr);
-        let mut channel = Self::get_channel(addr).await?;
+        let channel = Self::get_channel(addr).await?;
         let mut leader_client = LeaderServiceClient::new(channel.clone());
         let resp = leader_client
             .leader(LeaderRequest {})
@@ -934,10 +933,12 @@ impl GrpcMetaClient {
         );
         tracing::info!("Current leader is {}", leader_addr_str);
 
-        if addr != leader_addr_str.as_str() {
-            tracing::info!("Connecting aginst {}", leader_addr_str);
-            channel = Self::get_channel(leader_addr_str.as_str()).await?;
-        }
+        let channel = if addr == leader_addr_str.as_str() {
+            channel
+        } else {
+            tracing::info!("Connecting against {}", leader_addr_str);
+            Self::get_channel(leader_addr_str.as_str()).await?
+        };
 
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
