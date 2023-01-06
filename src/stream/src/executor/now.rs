@@ -25,7 +25,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{
     Barrier, BoxedMessageStream, Executor, Message, Mutation, PkIndices, PkIndicesRef,
-    StreamExecutorError, Watermark,
+    StreamExecutorError,
 };
 use crate::common::table::state_table::StateTable;
 
@@ -119,11 +119,12 @@ impl<S: StateStore> NowExecutor<S> {
                 let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
                 yield Message::Chunk(stream_chunk);
 
-                yield Message::Watermark(Watermark::new(
-                    0,
-                    DataType::TIMESTAMPTZ,
-                    timestamp.as_ref().unwrap().clone(),
-                ));
+                // TODO: depends on "https://github.com/risingwavelabs/risingwave/issues/6042"
+                // yield Message::Watermark(Watermark::new(
+                // 0,
+                // DataType::TIMESTAMPTZ,
+                // timestamp.as_ref().unwrap().clone(),
+                // ));
 
                 if last_timestamp.is_some() {
                     state_table.delete(row::once(last_timestamp));
