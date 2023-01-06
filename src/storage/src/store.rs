@@ -71,7 +71,6 @@ macro_rules! define_state_store_read_associated_type {
 }
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send + 'a;
-// TODO: directly return `&[u8]` or `Bytes` to user instead of `Vec<u8>`.
 pub type StateStoreIterItem = (FullKey<Bytes>, Bytes);
 pub trait StateStoreIterNextFutureTrait<'a> = NextFutureTrait<'a, StateStoreIterItem>;
 pub trait StateStoreIterItemStream = Stream<Item = StorageResult<StateStoreIterItem>> + Send;

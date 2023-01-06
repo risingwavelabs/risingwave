@@ -65,9 +65,7 @@ impl MemTable {
     }
 
     /// write methods
-    pub fn insert(&mut self, pk: impl Into<Bytes>, value: impl Into<Bytes>) -> Result<()> {
-        let pk = pk.into();
-        let value = value.into();
+    pub fn insert(&mut self, pk: Bytes, value: Bytes) -> Result<()> {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -90,9 +88,7 @@ impl MemTable {
         }
     }
 
-    pub fn delete(&mut self, pk: impl Into<Bytes>, old_value: impl Into<Bytes>) -> Result<()> {
-        let pk = pk.into();
-        let old_value = old_value.into();
+    pub fn delete(&mut self, pk: Bytes, old_value: Bytes) -> Result<()> {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
@@ -121,15 +117,7 @@ impl MemTable {
         }
     }
 
-    pub fn update(
-        &mut self,
-        pk: impl Into<Bytes>,
-        old_value: impl Into<Bytes>,
-        new_value: impl Into<Bytes>,
-    ) -> Result<()> {
-        let pk = pk.into();
-        let old_value = old_value.into();
-        let new_value = new_value.into();
+    pub fn update(&mut self, pk: Bytes, old_value: Bytes, new_value: Bytes) -> Result<()> {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {

@@ -137,9 +137,7 @@ pub mod sled {
             let mut ret = vec![];
             for result in self.inner.range((left_encoded, right_encoded)).take(limit) {
                 let (key, value) = result?;
-                let full_key = FullKey::decode_reverse_epoch(key.as_ref())
-                    .to_vec()
-                    .into_bytes();
+                let full_key = FullKey::decode_reverse_epoch(key.as_ref()).copy_into();
                 if !full_key_ref_bound.contains(&full_key.to_ref()) {
                     continue;
                 }

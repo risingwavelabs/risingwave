@@ -21,7 +21,7 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
@@ -507,11 +507,11 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    fn serialize_value(&self, value: impl Row) -> Vec<u8> {
+    fn serialize_value(&self, value: impl Row) -> Bytes {
         if let Some(value_indices) = self.value_indices.as_ref() {
-            value.project(value_indices).value_serialize()
+            value.project(value_indices).value_serialize_bytes()
         } else {
-            value.value_serialize()
+            value.value_serialize_bytes()
         }
     }
 
@@ -564,12 +564,7 @@ impl<S: StateStore> StateTable<S> {
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
         let (chunk, op) = chunk.into_parts();
 
-        let mut vnode_and_pks = vec![vec![]; chunk.capacity()];
-
-        compute_chunk_vnode(&chunk, &self.dist_key_indices, &self.vnodes)
-            .into_iter()
-            .zip_eq(vnode_and_pks.iter_mut())
-            .for_each(|(vnode, vnode_and_pk)| vnode_and_pk.extend(vnode.to_be_bytes()));
+        let vnodes = compute_chunk_vnode(&chunk, &self.dist_key_indices, &self.vnodes);
 
         let value_chunk = if let Some(ref value_indices) = self.value_indices {
             chunk.clone().reorder_columns(value_indices)
@@ -579,14 +574,18 @@ impl<S: StateStore> StateTable<S> {
         let values = value_chunk.serialize();
 
         let key_chunk = chunk.reorder_columns(self.pk_indices());
-        key_chunk
+        let vnode_and_pks = key_chunk
             .rows_with_holes()
-            .zip_eq(vnode_and_pks.iter_mut())
-            .for_each(|(r, vnode_and_pk)| {
+            .zip_eq(vnodes.iter())
+            .map(|(r, vnode)| {
+                let mut buffer = BytesMut::new();
+                buffer.put_slice(&vnode.to_be_bytes()[..]);
                 if let Some(r) = r {
-                    self.pk_serde.serialize(r, vnode_and_pk);
+                    self.pk_serde.serialize(r, &mut buffer);
                 }
-            });
+                buffer.freeze()
+            })
+            .collect_vec();
 
         let (_, vis) = key_chunk.into_parts();
         match vis {
