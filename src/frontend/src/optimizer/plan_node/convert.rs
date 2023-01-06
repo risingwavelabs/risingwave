@@ -143,7 +143,6 @@ fn enforce_exchange_above_table_scan(plan: PlanRef) -> PlanRef {
     if plan.node_type() != PlanNodeType::BatchExchange
         && plan.node_type() != PlanNodeType::BatchSeqScan
     {
-        println!("plan type: {:?}", plan.node_type());
         let new_inputs = plan
             .inputs()
             .into_iter()
