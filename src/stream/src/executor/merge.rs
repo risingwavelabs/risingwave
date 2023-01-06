@@ -1,10 +1,10 @@
-// Copyright 2023 Singularity Data
+// Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -200,6 +200,12 @@ impl MergeExecutor {
                                 }
                             }
                         }
+
+                        if !update.added_upstream_actor_id.is_empty()
+                            || !update.get_removed_upstream_actor_id().is_empty()
+                        {
+                            select_all.update_actor_ids();
+                        }
                     }
                 }
             }
@@ -236,6 +242,8 @@ pub struct SelectReceivers {
     blocked: Vec<BoxedInput>,
     /// The upstreams that're not blocked and can be polled.
     active: FuturesUnordered<StreamFuture<BoxedInput>>,
+    /// All upstream actor ids.
+    upstream_actor_ids: Vec<ActorId>,
 
     /// The actor id of this fragment.
     actor_id: u32,
@@ -327,12 +335,13 @@ impl Stream for SelectReceivers {
 impl SelectReceivers {
     fn new(actor_id: u32, upstreams: Vec<BoxedInput>) -> Self {
         assert!(!upstreams.is_empty());
-
+        let upstream_actor_ids = upstreams.iter().map(|input| input.actor_id()).collect();
         let mut this = Self {
             blocked: Vec::with_capacity(upstreams.len()),
             active: Default::default(),
             actor_id,
             barrier: None,
+            upstream_actor_ids,
             buffered_watermarks: Default::default(),
         };
         this.extend_active(upstreams);
@@ -348,8 +357,9 @@ impl SelectReceivers {
             .extend(upstreams.into_iter().map(|s| s.into_future()));
     }
 
-    fn actor_ids(&self) -> Vec<ActorId> {
-        self.blocked
+    fn update_actor_ids(&mut self) {
+        self.upstream_actor_ids = self
+            .blocked
             .iter()
             .map(|input| input.actor_id())
             .chain(
@@ -357,18 +367,17 @@ impl SelectReceivers {
                     .iter()
                     .map(|input| input.get_ref().unwrap().actor_id()),
             )
-            .collect()
+            .collect();
     }
 
     /// Handle a new watermark message. Optionally returns the watermark message to emit.
     fn handle_watermark(&mut self, actor_id: ActorId, watermark: Watermark) -> Option<Watermark> {
         let col_idx = watermark.col_idx;
-        let actor_ids = self.actor_ids();
         // Insert a buffer watermarks when first received from a column.
         let watermarks = self
             .buffered_watermarks
             .entry(col_idx)
-            .or_insert_with(|| BufferedWatermarks::with_ids(actor_ids));
+            .or_insert_with(|| BufferedWatermarks::with_ids(self.upstream_actor_ids.clone()));
         watermarks.handle_watermark(actor_id, watermark)
     }
 
