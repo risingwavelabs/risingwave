@@ -17,7 +17,6 @@ use risingwave_common::error::ErrorCode::{self};
 use risingwave_common::error::{Result, RwError};
 use risingwave_sqlparser::ast::ObjectName;
 
-
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
@@ -68,7 +67,7 @@ pub async fn handle_drop_source(
                 }
             };
 
-        session.check_privilege_for_drop_relation(schema_name, &*source)?;
+        session.check_privilege_for_drop_alter(schema_name, &*source)?;
 
         (source.id, table_id)
     };

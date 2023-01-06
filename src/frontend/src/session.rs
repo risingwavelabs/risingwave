@@ -51,9 +51,9 @@ use tokio::task::JoinHandle;
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
-use crate::catalog::root_catalog::{Catalog};
+use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
-use crate::handler::privilege::{check_privileges, ObjectCheckItem};
+use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::util::to_pg_field;
 use crate::handler::{handle, HandlerArgs};
 use crate::health_service::HealthServiceImpl;
@@ -461,14 +461,11 @@ impl SessionImpl {
 
         check_schema_writable(&schema.name())?;
         if schema.name() != DEFAULT_SCHEMA_NAME {
-            check_privileges(
-                self,
-                &[ObjectCheckItem::new(
-                    schema.owner(),
-                    Action::Create,
-                    Object::SchemaId(schema.id()),
-                )],
-            )?;
+            self.check_privileges(&[ObjectCheckItem::new(
+                schema.owner(),
+                Action::Create,
+                Object::SchemaId(schema.id()),
+            )])?;
         }
 
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();

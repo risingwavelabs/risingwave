@@ -13,10 +13,8 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-
-use risingwave_common::error::{Result};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
-
 
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -54,7 +52,7 @@ pub async fn handle_drop_table(
             }
         };
 
-        session.check_privilege_for_drop_relation(schema_name, &**table)?;
+        session.check_privilege_for_drop_alter(schema_name, &**table)?;
 
         match table.table_type() {
             // TODO(Yuanxin): Remove this `if` after unsupporting `CREATE MATERIALIZED SOURCE`.

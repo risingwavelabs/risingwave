@@ -125,7 +125,34 @@ pub(crate) fn resolve_privileges(stmt: &BoundStatement) -> Vec<ObjectCheckItem> 
 impl SessionImpl {
     /// Check whether the user of the current session has privileges in `items`.
     pub fn check_privileges(&self, items: &[ObjectCheckItem]) -> Result<()> {
-        check_privileges(self, items)
+        let user_reader = self.env().user_info_reader();
+        let reader = user_reader.read_guard();
+
+        if let Some(info) = reader.get_user_by_name(self.user_name()) {
+            if info.is_super {
+                return Ok(());
+            }
+            for item in items {
+                if item.owner == info.id {
+                    continue;
+                }
+                let has_privilege = info.grant_privileges.iter().any(|privilege| {
+                    privilege.object.is_some()
+                        && privilege.object.as_ref().unwrap() == &item.object
+                        && privilege
+                            .action_with_opts
+                            .iter()
+                            .any(|ao| ao.action == item.action as i32)
+                });
+                if !has_privilege {
+                    return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+                }
+            }
+        } else {
+            return Err(PermissionDenied("Session user is invalid".to_string()).into());
+        }
+
+        Ok(())
     }
 
     /// Returns `true` if the user of the current session is a super user.
@@ -139,9 +166,17 @@ impl SessionImpl {
         }
     }
 
-    /// Check whether the user of the current session has the privilege to drop relation `relation`
-    /// in the schema with name `schema_name`.
-    pub fn check_privilege_for_drop_relation(
+    /// Check whether the user of the current session has the privilege to drop or alter the
+    /// relation `relation` in the schema with name `schema_name`.
+    ///
+    /// Note that the right to drop or alter in PostgreSQL is special and not covered by the general
+    /// `GRANT`s.
+    ///
+    /// > The right to drop an object, or to alter its definition in any way, is not treated as a
+    /// > grantable privilege; it is inherent in the owner, and cannot be granted or revoked.
+    /// >
+    /// > Reference: https://www.postgresql.org/docs/current/sql-grant.html
+    pub fn check_privilege_for_drop_alter(
         &self,
         schema_name: &str,
         relation: &impl RelationCatalog,
@@ -170,37 +205,6 @@ impl SessionImpl {
     }
 }
 
-/// check whether user in `session` has privileges in `items`
-pub(crate) fn check_privileges(session: &SessionImpl, items: &[ObjectCheckItem]) -> Result<()> {
-    let user_reader = session.env().user_info_reader();
-    let reader = user_reader.read_guard();
-
-    if let Some(info) = reader.get_user_by_name(session.user_name()) {
-        if info.is_super {
-            return Ok(());
-        }
-        for item in items {
-            if item.owner == info.id {
-                continue;
-            }
-            let has_privilege = info.grant_privileges.iter().any(|privilege| {
-                privilege.object.is_some()
-                    && privilege.object.as_ref().unwrap() == &item.object
-                    && privilege
-                        .action_with_opts
-                        .iter()
-                        .any(|ao| ao.action == item.action as i32)
-            });
-            if !has_privilege {
-                return Err(PermissionDenied("Do not have the privilege".to_string()).into());
-            }
-        }
-    } else {
-        return Err(PermissionDenied("Session user is invalid".to_string()).into());
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SUPER_USER_ID};
@@ -225,7 +229,7 @@ mod tests {
             ProstAction::Create,
             ProstObject::SchemaId(schema.id()),
         )];
-        assert!(check_privileges(&session, &check_items).is_ok());
+        assert!(&session.check_privileges(&check_items).is_ok());
 
         frontend
             .run_sql(
@@ -244,12 +248,12 @@ mod tests {
                 .id
         };
         let session = frontend.session_user_ref(database, user_name, user_id);
-        assert!(check_privileges(&session, &check_items).is_err());
+        assert!(&session.check_privileges(&check_items).is_err());
 
         frontend
             .run_sql("GRANT CREATE ON SCHEMA schema TO user")
             .await
             .unwrap();
-        assert!(check_privileges(&session, &check_items).is_ok());
+        assert!(&session.check_privileges(&check_items).is_ok());
     }
 }
