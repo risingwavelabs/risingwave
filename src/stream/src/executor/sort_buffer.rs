@@ -148,7 +148,11 @@ impl<S: StateStore> SortBuffer<S> {
             let watermark_value = val;
             // Only records with timestamp greater than the last watermark will be output, so
             // records will only be emitted exactly once unless recovery.
-            let start_bound = if let Some(last_watermark) = last_watermark {
+            let start_bound = if let Some(last_watermark) = last_watermark.clone() {
+                // TODO: `start_bound` is wrong here, only values with `val.0 > last_watermark`
+                // should be output, but it's hard to represent `OwnedRow::MAX`. A possible
+                // implementation is introducing `next_unit` on a subset of `ScalarImpl` variants.
+                // Currently, we can skip some values explicitly.
                 Bound::Excluded((last_watermark, OwnedRow::empty()))
             } else {
                 Bound::Unbounded
@@ -156,10 +160,14 @@ impl<S: StateStore> SortBuffer<S> {
             // TODO: `end_bound` = `Bound::Inclusive((watermark_value + 1, OwnedRow::empty()))`, but
             // it's hard to represent now, so we end the loop by an explicit break.
             let end_bound = Bound::Unbounded;
-            for (key, (row, _)) in self.buffer.range((start_bound, end_bound)) {
+
+            for ((time_col, _), (row, _)) in self.buffer.range((start_bound, end_bound)) {
+                if let Some(ref last_watermark) = &last_watermark && &time_col == &last_watermark {
+                    continue;
+                }
                 // Only when a record's timestamp is prior to the watermark should it be
                 // sent to downstream.
-                if &key.0 <= watermark_value {
+                if time_col <= watermark_value {
                     // Add the record to stream chunk data. Note that we retrieve the
                     // record from a BTreeMap, so data in this chunk should be ordered
                     // by timestamp and pk.
@@ -301,7 +309,8 @@ mod tests {
             " I  I
             + 98 4
             + 37 5
-            + 60 8",
+            + 60 8
+            + 13 9",
         );
         let watermark2 = Watermark::new(1, DataType::Int64, 7i64.into());
         let barrier1 = Barrier::new_test_barrier(3);
@@ -364,5 +373,10 @@ mod tests {
                 row_pretty("60 8"),
             ]
         );
+
+        let watermark4 = Watermark::new(1, DataType::Int64, 9i64.into());
+        let output = sort_buffer.handle_watermark(&watermark4);
+        let rows4 = chunks_to_rows(output);
+        assert_eq!(rows4, vec![row_pretty("13 9")]);
     }
 }
