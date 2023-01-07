@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::{self, PermissionDenied};
+use risingwave_common::error::ErrorCode::{self};
 use risingwave_common::error::{Result, RwError};
 use risingwave_sqlparser::ast::ObjectName;
 
-use super::privilege::check_super_user;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
@@ -68,16 +67,7 @@ pub async fn handle_drop_source(
                 }
             };
 
-        let schema_catalog = catalog_reader
-            .get_schema_by_name(db_name, schema_name)
-            .unwrap();
-        let schema_owner = schema_catalog.owner();
-        if session.user_id() != source.owner
-            && session.user_id() != schema_owner
-            && !check_super_user(&session)
-        {
-            return Err(PermissionDenied("Do not have the privilege".to_string()).into());
-        }
+        session.check_privilege_for_drop_alter(schema_name, &*source)?;
 
         (source.id, table_id)
     };
