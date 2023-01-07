@@ -64,23 +64,6 @@ pub struct SortBuffer<S: StateStore> {
 }
 
 impl<S: StateStore> SortBuffer<S> {
-    pub fn new(
-        schema: Schema,
-        pk_indices: PkIndices,
-        sort_column_index: usize,
-        state_table: StateTable<S>,
-    ) -> Self {
-        Self {
-            schema,
-            pk_indices,
-            sort_column_index,
-            state_table,
-            chunk_size: 1024,
-            last_watermark: None,
-            buffer: BTreeMap::new(),
-        }
-    }
-
     pub async fn recover(
         schema: Schema,
         pk_indices: PkIndices,
@@ -286,16 +269,22 @@ mod tests {
         let tys = schema.data_types();
         let order_types = vec![OrderType::Ascending];
         let mut state_table = StateTable::new_without_distribution(
-            state_store,
+            state_store.clone(),
             table_id,
-            column_descs,
-            order_types,
+            column_descs.clone(),
+            order_types.clone(),
             pk_indices.clone(),
         )
         .await;
         state_table.init_epoch(EpochPair::new_test_epoch(2));
-        let mut sort_buffer =
-            SortBuffer::new(schema.clone(), pk_indices, sort_column_index, state_table);
+        let mut sort_buffer = SortBuffer::recover(
+            schema.clone(),
+            pk_indices.clone(),
+            sort_column_index,
+            state_table,
+        )
+        .await
+        .unwrap();
 
         let chunk1 = StreamChunk::from_pretty(
             " I I
@@ -335,8 +324,48 @@ mod tests {
                 OwnedRow::from_pretty_with_tys(&tys, "4 7"),
             ]
         );
+
+        // Rows that shouldn't be re-emitted after recovery.
         sort_buffer.delete(&rows1[0]);
         sort_buffer.delete(&rows1[1]);
+
         sort_buffer.handle_barrier(&barrier1).await.unwrap();
+
+        // Rows that should be re-emitted after recovery.
+        sort_buffer.delete(&rows2[0]);
+        sort_buffer.delete(&rows2[1]);
+
+        // Failover and recover
+        drop(sort_buffer);
+
+        let mut state_table = StateTable::new_without_distribution(
+            state_store.clone(),
+            table_id,
+            column_descs,
+            order_types,
+            pk_indices.clone(),
+        )
+        .await;
+
+        state_table.init_epoch(EpochPair::new_test_epoch(3));
+        let mut sort_buffer =
+            SortBuffer::recover(schema, pk_indices.clone(), sort_column_index, state_table)
+                .await
+                .unwrap();
+
+        let watermark3 = Watermark::new(1, DataType::Int64, 8i64.into());
+
+        let output = sort_buffer.handle_watermark(&watermark3);
+        let rows3 = chunks_to_rows(output);
+        assert_eq!(
+            rows3,
+            vec![
+                OwnedRow::from_pretty_with_tys(&tys, "98 4"),
+                OwnedRow::from_pretty_with_tys(&tys, "37 5"),
+                OwnedRow::from_pretty_with_tys(&tys, "3 6"),
+                OwnedRow::from_pretty_with_tys(&tys, "4 7"),
+                OwnedRow::from_pretty_with_tys(&tys, "60 8"),
+            ]
+        );
     }
 }
