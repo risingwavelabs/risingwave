@@ -76,7 +76,7 @@ impl Worker {
     }
 
     pub fn worker_type(&self) -> WorkerType {
-        WorkerType::from_i32(self.worker_node.r#type).expect("Invalid worker type")
+        self.worker_node.r#type()
     }
 
     pub fn expire_at(&self) -> u64 {

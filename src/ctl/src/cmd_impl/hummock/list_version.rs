@@ -48,7 +48,9 @@ pub async fn list_pinned_versions() -> anyhow::Result<()> {
             Some(worker) => {
                 println!(
                     "Worker {} type {} min_pinned_version_id {}",
-                    pinned_version.context_id, worker.r#type, pinned_version.min_pinned_id
+                    pinned_version.context_id,
+                    worker.r#type().as_str_name(),
+                    pinned_version.min_pinned_id
                 );
             }
         }
@@ -80,7 +82,7 @@ pub async fn list_pinned_snapshots() -> anyhow::Result<()> {
                 println!(
                     "Worker {} type {} min_pinned_snapshot {}",
                     pinned_snapshot.context_id,
-                    worker.r#type,
+                    worker.r#type().as_str_name(),
                     pinned_snapshot.minimal_pinned_snapshot
                 );
             }
