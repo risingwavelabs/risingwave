@@ -267,6 +267,9 @@ mod tests {
         let fields: Vec<Field> = column_descs.iter().map(Into::into).collect();
         let schema = Schema::new(fields);
         let tys = schema.data_types();
+
+        let row_pretty = |s: &str| OwnedRow::from_pretty_with_tys(&tys, s);
+
         let order_types = vec![OrderType::Ascending];
         let mut state_table = StateTable::new_without_distribution(
             state_store.clone(),
@@ -305,23 +308,17 @@ mod tests {
         sort_buffer.handle_chunk(&chunk1);
         let output = sort_buffer.handle_watermark(&watermark1);
         let rows1 = chunks_to_rows(output);
-        assert_eq!(
-            rows1,
-            vec![
-                OwnedRow::from_pretty_with_tys(&tys, "1 1"),
-                OwnedRow::from_pretty_with_tys(&tys, "2 2"),
-            ]
-        );
+        assert_eq!(rows1, vec![row_pretty("1 1"), row_pretty("2 2")]);
         sort_buffer.handle_chunk(&chunk2);
         let output = sort_buffer.handle_watermark(&watermark2);
         let rows2 = chunks_to_rows(output);
         assert_eq!(
             rows2,
             vec![
-                OwnedRow::from_pretty_with_tys(&tys, "98 4"),
-                OwnedRow::from_pretty_with_tys(&tys, "37 5"),
-                OwnedRow::from_pretty_with_tys(&tys, "3 6"),
-                OwnedRow::from_pretty_with_tys(&tys, "4 7"),
+                row_pretty("98 4"),
+                row_pretty("37 5"),
+                row_pretty("3 6"),
+                row_pretty("4 7"),
             ]
         );
 
@@ -360,11 +357,11 @@ mod tests {
         assert_eq!(
             rows3,
             vec![
-                OwnedRow::from_pretty_with_tys(&tys, "98 4"),
-                OwnedRow::from_pretty_with_tys(&tys, "37 5"),
-                OwnedRow::from_pretty_with_tys(&tys, "3 6"),
-                OwnedRow::from_pretty_with_tys(&tys, "4 7"),
-                OwnedRow::from_pretty_with_tys(&tys, "60 8"),
+                row_pretty("98 4"),
+                row_pretty("37 5"),
+                row_pretty("3 6"),
+                row_pretty("4 7"),
+                row_pretty("60 8"),
             ]
         );
     }
