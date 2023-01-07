@@ -44,6 +44,7 @@ impl StreamTopN {
             logical.functional_dependency().clone(),
             dist,
             false,
+            logical.input().watermark_columns().clone(),
         );
         StreamTopN { base, logical }
     }

@@ -508,7 +508,8 @@ impl Parser {
             Token::Number(_)
             | Token::SingleQuotedString(_)
             | Token::NationalStringLiteral(_)
-            | Token::HexStringLiteral(_) => {
+            | Token::HexStringLiteral(_)
+            | Token::CstyleEscapesString(_) => {
                 self.prev_token();
                 Ok(Expr::Value(self.parse_value()?))
             }
@@ -2232,6 +2233,7 @@ impl Parser {
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
             Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string())),
+            Token::CstyleEscapesString(ref s) => Ok(Value::CstyleEscapesString(s.to_string())),
             Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
             unexpected => self.expected("a value", unexpected),
