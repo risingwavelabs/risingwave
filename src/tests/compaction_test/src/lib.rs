@@ -24,13 +24,13 @@
 #![warn(clippy::await_holding_lock)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+mod compaction_test_runner;
 mod delete_range_runner;
-mod runner;
 
 use clap::Parser;
 pub use delete_range_runner::start_delete_range;
 
-use crate::runner::compaction_test_main;
+use crate::compaction_test_runner::compaction_test_main;
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Debug)]
@@ -73,6 +73,10 @@ pub struct CompactionTestOpts {
     /// [`risingwave_common::config`] instead of command line arguments.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    /// The path to the configuration file used for version delta replay.
+    #[clap(long, default_value = "src/config/ci-compaction-test.toml")]
+    pub config_path_for_replay: String,
 }
 
 use std::future::Future;

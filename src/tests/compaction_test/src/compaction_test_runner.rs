@@ -41,6 +41,7 @@ use risingwave_storage::store::{ReadOptions, StateStoreRead};
 use risingwave_storage::{StateStore, StateStoreImpl};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
+const CHECKPOINT_FREQ_FOR_REPLAY: usize = 99999999;
 
 use crate::CompactionTestOpts;
 
@@ -79,7 +80,7 @@ pub async fn compaction_test_main(
 
     let _meta_handle = tokio::spawn(start_meta_node(
         meta_listen_addr.clone(),
-        opts.config_path.clone(),
+        opts.config_path_for_replay.clone(),
     ));
 
     // Wait for meta starts
@@ -90,7 +91,7 @@ pub async fn compaction_test_main(
         opts.meta_address.clone(),
         client_addr.to_string(),
         opts.state_store.clone(),
-        opts.config_path.clone(),
+        opts.config_path_for_replay.clone(),
     );
 
     let original_meta_endpoint = "http://127.0.0.1:5690";
@@ -122,7 +123,7 @@ pub async fn compaction_test_main(
 }
 
 pub async fn start_meta_node(listen_addr: String, config_path: String) {
-    let opts = risingwave_meta::MetaNodeOpts::parse_from([
+    let meta_opts = risingwave_meta::MetaNodeOpts::parse_from([
         "meta-node",
         "--listen-addr",
         &listen_addr,
@@ -131,12 +132,19 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
         "--config-path",
         &config_path,
     ]);
-    let config = load_config(&opts.config_path);
+    let config = load_config(&meta_opts.config_path);
     assert!(
         config.meta.enable_compaction_deterministic,
         "enable_compaction_deterministic should be set"
     );
-    risingwave_meta::start(opts).await
+
+    // We set a large checkpoint frequency to prevent the embedded meta node
+    // to commit new epochs to avoid bumping the hummock version
+    assert_eq!(
+        CHECKPOINT_FREQ_FOR_REPLAY,
+        config.streaming.checkpoint_frequency
+    );
+    risingwave_meta::start(meta_opts).await
 }
 
 async fn start_compactor_node(
@@ -245,6 +253,7 @@ async fn init_metadata_for_replay(
         .init_metadata_for_replay(tables, compaction_groups)
         .await?;
 
+    // shift the sst id to avoid conflict with the original meta node
     let _ = new_meta_client.get_new_sst_ids(SST_ID_SHIFT_COUNT).await?;
 
     tracing::info!("Finished initializing the new Meta");
@@ -297,7 +306,7 @@ async fn start_replay(
     );
 
     let mut metric = CompactionTestMetrics::new();
-    let config = load_config(&opts.config_path);
+    let config = load_config(&opts.config_path_for_replay);
     tracing::info!(
         "Starting replay with config {:?} and opts {:?}",
         config,
