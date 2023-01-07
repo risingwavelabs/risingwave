@@ -6175,6 +6175,7 @@ dependencies = [
  "hyper",
  "itertools",
  "madsim-tokio",
+ "opendal",
  "prometheus",
  "risingwave_common",
  "spin 0.9.4",

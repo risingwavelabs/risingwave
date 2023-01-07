@@ -1,8 +1,5 @@
-use std::sync::Arc;
-
-use opendal::raw::Accessor;
 use opendal::services::hdfs;
-use opendal::{Object, Operator};
+use opendal::Operator;
 
 #[tokio::main]
 async fn main() {
@@ -28,5 +25,4 @@ async fn main() {
 
     println!("meta size = {:?}", meta.content_length());
     op.object("test_file").delete().await.unwrap();
-
 }
