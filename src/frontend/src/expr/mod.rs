@@ -218,7 +218,7 @@ impl ExprImpl {
     /// Evaluate a constant expression.
     pub fn eval_row_const(&self) -> Result<Datum> {
         assert!(self.is_const());
-        self.eval_row(OwnedRow::empty())
+        self.eval_row(&OwnedRow::empty())
     }
 }
 
