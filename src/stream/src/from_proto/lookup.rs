@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -70,11 +70,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             arrange_join_key_indices: lookup.arrange_key.iter().map(|x| *x as usize).collect(),
             column_mapping: lookup.column_mapping.iter().map(|x| *x as usize).collect(),
             state_table,
-            lru_manager: stream_manager.context.lru_manager.clone(),
-            cache_size: stream_manager
-                .config
-                .developer
-                .unsafe_stream_join_cache_size,
+            watermark_epoch: stream_manager.get_watermark_epoch(),
             chunk_size: params.env.config().developer.stream_chunk_size,
         })))
     }

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,24 +21,25 @@ use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrat
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
-use risingwave_source::*;
+use risingwave_source::BoxSourceWithStateStream;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::Barrier;
 
-type SourceReaderMessage = StreamExecutorResult<Either<Barrier, StreamChunkWithState>>;
-type SourceReaderArm = BoxStream<'static, SourceReaderMessage>;
-type SourceReaderStreamInner =
-    SelectWithStrategy<SourceReaderArm, SourceReaderArm, impl FnMut(&mut ()) -> PollNext, ()>;
+type SourceReaderMessage<T> = StreamExecutorResult<Either<Barrier, T>>;
+type SourceReaderArm<T> = BoxStream<'static, SourceReaderMessage<T>>;
+#[allow(type_alias_bounds)]
+type SourceReaderStreamInner<T: Send + 'static> =
+    SelectWithStrategy<SourceReaderArm<T>, SourceReaderArm<T>, impl FnMut(&mut ()) -> PollNext, ()>;
 
-pub(super) struct SourceReaderStream {
-    inner: SourceReaderStreamInner,
+pub(super) struct SourceReaderStream<T: Send + 'static> {
+    inner: SourceReaderStreamInner<T>,
     /// Whether the source stream is paused.
     paused: bool,
 }
 
-impl SourceReaderStream {
+impl<T: Send + 'static> SourceReaderStream<T> {
     /// Receive barriers from barrier manager with the channel, error on channel close.
     #[try_stream(ok = Barrier, error = StreamExecutorError)]
     async fn barrier_receiver(mut rx: UnboundedReceiver<Barrier>) {
@@ -49,8 +50,8 @@ impl SourceReaderStream {
     }
 
     /// Receive chunks and states from the source reader, hang up on error.
-    #[try_stream(ok = StreamChunkWithState, error = StreamExecutorError)]
-    async fn source_stream(stream: BoxSourceWithStateStream) {
+    #[try_stream(ok = T, error = StreamExecutorError)]
+    async fn source_stream(stream: BoxSourceWithStateStream<T>) {
         // TODO: support stack trace for Stream
         #[for_await]
         for chunk in stream {
@@ -67,7 +68,7 @@ impl SourceReaderStream {
     /// Convert this reader to a stream.
     pub fn new(
         barrier_receiver: UnboundedReceiver<Barrier>,
-        source_stream: BoxSourceWithStateStream,
+        source_stream: BoxSourceWithStateStream<T>,
     ) -> Self {
         Self {
             inner: Self::new_inner(
@@ -83,9 +84,9 @@ impl SourceReaderStream {
     }
 
     fn new_inner(
-        barrier_receiver_arm: SourceReaderArm,
-        source_stream_arm: SourceReaderArm,
-    ) -> SourceReaderStreamInner {
+        barrier_receiver_arm: SourceReaderArm<T>,
+        source_stream_arm: SourceReaderArm<T>,
+    ) -> SourceReaderStreamInner<T> {
         select_with_strategy(
             barrier_receiver_arm,
             source_stream_arm,
@@ -95,7 +96,7 @@ impl SourceReaderStream {
     }
 
     /// Replace the source stream with a new one for given `stream`. Used for split change.
-    pub fn replace_source_stream(&mut self, source_stream: BoxSourceWithStateStream) {
+    pub fn replace_source_stream(&mut self, source_stream: BoxSourceWithStateStream<T>) {
         // Take the barrier receiver arm.
         let barrier_receiver_arm = std::mem::replace(
             self.inner.get_mut().0,
@@ -125,8 +126,8 @@ impl SourceReaderStream {
     }
 }
 
-impl Stream for SourceReaderStream {
-    type Item = SourceReaderMessage;
+impl<T: Send> Stream for SourceReaderStream<T> {
+    type Item = SourceReaderMessage<T>;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
@@ -145,6 +146,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::{pin_mut, FutureExt};
     use risingwave_common::array::StreamChunk;
+    use risingwave_source::TableSource;
     use tokio::sync::mpsc;
 
     use super::*;

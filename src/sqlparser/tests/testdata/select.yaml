@@ -34,18 +34,18 @@
   formatted_sql: SELECT (foo).* FROM foo
 
 - input: SELECT ((foo.v1).v2).* FROM foo
-  formatted_sql: SELECT ((foo.v1).v2).* FROM foo
+  formatted_sql: SELECT (foo.v1).v2.* FROM foo
 
 - input: SELECT ((1,2,3)::foo).v1.*
   formatted_sql: SELECT (CAST(ROW(1, 2, 3) AS foo)).v1.*
 
 - input: SELECT (((((1,2,3)::foo).v1))).*
-  formatted_sql: SELECT ((CAST(ROW(1, 2, 3) AS foo)).v1).*
+  formatted_sql: SELECT (CAST(ROW(1, 2, 3) AS foo)).v1.*
 
 - input: SELECT * FROM generate_series('2'::INT,'10'::INT,'2'::INT)
   formatted_sql: SELECT * FROM generate_series(CAST('2' AS INT), CAST('10' AS INT), CAST('2' AS INT))
   formatted_ast: |
-    Query(Query { with: None, body: Select(Select { distinct: All, projection: [Wildcard], from: [TableWithJoins { relation: TableFunction { name: ObjectName([Ident { value: "generate_series", quote_style: None }]), alias: None, args: [Unnamed(Expr(Cast { expr: Value(SingleQuotedString("2")), data_type: Int(None) })), Unnamed(Expr(Cast { expr: Value(SingleQuotedString("10")), data_type: Int(None) })), Unnamed(Expr(Cast { expr: Value(SingleQuotedString("2")), data_type: Int(None) }))] }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+    Query(Query { with: None, body: Select(Select { distinct: All, projection: [Wildcard], from: [TableWithJoins { relation: TableFunction { name: ObjectName([Ident { value: "generate_series", quote_style: None }]), alias: None, args: [Unnamed(Expr(Cast { expr: Value(SingleQuotedString("2")), data_type: Int })), Unnamed(Expr(Cast { expr: Value(SingleQuotedString("10")), data_type: Int })), Unnamed(Expr(Cast { expr: Value(SingleQuotedString("2")), data_type: Int }))] }, joins: [] }], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
 
 - input: SELECT * FROM unnest(Array[1,2,3]);
   formatted_sql: SELECT * FROM unnest(ARRAY[1, 2, 3])
@@ -71,10 +71,10 @@
   error_msg: "sql parser error: Expected ), found: minutes"
 
 - input: SELECT 1, FROM t
-  error_msg: "sql parser error: syntax error at or near \"FROM\""
+  error_msg: 'sql parser error: syntax error at or near "FROM"'
 
 - input: SELECT 1, WHERE true
-  error_msg: "sql parser error: syntax error at or near \"WHERE\""
+  error_msg: 'sql parser error: syntax error at or near "WHERE"'
 
 - input: SELECT timestamp with time zone '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
   formatted_sql: SELECT TIMESTAMP WITH TIME ZONE '2022-10-01 12:00:00Z' AT TIME ZONE 'US/Pacific'
@@ -100,3 +100,13 @@
   formatted_sql: SELECT -1e6
   formatted_ast: |
     Query(Query { with: None, body: Select(Select { distinct: All, projection: [UnnamedExpr(Value(Number("-1e6")))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+
+- input: SELECT 1::float(0)
+  error_msg: |
+    sql parser error: precision for type float must be at least 1 bit
+- input: SELECT 1::float(54)
+  error_msg: |
+    sql parser error: precision for type float must be less than 54 bits
+- input: SELECT 1::int(2)
+  error_msg: |
+    sql parser error: Expected end of statement, found: (

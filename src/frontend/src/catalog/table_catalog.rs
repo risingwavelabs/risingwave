@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,12 +17,14 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::{TableDesc, TableId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType as ProstTableType};
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
 use super::column_catalog::ColumnCatalog;
-use super::{DatabaseId, FragmentId, SchemaId};
+use super::{DatabaseId, FragmentId, RelationCatalog, SchemaId};
 use crate::optimizer::property::FieldOrder;
+use crate::user::UserId;
 use crate::WithOptions;
 
 /// Includes full information about a table.
@@ -32,7 +34,7 @@ use crate::WithOptions;
 /// - a materialized view
 /// - an index
 ///
-/// Use `self.kind()` to determine the type of the table.
+/// Use `self.table_type()` to determine the type of the table.
 ///
 /// # Column ID & Column Index
 ///
@@ -58,7 +60,8 @@ use crate::WithOptions;
 ///
 /// - **Distribution Key**: the columns used to partition the data. It must be a subset of the order
 ///   key.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(Default, PartialEq))]
 pub struct TableCatalog {
     pub id: TableId,
 
@@ -86,7 +89,7 @@ pub struct TableCatalog {
     pub append_only: bool,
 
     /// Owner of the table.
-    pub owner: u32,
+    pub owner: UserId,
 
     /// Properties of the table. For example, `appendonly` or `retention_seconds`.
     pub properties: WithOptions,
@@ -106,7 +109,7 @@ pub struct TableCatalog {
     /// is not supported yet and expected to be `[0..columns.len()]`
     pub value_indices: Vec<usize>,
 
-    /// Definition of the materialized view.
+    /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
     pub definition: String,
 
     pub handle_pk_conflict: bool,
@@ -126,6 +129,7 @@ pub enum TableType {
     Internal,
 }
 
+#[cfg(test)]
 impl Default for TableType {
     fn default() -> Self {
         Self::Table
@@ -184,6 +188,29 @@ impl TableCatalog {
         self.table_type == TableType::Index
     }
 
+    /// Returns an error if `DROP` statements are used on the wrong type of table.
+    #[must_use]
+    pub fn bad_drop_error(&self) -> RwError {
+        let msg = match self.table_type {
+            TableType::MaterializedView => {
+                "Use `DROP MATERIALIZED VIEW` to drop a materialized view."
+            }
+            TableType::Index => "Use `DROP INDEX` to drop an index.",
+            TableType::Table => {
+                // TODO(Yuanxin): Remove this after unsupporting `CREATE MATERIALIZED SOURCE`.
+                // Note(bugen): may make this a method on `TableType` instead.
+                if self.associated_source_id().is_some() {
+                    "Use `DROP SOURCE` to drop a source."
+                } else {
+                    "Use `DROP TABLE` to drop a table."
+                }
+            }
+            TableType::Internal => "Internal tables cannot be dropped.",
+        };
+
+        ErrorCode::InvalidInputSyntax(msg.to_owned()).into()
+    }
+
     /// Get the table catalog's associated source id.
     #[must_use]
     pub fn associated_source_id(&self) -> Option<TableId> {
@@ -236,6 +263,11 @@ impl TableCatalog {
             SchemaId::placeholder() as u32,
             DatabaseId::placeholder() as u32,
         )
+    }
+
+    /// Returns the SQL statement that can be used to create this table.
+    pub fn create_sql(&self) -> String {
+        self.definition.clone()
     }
 
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
@@ -328,6 +360,12 @@ impl From<ProstTable> for TableCatalog {
 impl From<&ProstTable> for TableCatalog {
     fn from(tb: &ProstTable) -> Self {
         tb.clone().into()
+    }
+}
+
+impl RelationCatalog for TableCatalog {
+    fn owner(&self) -> UserId {
+        self.owner
     }
 }
 

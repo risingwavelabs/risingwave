@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_stack_trace::StackTrace;
 use fixedbitset::FixedBitSet;
@@ -37,11 +38,11 @@ use super::monitor::StreamingMetrics;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
-use crate::cache::LruManagerRef;
 use crate::common::table::state_table::StateTable;
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::expect_first_barrier_from_aligned_stream;
 use crate::executor::JoinType::LeftAnti;
+use crate::task::AtomicU64Ref;
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -405,12 +406,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         executor_id: u64,
         cond: Option<BoxedExpression>,
         op_info: String,
-        cache_size: usize,
         state_table_l: StateTable<S>,
         degree_state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
         degree_state_table_r: StateTable<S>,
-        lru_manager: Option<LruManagerRef>,
+        watermark_epoch: AtomicU64Ref,
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
@@ -532,8 +532,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             schema: actual_schema,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
-                    lru_manager.clone(),
-                    cache_size,
+                    watermark_epoch.clone(),
                     join_key_data_types_l,
                     state_all_data_types_l.clone(),
                     state_table_l,
@@ -556,8 +555,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
-                    lru_manager,
-                    cache_size,
+                    watermark_epoch,
                     join_key_data_types_r,
                     state_all_data_types_r.clone(),
                     state_table_r,
@@ -623,6 +621,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
                 }
                 AlignedMessage::Left(chunk) => {
+                    let mut left_time = Duration::from_nanos(0);
+                    let mut left_start_time = minstant::Instant::now();
                     #[for_await]
                     for chunk in Self::eq_join_oneside::<{ SideType::Left }>(
                         &self.ctx,
@@ -635,6 +635,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.append_only_optimize,
                         self.chunk_size,
                     ) {
+                        left_time += left_start_time.elapsed();
                         yield chunk.map(|v| match v {
                             Message::Watermark(_) => {
                                 todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
@@ -642,9 +643,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             Message::Chunk(chunk) => Message::Chunk(chunk),
                             barrier @ Message::Barrier(_) => barrier,
                         })?;
+                        left_start_time = minstant::Instant::now();
                     }
+                    left_time += left_start_time.elapsed();
+                    self.metrics
+                        .join_match_duration_ns
+                        .with_label_values(&[&actor_id_str, "left"])
+                        .inc_by(left_time.as_nanos() as u64);
                 }
                 AlignedMessage::Right(chunk) => {
+                    let mut right_time = Duration::from_nanos(0);
+                    let mut right_start_time = minstant::Instant::now();
                     #[for_await]
                     for chunk in Self::eq_join_oneside::<{ SideType::Right }>(
                         &self.ctx,
@@ -657,6 +666,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.append_only_optimize,
                         self.chunk_size,
                     ) {
+                        right_time += right_start_time.elapsed();
                         yield chunk.map(|v| match v {
                             Message::Watermark(_) => {
                                 todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
@@ -664,9 +674,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             Message::Chunk(chunk) => Message::Chunk(chunk),
                             barrier @ Message::Barrier(_) => barrier,
                         })?;
+                        right_start_time = minstant::Instant::now();
                     }
+                    right_time += right_start_time.elapsed();
+                    self.metrics
+                        .join_match_duration_ns
+                        .with_label_values(&[&actor_id_str, "right"])
+                        .inc_by(right_time.as_nanos() as u64);
                 }
                 AlignedMessage::Barrier(barrier) => {
+                    let barrier_start_time = minstant::Instant::now();
                     self.flush_data(barrier.epoch).await?;
 
                     // Update the vnode bitmap for state tables of both sides if asked.
@@ -699,6 +716,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         //     .set(ht.estimated_size() as i64);
                     }
 
+                    self.metrics
+                        .join_match_duration_ns
+                        .with_label_values(&[&actor_id_str, "barrier"])
+                        .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                     yield Message::Barrier(barrier);
                 }
             }
@@ -919,6 +940,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU64;
+
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
@@ -1042,12 +1065,11 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
-            1 << 16,
             state_l,
             degree_state_l,
             state_r,
             degree_state_r,
-            None,
+            Arc::new(AtomicU64::new(0)),
             false,
             Arc::new(StreamingMetrics::unused()),
             1024,
@@ -1115,12 +1137,11 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
-            1 << 16,
             state_l,
             degree_state_l,
             state_r,
             degree_state_r,
-            None,
+            Arc::new(AtomicU64::new(0)),
             true,
             Arc::new(StreamingMetrics::unused()),
             1024,

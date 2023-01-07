@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,6 +16,7 @@ use core::time::Duration;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::Write;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
@@ -52,6 +53,8 @@ pub static LOCAL_TEST_ADDR: std::sync::LazyLock<HostAddr> =
 
 pub type ActorHandle = JoinHandle<()>;
 
+pub type AtomicU64Ref = Arc<AtomicU64>;
+
 pub struct LocalStreamManagerCore {
     /// Runtime for the streaming actors.
     runtime: &'static tokio::runtime::Runtime,
@@ -80,6 +83,9 @@ pub struct LocalStreamManagerCore {
 
     /// Manages the stack traces of all actors.
     stack_trace_manager: Option<StackTraceManager<ActorId>>,
+
+    /// Watermark epoch number.
+    watermark_epoch: AtomicU64Ref,
 }
 
 /// `LocalStreamManager` manages all stream executors in this project.
@@ -156,7 +162,6 @@ impl LocalStreamManager {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         async_stack_trace_config: Option<TraceConfig>,
-        total_memory_available_bytes: usize,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
@@ -164,7 +169,6 @@ impl LocalStreamManager {
             streaming_metrics,
             config,
             async_stack_trace_config,
-            total_memory_available_bytes,
         ))
     }
 
@@ -307,10 +311,10 @@ impl LocalStreamManager {
 
     /// Force stop all actors on this worker.
     pub async fn stop_all_actors(&self) -> StreamResult<()> {
+        self.core.lock().await.drop_all_actors();
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
         self.clear_all_senders_and_collect_rx();
-        self.core.lock().await.drop_all_actors();
 
         Ok(())
     }
@@ -360,6 +364,13 @@ impl LocalStreamManager {
         let core = self.core.lock().await;
         core.config.clone()
     }
+
+    /// After memory manager is created, it will store the watermark epoch in stream manager, so
+    /// stream executor can get it to build managed cache.
+    pub async fn set_watermark_epoch(&self, watermark_epoch: AtomicU64Ref) {
+        let mut guard = self.core.lock().await;
+        guard.watermark_epoch = watermark_epoch;
+    }
 }
 
 fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
@@ -377,15 +388,8 @@ impl LocalStreamManagerCore {
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
         async_stack_trace_config: Option<TraceConfig>,
-        total_memory_available_bytes: usize,
     ) -> Self {
-        let context = SharedContext::new(
-            addr,
-            state_store.clone(),
-            streaming_metrics.clone(),
-            &config,
-            total_memory_available_bytes,
-        );
+        let context = SharedContext::new(addr, state_store.clone(), &config);
         Self::new_inner(
             state_store,
             context,
@@ -425,6 +429,7 @@ impl LocalStreamManagerCore {
             streaming_metrics,
             config,
             stack_trace_manager: async_stack_trace_config.map(StackTraceManager::new),
+            watermark_epoch: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -491,6 +496,7 @@ impl LocalStreamManagerCore {
                     | NodeBody::Chain(_)
                     | NodeBody::DynamicFilter(_)
                     | NodeBody::GroupTopN(_)
+                    | NodeBody::Now(_)
             )
         }
         let is_stateful = is_stateful_executor(node);
@@ -833,6 +839,11 @@ impl LocalStreamManagerCore {
             }
         }
         Ok(())
+    }
+
+    /// When executor need to create cache, it will call this needs the watermark epoch for evict.
+    pub fn get_watermark_epoch(&self) -> AtomicU64Ref {
+        self.watermark_epoch.clone()
     }
 }
 

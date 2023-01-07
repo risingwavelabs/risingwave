@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,7 +33,10 @@ use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
 };
-use crate::optimizer::plan_node::{gen_filter_and_pushdown, BatchSortAgg, LogicalProject};
+use crate::optimizer::plan_node::{
+    gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalProject,
+    PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
 use crate::optimizer::property::Direction::{Asc, Desc};
 use crate::optimizer::property::{
     Distribution, FieldOrder, FunctionalDependencySet, Order, RequiredDist,
@@ -285,6 +288,10 @@ impl LogicalAgg {
                     .data_type
                     == DataType::Int32
         })
+    }
+
+    pub fn core(&self) -> &generic::Agg<PlanRef> {
+        &self.core
     }
 }
 
@@ -637,10 +644,8 @@ impl LogicalAgg {
         input_fd_set: &FunctionalDependencySet,
         group_key: &[usize],
     ) -> FunctionalDependencySet {
-        let mut fd_set = FunctionalDependencySet::with_key(
-            column_cnt,
-            &(0..group_key.len()).into_iter().collect_vec(),
-        );
+        let mut fd_set =
+            FunctionalDependencySet::with_key(column_cnt, &(0..group_key.len()).collect_vec());
         // take group keys from input_columns, then grow the target size to column_cnt
         let i2o = ColIndexMapping::with_remaining_columns(group_key, input_len).composite(
             &ColIndexMapping::identity_or_none(group_key.len(), column_cnt),
@@ -773,7 +778,7 @@ impl fmt::Display for LogicalAgg {
 }
 
 impl ColPrunable for LogicalAgg {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let group_key_required_cols = FixedBitSet::from_iter(self.group_key().iter().copied());
 
         let (agg_call_required_cols, agg_calls) = {
@@ -808,7 +813,7 @@ impl ColPrunable for LogicalAgg {
             self.input().schema().len(),
         );
         let agg = {
-            let input = self.input().prune_col(&input_required_cols);
+            let input = self.input().prune_col(&input_required_cols, ctx);
             self.rewrite_with_input_agg(input, &agg_calls, input_col_change)
         };
         let new_output_cols = {
@@ -844,7 +849,11 @@ impl ColPrunable for LogicalAgg {
 }
 
 impl PredicatePushdown for LogicalAgg {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         let num_group_key = self.group_key().len();
         let num_agg_calls = self.agg_calls().len();
         assert!(num_group_key + num_agg_calls == self.schema().len());
@@ -857,7 +866,7 @@ impl PredicatePushdown for LogicalAgg {
         // When it is constantly false, pushing is wrong - the old plan returns 0 rows but new one
         // returns 1 row.
         if num_group_key == 0 {
-            return gen_filter_and_pushdown(self, predicate, Condition::true_cond());
+            return gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx);
         }
 
         // If the filter references agg_calls, we can not push it.
@@ -878,7 +887,7 @@ impl PredicatePushdown for LogicalAgg {
         };
         let pushed_predicate = pushed_predicate.rewrite_expr(&mut subst);
 
-        gen_filter_and_pushdown(self, agg_call_pred, pushed_predicate)
+        gen_filter_and_pushdown(self, agg_call_pred, pushed_predicate, ctx)
     }
 }
 
@@ -919,7 +928,7 @@ impl ToBatch for LogicalAgg {
 }
 
 impl ToStream for LogicalAgg {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         // To rewrite StreamAgg, there are two things to do:
         // 1. insert a RowCount(Count with zero argument) at the beginning of agg_calls of
         // LogicalAgg.
@@ -940,7 +949,7 @@ impl ToStream for LogicalAgg {
             .collect_vec();
 
         let logical_agg = LogicalAgg::new(agg_calls, self.group_key().to_vec(), self.input());
-        let stream_agg = logical_agg.gen_dist_stream_agg_plan(self.input().to_stream()?)?;
+        let stream_agg = logical_agg.gen_dist_stream_agg_plan(self.input().to_stream(ctx)?)?;
 
         let stream_project = StreamProject::new(LogicalProject::with_out_col_idx(
             stream_agg,
@@ -949,8 +958,11 @@ impl ToStream for LogicalAgg {
         Ok(stream_project.into())
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (input, input_col_change) = self.input().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
         let (map, _) = out_col_change.into_parts();
         let out_col_change = ColIndexMapping::with_target_size(map, agg.schema().len());
@@ -1151,10 +1163,10 @@ mod tests {
             Field::with_name(ty.clone(), "v2"),
             Field::with_name(ty.clone(), "v3"),
         ];
-        let agg = generate_agg_call(ty.clone(), fields.clone()).await;
+        let agg: PlanRef = generate_agg_call(ty.clone(), fields.clone()).await.into();
         // Perform the prune
         let required_cols = vec![0, 1];
-        let plan = agg.prune_col(&required_cols);
+        let plan = agg.prune_col(&required_cols, &mut ColumnPruningContext::new(agg.clone()));
 
         // Check the result
         let agg_new = plan.as_logical_agg().unwrap();
@@ -1190,10 +1202,10 @@ mod tests {
             Field::with_name(ty.clone(), "v2"),
             Field::with_name(ty.clone(), "v3"),
         ];
-        let agg = generate_agg_call(ty.clone(), fields.clone()).await;
+        let agg: PlanRef = generate_agg_call(ty.clone(), fields.clone()).await.into();
         // Perform the prune
         let required_cols = vec![1, 0];
-        let plan = agg.prune_col(&required_cols);
+        let plan = agg.prune_col(&required_cols, &mut ColumnPruningContext::new(agg.clone()));
         // Check the result
         let proj = plan.as_logical_project().unwrap();
         assert_eq!(proj.exprs().len(), 2);
@@ -1249,11 +1261,11 @@ mod tests {
             order_by_fields: vec![],
             filter: Condition::true_cond(),
         };
-        let agg = LogicalAgg::new(vec![agg_call], vec![1], values.into());
+        let agg: PlanRef = LogicalAgg::new(vec![agg_call], vec![1], values.into()).into();
 
         // Perform the prune
         let required_cols = vec![1];
-        let plan = agg.prune_col(&required_cols);
+        let plan = agg.prune_col(&required_cols, &mut ColumnPruningContext::new(agg.clone()));
 
         // Check the result
         let project = plan.as_logical_project().unwrap();
@@ -1323,11 +1335,11 @@ mod tests {
                 filter: Condition::true_cond(),
             },
         ];
-        let agg = LogicalAgg::new(agg_calls, vec![1, 2], values.into());
+        let agg: PlanRef = LogicalAgg::new(agg_calls, vec![1, 2], values.into()).into();
 
         // Perform the prune
         let required_cols = vec![0, 3];
-        let plan = agg.prune_col(&required_cols);
+        let plan = agg.prune_col(&required_cols, &mut ColumnPruningContext::new(agg.clone()));
         // Check the result
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 2);

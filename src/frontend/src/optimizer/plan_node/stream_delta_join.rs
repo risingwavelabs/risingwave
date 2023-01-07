@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt;
+use std::ops::BitAnd;
 
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_pb::plan_common::JoinType;
@@ -54,6 +55,16 @@ impl StreamDeltaJoin {
             &logical,
         );
 
+        let watermark_columns = {
+            let from_left = logical
+                .l2i_col_mapping()
+                .rewrite_bitset(logical.left().watermark_columns());
+            let from_right = logical
+                .r2i_col_mapping()
+                .rewrite_bitset(logical.right().watermark_columns());
+            let watermark_columns = from_left.bitand(&from_right);
+            logical.i2o_col_mapping().rewrite_bitset(&watermark_columns)
+        };
         // TODO: derive from input
         let base = PlanBase::new_stream(
             ctx,
@@ -62,6 +73,7 @@ impl StreamDeltaJoin {
             logical.functional_dependency().clone(),
             dist,
             append_only,
+            watermark_columns,
         );
 
         Self {

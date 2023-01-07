@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -322,18 +322,19 @@ impl SstableStore {
         self.meta_cache.clear();
     }
 
-    pub async fn sstable(
+    pub async fn sstable_syncable(
         &self,
         sst: &SstableInfo,
-        stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<TableHolder> {
-        stats.cache_meta_block_total += 1;
+        stats: &StoreLocalStatistic,
+    ) -> HummockResult<(TableHolder, u64)> {
+        let mut local_cache_meta_block_miss = 0;
         let sst_id = sst.id;
-        self.meta_cache
+        let result = self
+            .meta_cache
             .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || {
                 let store = self.store.clone();
                 let meta_path = self.get_sst_data_path(sst_id);
-                stats.cache_meta_block_miss += 1;
+                local_cache_meta_block_miss += 1;
                 let stats_ptr = stats.remote_io_time.clone();
                 let loc = BlockLocation {
                     offset: sst.meta_offset as usize,
@@ -354,7 +355,21 @@ impl SstableStore {
                 }
             })
             .verbose_stack_trace("meta_cache_lookup")
-            .await
+            .await;
+        result.map(|table_holder| (table_holder, local_cache_meta_block_miss))
+    }
+
+    pub async fn sstable(
+        &self,
+        sst: &SstableInfo,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<TableHolder> {
+        self.sstable_syncable(sst, stats).await.map(
+            |(table_holder, local_cache_meta_block_miss)| {
+                stats.apply_meta_fetch(local_cache_meta_block_miss);
+                table_holder
+            },
+        )
     }
 
     pub async fn list_ssts_from_object_store(&self) -> HummockResult<Vec<ObjectMetadata>> {
@@ -516,7 +531,7 @@ impl SstableWriter for BatchUploadWriter {
             // Upload data to object store.
             self.sstable_store
                 .clone()
-                .put_sst_data(self.sst_id, data.clone())
+                .put_sst_data(self.sst_id, data)
                 .await?;
             self.sstable_store.insert_meta_cache(self.sst_id, meta);
 

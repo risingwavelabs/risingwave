@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,7 +25,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 
-use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 pub use manager::*;
 pub use parser::*;
@@ -34,18 +33,16 @@ use risingwave_common::error::RwError;
 use risingwave_connector::source::SplitId;
 pub use table::*;
 
-use crate::connector_source::ConnectorSource;
-
 pub mod parser;
 
 mod manager;
-pub use manager::test_utils as table_test_utils;
 
 pub mod dml_manager;
 
 mod common;
 pub mod connector_source;
 pub use connector_source::test_utils as connector_test_utils;
+pub mod fs_connector_source;
 pub mod monitor;
 pub mod row_id;
 mod table;
@@ -59,15 +56,10 @@ pub enum SourceFormat {
     Avro,
     Maxwell,
     CanalJson,
+    Csv,
 }
 
-#[derive(Debug, EnumAsInner)]
-pub enum SourceImpl {
-    Table(TableSource),
-    Connector(ConnectorSource),
-}
-
-pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
+pub type BoxSourceWithStateStream<T> = BoxStream<'static, Result<T, RwError>>;
 
 /// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
 /// current design, one connector source can have multiple split reader. The keys are unique
@@ -76,6 +68,14 @@ pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithSta
 pub struct StreamChunkWithState {
     pub chunk: StreamChunk,
     pub split_offset_mapping: Option<HashMap<SplitId, String>>,
+}
+
+/// [`FsStreamChunkWithState`] returns stream chunk together with offset for each split. The keys
+/// are unique `split_id` and values are the latest offset for each split.
+#[derive(Clone, Debug)]
+pub struct FsStreamChunkWithState {
+    pub chunk: StreamChunk,
+    pub split_offset_mapping: Option<HashMap<SplitId, usize>>,
 }
 
 /// The `split_offset_mapping` field is unused for the table source, so we implement `From` for it.

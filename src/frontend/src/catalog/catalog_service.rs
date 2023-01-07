@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -42,7 +42,8 @@ impl CatalogReader {
     }
 
     pub fn read_guard(&self) -> CatalogReadGuard {
-        self.0.read_arc()
+        // Make this recursive so that one can get this guard in the same thread without fear.
+        self.0.read_arc_recursive()
     }
 }
 
@@ -71,7 +72,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_table(
         &self,
-        source: ProstSource,
+        source: Option<ProstSource>,
         table: ProstTable,
         graph: StreamFragmentGraph,
     ) -> Result<()>;
@@ -87,7 +88,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_sink(&self, sink: ProstSink, graph: StreamFragmentGraph) -> Result<()>;
 
-    async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()>;
+    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()>;
 
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()>;
 
@@ -172,14 +173,11 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn create_table(
         &self,
-        source: ProstSource,
+        source: Option<ProstSource>,
         table: ProstTable,
         graph: StreamFragmentGraph,
     ) -> Result<()> {
-        let (_, _, version) = self
-            .meta_client
-            .create_materialized_source(source, table, graph)
-            .await?;
+        let (_, version) = self.meta_client.create_table(source, table, graph).await?;
         self.wait_version(version).await
     }
 
@@ -193,11 +191,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
-        let version = self
-            .meta_client
-            .drop_materialized_source(source_id, table_id)
-            .await?;
+    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
+        let version = self.meta_client.drop_table(source_id, table_id).await?;
         self.wait_version(version).await
     }
 

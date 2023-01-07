@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,7 +32,10 @@ use crate::expr::{
     CollectInputRef, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::{BatchSeqScan, LogicalFilter, LogicalProject, LogicalValues};
+use crate::optimizer::plan_node::{
+    BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
+    PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
 use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
@@ -434,7 +437,7 @@ impl fmt::Display for LogicalScan {
 }
 
 impl ColPrunable for LogicalScan {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let output_col_idx: Vec<usize> = required_cols
             .iter()
             .map(|i| self.required_col_idx()[*i])
@@ -448,7 +451,11 @@ impl ColPrunable for LogicalScan {
 }
 
 impl PredicatePushdown for LogicalScan {
-    fn predicate_pushdown(&self, mut predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        mut predicate: Condition,
+        _ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}
@@ -465,7 +472,6 @@ impl PredicatePushdown for LogicalScan {
             .conjunctions
             .drain_filter(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
             .collect();
-
         let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
         ));
@@ -590,7 +596,7 @@ impl ToBatch for LogicalScan {
 }
 
 impl ToStream for LogicalScan {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         if self.is_sys_table() {
             return Err(RwError::from(ErrorCode::NotImplemented(
                 "streaming on system table is not allowed".to_string(),
@@ -605,11 +611,14 @@ impl ToStream for LogicalScan {
             if let Some(exprs) = project_expr {
                 plan = LogicalProject::create(plan, exprs)
             }
-            plan.to_stream()
+            plan.to_stream(ctx)
         }
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         if self.is_sys_table() {
             return Err(RwError::from(ErrorCode::NotImplemented(
                 "streaming on system table is not allowed".to_string(),

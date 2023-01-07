@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{ObjectName, Query, Statement};
+use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::{BoundSetExpr, BoundStatement};
@@ -45,7 +45,14 @@ pub async fn handle_create_as(
     table_name: ObjectName,
     if_not_exists: bool,
     query: Box<Query>,
+    columns: Vec<ColumnDef>,
 ) -> Result<RwPgResponse> {
+    if columns.iter().any(|column| column.data_type.is_some()) {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "Should not specify data type in CREATE TABLE AS".into(),
+        )
+        .into());
+    }
     let session = handler_args.session.clone();
 
     if let Err(e) = session.check_relation_name_duplicated(table_name.clone()) {
@@ -60,7 +67,7 @@ pub async fn handle_create_as(
     }
 
     // Generate catalog descs from query
-    let column_descs: Vec<_> = {
+    let mut column_descs: Vec<_> = {
         let mut binder = Binder::new(&session);
         let bound = binder.bind(Statement::Query(query.clone()))?;
         if let BoundStatement::Query(query) = bound {
@@ -87,8 +94,19 @@ pub async fn handle_create_as(
         }
     };
 
+    if columns.len() > column_descs.len() {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "too many column names were specified".to_string(),
+        )
+        .into());
+    }
+
+    columns.iter().enumerate().for_each(|(idx, column)| {
+        column_descs[idx].name = column.name.real_value();
+    });
+
     let (graph, source, table) = {
-        let context = OptimizerContext::new_with_handler_args(handler_args.clone());
+        let context = OptimizerContext::from_handler_args(handler_args.clone());
         let (plan, source, table) = gen_create_table_plan_without_bind(
             &session,
             context.into(),
@@ -96,6 +114,7 @@ pub async fn handle_create_as(
             column_descs,
             None,
             vec![],
+            "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
         )?;
         let graph = build_graph(plan);
 

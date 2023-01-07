@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -44,6 +44,7 @@ impl StreamTopN {
             logical.functional_dependency().clone(),
             dist,
             false,
+            logical.input().watermark_columns().clone(),
         );
         StreamTopN { base, logical }
     }
@@ -100,7 +101,7 @@ impl StreamNode for StreamTopN {
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
-            order_by_len: self.topn_order().len() as u32,
+            order_by: self.topn_order().to_protobuf(),
         };
         if self.input().append_only() {
             ProstStreamNode::AppendOnlyTopN(topn_node)

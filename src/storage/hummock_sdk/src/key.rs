@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,6 +20,7 @@ use std::ptr;
 
 use bytes::{Buf, BufMut};
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 
 use crate::HummockEpoch;
@@ -333,6 +334,12 @@ pub fn prefixed_range<B: AsRef<[u8]>>(
 /// identified by a [`TableId`].
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TableKey<T: AsRef<[u8]>>(pub T);
+
+impl<T: AsRef<[u8]>> TableKey<T> {
+    pub fn dist_key(&self) -> &[u8] {
+        &self.0.as_ref()[VirtualNode::SIZE..]
+    }
+}
 
 impl<T: AsRef<[u8]>> Debug for TableKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

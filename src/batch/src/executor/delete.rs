@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,8 +19,9 @@ use risingwave_common::array::{ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilde
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_source::TableSourceManagerRef;
+use risingwave_source::dml_manager::DmlManagerRef;
 
 use crate::error::BatchError;
 use crate::executor::{
@@ -29,12 +30,14 @@ use crate::executor::{
 use crate::task::BatchTaskContext;
 
 /// [`DeleteExecutor`] implements table deletion with values from its child executor.
-// TODO: concurrent `DELETE` may cause problems. A scheduler might be required.
+// Note: multiple `DELETE`s in a single epoch, or concurrent `DELETE`s may lead to conflicting
+// records. This is validated and filtered on the first `Materialize`.
 pub struct DeleteExecutor {
     /// Target table id.
     table_id: TableId,
-    source_manager: TableSourceManagerRef,
+    dml_manager: DmlManagerRef,
     child: BoxedExecutor,
+    chunk_size: usize,
     schema: Schema,
     identity: String,
 }
@@ -42,14 +45,16 @@ pub struct DeleteExecutor {
 impl DeleteExecutor {
     pub fn new(
         table_id: TableId,
-        source_manager: TableSourceManagerRef,
+        dml_manager: DmlManagerRef,
         child: BoxedExecutor,
+        chunk_size: usize,
         identity: String,
     ) -> Self {
         Self {
             table_id,
-            source_manager,
+            dml_manager,
             child,
+            chunk_size,
             // TODO: support `RETURNING`
             schema: Schema {
                 fields: vec![Field::unnamed(DataType::Int64)],
@@ -76,21 +81,32 @@ impl Executor for DeleteExecutor {
 impl DeleteExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
-        let source_desc = self.source_manager.get_source(&self.table_id)?;
-        let source = source_desc.source.as_table().expect("not table source");
+        let data_types = self.child.schema().data_types();
+        let mut builder = DataChunkBuilder::new(data_types, 1024);
 
         let mut notifiers = Vec::new();
+
+        // Transform the data chunk to a stream chunk, then write to the source.
+        let mut write_chunk = |chunk: DataChunk| -> Result<()> {
+            let cap = chunk.capacity();
+            let stream_chunk = StreamChunk::from_parts(vec![Op::Delete; cap], chunk);
+
+            let notifier = self.dml_manager.write_chunk(&self.table_id, stream_chunk)?;
+            notifiers.push(notifier);
+
+            Ok(())
+        };
 
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
-            let len = data_chunk.cardinality();
-            assert!(data_chunk.visibility().is_none());
+            for chunk in builder.append_chunk(data_chunk) {
+                write_chunk(chunk)?;
+            }
+        }
 
-            let chunk = StreamChunk::from_parts(vec![Op::Delete; len], data_chunk);
-
-            let notifier = source.write_chunk(chunk)?;
-            notifiers.push(notifier);
+        if let Some(chunk) = builder.consume_all() {
+            write_chunk(chunk)?;
         }
 
         // Wait for all chunks to be taken / written.
@@ -125,12 +141,13 @@ impl BoxedExecutorBuilder for DeleteExecutor {
             NodeBody::Delete
         )?;
 
-        let table_id = TableId::new(delete_node.table_source_id);
+        let table_id = TableId::new(delete_node.table_id);
 
         Ok(Box::new(Self::new(
             table_id,
-            source.context().source_manager(),
+            source.context().dml_manager(),
             child,
+            source.context.get_config().developer.batch_chunk_size,
             source.plan_node().get_identity().clone(),
         )))
     }
@@ -141,11 +158,11 @@ mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
+    use itertools::Itertools;
     use risingwave_common::array::Array;
-    use risingwave_common::catalog::schema_test_utils;
+    use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_source::table_test_utils::create_table_source_desc_builder;
-    use risingwave_source::{TableSourceManager, TableSourceManagerRef};
+    use risingwave_source::dml_manager::DmlManager;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -153,7 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_executor() -> Result<()> {
-        let source_manager: TableSourceManagerRef = Arc::new(TableSourceManager::default());
+        let dml_manager = Arc::new(DmlManager::default());
 
         // Schema for mock executor.
         let schema = schema_test_utils::ii();
@@ -173,25 +190,25 @@ mod tests {
 
         // Create reader
         let table_id = TableId::new(0);
-        let source_builder = create_table_source_desc_builder(
-            &schema,
-            table_id,
-            None,
-            vec![1],
-            source_manager.clone(),
-        );
-        let source_desc = source_builder.build().await.unwrap();
-        let source = source_desc.source.as_table().unwrap();
-        let mut reader = source
-            .stream_reader(vec![0.into(), 1.into()])
-            .await?
-            .into_stream();
+        let column_descs = schema
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, field)| ColumnDesc::unnamed(ColumnId::new(i as _), field.data_type.clone()))
+            .collect_vec();
+        // We must create a variable to hold this `Arc<TableSource>` here, or it will be dropped due
+        // to the `Weak` reference in `DmlManager`.
+        let reader = dml_manager
+            .register_reader(table_id, &column_descs)
+            .unwrap();
+        let mut reader = reader.stream_reader_v2().into_stream_v2();
 
         // Delete
         let delete_executor = Box::new(DeleteExecutor::new(
             table_id,
-            source_manager.clone(),
+            dml_manager,
             Box::new(mock_executor),
+            1024,
             "DeleteExecutor".to_string(),
         ));
 
@@ -214,7 +231,7 @@ mod tests {
         });
 
         // Read
-        let chunk = reader.next().await.unwrap()?.chunk;
+        let chunk = reader.next().await.unwrap()?;
 
         assert_eq!(chunk.ops().to_vec(), vec![Op::Delete; 5]);
 

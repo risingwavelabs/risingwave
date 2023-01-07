@@ -9,39 +9,42 @@ To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/rising
 
 ## Table of contents
 
-- [Developer guide](#developer-guide)
-  - [Table of contents](#table-of-contents)
-  - [Read the design docs](#read-the-design-docs)
-  - [Learn about the code structure](#learn-about-the-code-structure)
-  - [Set up the development environment](#set-up-the-development-environment)
-  - [Start and monitor a dev cluster](#start-and-monitor-a-dev-cluster)
-    - [Configure additional components](#configure-additional-components)
-    - [Configure system variables](#configure-system-variables)
-    - [Start the playground with RiseDev](#start-the-playground-with-risedev)
-    - [Start the playground with cargo](#start-the-playground-with-cargo)
-  - [Develop the dashboard](#develop-the-dashboard)
-    - [Dashboard v1](#dashboard-v1)
-    - [Dashboard v2](#dashboard-v2)
-  - [Observability components](#observability-components)
-    - [Cluster Control](#cluster-control)
-    - [Monitoring](#monitoring)
-    - [Tracing](#tracing)
-    - [Dashboard](#dashboard)
-    - [Logging](#logging)
-  - [Test your code changes](#test-your-code-changes)
-    - [Lint](#lint)
-    - [Unit tests](#unit-tests)
-    - [Planner tests](#planner-tests)
-    - [End-to-end tests](#end-to-end-tests)
-    - [End-to-end tests on CI](#end-to-end-tests-on-ci)
-    - [DocSlt tests](#docslt-tests)
-    - [Deterministic simulation tests](#deterministic-simulation-tests)
-  - [Miscellaneous checks](#miscellaneous-checks)
-  - [Update Grafana dashboard](#update-grafana-dashboard)
-  - [Add new files](#add-new-files)
-  - [Add new dependencies](#add-new-dependencies)
-  - [Submit PRs](#submit-prs)
+<!--
+Table of contents generated with markdown-toc:
+http://ecotrust-canada.github.io/markdown-toc/
+-->
 
+- [Read the design docs](#read-the-design-docs)
+- [Learn about the code structure](#learn-about-the-code-structure)
+- [Set up the development environment](#set-up-the-development-environment)
+- [Start and monitor a dev cluster](#start-and-monitor-a-dev-cluster)
+  * [Configure additional components](#configure-additional-components)
+  * [Configure system variables](#configure-system-variables)
+  * [Start the playground with RiseDev](#start-the-playground-with-risedev)
+  * [Start the playground with cargo](#start-the-playground-with-cargo)
+- [Develop the dashboard](#develop-the-dashboard)
+  * [Dashboard v1](#dashboard-v1)
+  * [Dashboard v2](#dashboard-v2)
+- [Observability components](#observability-components)
+  * [Cluster Control](#cluster-control)
+  * [Monitoring](#monitoring)
+  * [Tracing](#tracing)
+  * [Dashboard](#dashboard)
+  * [Logging](#logging)
+- [Test your code changes](#test-your-code-changes)
+  * [Lint](#lint)
+  * [Unit tests](#unit-tests)
+  * [Planner tests](#planner-tests)
+  * [End-to-end tests](#end-to-end-tests)
+  * [End-to-end tests on CI](#end-to-end-tests-on-ci)
+  * [DocSlt tests](#docslt-tests)
+  * [Deterministic simulation tests](#deterministic-simulation-tests)
+- [Miscellaneous checks](#miscellaneous-checks)
+- [Update Grafana dashboard](#update-grafana-dashboard)
+- [Add new files](#add-new-files)
+- [Add new dependencies](#add-new-dependencies)
+- [Submit PRs](#submit-prs)
+- [Profiling](#profiling)
 
 ## Read the design docs
 
@@ -255,7 +258,7 @@ The Rust components use `tokio-tracing` to handle both logging and tracing. The 
 * Third-party libraries: warn
 * Other libraries: debug
 
-If you need to adjust log levels, change the logging filters in `utils/runtime/lib.rs`.
+If you need to adjust log levels, change the logging filters in `src/utils/runtime/src/lib.rs`.
 
 
 ## Test your code changes
@@ -460,3 +463,8 @@ And use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are
 ## Submit PRs
 
 Instructions about submitting PRs are included in the [contribution guidelines](../CONTRIBUTING.md).
+
+## Profiling
+
+- [CPU Profiling Guide](./cpu-profiling.md)
+- [Memory (Heap) Profiling Guide](./memory-profiling.md)

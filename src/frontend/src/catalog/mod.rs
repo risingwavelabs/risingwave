@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -37,6 +37,8 @@ pub(crate) mod view_catalog;
 
 pub use index_catalog::IndexCatalog;
 pub use table_catalog::TableCatalog;
+
+use crate::user::UserId;
 
 pub(crate) type SourceId = u32;
 pub(crate) type SinkId = u32;
@@ -110,4 +112,12 @@ impl From<CatalogError> for RwError {
     fn from(e: CatalogError) -> Self {
         ErrorCode::CatalogError(Box::new(e)).into()
     }
+}
+
+/// A trait for the catalog of relations (table, index, sink, etc.).
+///
+/// This trait can be used to reduce code duplication and can be extended if needed in the future.
+pub trait RelationCatalog {
+    /// Returns the owner of the relation.
+    fn owner(&self) -> UserId;
 }

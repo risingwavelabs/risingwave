@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -82,13 +82,14 @@ impl CdcSplitReader {
             ConnectorClient::new(HostAddr::from_str(&self.conn_props.connector_node_addr)?).await?;
 
         let cdc_stream = cdc_client
-            .get_event_stream(
+            .start_source_stream(
                 self.source_id,
-                self.conn_props.source_type,
+                self.conn_props.source_type_enum()?,
                 self.start_offset,
                 self.conn_props.props,
             )
-            .await?;
+            .await
+            .inspect_err(|err| tracing::error!("connector node start stream error: {}", err))?;
         pin_mut!(cdc_stream);
         #[for_await]
         for event_res in cdc_stream {
