@@ -16,30 +16,23 @@ use std::ops::Bound::Unbounded;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use bytes::Bytes;
 use futures::TryStreamExt;
-use itertools::Itertools;
-use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::TableId;
 use risingwave_common::row::{OwnedRow, RowDeserializer};
-use risingwave_common::types::{DataType, ScalarImpl, ScalarRef};
+use risingwave_common::types::ScalarImpl;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
-use risingwave_pb::hummock::HummockVersion;
+use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_pb::java_binding::ReadPlan;
 use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
-use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::{SstableStore, TieredCache};
 use risingwave_storage::monitor::StateStoreMetrics;
-use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StreamTypeOfIter};
-use tokio::runtime::Runtime;
 use tokio::sync::mpsc::unbounded_channel;
 
 pub struct Iterator {
-    runtime: Runtime,
     row_serializer: RowDeserializer,
     stream: Pin<Box<StreamTypeOfIter<HummockStorageIterator>>>,
 }
@@ -73,60 +66,22 @@ impl Record {
     }
 }
 
-const TEST_EPOCH: u64 = 1000;
-const TEST_TABLE_ID: TableId = TableId { table_id: 2333 };
-
-fn gen_mock_schema() -> Vec<DataType> {
-    vec![DataType::Int64, DataType::Varchar, DataType::Int64]
-}
-
-fn gen_mock_imm_lists() -> Vec<SharedBufferBatch> {
-    let rows = vec![
-        OwnedRow::new(vec![
-            Some(ScalarImpl::Int64(100)),
-            Some(ScalarImpl::Utf8("value_of_100".to_owned_scalar())),
-            None,
-        ]),
-        OwnedRow::new(vec![
-            Some(ScalarImpl::Int64(101)),
-            Some(ScalarImpl::Utf8("value_of_101".to_owned_scalar())),
-            Some(ScalarImpl::Int64(2333)),
-        ]),
-    ];
-    let data_chunk = DataChunk::from_rows(&rows, &gen_mock_schema());
-    let row_data = data_chunk.serialize();
-    let kv_pairs = row_data
-        .into_iter()
-        .enumerate()
-        .map(|(i, row)| {
-            (
-                Bytes::from(format!("key{:?}", i)),
-                StorageValue::new_put(row),
-            )
-        })
-        .collect_vec();
-
-    let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
-    let size = SharedBufferBatch::measure_batch_size(&sorted_items);
-    let imm = SharedBufferBatch::build_shared_buffer_batch(
-        TEST_EPOCH,
-        sorted_items,
-        size,
-        vec![],
-        TEST_TABLE_ID,
-        None,
-    );
-
-    vec![imm]
-}
-
 impl Iterator {
-    pub fn new() -> StorageResult<Self> {
+    pub async fn new(state_store: &str, read_plan: ReadPlan) -> StorageResult<Self> {
+        let object_store = Arc::new(
+            parse_remote_object_store(
+                state_store
+                    .strip_prefix("hummock+")
+                    .expect("object store must be hummock for Java Iterator"),
+                Arc::new(ObjectStoreMetrics::unused()),
+                true,
+                "Hummock",
+            )
+            .await,
+        );
         let sstable_store = Arc::new(SstableStore::new(
-            Arc::new(ObjectStoreImpl::InMem(
-                InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused())),
-            )),
-            "random".to_string(),
+            object_store,
+            "hummock_001".to_string(),
             1 << 10,
             1 << 10,
             TieredCache::none(),
@@ -134,58 +89,53 @@ impl Iterator {
         let reader =
             HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
 
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-
-        let stream = runtime.block_on(async {
+        let stream = {
             let stream = reader
                 .iter(
                     (Unbounded, Unbounded),
-                    TEST_EPOCH,
+                    HummockEpoch::MAX,
                     ReadOptions {
                         prefix_hint: None,
                         ignore_range_tombstone: false,
                         check_bloom_filter: false,
                         retention_seconds: None,
-                        table_id: TEST_TABLE_ID,
+                        table_id: read_plan.table_id.into(),
                         read_version_from_backup: false,
                     },
                     (
-                        gen_mock_imm_lists(),
                         vec![],
-                        PinnedVersion::new(
-                            HummockVersion {
-                                id: 0,
-                                levels: Default::default(),
-                                max_committed_epoch: 0,
-                                safe_epoch: 0,
-                            },
-                            unbounded_channel().0,
-                        ),
+                        vec![],
+                        PinnedVersion::new(read_plan.version.unwrap(), unbounded_channel().0),
                     ),
                 )
                 .await?;
             Ok::<std::pin::Pin<Box<StreamTypeOfIter<HummockStorageIterator>>>, StorageError>(
                 Box::pin(stream),
             )
-        })?;
+        }?;
 
         Ok(Self {
-            runtime,
-            row_serializer: RowDeserializer::new(gen_mock_schema()),
+            row_serializer: RowDeserializer::new(
+                read_plan
+                    .table_catalog
+                    .unwrap()
+                    .columns
+                    .into_iter()
+                    .map(|c| (&c.column_desc.unwrap().column_type.unwrap()).into())
+                    .collect(),
+            ),
             stream,
         })
     }
 
-    pub fn next(&mut self) -> StorageResult<Option<Record>> {
-        self.runtime.block_on(async {
-            let item = self.stream.try_next().await?;
-            Ok(match item {
-                Some((key, value)) => Some(Record {
-                    key: key.user_key.table_key.0,
-                    row: self.row_serializer.deserialize(value)?,
-                }),
-                None => None,
-            })
+    pub async fn next(&mut self) -> StorageResult<Option<Record>> {
+        let item = self.stream.try_next().await?;
+        Ok(match item {
+            Some((key, value)) => Some(Record {
+                key: key.user_key.table_key.0,
+                row: self.row_serializer.deserialize(value)?,
+            }),
+            None => None,
         })
     }
 }

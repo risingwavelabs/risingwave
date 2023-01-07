@@ -180,6 +180,14 @@ message DropIndexResponse {
   uint64 version = 2;
 }
 
+message JavaGetTableRequest {
+  uint32 table_id = 1;
+}
+
+message JavaGetTableResponse {
+  catalog.Table table = 1;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -198,4 +206,5 @@ service DdlService {
   rpc DropView(DropViewRequest) returns (DropViewResponse);
   rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);
   rpc DropIndex(DropIndexRequest) returns (DropIndexResponse);
+  rpc JavaGetTable(JavaGetTableRequest) returns (JavaGetTableResponse);
 }

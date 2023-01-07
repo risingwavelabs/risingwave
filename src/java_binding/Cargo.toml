@@ -9,8 +9,10 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
 jni = "0.20.0"
 risingwave_common = { path = "../common" }
+risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
+risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -23,6 +25,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tracing = "0.1"
+prost = "0.11"
 
 
 [lib]

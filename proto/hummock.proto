@@ -117,11 +117,6 @@ message HummockSnapshot {
   uint64 current_epoch = 2;
 }
 
-message PinVersionRequest {
-  uint32 context_id = 1;
-  uint64 last_pinned = 2;
-}
-
 message PinVersionResponse {
   common.Status status = 1;
   oneof payload {
@@ -520,6 +515,14 @@ message SetCompactorRuntimeConfigRequest {
 
 message SetCompactorRuntimeConfigResponse {}
 
+message JavaPinVersionRequest {
+  uint32 context_id = 1;
+}
+
+message JavaPinVersionResponse {
+  HummockVersion pinned_version = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -549,6 +552,7 @@ service HummockManagerService {
   rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
   rpc SetCompactorRuntimeConfig(SetCompactorRuntimeConfigRequest) returns (SetCompactorRuntimeConfigResponse);
+  rpc JavaPinVersion(JavaPinVersionRequest) returns (JavaPinVersionResponse);
 }
 
 message CompactionConfig {

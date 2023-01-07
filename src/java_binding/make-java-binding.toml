@@ -33,9 +33,13 @@ dependencies = [
 script = '''
 #!/bin/bash
 set -ex
-RISINGWAVE_ROOT=.
+RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
 JAVA_BINDING_ROOT=${RISINGWAVE_ROOT}/src/java_binding
-java -cp ${JAVA_BINDING_ROOT}/java/java-binding/target/java-binding-1.0-SNAPSHOT.jar \
-    -Djava.library.path=${RISINGWAVE_ROOT}/target/debug \
-    com.risingwave.java.Demo
+cd ${JAVA_BINDING_ROOT}/java
+mvn exec:exec \
+    -pl java-binding \
+    -Dexec.executable=java \
+    -Dexec.args=" \
+        -cp %classpath:java-binding/target*.jar:proto/target/*.jar \
+        -Djava.library.path=${RISINGWAVE_ROOT}/target/debug com.risingwave.java.Demo"
 '''

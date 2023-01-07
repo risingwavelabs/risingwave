@@ -421,6 +421,16 @@ where
         let tables = self.catalog_manager.list_tables().await;
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
+
+    async fn java_get_table(
+        &self,
+        request: Request<JavaGetTableRequest>,
+    ) -> Result<Response<JavaGetTableResponse>, Status> {
+        let req = request.into_inner();
+        Ok(Response::new(JavaGetTableResponse {
+            table: self.catalog_manager.get_table(req.table_id).await,
+        }))
+    }
 }
 
 impl<S> DdlServiceImpl<S>

@@ -1361,6 +1361,16 @@ where
         }
     }
 
+    pub async fn get_table(&self, table_id: TableId) -> Option<Table> {
+        self.core
+            .lock()
+            .await
+            .database
+            .tables
+            .get(&table_id)
+            .cloned()
+    }
+
     pub async fn list_tables(&self) -> Vec<Table> {
         self.core.lock().await.database.list_tables()
     }

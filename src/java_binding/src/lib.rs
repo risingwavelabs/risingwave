@@ -14,6 +14,7 @@
 
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
+#![feature(once_cell)]
 
 mod iterator;
 
@@ -21,13 +22,19 @@ use std::backtrace::Backtrace;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::panic::catch_unwind;
+use std::sync::LazyLock;
 
 use iterator::{Iterator, Record};
 use jni::objects::{JClass, JObject, JString};
 use jni::sys::{jboolean, jbyteArray, jint, jlong};
 use jni::JNIEnv;
+use prost::{DecodeError, Message};
+use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
+use tokio::runtime::Runtime;
+
+static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
 
 #[derive(Error, Debug)]
 enum BindingError {
@@ -44,9 +51,23 @@ enum BindingError {
         error: StorageError,
         backtrace: Backtrace,
     },
+
+    #[error("RpcError {error}")]
+    RpcError {
+        #[from]
+        error: RpcError,
+        backtrace: Backtrace,
+    },
+
+    #[error("DecodeError {error}")]
+    DecodeError {
+        #[from]
+        error: DecodeError,
+        backtrace: Backtrace,
+    },
 }
 
-type Result<T> = std::result::Result<T, BindingError>;
+type BindingResult<T> = std::result::Result<T, BindingError>;
 
 #[repr(transparent)]
 #[derive(Default)]
@@ -133,7 +154,7 @@ impl<'a> EnvParam<'a> {
 
 fn execute_and_catch<F, Ret>(env: EnvParam<'_>, inner: F) -> Ret
 where
-    F: FnOnce() -> Result<Ret>,
+    F: FnOnce() -> BindingResult<Ret>,
     Ret: Default,
 {
     match catch_unwind(std::panic::AssertUnwindSafe(move || inner())) {
@@ -163,10 +184,17 @@ where
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNew(
-    env: EnvParam<'_>,
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNew<'a>(
+    env: EnvParam<'a>,
+    read_plan: jbyteArray,
+    state_store: JString<'a>,
 ) -> Pointer<'static, Iterator> {
-    execute_and_catch(env, move || Ok(Iterator::new()?.into()))
+    execute_and_catch(env, move || {
+        let read_plan = env.convert_byte_array(read_plan)?;
+        let read_plan = Message::decode(&read_plan[..])?;
+        let state_store: String = env.get_string(state_store)?.into();
+        RUNTIME.block_on(async { Ok(Iterator::new(&state_store, read_plan).await?.into()) })
+    })
 }
 
 #[no_mangle]
@@ -174,9 +202,13 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>
     env: EnvParam<'a>,
     mut pointer: Pointer<'a, Iterator>,
 ) -> Pointer<'static, Record> {
-    execute_and_catch(env, move || match pointer.as_mut().next()? {
-        None => Ok(Pointer::null()),
-        Some(record) => Ok(record.into()),
+    execute_and_catch(env, move || {
+        RUNTIME.block_on(async {
+            match pointer.as_mut().next().await? {
+                None => Ok(Pointer::null()),
+                Some(record) => Ok(record.into()),
+            }
+        })
     })
 }
 

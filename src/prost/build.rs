@@ -40,6 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "monitor_service",
         "health",
         "backup_service",
+        "java_binding",
     ];
     let protos: Vec<String> = proto_files
         .iter()
