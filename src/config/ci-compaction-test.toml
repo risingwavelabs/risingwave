@@ -6,7 +6,8 @@ max_heartbeat_interval_secs = 600
 barrier_interval_ms = 250
 in_flight_barrier_nums = 40
 # We set a large checkpoint frequency to prevent the embedded meta node
-# to commit new epochs to avoid bumping the hummock version
+# to commit new epochs to avoid bumping the hummock version in other path
+# except the version replay.
 checkpoint_frequency = 99999999
 
 [storage]

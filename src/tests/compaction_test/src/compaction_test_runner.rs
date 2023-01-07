@@ -139,7 +139,8 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
     );
 
     // We set a large checkpoint frequency to prevent the embedded meta node
-    // to commit new epochs to avoid bumping the hummock version
+    // to commit new epochs to avoid bumping the hummock version in other path
+    // except the version replay.
     assert_eq!(
         CHECKPOINT_FREQ_FOR_REPLAY,
         config.streaming.checkpoint_frequency
