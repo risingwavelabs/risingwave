@@ -80,7 +80,7 @@ pub async fn compaction_test_main(
 
     let _meta_handle = tokio::spawn(start_meta_node(
         meta_listen_addr.clone(),
-        opts.config_path_for_replay.clone(),
+        opts.config_path_for_meta.clone(),
     ));
 
     // Wait for meta starts
@@ -91,7 +91,7 @@ pub async fn compaction_test_main(
         opts.meta_address.clone(),
         client_addr.to_string(),
         opts.state_store.clone(),
-        opts.config_path_for_replay.clone(),
+        opts.config_path.clone(),
     );
 
     let original_meta_endpoint = "http://127.0.0.1:5690";
@@ -139,8 +139,7 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
     );
 
     // We set a large checkpoint frequency to prevent the embedded meta node
-    // to commit new epochs to avoid bumping the hummock version in other path
-    // except the version replay.
+    // to commit new epochs to avoid bumping the hummock version during version log replay.
     assert_eq!(
         CHECKPOINT_FREQ_FOR_REPLAY,
         config.streaming.checkpoint_frequency
@@ -307,7 +306,7 @@ async fn start_replay(
     );
 
     let mut metric = CompactionTestMetrics::new();
-    let config = load_config(&opts.config_path_for_replay);
+    let config = load_config(&opts.config_path_for_meta);
     tracing::info!(
         "Starting replay with config {:?} and opts {:?}",
         config,
@@ -329,8 +328,16 @@ async fn start_replay(
         vec![],
     )];
 
-    let latest_version = meta_client.get_current_version().await?;
+    // Prevent the embedded meta to commit new epochs during version replay
+    let latest_version = meta_client.disable_commit_epoch().await?;
     assert_eq!(FIRST_VERSION_ID, latest_version.id);
+    // The new meta should not have any data at this time
+    for (_, level) in latest_version.levels.iter() {
+        level.levels.iter().for_each(|lvl| {
+            assert!(lvl.table_infos.is_empty());
+            assert_eq!(0, lvl.total_file_size);
+        });
+    }
 
     // Creates a hummock state store *after* we reset the hummock version
     let storage_config = Arc::new(config.storage.clone());

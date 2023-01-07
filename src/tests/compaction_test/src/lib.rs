@@ -74,9 +74,9 @@ pub struct CompactionTestOpts {
     #[clap(long, default_value = "")]
     pub config_path: String,
 
-    /// The path to the configuration file used for version delta replay.
-    #[clap(long, default_value = "src/config/ci-compaction-test.toml")]
-    pub config_path_for_replay: String,
+    /// The path to the configuration file used for the embedded meta node.
+    #[clap(long, default_value = "src/config/ci-compaction-test-meta.toml")]
+    pub config_path_for_meta: String,
 }
 
 use std::future::Future;
