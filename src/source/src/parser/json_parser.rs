@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use futures::future::ready;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
+use crate::parser::common::{get_column_from_value, get_keys_from_value};
 use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for JSON format
@@ -98,18 +97,14 @@ impl JsonParser {
 
         let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-        let field_mapping: HashMap<String, String> = value
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(|s| (s.to_lowercase(), s.to_string()))
-            .collect();
+        let field_mapping = get_keys_from_value(&value);
 
         writer.insert(|desc| {
-            let field_value = field_mapping
-                .get(&desc.name.to_lowercase()).and_then(|k| value.get(k.as_str()));
-
-            simd_json_parse_value(&desc.data_type, field_value).map_err(|e| {
+            simd_json_parse_value(
+                &desc.data_type,
+                get_column_from_value(desc.name.to_lowercase().as_str(), &field_mapping, &value),
+            )
+            .map_err(|e| {
                 tracing::error!(
                     "failed to process value ({}): {}",
                     String::from_utf8_lossy(payload),
