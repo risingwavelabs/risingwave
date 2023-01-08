@@ -89,7 +89,7 @@ impl JsonParser {
         payload: &[u8],
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        use simd_json::{BorrowedValue, ValueAccess};
+        use simd_json::BorrowedValue;
 
         use crate::parser::common::simd_json_parse_value;
 
