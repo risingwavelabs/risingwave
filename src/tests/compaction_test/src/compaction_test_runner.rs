@@ -332,7 +332,7 @@ async fn start_replay(
     let latest_version = meta_client.disable_commit_epoch().await?;
     assert_eq!(FIRST_VERSION_ID, latest_version.id);
     // The new meta should not have any data at this time
-    for (_, level) in latest_version.levels.iter() {
+    for level in latest_version.levels.values() {
         level.levels.iter().for_each(|lvl| {
             assert!(lvl.table_infos.is_empty());
             assert_eq!(0, lvl.total_file_size);
