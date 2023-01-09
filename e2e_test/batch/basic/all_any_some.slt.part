@@ -17,6 +17,16 @@ select 3 >= ALL(array[1, 2, null])
 NULL
 
 query T
+select 1 < ALL(array[]::int[]);
+----
+t
+
+query T
+select 1 <> SOME('{}');
+----
+f
+
+query T
 select 'a' not like ANY(array['a', null]);
 ----
 NULL

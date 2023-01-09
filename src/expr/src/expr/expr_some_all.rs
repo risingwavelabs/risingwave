@@ -47,10 +47,6 @@ impl SomeAllExpression {
     }
 
     fn resolve_boolean_vec(&self, boolean_vec: Vec<Option<bool>>) -> Option<bool> {
-        if boolean_vec.is_empty() {
-            return None;
-        }
-
         match self.expr_type {
             Type::Some => {
                 if boolean_vec.iter().any(|b| b.unwrap_or(false)) {
@@ -102,11 +98,11 @@ impl Expression for SomeAllExpression {
         let mut unfolded_left_right =
             |left: Option<ScalarRefImpl<'_>>,
              right: Option<ScalarRefImpl<'_>>,
-             num_array: &mut Vec<usize>| {
+             num_array: &mut Vec<Option<usize>>| {
                 let datum_left = left.map(|s| s.into_scalar_impl());
                 let datum_right = right.map(|s| s.into_scalar_impl());
                 if datum_right.is_none() {
-                    num_array.push(0);
+                    num_array.push(None);
                     return;
                 }
 
@@ -114,7 +110,7 @@ impl Expression for SomeAllExpression {
                 match datum_right {
                     ScalarImpl::List(array) => {
                         let len = array.values().len();
-                        num_array.push(len);
+                        num_array.push(Some(len));
                         unfolded_arr_left_builder.append_datum_n(len, datum_left.as_ref());
                         for item in array.values() {
                             unfolded_arr_right_builder.append_datum(item.as_ref());
@@ -130,7 +126,7 @@ impl Expression for SomeAllExpression {
                     multizip((arr_left.iter(), arr_right.iter())).zip_eq(bitmap.iter())
                 {
                     if !visible {
-                        num_array.push(0);
+                        num_array.push(None);
                         continue;
                     }
                     unfolded_left_right(left, right, &mut num_array);
@@ -156,8 +152,11 @@ impl Expression for SomeAllExpression {
         Ok(Arc::new(
             num_array
                 .into_iter()
-                .map(|num| {
-                    self.resolve_boolean_vec(func_results_iter.by_ref().take(num).collect_vec())
+                .map(|num| match num {
+                    Some(num) => {
+                        self.resolve_boolean_vec(func_results_iter.by_ref().take(num).collect_vec())
+                    }
+                    None => None,
                 })
                 .collect::<BoolArray>()
                 .into(),
