@@ -15,11 +15,12 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{try_derive_watermark, Expr, ExprImpl};
+use crate::expr::{try_derive_watermark, Expr, ExprDisplay, ExprImpl};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
@@ -35,7 +36,31 @@ pub struct StreamProject {
 
 impl fmt::Display for StreamProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamProject")
+        let mut builder = f.debug_struct("StreamProject");
+        let input = self.input();
+        let input_schema = input.schema();
+        builder.field(
+            "exprs",
+            &self
+                .exprs()
+                .iter()
+                .map(|expr| ExprDisplay { expr, input_schema })
+                .collect_vec(),
+        );
+        if !self.watermark_derivations.is_empty() {
+            builder.field(
+                "watermark_columns",
+                &self
+                    .watermark_derivations
+                    .iter()
+                    .map(|(_, idx)| ExprDisplay {
+                        expr: &self.exprs()[*idx],
+                        input_schema,
+                    })
+                    .collect_vec(),
+            );
+        };
+        builder.finish()
     }
 }
 
@@ -52,8 +77,10 @@ impl StreamProject {
         let mut watermark_cols = FixedBitSet::with_capacity(logical.schema().len());
         for (expr_idx, expr) in logical.exprs().iter().enumerate() {
             if let Some(input_idx) = try_derive_watermark(expr) {
-                watermark_derivations.push((input_idx, expr_idx));
-                watermark_cols.insert(expr_idx);
+                if input.watermark_columns().contains(input_idx) {
+                    watermark_derivations.push((input_idx, expr_idx));
+                    watermark_cols.insert(expr_idx);
+                }
             }
         }
         // Project executor won't change the append-only behavior of the stream, so it depends on
