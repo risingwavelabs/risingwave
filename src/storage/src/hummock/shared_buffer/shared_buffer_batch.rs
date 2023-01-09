@@ -29,9 +29,10 @@ use crate::hummock::iterator::{
     Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
     HummockIteratorDirection,
 };
+use crate::hummock::shared_buffer::SHARED_BUFFER_BATCH_ID_GENERATOR;
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{DeleteRangeTombstone, HummockEpoch, HummockResult};
+use crate::hummock::{DeleteRangeTombstone, HummockEpoch, HummockResult, MemoryLimiter};
 use crate::storage_value::StorageValue;
 
 /// The key is `table_key`, which does not contain table id or epoch.
@@ -42,14 +43,14 @@ pub type SharedBufferBatchId = u64;
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferItem>,
     range_tombstone_list: Vec<DeleteRangeTombstone>,
-    largest_table_key: Vec<u8>,
+    pub(crate) largest_table_key: Vec<u8>,
     size: usize,
     _tracker: Option<MemoryTracker>,
     batch_id: SharedBufferBatchId,
 }
 
 impl SharedBufferBatchInner {
-    fn new(
+    pub(crate) fn new(
         payload: Vec<SharedBufferItem>,
         mut range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
@@ -114,12 +115,10 @@ impl PartialEq for SharedBufferBatchInner {
 /// A write batch stored in the shared buffer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SharedBufferBatch {
-    inner: Arc<SharedBufferBatchInner>,
-    epoch: HummockEpoch,
+    pub(crate) inner: Arc<SharedBufferBatchInner>,
+    pub(crate) epoch: HummockEpoch,
     pub table_id: TableId,
 }
-
-static SHARED_BUFFER_BATCH_ID_GENERATOR: LazyLock<AtomicU64> = LazyLock::new(|| AtomicU64::new(0));
 
 impl SharedBufferBatch {
     pub fn for_test(
@@ -141,9 +140,9 @@ impl SharedBufferBatch {
         }
     }
 
-    pub fn measure_batch_size(batches: &[SharedBufferItem]) -> usize {
+    pub fn measure_batch_size(batch_items: &[SharedBufferItem]) -> usize {
         // size = Sum(length of full key + length of user value)
-        batches
+        batch_items
             .iter()
             .map(|(k, v)| {
                 k.len() + {
@@ -167,6 +166,10 @@ impl SharedBufferBatch {
                 *self.start_table_key(),
                 *self.end_table_key(),
             )
+    }
+
+    pub fn table_id(&self) -> TableId {
+        self.table_id
     }
 
     pub fn get(&self, table_key: TableKey<&[u8]>) -> Option<HummockValue<Bytes>> {
@@ -502,17 +505,8 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        iterator_test_key_of_epoch, iterator_test_table_key_of,
+        iterator_test_key_of_epoch, iterator_test_table_key_of, transform_shared_buffer,
     };
-
-    fn transform_shared_buffer(
-        batches: Vec<(Vec<u8>, HummockValue<Bytes>)>,
-    ) -> Vec<(Bytes, HummockValue<Bytes>)> {
-        batches
-            .into_iter()
-            .map(|(k, v)| (k.into(), v))
-            .collect_vec()
-    }
 
     #[tokio::test]
     async fn test_shared_buffer_batch_basic() {

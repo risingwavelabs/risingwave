@@ -33,11 +33,14 @@ use tracing::{error, warn};
 
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchInner;
 use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
-use crate::hummock::store::version::StagingSstableInfo;
+use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo};
 use crate::hummock::{HummockError, HummockResult};
 
+// todo: payload should be changed to imm and merged imm
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
+
 pub type UploadTaskOutput = Vec<LocalSstableInfo>;
 pub type SpawnUploadTask = Arc<
     dyn Fn(UploadTaskPayload, UploadTaskInfo) -> JoinHandle<HummockResult<UploadTaskOutput>>
@@ -268,14 +271,17 @@ impl SealedData {
         // the newly added data are at the front
         self.imms.push_front((epoch, unseal_epoch_data.imms));
         self.epochs.push_front(epoch);
+
         unseal_epoch_data
             .spilled_data
             .uploading_tasks
             .append(&mut self.spilled_data.uploading_tasks);
+
         unseal_epoch_data
             .spilled_data
             .uploaded_data
             .append(&mut self.spilled_data.uploaded_data);
+
         self.spilled_data.uploading_tasks = unseal_epoch_data.spilled_data.uploading_tasks;
         self.spilled_data.uploaded_data = unseal_epoch_data.spilled_data.uploaded_data;
     }
@@ -339,6 +345,38 @@ impl UploaderContext {
     }
 }
 
+/// Task to merge small imms in the staging version to a large one
+pub struct ImmMergeTask {
+    read_version: Arc<parking_lot::RwLock<HummockReadVersion>>,
+    imms: Vec<ImmutableMemtable>,
+    join_handle: JoinHandle<HummockResult<ImmutableMemtable>>,
+}
+
+impl ImmMergeTask {
+    fn new(
+        read_version: Arc<parking_lot::RwLock<HummockReadVersion>>,
+        imms: Vec<ImmutableMemtable>,
+        _context: &UploaderContext,
+    ) -> Self {
+        // todo
+
+        ImmMergeTask {
+            read_version,
+            imms,
+            join_handle: tokio::spawn(async move {
+                // merge imms to a large imm
+                // let mut imm = ImmutableMemtable::new();
+                let imm = ImmutableMemtable {
+                    inner: Arc::new(SharedBufferBatchInner::new(vec![], vec![], 0, None)),
+                    epoch: 0,
+                    table_id: Default::default(),
+                };
+                Ok(imm)
+            }),
+        }
+    }
+}
+
 /// An uploader for hummock data.
 ///
 /// Data have 4 sequential stages: unsealed, sealed, syncing, synced.
@@ -372,6 +410,10 @@ pub struct HummockUploader {
     /// Newer epoch at the front
     syncing_data: VecDeque<SyncingData>,
 
+    /// Scheduled imm merge task for each local hummock instance
+    /// Each local hummock instance should only has one ongoing imm merge task at a time
+    imm_merging_tasks: VecDeque<ImmMergeTask>,
+
     /// Data that has been synced already. `epoch` satisfies
     /// `epoch <= max_synced_epoch`.
     synced_data: BTreeMap<HummockEpoch, SyncedDataState>,
@@ -393,6 +435,7 @@ impl HummockUploader {
             unsealed_data: Default::default(),
             sealed_data: Default::default(),
             syncing_data: Default::default(),
+            imm_merging_tasks: Default::default(),
             synced_data: Default::default(),
             context: UploaderContext::new(pinned_version, spawn_upload_task, buffer_tracker),
         }
@@ -428,6 +471,15 @@ impl HummockUploader {
             .or_default()
             .imms
             .push_front(imm);
+    }
+
+    pub(crate) fn start_merge_imms(
+        &self,
+        read_version: Arc<parking_lot::RwLock<HummockReadVersion>>,
+        imms: Vec<ImmutableMemtable>,
+    ) {
+        let merge_task = ImmMergeTask::new(read_version, imms, &self.context);
+        // todo
     }
 
     pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) {
@@ -671,6 +723,7 @@ pub(crate) enum UploaderEvent {
     // staging sstable info of newer data comes first
     SyncFinish(HummockEpoch, Vec<StagingSstableInfo>),
     DataSpilled(StagingSstableInfo),
+    ImmMerged,
 }
 
 impl<'a> Future for NextUploaderEvent<'a> {
@@ -678,6 +731,8 @@ impl<'a> Future for NextUploaderEvent<'a> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let uploader = &mut self.deref_mut().uploader;
+
+        // poll merge task event
 
         if let Some((epoch, newly_uploaded_sstables)) = ready!(uploader.poll_syncing_task(cx)) {
             return Poll::Ready(UploaderEvent::SyncFinish(epoch, newly_uploaded_sstables));
@@ -1058,6 +1113,7 @@ mod tests {
                 assert_eq!(epoch6, epoch);
             }
             UploaderEvent::DataSpilled(_) => unreachable!(),
+            UploaderEvent::ImmMerged => todo!(),
         }
         uploader.update_pinned_version(version5);
         assert_eq!(epoch6, uploader.max_synced_epoch);

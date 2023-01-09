@@ -94,7 +94,17 @@ impl HummockStorageCore {
 
     /// See `HummockReadVersion::update` for more details.
     pub fn update(&self, info: VersionUpdate) {
-        self.read_version.write().update(info)
+        let mut write_guard = self.read_version.write();
+        write_guard.update(info);
+
+        if let Some(imms) = write_guard.get_imms_to_merge() {
+            self.event_sender
+                .send(HummockEvent::ImmToMerge {
+                    read_version: self.read_version.clone(),
+                    imms,
+                })
+                .expect("send event failed");
+        }
     }
 
     pub async fn get_inner<'a>(

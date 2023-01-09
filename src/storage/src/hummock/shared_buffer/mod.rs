@@ -18,9 +18,9 @@ pub mod shared_buffer_uploader;
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::{Bound, RangeBounds};
-use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize};
+use std::sync::{Arc, LazyLock};
 
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{bound_table_key_range, user_key, TableKey, UserKey};
@@ -35,14 +35,19 @@ use crate::hummock::iterator::{
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::store::immutable_memtable::MergedImmutableMemtable;
 use crate::hummock::utils::filter_single_sst;
 use crate::hummock::{HummockIteratorType, HummockResult, SstableIteratorType, SstableStore};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+
+pub static SHARED_BUFFER_BATCH_ID_GENERATOR: LazyLock<AtomicU64> =
+    LazyLock::new(|| AtomicU64::new(0));
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UncommittedData {
     Sst(LocalSstableInfo),
     Batch(SharedBufferBatch),
+    // MergedBatch, // todo
 }
 
 pub fn get_sst_key_range(info: &SstableInfo) -> &KeyRange {
@@ -61,6 +66,7 @@ impl UncommittedData {
                 UserKey::decode(user_key(key_range.left.as_slice()))
             }
             UncommittedData::Batch(batch) => batch.start_user_key(),
+            // UncommittedData::MergedBatch => {}
         }
     }
 
@@ -71,6 +77,9 @@ impl UncommittedData {
                 UserKey::decode(user_key(key_range.right.as_slice()))
             }
             UncommittedData::Batch(batch) => batch.start_user_key(),
+            // UncommittedData::MergedBatch => {
+            //     // todo
+            // }
         }
     }
 }

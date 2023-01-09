@@ -15,6 +15,7 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
@@ -98,6 +99,15 @@ pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Ve
 /// The value of an index, like `value_test_00002` without value meta
 pub fn iterator_test_value_of(idx: usize) -> Vec<u8> {
     format!("value_test_{:05}", idx).as_bytes().to_vec()
+}
+
+pub fn transform_shared_buffer(
+    batches: Vec<(Vec<u8>, HummockValue<Bytes>)>,
+) -> Vec<(Bytes, HummockValue<Bytes>)> {
+    batches
+        .into_iter()
+        .map(|(k, v)| (k.into(), v))
+        .collect_vec()
 }
 
 /// Generates a test table used in almost all table-related tests. Developers may verify the

@@ -33,7 +33,7 @@ use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::hummock::compactor::{compact, Context};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::uploader::{
-    HummockUploader, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
+    HummockUploader, ImmMergeTask, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
 };
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -426,6 +426,9 @@ impl HummockEventHandler {
                     UploaderEvent::DataSpilled(staging_sstable_info) => {
                         self.handle_data_spilled(staging_sstable_info);
                     }
+                    UploaderEvent::ImmMerged => {
+                        todo!("handle imm merged");
+                    }
                 },
                 Either::Right(event) => {
                     match event {
@@ -453,6 +456,10 @@ impl HummockEventHandler {
                         HummockEvent::ImmToUploader(imm) => {
                             self.uploader.add_imm(imm);
                             self.uploader.may_flush();
+                        }
+
+                        HummockEvent::ImmToMerge { read_version, imms } => {
+                            self.uploader.start_merge_imms(read_version, imms);
                         }
 
                         HummockEvent::SealEpoch {

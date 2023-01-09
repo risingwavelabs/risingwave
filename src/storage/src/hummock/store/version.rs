@@ -59,6 +59,11 @@ use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIt
 
 pub type CommittedVersion = PinnedVersion;
 
+/// The value of threshold is related to the number of in-flight barriers
+/// and the frequency of checkpoint.
+/// todo: We should not use a fixed number here
+const IMM_MERGE_THRESHOLD: usize = 5;
+
 /// Data not committed to Hummock. There are two types of staging data:
 /// - Immutable memtable: data that has been written into local state store but not persisted.
 /// - Uncommitted SST: data that has been uploaded to persistent storage but not committed to
@@ -128,6 +133,7 @@ pub struct StagingVersion {
     // newer data comes first
     // Note: Currently, building imm and writing to staging version is not atomic, and therefore
     // imm of smaller batch id may be added later than one with greater batch id
+    // TODO: replace ImmutableMemtable with ImmutableMemtableImpl
     pub imm: VecDeque<ImmutableMemtable>,
     // newer data comes first
     pub sst: VecDeque<StagingSstableInfo>,
@@ -186,6 +192,8 @@ pub struct HummockReadVersion {
 
     /// Remote version for committed data.
     committed: CommittedVersion,
+
+    onging_merge_imms: Option<Vec<ImmId>>,
 }
 
 impl HummockReadVersion {
@@ -201,6 +209,7 @@ impl HummockReadVersion {
             },
 
             committed: committed_version,
+            onging_merge_imms: None,
         }
     }
 
@@ -297,6 +306,49 @@ impl HummockReadVersion {
                     }));
                 }
             }
+        }
+    }
+
+    pub fn get_imms_to_merge(&mut self) -> Option<Vec<ImmutableMemtable>> {
+        // check the number of imms in staging,
+        // if the number is greater than the threshold, we need to merge them to a large imm
+        if self.onging_merge_imms.is_none() && self.staging.imm.len() >= IMM_MERGE_THRESHOLD {
+            let len = self.staging.imm.len();
+            let mut imms = Vec::with_capacity(len);
+            let mut imm_ids = Vec::with_capacity(len);
+            for imm in self.staging.imm.iter() {
+                imms.push(imm.clone());
+                imm_ids.push(imm.batch_id());
+            }
+            self.onging_merge_imms = Some(imm_ids);
+            Some(imms)
+        } else {
+            None
+        }
+    }
+
+    pub fn on_imm_merge_finished(&mut self, merged_imm: ImmutableMemtable) {
+        // When merge task finished, we should remove those small imms from staging and
+        // add the merged imm into staging
+        if let Some(merged_imm_ids) = self.onging_merge_imms.take() {
+            let staging_imm_count = self.staging.imm.len();
+            #[cfg(debug_assertions)]
+            {
+                // check the last `merged_imm_ids.len()` imms in staging are the same as
+                // `merged_imm_ids`
+                let diff = staging_imm_count - merged_imm_ids.len();
+                for (i, imm) in self.staging.imm.iter().skip(diff).enumerate() {
+                    if i >= merged_imm_ids.len() {
+                        break;
+                    }
+                    assert_eq!(imm.batch_id(), merged_imm_ids[i]);
+                }
+            }
+
+            self.staging
+                .imm
+                .truncate(staging_imm_count - merged_imm_ids.len());
+            self.staging.imm.push_back(merged_imm);
         }
     }
 
