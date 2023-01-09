@@ -415,7 +415,8 @@ impl ExprVisitor<usize> for CountNow {
 /// analyze if the expression can derive a watermark from some input watermark. If it can
 /// derive, return the input watermark column index
 pub fn try_derive_watermark(expr: &ExprImpl) -> Option<usize> {
-    if let WatermarkDerivation::Watermark(idx) = self.visit_expr(expr) {
+    let a = WatermarkAnalyzer {};
+    if let WatermarkDerivation::Watermark(idx) = a.visit_expr(expr) {
         return Some(idx);
     }
     None
