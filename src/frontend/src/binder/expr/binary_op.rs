@@ -26,8 +26,8 @@ impl Binder {
         op: BinaryOperator,
         right: Expr,
     ) -> Result<ExprImpl> {
-        let mut bound_left = self.bind_expr(left)?;
-        let mut bound_right = self.bind_expr(right)?;
+        let bound_left = self.bind_expr(left)?;
+        let bound_right = self.bind_expr(right)?;
         let func_type = match op {
             BinaryOperator::Plus => ExprType::Add,
             BinaryOperator::Minus => ExprType::Subtract,
@@ -61,50 +61,7 @@ impl Binder {
                 )
             }
         };
-        self.bind_binary_op_with_timezone(func_type, &mut bound_left, &mut bound_right)?;
         Ok(FunctionCall::new(func_type, vec![bound_left, bound_right])?.into())
-    }
-
-    fn bind_binary_op_with_timezone(
-        &mut self,
-        func_type: ExprType,
-        bound_left: &mut ExprImpl,
-        bound_right: &mut ExprImpl,
-    ) -> Result<()> {
-        if matches!(
-            func_type,
-            ExprType::Equal
-                | ExprType::LessThan
-                | ExprType::LessThanOrEqual
-                | ExprType::GreaterThan
-                | ExprType::GreaterThanOrEqual
-        ) {
-            if matches!(bound_left.return_type(), DataType::Timestamptz)
-                && matches!(
-                    bound_right.return_type(),
-                    DataType::Date | DataType::Timestamp
-                )
-            {
-                if let Some(bound) =
-                    self.bind_cast_with_timezone(bound_right.clone(), DataType::Timestamptz)?
-                {
-                    *bound_right = bound;
-                }
-            }
-            if matches!(bound_right.return_type(), DataType::Timestamptz)
-                && matches!(
-                    bound_left.return_type(),
-                    DataType::Date | DataType::Timestamp
-                )
-            {
-                if let Some(bound) =
-                    self.bind_cast_with_timezone(bound_left.clone(), DataType::Timestamptz)?
-                {
-                    *bound_left = bound;
-                }
-            }
-        }
-        Ok(())
     }
 
     /// Apply a NOT on top of LIKE.

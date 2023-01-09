@@ -80,17 +80,6 @@ pub struct Binder {
     search_path: SearchPath,
     /// Whether the Binder is binding an MV.
     in_create_mv: bool,
-
-    session_timezone: SessionTimezone,
-}
-
-/// `SessionTimezone` will be used by the binder to resolve
-/// session timezone-dependent casts, comparisons or arithmetic.
-/// To achieve this, we replace one of the inputs with an `AT TIME ZONE` conversion.
-pub struct SessionTimezone {
-    pub timezone: String,
-    /// Whether or not the binder used the session timezone
-    pub used: bool,
 }
 
 impl Binder {
@@ -113,10 +102,6 @@ impl Binder {
             next_cte_id: 0,
             search_path: session.config().get_search_path(),
             in_create_mv,
-            session_timezone: SessionTimezone {
-                timezone: session.config().get_timezone().into(),
-                used: false,
-            },
         }
     }
 
@@ -201,18 +186,6 @@ impl Binder {
         let id = self.next_cte_id;
         self.next_cte_id += 1;
         id
-    }
-
-    pub fn append_notice(&self, notice: &mut String) {
-        if self.session_timezone.used {
-            notice.push_str(
-                &format!("Your session timezone is {}. It was used \
-                in the interpretation of timestamps and dates in your query. If this is unintended,
-                change your timezone to match that of your data's with `set timezone = [timezone]` or 
-                rewrite your query with an explicit timezone conversion, e.g. with `AT TIME ZONE`.\n", 
-                self.session_timezone.timezone)
-            );
-        }
     }
 }
 
