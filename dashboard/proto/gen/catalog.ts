@@ -138,6 +138,11 @@ export interface Table {
   definition: string;
   handlePkConflict: boolean;
   readPrefixLenHint: number;
+  /**
+   * Per-table catalog version, used by schema change. `None` for internal tables and tests.
+   * Not to be confused with the global catalog version for notification service.
+   */
+  version: Table_TableVersion | undefined;
 }
 
 export const Table_TableType = {
@@ -191,6 +196,19 @@ export function table_TableTypeToJSON(object: Table_TableType): string {
     default:
       return "UNRECOGNIZED";
   }
+}
+
+export interface Table_TableVersion {
+  /**
+   * The version number, which will be 0 by default and be increased by 1 for
+   * each schema change in the frontend.
+   */
+  version: number;
+  /**
+   * The ID of the next column to be added, which is used to make all columns
+   * in the table have unique IDs, even if some columns have been dropped.
+   */
+  nextColumnId: number;
 }
 
 export interface Table_PropertiesEntry {
@@ -645,6 +663,7 @@ function createBaseTable(): Table {
     definition: "",
     handlePkConflict: false,
     readPrefixLenHint: 0,
+    version: undefined,
   };
 }
 
@@ -685,6 +704,7 @@ export const Table = {
       definition: isSet(object.definition) ? String(object.definition) : "",
       handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
       readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
+      version: isSet(object.version) ? Table_TableVersion.fromJSON(object.version) : undefined,
     };
   },
 
@@ -743,6 +763,8 @@ export const Table = {
     message.definition !== undefined && (obj.definition = message.definition);
     message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
     message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
+    message.version !== undefined &&
+      (obj.version = message.version ? Table_TableVersion.toJSON(message.version) : undefined);
     return obj;
   },
 
@@ -790,6 +812,36 @@ export const Table = {
     message.definition = object.definition ?? "";
     message.handlePkConflict = object.handlePkConflict ?? false;
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
+    message.version = (object.version !== undefined && object.version !== null)
+      ? Table_TableVersion.fromPartial(object.version)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseTable_TableVersion(): Table_TableVersion {
+  return { version: 0, nextColumnId: 0 };
+}
+
+export const Table_TableVersion = {
+  fromJSON(object: any): Table_TableVersion {
+    return {
+      version: isSet(object.version) ? Number(object.version) : 0,
+      nextColumnId: isSet(object.nextColumnId) ? Number(object.nextColumnId) : 0,
+    };
+  },
+
+  toJSON(message: Table_TableVersion): unknown {
+    const obj: any = {};
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    message.nextColumnId !== undefined && (obj.nextColumnId = Math.round(message.nextColumnId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Table_TableVersion>, I>>(object: I): Table_TableVersion {
+    const message = createBaseTable_TableVersion();
+    message.version = object.version ?? 0;
+    message.nextColumnId = object.nextColumnId ?? 0;
     return message;
   },
 };

@@ -134,6 +134,7 @@ async fn compaction_test(
         table_type: 0,
         append_only: false,
         row_id_index: None,
+        version: None,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -165,7 +166,7 @@ async fn compaction_test(
         },
     );
     hummock_manager_ref
-        .init_metadata_for_replay(
+        .init_metadata_for_version_replay(
             vec![delete_key_table, delete_range_table],
             vec![group1, group2],
         )
