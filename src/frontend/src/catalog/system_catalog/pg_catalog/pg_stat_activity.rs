@@ -16,7 +16,7 @@ use risingwave_common::types::DataType;
 
 use crate::catalog::system_catalog::SystemCatalogColumnsDef;
 
-/// The pg_stat_activity view will have one row per server process, showing information related to
+/// The `pg_stat_activity` view will have one row per server process, showing information related to
 /// the current activity of that process. Ref: [`https://www.postgresql.org/docs/current/monitoring-stats.html#MONITORING-PG-STAT-ACTIVITY-VIEW`]
 pub const PG_STAT_ACTIVITY_TABLE_NAME: &str = "pg_stat_activity";
 pub const PG_STAT_ACTIVITY_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
