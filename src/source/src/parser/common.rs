@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use num_traits::FromPrimitive;
@@ -65,20 +63,11 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
             _ => anyhow::bail!("expect timestamptz, but found {v}"),
         },
         DataType::Struct(struct_type_info) => {
-            let field_mapping: HashMap<String, String> = v
-                .as_object()
-                .unwrap()
-                .keys()
-                .map(|k| (k.to_lowercase(), k.to_string()))
-                .collect();
             let fields = struct_type_info
                 .field_names
                 .iter()
                 .zip_eq(struct_type_info.fields.iter())
-                .map(|field| {
-                    let field_value = field_mapping.get(&field.0.to_lowercase()).and_then(|k| v.get(k.as_str()));
-                    simd_json_parse_value(field.1, field_value)
-                })
+                .map(|field| simd_json_parse_value(field.1, v.get(field.0.as_str())))
                 .collect::<Result<Vec<Datum>>>()?;
             ScalarImpl::Struct(StructValue::new(fields))
         }
