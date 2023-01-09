@@ -26,10 +26,13 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 use risingwave_connector::source::SplitImpl;
+use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::ExprError;
 use risingwave_pb::data::{Datum as ProstDatum, Epoch as ProstEpoch};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation as ProstMutation;
@@ -42,6 +45,7 @@ use risingwave_pb::stream_plan::{
 };
 use smallvec::SmallVec;
 
+use crate::common::InfallibleExpression;
 use crate::error::StreamResult;
 use crate::task::{ActorId, FragmentId};
 
@@ -577,6 +581,30 @@ impl Watermark {
             data_type,
             val,
         }
+    }
+
+    pub fn transform_with_expr(
+        self,
+        expr: &BoxedExpression,
+        new_col_idx: usize,
+        on_err: impl Fn(ExprError),
+    ) -> Option<Self> {
+        let Self {
+            col_idx,
+            data_type,
+            val,
+        } = self;
+        let row = {
+            let mut row = vec![None; col_idx + 1];
+            row[col_idx] = Some(val);
+            OwnedRow::new(row)
+        };
+        let val = expr.eval_row_infallible(&row, on_err)?;
+        Some(Self {
+            col_idx: new_col_idx,
+            data_type,
+            val,
+        })
     }
 
     pub fn to_protobuf(&self) -> ProstWatermark {

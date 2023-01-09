@@ -15,6 +15,7 @@
 use std::fmt::{Debug, Formatter};
 
 use itertools::Itertools;
+use multimap::MultiMap;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
@@ -22,7 +23,7 @@ use risingwave_expr::expr::BoxedExpression;
 
 use super::{
     ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef, SimpleExecutor,
-    SimpleExecutorWrapper, StreamExecutorResult,
+    SimpleExecutorWrapper, StreamExecutorResult, Watermark,
 };
 use crate::common::InfallibleExpression;
 
@@ -35,6 +36,7 @@ impl ProjectExecutor {
         pk_indices: PkIndices,
         exprs: Vec<BoxedExpression>,
         execuotr_id: u64,
+        watermark_derivations: MultiMap<usize, usize>,
     ) -> Self {
         let info = ExecutorInfo {
             schema: input.schema().to_owned(),
@@ -43,7 +45,7 @@ impl ProjectExecutor {
         };
         SimpleExecutorWrapper {
             input,
-            inner: SimpleProjectExecutor::new(ctx, info, exprs, execuotr_id),
+            inner: SimpleProjectExecutor::new(ctx, info, exprs, execuotr_id, watermark_derivations),
         }
     }
 }
@@ -57,6 +59,9 @@ pub struct SimpleProjectExecutor {
 
     /// Expressions of the current projection.
     exprs: Vec<BoxedExpression>,
+    /// All the watermark derivations, (input_column_index, output_column_index). And the
+    /// derivation expression is the project's expression itself.
+    watermark_derivations: MultiMap<usize, usize>,
 }
 
 impl SimpleProjectExecutor {
@@ -65,6 +70,7 @@ impl SimpleProjectExecutor {
         input_info: ExecutorInfo,
         exprs: Vec<BoxedExpression>,
         executor_id: u64,
+        watermark_derivations: MultiMap<usize, usize>,
     ) -> Self {
         let schema = Schema {
             fields: exprs
@@ -80,6 +86,7 @@ impl SimpleProjectExecutor {
                 identity: format!("ProjectExecutor {:X}", executor_id),
             },
             exprs,
+            watermark_derivations,
         }
     }
 }
@@ -110,6 +117,36 @@ impl SimpleExecutor for SimpleProjectExecutor {
 
         let new_chunk = StreamChunk::new(ops, projected_columns, None);
         Ok(Some(new_chunk))
+    }
+
+    fn handle_watermark(&self, watermark: Watermark) -> StreamExecutorResult<Vec<Watermark>> {
+        let out_col_indices = match self.watermark_derivations.get_vec(&watermark.col_idx) {
+            Some(v) => v,
+            None => return Ok(vec![]),
+        };
+        let mut ret = vec![];
+        for out_col_idx in out_col_indices {
+            let out_col_idx = *out_col_idx;
+            let derived_watermark = watermark.clone().transform_with_expr(
+                &self.exprs[out_col_idx],
+                out_col_idx,
+                |err| {
+                    self.ctx.on_compute_error(
+                        err,
+                        &(self.info.identity.to_string() + "(when computing watermark)"),
+                    )
+                },
+            );
+            if let Some(derived_watermark) = derived_watermark {
+                ret.push(derived_watermark);
+            } else {
+                warn!(
+                    "{} derive a NULL watermark with the expression {}!",
+                    self.info.identity, out_col_idx
+                );
+            }
+        }
+        Ok(ret)
     }
 
     fn schema(&self) -> &Schema {
@@ -177,6 +214,7 @@ mod tests {
             vec![],
             vec![test_expr],
             1,
+            MultiMap::new(),
         ));
         let mut project = project.execute();
 
