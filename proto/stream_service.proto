@@ -6,8 +6,8 @@ import "common.proto";
 import "hummock.proto";
 import "stream_plan.proto";
 
-option optimize_for = SPEED;
 option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
 
 message HangingChannel {
   common.ActorInfo upstream = 1;
