@@ -18,12 +18,14 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
+use risingwave_common::types::DataType;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
     Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
     View as ProstView,
 };
 
+use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
 use super::system_catalog::get_sys_catalogs_in_schema;
 use super::view_catalog::ViewCatalog;
@@ -51,6 +53,25 @@ impl<'a> SchemaPath<'a> {
         match schema_name {
             Some(schema_name) => SchemaPath::Name(schema_name),
             None => SchemaPath::Path(search_path, user_name),
+        }
+    }
+
+    /// Call function `f` for each schema name. Return the first `Some` result.
+    pub fn find<T>(&self, mut f: impl FnMut(&str) -> Option<T>) -> Option<(T, &'a str)> {
+        match self {
+            SchemaPath::Name(schema_name) => f(schema_name).map(|t| (t, *schema_name)),
+            SchemaPath::Path(search_path, user_name) => {
+                for schema_name in search_path.path() {
+                    let mut schema_name: &str = schema_name;
+                    if schema_name == USER_NAME_WILD_CARD {
+                        schema_name = user_name;
+                    }
+                    if let Some(res) = f(schema_name) {
+                        return Some((res, schema_name));
+                    }
+                }
+                None
+            }
         }
     }
 }
@@ -327,44 +348,19 @@ impl Catalog {
         ))
     }
 
-    #[inline(always)]
-    fn get_table_by_name_with_schema_name(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        table_name: &str,
-    ) -> CatalogResult<&Arc<TableCatalog>> {
-        self.get_schema_by_name(db_name, schema_name)?
-            .get_table_by_name(table_name)
-            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
-    }
-
     pub fn get_table_by_name<'a>(
         &self,
         db_name: &str,
         schema_path: SchemaPath<'a>,
         table_name: &str,
     ) -> CatalogResult<(&Arc<TableCatalog>, &'a str)> {
-        match schema_path {
-            SchemaPath::Name(schema_name) => self
-                .get_table_by_name_with_schema_name(db_name, schema_name, table_name)
-                .map(|table_catalog| (table_catalog, schema_name)),
-            SchemaPath::Path(search_path, user_name) => {
-                for path in search_path.path() {
-                    let mut schema_name: &str = path;
-                    if schema_name == USER_NAME_WILD_CARD {
-                        schema_name = user_name;
-                    }
-
-                    if let Ok(table_catalog) =
-                        self.get_table_by_name_with_schema_name(db_name, schema_name, table_name)
-                    {
-                        return Ok((table_catalog, schema_name));
-                    }
-                }
-                Err(CatalogError::NotFound("table", table_name.to_string()))
-            }
-        }
+        schema_path
+            .find(|schema_name| {
+                self.get_schema_by_name(db_name, schema_name)
+                    .ok()?
+                    .get_table_by_name(table_name)
+            })
+            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
     }
 
     pub fn get_table_by_id(&self, table_id: &TableId) -> CatalogResult<TableCatalog> {
@@ -397,56 +393,19 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
     }
 
-    #[inline(always)]
-    fn get_source_by_name_with_schema_name(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        source_name: &str,
-    ) -> CatalogResult<&Arc<SourceCatalog>> {
-        self.get_schema_by_name(db_name, schema_name)?
-            .get_source_by_name(source_name)
-            .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()))
-    }
-
     pub fn get_source_by_name<'a>(
         &self,
         db_name: &str,
         schema_path: SchemaPath<'a>,
         source_name: &str,
     ) -> CatalogResult<(&Arc<SourceCatalog>, &'a str)> {
-        match schema_path {
-            SchemaPath::Name(schema_name) => self
-                .get_source_by_name_with_schema_name(db_name, schema_name, source_name)
-                .map(|source_catalog| (source_catalog, schema_name)),
-            SchemaPath::Path(search_path, user_name) => {
-                for path in search_path.path() {
-                    let mut schema_name: &str = path;
-                    if schema_name == USER_NAME_WILD_CARD {
-                        schema_name = user_name;
-                    }
-
-                    if let Ok(source_catalog) =
-                        self.get_source_by_name_with_schema_name(db_name, schema_name, source_name)
-                    {
-                        return Ok((source_catalog, schema_name));
-                    }
-                }
-                Err(CatalogError::NotFound("source", source_name.to_string()))
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn get_sink_by_name_with_schema_name(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        sink_name: &str,
-    ) -> CatalogResult<&Arc<SinkCatalog>> {
-        self.get_schema_by_name(db_name, schema_name)?
-            .get_sink_by_name(sink_name)
-            .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()))
+        schema_path
+            .find(|schema_name| {
+                self.get_schema_by_name(db_name, schema_name)
+                    .ok()?
+                    .get_source_by_name(source_name)
+            })
+            .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()))
     }
 
     pub fn get_sink_by_name<'a>(
@@ -455,38 +414,13 @@ impl Catalog {
         schema_path: SchemaPath<'a>,
         sink_name: &str,
     ) -> CatalogResult<(&Arc<SinkCatalog>, &'a str)> {
-        match schema_path {
-            SchemaPath::Name(schema_name) => self
-                .get_sink_by_name_with_schema_name(db_name, schema_name, sink_name)
-                .map(|sink_catalog| (sink_catalog, schema_name)),
-            SchemaPath::Path(search_path, user_name) => {
-                for path in search_path.path() {
-                    let mut schema_name: &str = path;
-                    if schema_name == USER_NAME_WILD_CARD {
-                        schema_name = user_name;
-                    }
-
-                    if let Ok(sink_catalog) =
-                        self.get_sink_by_name_with_schema_name(db_name, schema_name, sink_name)
-                    {
-                        return Ok((sink_catalog, schema_name));
-                    }
-                }
-                Err(CatalogError::NotFound("sink", sink_name.to_string()))
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn get_index_by_name_with_schema_name(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        index_name: &str,
-    ) -> CatalogResult<&Arc<IndexCatalog>> {
-        self.get_schema_by_name(db_name, schema_name)?
-            .get_index_by_name(index_name)
-            .ok_or_else(|| CatalogError::NotFound("index", index_name.to_string()))
+        schema_path
+            .find(|schema_name| {
+                self.get_schema_by_name(db_name, schema_name)
+                    .ok()?
+                    .get_sink_by_name(sink_name)
+            })
+            .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()))
     }
 
     pub fn get_index_by_name<'a>(
@@ -495,38 +429,13 @@ impl Catalog {
         schema_path: SchemaPath<'a>,
         index_name: &str,
     ) -> CatalogResult<(&Arc<IndexCatalog>, &'a str)> {
-        match schema_path {
-            SchemaPath::Name(schema_name) => self
-                .get_index_by_name_with_schema_name(db_name, schema_name, index_name)
-                .map(|index_catalog| (index_catalog, schema_name)),
-            SchemaPath::Path(search_path, user_name) => {
-                for path in search_path.path() {
-                    let mut schema_name: &str = path;
-                    if schema_name == USER_NAME_WILD_CARD {
-                        schema_name = user_name;
-                    }
-
-                    if let Ok(index_catalog) =
-                        self.get_index_by_name_with_schema_name(db_name, schema_name, index_name)
-                    {
-                        return Ok((index_catalog, schema_name));
-                    }
-                }
-                Err(CatalogError::NotFound("index", index_name.to_string()))
-            }
-        }
-    }
-
-    #[inline(always)]
-    fn get_view_by_name_with_schema_name(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        view_name: &str,
-    ) -> CatalogResult<&Arc<ViewCatalog>> {
-        self.get_schema_by_name(db_name, schema_name)?
-            .get_view_by_name(view_name)
-            .ok_or_else(|| CatalogError::NotFound("view", view_name.to_string()))
+        schema_path
+            .find(|schema_name| {
+                self.get_schema_by_name(db_name, schema_name)
+                    .ok()?
+                    .get_index_by_name(index_name)
+            })
+            .ok_or_else(|| CatalogError::NotFound("index", index_name.to_string()))
     }
 
     pub fn get_view_by_name<'a>(
@@ -535,26 +444,29 @@ impl Catalog {
         schema_path: SchemaPath<'a>,
         view_name: &str,
     ) -> CatalogResult<(&Arc<ViewCatalog>, &'a str)> {
-        match schema_path {
-            SchemaPath::Name(schema_name) => self
-                .get_view_by_name_with_schema_name(db_name, schema_name, view_name)
-                .map(|view_catalog| (view_catalog, schema_name)),
-            SchemaPath::Path(search_path, user_name) => {
-                for path in search_path.path() {
-                    let mut schema_name: &str = path;
-                    if schema_name == USER_NAME_WILD_CARD {
-                        schema_name = user_name;
-                    }
+        schema_path
+            .find(|schema_name| {
+                self.get_schema_by_name(db_name, schema_name)
+                    .ok()?
+                    .get_view_by_name(view_name)
+            })
+            .ok_or_else(|| CatalogError::NotFound("view", view_name.to_string()))
+    }
 
-                    if let Ok(view_catalog) =
-                        self.get_view_by_name_with_schema_name(db_name, schema_name, view_name)
-                    {
-                        return Ok((view_catalog, schema_name));
-                    }
-                }
-                Err(CatalogError::NotFound("view", view_name.to_string()))
-            }
-        }
+    pub fn get_function_by_name_args<'a>(
+        &self,
+        db_name: &str,
+        schema_path: SchemaPath<'a>,
+        function_name: &str,
+        args: &[DataType],
+    ) -> CatalogResult<(&Arc<FunctionCatalog>, &'a str)> {
+        schema_path
+            .find(|schema_name| {
+                self.get_schema_by_name(db_name, schema_name)
+                    .ok()?
+                    .get_function_by_name_args(function_name, args)
+            })
+            .ok_or_else(|| CatalogError::NotFound("function", function_name.to_string()))
     }
 
     /// Check the name if duplicated with existing table, materialized view or source.
@@ -616,52 +528,30 @@ impl Catalog {
             .get_indexes_by_table_id(&mv_id)
     }
 
-    fn get_id_by_class_name_inner(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        class_name: &str,
-    ) -> CatalogResult<u32> {
-        let schema = self.get_schema_by_name(db_name, schema_name)?;
-        if let Some(item) = schema.get_system_table_by_name(class_name) {
-            return Ok(item.id().into());
-        } else if let Some(item) = schema.get_table_by_name(class_name) {
-            return Ok(item.id().into());
-        } else if let Some(item) = schema.get_index_by_name(class_name) {
-            return Ok(item.id.into());
-        } else if let Some(item) = schema.get_source_by_name(class_name) {
-            return Ok(item.id);
-        } else if let Some(item) = schema.get_view_by_name(class_name) {
-            return Ok(item.id);
-        }
-        Err(CatalogError::NotFound("class", class_name.to_string()))
-    }
-
     pub fn get_id_by_class_name(
         &self,
         db_name: &str,
         schema_path: SchemaPath<'_>,
         class_name: &str,
     ) -> CatalogResult<u32> {
-        match schema_path {
-            SchemaPath::Name(schema_name) => {
-                self.get_id_by_class_name_inner(db_name, schema_name, class_name)
-            }
-            SchemaPath::Path(search_path, user_name) => {
-                for path in search_path.path() {
-                    let mut schema_name: &str = path;
-                    if schema_name == USER_NAME_WILD_CARD {
-                        schema_name = user_name;
-                    }
-
-                    if let Ok(id) =
-                        self.get_id_by_class_name_inner(db_name, schema_name, class_name)
-                    {
-                        return Ok(id);
-                    }
+        schema_path
+            .find(|schema_name| {
+                let schema = self.get_schema_by_name(db_name, schema_name).ok()?;
+                if let Some(item) = schema.get_system_table_by_name(class_name) {
+                    Some(item.id().into())
+                } else if let Some(item) = schema.get_table_by_name(class_name) {
+                    Some(item.id().into())
+                } else if let Some(item) = schema.get_index_by_name(class_name) {
+                    Some(item.id.into())
+                } else if let Some(item) = schema.get_source_by_name(class_name) {
+                    Some(item.id)
+                } else if let Some(item) = schema.get_view_by_name(class_name) {
+                    Some(item.id)
+                } else {
+                    None
                 }
-                Err(CatalogError::NotFound("class", class_name.to_string()))
-            }
-        }
+            })
+            .map(|(id, _)| id)
+            .ok_or_else(|| CatalogError::NotFound("class", class_name.to_string()))
     }
 }
