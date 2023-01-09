@@ -19,41 +19,48 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_table::{gen_create_table_plan, ColumnIdGenerator};
-use super::privilege::check_super_user;
 use super::{HandlerArgs, RwPgResponse};
-use crate::binder::Relation;
+use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::table_catalog::TableType;
 use crate::{build_graph, Binder, OptimizerContext, TableCatalog};
 
-#[allow(clippy::unused_async)]
 pub async fn handle_add_column(
     handler_args: HandlerArgs,
     table_name: ObjectName,
     new_column: ColumnDef,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
+    let db_name = session.database();
+    let (schema_name, real_table_name) =
+        Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
+    let search_path = session.config().get_search_path();
+    let user_name = &session.auth_context().user_name;
+
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let original_catalog = {
-        let relation = Binder::new(&session).bind_relation_by_name(table_name.clone(), None)?;
-        match relation {
-            Relation::BaseTable(table) if table.table_catalog.is_table() => table.table_catalog,
+        let reader = session.env().catalog_reader().read_guard();
+        let (table, schema_name) =
+            reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+
+        match table.table_type() {
+            TableType::Table if table.associated_source_id().is_none() => {}
+            // Do not allow altering a table with a connector. It should be done passively according
+            // to the messages from the connector.
+            TableType::Table if table.associated_source_id().is_some() => {
+                Err(ErrorCode::InvalidInputSyntax(format!(
+                    "cannot alter table \"{table_name}\" because it has a connector"
+                )))?
+            }
             _ => Err(ErrorCode::InvalidInputSyntax(format!(
                 "\"{table_name}\" is not a table or cannot be altered"
             )))?,
         }
+
+        session.check_privilege_for_drop_alter(schema_name, &**table)?;
+
+        table.clone()
     };
-
-    if !check_super_user(&session) && session.user_id() != original_catalog.owner {
-        Err(ErrorCode::PermissionDenied(format!(
-            "must be owner of table \"{table_name}\""
-        )))?
-    }
-
-    // Do not allow altering a table with a connector.
-    if original_catalog.associated_source_id().is_some() {
-        Err(ErrorCode::InvalidInputSyntax(format!(
-            "cannot alter table \"{table_name}\" because it has a connector"
-        )))?
-    }
 
     // Retrieve the original table definition and parse it to AST.
     let [mut definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)
