@@ -14,15 +14,10 @@
 
 use std::sync::Arc;
 
-use itertools::Itertools;
-use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_pb::catalog::Function;
 
-use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
+use super::{Expr, ExprImpl};
 use crate::catalog::function_catalog::FunctionCatalog;
-use crate::expr::{ExprDisplay, ExprType};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UserDefinedFunction {

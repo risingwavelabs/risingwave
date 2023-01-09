@@ -274,7 +274,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_function(&self, function: ProstFunction) -> Result<()> {
+    async fn create_function(&self, _function: ProstFunction) -> Result<()> {
         todo!()
     }
 
@@ -363,7 +363,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_function(&self, function_id: FunctionId) -> Result<()> {
+    async fn drop_function(&self, _function_id: FunctionId) -> Result<()> {
         todo!()
     }
 

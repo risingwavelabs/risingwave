@@ -537,6 +537,7 @@ impl Catalog {
         schema_path
             .find(|schema_name| {
                 let schema = self.get_schema_by_name(db_name, schema_name).ok()?;
+                #[allow(clippy::manual_map)]
                 if let Some(item) = schema.get_system_table_by_name(class_name) {
                     Some(item.id().into())
                 } else if let Some(item) = schema.get_table_by_name(class_name) {

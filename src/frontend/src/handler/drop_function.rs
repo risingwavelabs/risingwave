@@ -46,7 +46,7 @@ pub async fn handle_drop_function(
     // TODO: argument is not specified, drop the only function with the name
     let mut arg_types = vec![];
     for arg in func_desc.args.unwrap_or_default() {
-        arg_types.push(bind_data_type(&arg.data_type)?.into());
+        arg_types.push(bind_data_type(&arg.data_type)?);
     }
 
     let function_id = {

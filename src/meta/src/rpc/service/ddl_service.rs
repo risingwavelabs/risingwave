@@ -370,7 +370,7 @@ where
 
         let version = self
             .catalog_manager
-            .drop_function(request.function_id.into())
+            .drop_function(request.function_id)
             .await?;
 
         Ok(Response::new(DropFunctionResponse {
