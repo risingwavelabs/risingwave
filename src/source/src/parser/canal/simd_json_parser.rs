@@ -25,7 +25,6 @@ use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use super::util::at_least_one_ok;
 use crate::parser::canal::operators::*;
-use crate::parser::common::{get_column_from_value, get_keys_from_value};
 use crate::{
     ensure_rust_type, ensure_str, ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard,
 };
@@ -80,15 +79,10 @@ impl CanalJsonParser {
                 let results = inserted
                     .into_iter()
                     .map(|v| {
-                        let field_mapping = get_keys_from_value(v);
                         writer.insert(|column| {
                             cannal_simd_json_parse_value(
                                 &column.data_type,
-                                get_column_from_value(
-                                    column.name.to_lowercase().as_str(),
-                                    &field_mapping,
-                                    v,
-                                ),
+                                v.get(column.name.as_str()),
                             )
                         })
                     })
@@ -123,29 +117,18 @@ impl CanalJsonParser {
                 let results = before
                     .zip_eq(after)
                     .map(|(before, after)| {
-                        let before_field_mapping = get_keys_from_value(before);
-                        let after_field_mapping = get_keys_from_value(after);
                         writer.update(|column| {
                             // in origin canal, old only contains the changed columns but data
                             // contains all columns.
                             // in ticdc, old contains all fields
-                            let before_value = before_field_mapping
-                                .get(column.name.to_lowercase().as_str())
-                                .and_then(|k| before.get(k.as_str()))
-                                .or_else(|| {
-                                    after_field_mapping
-                                        .get(column.name.to_lowercase().as_str())
-                                        .and_then(|k| after.get(k.as_str()))
-                                });
+                            let before_value = before
+                                .get(column.name.as_str())
+                                .or_else(|| after.get(column.name.as_str()));
                             let before =
                                 cannal_simd_json_parse_value(&column.data_type, before_value)?;
                             let after = cannal_simd_json_parse_value(
                                 &column.data_type,
-                                get_column_from_value(
-                                    column.name.to_lowercase().as_str(),
-                                    &after_field_mapping,
-                                    after,
-                                ),
+                                after.get(column.name.as_str()),
                             )?;
                             Ok((before, after))
                         })
@@ -168,15 +151,10 @@ impl CanalJsonParser {
                 let results = deleted
                     .into_iter()
                     .map(|v| {
-                        let field_mapping = get_keys_from_value(v);
                         writer.delete(|column| {
                             cannal_simd_json_parse_value(
                                 &column.data_type,
-                                get_column_from_value(
-                                    column.name.to_lowercase().as_str(),
-                                    &field_mapping,
-                                    v,
-                                ),
+                                v.get(column.name.as_str()),
                             )
                         })
                     })

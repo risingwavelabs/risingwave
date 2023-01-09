@@ -20,7 +20,7 @@ use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, ValueAccess};
 
 use super::operators::*;
-use crate::parser::common::{get_column_from_value, get_keys_from_value, simd_json_parse_value};
+use crate::parser::common::simd_json_parse_value;
 use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 const AFTER: &str = "data";
@@ -53,17 +53,9 @@ impl MaxwellParser {
                         "data is missing for creating event".to_string(),
                     ))
                 })?;
-                let field_mapping = get_keys_from_value(after);
                 writer.insert(|column| {
-                    simd_json_parse_value(
-                        &column.data_type,
-                        get_column_from_value(
-                            column.name.to_lowercase().as_str(),
-                            &field_mapping,
-                            after,
-                        ),
-                    )
-                    .map_err(Into::into)
+                    simd_json_parse_value(&column.data_type, after.get(column.name.as_str()))
+                        .map_err(Into::into)
                 })
             }
             MAXWELL_UPDATE_OP => {
@@ -72,33 +64,20 @@ impl MaxwellParser {
                         "data is missing for updating event".to_string(),
                     ))
                 })?;
-                let after_field_mapping = get_keys_from_value(after);
                 let before = event.get(BEFORE).ok_or_else(|| {
                     RwError::from(ProtocolError(
                         "old is missing for updating event".to_string(),
                     ))
                 })?;
-                let before_field_mapping = get_keys_from_value(before);
 
                 writer.update(|column| {
                     // old only contains the changed columns but data contains all columns.
-                    let before_value = before_field_mapping
-                        .get(column.name.to_lowercase().as_str())
-                        .and_then(|k| before.get(k.as_str()))
-                        .or_else(|| {
-                            after_field_mapping
-                                .get(column.name.to_lowercase().as_str())
-                                .and_then(|k| after.get(k.as_str()))
-                        });
+                    let before_value = before
+                        .get(column.name.as_str())
+                        .or_else(|| after.get(column.name.as_str()));
                     let before = simd_json_parse_value(&column.data_type, before_value)?;
-                    let after = simd_json_parse_value(
-                        &column.data_type,
-                        get_column_from_value(
-                            column.name.to_lowercase().as_str(),
-                            &after_field_mapping,
-                            after,
-                        ),
-                    )?;
+                    let after =
+                        simd_json_parse_value(&column.data_type, after.get(column.name.as_str()))?;
                     Ok((before, after))
                 })
             }
@@ -106,17 +85,9 @@ impl MaxwellParser {
                 let before = event.get(AFTER).ok_or_else(|| {
                     RwError::from(ProtocolError("old is missing for delete event".to_string()))
                 })?;
-                let before_field_mapping = get_keys_from_value(before);
                 writer.delete(|column| {
-                    simd_json_parse_value(
-                        &column.data_type,
-                        get_column_from_value(
-                            column.name.to_lowercase().as_str(),
-                            &before_field_mapping,
-                            before,
-                        ),
-                    )
-                    .map_err(Into::into)
+                    simd_json_parse_value(&column.data_type, before.get(column.name.as_str()))
+                        .map_err(Into::into)
                 })
             }
             other => Err(RwError::from(ProtocolError(format!(
