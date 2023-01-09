@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
@@ -49,6 +50,8 @@ impl StreamLocalSimpleAgg {
             logical.functional_dependency().clone(),
             input_dist.clone(),
             input.append_only(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            FixedBitSet::with_capacity(logical.schema().len()),
         );
         StreamLocalSimpleAgg { base, logical }
     }

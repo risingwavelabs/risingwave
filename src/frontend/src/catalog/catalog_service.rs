@@ -42,7 +42,8 @@ impl CatalogReader {
     }
 
     pub fn read_guard(&self) -> CatalogReadGuard {
-        self.0.read_arc()
+        // Make this recursive so that one can get this guard in the same thread without fear.
+        self.0.read_arc_recursive()
     }
 }
 
