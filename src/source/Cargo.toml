@@ -42,7 +42,6 @@ risingwave_pb = { path = "../prost" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
 simd-json = "0.7"
-simd-json-derive = "0.7"
 smallvec = "1"
 static_assertions = "1"
 tempfile = "3"

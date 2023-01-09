@@ -6124,7 +6124,6 @@ dependencies = [
  "risingwave_storage",
  "serde",
  "simd-json",
- "simd-json-derive",
  "smallvec",
  "static_assertions",
  "tempfile",
@@ -6811,32 +6810,6 @@ dependencies = [
  "serde_json",
  "simdutf8",
  "value-trait",
-]
-
-[[package]]
-name = "simd-json-derive"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e436a97551c1fcaf32577f3e0ce4fe09ca555ad85bd21e1d3bdab4dfc21fea19"
-dependencies = [
- "chrono",
- "itoa",
- "ryu",
- "simd-json",
- "simd-json-derive-int",
- "value-trait",
-]
-
-[[package]]
-name = "simd-json-derive-int"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c399b07ea91f9e228c7910c56b2be63115b0a4256a68f5a321fcce83bbcbba89"
-dependencies = [
- "proc-macro2",
- "quote",
- "simd-json",
- "syn",
 ]
 
 [[package]]
@@ -8387,7 +8360,6 @@ dependencies = [
  "ring",
  "scopeguard",
  "serde",
- "simd-json",
  "smallvec",
  "socket2",
  "stable_deref_trait",
