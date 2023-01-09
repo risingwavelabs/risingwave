@@ -168,7 +168,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
         };
         match state_row {
             Some(state_row) => {
-                state_table.update(state_row.into_owned(), current_row);
+                state_table.update(state_row, current_row);
             }
             None => {
                 state_table.insert(current_row);

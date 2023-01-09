@@ -37,13 +37,16 @@ export interface Relation {
   id: number
   name: string
   owner: number
-  dependentRelations: number[]
   columns: ColumnCatalog[]
 }
 
-export async function getRelations(): Promise<Relation[]> {
-  const materialized_views: Relation[] = await getMaterializedViews()
-  const sinks: Relation[] = await getSinks()
+export interface StreamingJob extends Relation {
+  dependentRelations: number[]
+}
+
+export async function getStreamingJobs(): Promise<StreamingJob[]> {
+  const materialized_views: StreamingJob[] = await getMaterializedViews()
+  const sinks: StreamingJob[] = await getSinks()
   let relations = materialized_views.concat(sinks)
   relations = sortBy(relations, (x) => x.id)
   return relations

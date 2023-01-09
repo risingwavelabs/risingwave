@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::UnionNode;
 
@@ -47,6 +48,8 @@ impl StreamUnion {
             logical.functional_dependency().clone(),
             dist,
             logical.inputs().iter().all(|x| x.append_only()),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            FixedBitSet::with_capacity(logical.schema().len()),
         );
         StreamUnion { base, logical }
     }

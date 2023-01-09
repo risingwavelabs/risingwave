@@ -373,14 +373,14 @@ async fn test_storage_basic() {
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch1),
+            FullKey::for_test(TableId::default(), b"aa".to_vec().into(), epoch1),
             Bytes::copy_from_slice(&b"111"[..])
         )),
         iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch1),
+            FullKey::for_test(TableId::default(), b"bb".to_vec().into(), epoch1),
             Bytes::copy_from_slice(&b"222"[..])
         )),
         iter.try_next().await.unwrap()
@@ -443,21 +443,21 @@ async fn test_storage_basic() {
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch2),
+            FullKey::for_test(TableId::default(), b"aa".to_vec().into(), epoch2),
             Bytes::copy_from_slice(&b"111111"[..])
         )),
         iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch1),
+            FullKey::for_test(TableId::default(), b"bb".to_vec().into(), epoch1),
             Bytes::copy_from_slice(&b"222"[..])
         )),
         iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch2),
+            FullKey::for_test(TableId::default(), b"cc".to_vec().into(), epoch2),
             Bytes::copy_from_slice(&b"333"[..])
         )),
         iter.try_next().await.unwrap()
@@ -483,28 +483,28 @@ async fn test_storage_basic() {
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch1),
+            FullKey::for_test(TableId::default(), b"bb".to_vec().into(), epoch1),
             Bytes::copy_from_slice(&b"222"[..])
         )),
         iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch2),
+            FullKey::for_test(TableId::default(), b"cc".to_vec().into(), epoch2),
             Bytes::copy_from_slice(&b"333"[..])
         )),
         iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"dd".to_vec(), epoch3),
+            FullKey::for_test(TableId::default(), b"dd".to_vec().into(), epoch3),
             Bytes::copy_from_slice(&b"444"[..])
         )),
         iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"ee".to_vec(), epoch3),
+            FullKey::for_test(TableId::default(), b"ee".to_vec().into(), epoch3),
             Bytes::copy_from_slice(&b"555"[..])
         )),
         iter.try_next().await.unwrap()
@@ -728,7 +728,7 @@ async fn test_state_store_sync() {
             assert_eq!(
                 result,
                 Some((
-                    FullKey::for_test(TableId::default(), k.to_vec(), e),
+                    FullKey::for_test(TableId::default(), k.to_vec().into(), e),
                     Bytes::from(v)
                 ))
             );
@@ -769,7 +769,7 @@ async fn test_state_store_sync() {
             assert_eq!(
                 result,
                 Some((
-                    FullKey::for_test(TableId::default(), k.to_vec(), e),
+                    FullKey::for_test(TableId::default(), k.to_vec().into(), e),
                     Bytes::from(v)
                 ))
             );

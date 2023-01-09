@@ -823,21 +823,21 @@ async fn test_write_anytime_inner(
             futures::pin_mut!(iter);
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"aa".to_vec().into(), epoch),
                     Bytes::from("111")
                 ),
                 iter.try_next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"bb".to_vec().into(), epoch),
                     Bytes::from("222")
                 ),
                 iter.try_next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"cc".to_vec().into(), epoch),
                     Bytes::from("333")
                 ),
                 iter.try_next().await.unwrap().unwrap()
@@ -944,14 +944,14 @@ async fn test_write_anytime_inner(
             futures::pin_mut!(iter);
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"aa".to_vec().into(), epoch),
                     Bytes::from("111_new")
                 ),
                 iter.try_next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"cc".to_vec().into(), epoch),
                     Bytes::from("333")
                 ),
                 iter.try_next().await.unwrap().unwrap()
