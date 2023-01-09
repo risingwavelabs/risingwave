@@ -46,6 +46,9 @@ pub trait StateCache: Send + Sync + 'static {
 /// Cache maintenance interface.
 /// Note that this trait must be private, so that only [`StateCacheFiller`] can use it.
 trait StateCacheMaintain: Send + Sync + 'static {
+    /// Get the number of entries in the inner cache.
+    fn len(&self) -> usize;
+
     /// Insert an entry to the cache without checking row count, capacity, key order, etc.
     /// Just insert into the inner cache structure, e.g. `BTreeMap`.
     fn insert_unchecked(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>);
@@ -58,6 +61,7 @@ trait StateCacheMaintain: Send + Sync + 'static {
 /// The state cache will be marked as synced automatically when this handle is dropped.
 pub struct StateCacheFiller<'a> {
     capacity: usize,
+    total_count: usize,
     cache: &'a mut dyn StateCacheMaintain,
 }
 
@@ -75,6 +79,11 @@ impl<'a> StateCacheFiller<'a> {
     /// Finish the cache filling process.
     /// Must be called after inserting all entries to mark the cache as synced.
     pub fn finish(self) {
+        // ensure the invariant
+        assert_eq!(
+            self.cache.len(),
+            std::cmp::min(self.capacity, self.total_count)
+        );
         self.cache.set_synced();
     }
 }
@@ -171,13 +180,14 @@ where
     fn begin_syncing(&mut self) -> StateCacheFiller<'_> {
         self.cache.clear(); // ensure the cache is clear before syncing
         StateCacheFiller {
+            total_count: self.total_count,
             capacity: self.cache.capacity(),
             cache: self,
         }
     }
 
     fn get_output(&self) -> Datum {
-        debug_assert!(self.synced);
+        assert!(self.synced);
         self.aggregator.aggregate(self.cache.iter_values())
     }
 }
@@ -186,6 +196,10 @@ impl<Agg> StateCacheMaintain for GenericStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
+    fn len(&self) -> usize {
+        self.cache.len()
+    }
+
     fn insert_unchecked(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>) {
         let value = self.aggregator.convert_cache_value(value);
         self.cache.insert(key, value);
