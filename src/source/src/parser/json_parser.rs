@@ -16,6 +16,7 @@ use futures::future::ready;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
+use crate::parser::common::{get_column_from_value, get_keys_from_value};
 use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 /// Parser for JSON format
@@ -88,7 +89,7 @@ impl JsonParser {
         payload: &[u8],
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        use simd_json::{BorrowedValue, ValueAccess};
+        use simd_json::BorrowedValue;
 
         use crate::parser::common::simd_json_parse_value;
 
@@ -96,9 +97,14 @@ impl JsonParser {
 
         let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
+        let field_mapping = get_keys_from_value(&value);
 
         writer.insert(|desc| {
-            simd_json_parse_value(&desc.data_type, value.get(desc.name.as_str())).map_err(|e| {
+            simd_json_parse_value(
+                &desc.data_type,
+                get_column_from_value(desc.name.to_lowercase().as_str(), &field_mapping, &value),
+            )
+            .map_err(|e| {
                 tracing::error!(
                     "failed to process value ({}): {}",
                     String::from_utf8_lossy(payload),
@@ -289,7 +295,7 @@ mod tests {
 
         let descs = vec![
             ColumnDesc::new_struct(
-                "data",
+                "Data",
                 0,
                 "",
                 vec![
@@ -304,10 +310,10 @@ mod tests {
                 5,
                 "",
                 vec![
-                    ColumnDesc::new_atomic(DataType::Timestamp, "created_at", 6),
+                    ColumnDesc::new_atomic(DataType::Timestamp, "Created_at", 6),
                     ColumnDesc::new_atomic(DataType::Varchar, "id", 7),
-                    ColumnDesc::new_atomic(DataType::Varchar, "name", 8),
-                    ColumnDesc::new_atomic(DataType::Varchar, "username", 9),
+                    ColumnDesc::new_atomic(DataType::Varchar, "Name", 8),
+                    ColumnDesc::new_atomic(DataType::Varchar, "Username", 9),
                 ],
             ),
         ]

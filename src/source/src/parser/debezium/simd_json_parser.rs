@@ -20,7 +20,7 @@ use risingwave_common::error::{Result, RwError};
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use super::operators::*;
-use crate::parser::common::simd_json_parse_value;
+use crate::parser::common::{get_column_from_value, get_keys_from_value, simd_json_parse_value};
 use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 const BEFORE: &str = "before";
@@ -69,6 +69,7 @@ impl DebeziumJsonParser {
                         "before is missing for updating event. If you are using postgres, you may want to try ALTER TABLE $TABLE_NAME REPLICA IDENTITY FULL;".to_string(),
                     ))
                 })?;
+                let before_field_mapping = get_keys_from_value(before);
 
                 let after = payload
                     .get(AFTER)
@@ -78,12 +79,25 @@ impl DebeziumJsonParser {
                             "after is missing for updating event".to_string(),
                         ))
                     })?;
+                let after_field_mapping = get_keys_from_value(after);
 
                 writer.update(|column| {
-                    let before =
-                        simd_json_parse_value(&column.data_type, before.get(column.name.as_str()))?;
-                    let after =
-                        simd_json_parse_value(&column.data_type, after.get(column.name.as_str()))?;
+                    let before = simd_json_parse_value(
+                        &column.data_type,
+                        get_column_from_value(
+                            column.name.to_lowercase().as_str(),
+                            &before_field_mapping,
+                            before,
+                        ),
+                    )?;
+                    let after = simd_json_parse_value(
+                        &column.data_type,
+                        get_column_from_value(
+                            column.name.to_lowercase().as_str(),
+                            &after_field_mapping,
+                            after,
+                        ),
+                    )?;
 
                     Ok((before, after))
                 })
@@ -97,10 +111,18 @@ impl DebeziumJsonParser {
                             "after is missing for creating event".to_string(),
                         ))
                     })?;
+                let after_field_mapping = get_keys_from_value(after);
 
                 writer.insert(|column| {
-                    simd_json_parse_value(&column.data_type, after.get(column.name.as_str()))
-                        .map_err(Into::into)
+                    simd_json_parse_value(
+                        &column.data_type,
+                        get_column_from_value(
+                            column.name.to_lowercase().as_str(),
+                            &after_field_mapping,
+                            after,
+                        ),
+                    )
+                    .map_err(Into::into)
                 })
             }
             DEBEZIUM_DELETE_OP => {
@@ -112,10 +134,18 @@ impl DebeziumJsonParser {
                             "before is missing for delete event".to_string(),
                         ))
                     })?;
+                let before_field_mapping = get_keys_from_value(before);
 
                 writer.delete(|column| {
-                    simd_json_parse_value(&column.data_type, before.get(column.name.as_str()))
-                        .map_err(Into::into)
+                    simd_json_parse_value(
+                        &column.data_type,
+                        get_column_from_value(
+                            column.name.to_lowercase().as_str(),
+                            &before_field_mapping,
+                            before,
+                        ),
+                    )
+                    .map_err(Into::into)
                 })
             }
             _ => Err(RwError::from(ProtocolError(format!(

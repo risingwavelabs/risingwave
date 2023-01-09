@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use num_traits::FromPrimitive;
@@ -169,11 +171,17 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
             _ => anyhow::bail!("expect timestamptz, but found {v}"),
         },
         DataType::Struct(struct_type_info) => {
+            let field_mapping = get_keys_from_value(v);
             let fields = struct_type_info
                 .field_names
                 .iter()
                 .zip_eq(struct_type_info.fields.iter())
-                .map(|field| simd_json_parse_value(field.1, v.get(field.0.as_str())))
+                .map(|field| {
+                    simd_json_parse_value(
+                        field.1,
+                        get_column_from_value(field.0.to_lowercase().as_str(), &field_mapping, v),
+                    )
+                })
                 .collect::<Result<Vec<Datum>>>()?;
             ScalarImpl::Struct(StructValue::new(fields))
         }
@@ -217,4 +225,35 @@ pub(crate) fn simd_json_parse_value(
             anyhow!("failed to parse type '{}' from json: {}", dtype, e)
         })?)),
     }
+}
+
+#[cfg(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+))]
+pub fn get_keys_from_value(value: &BorrowedValue<'_>) -> HashMap<String, String> {
+    value
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(|s| (s.to_lowercase(), s.to_string()))
+        .collect()
+}
+
+#[cfg(any(
+    target_feature = "sse4.2",
+    target_feature = "avx2",
+    target_feature = "neon",
+    target_feature = "simd128"
+))]
+pub fn get_column_from_value<'a>(
+    column_name: &'a str,
+    field_mapping: &'a HashMap<String, String>,
+    v: &'a BorrowedValue<'a>,
+) -> Option<&'a simd_json::borrowed::Value<'a>> {
+    field_mapping
+        .get(column_name)
+        .and_then(|k| v.get(k.as_str()))
 }
