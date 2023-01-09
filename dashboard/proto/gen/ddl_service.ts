@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { Database, Index, Schema, Sink, Source, Table, View } from "./catalog";
+import { Database, Function, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import { Status } from "./common";
 import { StreamFragmentGraph } from "./stream_plan";
 
@@ -134,6 +134,25 @@ export interface CreateTableRequest {
 export interface CreateTableResponse {
   status: Status | undefined;
   tableId: number;
+  version: number;
+}
+
+export interface CreateFunctionRequest {
+  function: Function | undefined;
+}
+
+export interface CreateFunctionResponse {
+  status: Status | undefined;
+  functionId: number;
+  version: number;
+}
+
+export interface DropFunctionRequest {
+  functionId: number;
+}
+
+export interface DropFunctionResponse {
+  status: Status | undefined;
   version: number;
 }
 
@@ -920,6 +939,113 @@ export const CreateTableResponse = {
       ? Status.fromPartial(object.status)
       : undefined;
     message.tableId = object.tableId ?? 0;
+    message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseCreateFunctionRequest(): CreateFunctionRequest {
+  return { function: undefined };
+}
+
+export const CreateFunctionRequest = {
+  fromJSON(object: any): CreateFunctionRequest {
+    return { function: isSet(object.function) ? Function.fromJSON(object.function) : undefined };
+  },
+
+  toJSON(message: CreateFunctionRequest): unknown {
+    const obj: any = {};
+    message.function !== undefined && (obj.function = message.function ? Function.toJSON(message.function) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreateFunctionRequest>, I>>(object: I): CreateFunctionRequest {
+    const message = createBaseCreateFunctionRequest();
+    message.function = (object.function !== undefined && object.function !== null)
+      ? Function.fromPartial(object.function)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCreateFunctionResponse(): CreateFunctionResponse {
+  return { status: undefined, functionId: 0, version: 0 };
+}
+
+export const CreateFunctionResponse = {
+  fromJSON(object: any): CreateFunctionResponse {
+    return {
+      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
+      functionId: isSet(object.functionId) ? Number(object.functionId) : 0,
+      version: isSet(object.version) ? Number(object.version) : 0,
+    };
+  },
+
+  toJSON(message: CreateFunctionResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    message.functionId !== undefined && (obj.functionId = Math.round(message.functionId));
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreateFunctionResponse>, I>>(object: I): CreateFunctionResponse {
+    const message = createBaseCreateFunctionResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    message.functionId = object.functionId ?? 0;
+    message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseDropFunctionRequest(): DropFunctionRequest {
+  return { functionId: 0 };
+}
+
+export const DropFunctionRequest = {
+  fromJSON(object: any): DropFunctionRequest {
+    return { functionId: isSet(object.functionId) ? Number(object.functionId) : 0 };
+  },
+
+  toJSON(message: DropFunctionRequest): unknown {
+    const obj: any = {};
+    message.functionId !== undefined && (obj.functionId = Math.round(message.functionId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DropFunctionRequest>, I>>(object: I): DropFunctionRequest {
+    const message = createBaseDropFunctionRequest();
+    message.functionId = object.functionId ?? 0;
+    return message;
+  },
+};
+
+function createBaseDropFunctionResponse(): DropFunctionResponse {
+  return { status: undefined, version: 0 };
+}
+
+export const DropFunctionResponse = {
+  fromJSON(object: any): DropFunctionResponse {
+    return {
+      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
+      version: isSet(object.version) ? Number(object.version) : 0,
+    };
+  },
+
+  toJSON(message: DropFunctionResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DropFunctionResponse>, I>>(object: I): DropFunctionResponse {
+    const message = createBaseDropFunctionResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
     message.version = object.version ?? 0;
     return message;
   },

@@ -10,7 +10,7 @@ export interface ExprNode {
   rexNode?: { $case: "inputRef"; inputRef: InputRefExpr } | { $case: "constant"; constant: Datum } | {
     $case: "funcCall";
     funcCall: FunctionCall;
-  };
+  } | { $case: "udf"; udf: UserDefinedFunction };
 }
 
 /**
@@ -132,6 +132,8 @@ export const ExprNode_Type = {
   VNODE: "VNODE",
   /** NOW - Non-deterministic functions */
   NOW: "NOW",
+  /** UDF - User defined functions */
+  UDF: "UDF",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -385,6 +387,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 2022:
     case "NOW":
       return ExprNode_Type.NOW;
+    case 3000:
+    case "UDF":
+      return ExprNode_Type.UDF;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -558,6 +563,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "VNODE";
     case ExprNode_Type.NOW:
       return "NOW";
+    case ExprNode_Type.UDF:
+      return "UDF";
     case ExprNode_Type.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -774,6 +781,14 @@ export interface AggCall_OrderByField {
   nullsFirst: boolean;
 }
 
+export interface UserDefinedFunction {
+  children: ExprNode[];
+  name: string;
+  argTypes: DataType[];
+  language: string;
+  path: string;
+}
+
 function createBaseExprNode(): ExprNode {
   return { exprType: ExprNode_Type.UNSPECIFIED, returnType: undefined, rexNode: undefined };
 }
@@ -789,6 +804,8 @@ export const ExprNode = {
         ? { $case: "constant", constant: Datum.fromJSON(object.constant) }
         : isSet(object.funcCall)
         ? { $case: "funcCall", funcCall: FunctionCall.fromJSON(object.funcCall) }
+        : isSet(object.udf)
+        ? { $case: "udf", udf: UserDefinedFunction.fromJSON(object.udf) }
         : undefined,
     };
   },
@@ -804,6 +821,8 @@ export const ExprNode = {
       (obj.constant = message.rexNode?.constant ? Datum.toJSON(message.rexNode?.constant) : undefined);
     message.rexNode?.$case === "funcCall" &&
       (obj.funcCall = message.rexNode?.funcCall ? FunctionCall.toJSON(message.rexNode?.funcCall) : undefined);
+    message.rexNode?.$case === "udf" &&
+      (obj.udf = message.rexNode?.udf ? UserDefinedFunction.toJSON(message.rexNode?.udf) : undefined);
     return obj;
   },
 
@@ -833,6 +852,9 @@ export const ExprNode = {
       object.rexNode?.funcCall !== null
     ) {
       message.rexNode = { $case: "funcCall", funcCall: FunctionCall.fromPartial(object.rexNode.funcCall) };
+    }
+    if (object.rexNode?.$case === "udf" && object.rexNode?.udf !== undefined && object.rexNode?.udf !== null) {
+      message.rexNode = { $case: "udf", udf: UserDefinedFunction.fromPartial(object.rexNode.udf) };
     }
     return message;
   },
@@ -1094,6 +1116,50 @@ export const AggCall_OrderByField = {
     message.type = (object.type !== undefined && object.type !== null) ? DataType.fromPartial(object.type) : undefined;
     message.direction = object.direction ?? OrderType.ORDER_UNSPECIFIED;
     message.nullsFirst = object.nullsFirst ?? false;
+    return message;
+  },
+};
+
+function createBaseUserDefinedFunction(): UserDefinedFunction {
+  return { children: [], name: "", argTypes: [], language: "", path: "" };
+}
+
+export const UserDefinedFunction = {
+  fromJSON(object: any): UserDefinedFunction {
+    return {
+      children: Array.isArray(object?.children) ? object.children.map((e: any) => ExprNode.fromJSON(e)) : [],
+      name: isSet(object.name) ? String(object.name) : "",
+      argTypes: Array.isArray(object?.argTypes) ? object.argTypes.map((e: any) => DataType.fromJSON(e)) : [],
+      language: isSet(object.language) ? String(object.language) : "",
+      path: isSet(object.path) ? String(object.path) : "",
+    };
+  },
+
+  toJSON(message: UserDefinedFunction): unknown {
+    const obj: any = {};
+    if (message.children) {
+      obj.children = message.children.map((e) => e ? ExprNode.toJSON(e) : undefined);
+    } else {
+      obj.children = [];
+    }
+    message.name !== undefined && (obj.name = message.name);
+    if (message.argTypes) {
+      obj.argTypes = message.argTypes.map((e) => e ? DataType.toJSON(e) : undefined);
+    } else {
+      obj.argTypes = [];
+    }
+    message.language !== undefined && (obj.language = message.language);
+    message.path !== undefined && (obj.path = message.path);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<UserDefinedFunction>, I>>(object: I): UserDefinedFunction {
+    const message = createBaseUserDefinedFunction();
+    message.children = object.children?.map((e) => ExprNode.fromPartial(e)) || [];
+    message.name = object.name ?? "";
+    message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
+    message.language = object.language ?? "";
+    message.path = object.path ?? "";
     return message;
   },
 };
