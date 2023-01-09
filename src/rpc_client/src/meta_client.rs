@@ -525,16 +525,6 @@ impl MetaClient {
             .await
     }
 
-    pub async fn reset_current_version(&self) -> Result<HummockVersion> {
-        let req = ResetCurrentVersionRequest {};
-        Ok(self
-            .inner
-            .reset_current_version(req)
-            .await?
-            .old_version
-            .unwrap())
-    }
-
     pub async fn init_metadata_for_replay(
         &self,
         tables: Vec<ProstTable>,
@@ -960,7 +950,6 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
-            ,{ hummock_client, reset_current_version, ResetCurrentVersionRequest, ResetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
             ,{ hummock_client, list_version_deltas, ListVersionDeltasRequest, ListVersionDeltasResponse }
             ,{ hummock_client, get_assigned_compact_task_num, GetAssignedCompactTaskNumRequest, GetAssignedCompactTaskNumResponse }

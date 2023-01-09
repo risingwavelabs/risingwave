@@ -1860,34 +1860,7 @@ where
         read_lock!(self, versioning).await
     }
 
-    /// Reset current version to empty
-    #[named]
-    pub async fn reset_current_version(&self) -> Result<HummockVersion> {
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        // Reset current version to empty
-        let mut init_version = HummockVersion {
-            id: FIRST_VERSION_ID,
-            levels: Default::default(),
-            max_committed_epoch: INVALID_EPOCH,
-            safe_epoch: INVALID_EPOCH,
-        };
-
-        // Initialize independent levels via corresponding compaction group' config.
-        for compaction_group in self.compaction_groups().await {
-            init_version.levels.insert(
-                compaction_group.group_id(),
-                <Levels as HummockLevelsExt>::build_initial_levels(
-                    &compaction_group.compaction_config(),
-                ),
-            );
-        }
-
-        let old_version = versioning_guard.current_version.clone();
-        versioning_guard.current_version = init_version;
-        Ok(old_version)
-    }
-
-    pub async fn init_metadata_for_replay(
+    pub async fn init_metadata_for_version_replay(
         &self,
         table_catalogs: Vec<Table>,
         compaction_groups: Vec<ProstCompactionGroup>,
