@@ -757,6 +757,7 @@ pub enum ShowCreateType {
     Index,
     Source,
     Sink,
+    Function,
 }
 
 impl fmt::Display for ShowCreateType {
@@ -768,6 +769,7 @@ impl fmt::Display for ShowCreateType {
             ShowCreateType::Index => f.write_str("INDEX"),
             ShowCreateType::Source => f.write_str("SOURCE"),
             ShowCreateType::Sink => f.write_str("SINK"),
+            ShowCreateType::Function => f.write_str("FUNCTION"),
         }
     }
 }

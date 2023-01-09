@@ -218,3 +218,38 @@ impl From<IndexId> for u32 {
         id.index_id
     }
 }
+
+#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub struct FunctionId(pub u32);
+
+impl FunctionId {
+    pub const fn new(id: u32) -> Self {
+        FunctionId(id)
+    }
+
+    pub const fn placeholder() -> Self {
+        FunctionId(u32::MAX - 1)
+    }
+
+    pub fn function_id(&self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u32> for FunctionId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for FunctionId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<FunctionId> for u32 {
+    fn from(id: FunctionId) -> Self {
+        id.0
+    }
+}
