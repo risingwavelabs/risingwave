@@ -500,32 +500,14 @@ impl PlanRoot {
         Ok(plan)
     }
 
-    /// Auxiliary function to ensure there is **exchange directly before table scan**,
-    /// so that it will be pushed to compute node.
-    /// Candidate: Optional [`BatchFilter`] with
-    /// either [`BatchSource`] or [`BatchSeqScan`] on non-system table.
+    /// Table Scans: Either [`BatchSource`] or [`BatchSeqScan`] on *non-system table*.
     /// Cases:
-    /// 1. Candidate in root, insert exchange.
-    /// 2. Candidate not in root.
-    ///    a. If exchange -> If child is Candidate -> End.
-    ///    b. If Candidate -> Insert exchange -> End.
-    ///    c. Other -> Recurse.
-    ///
-    /// [`plan`] must be root.
+    /// 1. If Root Node is a table scan, insert one directly.
+    /// 2. Otherwise, between Root Node and each of its child table scans,
+    ///    if there is no exchange, insert one directly before that table scan.
+    /// [`plan`] must be root node.
     fn enforce_exchange_above_table_scan(plan: PlanRef) -> PlanRef {
         fn is_candidate(plan: &PlanRef) -> bool {
-            let plan_inputs = plan.inputs();
-            let plan = if plan.node_type() == PlanNodeType::BatchProject {
-                &plan_inputs[0]
-            } else {
-                plan
-            };
-            let plan_inputs = plan.inputs();
-            let plan = if plan.node_type() == PlanNodeType::BatchFilter {
-                &plan_inputs[0]
-            } else {
-                plan
-            };
             plan.node_type() == PlanNodeType::BatchSource
                 || (plan.node_type() == PlanNodeType::BatchSeqScan
                     && !plan
@@ -545,8 +527,7 @@ impl PlanRoot {
         }
 
         fn helper(plan: PlanRef) -> PlanRef {
-            if is_exchange(&plan) && plan.inputs().iter().any(is_candidate) {
-                assert_eq!(plan.inputs().len(),1);
+            if is_exchange(&plan) {
                 return plan;
             }
             if is_candidate(&plan) {
