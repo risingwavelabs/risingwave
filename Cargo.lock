@@ -8390,6 +8390,7 @@ dependencies = [
  "ring",
  "scopeguard",
  "serde",
+ "simd-json",
  "smallvec",
  "socket2",
  "stable_deref_trait",
