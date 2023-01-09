@@ -13,6 +13,16 @@ arch="$(uname -m)"
 echo "--- docker build and tag"
 docker build -f docker/Dockerfile -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" --target risingwave .
 
+echo "--- check the image can start correctly"
+container_id=$(docker run -d "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" risingwave)
+ret_code=$(docker inspect --format='{{.State.ExitCode}}' "$container_id")
+if [ "$ret_code" -ne 0 ]; then
+  echo "docker run failed with exit code $ret_code"
+  docker logs "$container_id"
+  exit 1
+fi
+docker kill "$container_id"
+
 echo "--- docker images"
 docker images
 
