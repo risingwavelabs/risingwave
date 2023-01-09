@@ -218,6 +218,10 @@ impl StreamGraphFormatter {
                     "state table: {}",
                     self.add_table(node.get_table().unwrap())
                 )),
+                stream_node::NodeBody::Now(node) => Some(format!(
+                    "state table: {}",
+                    self.add_table(node.get_state_table().unwrap())
+                )),
                 _ => None,
             };
         if let Some(explain_table_oneline) = explain_table_oneline {

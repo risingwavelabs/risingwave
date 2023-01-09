@@ -23,15 +23,14 @@ use pgwire::pg_response::{PgResponse, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{
-    CreateSinkStatement, CreateSourceStatement, DropStatement, ObjectType, Statement,
-};
+use risingwave_sqlparser::ast::*;
 
 use self::util::DataChunkToRowSetAdapter;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_table;
 pub mod alter_user;
 mod create_database;
 pub mod create_index;
@@ -175,6 +174,7 @@ pub async fn handle(
             or_replace,
             temporary,
             if_not_exists,
+            source_schema,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
@@ -206,6 +206,7 @@ pub async fn handle(
                 columns,
                 constraints,
                 if_not_exists,
+                source_schema,
             )
             .await
         }
@@ -340,6 +341,10 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::AddColumn { column_def },
+        } => alter_table::handle_add_column(handler_args, name, column_def).await,
         // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
         // final implementation.
         // 1. Fully support transaction is too hard and gives few benefits to us.

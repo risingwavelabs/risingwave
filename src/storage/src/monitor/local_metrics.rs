@@ -44,7 +44,7 @@ pub struct StoreLocalStatistic {
 
 impl StoreLocalStatistic {
     pub fn add(&mut self, other: &StoreLocalStatistic) {
-        self.cache_meta_block_miss += other.cache_data_block_miss;
+        self.cache_meta_block_miss += other.cache_meta_block_miss;
         self.cache_meta_block_total += other.cache_meta_block_total;
 
         self.cache_data_block_miss += other.cache_data_block_miss;
@@ -66,6 +66,11 @@ impl StoreLocalStatistic {
         if other.added.fetch_or(true, Ordering::Relaxed) || other.reported.load(Ordering::Relaxed) {
             tracing::error!("double added\n{:#?}", other);
         }
+    }
+
+    pub fn apply_meta_fetch(&mut self, local_cache_meta_block_miss: u64) {
+        self.cache_meta_block_total += 1;
+        self.cache_meta_block_miss += local_cache_meta_block_miss;
     }
 
     pub fn report(&self, metrics: &StateStoreMetrics) {

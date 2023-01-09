@@ -5431,10 +5431,12 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
+ "chrono-tz",
  "comfy-table",
  "crc32fast",
  "criterion",
  "darwin-libproc",
+ "derivative",
  "either",
  "enum-as-inner",
  "fixedbitset",
@@ -5717,6 +5719,7 @@ dependencies = [
  "serde_json",
  "size",
  "tracing",
+ "uuid",
  "workspace-hack",
 ]
 

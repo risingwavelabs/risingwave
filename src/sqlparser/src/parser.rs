@@ -508,7 +508,8 @@ impl Parser {
             Token::Number(_)
             | Token::SingleQuotedString(_)
             | Token::NationalStringLiteral(_)
-            | Token::HexStringLiteral(_) => {
+            | Token::HexStringLiteral(_)
+            | Token::CstyleEscapesString(_) => {
                 self.prev_token();
                 Ok(Expr::Value(self.parse_value()?))
             }
@@ -1523,7 +1524,7 @@ impl Parser {
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_create_sink(or_replace)
         } else if self.parse_keyword(Keyword::FUNCTION) {
-            self.parse_create_function(or_replace)
+            self.parse_create_function(or_replace, temporary)
         } else if or_replace {
             self.expected(
                 "[EXTERNAL] TABLE or [MATERIALIZED] VIEW or [MATERIALIZED] SOURCE or SINK or FUNCTION after CREATE OR REPLACE",
@@ -1617,10 +1618,20 @@ impl Parser {
         })
     }
 
-    pub fn parse_create_function(&mut self, or_replace: bool) -> Result<Statement, ParserError> {
+    pub fn parse_create_function(
+        &mut self,
+        or_replace: bool,
+        temporary: bool,
+    ) -> Result<Statement, ParserError> {
         let name = self.parse_object_name()?;
         self.expect_token(&Token::LParen)?;
-        let args = self.parse_comma_separated(Parser::parse_create_function_arg)?;
+        let args = if self.consume_token(&Token::RParen) {
+            self.prev_token();
+            None
+        } else {
+            Some(self.parse_comma_separated(Parser::parse_function_arg)?)
+        };
+
         self.expect_token(&Token::RParen)?;
 
         let return_type = if self.parse_keyword(Keyword::RETURNS) {
@@ -1629,21 +1640,19 @@ impl Parser {
             None
         };
 
-        let mut bodies = vec![];
-        while let Ok(body) = self.parse_create_function_body() {
-            bodies.push(body);
-        }
+        let params = self.parse_create_function_body()?;
 
         Ok(Statement::CreateFunction {
             or_replace,
+            temporary,
             name,
-            args: Some(args),
+            args,
             return_type,
-            bodies,
+            params,
         })
     }
 
-    fn parse_create_function_arg(&mut self) -> Result<CreateFunctionArg, ParserError> {
+    fn parse_function_arg(&mut self) -> Result<OperateFunctionArg, ParserError> {
         let mode = if self.parse_keyword(Keyword::IN) {
             Some(ArgMode::In)
         } else if self.parse_keyword(Keyword::OUT) {
@@ -1669,7 +1678,7 @@ impl Parser {
         } else {
             None
         };
-        Ok(CreateFunctionArg {
+        Ok(OperateFunctionArg {
             mode,
             name,
             data_type,
@@ -1678,21 +1687,37 @@ impl Parser {
     }
 
     fn parse_create_function_body(&mut self) -> Result<CreateFunctionBody, ParserError> {
-        if self.parse_keyword(Keyword::AS) {
-            Ok(CreateFunctionBody::As(self.parse_literal_string()?))
-        } else if self.parse_keyword(Keyword::LANGUAGE) {
-            Ok(CreateFunctionBody::Language(self.parse_identifier()?))
-        } else if self.parse_keyword(Keyword::IMMUTABLE) {
-            Ok(CreateFunctionBody::Behavior(FunctionBehavior::Immutable))
-        } else if self.parse_keyword(Keyword::STABLE) {
-            Ok(CreateFunctionBody::Behavior(FunctionBehavior::Stable))
-        } else if self.parse_keyword(Keyword::VOLATILE) {
-            Ok(CreateFunctionBody::Behavior(FunctionBehavior::Volatile))
-        } else if self.parse_keyword(Keyword::RETURN) {
-            let expr = self.parse_expr()?;
-            Ok(CreateFunctionBody::Return(expr))
-        } else {
-            self.expected("AS or LANGUAGE or RETURN", self.peek_token())
+        let mut body = CreateFunctionBody::default();
+        loop {
+            fn ensure_not_set<T>(field: &Option<T>, name: &str) -> Result<(), ParserError> {
+                if field.is_some() {
+                    return Err(ParserError::ParserError(format!(
+                        "{name} specified more than once",
+                    )));
+                }
+                Ok(())
+            }
+            if self.parse_keyword(Keyword::AS) {
+                ensure_not_set(&body.as_, "AS")?;
+                body.as_ = Some(self.parse_function_definition()?);
+            } else if self.parse_keyword(Keyword::LANGUAGE) {
+                ensure_not_set(&body.language, "LANGUAGE")?;
+                body.language = Some(self.parse_identifier()?);
+            } else if self.parse_keyword(Keyword::IMMUTABLE) {
+                ensure_not_set(&body.behavior, "IMMUTABLE | STABLE | VOLATILE")?;
+                body.behavior = Some(FunctionBehavior::Immutable);
+            } else if self.parse_keyword(Keyword::STABLE) {
+                ensure_not_set(&body.behavior, "IMMUTABLE | STABLE | VOLATILE")?;
+                body.behavior = Some(FunctionBehavior::Stable);
+            } else if self.parse_keyword(Keyword::VOLATILE) {
+                ensure_not_set(&body.behavior, "IMMUTABLE | STABLE | VOLATILE")?;
+                body.behavior = Some(FunctionBehavior::Volatile);
+            } else if self.parse_keyword(Keyword::RETURN) {
+                ensure_not_set(&body.return_, "RETURN")?;
+                body.return_ = Some(self.parse_expr()?);
+            } else {
+                return Ok(body);
+            }
         }
     }
 
@@ -1712,7 +1737,47 @@ impl Parser {
     }
 
     pub fn parse_drop(&mut self) -> Result<Statement, ParserError> {
+        if self.parse_keyword(Keyword::FUNCTION) {
+            return self.parse_drop_function();
+        }
         Ok(Statement::Drop(DropStatement::parse_to(self)?))
+    }
+
+    /// ```sql
+    /// DROP FUNCTION [ IF EXISTS ] name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ] [, ...]
+    /// [ CASCADE | RESTRICT ]
+    /// ```
+    fn parse_drop_function(&mut self) -> Result<Statement, ParserError> {
+        let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
+        let func_desc = self.parse_comma_separated(Parser::parse_drop_function_desc)?;
+        let option = match self.parse_one_of_keywords(&[Keyword::CASCADE, Keyword::RESTRICT]) {
+            Some(Keyword::CASCADE) => Some(ReferentialAction::Cascade),
+            Some(Keyword::RESTRICT) => Some(ReferentialAction::Restrict),
+            _ => None,
+        };
+        Ok(Statement::DropFunction {
+            if_exists,
+            func_desc,
+            option,
+        })
+    }
+
+    fn parse_drop_function_desc(&mut self) -> Result<DropFunctionDesc, ParserError> {
+        let name = self.parse_object_name()?;
+
+        let args = if self.consume_token(&Token::LParen) {
+            if self.consume_token(&Token::RParen) {
+                None
+            } else {
+                let args = self.parse_comma_separated(Parser::parse_function_arg)?;
+                self.expect_token(&Token::RParen)?;
+                Some(args)
+            }
+        } else {
+            None
+        };
+
+        Ok(DropFunctionDesc { name, args })
     }
 
     pub fn parse_create_index(&mut self, unique: bool) -> Result<Statement, ParserError> {
@@ -1758,6 +1823,14 @@ impl Parser {
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
         let with_options = self.parse_with_properties()?;
+
+        // Table can be created with an external stream source.
+        let source_schema = if self.parse_keywords(&[Keyword::ROW, Keyword::FORMAT]) {
+            Some(SourceSchema::parse_to(self)?)
+        } else {
+            None
+        };
+
         // Parse optional `AS ( query )`
         let query = if self.parse_keyword(Keyword::AS) {
             Some(Box::new(self.parse_query()?))
@@ -1773,6 +1846,7 @@ impl Parser {
             with_options,
             or_replace,
             if_not_exists,
+            source_schema,
             query,
         })
     }
@@ -2159,6 +2233,7 @@ impl Parser {
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
             Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string())),
+            Token::CstyleEscapesString(ref s) => Ok(Value::CstyleEscapesString(s.to_string())),
             Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
             unexpected => self.expected("a value", unexpected),
@@ -2183,6 +2258,23 @@ impl Parser {
             }),
             unexpected => self.expected("literal int", unexpected),
         }
+    }
+
+    pub fn parse_function_definition(&mut self) -> Result<FunctionDefinition, ParserError> {
+        Ok(FunctionDefinition::SingleQuotedDef(
+            self.parse_literal_string()?,
+        ))
+        // TODO: support dollar quoted string
+        // let peek_token = self.peek_token();
+        // match peek_token {
+        //     Token::DollarQuotedString(value) if dialect_of!(self is PostgreSqlDialect) => {
+        //         self.next_token();
+        //         Ok(FunctionDefinition::DoubleDollarDef(value.value))
+        //     }
+        //     _ => Ok(FunctionDefinition::SingleQuotedDef(
+        //         self.parse_literal_string()?,
+        //     )),
+        // }
     }
 
     /// Parse a literal string
@@ -2261,19 +2353,27 @@ impl Parser {
         match self.next_token() {
             Token::Word(w) => match w.keyword {
                 Keyword::BOOLEAN | Keyword::BOOL => Ok(DataType::Boolean),
-                Keyword::FLOAT => Ok(DataType::Float(self.parse_optional_precision()?)),
+                Keyword::FLOAT => {
+                    let precision = self.parse_optional_precision()?;
+                    match precision {
+                        Some(0) => Err(ParserError::ParserError(
+                            "precision for type float must be at least 1 bit".to_string(),
+                        )),
+                        Some(54..) => Err(ParserError::ParserError(
+                            "precision for type float must be less than 54 bits".to_string(),
+                        )),
+                        _ => Ok(DataType::Float(precision)),
+                    }
+                }
                 Keyword::REAL => Ok(DataType::Real),
                 Keyword::DOUBLE => {
                     let _ = self.parse_keyword(Keyword::PRECISION);
                     Ok(DataType::Double)
                 }
-                Keyword::TINYINT => Ok(DataType::TinyInt(self.parse_optional_precision()?)),
-                Keyword::SMALLINT => Ok(DataType::SmallInt(self.parse_optional_precision()?)),
-                Keyword::INT | Keyword::INTEGER => {
-                    Ok(DataType::Int(self.parse_optional_precision()?))
-                }
-                Keyword::BIGINT => Ok(DataType::BigInt(self.parse_optional_precision()?)),
-                Keyword::VARCHAR => Ok(DataType::Varchar),
+                Keyword::SMALLINT => Ok(DataType::SmallInt),
+                Keyword::INT | Keyword::INTEGER => Ok(DataType::Int),
+                Keyword::BIGINT => Ok(DataType::BigInt),
+                Keyword::STRING | Keyword::VARCHAR => Ok(DataType::Varchar),
                 Keyword::CHAR | Keyword::CHARACTER => {
                     if self.parse_keyword(Keyword::VARYING) {
                         Ok(DataType::Varchar)
@@ -2302,7 +2402,6 @@ impl Parser {
                 // parse_interval_literal for a taste.
                 Keyword::INTERVAL => Ok(DataType::Interval),
                 Keyword::REGCLASS => Ok(DataType::Regclass),
-                Keyword::STRING => Ok(DataType::String),
                 Keyword::TEXT => {
                     if self.consume_token(&Token::LBracket) {
                         // Note: this is postgresql-specific
