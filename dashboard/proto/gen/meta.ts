@@ -2,6 +2,7 @@
 import { MetaBackupManifestId } from "./backup_service";
 import { Database, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import {
+  ClusterConfig,
   HostAddress,
   ParallelUnit,
   ParallelUnitMapping,
@@ -330,6 +331,7 @@ export interface AddWorkerNodeRequest {
 export interface AddWorkerNodeResponse {
   status: Status | undefined;
   node: WorkerNode | undefined;
+  clusterConfig: ClusterConfig | undefined;
 }
 
 export interface ActivateWorkerNodeRequest {
@@ -1230,7 +1232,7 @@ export const AddWorkerNodeRequest = {
 };
 
 function createBaseAddWorkerNodeResponse(): AddWorkerNodeResponse {
-  return { status: undefined, node: undefined };
+  return { status: undefined, node: undefined, clusterConfig: undefined };
 }
 
 export const AddWorkerNodeResponse = {
@@ -1238,6 +1240,7 @@ export const AddWorkerNodeResponse = {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
       node: isSet(object.node) ? WorkerNode.fromJSON(object.node) : undefined,
+      clusterConfig: isSet(object.clusterConfig) ? ClusterConfig.fromJSON(object.clusterConfig) : undefined,
     };
   },
 
@@ -1245,6 +1248,8 @@ export const AddWorkerNodeResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.node !== undefined && (obj.node = message.node ? WorkerNode.toJSON(message.node) : undefined);
+    message.clusterConfig !== undefined &&
+      (obj.clusterConfig = message.clusterConfig ? ClusterConfig.toJSON(message.clusterConfig) : undefined);
     return obj;
   },
 
@@ -1255,6 +1260,9 @@ export const AddWorkerNodeResponse = {
       : undefined;
     message.node = (object.node !== undefined && object.node !== null)
       ? WorkerNode.fromPartial(object.node)
+      : undefined;
+    message.clusterConfig = (object.clusterConfig !== undefined && object.clusterConfig !== null)
+      ? ClusterConfig.fromPartial(object.clusterConfig)
       : undefined;
     return message;
   },
