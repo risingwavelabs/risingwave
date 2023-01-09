@@ -1,47 +1,56 @@
+// Copyright 2023 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::sync::Arc;
 
 use arrow_array::{Int32Array, RecordBatch};
-use arrow_flight::decode::FlightRecordBatchStream;
-use arrow_flight::encode::FlightDataEncoderBuilder;
-use arrow_flight::flight_service_client::FlightServiceClient;
-use arrow_flight::{FlightData, FlightDescriptor};
 use arrow_schema::{DataType, Field, Schema};
-use futures_util::{stream, StreamExt, TryStreamExt};
+use futures_util::{stream, StreamExt};
+use risingwave_udf::ArrowFlightUdfClient;
 
 #[tokio::main]
 async fn main() {
     let addr = "http://localhost:8815";
-    let mut client = FlightServiceClient::connect(addr).await.unwrap();
+    let mut client = ArrowFlightUdfClient::connect(addr).await.unwrap();
 
     // build `RecordBatch` to send (equivalent to our `DataChunk`)
     let array1 = Int32Array::from_iter(vec![1, 6, 10]);
     let array2 = Int32Array::from_iter(vec![3, 4, 15]);
-    let schema = Schema::new(vec![
-        Field::new("a", DataType::Int32, false),
-        Field::new("b", DataType::Int32, false),
+    let input_schema = Schema::new(vec![
+        Field::new("a", DataType::Int32, true),
+        Field::new("b", DataType::Int32, true),
     ]);
-    let batch =
-        RecordBatch::try_new(Arc::new(schema), vec![Arc::new(array1), Arc::new(array2)]).unwrap();
+    let output_schema = Schema::new(vec![Field::new("c", DataType::Int32, true)]);
 
-    // build `FlightData` stream
-    let input_stream = stream::iter(vec![Ok(batch)]);
-    let flight_data_stream = FlightDataEncoderBuilder::new()
-        .build(input_stream)
-        .map(|res| FlightData {
-            flight_descriptor: Some(FlightDescriptor::new_path(vec!["gcd".to_string()])),
-            ..res.unwrap()
-        });
+    // check function
+    let id = client
+        .check("gcd", &input_schema, &output_schema)
+        .await
+        .unwrap();
 
-    // call `do_exchange` on Flight server
-    let response = client.do_exchange(flight_data_stream).await.unwrap();
+    let input = RecordBatch::try_new(
+        Arc::new(input_schema),
+        vec![Arc::new(array1), Arc::new(array2)],
+    )
+    .unwrap();
 
-    // read response
-    let stream = response.into_inner();
-    let mut record_batch_stream = FlightRecordBatchStream::new_from_flight_data(
-        // convert tonic::Status to FlightError
-        stream.map_err(|e| e.into()),
-    );
-    while let Some(batch) = record_batch_stream.next().await {
+    let mut output = client
+        .call(&id, stream::once(async { input }))
+        .await
+        .expect("failed to call function");
+
+    while let Some(batch) = output.next().await {
         dbg!(batch.unwrap());
     }
 }

@@ -6482,7 +6482,8 @@ dependencies = [
  "arrow-flight",
  "arrow-schema 30.0.0",
  "futures-util",
- "tokio",
+ "madsim-tokio",
+ "madsim-tonic",
 ]
 
 [[package]]

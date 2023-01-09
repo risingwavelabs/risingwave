@@ -15,6 +15,12 @@ class FlightServer(pa.flight.FlightServerBase):
         self._location = location
         self._functions = {}
 
+    def get_flight_info(self, context, descriptor):
+        """Return a FlightInfo."""
+        return pa.flight.FlightInfo(schema=pa.schema([
+            ('c', pa.int32()),
+        ]), descriptor=descriptor, endpoints=[], total_records=0, total_bytes=0)
+
     def add_function(self, name: str, func):
         """Add a function to the server."""
         self._functions[name] = func

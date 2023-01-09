@@ -1,0 +1,92 @@
+// Copyright 2023 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use arrow_array::RecordBatch;
+use arrow_flight::decode::FlightRecordBatchStream;
+use arrow_flight::encode::FlightDataEncoderBuilder;
+use arrow_flight::error::FlightError;
+use arrow_flight::flight_service_client::FlightServiceClient;
+use arrow_flight::{FlightData, FlightDescriptor};
+use arrow_schema::{DataType, Field, Schema};
+use futures_util::{Stream, StreamExt, TryStreamExt};
+use tonic::transport::Channel;
+use tonic::{Result, Status};
+
+/// Client for external function service based on Arrow Flight.
+pub struct ArrowFlightUdfClient {
+    client: FlightServiceClient<Channel>,
+}
+
+impl ArrowFlightUdfClient {
+    /// Connect to a UDF service.
+    pub async fn connect(addr: &str) -> Result<Self, tonic::transport::Error> {
+        let client = FlightServiceClient::connect(addr.to_string()).await?;
+        Ok(Self { client })
+    }
+
+    /// Check if the function is available and return the function ID.
+    pub async fn check(&self, name: &str, args: &Schema, returns: &Schema) -> Result<FunctionId> {
+        let mut path = vec![name.to_string()];
+        for arg in &args.fields {
+            path.push(format!("{}", arg.data_type()));
+        }
+        let descriptor = FlightDescriptor::new_path(path.clone());
+
+        let response = self.client.clone().get_flight_info(descriptor).await?;
+
+        let info = response.into_inner();
+        let schema = Schema::try_from(info)
+            .map_err(|e| FlightError::DecodeError(format!("Error decoding schema: {e}")))?;
+        if &schema != returns {
+            return Err(Status::unavailable(format!(
+                "Schema mismatch: expected {:?}, got {:?}",
+                returns, schema
+            ))
+            .into());
+        }
+        Ok(FunctionId(path))
+    }
+
+    /// Call a function.
+    pub async fn call(
+        &self,
+        id: &FunctionId,
+        inputs: impl Stream<Item = RecordBatch> + Send + 'static,
+    ) -> Result<impl Stream<Item = Result<RecordBatch, FlightError>> + Send, FlightError> {
+        let descriptor = FlightDescriptor::new_path(id.0.clone());
+        let flight_data_stream =
+            FlightDataEncoderBuilder::new()
+                .build(inputs.map(Ok))
+                .map(move |res| FlightData {
+                    // TODO: fill descriptor only for the first message
+                    flight_descriptor: Some(descriptor.clone()),
+                    ..res.unwrap()
+                });
+
+        // call `do_exchange` on Flight server
+        let response = self.client.clone().do_exchange(flight_data_stream).await?;
+
+        // decode response
+        let stream = response.into_inner();
+        let record_batch_stream = FlightRecordBatchStream::new_from_flight_data(
+            // convert tonic::Status to FlightError
+            stream.map_err(|e| e.into()),
+        );
+        Ok(record_batch_stream)
+    }
+}
+
+/// An opaque ID for a function.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FunctionId(Vec<String>);

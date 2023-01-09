@@ -11,4 +11,5 @@ arrow-array = { git = "https://github.com/apache/arrow-rs", rev = "6139d898" }
 arrow-flight = { git = "https://github.com/apache/arrow-rs", rev = "6139d898" }
 arrow-schema = { git = "https://github.com/apache/arrow-rs", rev = "6139d898" }
 futures-util = "0.3.25"
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
+tonic = { version = "0.2", package = "madsim-tonic" }
