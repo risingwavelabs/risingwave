@@ -867,16 +867,11 @@ use tower::Service;
 #[derive(Clone, Debug)]
 pub struct MetaFailoverSvc {
     inner: Channel,
-    mu: bool,
 }
 
 impl MetaFailoverSvc {
     pub fn new(inner: Channel) -> Self {
-        MetaFailoverSvc { inner, mu: true }
-    }
-
-    pub fn meta_up(&mut self, b: bool) {
-        self.mu = b;
+        MetaFailoverSvc { inner }
     }
 }
 
