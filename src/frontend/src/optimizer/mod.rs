@@ -506,11 +506,24 @@ impl PlanRoot {
     /// 2. Otherwise, between Root Node and each of its child table scans,
     ///    if there is no exchange, insert one directly before that table scan.
     /// [`plan`] must be root node.
+    ///
+    /// NOTE: Optional `BatchTopN` / `BatchFilter`, are supported,
+    /// so less data sent over RPC.
     fn enforce_exchange_above_table_scan(plan: PlanRef) -> PlanRef {
         fn is_candidate(plan: &PlanRef) -> bool {
-            plan.node_type() == PlanNodeType::BatchSource
-                || (plan.node_type() == PlanNodeType::BatchSeqScan
-                    && !plan
+            // Unwrap optional `BatchTopN` / `BatchFilter`.
+            let mut candidate = plan.clone();
+            let mut inputs = candidate.inputs();
+            while candidate.node_type() == PlanNodeType::BatchTopN
+                || candidate.node_type() == PlanNodeType::BatchFilter
+            {
+                candidate = inputs[0].clone();
+                inputs = candidate.inputs();
+            }
+            // Table Scan
+            candidate.node_type() == PlanNodeType::BatchSource
+                || (candidate.node_type() == PlanNodeType::BatchSeqScan
+                    && !candidate
                         .downcast_ref::<BatchSeqScan>()
                         .unwrap()
                         .logical()
