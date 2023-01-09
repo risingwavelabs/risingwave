@@ -21,22 +21,11 @@ use risingwave_expr::vector_op::cast::{
     i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
     str_to_timestamptz,
 };
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
-use simd_json::{value::StaticNode, BorrowedValue, ValueAccess};
+use simd_json::value::StaticNode;
+use simd_json::{BorrowedValue, ValueAccess};
 
 use crate::{ensure_int, ensure_str};
 
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<ScalarImpl> {
     use crate::simd_json_ensure_float;
 
@@ -104,12 +93,6 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
     Ok(v)
 }
 
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 #[inline]
 pub(crate) fn simd_json_parse_value(
     // column: &ColumnDesc,

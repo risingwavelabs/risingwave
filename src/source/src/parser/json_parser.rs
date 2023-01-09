@@ -22,12 +22,6 @@ use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 #[derive(Debug)]
 pub struct JsonParser;
 
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 impl JsonParser {
     fn parse_inner(
         &self,
@@ -56,12 +50,6 @@ impl JsonParser {
     }
 }
 
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 impl SourceParser for JsonParser {
     type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
 
