@@ -910,9 +910,9 @@ impl Service<Request<BoxBody>> for MetaFailoverSvc {
                     leader_addr.get_host(),
                     leader_addr.get_port()
                 );
-                let inner_channel = get_channel(addr.as_str(), 1, 1, 1, 1).await?;
+                let leader_channel = get_channel(addr.as_str(), 1, 1, 1, 1).await?;
                 // TODO: we need to update inner somehow
-                // self.inner = inner_channel;
+                // self.inner = leader_channel;
             }
 
             let res = response?;
