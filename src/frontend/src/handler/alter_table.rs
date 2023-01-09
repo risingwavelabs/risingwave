@@ -121,7 +121,7 @@ pub async fn handle_add_column(
 
         Ok(PgResponse::empty_result_with_notice(
             StatementType::ALTER_TABLE,
-            "The `ALTER TABLE` feature is incomplete and not data is preserved! This feature is not available in production.".to_owned(),
+            "The `ALTER TABLE` feature is incomplete and NO DATA is preserved! This feature is not available in production.".to_owned(),
         ))
     } else {
         Err(ErrorCode::NotImplemented(
