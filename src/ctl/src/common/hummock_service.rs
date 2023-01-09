@@ -22,8 +22,8 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
-    CompactorMetrics, HummockMetrics, MonitoredStateStore, MonitoredStorageMetrics,
-    ObjectStoreMetrics, StateStoreMetrics,
+    CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
+    MonitoredStorageMetrics, ObjectStoreMetrics,
 };
 use risingwave_storage::{StateStore, StateStoreImpl};
 use tokio::sync::oneshot::Sender;
@@ -39,7 +39,7 @@ pub struct HummockServiceOpts {
 #[derive(Clone)]
 pub struct Metrics {
     pub hummock_metrics: Arc<HummockMetrics>,
-    pub state_store_metrics: Arc<StateStoreMetrics>,
+    pub state_store_metrics: Arc<HummockStateStoreMetrics>,
     pub object_store_metrics: Arc<ObjectStoreMetrics>,
     pub storage_metrics: Arc<MonitoredStorageMetrics>,
     pub compactor_metrics: Arc<CompactorMetrics>,
@@ -106,7 +106,7 @@ For `./risedev apply-compose-deploy` users,
 
         let metrics = Metrics {
             hummock_metrics: Arc::new(HummockMetrics::unused()),
-            state_store_metrics: Arc::new(StateStoreMetrics::unused()),
+            state_store_metrics: Arc::new(HummockStateStoreMetrics::unused()),
             object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
             storage_metrics: Arc::new(MonitoredStorageMetrics::unused()),
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
@@ -131,10 +131,9 @@ For `./risedev apply-compose-deploy` users,
 
         if let Some(hummock_state_store) = state_store_impl.as_hummock() {
             Ok((
-                hummock_state_store.clone().monitored(
-                    metrics.state_store_metrics.clone(),
-                    metrics.storage_metrics.clone(),
-                ),
+                hummock_state_store
+                    .clone()
+                    .monitored(metrics.storage_metrics.clone()),
                 metrics,
             ))
         } else {

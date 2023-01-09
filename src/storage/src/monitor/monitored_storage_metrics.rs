@@ -19,7 +19,7 @@ use prometheus::{
     HistogramVec, Registry,
 };
 
-/// [`MonitoredStorageMetrics`] stores the performance and IO metrics of hummock storage.
+/// [`MonitoredStorageMetrics`] stores the performance and IO metrics of Storage.
 #[derive(Debug)]
 pub struct MonitoredStorageMetrics {
     pub get_duration: HistogramVec,
@@ -35,8 +35,8 @@ pub struct MonitoredStorageMetrics {
     pub write_batch_duration: HistogramVec,
     pub write_batch_size: HistogramVec,
 
-    pub shared_buffer_to_l0_duration: Histogram,
-    pub write_l0_size_per_epoch: Histogram,
+    pub sync_duration: Histogram,
+    pub sync_size: Histogram,
 }
 
 impl MonitoredStorageMetrics {
@@ -133,19 +133,18 @@ impl MonitoredStorageMetrics {
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
 
         let opts = histogram_opts!(
-            "state_store_shared_buffer_to_l0_duration",
+            "state_store_sync_duration",
             "Histogram of time spent from compacting shared buffer to remote storage",
             exponential_buckets(0.01, 2.0, 16).unwrap() // max 327s
         );
-        let shared_buffer_to_l0_duration =
-            register_histogram_with_registry!(opts, registry).unwrap();
+        let sync_duration = register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
-            "state_store_write_l0_size_per_epoch",
+            "state_store_sync_size",
             "Total size of upload to l0 every epoch",
             exponential_buckets(10.0, 2.0, 25).unwrap()
         );
-        let write_l0_size_per_epoch = register_histogram_with_registry!(opts, registry).unwrap();
+        let sync_size = register_histogram_with_registry!(opts, registry).unwrap();
 
         Self {
             get_duration,
@@ -159,12 +158,12 @@ impl MonitoredStorageMetrics {
             write_batch_tuple_counts,
             write_batch_duration,
             write_batch_size,
-            shared_buffer_to_l0_duration,
-            write_l0_size_per_epoch,
+            sync_duration,
+            sync_size,
         }
     }
 
-    /// Creates a new `StateStoreMetrics` instance used in tests or other places.
+    /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(Registry::new())
     }

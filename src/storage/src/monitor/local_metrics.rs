@@ -17,9 +17,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use risingwave_common::catalog::TableId;
-
-use super::StateStoreMetrics;
+use super::HummockStateStoreMetrics;
 use crate::monitor::CompactorMetrics;
 
 #[derive(Default, Debug)]
@@ -76,41 +74,41 @@ impl StoreLocalStatistic {
         self.cache_meta_block_miss += local_cache_meta_block_miss;
     }
 
-    pub fn report(&self, metrics: &StateStoreMetrics, table_id: Option<TableId>) {
-        let table_id_label = table_id.map_or("".to_string(), |table_id| table_id.to_string());
+    pub fn report(&self, metrics: &HummockStateStoreMetrics, table_id_label: Option<&str>) {
+        let table_id_label = table_id_label.map_or("", |table_id| table_id);
 
         if self.cache_data_block_total > 0 {
             metrics
                 .sst_store_block_request_counts
-                .with_label_values(&[table_id_label.as_str(), "data_total"])
+                .with_label_values(&[table_id_label, "data_total"])
                 .inc_by(self.cache_data_block_total);
         }
 
         if self.cache_data_block_miss > 0 {
             metrics
                 .sst_store_block_request_counts
-                .with_label_values(&[table_id_label.as_str(), "data_miss"])
+                .with_label_values(&[table_id_label, "data_miss"])
                 .inc_by(self.cache_data_block_miss);
         }
 
         if self.cache_meta_block_total > 0 {
             metrics
                 .sst_store_block_request_counts
-                .with_label_values(&[table_id_label.as_str(), "meta_total"])
+                .with_label_values(&[table_id_label, "meta_total"])
                 .inc_by(self.cache_meta_block_total);
         }
 
         if self.cache_meta_block_miss > 0 {
             metrics
                 .sst_store_block_request_counts
-                .with_label_values(&[table_id_label.as_str(), "meta_miss"])
+                .with_label_values(&[table_id_label, "meta_miss"])
                 .inc_by(self.cache_meta_block_miss);
         }
 
         if self.bloom_filter_true_negative_count > 0 {
             metrics
                 .bloom_filter_true_negative_counts
-                .with_label_values(&[table_id_label.as_str()])
+                .with_label_values(&[table_id_label])
                 .inc_by(self.bloom_filter_true_negative_count);
         }
 
@@ -118,49 +116,49 @@ impl StoreLocalStatistic {
         if t > 0.0 {
             metrics
                 .remote_read_time
-                .with_label_values(&[table_id_label.as_str()])
+                .with_label_values(&[table_id_label])
                 .observe(t / 1000.0);
         }
 
         if self.bloom_filter_check_counts > 0 {
             metrics
                 .bloom_filter_check_counts
-                .with_label_values(&[table_id_label.as_str()])
+                .with_label_values(&[table_id_label])
                 .inc_by(self.bloom_filter_check_counts);
         }
 
         if self.processed_key_count > 0 {
             metrics
                 .iter_scan_key_counts
-                .with_label_values(&[table_id_label.as_str(), "processed"])
+                .with_label_values(&[table_id_label, "processed"])
                 .inc_by(self.processed_key_count);
         }
 
         if self.skip_multi_version_key_count > 0 {
             metrics
                 .iter_scan_key_counts
-                .with_label_values(&[table_id_label.as_str(), "skip_multi_version"])
+                .with_label_values(&[table_id_label, "skip_multi_version"])
                 .inc_by(self.skip_multi_version_key_count);
         }
 
         if self.skip_delete_key_count > 0 {
             metrics
                 .iter_scan_key_counts
-                .with_label_values(&[table_id_label.as_str(), "skip_delete"])
+                .with_label_values(&[table_id_label, "skip_delete"])
                 .inc_by(self.skip_delete_key_count);
         }
 
         if self.total_key_count > 0 {
             metrics
                 .iter_scan_key_counts
-                .with_label_values(&[table_id_label.as_str(), "total"])
+                .with_label_values(&[table_id_label, "total"])
                 .inc_by(self.total_key_count);
         }
 
         if self.get_shared_buffer_hit_counts > 0 {
             metrics
                 .get_shared_buffer_hit_counts
-                .with_label_values(&[table_id_label.as_str()])
+                .with_label_values(&[table_id_label])
                 .inc_by(self.get_shared_buffer_hit_counts);
         }
 

@@ -82,7 +82,7 @@ use value::*;
 use self::event_handler::ReadVersionMappingType;
 use self::iterator::{BackwardUserIterator, HummockIterator, UserIterator};
 pub use self::sstable_store::*;
-use super::monitor::StateStoreMetrics;
+use super::monitor::HummockStateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::Context;
@@ -150,7 +150,7 @@ impl HummockStorage {
         backup_reader: BackupReaderRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
-        state_store_metrics: Arc<StateStoreMetrics>,
+        state_store_metrics: Arc<HummockStateStoreMetrics>,
         tracing: Arc<risingwave_tracing::RwTracingService>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> HummockResult<Self> {
@@ -315,7 +315,7 @@ impl HummockStorage {
             BackupReader::unused(),
             hummock_meta_client,
             notification_client,
-            Arc::new(StateStoreMetrics::unused()),
+            Arc::new(HummockStateStoreMetrics::unused()),
             Arc::new(risingwave_tracing::RwTracingService::disabled()),
             Arc::new(CompactorMetrics::unused()),
         )
@@ -474,7 +474,7 @@ pub struct HummockStorageV1 {
     sstable_store: SstableStoreRef,
 
     /// Statistics
-    state_store_metrics: Arc<StateStoreMetrics>,
+    state_store_metrics: Arc<HummockStateStoreMetrics>,
 
     sstable_id_manager: SstableIdManagerRef,
 
@@ -496,8 +496,8 @@ impl HummockStorageV1 {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
-        // TODO: separate `HummockStats` from `StateStoreMetrics`.
-        state_store_metrics: Arc<StateStoreMetrics>,
+        // TODO: separate `HummockStats` from `HummockStateStoreMetrics`.
+        state_store_metrics: Arc<HummockStateStoreMetrics>,
         tracing: Arc<risingwave_tracing::RwTracingService>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> HummockResult<Self> {

@@ -253,6 +253,7 @@ profile:
         address: ${dns-host:rw-compute-0}
         async-stack-trace: verbose
         enable-tiered-cache: true
+        total-memory-bytes: 8589934592
 
       - use: compute-node
         id: compute-node-1
@@ -260,6 +261,7 @@ profile:
         address: ${dns-host:rw-compute-1}
         async-stack-trace: verbose
         enable-tiered-cache: true
+        total-memory-bytes: 8589934592
 
       - use: compute-node
         id: compute-node-2
@@ -267,6 +269,7 @@ profile:
         address: ${dns-host:rw-compute-2}
         async-stack-trace: verbose
         enable-tiered-cache: true
+        total-memory-bytes: 8589934592
 
       - use: frontend
         id: frontend-node-0

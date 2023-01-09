@@ -19,51 +19,25 @@ use prometheus::{
     exponential_buckets, histogram_opts, proto, register_histogram_vec_with_registry,
     register_int_counter_vec_with_registry, HistogramVec, IntGauge, Opts, Registry,
 };
-use risingwave_common::monitor::Print;
 
-/// Define all metrics.
-#[macro_export]
-macro_rules! for_all_metrics {
-    ($macro:ident) => {
-        $macro! {
-            bloom_filter_true_negative_counts: GenericCounterVec<AtomicU64>,
-            bloom_filter_check_counts: GenericCounterVec<AtomicU64>,
-            range_scan_size: HistogramVec,
-            range_scan_duration: HistogramVec,
-            iter_merge_sstable_counts: HistogramVec,
-            sst_store_block_request_counts: GenericCounterVec<AtomicU64>,
-            iter_scan_key_counts: GenericCounterVec<AtomicU64>,
-            get_shared_buffer_hit_counts: GenericCounterVec<AtomicU64>,
-            remote_read_time: HistogramVec,
-            iter_fetch_meta_duration: HistogramVec,
-        }
-    };
+/// [`HummockStateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
+/// `RocksDBStateStore` and `TikvStateStore`.
+/// In practice, keep in mind that this represents the whole Hummock utilization of
+/// a `RisingWave` instance. More granular utilization of per `materialization view`
+/// job or an executor should be collected by views like `StateStats` and `JobStats`.
+#[derive(Debug)]
+pub struct HummockStateStoreMetrics {
+    pub bloom_filter_true_negative_counts: GenericCounterVec<AtomicU64>,
+    pub bloom_filter_check_counts: GenericCounterVec<AtomicU64>,
+    pub iter_merge_sstable_counts: HistogramVec,
+    pub sst_store_block_request_counts: GenericCounterVec<AtomicU64>,
+    pub iter_scan_key_counts: GenericCounterVec<AtomicU64>,
+    pub get_shared_buffer_hit_counts: GenericCounterVec<AtomicU64>,
+    pub remote_read_time: HistogramVec,
+    pub iter_fetch_meta_duration: HistogramVec,
 }
 
-macro_rules! define_state_store_metrics {
-    ($( $name:ident: $type:ty ),* ,) => {
-        /// [`StateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
-        /// `RocksDBStateStore` and `TikvStateStore`.
-        /// In practice, keep in mind that this represents the whole Hummock utilization of
-        /// a `RisingWave` instance. More granular utilization of per `materialization view`
-        /// job or an executor should be collected by views like `StateStats` and `JobStats`.
-        #[derive(Debug)]
-        pub struct StateStoreMetrics {
-            $( pub $name: $type, )*
-        }
-
-        impl Print for StateStoreMetrics {
-           fn print(&self) {
-                $( self.$name.print(); )*
-           }
-        }
-    }
-
-}
-
-for_all_metrics! { define_state_store_metrics }
-
-impl StateStoreMetrics {
+impl HummockStateStoreMetrics {
     pub fn new(registry: Registry) -> Self {
         let bloom_filter_true_negative_counts = register_int_counter_vec_with_registry!(
             "state_store_bloom_filter_true_negative_counts",
@@ -80,23 +54,6 @@ impl StateStoreMetrics {
             registry
         )
         .unwrap();
-
-        // ----- range_scan -----
-        let opts = histogram_opts!(
-            "state_store_range_scan_size",
-            "Total bytes gotten from state store scan(), for calculating read throughput",
-            exponential_buckets(1.0, 2.0, 25).unwrap() // max 16MB
-        );
-        let range_scan_size =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-
-        let opts = histogram_opts!(
-            "state_store_range_scan_duration",
-            "Total time of scan that have been issued to state store",
-            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
-        );
-        let range_scan_duration =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
 
         // ----- iter -----
         let opts = histogram_opts!(
@@ -151,8 +108,6 @@ impl StateStoreMetrics {
         Self {
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,
-            range_scan_size,
-            range_scan_duration,
             iter_merge_sstable_counts,
             sst_store_block_request_counts,
             iter_scan_key_counts,
@@ -162,7 +117,7 @@ impl StateStoreMetrics {
         }
     }
 
-    /// Creates a new `StateStoreMetrics` instance used in tests or other places.
+    /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(Registry::new())
     }

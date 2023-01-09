@@ -34,8 +34,8 @@ use crate::hummock::{
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
 use crate::monitor::{
-    CompactorMetrics, MonitoredStateStore as Monitored, MonitoredStorageMetrics,
-    ObjectStoreMetrics, StateStoreMetrics,
+    CompactorMetrics, HummockStateStoreMetrics, MonitoredStateStore as Monitored,
+    MonitoredStorageMetrics, ObjectStoreMetrics,
 };
 use crate::StateStore;
 
@@ -108,64 +108,46 @@ fn may_verify(state_store: impl StateStore + AsHummockTrait) -> impl StateStore 
 impl StateStoreImpl {
     fn in_memory(
         state_store: MemoryStateStore,
-        state_store_metrics: Arc<StateStoreMetrics>,
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of MemoryStateStoreType in deducted here.
-        Self::MemoryStateStore(
-            may_dynamic_dispatch(state_store).monitored(state_store_metrics, storage_metrics),
-        )
+        Self::MemoryStateStore(may_dynamic_dispatch(state_store).monitored(storage_metrics))
     }
 
     pub fn hummock(
         state_store: HummockStorage,
-        state_store_metrics: Arc<StateStoreMetrics>,
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of HummockStateStoreType in deducted here.
         Self::HummockStateStore(
-            may_dynamic_dispatch(may_verify(state_store))
-                .monitored(state_store_metrics, storage_metrics),
+            may_dynamic_dispatch(may_verify(state_store)).monitored(storage_metrics),
         )
     }
 
     pub fn hummock_v1(
         state_store: HummockStorageV1,
-        state_store_metrics: Arc<StateStoreMetrics>,
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of HummockStateStoreV1Type in deducted here.
         Self::HummockStateStoreV1(
-            may_dynamic_dispatch(may_verify(state_store))
-                .monitored(state_store_metrics, storage_metrics),
+            may_dynamic_dispatch(may_verify(state_store)).monitored(storage_metrics),
         )
     }
 
     pub fn sled(
         state_store: SledStateStore,
-        state_store_metrics: Arc<StateStoreMetrics>,
         storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
-        Self::SledStateStore(
-            may_dynamic_dispatch(state_store).monitored(state_store_metrics, storage_metrics),
-        )
+        Self::SledStateStore(may_dynamic_dispatch(state_store).monitored(storage_metrics))
     }
 
-    pub fn shared_in_memory_store(
-        state_store_metrics: Arc<StateStoreMetrics>,
-        storage_metrics: Arc<MonitoredStorageMetrics>,
-    ) -> Self {
-        Self::in_memory(
-            MemoryStateStore::shared(),
-            state_store_metrics,
-            storage_metrics,
-        )
+    pub fn shared_in_memory_store(storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
+        Self::in_memory(MemoryStateStore::shared(), storage_metrics)
     }
 
     pub fn for_test() -> Self {
         Self::in_memory(
             MemoryStateStore::new(),
-            Arc::new(StateStoreMetrics::unused()),
             Arc::new(MonitoredStorageMetrics::unused()),
         )
     }
@@ -472,7 +454,7 @@ impl StateStoreImpl {
         file_cache_dir: &str,
         rw_config: &RwConfig,
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
-        state_store_metrics: Arc<StateStoreMetrics>,
+        state_store_metrics: Arc<HummockStateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
         tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
         tracing: Arc<risingwave_tracing::RwTracingService>,
@@ -555,7 +537,7 @@ impl StateStoreImpl {
                     )
                     .await?;
 
-                    StateStoreImpl::hummock(inner, state_store_metrics, storage_metrics)
+                    StateStoreImpl::hummock(inner, storage_metrics)
                 } else {
                     let inner = HummockStorageV1::new(
                         config.clone(),
@@ -568,26 +550,19 @@ impl StateStoreImpl {
                     )
                     .await?;
 
-                    StateStoreImpl::hummock_v1(inner, state_store_metrics, storage_metrics)
+                    StateStoreImpl::hummock_v1(inner, storage_metrics)
                 }
             }
 
             "in_memory" | "in-memory" => {
                 tracing::warn!("In-memory state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
-                StateStoreImpl::shared_in_memory_store(
-                    state_store_metrics.clone(),
-                    storage_metrics.clone(),
-                )
+                StateStoreImpl::shared_in_memory_store(storage_metrics.clone())
             }
 
             sled if sled.starts_with("sled://") => {
                 tracing::warn!("sled state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
                 let path = sled.strip_prefix("sled://").unwrap();
-                StateStoreImpl::sled(
-                    SledStateStore::new(path),
-                    state_store_metrics.clone(),
-                    storage_metrics.clone(),
-                )
+                StateStoreImpl::sled(SledStateStore::new(path), storage_metrics.clone())
             }
 
             other => unimplemented!("{} state store is not supported", other),

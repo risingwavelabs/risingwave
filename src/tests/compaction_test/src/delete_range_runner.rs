@@ -47,7 +47,7 @@ use risingwave_storage::hummock::{
     CompactorSstableStore, HummockStorage, MemoryLimiter, SstableIdManager, SstableStore,
     TieredCache,
 };
-use risingwave_storage::monitor::{CompactorMetrics, StateStoreMetrics};
+use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
@@ -174,7 +174,7 @@ async fn compaction_test(
 
     let config = Arc::new(storage_config);
 
-    let state_store_metrics = Arc::new(StateStoreMetrics::unused());
+    let state_store_metrics = Arc::new(HummockStateStoreMetrics::unused());
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
     let object_store_metrics = Arc::new(ObjectStoreMetrics::unused());
     let remote_object_store = parse_remote_object_store(

@@ -23,7 +23,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
 
-use super::{MonitoredStorageMetrics, StateStoreMetrics};
+use super::MonitoredStorageMetrics;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
@@ -39,20 +39,13 @@ use crate::{
 pub struct MonitoredStateStore<S> {
     inner: Box<S>,
 
-    state_store_metrics: Arc<StateStoreMetrics>,
-
     storage_metrics: Arc<MonitoredStorageMetrics>,
 }
 
 impl<S> MonitoredStateStore<S> {
-    pub fn new(
-        inner: S,
-        state_store_metrics: Arc<StateStoreMetrics>,
-        storage_metrics: Arc<MonitoredStorageMetrics>,
-    ) -> Self {
+    pub fn new(inner: S, storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
         Self {
             inner: Box::new(inner),
-            state_store_metrics,
             storage_metrics,
         }
     }
@@ -215,10 +208,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         async move {
             // TODO: this metrics may not be accurate if we start syncing after `seal_epoch`. We may
             // move this metrics to inside uploader
-            let timer = self
-                .storage_metrics
-                .shared_buffer_to_l0_duration
-                .start_timer();
+            let timer = self.storage_metrics.sync_duration.start_timer();
             let sync_result = self
                 .inner
                 .sync(epoch)
@@ -228,7 +218,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             timer.observe_duration();
             if sync_result.sync_size != 0 {
                 self.storage_metrics
-                    .write_l0_size_per_epoch
+                    .sync_size
                     .observe(sync_result.sync_size as _);
             }
             Ok(sync_result)
@@ -241,7 +231,6 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
 
     fn monitored(
         self,
-        _state_store_metrics: Arc<StateStoreMetrics>,
         _storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> MonitoredStateStore<Self> {
         panic!("the state store is already monitored")
@@ -261,7 +250,6 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         async move {
             MonitoredStateStore::new(
                 self.inner.new_local(table_id).await,
-                self.state_store_metrics.clone(),
                 self.storage_metrics.clone(),
             )
         }

@@ -43,8 +43,8 @@ use risingwave_storage::hummock::{
     CompactorSstableStore, HummockMemoryCollector, MemoryLimiter, TieredCacheMetricsBuilder,
 };
 use risingwave_storage::monitor::{
-    monitor_cache, CompactorMetrics, HummockMetrics, MonitoredStorageMetrics, ObjectStoreMetrics,
-    StateStoreMetrics,
+    monitor_cache, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
+    MonitoredStorageMetrics, ObjectStoreMetrics,
 };
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
@@ -105,7 +105,7 @@ pub async fn compute_node_serve(
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
     // Initialize state store.
-    let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
+    let state_store_metrics = Arc::new(HummockStateStoreMetrics::new(registry.clone()));
     let object_store_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
     let storage_metrics = Arc::new(MonitoredStorageMetrics::new(registry.clone()));
     let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));

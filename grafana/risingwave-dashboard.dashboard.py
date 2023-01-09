@@ -1527,13 +1527,13 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_shared_buffer_to_l0_duration_bucket')}[$__rate_interval])) by (le, job, instance))",
+                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_sync_duration_bucket')}[$__rate_interval])) by (le, job, instance))",
                         f"p{legend}" + " - {{job}} @ {{instance}}",
                     ),
                     [50, 90, 99, "max"],
                 ),
                 panels.target(
-                    f"sum by(le, job, instance) (rate({metric('state_store_shared_buffer_to_l0_duration_sum')}[$__rate_interval])) / sum by(le, job, instance) (rate({metric('state_store_shared_buffer_to_l0_duration_count')}[$__rate_interval]))",
+                    f"sum by(le, job, instance) (rate({metric('state_store_sync_duration_sum')}[$__rate_interval])) / sum by(le, job, instance) (rate({metric('state_store_sync_duration_count')}[$__rate_interval]))",
                     "avg - {{job}} @ {{instance}}",
                 ),
             ],
@@ -1563,10 +1563,6 @@ def section_hummock(panels):
                 panels.target(
                     f"sum(rate({metric('state_store_get_duration_count')}[$__rate_interval])) by (job,instanc,table_id)",
                     "get - {{table_id}} @ {{job}} @ {{instance}}",
-                ),
-                panels.target(
-                    f"sum(rate({metric('state_store_range_scan_duration_count')}[$__rate_interval])) by (job,instance)",
-                    "forward scan - {{job}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum(rate({metric('state_store_range_reverse_scan_duration_count')}[$__rate_interval])) by (job,instance)",
@@ -1651,14 +1647,6 @@ def section_hummock(panels):
                     ),
                     [90, 99, 999, "max"],
                 ),
-
-                *quantile(
-                    lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_range_scan_size_bucket')}[$__rate_interval])) by (le, job, instance, table_id))",
-                        f"p{legend} - {{{{table_id}}}} @ {{{{job}}}} @ {{{{instance}}}}",
-                    ),
-                    [90, 99, 999, "max"],
-                ),
             ],
         ),
         panels.timeseries_count(
@@ -1723,8 +1711,8 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"1 - (sum(rate({metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance)) / (sum(rate({metric('state_bloom_filter_check_counts')}[$__rate_interval])) by (job,instance))",
-                    "bloom filter miss rate - {{job}} @ {{instance}}",
+                    f"1 - (sum(rate({metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({metric('state_bloom_filter_check_counts')}[$__rate_interval])) by (job,instance,table_id))",
+                    "bloom filter miss rate - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
                     f"(sum(rate({metric('state_store_sst_store_block_request_counts', mete_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
@@ -1767,7 +1755,7 @@ def section_hummock(panels):
                     "write batch - {{table_id}} @ {{job}} @ {{instance}} ",
                 ),
                 panels.target(
-                    f"sum(rate({metric('state_store_shared_buffer_to_l0_duration_count')}[$__rate_interval])) by (job,instance)",
+                    f"sum(rate({metric('state_store_sync_duration_count')}[$__rate_interval])) by (job,instance)",
                     "l0 - {{job}} @ {{instance}} ",
                 ),
             ],
@@ -1832,13 +1820,13 @@ def section_hummock(panels):
             [
                 *quantile(
                     lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_write_l0_size_per_epoch_bucket')}[$__rate_interval])) by (le, job, instance))",
+                        f"histogram_quantile({quantile}, sum(rate({metric('state_store_sync_size_bucket')}[$__rate_interval])) by (le, job, instance))",
                         f"p{legend}" + " - {{job}} @ {{instance}}",
                     ),
                     [50, 90, 99, "max"],
                 ),
                 panels.target(
-                    f"sum by(le, job, instance) (rate({metric('state_store_write_l0_size_per_epoch_sum')}[$__rate_interval])) / sum by(le, job, instance) (rate({metric('state_store_write_l0_size_per_epoch_count')}[$__rate_interval]))",
+                    f"sum by(le, job, instance) (rate({metric('state_store_sync_size_sum')}[$__rate_interval])) / sum by(le, job, instance) (rate({metric('state_store_sync_size_count')}[$__rate_interval]))",
                     "avg - {{job}} @ {{instance}}",
                 ),
             ],
