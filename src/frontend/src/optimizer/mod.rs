@@ -534,29 +534,30 @@ impl PlanRoot {
             plan.node_type() == PlanNodeType::BatchExchange
         }
 
-        fn insert_exchange(plan: PlanRef, order: &Order) -> PlanRef {
+        fn insert_exchange(plan: PlanRef, order: Order) -> PlanRef {
             BatchExchange::new(plan, order.clone(), Distribution::Single).into()
         }
 
-        fn helper(plan: PlanRef, order: &Order) -> PlanRef {
+        fn helper(plan: PlanRef) -> PlanRef {
             if is_exchange(&plan) {
                 return plan;
             }
             if is_candidate(&plan) {
+                let order = plan.order().clone();
                 return insert_exchange(plan, order);
             }
             let new_inputs = plan
                 .inputs()
                 .into_iter()
-                .map(|input| helper(input, plan.order()))
+                .map(|input| helper(input))
                 .collect_vec();
             plan.clone_with_inputs(&new_inputs)
         }
 
         if is_candidate(&root) {
-            insert_exchange(root, order)
+            insert_exchange(root, order.clone())
         } else {
-            helper(root, order)
+            helper(root)
         }
     }
 
