@@ -45,14 +45,13 @@ pub fn gen_batch_query_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: Statement,
-    notice: &mut String,
 ) -> Result<(PlanRef, QueryMode, Schema)> {
     let stmt_type = to_statement_type(&stmt)?;
 
     let bound = {
         let mut binder = Binder::new(session);
         let bound = binder.bind(stmt)?;
-        binder.append_notice(notice);
+        // binder.append_notice(notice);
         bound
     };
 
@@ -107,9 +106,9 @@ pub async fn handle_query(
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, query_mode, output_schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let (plan, query_mode, schema) =
-            gen_batch_query_plan(&session, context.into(), stmt, &mut notice)?;
+        let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
 
+        let context = plan.plan_base().ctx.clone();
         tracing::trace!(
             "Generated query plan: {:?}, query_mode:{:?}",
             plan.explain_to_string()?,
@@ -119,7 +118,9 @@ pub async fn handle_query(
             session.env().worker_node_manager_ref(),
             session.env().catalog_reader().clone(),
         );
-        (plan_fragmenter.split(plan)?, query_mode, schema)
+        let query = plan_fragmenter.split(plan)?;
+        context.append_notice(&mut notice);
+        (query, query_mode, schema)
     };
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 

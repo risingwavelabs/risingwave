@@ -992,5 +992,4 @@ mod tests {
         let timestamp2 = str_to_timestamp(str2).unwrap();
         assert_eq!(timestamp2.0.timestamp_micros(), -1);
     }
-
 }

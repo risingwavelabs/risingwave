@@ -18,6 +18,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
+use super::generic::GenericPlanRef;
 use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -86,7 +87,12 @@ impl StreamNode for StreamProject {
                 .logical
                 .exprs()
                 .iter()
-                .map(Expr::to_expr_proto)
+                .map(|x| {
+                    self.base
+                        .ctx()
+                        .expr_with_session_timezone(x.clone())
+                        .to_expr_proto()
+                })
                 .collect(),
         })
     }

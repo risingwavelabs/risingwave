@@ -114,7 +114,7 @@ pub fn handle_explain(
             .into());
         }
 
-        stmt => gen_batch_query_plan(&session, context.into(), stmt, &mut String::new())?.0,
+        stmt => gen_batch_query_plan(&session, context.into(), stmt)?.0,
     };
 
     let ctx = plan.plan_base().ctx.clone();

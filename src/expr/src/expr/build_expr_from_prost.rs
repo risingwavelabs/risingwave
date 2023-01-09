@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -37,10 +38,11 @@ use crate::expr::expr_to_timestamp_const_tmpl::{
 use crate::expr::expr_unary::{
     new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
 };
-use crate::expr::{build_from_prost as expr_build_from_prost, LiteralExpression, BoxedExpression, Expression};
+use crate::expr::{
+    build_from_prost as expr_build_from_prost, BoxedExpression, Expression, LiteralExpression,
+};
 use crate::vector_op::to_char::compile_pattern_to_chrono;
 use crate::{bail, ensure, Result};
-use risingwave_common::try_match_expand;
 
 fn get_children_and_return_type(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataType)> {
     let ret_type = DataType::from(prost.get_return_type().unwrap());

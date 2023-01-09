@@ -21,7 +21,7 @@ use risingwave_pb::expr::expr_node::Type;
 
 use super::Expression;
 use crate::expr::expr_binary_bytes::new_concat_op;
-use crate::expr::template::{BinaryExpression, BinaryBytesExpression};
+use crate::expr::template::{BinaryBytesExpression, BinaryExpression};
 use crate::expr::{template_fast, BoxedExpression};
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::bitwise_op::*;
@@ -33,7 +33,9 @@ use crate::vector_op::extract::{
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
-use crate::vector_op::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone, timestamptz_to_string, str_to_timestamptz};
+use crate::vector_op::timestamptz::{
+    str_to_timestamptz, timestamp_at_time_zone, timestamptz_at_time_zone, timestamptz_to_string,
+};
 use crate::vector_op::to_timestamp::to_timestamp;
 use crate::vector_op::tumble::{
     tumble_start_date, tumble_start_date_time, tumble_start_timestamptz,
@@ -425,17 +427,22 @@ fn build_cast_with_time_zone_expr(
             I64Array,
             Utf8Array,
             _,
-        >::new(l, r, ret, timestamptz_to_string)),
-        (DataType::Timestamptz, DataType::Varchar) => Box::new(BinaryExpression::<
-            Utf8Array,
-            Utf8Array,
-            I64Array,
-            _,
-        >::new(l, r, ret, str_to_timestamptz)),
+        >::new(
+            l, r, ret, timestamptz_to_string
+        )),
+        (DataType::Timestamptz, DataType::Varchar) => {
+            Box::new(BinaryExpression::<Utf8Array, Utf8Array, I64Array, _>::new(
+                l,
+                r,
+                ret,
+                str_to_timestamptz,
+            ))
+        }
         _ => {
             return Err(ExprError::UnsupportedFunction(format!(
                 "cannot cast at time zone (input type: {:?}, output type: {:?}",
-                l.return_type(), ret,
+                l.return_type(),
+                ret,
             )))
         }
     };

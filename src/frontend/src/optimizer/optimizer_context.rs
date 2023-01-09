@@ -14,13 +14,13 @@
 
 use core::convert::Into;
 use core::fmt::Formatter;
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType};
 
-use crate::expr::CorrelatedId;
+use crate::expr::{CorrelatedId, ExprImpl, ExprRewriter, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
@@ -44,7 +44,10 @@ pub struct OptimizerContext {
     next_correlated_id: RefCell<u32>,
     /// Store options or properties from the `with` clause
     with_options: WithOptions,
+    /// Store the Session Timezone and whether it was used.
+    session_timezone: RefCell<SessionTimezone>,
 }
+
 pub type OptimizerContextRef = Rc<OptimizerContext>;
 
 impl OptimizerContext {
@@ -56,6 +59,9 @@ impl OptimizerContext {
 
     /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`] and [`ExplainOptions`].
     pub fn new(handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
+        let session_timezone = RefCell::new(SessionTimezone::new(
+            handler_args.session.config().get_timezone().to_owned(),
+        ));
         Self {
             session_ctx: handler_args.session,
             next_plan_node_id: RefCell::new(0),
@@ -66,6 +72,7 @@ impl OptimizerContext {
             logical_explain: RefCell::new(None),
             next_correlated_id: RefCell::new(0),
             with_options: handler_args.with_options,
+            session_timezone,
         }
     }
 
@@ -83,6 +90,7 @@ impl OptimizerContext {
             logical_explain: RefCell::new(None),
             next_correlated_id: RefCell::new(0),
             with_options: Default::default(),
+            session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
         }
         .into()
     }
@@ -145,6 +153,24 @@ impl OptimizerContext {
     /// Return the normalized SQL.
     pub fn normalized_sql(&self) -> &str {
         &self.normalized_sql
+    }
+
+    pub fn expr_with_session_timezone(&self, expr: ExprImpl) -> ExprImpl {
+        let mut session_timezone = self.session_timezone.borrow_mut();
+        let expr = session_timezone.rewrite_expr(expr);
+        expr
+    }
+
+    pub fn append_notice(&self, notice: &mut String) {
+        let session_timezone = self.session_timezone.borrow();
+        if session_timezone.used() {
+            notice.push_str(&format!(
+                "Your session timezone is {}. It was used in the interpretation of timestamps and dates in your query. If this is unintended, \
+                change your timezone to match that of your data's with `set timezone = [timezone]` or \
+                rewrite your query with an explicit timezone conversion, e.g. with `AT TIME ZONE`.\n",
+                session_timezone.timezone()
+            ));
+        }
     }
 }
 
