@@ -634,6 +634,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         chunk,
                         self.append_only_optimize,
                         self.chunk_size,
+                        &self.metrics,
                     ) {
                         left_time += left_start_time.elapsed();
                         yield chunk.map(|v| match v {
@@ -665,6 +666,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         chunk,
                         self.append_only_optimize,
                         self.chunk_size,
+                        &self.metrics,
                     ) {
                         right_time += right_start_time.elapsed();
                         yield chunk.map(|v| match v {
@@ -779,6 +781,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         chunk: StreamChunk,
         append_only_optimize: bool,
         chunk_size: usize,
+        metrics: &'a StreamingMetrics,
     ) {
         let chunk = chunk.compact();
 
@@ -841,12 +844,35 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let futs = cache_miss_keys
             .into_iter()
             .map(|key| side_match.ht.fetch_cached_state(key));
+        let timer = metrics
+            .join_read_duration_per_chunk
+            .with_label_values(&[
+                &ctx.id.to_string(),
+                &if SIDE == SideType::Left {
+                    String::from("left")
+                } else {
+                    String::from("right")
+                },
+            ])
+            .start_timer();
+        metrics
+            .join_cache_miss_per_chunk
+            .with_label_values(&[
+                &ctx.id.to_string(),
+                &if SIDE == SideType::Left {
+                    String::from("left")
+                } else {
+                    String::from("right")
+                },
+            ])
+            .set(futs.len() as i64);
         let mut buffered = stream::iter(futs).buffer_unordered(10);
         while let Some(result) = buffered.next().await {
             let (key, join_entry_state) = result?;
             *key2matched_rows.get_mut(&key).unwrap() = Some(join_entry_state.into());
         }
         drop(buffered);
+        timer.observe_duration();
 
         for ((op, row), key) in chunk.rows().zip_eq(keys.iter()) {
             let matched_rows = key2matched_rows.get_mut(key).unwrap();

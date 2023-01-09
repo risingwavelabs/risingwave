@@ -54,6 +54,8 @@ pub struct StreamingMetrics {
     pub join_cached_entries: GenericGaugeVec<AtomicI64>,
     pub join_cached_rows: GenericGaugeVec<AtomicI64>,
     pub join_cached_estimated_size: GenericGaugeVec<AtomicI64>,
+    pub join_read_duration_per_chunk: HistogramVec,
+    pub join_cache_miss_per_chunk: GenericGaugeVec<AtomicI64>,
 
     // Streaming Aggregation
     pub agg_lookup_miss_count: GenericCounterVec<AtomicU64>,
@@ -289,6 +291,14 @@ impl StreamingMetrics {
             register_histogram_vec_with_registry!(opts, &["actor_id", "wait_side"], registry)
                 .unwrap();
 
+        let opts = histogram_opts!(
+            "stream_join_read_duration_per_chunk",
+            "Duration of join read per chunk",
+            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
+        );
+        let join_read_duration_per_chunk =
+            register_histogram_vec_with_registry!(opts, &["actor_id"], registry).unwrap();
+
         let join_cached_entries = register_int_gauge_vec_with_registry!(
             "stream_join_cached_entries",
             "Number of cached entries in streaming join operators",
@@ -308,6 +318,14 @@ impl StreamingMetrics {
         let join_cached_estimated_size = register_int_gauge_vec_with_registry!(
             "stream_join_cached_estimated_size",
             "Estimated size of all cached entries in streaming join operators",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
+        let join_cache_miss_per_chunk = register_int_gauge_vec_with_registry!(
+            "stream_join_cache_miss_per_chunk",
+            "Number of cache misses per chunk in streaming join operators",
             &["actor_id", "side"],
             registry
         )
@@ -421,9 +439,11 @@ impl StreamingMetrics {
             join_actor_input_waiting_duration_ns,
             join_match_duration_ns,
             join_barrier_align_duration,
+            join_read_duration_per_chunk,
             join_cached_entries,
             join_cached_rows,
             join_cached_estimated_size,
+            join_cache_miss_per_chunk,
             agg_lookup_miss_count,
             agg_total_lookup_count,
             agg_cached_keys,
