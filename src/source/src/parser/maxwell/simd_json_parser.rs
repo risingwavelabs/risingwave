@@ -54,8 +54,11 @@ impl MaxwellParser {
                     ))
                 })?;
                 writer.insert(|column| {
-                    simd_json_parse_value(&column.data_type, after.get(column.name.to_ascii_lowercase().as_str()))
-                        .map_err(Into::into)
+                    simd_json_parse_value(
+                        &column.data_type,
+                        after.get(column.name.to_ascii_lowercase().as_str()),
+                    )
+                    .map_err(Into::into)
                 })
             }
             MAXWELL_UPDATE_OP => {
@@ -87,8 +90,11 @@ impl MaxwellParser {
                     RwError::from(ProtocolError("old is missing for delete event".to_string()))
                 })?;
                 writer.delete(|column| {
-                    simd_json_parse_value(&column.data_type, before.get(column.name.to_ascii_lowercase().as_str()))
-                        .map_err(Into::into)
+                    simd_json_parse_value(
+                        &column.data_type,
+                        before.get(column.name.to_ascii_lowercase().as_str()),
+                    )
+                    .map_err(Into::into)
                 })
             }
             other => Err(RwError::from(ProtocolError(format!(
