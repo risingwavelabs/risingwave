@@ -474,7 +474,33 @@ where
     }
 
     pub async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
-        todo!("drop function")
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let function = functions
+            .remove(function_id)
+            .ok_or_else(|| anyhow!("function not found"))?;
+
+        let objects = &[Object::FunctionId(function_id)];
+        let users_need_update = Self::update_user_privileges(&mut users, objects);
+
+        commit_meta!(self, functions, users)?;
+
+        user_core.decrease_ref(function.owner);
+
+        for user in users_need_update {
+            self.notify_frontend(Operation::Update, Info::User(user))
+                .await;
+        }
+
+        let version = self
+            .notify_frontend(Operation::Delete, Info::Function(function))
+            .await;
+
+        Ok(version)
     }
 
     pub async fn start_create_stream_job_procedure(
