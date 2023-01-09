@@ -50,7 +50,7 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::handler::create_table::DmlFlag;
 use crate::optimizer::plan_node::{
-    BatchExchange, ColumnPruningContext, PlanNodeType, PredicatePushdownContext,
+    BatchExchange, BatchSeqScan, ColumnPruningContext, PlanNodeType, PredicatePushdownContext,
 };
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
@@ -502,27 +502,53 @@ impl PlanRoot {
 
     /// Auxiliary function to ensure there is **exchange directly before table scan**,
     /// so that it will be pushed to compute node.
+    /// Candidate: Either [`BatchSource`] Or [`BatchSeqScan`] on non-system table.
+    /// Cases:
+    /// 1. Candidate in root, insert exchange.
+    /// 2. Candidate not in root.
+    ///    a. If exchange -> If child is Candidate -> End.
+    ///    b. If Candidate -> Insert exchange -> End.
+    ///    c. Other -> Recurse.
+    ///
+    /// [`plan`] must be root.
     fn enforce_exchange_above_table_scan(plan: PlanRef) -> PlanRef {
-        if plan.node_type() != PlanNodeType::BatchExchange
-            && plan.node_type() != PlanNodeType::BatchSeqScan
-        {
+        fn is_candidate(plan: &PlanRef) -> bool {
+            plan.node_type() == PlanNodeType::BatchSource
+                || (plan.node_type() == PlanNodeType::BatchSeqScan
+                    && !plan
+                        .downcast_ref::<BatchSeqScan>()
+                        .unwrap()
+                        .logical()
+                        .is_sys_table())
+        }
+        fn is_exchange(plan: &PlanRef) -> bool {
+            plan.node_type() == PlanNodeType::BatchExchange
+        }
+        fn insert_exchange(plan: PlanRef) -> PlanRef {
+            let order = plan.order().clone();
+            BatchExchange::new(plan, order, Distribution::Single).into()
+        }
+
+        fn helper(plan: PlanRef) -> PlanRef {
+            if is_exchange(&plan) && plan.inputs().iter().any(is_candidate) {
+                assert_eq!(plan.inputs().len(),1);
+                return plan;
+            }
+            if is_candidate(&plan) {
+                return insert_exchange(plan);
+            }
             let new_inputs = plan
                 .inputs()
                 .into_iter()
-                .map(|input| {
-                    if input.node_type() == PlanNodeType::BatchSeqScan
-                        && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table())
-                    {
-                        let order = input.order().clone();
-                        BatchExchange::new(input, order, Distribution::Single).into()
-                    } else {
-                        Self::enforce_exchange_above_table_scan(input)
-                    }
-                })
+                .map(|input| helper(input))
                 .collect_vec();
             plan.clone_with_inputs(&new_inputs)
+        }
+
+        if is_candidate(&plan) {
+            insert_exchange(plan)
         } else {
-            plan
+            helper(plan)
         }
     }
 
@@ -535,17 +561,6 @@ impl PlanRoot {
 
         // Ensure there is exchange before all seq scan.
         plan = Self::enforce_exchange_above_table_scan(plan);
-
-        // We remark that since the `to_local_with_order_required` does not enforce single
-        // distribution, we enforce at the root if needed.
-        let insert_exchange = match plan.distribution() {
-            Distribution::Single => Self::require_additional_exchange_on_root(plan.clone()),
-            _ => true,
-        };
-        if insert_exchange {
-            plan =
-                BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into()
-        }
 
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {

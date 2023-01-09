@@ -74,7 +74,8 @@
     BatchSimpleAgg { aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchProject { exprs: [t.s, ',':Varchar, t.o] }
-        └─BatchScan { table: t, columns: [t.o, t.s], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchScan { table: t, columns: [t.o, t.s], distribution: SomeShard }
 - id: extreme_count_on_T
   before:
   - create_tables
@@ -103,7 +104,8 @@
     BatchSimpleAgg { aggs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
-        └─BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
 - id: extreme_string_agg_on_T
   before:
   - create_tables
@@ -118,7 +120,8 @@
     BatchSimpleAgg { aggs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
-        └─BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
 - id: extreme_on_T_by_k
   before:
   - create_tables

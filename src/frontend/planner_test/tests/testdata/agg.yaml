@@ -80,7 +80,8 @@
     └─BatchHashAgg { group_key: [t.v3], aggs: [min(t.v1), sum((t.v1 + t.v2)), count((t.v1 + t.v2))] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchProject { exprs: [t.v3, t.v1, (t.v1 + t.v2)] }
-          └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+          └─BatchExchange { order: [], dist: Single }
+            └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [v3, agg], pk_columns: [v3] }
     └─StreamProject { exprs: [t.v3, (min(t.v1) * (sum((t.v1 + t.v2))::Decimal / count((t.v1 + t.v2))))] }
@@ -148,7 +149,8 @@
     BatchSimpleAgg { aggs: [count((t.v1 + t.v2)), sum((t.v1 + t.v2))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchProject { exprs: [(t.v1 + t.v2)] }
-        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   stream_plan: |
     StreamMaterialize { columns: [cnt, sum], pk_columns: [] }
     └─StreamProject { exprs: [sum0(count((t.v1 + t.v2))), sum(sum((t.v1 + t.v2)))] }

@@ -6,6 +6,9 @@ create table t (id int);
 statement ok
 create materialized view v as select count(*) cnt from t;
 
+statement ok
+SET QUERY_MODE TO local;
+
 query I
 select * from v join (select count(*) from t) T;
 ----
