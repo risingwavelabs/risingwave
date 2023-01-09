@@ -35,11 +35,5 @@ script = '''
 set -ex
 RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
 JAVA_BINDING_ROOT=${RISINGWAVE_ROOT}/src/java_binding
-cd ${JAVA_BINDING_ROOT}/java
-mvn exec:exec \
-    -pl java-binding \
-    -Dexec.executable=java \
-    -Dexec.args=" \
-        -cp %classpath:java-binding/target*.jar:proto/target/*.jar \
-        -Djava.library.path=${RISINGWAVE_ROOT}/target/debug com.risingwave.java.Demo"
+source ${JAVA_BINDING_ROOT}/run_demo.sh
 '''
