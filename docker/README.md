@@ -1,5 +1,13 @@
 # Docker Images
 
+## Published images
+
+- `latest` on GHCR (latest nightly build): `ghcr.io/risingwavelabs/risingwave:latest` 
+- `latest` on Docker Hub (latest release): `risingwavelabs/risingwave:latest`
+- Other tags available on both GHCR and Docker Hub:
+  - `nightly-yyyyMMdd`, e.g., `nightly-20230108`
+  - `vX.Y.Z`, e.g., `v0.1.15`
+
 ## Build the images
 
 The docker images for x86_64 are built with AVX2 SIMD extensions, while the images for aarch64 are built with NEON SIMD extensions. These must be available on your machine. If your machine does not support these extensions, you must build the docker image with the build-arg `simd_disabled=true`.
