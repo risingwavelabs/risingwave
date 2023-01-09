@@ -51,7 +51,7 @@ impl StreamProject {
         let mut watermark_derivations = vec![];
         let mut watermark_cols = FixedBitSet::with_capacity(logical.schema().len());
         for (expr_idx, expr) in logical.exprs().iter().enumerate() {
-            if let Some(input_idx) = try_derive_watermark(&expr) {
+            if let Some(input_idx) = try_derive_watermark(expr) {
                 watermark_derivations.push((input_idx, expr_idx));
                 watermark_cols.insert(expr_idx);
             }
@@ -103,6 +103,16 @@ impl StreamNode for StreamProject {
                 .exprs()
                 .iter()
                 .map(Expr::to_expr_proto)
+                .collect(),
+            watermark_input_key: self
+                .watermark_derivations
+                .iter()
+                .map(|(x, _)| *x as u32)
+                .collect(),
+            watermark_output_key: self
+                .watermark_derivations
+                .iter()
+                .map(|(_, y)| *y as u32)
                 .collect(),
         })
     }
