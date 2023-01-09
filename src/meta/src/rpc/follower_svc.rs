@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use either::{Left, Right};
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::leader::leader_service_server::LeaderServiceServer;
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -35,7 +34,13 @@ pub async fn start_follower_srv(
     address_info: AddressInfo,
     election_client: Option<ElectionClientRef>,
 ) {
-    let leader_srv = LeaderServiceImpl::new(election_client, MetaLeaderInfo{ node_address: address_info.listen_addr.to_string(), lease_id: 0 });
+    let leader_srv = LeaderServiceImpl::new(
+        election_client,
+        MetaLeaderInfo {
+            node_address: address_info.listen_addr.to_string(),
+            lease_id: 0,
+        },
+    );
 
     let health_srv = HealthServiceImpl::new();
     tonic::transport::Server::builder()

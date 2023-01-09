@@ -14,7 +14,6 @@
 
 use std::borrow::Borrow;
 
-use either::Either;
 use risingwave_common::util::addr::leader_info_to_host_addr;
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::leader::leader_service_server::LeaderService;
@@ -32,7 +31,10 @@ pub struct LeaderServiceImpl {
 
 impl LeaderServiceImpl {
     pub fn new(election_client: Option<ElectionClientRef>, current_leader: MetaLeaderInfo) -> Self {
-        LeaderServiceImpl { election_client, current_leader }
+        LeaderServiceImpl {
+            election_client,
+            current_leader,
+        }
     }
 }
 
@@ -45,9 +47,7 @@ impl LeaderService for LeaderServiceImpl {
     ) -> Result<Response<LeaderResponse>, Status> {
         let leader = match self.election_client.borrow() {
             None => Ok(Some(self.current_leader.clone())),
-            Some(client) => {
-                client.leader().await
-            }
+            Some(client) => client.leader().await,
         }?;
 
         let leader_address = leader

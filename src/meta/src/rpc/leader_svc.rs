@@ -15,7 +15,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use either::{Left, Right};
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -300,7 +299,6 @@ pub async fn start_leader_srv<S: MetaStore>(
             }
         }
     };
-
 
     let leader_srv = LeaderServiceImpl::new(election_client, current_leader);
 
