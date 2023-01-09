@@ -198,7 +198,7 @@ impl HummockStorageV1 {
         local_stats.report(self.state_store_metrics.as_ref(), Some(table_id_label));
         self.state_store_metrics
             .iter_merge_sstable_counts
-            .with_label_values(&["sub-iter"])
+            .with_label_values(&["", "sub-iter"])
             .observe(table_counts as f64);
         Ok(None)
     }
@@ -275,7 +275,7 @@ impl HummockStorageV1 {
         }
         self.state_store_metrics
             .iter_merge_sstable_counts
-            .with_label_values(&["memory-iter"])
+            .with_label_values(&["", "memory-iter"])
             .observe(overlapped_iters.len() as f64);
 
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with the
@@ -385,7 +385,7 @@ impl HummockStorageV1 {
 
         self.state_store_metrics
             .iter_merge_sstable_counts
-            .with_label_values(&["sub-iter"])
+            .with_label_values(&["", "sub-iter"])
             .observe(overlapped_iters.len() as f64);
 
         // TODO: implement delete range if the code of this file would not be delete.
