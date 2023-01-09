@@ -535,7 +535,7 @@ impl PlanRoot {
         }
 
         fn insert_exchange(plan: PlanRef, order: Order) -> PlanRef {
-            BatchExchange::new(plan, order.clone(), Distribution::Single).into()
+            BatchExchange::new(plan, order, Distribution::Single).into()
         }
 
         fn helper(plan: PlanRef) -> PlanRef {
