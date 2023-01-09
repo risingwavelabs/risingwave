@@ -1354,7 +1354,9 @@ def section_streaming_actors(outer_panels):
                     "",
                     [
                         panels.target(f"{metric('stream_agg_cached_keys')}",
-                                      "{{actor_id}}"),
+                                      "cached keys {{actor_id}}"),
+                        panels.target(f"{metric('stream_agg_total_keys')}",
+                                      "total keys {{actor_id}}"),
                     ],
                 ),
             ],

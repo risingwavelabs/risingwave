@@ -21,7 +21,7 @@ use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
@@ -106,6 +106,8 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
 
     total_lookup_count: AtomicU64,
 
+    total_keys_count: AtomicU64,
+
     metrics: Arc<StreamingMetrics>,
 
     /// Extreme state cache size
@@ -184,6 +186,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 group_change_set: HashSet::new(),
                 lookup_miss_count: AtomicU64::new(0),
                 total_lookup_count: AtomicU64::new(0),
+                total_keys_count: AtomicU64::new(0),
                 metrics,
                 chunk_size,
                 group_key_invert_idx,
@@ -258,11 +261,24 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref schema,
             lookup_miss_count,
             total_lookup_count,
+            total_keys_count,
             ..
         }: &mut HashAggExecutorExtra<K, S>,
         agg_group_cache: &mut AggGroupCache<K, S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
+        for (row_idx, op) in chunk.ops().iter().enumerate() {
+            if let Some(vis_map) = chunk.visibility() && !vis_map.is_set(row_idx) {
+                continue;
+            }
+            match op {
+                Op::Insert => total_keys_count.fetch_add(1, Ordering::Relaxed),
+                Op::Delete => total_keys_count.fetch_sub(1, Ordering::Relaxed),
+                Op::UpdateInsert => total_keys_count.fetch_add(1, Ordering::Relaxed),
+                Op::UpdateDelete => total_keys_count.fetch_sub(1, Ordering::Relaxed),
+            };
+        }
+
         // Compute hash code here before serializing keys to avoid duplicate hash code computation.
         let hash_codes = chunk
             .data_chunk()
@@ -376,6 +392,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref mut group_change_set,
             ref lookup_miss_count,
             ref total_lookup_count,
+            ref total_keys_count,
             ref metrics,
             ref chunk_size,
             ref buffered_watermarks,
@@ -402,6 +419,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .agg_cached_keys
             .with_label_values(&[&actor_id_str])
             .set(agg_group_cache.len() as i64);
+        metrics
+            .agg_total_keys
+            .with_label_values(&[&actor_id_str])
+            .set(total_keys_count.load(Ordering::Relaxed) as i64);
 
         let dirty_cnt = group_change_set.len();
         if dirty_cnt > 0 {
