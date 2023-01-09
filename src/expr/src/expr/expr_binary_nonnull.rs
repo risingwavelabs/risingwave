@@ -21,7 +21,7 @@ use risingwave_pb::expr::expr_node::Type;
 
 use super::Expression;
 use crate::expr::expr_binary_bytes::new_concat_op;
-use crate::expr::template::BinaryExpression;
+use crate::expr::template::{BinaryExpression, BinaryBytesExpression};
 use crate::expr::{template_fast, BoxedExpression};
 use crate::vector_op::arithmetic_op::*;
 use crate::vector_op::bitwise_op::*;
@@ -33,7 +33,7 @@ use crate::vector_op::extract::{
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
-use crate::vector_op::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
+use crate::vector_op::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone, timestamptz_to_string, str_to_timestamptz};
 use crate::vector_op::to_timestamp::to_timestamp;
 use crate::vector_op::tumble::{
     tumble_start_date, tumble_start_date_time, tumble_start_timestamptz,
@@ -415,6 +415,33 @@ fn build_at_time_zone_expr(
     Ok(expr)
 }
 
+fn build_cast_with_time_zone_expr(
+    ret: DataType,
+    l: BoxedExpression,
+    r: BoxedExpression,
+) -> Result<BoxedExpression> {
+    let expr: BoxedExpression = match (ret.clone(), l.return_type()) {
+        (DataType::Varchar, DataType::Timestamptz) => Box::new(BinaryBytesExpression::<
+            I64Array,
+            Utf8Array,
+            _,
+        >::new(l, r, ret, timestamptz_to_string)),
+        (DataType::Timestamptz, DataType::Varchar) => Box::new(BinaryExpression::<
+            Utf8Array,
+            Utf8Array,
+            I64Array,
+            _,
+        >::new(l, r, ret, str_to_timestamptz)),
+        _ => {
+            return Err(ExprError::UnsupportedFunction(format!(
+                "cannot cast at time zone (input type: {:?}, output type: {:?}",
+                l.return_type(), ret,
+            )))
+        }
+    };
+    Ok(expr)
+}
+
 pub fn new_date_trunc_expr(
     ret: DataType,
     field: BoxedExpression,
@@ -630,6 +657,7 @@ pub fn new_binary_expr(
         }
         Type::Extract => build_extract_expr(ret, l, r)?,
         Type::AtTimeZone => build_at_time_zone_expr(ret, l, r)?,
+        Type::CastWithTimeZone => build_cast_with_time_zone_expr(ret, l, r)?,
         Type::RoundDigit => Box::new(template_fast::BinaryExpression::new(
             l,
             r,

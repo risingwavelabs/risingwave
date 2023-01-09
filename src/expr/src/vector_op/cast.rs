@@ -249,12 +249,6 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-pub fn timestamptz_to_utc_string(elem: i64, mut writer: &mut dyn Write) -> Result<()> {
-    elem.write_with_type(&DataType::Timestamptz, &mut writer)
-        .unwrap();
-    Ok(())
-}
-
 #[inline(always)]
 pub fn str_parse<T>(elem: &str) -> Result<T>
 where
@@ -418,7 +412,6 @@ macro_rules! for_all_cast_variants {
             { varchar, time, str_to_time, false },
             { varchar, interval, str_parse, false },
             { varchar, timestamp, str_to_timestamp, false },
-            { varchar, timestamptz, str_to_timestamptz, false },
             { varchar, int16, str_parse, false },
             { varchar, int32, str_parse, false },
             { varchar, int64, str_parse, false },
@@ -440,7 +433,6 @@ macro_rules! for_all_cast_variants {
             { interval, varchar, general_to_text, false },
             { date, varchar, general_to_text, false },
             { timestamp, varchar, general_to_text, false },
-            { timestamptz, varchar, timestamptz_to_utc_string, false },
             { list, varchar, |x, w| general_to_text(x, w), false },
 
             { boolean, int32, try_cast, false },
@@ -1001,22 +993,4 @@ mod tests {
         assert_eq!(timestamp2.0.timestamp_micros(), -1);
     }
 
-    #[test]
-    fn test_timestamptz() {
-        let str1 = "0001-11-15 15:35:40.999999+08:00";
-        let timestamptz1 = str_to_timestamptz(str1).unwrap();
-        assert_eq!(timestamptz1, -62108094259000001);
-
-        let mut writer = String::new();
-        timestamptz_to_utc_string(timestamptz1, &mut writer).unwrap();
-        assert_eq!(writer, "0001-11-15 07:35:40.999999+00:00");
-
-        let str2 = "1969-12-31 23:59:59.999999+00:00";
-        let timestamptz2 = str_to_timestamptz(str2).unwrap();
-        assert_eq!(timestamptz2, -1);
-
-        let mut writer = String::new();
-        timestamptz_to_utc_string(timestamptz2, &mut writer).unwrap();
-        assert_eq!(writer, str2);
-    }
 }

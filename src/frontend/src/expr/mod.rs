@@ -66,6 +66,112 @@ pub trait Expr: Into<ExprImpl> {
     fn to_expr_proto(&self) -> ExprNode;
 }
 
+
+/// `SessionTimezone` will be used to resolve session 
+/// timezone-dependent casts, comparisons or arithmetic.
+pub struct SessionTimezoneRewriter {
+    pub timezone: String,
+    /// Whether or not the session timezone was used
+    pub used: bool,
+}
+
+impl ExprRewriter for SessionTimezoneRewriter {
+    fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
+        let (func_type, inputs, ret) = func_call.decompose();
+        let inputs: Vec<ExprImpl> = inputs
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        if let Some(expr) = self.with_timezone(func_type, inputs.clone(), ret) {
+            self.used = true;
+            expr
+        } else {
+            FunctionCall::new_unchecked(func_type, inputs, ret).into()
+        }
+    }
+}
+
+impl SessionTimezoneRewriter {
+    fn with_timezone(&self, func_type: ExprType, inputs: Vec<ExprImpl>, return_type: DataType) -> Option<ExprImpl> {
+        match func_type {
+            ExprType::Cast => {
+                assert_eq!(inputs.len(), 1);
+                let mut input = inputs[0];
+                let input_type = input.return_type();
+                match (input_type, return_type) {
+                    (DataType::Timestamptz, DataType::Varchar) | (DataType::Varchar, DataType::Timestamptz) => {
+                        Some(self.cast_with_timezone(input, return_type))
+                    },
+                    (DataType::Timestamp, DataType::Timestamptz) | (DataType::Timestamptz, DataType::Timestamp) => {
+                        Some(self.at_timezone(input))
+                    },
+                    (DataType::Date, DataType::Timestamptz) | (DataType::Timestamp, DataType::Timestamptz)  => {
+                        if input_type != DataType::Timestamp {
+                            input = input.cast_explicit(DataType::Timestamp).unwrap();
+                        }
+                        Some(self.at_timezone(input))
+                    }
+                    (DataType::Timestamptz, DataType::Date) | (DataType::Timestamptz, DataType::Time) | (DataType::Timestamptz, DataType::Timestamp) => {
+                        input = self.at_timezone(input);
+                        if return_type != DataType::Timestamp {
+                            input = input.cast_explicit(return_type).unwrap();
+                        }
+                        Some(input)
+                    }
+                    _ => None
+                }
+            },
+            ExprType::Equal
+                | ExprType::LessThan
+                | ExprType::LessThanOrEqual
+                | ExprType::GreaterThan
+                | ExprType::GreaterThanOrEqual => {
+                assert_eq!(inputs.len(), 2);
+                for idx in 0..2 {
+                    if matches!(inputs[(idx + 1) % 2].return_type(), DataType::Timestamptz)
+                        && matches!(
+                            inputs[idx % 2].return_type(),
+                            DataType::Date | DataType::Timestamp
+                        )
+                    {   
+                        // Cast to `Timestamp` first, then use `AT TIME ZONE` to convert to `Timestamptz`
+                        if matches!(inputs[idx % 2].return_type(), DataType::Date) {
+                            inputs[idx % 2] = inputs[idx % 2].cast_explicit(DataType::Timestamp).unwrap();
+                        }
+                        inputs[idx % 2] =
+                            self.at_timezone(inputs[idx % 2]);
+                    }
+                }
+                Some(FunctionCall::new_unchecked(func_type, inputs, return_type).into())
+            }
+            // TODO: handle tstz-related arithmetic with timezone
+            _ => None,
+        }
+    }
+
+    fn at_timezone(&self, input: ExprImpl) -> ExprImpl {
+            FunctionCall::new(
+                ExprType::AtTimeZone,
+                vec![
+                    input,
+                    ExprImpl::literal_varchar(self.timezone.clone()),
+                ],
+            )
+            .unwrap()
+            .into()
+    }
+
+    fn cast_with_timezone(&self, input: ExprImpl, return_type: DataType) -> ExprImpl {
+        FunctionCall::new_unchecked(
+            ExprType::CastWithTimeZone,
+            vec![
+                input, 
+                ExprImpl::literal_varchar(self.timezone.clone())], 
+            return_type,
+        ).into()
+    }
+}
+
 macro_rules! impl_expr_impl {
     ($($t:ident),*) => {
         #[derive(Clone, Eq, PartialEq, Hash, EnumAsInner)]
