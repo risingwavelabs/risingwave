@@ -162,7 +162,7 @@ impl<S: StateStore> SortBuffer<S> {
             let end_bound = Bound::Unbounded;
 
             for ((time_col, _), (row, _)) in self.buffer.range((start_bound, end_bound)) {
-                if let Some(ref last_watermark) = &last_watermark && &time_col == &last_watermark {
+                if let Some(ref last_watermark) = &last_watermark && time_col == last_watermark {
                     continue;
                 }
                 // Only when a record's timestamp is prior to the watermark should it be
@@ -192,7 +192,7 @@ impl<S: StateStore> SortBuffer<S> {
     }
 
     /// Delete a record from the buffer.
-    /// TODO: The delete is always be called in order per group, so should we support range_delete
+    /// TODO: `delete` is always be called in order per group, so should we support `range_delete`
     /// here?
     ///
     /// # Panics
