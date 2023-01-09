@@ -68,8 +68,10 @@ impl CompactorService {
 
         let provide_minio = config.provide_minio.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
+        let provide_opendal = config.provide_opendal.as_ref().unwrap();
         add_storage_backend(
             &config.id,
+            provide_opendal,
             provide_minio,
             provide_aws_s3,
             HummockInMemoryStrategy::Shared,

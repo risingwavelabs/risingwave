@@ -820,6 +820,9 @@ pub async fn parse_remote_object_store(
             .await
             .monitored(metrics),
         ),
+        hdfs if hdfs.starts_with("hdfs://") => {
+            ObjectStoreImpl::Hdfs(HdfsObjectStore::new(hdfs.to_string()).monitored(metrics))
+        }
         s3_compatible if s3_compatible.starts_with("s3-compatible://") => {
             ObjectStoreImpl::S3Compatible(
                 S3ObjectStore::new_s3_compatible(
@@ -876,6 +879,9 @@ pub fn parse_local_object_store(url: &str, metrics: Arc<ObjectStoreMetrics>) -> 
         "memory" => {
             tracing::warn!("You're using Hummock in-memory local object store. This should never be used in benchmarks and production environment.");
             ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
+        }
+        hdfs if hdfs.starts_with("hdfs://") => {
+            ObjectStoreImpl::Hdfs(HdfsObjectStore::new(hdfs.to_string()).monitored(metrics))
         }
         other => {
             unimplemented!(

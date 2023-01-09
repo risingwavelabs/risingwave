@@ -16,7 +16,7 @@ use std::process::Command;
 
 use anyhow::{anyhow, Result};
 
-use crate::{AwsS3Config, MetaNodeConfig, MinioConfig};
+use crate::{AwsS3Config, MetaNodeConfig, MinioConfig, OpendalConfig};
 
 /// Add a meta node to the parameters.
 pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) -> Result<()> {
@@ -57,13 +57,14 @@ pub enum HummockInMemoryStrategy {
 /// Add a storage backend to the parameters. Returns whether this is a shared backend.
 pub fn add_storage_backend(
     id: &str,
+    provide_opendal: &[OpendalConfig],
     provide_minio: &[MinioConfig],
     provide_aws_s3: &[AwsS3Config],
     hummock_in_memory_strategy: HummockInMemoryStrategy,
     cmd: &mut Command,
 ) -> Result<bool> {
-    let is_shared_backend = match (provide_minio, provide_aws_s3) {
-        ([], []) => {
+    let is_shared_backend = match (provide_minio, provide_aws_s3, provide_opendal) {
+        ([], [], []) => {
             match hummock_in_memory_strategy {
                 HummockInMemoryStrategy::Isolated => {
                     cmd.arg("--state-store").arg("hummock+memory");
@@ -78,7 +79,7 @@ pub fn add_storage_backend(
                 )),
             }
         }
-        ([minio], []) => {
+        ([minio], [], []) => {
             cmd.arg("--state-store").arg(format!(
                 "hummock+minio://{hummock_user}:{hummock_password}@{minio_addr}:{minio_port}/{hummock_bucket}",
                 hummock_user = minio.root_user,
@@ -89,7 +90,7 @@ pub fn add_storage_backend(
             ));
             true
         }
-        ([], [aws_s3]) => {
+        ([], [aws_s3], []) => {
             // if s3-compatible is true, using some s3 compatible object store.
             match aws_s3.s3_compatible{
                 true => cmd.arg("--state-store")
@@ -99,8 +100,13 @@ pub fn add_storage_backend(
             };
             true
         }
+        ([], [], [opendal]) => {
+            cmd.arg("--state-store")
+            .arg(format!("hummock+hdfs://{}", opendal.namenode));
+            true
+        }
 
-        (other_minio, other_s3) => {
+        (other_minio, other_s3, _) => {
             return Err(anyhow!(
                 "{} minio and {} s3 instance found in config, but only 1 is needed",
                 other_minio.len(),

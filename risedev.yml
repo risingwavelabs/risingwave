@@ -21,11 +21,12 @@ profile:
       # If you want to use the local s3 storage, enable the following line
       # - use: minio
 
+      
       # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
       # - use: aws-s3
       #   bucket: test-bucket
       # If you want to use other s3 compatible object store, open this flag:
-      #   s3-compatible: false
+        # s3-compatible: true
 
       # if you want to enable etcd backend, uncomment the following lines.
       # - use: etcd
@@ -34,11 +35,15 @@ profile:
       - use: compute-node
       - use: frontend
 
+     # If you want to use opendal, enable the following lines:
+      - use: opendal
+        namenode: "127.0.0.1:9000"
+        
       # If you want to create CDC source, uncomment the following line
       # - use: connector-node
 
       # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
-      # - use: compactor
+      - use: compactor
 
       # If you want to enable metrics, uncomment those two lines.
       # - use: prometheus
@@ -653,6 +658,9 @@ template:
     provide-minio: "minio*"
 
     # AWS s3 bucket used by this compute node
+    provide-opendal: "opendal*"
+
+    # AWS s3 bucket used by this compute node
     provide-aws-s3: "aws-s3*"
 
     # Meta-nodes used by this compute node
@@ -798,6 +806,8 @@ template:
     provide-minio: "minio*"
 
     # AWS s3 bucket used by this compute node
+    provide-opendal: "opendal*"
+    # AWS s3 bucket used by this compute node
     provide-aws-s3: "aws-s3*"
 
     # Meta-nodes used by this compute node
@@ -847,6 +857,12 @@ template:
 
     # Jaeger has a lot of ports open, and we don't want to make this config more complex.
     # So we keep the default value of jaeger instead of making it part of RiseDev config.
+
+  # opendal:
+  opendal:
+    id: opendal
+
+    namenode: 127.0.0.1:9000"
 
   # aws-s3 is a placeholder service to provide configurations
   aws-s3:

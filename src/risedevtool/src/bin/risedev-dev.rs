@@ -27,8 +27,8 @@ use risedev::{
     compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
     ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext,
     FrontendService, GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService,
-    PrometheusService, PubsubService, RedisService, ServiceConfig, Task, ZooKeeperService,
-    RISEDEV_SESSION_NAME,
+    OpendalConfig, PrometheusService, PubsubService, RedisService, ServiceConfig, Task,
+    ZooKeeperService, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -112,6 +112,7 @@ fn task_main(
             ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
             ServiceConfig::AwsS3(_) => None,
+            ServiceConfig::OpenDal(_) => None,
             ServiceConfig::RedPanda(_) => None,
             ServiceConfig::ConnectorNode(c) => Some((c.port, c.id.clone())),
         };
@@ -275,6 +276,29 @@ fn task_main(
                 ctx.complete_spin();
                 ctx.pb
                     .set_message(format!("using AWS s3 bucket {}", c.bucket));
+            }
+            ServiceConfig::OpenDal(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+
+                struct OpendalService(OpendalConfig);
+                impl Task for OpendalService {
+                    fn execute(
+                        &mut self,
+                        _ctx: &mut ExecuteContext<impl std::io::Write>,
+                    ) -> anyhow::Result<()> {
+                        Ok(())
+                    }
+
+                    fn id(&self) -> String {
+                        self.0.id.clone()
+                    }
+                }
+
+                ctx.service(&OpendalService(c.clone()));
+                ctx.complete_spin();
+                ctx.pb
+                    .set_message(format!("using Opendal, namenode =  {}", c.namenode));
             }
             ServiceConfig::ZooKeeper(c) => {
                 let mut ctx =
