@@ -53,6 +53,7 @@ type Result<T> = std::result::Result<T, BindingError>;
 pub struct ByteArray<'a>(JObject<'a>);
 
 impl<'a> From<jbyteArray> for ByteArray<'a> {
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn from(inner: jbyteArray) -> Self {
         unsafe { Self(JObject::from_raw(inner)) }
     }
@@ -136,8 +137,8 @@ where
     F: FnOnce() -> Result<Ret>,
     Ret: Default,
 {
-    match catch_unwind(std::panic::AssertUnwindSafe(move || inner())) {
-        Ok(Ok(ret)) => ret.into(),
+    match catch_unwind(std::panic::AssertUnwindSafe(inner)) {
+        Ok(Ok(ret)) => ret,
         Ok(Err(e)) => {
             match e {
                 BindingError::JniError {
