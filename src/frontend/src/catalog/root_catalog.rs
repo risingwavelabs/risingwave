@@ -57,20 +57,23 @@ impl<'a> SchemaPath<'a> {
     }
 
     /// Call function `f` for each schema name. Return the first `Some` result.
-    pub fn find<T>(&self, mut f: impl FnMut(&str) -> Option<T>) -> Option<(T, &'a str)> {
+    pub fn try_find<T, E>(
+        &self,
+        mut f: impl FnMut(&str) -> Result<Option<T>, E>,
+    ) -> Result<Option<(T, &'a str)>, E> {
         match self {
-            SchemaPath::Name(schema_name) => f(schema_name).map(|t| (t, *schema_name)),
+            SchemaPath::Name(schema_name) => Ok(f(schema_name)?.map(|t| (t, *schema_name))),
             SchemaPath::Path(search_path, user_name) => {
                 for schema_name in search_path.path() {
                     let mut schema_name: &str = schema_name;
                     if schema_name == USER_NAME_WILD_CARD {
                         schema_name = user_name;
                     }
-                    if let Some(res) = f(schema_name) {
-                        return Some((res, schema_name));
+                    if let Ok(Some(res)) = f(schema_name) {
+                        return Ok(Some((res, schema_name)));
                     }
                 }
-                None
+                Ok(None)
             }
         }
     }
@@ -355,11 +358,11 @@ impl Catalog {
         table_name: &str,
     ) -> CatalogResult<(&Arc<TableCatalog>, &'a str)> {
         schema_path
-            .find(|schema_name| {
-                self.get_schema_by_name(db_name, schema_name)
-                    .ok()?
-                    .get_table_by_name(table_name)
-            })
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_table_by_name(table_name))
+            })?
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()))
     }
 
@@ -400,11 +403,11 @@ impl Catalog {
         source_name: &str,
     ) -> CatalogResult<(&Arc<SourceCatalog>, &'a str)> {
         schema_path
-            .find(|schema_name| {
-                self.get_schema_by_name(db_name, schema_name)
-                    .ok()?
-                    .get_source_by_name(source_name)
-            })
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_source_by_name(source_name))
+            })?
             .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()))
     }
 
@@ -415,11 +418,11 @@ impl Catalog {
         sink_name: &str,
     ) -> CatalogResult<(&Arc<SinkCatalog>, &'a str)> {
         schema_path
-            .find(|schema_name| {
-                self.get_schema_by_name(db_name, schema_name)
-                    .ok()?
-                    .get_sink_by_name(sink_name)
-            })
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_sink_by_name(sink_name))
+            })?
             .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()))
     }
 
@@ -430,11 +433,11 @@ impl Catalog {
         index_name: &str,
     ) -> CatalogResult<(&Arc<IndexCatalog>, &'a str)> {
         schema_path
-            .find(|schema_name| {
-                self.get_schema_by_name(db_name, schema_name)
-                    .ok()?
-                    .get_index_by_name(index_name)
-            })
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_index_by_name(index_name))
+            })?
             .ok_or_else(|| CatalogError::NotFound("index", index_name.to_string()))
     }
 
@@ -445,11 +448,11 @@ impl Catalog {
         view_name: &str,
     ) -> CatalogResult<(&Arc<ViewCatalog>, &'a str)> {
         schema_path
-            .find(|schema_name| {
-                self.get_schema_by_name(db_name, schema_name)
-                    .ok()?
-                    .get_view_by_name(view_name)
-            })
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_view_by_name(view_name))
+            })?
             .ok_or_else(|| CatalogError::NotFound("view", view_name.to_string()))
     }
 
@@ -461,11 +464,11 @@ impl Catalog {
         args: &[DataType],
     ) -> CatalogResult<(&Arc<FunctionCatalog>, &'a str)> {
         schema_path
-            .find(|schema_name| {
-                self.get_schema_by_name(db_name, schema_name)
-                    .ok()?
-                    .get_function_by_name_args(function_name, args)
-            })
+            .try_find(|schema_name| {
+                Ok(self
+                    .get_schema_by_name(db_name, schema_name)?
+                    .get_function_by_name_args(function_name, args))
+            })?
             .ok_or_else(|| CatalogError::NotFound("function", function_name.to_string()))
     }
 
@@ -535,23 +538,23 @@ impl Catalog {
         class_name: &str,
     ) -> CatalogResult<u32> {
         schema_path
-            .find(|schema_name| {
-                let schema = self.get_schema_by_name(db_name, schema_name).ok()?;
+            .try_find(|schema_name| {
+                let schema = self.get_schema_by_name(db_name, schema_name)?;
                 #[allow(clippy::manual_map)]
                 if let Some(item) = schema.get_system_table_by_name(class_name) {
-                    Some(item.id().into())
+                    Ok(Some(item.id().into()))
                 } else if let Some(item) = schema.get_table_by_name(class_name) {
-                    Some(item.id().into())
+                    Ok(Some(item.id().into()))
                 } else if let Some(item) = schema.get_index_by_name(class_name) {
-                    Some(item.id.into())
+                    Ok(Some(item.id.into()))
                 } else if let Some(item) = schema.get_source_by_name(class_name) {
-                    Some(item.id)
+                    Ok(Some(item.id))
                 } else if let Some(item) = schema.get_view_by_name(class_name) {
-                    Some(item.id)
+                    Ok(Some(item.id))
                 } else {
-                    None
+                    Ok(None)
                 }
-            })
+            })?
             .map(|(id, _)| id)
             .ok_or_else(|| CatalogError::NotFound("class", class_name.to_string()))
     }
