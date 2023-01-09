@@ -12,35 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-pub use json_parser::*;
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 pub use simd_json_parser::*;
 
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-mod json_parser;
 mod operators;
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 mod simd_json_parser;
 
 #[cfg(test)]

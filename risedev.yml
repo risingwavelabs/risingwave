@@ -16,7 +16,8 @@ profile:
 
   # The default configuration will start 1 compute node, 1 meta node and 1 frontend.
   default:
-    config-path: src/config/default.toml
+    # Specify a configuration file to override the default settings
+    # config-path: src/config/example.toml
     steps:
       # If you want to use the local s3 storage, enable the following line
       # - use: minio
@@ -68,7 +69,6 @@ profile:
 
   # The minimum config to use with risectl.
   for-ctl:
-    config-path: src/config/default.toml
     steps:
       - use: minio
       - use: meta-node
@@ -132,7 +132,6 @@ profile:
         persist-data: true
 
   3etcd-3meta-1cn-1fe:
-    config-path: src/config/default.toml
     steps:
       - use: etcd
         unsafe-no-fsync: true
@@ -194,7 +193,7 @@ profile:
       - use: compactor
 
   docker-playground:
-    config-path: src/config/default.toml
+    config-path: src/config/playground.toml
     steps:
       - use: meta-node
         listen-address: "0.0.0.0"

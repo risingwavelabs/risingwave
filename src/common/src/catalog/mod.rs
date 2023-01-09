@@ -32,6 +32,9 @@ pub use crate::constants::hummock;
 use crate::error::Result;
 use crate::row::OwnedRow;
 
+/// The global version of the catalog.
+pub type CatalogVersion = u64;
+
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
 pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
@@ -60,8 +63,6 @@ pub trait SysCatalogReader: Sync + Send + 'static {
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
-
-pub type CatalogVersion = u64;
 
 #[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct DatabaseId {
