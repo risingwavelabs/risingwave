@@ -103,7 +103,9 @@ pub struct MetaOpts {
     /// colocated with Meta node in the cloud environment
     pub connector_rpc_endpoint: Option<String>,
 
-    /// The storage url for storing backups.
+    /// The primary state store url.
+    pub state_store_url: String,
+    /// The object storage url for storing backups.
     pub backup_storage_url: String,
     /// The storage directory for storing backups.
     pub backup_storage_directory: String,
@@ -128,6 +130,7 @@ impl MetaOpts {
             node_num_monitor_interval_sec: 10,
             prometheus_endpoint: None,
             connector_rpc_endpoint: None,
+            state_store_url: "".to_string(),
             backup_storage_url: "memory".to_string(),
             backup_storage_directory: "backup".to_string(),
         }

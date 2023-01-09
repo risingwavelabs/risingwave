@@ -28,6 +28,7 @@ use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
+use risingwave_pb::meta::storage_service_server::StorageServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::MetaLeaderInfo;
 use risingwave_pb::user::user_service_server::UserServiceServer;
@@ -52,6 +53,7 @@ use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
+use crate::rpc::service::storage_service::StorageServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::MetaStore;
@@ -255,6 +257,7 @@ pub async fn start_leader_srv<S: MetaStore>(
     );
     let health_srv = HealthServiceImpl::new();
     let backup_srv = BackupServiceImpl::new(backup_manager);
+    let storage_srv = StorageServiceImpl::new(env.opts.state_store_url.clone());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(
@@ -324,6 +327,7 @@ pub async fn start_leader_srv<S: MetaStore>(
         .add_service(ScaleServiceServer::new(scale_srv))
         .add_service(HealthServer::new(health_srv))
         .add_service(BackupServiceServer::new(backup_srv))
+        .add_service(StorageServiceServer::new(storage_srv))
         .serve_with_shutdown(address_info.listen_addr, async move {
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {},

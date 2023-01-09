@@ -77,6 +77,15 @@ pub async fn playground() -> Result<()> {
                 .iter()
                 .filter(|s| matches!(s, ServiceConfig::ComputeNode(_)))
                 .count();
+            let compactor_node_count = services
+                .iter()
+                .filter(|s| matches!(s, ServiceConfig::ComputeNode(_)))
+                .count();
+            let hummock_in_memory_strategy = if compute_node_count > 1 || compactor_node_count > 0 {
+                HummockInMemoryStrategy::Shared
+            } else {
+                HummockInMemoryStrategy::Isolated
+            };
 
             let mut rw_services = vec![];
             for service in &services {
@@ -86,11 +95,7 @@ pub async fn playground() -> Result<()> {
                         ComputeNodeService::apply_command_args(
                             &mut command,
                             c,
-                            if compute_node_count > 1 {
-                                HummockInMemoryStrategy::Shared
-                            } else {
-                                HummockInMemoryStrategy::Isolated
-                            },
+                            hummock_in_memory_strategy,
                         )?;
                         apply_config_file(&mut command, config_path.as_deref());
                         if c.enable_tiered_cache {
@@ -107,7 +112,11 @@ pub async fn playground() -> Result<()> {
                     }
                     ServiceConfig::MetaNode(c) => {
                         let mut command = Command::new("meta-node");
-                        MetaNodeService::apply_command_args(&mut command, c)?;
+                        MetaNodeService::apply_command_args(
+                            &mut command,
+                            c,
+                            hummock_in_memory_strategy,
+                        )?;
                         apply_config_file(&mut command, config_path.as_deref());
                         rw_services.push(RisingWaveService::Meta(
                             command.get_args().map(ToOwned::to_owned).collect(),
@@ -123,7 +132,11 @@ pub async fn playground() -> Result<()> {
                     }
                     ServiceConfig::Compactor(c) => {
                         let mut command = Command::new("compactor");
-                        CompactorService::apply_command_args(&mut command, c)?;
+                        CompactorService::apply_command_args(
+                            &mut command,
+                            c,
+                            hummock_in_memory_strategy,
+                        )?;
                         apply_config_file(&mut command, config_path.as_deref());
                         rw_services.push(RisingWaveService::Compactor(
                             command.get_args().map(ToOwned::to_owned).collect(),

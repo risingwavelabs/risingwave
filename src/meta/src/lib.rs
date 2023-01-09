@@ -101,6 +101,10 @@ pub struct MetaNodeOpts {
     #[clap(long)]
     prometheus_endpoint: Option<String>,
 
+    /// For worker nodes to create storage backend.
+    #[clap(long, default_value = "")]
+    pub state_store: String,
+
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
     #[clap(long, env = "META_CONNECTOR_RPC_ENDPOINT")]
@@ -186,6 +190,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
                 prometheus_endpoint: opts.prometheus_endpoint,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
+                state_store_url: opts.state_store,
                 backup_storage_url: config.backup.storage_url,
                 backup_storage_directory: config.backup.storage_directory,
             },

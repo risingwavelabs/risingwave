@@ -709,6 +709,12 @@ template:
     # Prometheus nodes used by dashboard service
     provide-prometheus: "prometheus*"
 
+    # Minio instances used by the cluster
+    provide-minio: "minio*"
+
+    # AWS s3 bucket used by the cluster
+    provide-aws-s3: "aws-s3*"
+
   prometheus:
     # Advertise address of Prometheus
     address: "127.0.0.1"

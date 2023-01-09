@@ -64,6 +64,8 @@ pub struct MetaNodeConfig {
     pub connector_rpc_endpoint: String,
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
+    pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_aws_s3: Option<Vec<AwsS3Config>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

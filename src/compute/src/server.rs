@@ -113,8 +113,10 @@ pub async fn compute_node_serve(
 
     let mut join_handle_vec = vec![];
 
+    let state_store_url = meta_client.get_state_store_url().await.unwrap();
+    assert_eq!(state_store_url, opts.state_store);
     let state_store = StateStoreImpl::new(
-        &opts.state_store,
+        &state_store_url,
         &opts.file_cache_dir,
         &config,
         hummock_meta_client.clone(),

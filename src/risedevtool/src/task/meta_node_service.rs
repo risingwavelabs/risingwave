@@ -19,7 +19,7 @@ use std::process::Command;
 use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
-use crate::MetaNodeConfig;
+use crate::{add_storage_backend, HummockInMemoryStrategy, MetaNodeConfig};
 
 pub struct MetaNodeService {
     config: MetaNodeConfig,
@@ -41,7 +41,11 @@ impl MetaNodeService {
     }
 
     /// Apply command args according to config
-    pub fn apply_command_args(cmd: &mut Command, config: &MetaNodeConfig) -> Result<()> {
+    pub fn apply_command_args(
+        cmd: &mut Command,
+        config: &MetaNodeConfig,
+        hummock_in_memory_strategy: HummockInMemoryStrategy,
+    ) -> Result<()> {
         cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--host")
@@ -89,6 +93,16 @@ impl MetaNodeService {
             }
         }
 
+        let provide_minio = config.provide_minio.as_ref().unwrap();
+        let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
+        add_storage_backend(
+            &config.id,
+            provide_minio,
+            provide_aws_s3,
+            hummock_in_memory_strategy,
+            cmd,
+        )?;
+
         Ok(())
     }
 }
@@ -117,7 +131,7 @@ impl Task for MetaNodeService {
             );
         }
 
-        Self::apply_command_args(&mut cmd, &self.config)?;
+        Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Isolated)?;
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
         cmd.arg("--config-path")

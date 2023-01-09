@@ -51,6 +51,7 @@ pub struct ComputeNodeOpts {
     #[clap(long)]
     pub client_address: Option<String>,
 
+    // TODO(zhidong): remove this option
     #[clap(long, default_value = "hummock+memory")]
     pub state_store: String,
 

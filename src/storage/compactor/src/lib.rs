@@ -35,6 +35,7 @@ pub struct CompactorOpts {
     #[clap(long)]
     pub port: Option<u16>,
 
+    // TODO(zhidong): remove this option
     #[clap(long, default_value = "")]
     pub state_store: String,
 

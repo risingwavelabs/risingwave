@@ -44,6 +44,7 @@ pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) ->
 }
 
 /// Strategy for whether to enable in-memory hummock if no minio and s3 is provided.
+#[derive(Clone, Copy)]
 pub enum HummockInMemoryStrategy {
     /// Enable isolated in-memory hummock. Used by single-node configuration.
     Isolated,

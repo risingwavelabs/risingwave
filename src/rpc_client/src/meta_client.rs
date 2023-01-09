@@ -47,6 +47,7 @@ use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::reschedule_request::Reschedule as ProstReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
+use risingwave_pb::meta::storage_service_client::StorageServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -666,6 +667,12 @@ impl MetaClient {
         let resp = self.inner.get_meta_snapshot_manifest(req).await?;
         Ok(resp.manifest.expect("should exist"))
     }
+
+    pub async fn get_state_store_url(&self) -> Result<String> {
+        let req = GetStateStoreUrlRequest {};
+        let resp = self.inner.get_state_store_url(req).await?;
+        Ok(resp.url)
+    }
 }
 
 #[async_trait]
@@ -845,6 +852,7 @@ struct GrpcMetaClient {
     user_client: UserServiceClient<Channel>,
     scale_client: ScaleServiceClient<Channel>,
     backup_client: BackupServiceClient<Channel>,
+    storage_client: StorageServiceClient<Channel>,
 }
 
 impl GrpcMetaClient {
@@ -898,7 +906,8 @@ impl GrpcMetaClient {
         let stream_client = StreamManagerServiceClient::new(channel.clone());
         let user_client = UserServiceClient::new(channel.clone());
         let scale_client = ScaleServiceClient::new(channel.clone());
-        let backup_client = BackupServiceClient::new(channel);
+        let backup_client = BackupServiceClient::new(channel.clone());
+        let storage_client = StorageServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
@@ -909,6 +918,7 @@ impl GrpcMetaClient {
             user_client,
             scale_client,
             backup_client,
+            storage_client,
         })
     }
 
@@ -989,6 +999,7 @@ macro_rules! for_all_meta_rpc {
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
             ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
+            ,{ storage_client, get_state_store_url, GetStateStoreUrlRequest, GetStateStoreUrlResponse }
         }
     };
 }

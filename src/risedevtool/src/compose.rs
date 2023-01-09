@@ -201,7 +201,11 @@ impl Compose for ComputeNodeConfig {
 impl Compose for MetaNodeConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("meta-node");
-        MetaNodeService::apply_command_args(&mut command, self)?;
+        MetaNodeService::apply_command_args(
+            &mut command,
+            self,
+            HummockInMemoryStrategy::Disallowed,
+        )?;
 
         if let Some(c) = &config.rw_config_path {
             let target = Path::new(&config.config_directory).join("risingwave.toml");
@@ -264,7 +268,11 @@ impl Compose for FrontendConfig {
 impl Compose for CompactorConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compactor-node");
-        CompactorService::apply_command_args(&mut command, self)?;
+        CompactorService::apply_command_args(
+            &mut command,
+            self,
+            HummockInMemoryStrategy::Disallowed,
+        )?;
 
         if let Some(c) = &config.rw_config_path {
             let target = Path::new(&config.config_directory).join("risingwave.toml");
