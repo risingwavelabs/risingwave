@@ -35,7 +35,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use super::CreateStreamingJobContext;
-use crate::manager::{DatabaseId, IdCategory, IdGeneratorManager, IdGeneratorManagerRef, SchemaId};
+use crate::manager::{DatabaseId, IdCategory, IdGeneratorManagerRef, SchemaId};
 use crate::model::FragmentId;
 use crate::storage::MetaStore;
 use crate::MetaResult;

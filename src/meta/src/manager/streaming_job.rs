@@ -102,6 +102,9 @@ impl StreamingJob {
         }
     }
 
+    /// Returns the optional [`Source`] if this is a `Table` streaming job.
+    ///
+    /// Only used for registering sources for creating tables with connectors.
     pub fn source(&self) -> Option<&Source> {
         match self {
             Self::MaterializedView(_) => None,
