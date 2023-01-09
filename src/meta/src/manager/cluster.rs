@@ -20,7 +20,7 @@ use std::time::{Duration, SystemTime};
 use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
-use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
+use risingwave_pb::common::{ClusterConfig, HostAddress, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
@@ -63,6 +63,8 @@ pub struct ClusterManager<S: MetaStore> {
 
     max_heartbeat_interval: Duration,
 
+    cluster_config: ClusterConfig,
+
     core: RwLock<ClusterManagerCore>,
 }
 
@@ -73,10 +75,13 @@ where
     pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> MetaResult<Self> {
         let meta_store = env.meta_store_ref();
         let core = ClusterManagerCore::new(meta_store.clone()).await?;
-
+        let cluster_config = ClusterConfig {
+            state_store_url: env.opts.state_store_url.clone(),
+        };
         Ok(Self {
             env,
             max_heartbeat_interval,
+            cluster_config,
             core: RwLock::new(core),
         })
     }
@@ -366,6 +371,10 @@ where
 
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> Option<Worker> {
         self.core.read().await.get_worker_by_id(worker_id)
+    }
+
+    pub fn cluster_config(&self) -> &ClusterConfig {
+        &self.cluster_config
     }
 }
 

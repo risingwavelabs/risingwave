@@ -57,6 +57,7 @@ where
         Ok(Response::new(AddWorkerNodeResponse {
             status: None,
             node: Some(worker_node),
+            cluster_config: Some(self.cluster_manager.cluster_config().clone()),
         }))
     }
 

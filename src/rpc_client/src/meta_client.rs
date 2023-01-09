@@ -33,7 +33,7 @@ use risingwave_pb::catalog::{
     Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
     Source as ProstSource, Table as ProstTable, View as ProstView,
 };
-use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::{ClusterConfig, WorkerType};
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
@@ -47,7 +47,6 @@ use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::reschedule_request::Reschedule as ProstReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
-use risingwave_pb::meta::storage_service_client::StorageServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -113,7 +112,7 @@ impl MetaClient {
         worker_type: WorkerType,
         addr: &HostAddr,
         worker_node_parallelism: usize,
-    ) -> Result<Self> {
+    ) -> Result<(Self, ClusterConfig)> {
         let grpc_meta_client = GrpcMetaClient::new(meta_addr).await?;
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
@@ -127,12 +126,15 @@ impl MetaClient {
         })
         .await?;
         let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
-        Ok(Self {
-            worker_id: worker_node.id,
-            worker_type,
-            host_addr: addr.clone(),
-            inner: grpc_meta_client,
-        })
+        Ok((
+            Self {
+                worker_id: worker_node.id,
+                worker_type,
+                host_addr: addr.clone(),
+                inner: grpc_meta_client,
+            },
+            resp.cluster_config.unwrap(),
+        ))
     }
 
     /// Activate the current node in cluster to confirm it's ready to serve.
@@ -541,7 +543,7 @@ impl MetaClient {
 
     pub async fn set_compactor_runtime_config(&self, config: CompactorRuntimeConfig) -> Result<()> {
         let req = SetCompactorRuntimeConfigRequest {
-            context_id: self.worker_id,
+            context_id: self.worker_id(),
             config: Some(config.into()),
         };
         let _resp = self.inner.set_compactor_runtime_config(req).await?;
@@ -666,12 +668,6 @@ impl MetaClient {
         let req = GetMetaSnapshotManifestRequest {};
         let resp = self.inner.get_meta_snapshot_manifest(req).await?;
         Ok(resp.manifest.expect("should exist"))
-    }
-
-    pub async fn get_state_store_url(&self) -> Result<String> {
-        let req = GetStateStoreUrlRequest {};
-        let resp = self.inner.get_state_store_url(req).await?;
-        Ok(resp.url)
     }
 }
 
@@ -852,7 +848,6 @@ struct GrpcMetaClient {
     user_client: UserServiceClient<Channel>,
     scale_client: ScaleServiceClient<Channel>,
     backup_client: BackupServiceClient<Channel>,
-    storage_client: StorageServiceClient<Channel>,
 }
 
 impl GrpcMetaClient {
@@ -906,8 +901,7 @@ impl GrpcMetaClient {
         let stream_client = StreamManagerServiceClient::new(channel.clone());
         let user_client = UserServiceClient::new(channel.clone());
         let scale_client = ScaleServiceClient::new(channel.clone());
-        let backup_client = BackupServiceClient::new(channel.clone());
-        let storage_client = StorageServiceClient::new(channel);
+        let backup_client = BackupServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
@@ -918,7 +912,6 @@ impl GrpcMetaClient {
             user_client,
             scale_client,
             backup_client,
-            storage_client,
         })
     }
 
@@ -999,7 +992,6 @@ macro_rules! for_all_meta_rpc {
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
             ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
-            ,{ storage_client, get_state_store_url, GetStateStoreUrlRequest, GetStateStoreUrlResponse }
         }
     };
 }

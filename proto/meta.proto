@@ -137,6 +137,7 @@ message AddWorkerNodeRequest {
 message AddWorkerNodeResponse {
   common.Status status = 1;
   common.WorkerNode node = 2;
+  common.ClusterConfig cluster_config = 3;
 }
 
 message ActivateWorkerNodeRequest {
@@ -290,14 +291,4 @@ service ScaleService {
   rpc Resume(ResumeRequest) returns (ResumeResponse);
   rpc GetClusterInfo(GetClusterInfoRequest) returns (GetClusterInfoResponse);
   rpc Reschedule(RescheduleRequest) returns (RescheduleResponse);
-}
-
-message GetStateStoreUrlRequest {}
-
-message GetStateStoreUrlResponse {
-  string url = 1;
-}
-
-service StorageService {
-  rpc GetStateStoreUrl(GetStateStoreUrlRequest) returns (GetStateStoreUrlResponse);
 }

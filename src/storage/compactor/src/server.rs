@@ -56,7 +56,7 @@ pub async fn compactor_serve(
     );
 
     // Register to the cluster.
-    let meta_client =
+    let (meta_client, cluster_config) =
         MetaClient::register_new(&opts.meta_address, WorkerType::Compactor, &client_addr, 0)
             .await
             .unwrap();
@@ -77,7 +77,7 @@ pub async fn compactor_serve(
     // limited at first.
     let storage_config = Arc::new(config.storage);
     let state_store_stats = Arc::new(StateStoreMetrics::new(registry.clone()));
-    let state_store_url = meta_client.get_state_store_url().await.unwrap();
+    let state_store_url = cluster_config.state_store_url.as_str();
     assert_eq!(state_store_url, opts.state_store);
     let object_store = Arc::new(
         parse_remote_object_store(

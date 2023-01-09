@@ -81,7 +81,7 @@ pub async fn compute_node_serve(
     let batch_config = Arc::new(config.batch.clone());
 
     // Register to the cluster. We're not ready to serve until activate is called.
-    let meta_client = MetaClient::register_new(
+    let (meta_client, cluster_config) = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::ComputeNode,
         &client_addr,
@@ -112,11 +112,10 @@ pub async fn compute_node_serve(
     ));
 
     let mut join_handle_vec = vec![];
-
-    let state_store_url = meta_client.get_state_store_url().await.unwrap();
+    let state_store_url = cluster_config.state_store_url.as_str();
     assert_eq!(state_store_url, opts.state_store);
     let state_store = StateStoreImpl::new(
-        &state_store_url,
+        state_store_url,
         &opts.file_cache_dir,
         &config,
         hummock_meta_client.clone(),

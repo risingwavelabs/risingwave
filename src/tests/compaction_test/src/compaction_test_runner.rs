@@ -231,7 +231,7 @@ async fn init_metadata_for_replay(
             std::process::exit(0);
         },
         ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, client_addr, 0) => {
-            meta_client = ret.unwrap();
+            meta_client = ret.unwrap().0;
         },
     }
     let worker_id = meta_client.worker_id();
@@ -241,7 +241,7 @@ async fn init_metadata_for_replay(
     let tables = meta_client.risectl_list_state_tables().await?;
     let compaction_groups = meta_client.risectl_list_compaction_group().await?;
 
-    let new_meta_client =
+    let (new_meta_client, _) =
         MetaClient::register_new(new_meta_endpoint, WorkerType::RiseCtl, client_addr, 0).await?;
     new_meta_client.activate(client_addr).await.unwrap();
     if ci_mode {
@@ -266,7 +266,7 @@ async fn pull_version_deltas(
 ) -> anyhow::Result<Vec<HummockVersionDelta>> {
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-    let meta_client =
+    let (meta_client, _) =
         MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, client_addr, 0)
             .await?;
     let worker_id = meta_client.worker_id();
@@ -315,7 +315,7 @@ async fn start_replay(
 
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-    let meta_client =
+    let (meta_client, _) =
         MetaClient::register_new(&opts.meta_address, WorkerType::RiseCtl, &client_addr, 0).await?;
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned replay worker id {}", worker_id);
