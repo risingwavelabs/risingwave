@@ -868,27 +868,6 @@ async fn test_trigger_compaction_deterministic() {
         .expect("shutdown compaction scheduler error");
 }
 
-#[tokio::test]
-async fn test_reset_current_version() {
-    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
-    let context_id = worker_node.id;
-
-    // Generate data for compaction task
-    let _ = add_test_tables(&hummock_manager, context_id).await;
-
-    let cur_version = hummock_manager.get_current_version().await;
-
-    let old_version = hummock_manager.reset_current_version().await.unwrap();
-    assert_eq!(cur_version.id, old_version.id);
-    assert_eq!(
-        cur_version.max_committed_epoch,
-        old_version.max_committed_epoch
-    );
-    let new_version = hummock_manager.get_current_version().await;
-    assert_eq!(new_version.id, FIRST_VERSION_ID);
-    assert_eq!(new_version.max_committed_epoch, INVALID_EPOCH);
-}
-
 // This is a non-deterministic test
 #[cfg(madsim)]
 #[tokio::test]

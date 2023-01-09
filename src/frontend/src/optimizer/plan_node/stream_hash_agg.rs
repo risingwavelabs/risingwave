@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
@@ -50,6 +51,8 @@ impl StreamHashAgg {
             logical.functional_dependency().clone(),
             dist,
             false,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            FixedBitSet::with_capacity(logical.schema().len()),
         );
         StreamHashAgg {
             base,
