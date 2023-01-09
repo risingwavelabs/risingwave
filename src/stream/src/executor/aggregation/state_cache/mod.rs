@@ -180,8 +180,8 @@ where
     fn begin_syncing(&mut self) -> StateCacheFiller<'_> {
         self.cache.clear(); // ensure the cache is clear before syncing
         StateCacheFiller {
-            total_count: self.total_count,
             capacity: self.cache.capacity(),
+            total_count: self.total_count,
             cache: self,
         }
     }
