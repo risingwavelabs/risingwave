@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use either::{Left, Right};
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::leader::leader_service_server::LeaderServiceServer;
 use risingwave_pb::meta::MetaLeaderInfo;
@@ -24,6 +25,7 @@ use super::intercept::MetricsMiddlewareLayer;
 use super::server::AddressInfo;
 use super::service::health_service::HealthServiceImpl;
 use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::server::ElectionClientRef;
 use crate::rpc::service::leader_service::LeaderServiceImpl;
 
 /// Starts all services needed for the meta follower node
@@ -31,9 +33,19 @@ pub async fn start_follower_srv(
     mut svc_shutdown_rx: WatchReceiver<()>,
     follower_shutdown_rx: OneReceiver<()>,
     address_info: AddressInfo,
-    leader_rx: WatchReceiver<(MetaLeaderInfo, bool)>,
+    election_client: Option<ElectionClientRef>,
 ) {
-    let leader_srv = LeaderServiceImpl::new(leader_rx);
+    let either = if let Some(election_client) = election_client {
+        Left(election_client)
+    } else {
+        Right(MetaLeaderInfo {
+            node_address: address_info.listen_addr.clone().to_string(),
+            lease_id: 0,
+        })
+    };
+
+    let leader_srv = LeaderServiceImpl::new(either);
+
     let health_srv = HealthServiceImpl::new();
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))

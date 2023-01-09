@@ -15,6 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use either::{Left, Right};
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -46,7 +47,7 @@ use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
 };
 use crate::rpc::metrics::MetaMetrics;
-use crate::rpc::server::AddressInfo;
+use crate::rpc::server::{AddressInfo, ElectionClientRef};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -70,11 +71,12 @@ pub async fn start_leader_srv<S: MetaStore>(
     max_heartbeat_interval: Duration,
     opts: MetaOpts,
     current_leader: MetaLeaderInfo,
+    election_client: Option<ElectionClientRef>,
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
-    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), current_leader).await;
+    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), current_leader.clone()).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let registry = meta_metrics.registry();
@@ -274,10 +276,7 @@ pub async fn start_leader_srv<S: MetaStore>(
         .await,
     );
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
-    // sub_tasks.push((
-    //     election_coordination.election_handle,
-    //     election_coordination.election_shutdown,
-    // ));
+
     if cfg!(not(test)) {
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
@@ -302,7 +301,12 @@ pub async fn start_leader_srv<S: MetaStore>(
         }
     };
 
-    let leader_srv = LeaderServiceImpl::new(election_coordination.leader_rx);
+    let either = if let Some(election_client) = election_client {
+        Left(election_client)
+    } else {
+        Right(current_leader.clone())
+    };
+    let leader_srv = LeaderServiceImpl::new(either);
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))

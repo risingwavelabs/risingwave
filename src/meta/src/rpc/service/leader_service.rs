@@ -12,22 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
+
+use either::Either;
 use risingwave_common::util::addr::leader_info_to_host_addr;
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::leader::leader_service_server::LeaderService;
 use risingwave_pb::leader::{LeaderRequest, LeaderResponse};
 use risingwave_pb::meta::MetaLeaderInfo;
-use tokio::sync::watch::Receiver;
 use tonic::{Request, Response, Status};
+
+use crate::rpc::server::ElectionClientRef;
 
 #[derive(Clone)]
 pub struct LeaderServiceImpl {
-    leader_rx: Receiver<(MetaLeaderInfo, bool)>,
+    election_client: Either<ElectionClientRef, MetaLeaderInfo>,
 }
 
 impl LeaderServiceImpl {
-    pub fn new(leader_rx: Receiver<(MetaLeaderInfo, bool)>) -> Self {
-        LeaderServiceImpl { leader_rx }
+    pub fn new(election_client: Either<ElectionClientRef, MetaLeaderInfo>) -> Self {
+        LeaderServiceImpl { election_client }
     }
 }
 
@@ -38,14 +42,20 @@ impl LeaderService for LeaderServiceImpl {
         &self,
         _request: Request<LeaderRequest>,
     ) -> Result<Response<LeaderResponse>, Status> {
-        let leader_info = self.leader_rx.borrow().0.clone();
-        let leader_addr = leader_info_to_host_addr(leader_info);
-        let leader_address = HostAddress {
-            host: leader_addr.host,
-            port: leader_addr.port.into(),
-        };
+        let leader = match self.election_client.borrow() {
+            Either::Left(election_client) => election_client.leader().await,
+            Either::Right(leader) => Ok(Some(leader.clone())),
+        }?;
+
+        let leader_address = leader
+            .map(leader_info_to_host_addr)
+            .map(|leader_addr| HostAddress {
+                host: leader_addr.host,
+                port: leader_addr.port.into(),
+            });
+
         Ok(Response::new(LeaderResponse {
-            leader_addr: Some(leader_address),
+            leader_addr: leader_address,
         }))
     }
 }

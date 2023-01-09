@@ -156,12 +156,15 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             let (follower_shutdown_tx, follower_shutdown_rx) = OneChannel::<()>();
             let follower_handle: Option<JoinHandle<()>> = if !election_client.is_leader().await {
                 let address_info_clone = address_info.clone();
+
+                let election_client_ = election_client.clone();
                 Some(tokio::spawn(async move {
                     let _ = tracing::span!(tracing::Level::INFO, "follower services").enter();
                     start_follower_srv(
                         svc_shutdown_rx_clone,
                         follower_shutdown_rx,
                         address_info_clone,
+                        Some(election_client_),
                     )
                     .await;
                 }))
@@ -188,7 +191,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 node_address: address_info.listen_addr.clone().to_string(),
                 lease_id: 0,
             }
-
         };
 
         start_leader_srv(
@@ -197,6 +199,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             max_heartbeat_interval,
             opts,
             current_leader,
+            election_client,
             svc_shutdown_rx,
         )
         .await
