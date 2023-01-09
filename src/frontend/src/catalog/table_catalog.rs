@@ -17,12 +17,14 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::{TableDesc, TableId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
+use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType as ProstTableType};
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
 use super::column_catalog::ColumnCatalog;
-use super::{DatabaseId, FragmentId, SchemaId};
+use super::{DatabaseId, FragmentId, RelationCatalog, SchemaId};
 use crate::optimizer::property::FieldOrder;
+use crate::user::UserId;
 use crate::WithOptions;
 
 /// Includes full information about a table.
@@ -32,7 +34,7 @@ use crate::WithOptions;
 /// - a materialized view
 /// - an index
 ///
-/// Use `self.kind()` to determine the type of the table.
+/// Use `self.table_type()` to determine the type of the table.
 ///
 /// # Column ID & Column Index
 ///
@@ -67,7 +69,7 @@ pub struct TableCatalog {
 
     pub name: String,
 
-    /// All columns in this table
+    /// All columns in this table.
     pub columns: Vec<ColumnCatalog>,
 
     /// Key used as materialize's storage key prefix, including MV order columns and stream_key.
@@ -76,18 +78,20 @@ pub struct TableCatalog {
     /// pk_indices of the corresponding materialize operator's output.
     pub stream_key: Vec<usize>,
 
-    /// Type of the table. Sink will
+    /// Type of the table. Used to distinguish user-created tables, materialized views, index
+    /// tables, and internal tables. Sinks will have a type of `TableType::Table` because there is
+    /// no need to distinguish sinks from other types of tables now.
     pub table_type: TableType,
 
     /// Distribution key column indices.
     pub distribution_key: Vec<usize>,
 
     /// The append-only attribute is derived from `StreamMaterialize` and `StreamTableScan` relies
-    /// on this to derive an append-only stream plan
+    /// on this to derive an append-only stream plan.
     pub append_only: bool,
 
     /// Owner of the table.
-    pub owner: u32,
+    pub owner: UserId,
 
     /// Properties of the table. For example, `appendonly` or `retention_seconds`.
     pub properties: WithOptions,
@@ -96,7 +100,7 @@ pub struct TableCatalog {
     pub fragment_id: FragmentId,
 
     /// An optional column index which is the vnode of each row computed by the table's consistent
-    /// hash distribution
+    /// hash distribution.
     pub vnode_col_index: Option<usize>,
 
     /// An optional column index of row id. If the primary key is specified by users, this will be
@@ -104,7 +108,7 @@ pub struct TableCatalog {
     pub row_id_index: Option<usize>,
 
     /// The column indices which are stored in the state store's value with row-encoding. Currently
-    /// is not supported yet and expected to be `[0..columns.len()]`
+    /// is not supported yet and expected to be `[0..columns.len()]`.
     pub value_indices: Vec<usize>,
 
     /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
@@ -184,6 +188,29 @@ impl TableCatalog {
 
     pub fn is_index(&self) -> bool {
         self.table_type == TableType::Index
+    }
+
+    /// Returns an error if `DROP` statements are used on the wrong type of table.
+    #[must_use]
+    pub fn bad_drop_error(&self) -> RwError {
+        let msg = match self.table_type {
+            TableType::MaterializedView => {
+                "Use `DROP MATERIALIZED VIEW` to drop a materialized view."
+            }
+            TableType::Index => "Use `DROP INDEX` to drop an index.",
+            TableType::Table => {
+                // TODO(Yuanxin): Remove this after unsupporting `CREATE MATERIALIZED SOURCE`.
+                // Note(bugen): may make this a method on `TableType` instead.
+                if self.associated_source_id().is_some() {
+                    "Use `DROP SOURCE` to drop a source."
+                } else {
+                    "Use `DROP TABLE` to drop a table."
+                }
+            }
+            TableType::Internal => "Internal tables cannot be dropped.",
+        };
+
+        ErrorCode::InvalidInputSyntax(msg.to_owned()).into()
     }
 
     /// Get the table catalog's associated source id.
@@ -335,6 +362,12 @@ impl From<ProstTable> for TableCatalog {
 impl From<&ProstTable> for TableCatalog {
     fn from(tb: &ProstTable) -> Self {
         tb.clone().into()
+    }
+}
+
+impl RelationCatalog for TableCatalog {
+    fn owner(&self) -> UserId {
+        self.owner
     }
 }
 

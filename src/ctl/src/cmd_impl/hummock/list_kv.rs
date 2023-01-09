@@ -16,6 +16,7 @@ use core::ops::Bound::Unbounded;
 
 use risingwave_common::catalog::TableId;
 use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
+use risingwave_storage::StateStore;
 
 use crate::CtlContext;
 
@@ -24,9 +25,10 @@ pub async fn list_kv(context: &CtlContext, epoch: u64, table_id: u32) -> anyhow:
     if epoch == u64::MAX {
         tracing::info!("using u64::MAX as epoch");
     }
+    let local_hummock = hummock.inner().new_local(table_id.into()).await;
     let scan_result = {
         let range = (Unbounded, Unbounded);
-        hummock
+        local_hummock
             .scan(
                 range,
                 epoch,
