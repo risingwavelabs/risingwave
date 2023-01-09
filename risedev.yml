@@ -426,6 +426,7 @@ profile:
       - use: etcd
         unsafe-no-fsync: true
       - use: meta-node
+        enable-in-memory-kv-state-backend: true
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -702,6 +703,9 @@ template:
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
+
+  # Whether to enable in-memory pure KV state backend. When set to true, no compactor should be used.
+    enable-in-memory-kv-state-backend: false
 
     # Etcd backend config
     provide-etcd-backend: "etcd*"

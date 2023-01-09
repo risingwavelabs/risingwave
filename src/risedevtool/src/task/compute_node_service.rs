@@ -85,6 +85,7 @@ impl ComputeNodeService {
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
 
+        // TODO(zhidong): move the checks to MetaNodeService.
         let is_shared_backend = match (
             config.enable_in_memory_kv_state_backend,
             provide_minio.as_slice(),

@@ -95,13 +95,17 @@ impl MetaNodeService {
 
         let provide_minio = config.provide_minio.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
-        add_storage_backend(
-            &config.id,
-            provide_minio,
-            provide_aws_s3,
-            hummock_in_memory_strategy,
-            cmd,
-        )?;
+        if config.enable_in_memory_kv_state_backend {
+            cmd.arg("--state-store").arg("in-memory");
+        } else {
+            add_storage_backend(
+                &config.id,
+                provide_minio,
+                provide_aws_s3,
+                hummock_in_memory_strategy,
+                cmd,
+            )?;
+        }
 
         Ok(())
     }

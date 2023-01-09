@@ -60,6 +60,7 @@ pub struct MetaNodeConfig {
     pub exporter_port: u16,
 
     pub user_managed: bool,
+    pub enable_in_memory_kv_state_backend: bool,
 
     pub connector_rpc_endpoint: String,
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
