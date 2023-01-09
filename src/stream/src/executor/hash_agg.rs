@@ -101,7 +101,7 @@ struct HashAggExecutorExtra<K: HashKey, S: StateStore> {
     /// Lru manager. None if using local eviction.
     watermark_epoch: AtomicU64Ref,
 
-    /// How many times have we hit the cache of join executor for the lookup of each key 
+    /// How many times have we hit the cache of join executor for the lookup of each key
     lookup_miss_count: AtomicU64,
 
     total_lookup_count: AtomicU64,
