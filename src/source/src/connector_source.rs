@@ -29,6 +29,7 @@ use risingwave_connector::source::{
     SplitReaderImpl,
 };
 use risingwave_connector::ConnectorParams;
+use risingwave_expr::vector_op::cast::i64_to_timestamptz;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, StreamSourceInfo as ProstStreamSourceInfo,
 };
@@ -178,6 +179,14 @@ impl ConnectorSourceReader {
                     {
                         tracing::warn!("message parsing failed {}, skipping", e.to_string());
                         continue;
+                    }
+                    // fulfill the timestamp column if it exists
+                    if let Some(ts) = msg.timestamp {
+                        builder
+                            .row_writer()
+                            .insert_timestamp(Some(i64_to_timestamptz(ts).unwrap().into()));
+                    } else {
+                        builder.row_writer().insert_timestamp(None);
                     }
                 }
             }

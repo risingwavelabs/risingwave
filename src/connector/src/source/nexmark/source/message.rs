@@ -31,6 +31,7 @@ impl From<NexmarkMessage> for SourceMessage {
             payload: Some(msg.payload),
             offset: msg.sequence_number.clone(),
             split_id: msg.split_id,
+            timestamp: None,
         }
     }
 }

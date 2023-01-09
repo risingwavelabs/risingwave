@@ -37,6 +37,7 @@ mod test {
                 data_type: DataType::Int32,
                 column_id: ColumnId::from(0),
                 skip_parse: false,
+                is_timestamp: false,
                 fields: vec![],
             },
             SourceColumnDesc {
@@ -44,6 +45,7 @@ mod test {
                 data_type: DataType::Varchar,
                 column_id: ColumnId::from(1),
                 skip_parse: false,
+                is_timestamp: false,
                 fields: vec![],
             },
             SourceColumnDesc {
@@ -51,6 +53,7 @@ mod test {
                 data_type: DataType::Varchar,
                 column_id: ColumnId::from(2),
                 skip_parse: false,
+                is_timestamp: false,
                 fields: vec![],
             },
             SourceColumnDesc {
@@ -58,6 +61,7 @@ mod test {
                 data_type: DataType::Float64,
                 column_id: ColumnId::from(3),
                 skip_parse: false,
+                is_timestamp: false,
                 fields: vec![],
             },
         ];

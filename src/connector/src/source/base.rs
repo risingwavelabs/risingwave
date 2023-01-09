@@ -287,6 +287,7 @@ pub struct SourceMessage {
     pub payload: Option<Bytes>,
     pub offset: String,
     pub split_id: SplitId,
+    pub timestamp: Option<i64>,
 }
 
 /// The message pumped from the external source service.

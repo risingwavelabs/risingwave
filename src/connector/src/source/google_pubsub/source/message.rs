@@ -44,10 +44,9 @@ impl From<TaggedReceivedMessage> for SourceMessage {
                     _ => Some(Bytes::from(payload)),
                 }
             },
-
             offset: timestamp.timestamp_nanos().to_string(),
-
             split_id,
+            timestamp: None,
         }
     }
 }

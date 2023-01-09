@@ -78,6 +78,7 @@ impl DatagenEventGenerator {
                         payload: Some(Bytes::from(value.to_string())),
                         offset: self.offset.to_string(),
                         split_id: self.split_id.clone(),
+                        timestamp: None,
                     });
                     self.offset += 1;
                     rows_generated_this_second += 1;

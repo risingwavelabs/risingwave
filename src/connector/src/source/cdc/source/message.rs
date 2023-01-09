@@ -23,6 +23,7 @@ impl From<CdcMessage> for SourceMessage {
             payload: Some(Bytes::from(message.payload)),
             offset: message.offset,
             split_id: message.partition.into(),
+            timestamp: None,
         }
     }
 }

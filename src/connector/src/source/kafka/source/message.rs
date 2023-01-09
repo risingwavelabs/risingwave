@@ -25,6 +25,7 @@ impl<'a> From<BorrowedMessage<'a>> for SourceMessage {
             payload: message.payload().map(Bytes::copy_from_slice),
             offset: message.offset().to_string(),
             split_id: message.partition().to_string().into(),
+            timestamp: message.timestamp().to_millis(),
         }
     }
 }

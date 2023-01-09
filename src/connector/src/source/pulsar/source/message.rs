@@ -30,6 +30,7 @@ impl From<Message<Vec<u8>>> for SourceMessage {
                 message_id.batch_index.unwrap_or(-1)
             ),
             split_id: msg.topic.into(),
+            timestamp: None,
         }
     }
 }
