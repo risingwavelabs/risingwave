@@ -798,6 +798,32 @@ fn parse_bitwise_ops() {
 }
 
 #[test]
+fn parse_binary_some() {
+    let select = verified_only_select("SELECT a = SOME(b)");
+    assert_eq!(
+        SelectItem::UnnamedExpr(Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new("a"))),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::SomeOp(Box::new(Expr::Identifier(Ident::new("b"))))),
+        }),
+        select.projection[0]
+    );
+}
+
+#[test]
+fn parse_binary_all() {
+    let select = verified_only_select("SELECT a = ALL(b)");
+    assert_eq!(
+        SelectItem::UnnamedExpr(Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new("a"))),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::AllOp(Box::new(Expr::Identifier(Ident::new("b"))))),
+        }),
+        select.projection[0]
+    );
+}
+
+#[test]
 fn parse_logical_xor() {
     let sql = "SELECT true XOR true, false XOR false, true XOR false, false XOR true";
     let select = verified_only_select(sql);
