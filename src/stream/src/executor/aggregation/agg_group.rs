@@ -115,7 +115,7 @@ impl<S: StateStore> AggGroup<S> {
         self.group_key.as_ref()
     }
 
-    fn prev_row_count(&self) -> usize {
+    pub fn prev_row_count(&self) -> usize {
         match &self.prev_outputs {
             Some(states) => states[ROW_COUNT_COLUMN]
                 .as_ref()

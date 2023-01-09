@@ -21,7 +21,7 @@ use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashCode, HashKey, PrecomputedBuildHasher};
@@ -267,18 +267,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         agg_group_cache: &mut AggGroupCache<K, S>,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
-        for (row_idx, op) in chunk.ops().iter().enumerate() {
-            if let Some(vis_map) = chunk.visibility() && !vis_map.is_set(row_idx) {
-                continue;
-            }
-            match op {
-                Op::Insert => total_keys_count.fetch_add(1, Ordering::Relaxed),
-                Op::Delete => total_keys_count.fetch_sub(1, Ordering::Relaxed),
-                Op::UpdateInsert => total_keys_count.fetch_add(1, Ordering::Relaxed),
-                Op::UpdateDelete => total_keys_count.fetch_sub(1, Ordering::Relaxed),
-            };
-        }
-
         // Compute hash code here before serializing keys to avoid duplicate hash code computation.
         let hash_codes = chunk
             .data_chunk()
@@ -322,6 +310,10 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let mut buffered = stream::iter(futs).buffer_unordered(10).fuse();
         while let Some(result) = buffered.next().await {
             let (key, agg_group) = result?;
+            // We then know this agg group by key appears the first time
+            if agg_group.prev_row_count() == 0 {
+                total_keys_count.fetch_add(1, Ordering::Relaxed);
+            }
             agg_group_cache.put(key, agg_group);
         }
         drop(buffered); // drop to avoid accidental use
