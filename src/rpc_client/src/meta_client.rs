@@ -61,6 +61,7 @@ use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
+use tower::ServiceBuilder;
 
 use crate::error::Result;
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
@@ -853,20 +854,127 @@ impl HummockMetaClient for MetaClient {
     }
 }
 
+// TODO: move imports up to other imports
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use http::{Request, Response};
+use tonic::body::BoxBody;
+use tonic::transport::Body;
+use tower::Service;
+
+#[derive(Clone, Debug)]
+pub struct MetaFailoverSvc {
+    inner: Channel,
+    mu: bool,
+}
+
+impl MetaFailoverSvc {
+    pub fn new(inner: Channel) -> Self {
+        MetaFailoverSvc { inner, mu: true }
+    }
+
+    pub fn meta_up(&mut self, b: bool) {
+        self.mu = b;
+    }
+}
+
+impl Service<Request<BoxBody>> for MetaFailoverSvc {
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+    #[allow(clippy::type_complexity)]
+    type Future =
+        Pin<Box<dyn Future<Output = std::result::Result<Self::Response, Self::Error>> + Send>>;
+    type Response = Response<Body>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<std::result::Result<(), Self::Error>> {
+        self.inner.poll_ready(cx).map_err(Into::into)
+    }
+
+    /// requests have to be retried, in case of meta failover
+    fn call(&mut self, req: Request<BoxBody>) -> Self::Future {
+        let clone = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, clone);
+
+        Box::pin(async move {
+            // TODO: fail on failure, but still change inner?
+            let response = inner.call(req).await;
+            if response.is_err() {
+                let mut leader_client = LeaderServiceClient::new(inner.clone());
+                let resp = leader_client
+                    .leader(LeaderRequest {})
+                    .await
+                    .expect("Expect that leader service always knows who leader is")
+                    .into_inner();
+
+                let leader_addr: HostAddress = resp
+                    .leader_addr
+                    .expect("Expect that leader service always knows who leader is");
+                let addr = format!(
+                    "http://{}:{}",
+                    leader_addr.get_host(),
+                    leader_addr.get_port()
+                );
+                let inner_channel = get_channel(addr.as_str(), 1, 1, 1, 1).await?;
+                // TODO: we need to update inner somehow
+                // self.inner = inner_channel;
+            }
+
+            let res = response?;
+            Ok(res)
+        })
+    }
+}
+
+/// get a channel against service at `addr`
+///
+/// ## Arguments:
+/// addr: Should consist out of protocol, IP and port
+async fn get_channel(
+    addr: &str,
+    max_retry_ms: u64,
+    retry_base_interval: u64,
+    keep_alive_interval: u64,
+    keep_alive_timeout: u64,
+) -> std::result::Result<Channel, tonic::transport::Error> {
+    let endpoint = Endpoint::from_shared(addr.to_string())?
+        .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
+    let retry_strategy = ExponentialBackoff::from_millis(retry_base_interval)
+        .max_delay(Duration::from_millis(max_retry_ms))
+        .map(jitter);
+    tokio_retry::Retry::spawn(retry_strategy, || async {
+        let endpoint = endpoint.clone();
+        endpoint
+            .http2_keep_alive_interval(Duration::from_secs(keep_alive_interval))
+            .keep_alive_timeout(Duration::from_secs(keep_alive_timeout))
+            .connect_timeout(Duration::from_secs(5))
+            .connect()
+            .await
+            .inspect_err(|e| {
+                tracing::warn!(
+                    "Failed to connect to meta server {}, wait for online: {}",
+                    addr,
+                    e
+                );
+            })
+    })
+    .await
+}
+
 /// Client to meta server. Cloning the instance is lightweight.
 ///
 /// It is a wrapper of tonic client. See [`rpc_client_method_impl`].
 #[derive(Debug, Clone)]
 struct GrpcMetaClient {
-    cluster_client: ClusterServiceClient<Channel>,
-    heartbeat_client: HeartbeatServiceClient<Channel>,
-    ddl_client: DdlServiceClient<Channel>,
-    hummock_client: HummockManagerServiceClient<Channel>,
-    notification_client: NotificationServiceClient<Channel>,
-    stream_client: StreamManagerServiceClient<Channel>,
-    user_client: UserServiceClient<Channel>,
-    scale_client: ScaleServiceClient<Channel>,
-    backup_client: BackupServiceClient<Channel>,
+    cluster_client: ClusterServiceClient<MetaFailoverSvc>,
+    heartbeat_client: HeartbeatServiceClient<MetaFailoverSvc>,
+    ddl_client: DdlServiceClient<MetaFailoverSvc>,
+    hummock_client: HummockManagerServiceClient<MetaFailoverSvc>,
+    notification_client: NotificationServiceClient<MetaFailoverSvc>,
+    stream_client: StreamManagerServiceClient<MetaFailoverSvc>,
+    user_client: UserServiceClient<MetaFailoverSvc>,
+    scale_client: ScaleServiceClient<MetaFailoverSvc>,
+    backup_client: BackupServiceClient<MetaFailoverSvc>,
 }
 
 impl GrpcMetaClient {
@@ -885,41 +993,23 @@ impl GrpcMetaClient {
     // Max retry interval in ms for request to meta server.
     const REQUEST_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
-    /// get a channel against service at `addr`
-    ///
-    /// ## Arguments:
-    /// addr: Should consist out of protocol, IP and port
-    async fn get_channel(addr: &str) -> std::result::Result<Channel, tonic::transport::Error> {
-        let endpoint = Endpoint::from_shared(addr.to_string())?
-            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
-        let retry_strategy = ExponentialBackoff::from_millis(Self::CONN_RETRY_BASE_INTERVAL_MS)
-            .max_delay(Duration::from_millis(Self::CONN_RETRY_MAX_INTERVAL_MS))
-            .map(jitter);
-        tokio_retry::Retry::spawn(retry_strategy, || async {
-            let endpoint = endpoint.clone();
-            endpoint
-                .http2_keep_alive_interval(Duration::from_secs(
-                    Self::ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
-                ))
-                .keep_alive_timeout(Duration::from_secs(Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
-                .connect_timeout(Duration::from_secs(5))
-                .connect()
-                .await
-                .inspect_err(|e| {
-                    tracing::warn!(
-                        "Failed to connect to meta server {}, wait for online: {}",
-                        addr,
-                        e
-                    );
-                })
-        })
-        .await
-    }
-
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
         tracing::info!("Originally connect against {}", addr);
-        let channel = Self::get_channel(addr).await?;
+        let channel = get_channel(
+            addr,
+            Self::CONN_RETRY_MAX_INTERVAL_MS,
+            Self::CONN_RETRY_BASE_INTERVAL_MS,
+            Self::ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
+            Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC,
+        )
+        .await?;
+
+        // TODO: rename var here
+        let channel = ServiceBuilder::new()
+            .layer_fn(MetaFailoverSvc::new)
+            .service(channel);
+
         let mut leader_client = LeaderServiceClient::new(channel.clone());
         let resp = leader_client
             .leader(LeaderRequest {})
@@ -942,13 +1032,6 @@ impl GrpcMetaClient {
             leader_addr.get_port()
         );
         tracing::info!("Current leader is {}", leader_addr_str);
-
-        let channel = if addr == leader_addr_str.as_str() {
-            channel
-        } else {
-            tracing::info!("Connecting against {}", leader_addr_str);
-            Self::get_channel(leader_addr_str.as_str()).await?
-        };
 
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());

@@ -12,6 +12,9 @@ anyhow = "1"
 async-trait = "0.1"
 async_stack_trace = { path = "../utils/async_stack_trace" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.3", optional = true }
+http = "0.2"
 paste = "1"
 rand = "0.8"
 risingwave_common = { path = "../common" }
