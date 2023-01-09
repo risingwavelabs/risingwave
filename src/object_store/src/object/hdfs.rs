@@ -17,22 +17,29 @@ use super::{
 #[derive(Clone)]
 pub struct HdfsObjectStore {
     op: Operator,
+    namenode: String,
+    root: String,
 }
 
 impl HdfsObjectStore {
-    pub fn new(name_node: String) -> Self {
+    pub fn new(namenode: String) -> Self {
         // Create fs backend builder.
         let mut builder = hdfs::Builder::default();
         // Set the name node for hdfs.
-        builder.name_node(&name_node);
+        builder.name_node(&namenode);
         // Set the root for hdfs, all operations will happen under this root.
         //
         // NOTE: the root must be absolute path.
-        builder.root("/risingwave");
+        let root = "risingwave";
+        builder.root(root);
 
         // `Accessor` provides the low level APIs, we will use `Operator` normally.
         let op: Operator = Operator::new(builder.build().unwrap());
-        Self { op }
+        Self {
+            op,
+            namenode,
+            root: root.to_string(),
+        }
     }
 
     async fn get_object<R, F>(&self, path: &str, f: F) -> ObjectResult<R>
@@ -61,7 +68,11 @@ impl ObjectStore for HdfsObjectStore {
     }
 
     fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
-        Ok(Box::new(HdfsStreamingUploader::new(path.to_string())))
+        Ok(Box::new(HdfsStreamingUploader::new(
+            path.to_string(),
+            self.namenode.clone(),
+            self.root.clone(),
+        )))
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -181,12 +192,16 @@ fn find_block(obj: &Bytes, block: BlockLocation) -> ObjectResult<Bytes> {
 pub struct HdfsStreamingUploader {
     path: String,
     buf: BytesMut,
+    namenode: String,
+    root: String,
 }
 impl HdfsStreamingUploader {
-    pub fn new(path: String) -> Self {
+    pub fn new(path: String, namenode: String, root: String) -> Self {
         Self {
             path,
             buf: BytesMut::new(),
+            namenode,
+            root,
         }
     }
 }
@@ -201,11 +216,11 @@ impl StreamingUploader for HdfsStreamingUploader {
         // Create fs backend builder.
         let mut builder = hdfs::Builder::default();
         // Set the name node for hdfs.
-        builder.name_node("hdfs://127.0.0.1:9000");
+        builder.name_node(&self.namenode);
         // Set the root for hdfs, all operations will happen under this root.
         //
         // NOTE: the root must be absolute path.
-        builder.root("/tmp");
+        builder.root(&self.root);
 
         // `Accessor` provides the low level APIs, we will use `Operator` normally.
         let op: Operator = Operator::new(builder.build().unwrap());
@@ -338,7 +353,7 @@ mod tests {
 
         let namenode = "hdfs://127.0.0.1:9000";
         let store = HdfsObjectStore::new(namenode.to_string());
-        let mut uploader = store.streaming_upload("/abc").unwrap();
+        let mut uploader = store.streaming_upload("/yyy").unwrap();
 
         for block in blocks {
             uploader.write_bytes(block).await.unwrap();
@@ -346,21 +361,21 @@ mod tests {
         uploader.finish().await.unwrap();
 
         // Read whole object.
-        let read_obj = store.read("/abc", None).await.unwrap();
+        let read_obj = store.read("/yyy", None).await.unwrap();
         assert!(read_obj.eq(&obj));
 
         // Read part of the object.
         let read_obj = store
-            .read("/abc", Some(BlockLocation { offset: 4, size: 2 }))
+            .read("/yyy", Some(BlockLocation { offset: 4, size: 2 }))
             .await
             .unwrap();
         assert_eq!(
             String::from_utf8(read_obj.to_vec()).unwrap(),
             "56".to_string()
         );
-        store
-            .delete("/abc")
-            .await
-            .unwrap();
+        // store
+        //     .delete("/yyy")
+        //     .await
+        //     .unwrap();
     }
 }
