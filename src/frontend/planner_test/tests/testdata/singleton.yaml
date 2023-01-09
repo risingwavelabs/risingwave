@@ -26,7 +26,7 @@
         └─BatchScan { table: mv, columns: [mv.v], distribution: Single }
   batch_local_plan: |
     BatchLookupJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v] }
-    └─BatchExchange { order: [], dist: Single }
+    └─BatchExchange { order: [mv.v ASC], dist: Single }
       └─BatchScan { table: mv, columns: [mv.v], distribution: Single }
 - id: select_from_singleton_mv_join_top_n
   before:
@@ -46,5 +46,5 @@
     └─BatchTopN { order: "[mv.v ASC]", limit: 10, offset: 0 }
       └─BatchTopN { order: "[mv.v ASC]", limit: 10, offset: 0 }
         └─BatchLookupJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v, mv.v] }
-          └─BatchExchange { order: [], dist: Single }
+          └─BatchExchange { order: [mv.v ASC], dist: Single }
             └─BatchScan { table: mv, columns: [mv.v], distribution: Single }
