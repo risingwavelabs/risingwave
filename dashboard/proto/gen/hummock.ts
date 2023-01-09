@@ -625,13 +625,6 @@ export interface RiseCtlGetPinnedSnapshotsSummaryResponse {
   summary: PinnedSnapshotsSummary | undefined;
 }
 
-export interface ResetCurrentVersionRequest {
-}
-
-export interface ResetCurrentVersionResponse {
-  oldVersion: HummockVersion | undefined;
-}
-
 export interface InitMetadataForReplayRequest {
   tables: Table[];
   compactionGroups: CompactionGroup[];
@@ -3584,51 +3577,6 @@ export const RiseCtlGetPinnedSnapshotsSummaryResponse = {
     const message = createBaseRiseCtlGetPinnedSnapshotsSummaryResponse();
     message.summary = (object.summary !== undefined && object.summary !== null)
       ? PinnedSnapshotsSummary.fromPartial(object.summary)
-      : undefined;
-    return message;
-  },
-};
-
-function createBaseResetCurrentVersionRequest(): ResetCurrentVersionRequest {
-  return {};
-}
-
-export const ResetCurrentVersionRequest = {
-  fromJSON(_: any): ResetCurrentVersionRequest {
-    return {};
-  },
-
-  toJSON(_: ResetCurrentVersionRequest): unknown {
-    const obj: any = {};
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<ResetCurrentVersionRequest>, I>>(_: I): ResetCurrentVersionRequest {
-    const message = createBaseResetCurrentVersionRequest();
-    return message;
-  },
-};
-
-function createBaseResetCurrentVersionResponse(): ResetCurrentVersionResponse {
-  return { oldVersion: undefined };
-}
-
-export const ResetCurrentVersionResponse = {
-  fromJSON(object: any): ResetCurrentVersionResponse {
-    return { oldVersion: isSet(object.oldVersion) ? HummockVersion.fromJSON(object.oldVersion) : undefined };
-  },
-
-  toJSON(message: ResetCurrentVersionResponse): unknown {
-    const obj: any = {};
-    message.oldVersion !== undefined &&
-      (obj.oldVersion = message.oldVersion ? HummockVersion.toJSON(message.oldVersion) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<ResetCurrentVersionResponse>, I>>(object: I): ResetCurrentVersionResponse {
-    const message = createBaseResetCurrentVersionResponse();
-    message.oldVersion = (object.oldVersion !== undefined && object.oldVersion !== null)
-      ? HummockVersion.fromPartial(object.oldVersion)
       : undefined;
     return message;
   },

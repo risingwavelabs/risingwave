@@ -28,7 +28,7 @@ use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, OrderBy, Subquery, SubqueryKind,
-    TableFunction, TableFunctionType, WindowFunction, WindowFunctionType,
+    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction, WindowFunctionType,
 };
 use crate::utils::Condition;
 
@@ -94,6 +94,23 @@ impl Binder {
         if let Ok(function_type) = table_function_type {
             self.ensure_table_function_allowed()?;
             return Ok(TableFunction::new(function_type, inputs)?.into());
+        }
+
+        // user defined function
+        // TODO: resolve schema name
+        if let Some(func) = self
+            .catalog
+            .first_valid_schema(
+                &self.db_name,
+                &self.search_path,
+                &self.auth_context.user_name,
+            )?
+            .get_function_by_name_args(
+                &function_name,
+                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
+            )
+        {
+            return Ok(UserDefinedFunction::new(func.clone(), inputs).into());
         }
 
         // normal function
