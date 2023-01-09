@@ -24,17 +24,12 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::{PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
 use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::table_catalog::{TableCatalog, TableType};
-use crate::catalog::FragmentId;
+use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
+use crate::catalog::{FragmentId, USER_COLUMN_ID_OFFSET};
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::WithOptions;
-
-/// The first column id to allocate for a new materialized view.
-///
-/// Note: not starting from 0 helps us to debug misusing of the column id and the index.
-const COLUMN_ID_BASE: i32 = 1000;
 
 /// Materializes a stream.
 #[derive(Debug, Clone)]
@@ -90,7 +85,7 @@ impl StreamMaterialize {
                 let mut c = ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         field,
-                        i as i32 + COLUMN_ID_BASE,
+                        i as i32 + USER_COLUMN_ID_OFFSET,
                     ),
                     is_hidden: !user_cols.contains(i),
                 };
@@ -120,6 +115,7 @@ impl StreamMaterialize {
             false,
             None,
             table_type,
+            None,
         )?;
 
         Ok(Self::new(input, table))
@@ -140,6 +136,7 @@ impl StreamMaterialize {
         definition: String,
         handle_pk_conflict: bool,
         row_id_index: Option<usize>,
+        version: Option<TableVersion>,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, TableType::Table)?;
 
@@ -152,6 +149,7 @@ impl StreamMaterialize {
             handle_pk_conflict,
             row_id_index,
             TableType::Table,
+            version,
         )?;
 
         Ok(Self::new(input, table))
@@ -199,6 +197,7 @@ impl StreamMaterialize {
         handle_pk_conflict: bool,
         row_id_index: Option<usize>,
         table_type: TableType,
+        version: Option<TableVersion>,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
@@ -207,9 +206,12 @@ impl StreamMaterialize {
         let schema = input.schema();
         let distribution = input.distribution();
 
-        // Assert the uniqueness of column names, including hidden columns.
+        // Assert the uniqueness of column names and IDs, including hidden columns.
         if let Some(name) = columns.iter().map(|c| c.name()).duplicates().next() {
-            panic!("column \"{}\" specified more than once", name);
+            panic!("duplicated column name \"{name}\"");
+        }
+        if let Some(id) = columns.iter().map(|c| c.column_id()).duplicates().next() {
+            panic!("duplicated column ID {id}");
         }
         // Assert that the schema of given `columns` is correct.
         assert_eq!(
@@ -262,6 +264,7 @@ impl StreamMaterialize {
             definition,
             handle_pk_conflict,
             read_prefix_len_hint,
+            version,
         })
     }
 
