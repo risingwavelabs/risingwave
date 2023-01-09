@@ -461,11 +461,21 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         n_appended_ops,
                         result_row,
                         prev_outputs,
+                        key_num_delta,
                     } = agg_group.build_changes(
                         curr_outputs,
                         &mut builders[group_key_indices.len()..],
                         &mut new_ops,
                     );
+
+                    match key_num_delta {
+                        1 => total_keys_count.fetch_add(key_num_delta as u64, Ordering::Relaxed),
+                        -1 => {
+                            total_keys_count.fetch_sub((-key_num_delta) as u64, Ordering::Relaxed)
+                        }
+                        0 => 0,
+                        _ => unreachable!(),
+                    };
 
                     if n_appended_ops != 0 {
                         for _ in 0..n_appended_ops {

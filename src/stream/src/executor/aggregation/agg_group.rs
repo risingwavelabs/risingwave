@@ -61,6 +61,8 @@ pub struct AggChangesInfo {
     pub result_row: OwnedRow,
     /// The previous outputs of all agg calls recorded in the `AggState`.
     pub prev_outputs: Option<OwnedRow>,
+    /// Whether we will have a new `group by key` state or lose one after changes.
+    pub key_num_delta: i8,
 }
 
 impl<S: StateStore> AggGroup<S> {
@@ -219,7 +221,7 @@ impl<S: StateStore> AggGroup<S> {
             row_count
         );
 
-        let n_appended_ops = match (
+        let (n_appended_ops, key_num_delta) = match (
             prev_row_count,
             row_count,
             self.group_key().is_some(),
@@ -230,7 +232,7 @@ impl<S: StateStore> AggGroup<S> {
                 // FIXME: for `SimpleAgg`, should we still build some changes when `row_count` is 0
                 // While other aggs may not be `0`?
 
-                0
+                (0, 0)
             }
 
             (0, _, true, _) | (0, _, _, false) => {
@@ -242,7 +244,7 @@ impl<S: StateStore> AggGroup<S> {
                     builder.append_datum(new_value);
                 }
 
-                1
+                (1, 1)
             }
 
             (_, 0, true, _) => {
@@ -257,7 +259,7 @@ impl<S: StateStore> AggGroup<S> {
                     builder.append_datum(old_value);
                 }
 
-                1
+                (1, -1)
             }
 
             _ => {
@@ -288,7 +290,7 @@ impl<S: StateStore> AggGroup<S> {
                     builder.append_datum(new_value);
                 }
 
-                2
+                (2, 0)
             }
         };
 
@@ -304,6 +306,7 @@ impl<S: StateStore> AggGroup<S> {
             n_appended_ops,
             result_row,
             prev_outputs,
+            key_num_delta,
         }
     }
 }
