@@ -303,6 +303,29 @@ impl Binder {
             "pg_table_is_visible" => return Ok(ExprImpl::literal_bool(true)),
             "pg_encoding_to_char" => return Ok(ExprImpl::literal_varchar("UTF8".into())),
             "has_database_privilege" => return Ok(ExprImpl::literal_bool(true)),
+            "pg_cancel_backend" => {
+                return if inputs.len() == 1 {
+                    // TODO: implement real cancel rather than just return false as an workaround.
+                    Ok(ExprImpl::literal_bool(false))
+                } else {
+                    Err(ErrorCode::ExprError(
+                        "Too many/few arguments for pg_cancel_backend()".into(),
+                    )
+                    .into())
+                };
+            }
+            "pg_terminate_backend" => {
+                return if inputs.len() == 1 {
+                    // TODO: implement real terminate rather than just return false as an
+                    // workaround.
+                    Ok(ExprImpl::literal_bool(false))
+                } else {
+                    Err(ErrorCode::ExprError(
+                        "Too many/few arguments for pg_terminate_backend()".into(),
+                    )
+                    .into())
+                };
+            }
             // internal
             "rw_vnode" => ExprType::Vnode,
             // TODO: include version/tag/commit_id
