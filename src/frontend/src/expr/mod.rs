@@ -52,8 +52,8 @@ pub use risingwave_pb::expr::expr_node::Type as ExprType;
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{
-    agg_func_sigs, align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_type,
-    least_restrictive, AggFuncSig, CastContext, CastSig, FuncSign,
+    agg_func_sigs, align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_some_all,
+    infer_type, least_restrictive, AggFuncSig, CastContext, CastSig, FuncSign,
 };
 pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;

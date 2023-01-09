@@ -55,6 +55,9 @@ pub struct LogicalAgg {
     core: generic::Agg<PlanRef>,
 }
 
+/// We insert a `count(*)` agg at the beginning of stream agg calls.
+const STREAM_ROW_COUNT_COLUMN: usize = 0;
+
 impl LogicalAgg {
     /// Infer agg result table for streaming agg.
     pub fn infer_result_table(&self, vnode_col_idx: Option<usize>) -> TableCatalog {
@@ -78,7 +81,10 @@ impl LogicalAgg {
                 .iter()
                 .enumerate()
                 .map(|(partial_output_idx, agg_call)| {
-                    agg_call.partial_to_total_agg_call(partial_output_idx)
+                    agg_call.partial_to_total_agg_call(
+                        partial_output_idx,
+                        partial_output_idx == STREAM_ROW_COUNT_COLUMN,
+                    )
                 })
                 .collect(),
             vec![],
@@ -131,7 +137,10 @@ impl LogicalAgg {
                     .iter()
                     .enumerate()
                     .map(|(partial_output_idx, agg_call)| {
-                        agg_call.partial_to_total_agg_call(n_local_group_key + partial_output_idx)
+                        agg_call.partial_to_total_agg_call(
+                            n_local_group_key + partial_output_idx,
+                            partial_output_idx == STREAM_ROW_COUNT_COLUMN,
+                        )
                     })
                     .collect(),
                 self.group_key().to_vec(),
@@ -147,8 +156,10 @@ impl LogicalAgg {
                         .iter()
                         .enumerate()
                         .map(|(partial_output_idx, agg_call)| {
-                            agg_call
-                                .partial_to_total_agg_call(n_local_group_key + partial_output_idx)
+                            agg_call.partial_to_total_agg_call(
+                                n_local_group_key + partial_output_idx,
+                                partial_output_idx == STREAM_ROW_COUNT_COLUMN,
+                            )
                         })
                         .collect(),
                     self.group_key().to_vec(),

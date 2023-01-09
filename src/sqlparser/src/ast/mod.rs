@@ -256,6 +256,10 @@ pub enum Expr {
         op: BinaryOperator,
         right: Box<Expr>,
     },
+    /// Some operation e.g. `foo > Some(bar)`, It will be wrapped in the right side of BinaryExpr
+    SomeOp(Box<Expr>),
+    /// ALL operation e.g. `foo > ALL(bar)`, It will be wrapped in the right side of BinaryExpr
+    AllOp(Box<Expr>),
     /// Unary operation e.g. `NOT foo`
     UnaryOp { op: UnaryOperator, expr: Box<Expr> },
     /// CAST an expression to a different data type e.g. `CAST(foo AS VARCHAR)`
@@ -399,6 +403,8 @@ impl fmt::Display for Expr {
                 op,
                 fmt_expr_with_paren(right)
             ),
+            Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
+            Expr::AllOp(expr) => write!(f, "ALL({})", expr),
             Expr::UnaryOp { op, expr } => {
                 if op == &UnaryOperator::PGPostfixFactorial {
                     write!(f, "{}{}", expr, op)
