@@ -1242,19 +1242,19 @@ static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
 
 /// A utility for visiting the [`NodeBody`] of the [`StreamNode`]s in a [`StreamFragment`]
 /// recursively.
-pub fn visit_fragment<F>(fragment: &mut StreamFragment, f: F)
+pub fn visit_fragment<F>(fragment: &mut StreamFragment, mut f: F)
 where
     F: FnMut(&mut NodeBody),
 {
-    fn visit_inner<F>(stream_node: &mut StreamNode, mut f: F)
+    fn visit_inner<F>(stream_node: &mut StreamNode, f: &mut F)
     where
         F: FnMut(&mut NodeBody),
     {
         f(stream_node.node_body.as_mut().unwrap());
         for input in &mut stream_node.input {
-            visit_inner(input, &mut f);
+            visit_inner(input, f);
         }
     }
 
-    visit_inner(fragment.node.as_mut().unwrap(), f)
+    visit_inner(fragment.node.as_mut().unwrap(), &mut f)
 }
