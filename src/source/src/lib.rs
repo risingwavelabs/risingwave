@@ -21,6 +21,7 @@
 #![feature(generators)]
 #![feature(hash_drain_filter)]
 #![feature(type_alias_impl_trait)]
+#![feature(async_fn_in_trait)]
 
 use std::collections::HashMap;
 use std::fmt::Debug;

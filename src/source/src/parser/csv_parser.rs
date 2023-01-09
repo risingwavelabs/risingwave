@@ -12,18 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use anyhow::anyhow;
 use futures::future::ready;
+use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_expr::vector_op::cast::{
     str_to_date, str_to_timestamp, str_with_time_zone_to_timestamptz,
 };
+use risingwave_connector::source::SplitId;
 
-use crate::{ByteStreamSourceParser, ParseFuture, SourceStreamChunkRowWriter, WriteGuard};
+use crate::{
+    ByteStreamSourceParser, ParseFuture, SourceColumnDesc, SourceStreamChunkBuilder,
+    SourceStreamChunkRowWriter, StreamChunkWithState, WriteGuard,
+};
 
 macro_rules! to_rust_type {
     ($v:ident, $t:ty) => {
@@ -34,6 +40,7 @@ macro_rules! to_rust_type {
 
 #[derive(Debug)]
 pub struct CsvParser {
+    rw_columns: Vec<SourceColumnDesc>,
     next_row_is_header: bool,
     csv_reader: csv_core::Reader,
     // buffers for parse
@@ -44,8 +51,9 @@ pub struct CsvParser {
 }
 
 impl CsvParser {
-    pub fn new(delimiter: u8, has_header: bool) -> Result<Self> {
+    pub fn new(rw_columns: Vec<SourceColumnDesc>, delimiter: u8, has_header: bool) -> Result<Self> {
         Ok(Self {
+            rw_columns,
             next_row_is_header: has_header,
             csv_reader: csv_core::ReaderBuilder::new().delimiter(delimiter).build(),
             output: vec![0],
@@ -119,8 +127,8 @@ impl CsvParser {
         }
     }
 
-    fn parse_inner(
-        &mut self,
+    fn try_parse_single(
+        self,
         payload: &mut &[u8],
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<Option<WriteGuard>> {
@@ -143,19 +151,87 @@ impl CsvParser {
 }
 
 impl ByteStreamSourceParser for CsvParser {
-    type ParseResult<'a> = impl ParseFuture<'a, Result<Option<WriteGuard>>>;
+    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    async fn parse(self, data_stream: risingwave_connector::source::BoxSourceStream) {
+        // the remain length of the last message
+        let mut remain_len = 0;
+        let mut offset = 0;
+        let mut split_id = None;
+        
+        #[for_await]
+        for batch in data_stream {
+            let batch = batch?;
 
-    fn parse<'a, 'b, 'c>(
-        &'a mut self,
-        payload: &'a mut &'b [u8],
-        writer: crate::SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        ready(self.parse_inner(payload, writer))
+            let mut builder =
+                SourceStreamChunkBuilder::with_capacity(self.rw_columns.clone(), batch.len() * 2);
+            let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
+
+            for msg in batch {
+                if let Some(content) = msg.payload {
+                    offset = msg.offset.parse().unwrap();
+                    let mut buff = content.as_ref();
+
+                    remain_len = content.len();
+                    loop {
+                        match self.try_parse_single(&mut buff, builder.row_writer()) {
+                            Err(e) => {
+                                tracing::warn!(
+                                    "message parsing failed {}, skipping",
+                                    e.to_string()
+                                );
+                                continue;
+                            }
+                            Ok(None) => {
+                                break;
+                            }
+                            Ok(Some(_)) => {
+                                let consumed = remain_len - buff.len();
+                                offset += consumed;
+                                remain_len = buff.len();
+                            }
+                        }
+                    }
+                    split_offset_mapping.insert(msg.split_id, offset.to_string());
+                }
+            }
+            yield StreamChunkWithState {
+                chunk: builder.finish(),
+                split_offset_mapping: Some(split_offset_mapping),
+            };
+        }
+        // the last record in a file may be missing the terminator,
+        // so we need to pass an empty payload to inform the parser.
+        if remain_len > 0 {
+            let mut builder = SourceStreamChunkBuilder::with_capacity(self.rw_columns.clone(), 1);
+            let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
+            let empty = &mut vec![].as_ref();
+            match self.try_parse_single(empty, builder.row_writer()) {
+                Err(e) => {
+                    tracing::warn!("message parsing failed {}, skipping", e.to_string());
+                }
+                Ok(Some(_)) => {
+                    split_offset_mapping.insert(, );
+                    yield StreamChunkWithState {
+                        chunk: builder.finish(),
+                        split_offset_mapping: Some(split_offset_mapping),
+                    };
+                }
+            }
+        }
     }
+    // type ParseResult<'a> = impl ParseFuture<'a, Result<Option<WriteGuard>>>;
+
+    // fn parse<'a, 'b, 'c>(
+    //     &'a mut self,
+    //     payload: &'a mut &'b [u8],
+    //     writer: crate::SourceStreamChunkRowWriter<'c>,
+    // ) -> Self::ParseResult<'a>
+    // where
+    //     'b: 'a,
+    //     'c: 'a,
+    // {
+    //     ready(self.parse_inner(payload, writer))
+    // }
 }
 
 #[inline]

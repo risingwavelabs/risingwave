@@ -29,10 +29,11 @@ use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
+use risingwave_connector::source::BoxSourceStream;
 use risingwave_pb::catalog::StreamSourceInfo;
 
 use crate::parser::maxwell::MaxwellParser;
-use crate::{SourceColumnDesc, SourceFormat};
+use crate::{BoxSourceWithStateStream, SourceColumnDesc, SourceFormat, StreamChunkWithState};
 
 mod avro;
 mod canal;
@@ -384,7 +385,7 @@ impl SourceParserImpl {
 // TODO: use `async_fn_in_traits` to implement it
 /// A parser trait that parse byte stream instead of one byte chunk
 pub trait ByteStreamSourceParser: Send + Debug + 'static {
-    type ParseResult<'a>: ParseFuture<'a, Result<Option<WriteGuard>>>;
+    // type ParseResult<'a>: ParseFuture<'a, Result<Option<WriteGuard>>>;
     /// Parse the payload and append the result to the [`StreamChunk`] directly.
     /// If the payload is not enough to parse one record, the parser will cache
     /// the payload and wait for more byte to be passed.
@@ -397,14 +398,20 @@ pub trait ByteStreamSourceParser: Send + Debug + 'static {
     /// # Returns
     ///
     /// An [`Option<WriteGuard>`], None if the payload is not enough to parse one record, else Some
-    fn parse<'a, 'b, 'c>(
-        &'a mut self,
-        payload: &'a mut &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a;
+    // fn parse<'a, 'b, 'c>(
+    //     &'a mut self,
+    //     payload: &'a mut &'b [u8],
+    //     writer: SourceStreamChunkRowWriter<'c>,
+    // ) -> Self::ParseResult<'a>
+    // where
+    //     'b: 'a,
+    //     'c: 'a;
+
+    // the `payload_stream` is a data stream of only one source split
+    fn parse(
+        self,
+        payload_stream: BoxSourceStream,
+    ) -> BoxSourceWithStateStream<StreamChunkWithState>;
 }
 
 #[derive(Debug)]
