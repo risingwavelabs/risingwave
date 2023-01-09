@@ -30,8 +30,8 @@ use crate::hummock::{HummockStorage, SstableIdManagerRef};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
-    define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type,
+    define_local_state_store_associated_type, define_state_store_associated_type,
+    define_state_store_read_associated_type, define_state_store_write_associated_type,
 };
 
 /// A state store wrapper for monitoring metrics.
@@ -188,7 +188,17 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
     }
 }
 
-impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {}
+impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
+    define_local_state_store_associated_type!();
+
+    fn surely_not_have(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::SurelyNotHaveFuture<'_> {
+        self.inner.surely_not_have(key_range, read_options)
+    }
+}
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     type Local = MonitoredStateStore<S::Local>;

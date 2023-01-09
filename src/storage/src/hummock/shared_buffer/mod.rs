@@ -234,7 +234,7 @@ impl SharedBuffer {
             .filter(|(_, data)| match data {
                 UncommittedData::Batch(batch) => batch.filter(table_id, table_key_range),
                 UncommittedData::Sst(LocalSstableInfo { sst_info, .. }) => {
-                    filter_single_sst(sst_info, table_id, table_key_range)
+                    filter_single_sst(sst_info, &table_id, table_key_range)
                 }
             })
             .map(|((_, order_index), data)| (*order_index, data.clone()));

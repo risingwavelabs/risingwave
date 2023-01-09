@@ -138,7 +138,7 @@ impl SyncUncommittedData {
                                         && batch.filter(table_id, table_key_range)
                                 }
                                 UncommittedData::Sst(LocalSstableInfo { sst_info, .. }) => {
-                                    filter_single_sst(sst_info, table_id, table_key_range)
+                                    filter_single_sst(sst_info, &table_id, table_key_range)
                                 }
                             })
                             .cloned()
@@ -149,7 +149,7 @@ impl SyncUncommittedData {
             SyncUncommittedDataStage::Synced(ssts, _) => vec![ssts
                 .iter()
                 .filter(|LocalSstableInfo { sst_info, .. }| {
-                    filter_single_sst(sst_info, table_id, table_key_range)
+                    filter_single_sst(sst_info, &table_id, table_key_range)
                 })
                 .map(|info| UncommittedData::Sst(info.clone()))
                 .collect()],

@@ -392,7 +392,17 @@ pub mod verify {
         }
     }
 
-    impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {}
+    impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {
+        define_local_state_store_associated_type!();
+
+        fn surely_not_have(
+            &self,
+            _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            _read_options: ReadOptions,
+        ) -> Self::SurelyNotHaveFuture<'_> {
+            async move { Ok(false) }
+        }
+    }
 
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
         type Local = VerifyStateStore<A::Local, E::Local>;
@@ -799,7 +809,17 @@ pub mod boxed_state_store {
     impl_state_store_read_for_box!(BoxDynamicDispatchedLocalStateStore);
     impl_state_store_write_for_box!(BoxDynamicDispatchedLocalStateStore);
 
-    impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {}
+    impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {
+        define_local_state_store_associated_type!();
+
+        fn surely_not_have(
+            &self,
+            _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            _read_options: ReadOptions,
+        ) -> Self::SurelyNotHaveFuture<'_> {
+            async move { Ok(false) }
+        }
+    }
 
     // For global StateStore
 

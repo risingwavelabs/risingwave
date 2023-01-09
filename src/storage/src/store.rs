@@ -245,10 +245,21 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
 }
 
+pub trait SurelyNotHaveTrait<'a> = Future<Output = StorageResult<bool>> + Send + 'a;
+
+#[macro_export]
+macro_rules! define_local_state_store_associated_type {
+    () => {
+        type SurelyNotHaveFuture<'a> = impl SurelyNotHaveTrait<'a>;
+    };
+}
+
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
 /// written by itself. Each local state store is not `Clone`, and is owned by a streaming state
 /// table.
 pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
+    type SurelyNotHaveFuture<'a>: SurelyNotHaveTrait<'a>;
+
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
     fn insert(&self, _key: Bytes, _val: Bytes) -> StorageResult<()> {
         unimplemented!()
@@ -271,6 +282,21 @@ pub trait LocalStateStore: StateStoreRead + StateStoreWrite + StaticSendSync {
     fn advance_write_epoch(&mut self, _new_epoch: u64) -> StorageResult<()> {
         unimplemented!()
     }
+
+    /// Check existence of a given `key_range`.
+    /// It is better to provide `prefix_hint` in `read_options`, which will be used
+    /// for checking bloom filter if hummock is used. If `prefix_hint` is not provided,
+    /// the false positive rate can be significantly higher because bloom filter cannot
+    /// be used.
+    ///
+    /// Returns:
+    /// - true: `key_range` is guaranteed to be absent in storage.
+    /// - false: `key_range` may or may not exist in storage.
+    fn surely_not_have(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::SurelyNotHaveFuture<'_>;
 }
 
 #[derive(Default, Clone)]
