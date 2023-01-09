@@ -35,16 +35,7 @@ pub async fn start_follower_srv(
     address_info: AddressInfo,
     election_client: Option<ElectionClientRef>,
 ) {
-    let either = if let Some(election_client) = election_client {
-        Left(election_client)
-    } else {
-        Right(MetaLeaderInfo {
-            node_address: address_info.listen_addr.clone().to_string(),
-            lease_id: 0,
-        })
-    };
-
-    let leader_srv = LeaderServiceImpl::new(either);
+    let leader_srv = LeaderServiceImpl::new(election_client, MetaLeaderInfo{ node_address: address_info.listen_addr.to_string(), lease_id: 0 });
 
     let health_srv = HealthServiceImpl::new();
     tonic::transport::Server::builder()

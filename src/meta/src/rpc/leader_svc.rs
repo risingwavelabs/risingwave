@@ -301,12 +301,8 @@ pub async fn start_leader_srv<S: MetaStore>(
         }
     };
 
-    let either = if let Some(election_client) = election_client {
-        Left(election_client)
-    } else {
-        Right(current_leader.clone())
-    };
-    let leader_srv = LeaderServiceImpl::new(either);
+
+    let leader_srv = LeaderServiceImpl::new(election_client, current_leader);
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))

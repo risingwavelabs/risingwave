@@ -26,12 +26,13 @@ use crate::rpc::server::ElectionClientRef;
 
 #[derive(Clone)]
 pub struct LeaderServiceImpl {
-    election_client: Either<ElectionClientRef, MetaLeaderInfo>,
+    election_client: Option<ElectionClientRef>,
+    current_leader: MetaLeaderInfo,
 }
 
 impl LeaderServiceImpl {
-    pub fn new(election_client: Either<ElectionClientRef, MetaLeaderInfo>) -> Self {
-        LeaderServiceImpl { election_client }
+    pub fn new(election_client: Option<ElectionClientRef>, current_leader: MetaLeaderInfo) -> Self {
+        LeaderServiceImpl { election_client, current_leader }
     }
 }
 
@@ -43,8 +44,10 @@ impl LeaderService for LeaderServiceImpl {
         _request: Request<LeaderRequest>,
     ) -> Result<Response<LeaderResponse>, Status> {
         let leader = match self.election_client.borrow() {
-            Either::Left(election_client) => election_client.leader().await,
-            Either::Right(leader) => Ok(Some(leader.clone())),
+            None => Ok(Some(self.current_leader.clone())),
+            Some(client) => {
+                client.leader().await
+            }
         }?;
 
         let leader_address = leader
