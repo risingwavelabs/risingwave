@@ -412,6 +412,15 @@ impl ExprVisitor<usize> for CountNow {
     }
 }
 
+/// analyze if the expression can derive a watermark from some input watermark. If it can
+/// derive, return the input watermark column index
+pub fn try_derive_watermark(expr: &ExprImpl) -> Option<usize> {
+    if let WatermarkDerivation::Watermark(idx) = self.visit_expr(expr) {
+        return Some(idx);
+    }
+    None
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum WatermarkDerivation {
     /// the expression will return a constant and not depends on its input.
@@ -424,18 +433,9 @@ enum WatermarkDerivation {
 }
 
 #[derive(Clone, Default)]
-pub struct WatermarkAnalyzer {}
+struct WatermarkAnalyzer {}
 
 impl WatermarkAnalyzer {
-    /// analyze if the expression can derive a watermark from some input watermark. If it can
-    /// derive, return the input watermark column index
-    pub fn try_derive_watermark(&self, expr: &ExprImpl) -> Option<usize> {
-        if let WatermarkDerivation::Watermark(idx) = self.visit_expr(expr) {
-            return Some(idx);
-        }
-        None
-    }
-
     fn visit_expr(&self, expr: &ExprImpl) -> WatermarkDerivation {
         match expr {
             ExprImpl::InputRef(inner) => WatermarkDerivation::Watermark(inner.index()),

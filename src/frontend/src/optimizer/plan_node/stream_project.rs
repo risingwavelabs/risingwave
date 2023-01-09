@@ -19,7 +19,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{try_derive_watermark, Expr, ExprImpl};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
@@ -28,6 +28,9 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 pub struct StreamProject {
     pub base: PlanBase,
     logical: LogicalProject,
+    /// All the watermark derivations, (input_column_index, output_column_index). And the
+    /// derivation expression is the project's expression itself.
+    watermark_derivations: Vec<(usize, usize)>,
 }
 
 impl fmt::Display for StreamProject {
@@ -44,6 +47,15 @@ impl StreamProject {
         let distribution = logical
             .i2o_col_mapping()
             .rewrite_provided_distribution(input.distribution());
+
+        let mut watermark_derivations = vec![];
+        let mut watermark_cols = FixedBitSet::with_capacity(logical.schema().len());
+        for (expr_idx, expr) in logical.exprs().iter().enumerate() {
+            if let Some(input_idx) = try_derive_watermark(&expr) {
+                watermark_derivations.push((input_idx, expr_idx));
+                watermark_cols.insert(expr_idx);
+            }
+        }
         // Project executor won't change the append-only behavior of the stream, so it depends on
         // input's `append_only`.
         let base = PlanBase::new_stream(
@@ -54,9 +66,13 @@ impl StreamProject {
             distribution,
             logical.input().append_only(),
             // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            FixedBitSet::with_capacity(logical.schema().len()),
+            watermark_cols,
         );
-        StreamProject { base, logical }
+        StreamProject {
+            base,
+            logical,
+            watermark_derivations,
+        }
     }
 
     pub fn as_logical(&self) -> &LogicalProject {
