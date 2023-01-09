@@ -261,7 +261,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             ref schema,
             lookup_miss_count,
             total_lookup_count,
-            total_keys_count,
             ..
         }: &mut HashAggExecutorExtra<K, S>,
         agg_group_cache: &mut AggGroupCache<K, S>,
@@ -310,10 +309,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let mut buffered = stream::iter(futs).buffer_unordered(10).fuse();
         while let Some(result) = buffered.next().await {
             let (key, agg_group) = result?;
-            // We then know this agg group by key appears the first time
-            if agg_group.prev_row_count() == 0 {
-                total_keys_count.fetch_add(1, Ordering::Relaxed);
-            }
             agg_group_cache.put(key, agg_group);
         }
         drop(buffered); // drop to avoid accidental use
