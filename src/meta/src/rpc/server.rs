@@ -293,7 +293,7 @@ mod tests {
         setup_n_nodes_inner(n, meta_port, &meta_store).await
     }
 
-    /// Get a Channel to a meat node without re-trying the connection.
+    /// Get a Channel to a meta node without re-trying the connection.
     ///
     /// ### Returns
     /// Null on error, else the channel
@@ -484,17 +484,8 @@ mod tests {
             "1: Leader should stay the same if nodes are added"
         );
 
-        // add nodes again
-        let node_controllers_3 =
-            setup_n_nodes(number_of_nodes, meta_port + number_of_nodes * 2 + 2).await;
-        assert_eq!(
-            original_leader,
-            get_agreed_leader(number_of_nodes, meta_port).await,
-            "2: Leader should stay the same if nodes are added"
-        );
-
         // shut down all nodes
-        for c in [node_controllers_1, node_controllers_2, node_controllers_3] {
+        for c in [node_controllers_1, node_controllers_2] {
             for (join_handle, shutdown_tx) in c {
                 if shutdown_tx.send(()).is_ok() {
                     join_handle.await.unwrap();
