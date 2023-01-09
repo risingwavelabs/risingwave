@@ -30,6 +30,7 @@ mod expr_literal;
 mod expr_nested_construct;
 mod expr_quaternary_bytes;
 pub mod expr_regexp;
+mod expr_some_all;
 mod expr_ternary_bytes;
 mod expr_to_char_const_tmpl;
 mod expr_to_timestamp_const_tmpl;
@@ -135,6 +136,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         DateTrunc => build_date_trunc_expr(prost),
 
         // Dedicated types
+        All | Some => build_some_all_expr_prost(prost),
         In => InExpression::try_from(prost).map(Expression::boxed),
         Case => CaseExpression::try_from(prost).map(Expression::boxed),
         Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
@@ -157,7 +159,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             let RexNode::FuncCall(func_call_node) = rex_node else {
                 bail!("Expected RexNode::FuncCall in Now");
             };
-            let Some(bind_timestamp) = func_call_node.children.first() else {
+            let Option::Some(bind_timestamp) = func_call_node.children.first() else {
                 bail!("Expected epoch timestamp bound into Now");
             };
             LiteralExpression::try_from(bind_timestamp).map(Expression::boxed)

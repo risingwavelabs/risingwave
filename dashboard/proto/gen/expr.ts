@@ -40,6 +40,8 @@ export const ExprNode_Type = {
   OR: "OR",
   NOT: "NOT",
   IN: "IN",
+  SOME: "SOME",
+  ALL: "ALL",
   /** BITWISE_AND - bitwise operators */
   BITWISE_AND: "BITWISE_AND",
   BITWISE_OR: "BITWISE_OR",
@@ -191,6 +193,12 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 24:
     case "IN":
       return ExprNode_Type.IN;
+    case 25:
+    case "SOME":
+      return ExprNode_Type.SOME;
+    case 26:
+    case "ALL":
+      return ExprNode_Type.ALL;
     case 31:
     case "BITWISE_AND":
       return ExprNode_Type.BITWISE_AND;
@@ -422,6 +430,10 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "NOT";
     case ExprNode_Type.IN:
       return "IN";
+    case ExprNode_Type.SOME:
+      return "SOME";
+    case ExprNode_Type.ALL:
+      return "ALL";
     case ExprNode_Type.BITWISE_AND:
       return "BITWISE_AND";
     case ExprNode_Type.BITWISE_OR:
