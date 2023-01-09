@@ -509,7 +509,7 @@ impl PlanRoot {
     ///
     /// NOTE: Optional `BatchTopN` / `BatchFilter`, are supported,
     /// so less data sent over RPC.
-    fn enforce_exchange_above_table_scan(plan: PlanRef) -> PlanRef {
+    fn enforce_exchange_above_table_scan(root: PlanRef, order: &Order) -> PlanRef {
         fn is_candidate(plan: &PlanRef) -> bool {
             // Unwrap optional `BatchTopN` / `BatchFilter`.
             let mut candidate = plan.clone();
@@ -534,30 +534,29 @@ impl PlanRoot {
             plan.node_type() == PlanNodeType::BatchExchange
         }
 
-        fn insert_exchange(plan: PlanRef) -> PlanRef {
-            let order = plan.order().clone();
-            BatchExchange::new(plan, order, Distribution::Single).into()
+        fn insert_exchange(plan: PlanRef, order: &Order) -> PlanRef {
+            BatchExchange::new(plan, order.clone(), Distribution::Single).into()
         }
 
-        fn helper(plan: PlanRef) -> PlanRef {
+        fn helper(plan: PlanRef, order: &Order) -> PlanRef {
             if is_exchange(&plan) {
                 return plan;
             }
             if is_candidate(&plan) {
-                return insert_exchange(plan);
+                return insert_exchange(plan, order);
             }
             let new_inputs = plan
                 .inputs()
                 .into_iter()
-                .map(|input| helper(input))
+                .map(|input| helper(input, plan.order()))
                 .collect_vec();
             plan.clone_with_inputs(&new_inputs)
         }
 
-        if is_candidate(&plan) {
-            insert_exchange(plan)
+        if is_candidate(&root) {
+            insert_exchange(root, order)
         } else {
-            helper(plan)
+            helper(root, order)
         }
     }
 
@@ -569,7 +568,7 @@ impl PlanRoot {
         plan = plan.to_local_with_order_required(&self.required_order)?;
 
         // Ensure there is exchange before all seq scan.
-        plan = Self::enforce_exchange_above_table_scan(plan);
+        plan = Self::enforce_exchange_above_table_scan(plan, &self.required_order);
 
         // Add Project if the any position of `self.out_fields` is set to zero.
         if self.out_fields.count_ones(..) != self.out_fields.len() {
