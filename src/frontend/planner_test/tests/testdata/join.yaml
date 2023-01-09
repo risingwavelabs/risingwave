@@ -113,8 +113,7 @@
     BatchNestedLoopJoin { type: Inner, predicate: (t1.v1 > t2.v1), output: [t1.v2, t2.v2] }
     ├─BatchExchange { order: [], dist: Single }
     | └─BatchFilter { predicate: (t1.v2 < 10:Int32) }
-    |   └─BatchExchange { order: [], dist: Single }
-    |     └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
+    |   └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
     └─BatchExchange { order: [], dist: Single }
       └─BatchScan { table: t2, columns: [t2.v1, t2.v2], distribution: SomeShard }
 - sql: |
@@ -550,8 +549,7 @@
     BatchLookupJoin { type: Inner, predicate: t1.v2 = t3.v1 AND (t3.v1 > 1:Int32), output: all }
     └─BatchExchange { order: [], dist: Single }
       └─BatchFilter { predicate: (t1.v2 > 1:Int32) }
-        └─BatchExchange { order: [], dist: Single }
-          └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
+        └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
   with_config_map:
     QUERY_MODE: local
     RW_BATCH_ENABLE_LOOKUP_JOIN: 'true'

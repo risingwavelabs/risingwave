@@ -478,8 +478,8 @@
     └─BatchFilter { predicate: (((t1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Int32)) }
       └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
   batch_local_plan: |
-    BatchFilter { predicate: (((t1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Int32)) }
-    └─BatchExchange { order: [], dist: Single }
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (((t1.a > 1:Int32) OR (t1.c > 1:Int32)) OR (t1.b > 1:Int32)) }
       └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
 - sql: |
     create table t1 (a int, b numeric, c bigint, p int);
@@ -493,8 +493,8 @@
     └─BatchFilter { predicate: ((((t1.a >= 1:Int32) AND (t1.a <= 8:Int32)) OR ((t1.b >= 1:Int32) AND (t1.b <= 8:Int32))) OR ((t1.c >= 1:Int32) AND (t1.c <= 8:Int32))) }
       └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
   batch_local_plan: |
-    BatchFilter { predicate: ((((t1.a >= 1:Int32) AND (t1.a <= 8:Int32)) OR ((t1.b >= 1:Int32) AND (t1.b <= 8:Int32))) OR ((t1.c >= 1:Int32) AND (t1.c <= 8:Int32))) }
-    └─BatchExchange { order: [], dist: Single }
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: ((((t1.a >= 1:Int32) AND (t1.a <= 8:Int32)) OR ((t1.b >= 1:Int32) AND (t1.b <= 8:Int32))) OR ((t1.c >= 1:Int32) AND (t1.c <= 8:Int32))) }
       └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
 - sql: |
     create table t1 (a int, b numeric, c bigint, p int);
@@ -508,8 +508,8 @@
     └─BatchFilter { predicate: (t1.a > 1:Int32) AND (t1.b > 1:Int32) }
       └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
   batch_local_plan: |
-    BatchFilter { predicate: (t1.a > 1:Int32) AND (t1.b > 1:Int32) }
-    └─BatchExchange { order: [], dist: Single }
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: (t1.a > 1:Int32) AND (t1.b > 1:Int32) }
       └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c, t1.p], distribution: SomeShard }
 - sql: |
     CREATE TABLE lineitem (

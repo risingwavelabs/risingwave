@@ -502,7 +502,8 @@ impl PlanRoot {
 
     /// Auxiliary function to ensure there is **exchange directly before table scan**,
     /// so that it will be pushed to compute node.
-    /// Candidate: Either [`BatchSource`] Or [`BatchSeqScan`] on non-system table.
+    /// Candidate: Optional [`BatchFilter`] with
+    /// either [`BatchSource`] or [`BatchSeqScan`] on non-system table.
     /// Cases:
     /// 1. Candidate in root, insert exchange.
     /// 2. Candidate not in root.
@@ -513,6 +514,18 @@ impl PlanRoot {
     /// [`plan`] must be root.
     fn enforce_exchange_above_table_scan(plan: PlanRef) -> PlanRef {
         fn is_candidate(plan: &PlanRef) -> bool {
+            let plan_inputs = plan.inputs();
+            let plan = if plan.node_type() == PlanNodeType::BatchProject {
+                &plan_inputs[0]
+            } else {
+                plan
+            };
+            let plan_inputs = plan.inputs();
+            let plan = if plan.node_type() == PlanNodeType::BatchFilter {
+                &plan_inputs[0]
+            } else {
+                plan
+            };
             plan.node_type() == PlanNodeType::BatchSource
                 || (plan.node_type() == PlanNodeType::BatchSeqScan
                     && !plan
@@ -521,9 +534,11 @@ impl PlanRoot {
                         .logical()
                         .is_sys_table())
         }
+
         fn is_exchange(plan: &PlanRef) -> bool {
             plan.node_type() == PlanNodeType::BatchExchange
         }
+
         fn insert_exchange(plan: PlanRef) -> PlanRef {
             let order = plan.order().clone();
             BatchExchange::new(plan, order, Distribution::Single).into()
