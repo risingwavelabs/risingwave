@@ -177,7 +177,8 @@ impl KafkaSplitReader {
                     bytes_current_second = 0;
                     res.clear();
                 }
-                if num_messages > self.max_num_messages {
+                if num_messages >= self.max_num_messages {
+                    yield res;
                     break 'for_outer_loop;
                 }
             }

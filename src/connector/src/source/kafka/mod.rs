@@ -42,7 +42,7 @@ pub struct KafkaProperties {
     /// is determined by the compute node's parameter, this parameter specifies
     /// the number of messages total across all the parallelism.
     /// We remark that the default parallelism is the same as the number of Kafka topic partitions
-    #[serde(rename = "max.num.messages")]
+    #[serde(rename = "max.num.messages", alias = "kafka.max.num.messages")]
     pub max_num_messages: Option<String>,
 
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
