@@ -538,7 +538,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: covered_index, columns: [covered_index.l_orderkey, covered_index.l_partkey, covered_index.l_suppkey, covered_index.l_linenumber, covered_index.l_quantity, covered_index.l_extendedprice, covered_index.l_discount, covered_index.l_tax, covered_index.l_returnflag, covered_index.l_linestatus, covered_index.l_shipdate, covered_index.l_commitdate, covered_index.l_receiptdate, covered_index.l_shipinstruct, covered_index.l_shipmode, covered_index.l_comment], scan_ranges: [covered_index.l_orderkey = Int64(1)], distribution: UpstreamHashShard(covered_index.l_orderkey) }
   batch_local_plan: |
-    BatchExchange { order: [covered_index.l_orderkey ASC], dist: Single }
+    BatchExchange { order: [], dist: Single }
     └─BatchScan { table: covered_index, columns: [covered_index.l_orderkey, covered_index.l_partkey, covered_index.l_suppkey, covered_index.l_linenumber, covered_index.l_quantity, covered_index.l_extendedprice, covered_index.l_discount, covered_index.l_tax, covered_index.l_returnflag, covered_index.l_linestatus, covered_index.l_shipdate, covered_index.l_commitdate, covered_index.l_receiptdate, covered_index.l_shipinstruct, covered_index.l_shipmode, covered_index.l_comment], scan_ranges: [covered_index.l_orderkey = Int64(1)], distribution: UpstreamHashShard(covered_index.l_orderkey) }
 - sql: |
     create table t1 (a int, b numeric, c bigint, p int);
