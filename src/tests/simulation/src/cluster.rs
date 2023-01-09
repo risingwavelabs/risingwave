@@ -155,6 +155,8 @@ impl Cluster {
             "etcd",
             "--etcd-endpoints",
             "192.168.10.1:2388",
+            "--state-store",
+            "hummock+memory-shared",
         ]);
         handle
             .create_node()
