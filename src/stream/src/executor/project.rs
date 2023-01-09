@@ -170,7 +170,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::InputRefExpression;
+    use risingwave_expr::expr::{InputRefExpression, LiteralExpression};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::super::test_utils::MockSource;
@@ -239,6 +239,79 @@ mod tests {
             )
         );
 
+        assert!(project.next().await.unwrap().unwrap().is_stop());
+    }
+    #[tokio::test]
+    async fn test_watermark_projection() {
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+
+        let a_left_expr = InputRefExpression::new(DataType::Int64, 0);
+        let a_right_expr = LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1)));
+        let a_expr = new_binary_expr(
+            Type::Add,
+            DataType::Int64,
+            Box::new(a_left_expr),
+            Box::new(a_right_expr),
+        )
+        .unwrap();
+
+        let b_left_expr = InputRefExpression::new(DataType::Int64, 0);
+        let b_right_expr = LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1)));
+        let b_expr = new_binary_expr(
+            Type::Subtract,
+            DataType::Int64,
+            Box::new(b_left_expr),
+            Box::new(b_right_expr),
+        )
+        .unwrap();
+
+        let project = Box::new(ProjectExecutor::new(
+            ActorContext::create(123),
+            Box::new(source),
+            vec![],
+            vec![a_expr, b_expr],
+            1,
+            MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
+        ));
+        let mut project = project.execute();
+
+        tx.push_int64_watermark(0, 100);
+
+        let w1 = project.next().await.unwrap().unwrap();
+        let w1 = w1.as_watermark().unwrap();
+        let w2 = project.next().await.unwrap().unwrap();
+        let w2 = w2.as_watermark().unwrap();
+        let (w1, w2) = if w1.col_idx < w2.col_idx {
+            (w1, w2)
+        } else {
+            (w2, w1)
+        };
+
+        assert_eq!(
+            w1,
+            &Watermark {
+                col_idx: 0,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(101)
+            }
+        );
+
+        assert_eq!(
+            w2,
+            &Watermark {
+                col_idx: 1,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(99)
+            }
+        );
+        tx.push_int64_watermark(1, 100);
+        tx.push_barrier(1, true);
         assert!(project.next().await.unwrap().unwrap().is_stop());
     }
 }
