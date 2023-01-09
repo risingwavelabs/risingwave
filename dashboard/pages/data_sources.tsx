@@ -22,6 +22,11 @@ import { getDataSources } from "./api/streaming"
 export default function DataSources() {
   const columns: Column<Source>[] = [
     {
+      name: "Connector",
+      width: 3,
+      content: (r) => r.properties.connector ?? "unknown",
+    },
+    {
       name: "Row Format",
       width: 3,
       content: (s) => s.info?.rowFormat ?? "unknown",
