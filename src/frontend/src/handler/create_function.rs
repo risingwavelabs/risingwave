@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
 use risingwave_pb::catalog::Function;
@@ -20,6 +21,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use super::*;
+use crate::catalog::CatalogError;
 use crate::{bind_data_type, Binder};
 
 pub async fn handle_create_function(
@@ -72,7 +74,7 @@ pub async fn handle_create_function(
     };
     let mut arg_types = vec![];
     for arg in args.unwrap_or_default() {
-        arg_types.push(bind_data_type(&arg.data_type)?.into());
+        arg_types.push(bind_data_type(&arg.data_type)?);
     }
 
     // resolve database and schema id
@@ -81,12 +83,25 @@ pub async fn handle_create_function(
     let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
+    // check if function exists
+    if (session.env().catalog_reader().read_guard())
+        .get_schema_by_id(&database_id, &schema_id)?
+        .get_function_by_name_args(&function_name, &arg_types)
+        .is_some()
+    {
+        let name = format!(
+            "{function_name}({})",
+            arg_types.iter().map(|t| t.to_string()).join(",")
+        );
+        return Err(CatalogError::Duplicated("function", name).into());
+    }
+
     let function = Function {
         id: FunctionId::placeholder().0,
         schema_id,
         database_id,
         name: function_name,
-        arg_types,
+        arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
         return_type: Some(bind_data_type(&return_type)?.into()),
         language,
         path: flight_server_addr,

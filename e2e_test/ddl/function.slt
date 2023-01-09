@@ -8,11 +8,9 @@ create function func(int, int) returns int as 'http://localhost:8815' language a
 statement ok
 create function func(int) returns int as 'http://localhost:8815' language arrow_flight;
 
-# TODO: check existance
-
-# # Create a function with the same name and arguments.
-# statement error
-# create function func(int) returns int as 'http://localhost:8815' language arrow_flight;
+# Create a function with the same name and arguments.
+statement error exists
+create function func(int) returns int as 'http://localhost:8815' language arrow_flight;
 
 # TODO: drop function without arguments
 
