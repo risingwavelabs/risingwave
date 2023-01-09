@@ -233,7 +233,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         pin_mut!(rhs_stream);
 
         if let Some(res) = rhs_stream.next().await {
-            let value = res?.into_owned();
+            let value = res?;
             assert!(rhs_stream.next().await.is_none());
             Ok(Some(value))
         } else {
