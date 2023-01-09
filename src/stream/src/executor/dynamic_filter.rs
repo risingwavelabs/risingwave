@@ -28,7 +28,9 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl, ToDatumRef, ToOwnedD
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
-use risingwave_pb::expr::expr_node::Type::*;
+use risingwave_pb::expr::expr_node::Type::{
+    GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
+};
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
