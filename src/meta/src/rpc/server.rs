@@ -293,7 +293,7 @@ mod tests {
         setup_n_nodes_inner(n, meta_port, &meta_store).await
     }
 
-    /// Get a Channel to a meat node without re-trying the connection.
+    /// Get a Channel to a meta node without re-trying the connection.
     ///
     /// ### Returns
     /// Null on error, else the channel
