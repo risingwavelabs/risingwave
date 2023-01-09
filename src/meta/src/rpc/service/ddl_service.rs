@@ -34,7 +34,7 @@ use crate::manager::{
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    ActorGraphBuilder, CreateStreamingJobContext, GlobalStreamManagerRef, SourceManagerRef,
+    visit_fragment, ActorGraphBuilder, CreateStreamingJobContext, GlobalStreamManagerRef, SourceManagerRef,
 };
 use crate::{MetaError, MetaResult};
 
@@ -692,23 +692,15 @@ where
             let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: Use source category
             source.id = source_id;
 
-            // Fill in the correct source id for stream node.
-            fn fill_source_id(stream_node: &mut StreamNode, source_id: u32) -> usize {
-                let mut source_count = 0;
-                if let NodeBody::Source(source_node) = stream_node.node_body.as_mut().unwrap() {
-                    // TODO: Refactor using source id.
-                    source_node.source_inner.as_mut().unwrap().source_id = source_id;
-                    source_count += 1;
-                }
-                for input in &mut stream_node.input {
-                    source_count += fill_source_id(input, source_id);
-                }
-                source_count
-            }
-
             let mut source_count = 0;
             for fragment in fragment_graph.fragments.values_mut() {
-                source_count += fill_source_id(fragment.node.as_mut().unwrap(), source_id);
+                visit_fragment(fragment, |node_body| {
+                    if let NodeBody::Source(source_node) = node_body {
+                        // TODO: Refactor using source id.
+                        source_node.source_inner.as_mut().unwrap().source_id = source_id;
+                        source_count += 1;
+                    }
+                });
             }
             assert_eq!(
                 source_count, 1,
