@@ -32,6 +32,7 @@ pub struct KafkaSplitReader {
     start_offset: Option<i64>,
     stop_offset: Option<i64>,
     bytes_per_second: usize,
+    max_num_messages: usize,
 }
 
 #[async_trait]
@@ -106,11 +107,19 @@ impl SplitReader for KafkaSplitReader {
                 .expect("bytes.per.second expect usize"),
         };
 
+        let max_num_messages = match properties.max_num_messages {
+            None => usize::MAX,
+            Some(number) => number
+                .parse::<usize>()
+                .expect("max.num.messages expect usize"),
+        };
+
         Ok(Self {
             consumer,
             start_offset,
             stop_offset,
             bytes_per_second,
+            max_num_messages,
         })
     }
 
@@ -134,6 +143,7 @@ impl KafkaSplitReader {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         interval.tick().await;
         let mut bytes_current_second = 0;
+        let mut num_messages = 0;
         let mut res = Vec::with_capacity(MAX_CHUNK_SIZE);
         #[for_await]
         'for_outer_loop: for msgs in self.consumer.stream().ready_chunks(MAX_CHUNK_SIZE) {
@@ -144,6 +154,7 @@ impl KafkaSplitReader {
                     None => 0,
                     Some(payload) => payload.len(),
                 };
+                num_messages += 1;
                 res.push(SourceMessage::from(msg));
                 if let Some(stop_offset) = self.stop_offset {
                     if cur_offset == stop_offset - 1 {
@@ -165,6 +176,9 @@ impl KafkaSplitReader {
                     interval.tick().await;
                     bytes_current_second = 0;
                     res.clear();
+                }
+                if num_messages > self.max_num_messages {
+                    break 'for_outer_loop;
                 }
             }
             let mut cur = Vec::with_capacity(res.capacity());
