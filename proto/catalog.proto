@@ -2,9 +2,9 @@ syntax = "proto3";
 
 package catalog;
 
+import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
-import "data.proto";
 
 option optimize_for = SPEED;
 
