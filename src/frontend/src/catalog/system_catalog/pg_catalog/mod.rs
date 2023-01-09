@@ -21,11 +21,14 @@ pub mod pg_collation;
 pub mod pg_database;
 pub mod pg_description;
 pub mod pg_index;
+pub mod pg_indexes;
+pub mod pg_statistic_ext;
 pub mod pg_keywords;
 pub mod pg_matviews;
 pub mod pg_namespace;
 pub mod pg_opclass;
 pub mod pg_operator;
+pub mod pg_proc;
 pub mod pg_roles;
 pub mod pg_settings;
 pub mod pg_shdescription;
@@ -46,11 +49,14 @@ pub use pg_collation::*;
 pub use pg_database::*;
 pub use pg_description::*;
 pub use pg_index::*;
+pub use pg_statistic_ext::*;
+pub use pg_indexes::*;
 pub use pg_keywords::*;
 pub use pg_matviews::*;
 pub use pg_namespace::*;
 pub use pg_opclass::*;
 pub use pg_operator::*;
+pub use pg_proc::*;
 pub use pg_roles::*;
 pub use pg_settings::*;
 pub use pg_shdescription::*;
@@ -220,22 +226,37 @@ impl SysCatalogReaderImpl {
         Ok(meta_snapshots)
     }
 
-    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/2954>
+    pub(super) fn read_statistic_ext_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/2954>
+    pub(super) fn read_indexes_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/2954>
+    pub(super) fn read_proc_info(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
+    }
+
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/2954>
     pub(super) fn read_opclass_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
     }
 
-    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/2954>
     pub(super) fn read_operator_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
     }
 
-    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/2954>
     pub(super) fn read_am_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
     }
 
-    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/3431#issuecomment-1164160988>
+    // FIXME(noel): Tracked by <https://github.com/risingwavelabs/risingwave/issues/2954>
     pub(super) fn read_collation_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(vec![])
     }
