@@ -49,7 +49,6 @@ async fn test_empty_read_v2() {
             ReadOptions {
                 prefix_hint: None,
                 ignore_range_tombstone: false,
-                check_bloom_filter: false,
                 retention_seconds: None,
                 table_id: TableId { table_id: 2333 },
                 read_version_from_backup: false,
@@ -65,7 +64,6 @@ async fn test_empty_read_v2() {
             ReadOptions {
                 prefix_hint: None,
                 ignore_range_tombstone: false,
-                check_bloom_filter: false,
                 retention_seconds: None,
                 table_id: TableId { table_id: 2333 },
                 read_version_from_backup: false,

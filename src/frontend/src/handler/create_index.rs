@@ -140,7 +140,7 @@ pub(crate) fn gen_create_index_plan(
     }
 
     // Manually assemble the materialization plan for the index MV.
-    let mut materialize = assemble_materialize(
+    let materialize = assemble_materialize(
         table_name,
         table_desc.clone(),
         context,
@@ -159,10 +159,20 @@ pub(crate) fn gen_create_index_plan(
     let (index_database_id, index_schema_id) =
         session.get_database_and_schema_id_for_create(Some(schema_name))?;
 
-    let index_table = materialize.table_mut();
-    // Inherit table properties
-    index_table.properties = table.properties.clone();
+    let index_table = materialize.table();
     let mut index_table_prost = index_table.to_prost(index_schema_id, index_database_id);
+    {
+        use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+        let retention_second_string_key = PROPERTIES_RETENTION_SECOND_KEY.to_string();
+
+        // Inherit table properties
+        table.properties.get(&retention_second_string_key).map(|v| {
+            index_table_prost
+                .properties
+                .insert(retention_second_string_key, v.clone())
+        });
+    }
+
     index_table_prost.owner = session.user_id();
 
     let index_prost = ProstIndex {

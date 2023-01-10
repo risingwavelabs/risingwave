@@ -78,10 +78,6 @@ impl HummockStorageV1 {
         epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
-        println!(
-            "table_key {:?} prefix_hint {:?}",
-            table_key, read_options.prefix_hint
-        );
         let table_id = read_options.table_id;
         let table_id_string = table_id.to_string();
         let table_id_label = table_id_string.as_str();

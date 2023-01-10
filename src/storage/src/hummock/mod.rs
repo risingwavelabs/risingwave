@@ -336,15 +336,6 @@ pub async fn get_from_sstable_info(
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
     let min_epoch = gen_min_epoch(full_key.epoch, read_options.retention_seconds.as_ref());
-    println!(
-        "get_from_sstable_info key {:?} min_epoch {:?} read_epoch {:?} check_hash {:?}",
-        // iter.key().epoch,
-        full_key,
-        min_epoch,
-        full_key.epoch,
-        dist_key_hash
-    );
-
     let ukey = &full_key.user_key;
     let delete_epoch = if read_options.ignore_range_tombstone {
         None

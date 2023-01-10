@@ -1791,7 +1791,7 @@ async fn test_get_with_min_epoch() {
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
     let hummock_version_reader =
-        HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
+        HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
 
     let hummock_storage =
         get_local_hummock_storage(Default::default(), event_tx.clone(), hummock_version_reader)

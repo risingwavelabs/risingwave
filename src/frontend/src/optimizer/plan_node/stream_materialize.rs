@@ -274,10 +274,6 @@ impl StreamMaterialize {
         &self.table
     }
 
-    pub fn table_mut(&mut self) -> &mut TableCatalog {
-        &mut self.table
-    }
-
     pub fn name(&self) -> &str {
         self.table.name()
     }
