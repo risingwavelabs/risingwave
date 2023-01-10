@@ -3331,9 +3331,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.12"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19a97146650b9d03128eb9a1101f45c7dadb1f867ef7b10e58d878432e47de00"
+checksum = "a1d2469ca5362ee2674302c477af49577be8d08f2922e4005e83a63661d7ceb5"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -5405,6 +5405,7 @@ dependencies = [
  "risingwave_rt",
  "sync-point",
  "task_stats_alloc",
+ "tempfile",
  "tikv-jemallocator",
  "tracing",
  "workspace-config",
@@ -6123,11 +6124,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_storage",
  "serde",
- "serde-value",
- "serde_derive",
- "serde_json",
  "simd-json",
- "simd-json-derive",
  "smallvec",
  "static_assertions",
  "tempfile",
@@ -6805,8 +6802,7 @@ dependencies = [
 [[package]]
 name = "simd-json"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e3375b6c3d8c048ba09c8b4b6c3f1d3f35e06b71db07d231c323943a949e1b8"
+source = "git+https://github.com/tabVersion/simd-json.git?branch=main#fe89a0d1d2bb5749acc72a515db39c36d16d267d"
 dependencies = [
  "halfbrown",
  "lexical-core",
@@ -6814,32 +6810,6 @@ dependencies = [
  "serde_json",
  "simdutf8",
  "value-trait",
-]
-
-[[package]]
-name = "simd-json-derive"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e436a97551c1fcaf32577f3e0ce4fe09ca555ad85bd21e1d3bdab4dfc21fea19"
-dependencies = [
- "chrono",
- "itoa",
- "ryu",
- "simd-json",
- "simd-json-derive-int",
- "value-trait",
-]
-
-[[package]]
-name = "simd-json-derive-int"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c399b07ea91f9e228c7910c56b2be63115b0a4256a68f5a321fcce83bbcbba89"
-dependencies = [
- "proc-macro2",
- "quote",
- "simd-json",
- "syn",
 ]
 
 [[package]]

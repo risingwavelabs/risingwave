@@ -344,6 +344,41 @@ where
         }))
     }
 
+    async fn create_function(
+        &self,
+        request: Request<CreateFunctionRequest>,
+    ) -> Result<Response<CreateFunctionResponse>, Status> {
+        let req = request.into_inner();
+        let id = self.gen_unique_id::<{ IdCategory::Function }>().await?;
+        let mut function = req.get_function()?.clone();
+        function.id = id;
+        let version = self.catalog_manager.create_function(&function).await?;
+
+        Ok(Response::new(CreateFunctionResponse {
+            status: None,
+            function_id: id,
+            version,
+        }))
+    }
+
+    async fn drop_function(
+        &self,
+        request: Request<DropFunctionRequest>,
+    ) -> Result<Response<DropFunctionResponse>, Status> {
+        self.check_barrier_manager_status().await?;
+        let request = request.into_inner();
+
+        let version = self
+            .catalog_manager
+            .drop_function(request.function_id)
+            .await?;
+
+        Ok(Response::new(DropFunctionResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn create_table(
         &self,
         request: Request<CreateTableRequest>,
@@ -420,6 +455,15 @@ where
     ) -> Result<Response<RisectlListStateTablesResponse>, Status> {
         let tables = self.catalog_manager.list_tables().await;
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
+    }
+
+    async fn replace_table_plan(
+        &self,
+        _request: Request<ReplaceTablePlanRequest>,
+    ) -> Result<Response<ReplaceTablePlanResponse>, Status> {
+        Err(Status::unimplemented(
+            "replace table plan is not implemented yet",
+        ))
     }
 }
 

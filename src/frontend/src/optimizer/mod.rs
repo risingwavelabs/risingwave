@@ -47,7 +47,7 @@ use self::plan_visitor::{
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::table_catalog::TableType;
+use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::handler::create_table::DmlFlag;
 use crate::optimizer::plan_node::{
     BatchExchange, BatchSeqScan, ColumnPruningContext, PlanNodeType, PredicatePushdownContext,
@@ -635,6 +635,7 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a create table plan.
+    #[allow(clippy::too_many_arguments)]
     pub fn gen_table_plan(
         &mut self,
         table_name: String,
@@ -643,6 +644,7 @@ impl PlanRoot {
         handle_pk_conflict: bool,
         row_id_index: Option<usize>,
         dml_flag: DmlFlag,
+        version: Option<TableVersion>,
     ) -> Result<StreamMaterialize> {
         let mut stream_plan = self.gen_stream_plan()?;
 
@@ -675,6 +677,7 @@ impl PlanRoot {
             definition,
             handle_pk_conflict,
             row_id_index,
+            version,
         )
     }
 
