@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::Mutex;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -935,28 +936,61 @@ pub async fn get_channel(
 /// Client to meta server. Cloning the instance is lightweight.
 ///
 /// It is a wrapper of tonic client. See [`meta_rpc_client_method_impl`].
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct GrpcMetaClient {
     // TODO: alternative:
     // leader_service: LeaderServiceClient<Channel>
     // Client needs access to the channel to handle LeaderRequest during meta failover
     meta_connection: Channel,
 
+    // This has to be the multithreaded version.
+    // I need mutexes
+    // see https://doc.rust-lang.org/book/ch16-03-shared-state.html#using-mutexes-to-allow-access-to-data-from-one-thread-at-a-time
+
     // Do I need Rc<RefCell<Client>> or RefCell<Client>?
     // RefCell<Client>: Mutable reference by one
     // Rc<RefCell<Client>>: Mutable reference by many
 
-    // Do we only ever have one thread accessing this?
-    // Update this, because the chanel changed, do I need to protect the update step with a MutEx?
-    cluster_client: ClusterServiceClient<Channel>,
-    heartbeat_client: HeartbeatServiceClient<Channel>,
-    ddl_client: DdlServiceClient<Channel>,
-    hummock_client: HummockManagerServiceClient<Channel>,
-    notification_client: NotificationServiceClient<Channel>,
-    stream_client: StreamManagerServiceClient<Channel>,
-    user_client: UserServiceClient<Channel>,
-    scale_client: ScaleServiceClient<Channel>,
-    backup_client: BackupServiceClient<Channel>,
+    // Do we only ever have one thread accessing this? -> No. Multithreaded
+    // Update this, because the channel changed, do I need to protect the update step with a MutEx?
+    // -> Yes. Update this all at once
+    cluster_client: Mutex<ClusterServiceClient<Channel>>,
+    heartbeat_client: Mutex<HeartbeatServiceClient<Channel>>,
+    ddl_client: Mutex<DdlServiceClient<Channel>>,
+    hummock_client: Mutex<HummockManagerServiceClient<Channel>>,
+    notification_client: Mutex<NotificationServiceClient<Channel>>,
+    stream_client: Mutex<StreamManagerServiceClient<Channel>>,
+    user_client: Mutex<UserServiceClient<Channel>>,
+    scale_client: Mutex<ScaleServiceClient<Channel>>,
+    backup_client: Mutex<BackupServiceClient<Channel>>,
+}
+
+impl Clone for GrpcMetaClient {
+    fn clone(&self) -> GrpcMetaClient {
+        // TODO: Code duplication. Same as in new function. DNRY
+        let mc = self.meta_connection.clone();
+        let cluster_client = Mutex::new(ClusterServiceClient::new(mc.clone()));
+        let heartbeat_client = Mutex::new(HeartbeatServiceClient::new(mc.clone()));
+        let ddl_client = Mutex::new(DdlServiceClient::new(mc.clone()));
+        let hummock_client = Mutex::new(HummockManagerServiceClient::new(mc.clone()));
+        let notification_client = Mutex::new(NotificationServiceClient::new(mc.clone()));
+        let stream_client = Mutex::new(StreamManagerServiceClient::new(mc.clone()));
+        let user_client = Mutex::new(UserServiceClient::new(mc.clone()));
+        let scale_client = Mutex::new(ScaleServiceClient::new(mc.clone()));
+        let backup_client = Mutex::new(BackupServiceClient::new(mc.clone()));
+        GrpcMetaClient {
+            meta_connection: mc,
+            cluster_client,
+            heartbeat_client,
+            ddl_client,
+            hummock_client,
+            notification_client,
+            stream_client,
+            user_client,
+            scale_client,
+            backup_client,
+        }
+    }
 }
 
 impl GrpcMetaClient {
@@ -1010,15 +1044,15 @@ impl GrpcMetaClient {
         );
         tracing::info!("Current leader is {}", leader_addr_str);
 
-        let cluster_client = ClusterServiceClient::new(channel.clone());
-        let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
-        let ddl_client = DdlServiceClient::new(channel.clone());
-        let hummock_client = HummockManagerServiceClient::new(channel.clone());
-        let notification_client = NotificationServiceClient::new(channel.clone());
-        let stream_client = StreamManagerServiceClient::new(channel.clone());
-        let user_client = UserServiceClient::new(channel.clone());
-        let scale_client = ScaleServiceClient::new(channel.clone());
-        let backup_client = BackupServiceClient::new(channel.clone());
+        let cluster_client = Mutex::new(ClusterServiceClient::new(channel.clone()));
+        let heartbeat_client = Mutex::new(HeartbeatServiceClient::new(channel.clone()));
+        let ddl_client = Mutex::new(DdlServiceClient::new(channel.clone()));
+        let hummock_client = Mutex::new(HummockManagerServiceClient::new(channel.clone()));
+        let notification_client = Mutex::new(NotificationServiceClient::new(channel.clone()));
+        let stream_client = Mutex::new(StreamManagerServiceClient::new(channel.clone()));
+        let user_client = Mutex::new(UserServiceClient::new(channel.clone()));
+        let scale_client = Mutex::new(ScaleServiceClient::new(channel.clone()));
+        let backup_client = Mutex::new(BackupServiceClient::new(channel.clone()));
         Ok(Self {
             meta_connection: channel,
             cluster_client,

@@ -180,7 +180,7 @@ macro_rules! meta_rpc_client_method_impl {
                 let req_clone = request.clone();
                 let response = self
                     .$client
-                    .to_owned()
+                    .get_mut() // TODO: Some sort of deref
                     .$fn_name(request)
                     .await;
 
