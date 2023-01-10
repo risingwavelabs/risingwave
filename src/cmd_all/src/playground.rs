@@ -79,7 +79,7 @@ pub async fn playground() -> Result<()> {
                 .count();
             let compactor_node_count = services
                 .iter()
-                .filter(|s| matches!(s, ServiceConfig::ComputeNode(_)))
+                .filter(|s| matches!(s, ServiceConfig::CompactorNode(_)))
                 .count();
             let hummock_in_memory_strategy = if compute_node_count > 1 || compactor_node_count > 0 {
                 HummockInMemoryStrategy::Shared
