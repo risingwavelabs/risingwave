@@ -351,5 +351,6 @@
     select * from auction AS hop_1
     where EXISTS (select hop_1.date_time from auction group by hop_1.date_time );
   stream_error: |-
-    Feature is not yet implemented: stream nested-loop join
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
