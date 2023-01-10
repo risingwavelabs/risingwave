@@ -94,23 +94,6 @@ pub trait HummockVersionExt {
     ///
     /// Levels belonging to the same compaction group retain their relative order.
     fn get_combined_levels(&self) -> Vec<&Level>;
-    fn iter_tables<F: FnMut(&SstableInfo)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        level_idex: usize,
-        f: F,
-    );
-    fn iter_group_tables<F: FnMut(&SstableInfo)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        f: F,
-    );
-    fn map_level<F: FnMut(&Level)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        level_idex: usize,
-        f: F,
-    );
     fn num_levels(&self, compaction_group_id: CompactionGroupId) -> usize;
     fn level_iter<F: FnMut(&Level) -> bool>(&self, compaction_group_id: CompactionGroupId, f: F);
 
@@ -164,48 +147,6 @@ impl HummockVersionExt for HummockVersion {
             .collect_vec()
     }
 
-    fn iter_tables<F: FnMut(&SstableInfo)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        level_idx: usize,
-        mut f: F,
-    ) {
-        if let Some(levels) = self.levels.get(&compaction_group_id) {
-            if level_idx == 0 {
-                for level in &levels.l0.as_ref().unwrap().sub_levels {
-                    for table in &level.table_infos {
-                        f(table);
-                    }
-                }
-            } else {
-                for table in &levels.levels[level_idx - 1].table_infos {
-                    f(table);
-                }
-            }
-        }
-    }
-
-    fn iter_group_tables<F: FnMut(&SstableInfo)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        mut f: F,
-    ) {
-        if let Some(levels) = self.levels.get(&compaction_group_id) {
-            if let Some(ref l0) = levels.l0 {
-                for sub_level in l0.get_sub_levels() {
-                    for table_info in sub_level.get_table_infos() {
-                        f(table_info);
-                    }
-                }
-            }
-            for level in levels.get_levels() {
-                for table_info in level.get_table_infos() {
-                    f(table_info);
-                }
-            }
-        }
-    }
-
     fn level_iter<F: FnMut(&Level) -> bool>(
         &self,
         compaction_group_id: CompactionGroupId,
@@ -221,23 +162,6 @@ impl HummockVersionExt for HummockVersion {
                 if !f(level) {
                     return;
                 }
-            }
-        }
-    }
-
-    fn map_level<F: FnMut(&Level)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        level_idx: usize,
-        mut f: F,
-    ) {
-        if let Some(levels) = self.levels.get(&compaction_group_id) {
-            if level_idx == 0 {
-                for sub_level in &levels.l0.as_ref().unwrap().sub_levels {
-                    f(sub_level);
-                }
-            } else {
-                f(&levels.levels[level_idx - 1]);
             }
         }
     }
@@ -414,11 +338,14 @@ impl HummockVersionUpdateExt for HummockVersion {
     ) -> BTreeMap<HummockSstableId, HashMap<CompactionGroupId, u64>> {
         let mut ret: BTreeMap<_, HashMap<_, _>> = BTreeMap::new();
         for compaction_group_id in self.get_levels().keys() {
-            self.iter_group_tables(*compaction_group_id, |table_info| {
-                let sst_id = table_info.get_id();
-                ret.entry(sst_id)
-                    .or_default()
-                    .insert(*compaction_group_id, table_info.get_divide_version());
+            self.level_iter(*compaction_group_id, |level| {
+                for table_info in level.get_table_infos() {
+                    let sst_id = table_info.get_id();
+                    ret.entry(sst_id)
+                        .or_default()
+                        .insert(*compaction_group_id, table_info.get_divide_version());
+                }
+                true
             });
         }
         ret.retain(|_, v| v.len() != 1 || *v.values().next().unwrap() != 0);
