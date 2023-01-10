@@ -66,9 +66,30 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
         ],
         "playground-3cn" => vec![
             RisingWaveService::Meta(osstrs([])),
-            RisingWaveService::Compute(osstrs(["--host", "127.0.0.1:5687", "--state-store", "hummock+memory-shared", "--parallelism", "4"])),
-            RisingWaveService::Compute(osstrs(["--host", "127.0.0.1:5688", "--state-store", "hummock+memory-shared", "--parallelism", "4"])),
-            RisingWaveService::Compute(osstrs(["--host", "127.0.0.1:5689", "--state-store", "hummock+memory-shared", "--parallelism", "4"])),
+            RisingWaveService::Compute(osstrs([
+                "--host",
+                "127.0.0.1:5687",
+                "--state-store",
+                "hummock+memory-shared",
+                "--parallelism",
+                "4",
+            ])),
+            RisingWaveService::Compute(osstrs([
+                "--host",
+                "127.0.0.1:5688",
+                "--state-store",
+                "hummock+memory-shared",
+                "--parallelism",
+                "4",
+            ])),
+            RisingWaveService::Compute(osstrs([
+                "--host",
+                "127.0.0.1:5689",
+                "--state-store",
+                "hummock+memory-shared",
+                "--parallelism",
+                "4",
+            ])),
             RisingWaveService::Frontend(osstrs([])),
         ],
         "online-docker-playground" | "docker-playground" => {
