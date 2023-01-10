@@ -172,7 +172,7 @@ macro_rules! rpc_client_method_impl {
 macro_rules! meta_rpc_client_method_impl {
     ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
         $(
-            pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
+            pub async fn $fn_name(&mut self, request: $req) -> $crate::Result<$resp> {
                 use risingwave_pb::leader::leader_service_client::LeaderServiceClient;
                 use risingwave_pb::common::{HostAddress};
                 use risingwave_pb::leader::LeaderRequest;

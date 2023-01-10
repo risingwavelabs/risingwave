@@ -94,7 +94,7 @@ impl MetaClient {
 
     /// Subscribe to notification from meta.
     pub async fn subscribe(
-        &self,
+        &mut self,
         subscribe_type: SubscribeType,
     ) -> Result<Streaming<SubscribeResponse>> {
         let request = SubscribeRequest {
@@ -110,6 +110,9 @@ impl MetaClient {
         .await
     }
 
+    // TODO: Try to split up the client to have one version that is
+    // mutable and one version that is immutable?
+
     /// Register the current node to the cluster and set the corresponding worker id.
     pub async fn register_new(
         meta_addr: &str,
@@ -117,7 +120,7 @@ impl MetaClient {
         addr: &HostAddr,
         worker_node_parallelism: usize,
     ) -> Result<Self> {
-        let grpc_meta_client = GrpcMetaClient::new(meta_addr).await?;
+        let mut grpc_meta_client = GrpcMetaClient::new(meta_addr).await?;
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
@@ -139,7 +142,7 @@ impl MetaClient {
     }
 
     /// Activate the current node in cluster to confirm it's ready to serve.
-    pub async fn activate(&self, addr: &HostAddr) -> Result<()> {
+    pub async fn activate(&mut self, addr: &HostAddr) -> Result<()> {
         let request = ActivateWorkerNodeRequest {
             host: Some(addr.to_protobuf()),
         };
@@ -154,7 +157,11 @@ impl MetaClient {
     }
 
     /// Send heartbeat signal to meta service.
-    pub async fn send_heartbeat(&self, node_id: u32, info: Vec<extra_info::Info>) -> Result<()> {
+    pub async fn send_heartbeat(
+        &mut self,
+        node_id: u32,
+        info: Vec<extra_info::Info>,
+    ) -> Result<()> {
         let request = HeartbeatRequest {
             node_id,
             info: info
@@ -172,14 +179,20 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_database(&self, db: ProstDatabase) -> Result<(DatabaseId, CatalogVersion)> {
+    pub async fn create_database(
+        &mut self,
+        db: ProstDatabase,
+    ) -> Result<(DatabaseId, CatalogVersion)> {
         let request = CreateDatabaseRequest { db: Some(db) };
         let resp = self.inner.create_database(request).await?;
         // TODO: handle error in `resp.status` here
         Ok((resp.database_id, resp.version))
     }
 
-    pub async fn create_schema(&self, schema: ProstSchema) -> Result<(SchemaId, CatalogVersion)> {
+    pub async fn create_schema(
+        &mut self,
+        schema: ProstSchema,
+    ) -> Result<(SchemaId, CatalogVersion)> {
         let request = CreateSchemaRequest {
             schema: Some(schema),
         };
@@ -189,7 +202,7 @@ impl MetaClient {
     }
 
     pub async fn create_materialized_view(
-        &self,
+        &mut self,
         table: ProstTable,
         graph: StreamFragmentGraph,
     ) -> Result<(TableId, CatalogVersion)> {
@@ -202,7 +215,7 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
-    pub async fn drop_materialized_view(&self, table_id: TableId) -> Result<CatalogVersion> {
+    pub async fn drop_materialized_view(&mut self, table_id: TableId) -> Result<CatalogVersion> {
         let request = DropMaterializedViewRequest {
             table_id: table_id.table_id(),
         };
@@ -211,7 +224,7 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn create_source(&self, source: ProstSource) -> Result<(u32, CatalogVersion)> {
+    pub async fn create_source(&mut self, source: ProstSource) -> Result<(u32, CatalogVersion)> {
         let request = CreateSourceRequest {
             source: Some(source),
         };
@@ -221,7 +234,7 @@ impl MetaClient {
     }
 
     pub async fn create_sink(
-        &self,
+        &mut self,
         sink: ProstSink,
         graph: StreamFragmentGraph,
     ) -> Result<(u32, CatalogVersion)> {
@@ -235,7 +248,7 @@ impl MetaClient {
     }
 
     pub async fn create_function(
-        &self,
+        &mut self,
         function: ProstFunction,
     ) -> Result<(FunctionId, CatalogVersion)> {
         let request = CreateFunctionRequest {
@@ -246,7 +259,7 @@ impl MetaClient {
     }
 
     pub async fn create_table(
-        &self,
+        &mut self,
         source: Option<ProstSource>,
         table: ProstTable,
         graph: StreamFragmentGraph,
@@ -261,7 +274,7 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
-    pub async fn create_view(&self, view: ProstView) -> Result<(u32, CatalogVersion)> {
+    pub async fn create_view(&mut self, view: ProstView) -> Result<(u32, CatalogVersion)> {
         let request = CreateViewRequest { view: Some(view) };
         let resp = self.inner.create_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -269,7 +282,7 @@ impl MetaClient {
     }
 
     pub async fn create_index(
-        &self,
+        &mut self,
         index: ProstIndex,
         table: ProstTable,
         graph: StreamFragmentGraph,
@@ -285,7 +298,7 @@ impl MetaClient {
     }
 
     pub async fn drop_table(
-        &self,
+        &mut self,
         source_id: Option<u32>,
         table_id: TableId,
     ) -> Result<CatalogVersion> {
@@ -298,25 +311,25 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_view(&self, view_id: u32) -> Result<CatalogVersion> {
+    pub async fn drop_view(&mut self, view_id: u32) -> Result<CatalogVersion> {
         let request = DropViewRequest { view_id };
         let resp = self.inner.drop_view(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_source(&self, source_id: u32) -> Result<CatalogVersion> {
+    pub async fn drop_source(&mut self, source_id: u32) -> Result<CatalogVersion> {
         let request = DropSourceRequest { source_id };
         let resp = self.inner.drop_source(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_sink(&self, sink_id: u32) -> Result<CatalogVersion> {
+    pub async fn drop_sink(&mut self, sink_id: u32) -> Result<CatalogVersion> {
         let request = DropSinkRequest { sink_id };
         let resp = self.inner.drop_sink(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_index(&self, index_id: IndexId) -> Result<CatalogVersion> {
+    pub async fn drop_index(&mut self, index_id: IndexId) -> Result<CatalogVersion> {
         let request = DropIndexRequest {
             index_id: index_id.index_id,
         };
@@ -324,7 +337,7 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_function(&self, function_id: FunctionId) -> Result<CatalogVersion> {
+    pub async fn drop_function(&mut self, function_id: FunctionId) -> Result<CatalogVersion> {
         let request = DropFunctionRequest {
             function_id: function_id.0,
         };
@@ -332,33 +345,33 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn drop_database(&self, database_id: u32) -> Result<CatalogVersion> {
+    pub async fn drop_database(&mut self, database_id: u32) -> Result<CatalogVersion> {
         let request = DropDatabaseRequest { database_id };
         let resp = self.inner.drop_database(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_schema(&self, schema_id: u32) -> Result<CatalogVersion> {
+    pub async fn drop_schema(&mut self, schema_id: u32) -> Result<CatalogVersion> {
         let request = DropSchemaRequest { schema_id };
         let resp = self.inner.drop_schema(request).await?;
         Ok(resp.version)
     }
 
     // TODO: using UserInfoVersion instead as return type.
-    pub async fn create_user(&self, user: UserInfo) -> Result<u64> {
+    pub async fn create_user(&mut self, user: UserInfo) -> Result<u64> {
         let request = CreateUserRequest { user: Some(user) };
         let resp = self.inner.create_user(request).await?;
         Ok(resp.version)
     }
 
-    pub async fn drop_user(&self, user_id: u32) -> Result<u64> {
+    pub async fn drop_user(&mut self, user_id: u32) -> Result<u64> {
         let request = DropUserRequest { user_id };
         let resp = self.inner.drop_user(request).await?;
         Ok(resp.version)
     }
 
     pub async fn update_user(
-        &self,
+        &mut self,
         user: UserInfo,
         update_fields: Vec<UpdateField>,
     ) -> Result<u64> {
@@ -374,7 +387,7 @@ impl MetaClient {
     }
 
     pub async fn grant_privilege(
-        &self,
+        &mut self,
         user_ids: Vec<u32>,
         privileges: Vec<GrantPrivilege>,
         with_grant_option: bool,
@@ -391,7 +404,7 @@ impl MetaClient {
     }
 
     pub async fn revoke_privilege(
-        &self,
+        &mut self,
         user_ids: Vec<u32>,
         privileges: Vec<GrantPrivilege>,
         granted_by: Option<u32>,
@@ -413,7 +426,7 @@ impl MetaClient {
     }
 
     /// Unregister the current node to the cluster.
-    pub async fn unregister(&self, addr: HostAddr) -> Result<()> {
+    pub async fn unregister(&mut self, addr: HostAddr) -> Result<()> {
         let request = DeleteWorkerNodeRequest {
             host: Some(addr.to_protobuf()),
         };
@@ -483,20 +496,20 @@ impl MetaClient {
         (join_handle, shutdown_tx)
     }
 
-    pub async fn risectl_list_state_tables(&self) -> Result<Vec<ProstTable>> {
+    pub async fn risectl_list_state_tables(&mut self) -> Result<Vec<ProstTable>> {
         let request = RisectlListStateTablesRequest {};
         let resp = self.inner.risectl_list_state_tables(request).await?;
         Ok(resp.tables)
     }
 
-    pub async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
+    pub async fn flush(&mut self, checkpoint: bool) -> Result<HummockSnapshot> {
         let request = FlushRequest { checkpoint };
         let resp = self.inner.flush(request).await?;
         Ok(resp.snapshot.unwrap())
     }
 
     pub async fn list_table_fragments(
-        &self,
+        &mut self,
         table_ids: &[u32],
     ) -> Result<HashMap<u32, TableFragmentInfo>> {
         let request = ListTableFragmentsRequest {
@@ -506,32 +519,32 @@ impl MetaClient {
         Ok(resp.table_fragments)
     }
 
-    pub async fn pause(&self) -> Result<()> {
+    pub async fn pause(&mut self) -> Result<()> {
         let request = PauseRequest {};
         let _resp = self.inner.pause(request).await?;
         Ok(())
     }
 
-    pub async fn resume(&self) -> Result<()> {
+    pub async fn resume(&mut self) -> Result<()> {
         let request = ResumeRequest {};
         let _resp = self.inner.resume(request).await?;
         Ok(())
     }
 
-    pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
+    pub async fn get_cluster_info(&mut self) -> Result<GetClusterInfoResponse> {
         let request = GetClusterInfoRequest {};
         let resp = self.inner.get_cluster_info(request).await?;
         Ok(resp)
     }
 
-    pub async fn reschedule(&self, reschedules: HashMap<u32, ProstReschedule>) -> Result<bool> {
+    pub async fn reschedule(&mut self, reschedules: HashMap<u32, ProstReschedule>) -> Result<bool> {
         let request = RescheduleRequest { reschedules };
         let resp = self.inner.reschedule(request).await?;
         Ok(resp.success)
     }
 
     pub async fn risectl_get_pinned_versions_summary(
-        &self,
+        &mut self,
     ) -> Result<RiseCtlGetPinnedVersionsSummaryResponse> {
         let request = RiseCtlGetPinnedVersionsSummaryRequest {};
         self.inner
@@ -540,7 +553,7 @@ impl MetaClient {
     }
 
     pub async fn risectl_get_pinned_snapshots_summary(
-        &self,
+        &mut self,
     ) -> Result<RiseCtlGetPinnedSnapshotsSummaryResponse> {
         let request = RiseCtlGetPinnedSnapshotsSummaryRequest {};
         self.inner
@@ -549,7 +562,7 @@ impl MetaClient {
     }
 
     pub async fn init_metadata_for_replay(
-        &self,
+        &mut self,
         tables: Vec<ProstTable>,
         compaction_groups: Vec<CompactionGroup>,
     ) -> Result<()> {
@@ -561,7 +574,10 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn set_compactor_runtime_config(&self, config: CompactorRuntimeConfig) -> Result<()> {
+    pub async fn set_compactor_runtime_config(
+        &mut self,
+        config: CompactorRuntimeConfig,
+    ) -> Result<()> {
         let req = SetCompactorRuntimeConfigRequest {
             context_id: self.worker_id,
             config: Some(config.into()),
@@ -571,7 +587,7 @@ impl MetaClient {
     }
 
     pub async fn replay_version_delta(
-        &self,
+        &mut self,
         version_delta: HummockVersionDelta,
     ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
         let req = ReplayVersionDeltaRequest {
@@ -582,7 +598,7 @@ impl MetaClient {
     }
 
     pub async fn list_version_deltas(
-        &self,
+        &mut self,
         start_id: u64,
         num_limit: u32,
         committed_epoch_limit: HummockEpoch,
@@ -601,7 +617,7 @@ impl MetaClient {
     }
 
     pub async fn trigger_compaction_deterministic(
-        &self,
+        &mut self,
         version_id: HummockVersionId,
         compaction_groups: Vec<CompactionGroupId>,
     ) -> Result<()> {
@@ -613,7 +629,7 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn disable_commit_epoch(&self) -> Result<HummockVersion> {
+    pub async fn disable_commit_epoch(&mut self) -> Result<HummockVersion> {
         let req = DisableCommitEpochRequest {};
         Ok(self
             .inner
@@ -623,7 +639,7 @@ impl MetaClient {
             .unwrap())
     }
 
-    pub async fn pin_specific_snapshot(&self, epoch: HummockEpoch) -> Result<HummockSnapshot> {
+    pub async fn pin_specific_snapshot(&mut self, epoch: HummockEpoch) -> Result<HummockSnapshot> {
         let req = PinSpecificSnapshotRequest {
             context_id: self.worker_id(),
             epoch,
@@ -632,20 +648,20 @@ impl MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
-    pub async fn get_assigned_compact_task_num(&self) -> Result<usize> {
+    pub async fn get_assigned_compact_task_num(&mut self) -> Result<usize> {
         let req = GetAssignedCompactTaskNumRequest {};
         let resp = self.inner.get_assigned_compact_task_num(req).await?;
         Ok(resp.num_tasks as usize)
     }
 
-    pub async fn risectl_list_compaction_group(&self) -> Result<Vec<CompactionGroup>> {
+    pub async fn risectl_list_compaction_group(&mut self) -> Result<Vec<CompactionGroup>> {
         let req = RiseCtlListCompactionGroupRequest {};
         let resp = self.inner.rise_ctl_list_compaction_group(req).await?;
         Ok(resp.compaction_groups)
     }
 
     pub async fn risectl_update_compaction_config(
-        &self,
+        &mut self,
         compaction_groups: &[CompactionGroupId],
         configs: &[MutableConfig],
     ) -> Result<()> {
@@ -664,19 +680,19 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn backup_meta(&self) -> Result<u64> {
+    pub async fn backup_meta(&mut self) -> Result<u64> {
         let req = BackupMetaRequest {};
         let resp = self.inner.backup_meta(req).await?;
         Ok(resp.job_id)
     }
 
-    pub async fn get_backup_job_status(&self, job_id: u64) -> Result<BackupJobStatus> {
+    pub async fn get_backup_job_status(&mut self, job_id: u64) -> Result<BackupJobStatus> {
         let req = GetBackupJobStatusRequest { job_id };
         let resp = self.inner.get_backup_job_status(req).await?;
         Ok(resp.job_status())
     }
 
-    pub async fn delete_meta_snapshot(&self, snapshot_ids: &[u64]) -> Result<()> {
+    pub async fn delete_meta_snapshot(&mut self, snapshot_ids: &[u64]) -> Result<()> {
         let req = DeleteMetaSnapshotRequest {
             snapshot_ids: snapshot_ids.to_vec(),
         };
@@ -684,7 +700,7 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn get_meta_snapshot_manifest(&self) -> Result<MetaSnapshotManifest> {
+    pub async fn get_meta_snapshot_manifest(&mut self) -> Result<MetaSnapshotManifest> {
         let req = GetMetaSnapshotManifestRequest {};
         let resp = self.inner.get_meta_snapshot_manifest(req).await?;
         Ok(resp.manifest.expect("should exist"))
