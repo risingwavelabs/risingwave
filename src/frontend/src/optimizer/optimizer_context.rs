@@ -161,14 +161,8 @@ impl OptimizerContext {
     }
 
     pub fn append_notice(&self, notice: &mut String) {
-        let session_timezone = self.session_timezone.borrow();
-        if session_timezone.used() {
-            notice.push_str(&format!(
-                "Your session timezone is {}. It was used in the interpretation of timestamps and dates in your query. If this is unintended, \
-                change your timezone to match that of your data's with `set timezone = [timezone]` or \
-                rewrite your query with an explicit timezone conversion, e.g. with `AT TIME ZONE`.\n",
-                session_timezone.timezone()
-            ));
+        if let Some(warning) = self.session_timezone.borrow().warning() {
+            notice.push_str(&warning);
         }
     }
 }

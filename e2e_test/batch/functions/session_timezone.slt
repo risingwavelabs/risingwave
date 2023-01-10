@@ -47,7 +47,7 @@ t
 query T
 select '2022-01-01 00:00:00'::timestamp with time zone;
 ----
-2022-01-01 00:00:00-08:00
+2022-01-01 08:00:00+00:00
 
 # Cast timestamptz to varchar, should display with timezone information
 query T

@@ -835,6 +835,19 @@ impl SessionTimezone {
         self.used
     }
 
+    pub fn warning(&self) -> Option<String> {
+        if self.used {
+            Some(format!(
+                "Your session timezone is {}. It was used in the interpretation of timestamps and dates in your query. If this is unintended, \
+                change your timezone to match that of your data's with `set timezone = [timezone]` or \
+                rewrite your query with an explicit timezone conversion, e.g. with `AT TIME ZONE`.\n",
+                self.timezone
+            ))
+        } else {
+            None
+        }
+    }
+
     fn with_timezone(
         &self,
         func_type: ExprType,
