@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
 use std::path::PathBuf;
@@ -408,6 +409,20 @@ impl Cluster {
                 datadir.to_string(),
             ));
     }
+
+    /// Create a kafka topic.
+    pub fn create_kafka_topics(&self, topics: HashMap<String, i32>) {
+        self.handle
+            .create_node()
+            .name("kafka-topic-create")
+            .ip("192.168.11.3".parse().unwrap())
+            .build()
+            .spawn(crate::kafka::create_topics(
+                "192.168.11.1:29092",
+                topics
+            ));
+    }
+
 
     /// Return the IP of a random frontend node.
     pub fn rand_frontend_ip(&self) -> String {

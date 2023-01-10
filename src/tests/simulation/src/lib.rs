@@ -20,7 +20,7 @@
 pub mod client;
 pub mod cluster;
 pub mod ctl_ext;
-mod kafka;
+pub mod kafka;
 pub mod nexmark;
 pub mod slt;
 pub mod utils;
