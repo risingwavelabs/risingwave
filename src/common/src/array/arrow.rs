@@ -100,6 +100,12 @@ impl From<&arrow_schema::DataType> for DataType {
     }
 }
 
+impl From<arrow_schema::DataType> for DataType {
+    fn from(value: arrow_schema::DataType) -> Self {
+        (&value).into()
+    }
+}
+
 impl From<&DataType> for arrow_schema::DataType {
     fn from(value: &DataType) -> Self {
         match value {
@@ -124,6 +130,12 @@ impl From<&DataType> for arrow_schema::DataType {
             }
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
+    }
+}
+
+impl From<DataType> for arrow_schema::DataType {
+    fn from(value: DataType) -> Self {
+        (&value).into()
     }
 }
 

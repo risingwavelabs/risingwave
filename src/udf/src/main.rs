@@ -22,7 +22,7 @@ use risingwave_udf::ArrowFlightUdfClient;
 #[tokio::main]
 async fn main() {
     let addr = "http://localhost:8815";
-    let mut client = ArrowFlightUdfClient::connect(addr).await.unwrap();
+    let client = ArrowFlightUdfClient::connect(addr).await.unwrap();
 
     // build `RecordBatch` to send (equivalent to our `DataChunk`)
     let array1 = Int32Array::from_iter(vec![1, 6, 10]);

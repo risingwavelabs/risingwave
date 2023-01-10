@@ -134,42 +134,16 @@ checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 
 [[package]]
 name = "arrow-array"
-version = "29.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9452131e027aec3276e43449162af084db611c42ef875e54d231e6580bc6254"
-dependencies = [
- "ahash 0.8.2",
- "arrow-buffer 29.0.0",
- "arrow-data 29.0.0",
- "arrow-schema 29.0.0",
- "chrono",
- "half 2.1.0",
- "hashbrown 0.13.1",
- "num",
-]
-
-[[package]]
-name = "arrow-array"
 version = "30.0.0"
 source = "git+https://github.com/apache/arrow-rs?rev=6139d898#6139d8984ca702fa744aaf3b0b2193dd85468cf7"
 dependencies = [
  "ahash 0.8.2",
- "arrow-buffer 30.0.0",
- "arrow-data 30.0.0",
- "arrow-schema 30.0.0",
+ "arrow-buffer",
+ "arrow-data",
+ "arrow-schema",
  "chrono",
  "half 2.1.0",
  "hashbrown 0.13.1",
- "num",
-]
-
-[[package]]
-name = "arrow-buffer"
-version = "29.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a301001e8ed7da638a12fa579ac5f3f154c44c0655f2ca6ed0f8586b418a779"
-dependencies = [
- "half 2.1.0",
  "num",
 ]
 
@@ -187,10 +161,10 @@ name = "arrow-cast"
 version = "30.0.0"
 source = "git+https://github.com/apache/arrow-rs?rev=6139d898#6139d8984ca702fa744aaf3b0b2193dd85468cf7"
 dependencies = [
- "arrow-array 30.0.0",
- "arrow-buffer 30.0.0",
- "arrow-data 30.0.0",
- "arrow-schema 30.0.0",
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-data",
+ "arrow-schema",
  "arrow-select",
  "chrono",
  "lexical-core",
@@ -199,23 +173,11 @@ dependencies = [
 
 [[package]]
 name = "arrow-data"
-version = "29.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e59619d9d102e4e6b22087b2bd60c07df76fcb68683620841718f6bc8e8f02cb"
-dependencies = [
- "arrow-buffer 29.0.0",
- "arrow-schema 29.0.0",
- "half 2.1.0",
- "num",
-]
-
-[[package]]
-name = "arrow-data"
 version = "30.0.0"
 source = "git+https://github.com/apache/arrow-rs?rev=6139d898#6139d8984ca702fa744aaf3b0b2193dd85468cf7"
 dependencies = [
- "arrow-buffer 30.0.0",
- "arrow-schema 30.0.0",
+ "arrow-buffer",
+ "arrow-schema",
  "half 2.1.0",
  "num",
 ]
@@ -225,11 +187,11 @@ name = "arrow-flight"
 version = "30.0.0"
 source = "git+https://github.com/apache/arrow-rs?rev=6139d898#6139d8984ca702fa744aaf3b0b2193dd85468cf7"
 dependencies = [
- "arrow-array 30.0.0",
- "arrow-buffer 30.0.0",
+ "arrow-array",
+ "arrow-buffer",
  "arrow-cast",
  "arrow-ipc",
- "arrow-schema 30.0.0",
+ "arrow-schema",
  "base64 0.20.0",
  "bytes",
  "futures",
@@ -247,19 +209,13 @@ name = "arrow-ipc"
 version = "30.0.0"
 source = "git+https://github.com/apache/arrow-rs?rev=6139d898#6139d8984ca702fa744aaf3b0b2193dd85468cf7"
 dependencies = [
- "arrow-array 30.0.0",
- "arrow-buffer 30.0.0",
+ "arrow-array",
+ "arrow-buffer",
  "arrow-cast",
- "arrow-data 30.0.0",
- "arrow-schema 30.0.0",
+ "arrow-data",
+ "arrow-schema",
  "flatbuffers",
 ]
-
-[[package]]
-name = "arrow-schema"
-version = "29.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69ef17c144f1253b9864f5a3e8f4c6f1e436bdd52394855d5942f132f776b64e"
 
 [[package]]
 name = "arrow-schema"
@@ -271,10 +227,10 @@ name = "arrow-select"
 version = "30.0.0"
 source = "git+https://github.com/apache/arrow-rs?rev=6139d898#6139d8984ca702fa744aaf3b0b2193dd85468cf7"
 dependencies = [
- "arrow-array 30.0.0",
- "arrow-buffer 30.0.0",
- "arrow-data 30.0.0",
- "arrow-schema 30.0.0",
+ "arrow-array",
+ "arrow-buffer",
+ "arrow-data",
+ "arrow-schema",
  "num",
 ]
 
@@ -5544,8 +5500,8 @@ name = "risingwave_common"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
- "arrow-array 29.0.0",
- "arrow-schema 29.0.0",
+ "arrow-array",
+ "arrow-schema",
  "async-stream",
  "async-trait",
  "auto_enums",
@@ -5851,6 +5807,7 @@ version = "0.2.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
+ "arrow-schema",
  "async-stream",
  "async-trait",
  "byteorder",
@@ -5875,6 +5832,7 @@ dependencies = [
  "regex",
  "risingwave_common",
  "risingwave_pb",
+ "risingwave_udf",
  "rust_decimal",
  "serde",
  "smallvec",
@@ -6478,12 +6436,13 @@ dependencies = [
 name = "risingwave_udf"
 version = "0.1.0"
 dependencies = [
- "arrow-array 30.0.0",
+ "arrow-array",
  "arrow-flight",
- "arrow-schema 30.0.0",
+ "arrow-schema",
  "futures-util",
  "madsim-tokio",
  "madsim-tonic",
+ "thiserror",
 ]
 
 [[package]]
@@ -8467,6 +8426,7 @@ dependencies = [
  "hyper",
  "indexmap",
  "isahc",
+ "itertools",
  "lexical-core",
  "lexical-parse-float",
  "lexical-parse-integer",
@@ -8514,6 +8474,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tonic",
+ "tonic-build",
  "tower",
  "tower-http",
  "tracing",

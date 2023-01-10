@@ -17,12 +17,14 @@
 use std::convert::TryFrom;
 use std::sync::Arc;
 
+use arrow_schema::{Field, Schema};
 use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::for_all_variants;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{literal_type_match, DataType, Datum, Scalar, ScalarImpl};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
+use risingwave_udf::{ArrowFlightUdfClient, FunctionId};
 
 use super::{build_from_prost, BoxedExpression};
 use crate::expr::Expression;
@@ -34,7 +36,8 @@ pub struct UdfExpression {
     name: String,
     arg_types: Vec<DataType>,
     return_type: DataType,
-    // TODO: arrow flight client
+    client: ArrowFlightUdfClient,
+    function_id: FunctionId,
 }
 
 impl Expression for UdfExpression {
@@ -58,15 +61,30 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
         ensure!(prost.get_expr_type().unwrap() == Type::Udf);
-        let ret_type = DataType::from(prost.get_return_type().unwrap());
+        let return_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::Udf(udf) = prost.get_rex_node().unwrap() else {
             bail!("expect UDF");
         };
+        // connect to UDF service and check the function
+        let (client, function_id) = tokio::runtime::Handle::current().block_on(async {
+            let client = ArrowFlightUdfClient::connect(&udf.path).await?;
+            let args = Schema::new(
+                udf.arg_types
+                    .iter()
+                    .map(|t| Field::new("", DataType::from(t).into(), true))
+                    .collect(),
+            );
+            let returns = Schema::new(vec![Field::new("", (&return_type).into(), true)]);
+            let id = client.check(&udf.name, &args, &returns).await?;
+            Ok((client, id)) as risingwave_udf::Result<_>
+        })?;
         Ok(Self {
             children: udf.children.iter().map(build_from_prost).try_collect()?,
             name: udf.name.clone(),
             arg_types: udf.arg_types.iter().map(|t| t.into()).collect(),
-            return_type: ret_type,
+            return_type,
+            client,
+            function_id,
         })
     }
 }

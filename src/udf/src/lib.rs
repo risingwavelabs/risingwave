@@ -18,19 +18,19 @@ use arrow_flight::encode::FlightDataEncoderBuilder;
 use arrow_flight::error::FlightError;
 use arrow_flight::flight_service_client::FlightServiceClient;
 use arrow_flight::{FlightData, FlightDescriptor};
-use arrow_schema::{DataType, Field, Schema};
+use arrow_schema::Schema;
 use futures_util::{Stream, StreamExt, TryStreamExt};
 use tonic::transport::Channel;
-use tonic::{Result, Status};
 
 /// Client for external function service based on Arrow Flight.
+#[derive(Debug)]
 pub struct ArrowFlightUdfClient {
     client: FlightServiceClient<Channel>,
 }
 
 impl ArrowFlightUdfClient {
     /// Connect to a UDF service.
-    pub async fn connect(addr: &str) -> Result<Self, tonic::transport::Error> {
+    pub async fn connect(addr: &str) -> Result<Self> {
         let client = FlightServiceClient::connect(addr.to_string()).await?;
         Ok(Self { client })
     }
@@ -49,7 +49,7 @@ impl ArrowFlightUdfClient {
         let schema = Schema::try_from(info)
             .map_err(|e| FlightError::DecodeError(format!("Error decoding schema: {e}")))?;
         if &schema != returns {
-            return Err(Status::unavailable(format!(
+            return Err(tonic::Status::unavailable(format!(
                 "Schema mismatch: expected {:?}, got {:?}",
                 returns, schema
             ))
@@ -63,7 +63,7 @@ impl ArrowFlightUdfClient {
         &self,
         id: &FunctionId,
         inputs: impl Stream<Item = RecordBatch> + Send + 'static,
-    ) -> Result<impl Stream<Item = Result<RecordBatch, FlightError>> + Send, FlightError> {
+    ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + 'static> {
         let descriptor = FlightDescriptor::new_path(id.0.clone());
         let flight_data_stream =
             FlightDataEncoderBuilder::new()
@@ -83,10 +83,22 @@ impl ArrowFlightUdfClient {
             // convert tonic::Status to FlightError
             stream.map_err(|e| e.into()),
         );
-        Ok(record_batch_stream)
+        Ok(record_batch_stream.map_err(|e| e.into()))
     }
 }
 
 /// An opaque ID for a function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FunctionId(Vec<String>);
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("failed to connect to UDF service: {0}")]
+    Connect(#[from] tonic::transport::Error),
+    #[error("failed to check function: {0}")]
+    Check(#[from] tonic::Status),
+    #[error("Error calling UDF: {0}")]
+    Flight(#[from] FlightError),
+}
