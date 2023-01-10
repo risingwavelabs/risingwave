@@ -685,6 +685,7 @@ pub fn to_stream_prost_body(
         }
         Node::Project(me) => ProstNode::Project(ProjectNode {
             select_list: me
+                .core
                 .exprs
                 .iter()
                 .map(|x| {
