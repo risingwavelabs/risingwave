@@ -18,6 +18,7 @@ use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
 use rdkafka::consumer::StreamConsumer;
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::producer::{BaseProducer, BaseRecord};
+use rdkafka::consumer::StreamConsumer;
 use rdkafka::ClientConfig;
 use std::collections::HashMap;
 
@@ -30,6 +31,7 @@ pub async fn create_topics(broker_addr: &str, topics: HashMap<String, i32>) {
         .expect("failed to create kafka admin client");
 
     for (topic, partition) in topics {
+        println!("creating topic {}", topic);
         admin
             .create_topics(
                 &[NewTopic::new(
