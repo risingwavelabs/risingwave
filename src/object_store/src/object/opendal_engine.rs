@@ -133,9 +133,9 @@ impl ObjectStore for OpendalObjectStore {
         path: &str,
         start_pos: Option<usize>,
     ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
-        fail_point!("hdfs_streaming_read_err", |_| Err(ObjectError::internal(
-            "hdfs streaming read error"
-        )));
+        fail_point!("opendal_streaming_read_err", |_| Err(
+            ObjectError::internal("opendal streaming read error")
+        ));
 
         let bytes = match start_pos {
             Some(strat_position) => {
@@ -158,7 +158,6 @@ impl ObjectStore for OpendalObjectStore {
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         let opendal_metadata = self.op.object(path).metadata().await?;
-        // todo: use correct path
         let key = path.to_string();
         let last_modified = match opendal_metadata.last_modified() {
             Some(t) => t.unix_timestamp() as f64,
@@ -211,7 +210,10 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     fn store_media_type(&self) -> &'static str {
-        "hdfs"
+        match self.engine_type {
+            EngineType::Memory => "Memory",
+            EngineType::Hdfs => "Hdfs",
+        }
     }
 }
 
