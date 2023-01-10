@@ -21,8 +21,8 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 pub mod mem;
 pub use mem::*;
 
-pub mod hdfs;
-pub use hdfs::*;
+pub mod opendal_engine;
+pub use opendal_engine::*;
 
 pub mod s3;
 use async_stack_trace::StackTrace;
@@ -187,7 +187,7 @@ pub trait ObjectStore: Send + Sync {
 pub enum ObjectStoreImpl {
     InMem(MonitoredObjectStore<InMemObjectStore>),
     Disk(MonitoredObjectStore<DiskObjectStore>),
-    Hdfs(MonitoredObjectStore<HdfsObjectStore>),
+    Hdfs(MonitoredObjectStore<OpendalObjectStore>),
     S3(MonitoredObjectStore<S3ObjectStore>),
     S3Compatible(MonitoredObjectStore<S3ObjectStore>),
     Hybrid {
@@ -821,7 +821,12 @@ pub async fn parse_remote_object_store(
             .monitored(metrics),
         ),
         hdfs if hdfs.starts_with("hdfs://") => {
-            ObjectStoreImpl::Hdfs(HdfsObjectStore::new(hdfs.to_string()).monitored(metrics))
+            let hdfs = hdfs.strip_prefix("hdfs://").unwrap();
+            let (namenode, root) = hdfs.split_once('@').unwrap();
+            ObjectStoreImpl::Hdfs(
+                OpendalObjectStore::new_hdfs_engine(namenode.to_string(), root.to_string())
+                    .monitored(metrics),
+            )
         }
         s3_compatible if s3_compatible.starts_with("s3-compatible://") => {
             ObjectStoreImpl::S3Compatible(
@@ -880,9 +885,10 @@ pub fn parse_local_object_store(url: &str, metrics: Arc<ObjectStoreMetrics>) -> 
             tracing::warn!("You're using Hummock in-memory local object store. This should never be used in benchmarks and production environment.");
             ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
         }
-        hdfs if hdfs.starts_with("hdfs://") => {
-            ObjectStoreImpl::Hdfs(HdfsObjectStore::new(hdfs.to_string()).monitored(metrics))
-        }
+        hdfs if hdfs.starts_with("hdfs://") => ObjectStoreImpl::Hdfs(
+            OpendalObjectStore::new_hdfs_engine(hdfs.to_string(), "risingwave".to_string())
+                .monitored(metrics),
+        ),
         other => {
             unimplemented!(
                 "{} Hummock only supports s3, minio, disk, and memory for now.",

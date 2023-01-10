@@ -5,7 +5,7 @@ use fail::fail_point;
 use futures::future::try_join_all;
 use futures::StreamExt;
 use itertools::Itertools;
-use opendal::services::hdfs;
+use opendal::services::{hdfs, memory};
 use opendal::Operator;
 use tokio::io::AsyncRead;
 
@@ -13,16 +13,17 @@ use super::{
     BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
     StreamingUploader,
 };
-/// Hdfs object storage.
+/// Opendal object storage.
 #[derive(Clone)]
-pub struct HdfsObjectStore {
+pub struct OpendalObjectStore {
     op: Operator,
     namenode: String,
     root: String,
 }
 
-impl HdfsObjectStore {
-    pub fn new(namenode: String) -> Self {
+impl OpendalObjectStore {
+    /// create opendal hdfs engine.
+    pub fn new_hdfs_engine(namenode: String, root: String) -> Self {
         // Create fs backend builder.
         let mut builder = hdfs::Builder::default();
         // Set the name node for hdfs.
@@ -30,14 +31,28 @@ impl HdfsObjectStore {
         // Set the root for hdfs, all operations will happen under this root.
         //
         // NOTE: the root must be absolute path.
-        let root = "risingwave";
-        builder.root(root);
+        builder.root(&root);
 
         // `Accessor` provides the low level APIs, we will use `Operator` normally.
         let op: Operator = Operator::new(builder.build().unwrap());
         Self {
             op,
             namenode,
+            root: root.to_string(),
+        }
+    }
+
+    /// create opendal memory engine, used for unit tests.
+    pub fn new_memory_engine() -> Self {
+        // Create fs backend builder.
+        let mut builder = memory::Builder::default();
+
+        let root = "temp";
+        let namenode = "";
+        let op: Operator = Operator::new(builder.build().unwrap());
+        Self {
+            op,
+            namenode: namenode.to_string(),
             root: root.to_string(),
         }
     }
@@ -50,10 +65,18 @@ impl HdfsObjectStore {
             .ok_or_else(|| ObjectError::internal(format!("no object at path '{}'", path)))
             .map(f)
     }
+
+    #[cfg(test)]
+    fn in_memory_streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
+        Ok(Box::new(OpendalMemoryStreamingUploader::new(
+            self.op.clone(),
+            path.to_string(),
+        )))
+    }
 }
 
 #[async_trait::async_trait]
-impl ObjectStore for HdfsObjectStore {
+impl ObjectStore for OpendalObjectStore {
     fn get_object_prefix(&self, _obj_id: u64) -> String {
         String::default()
     }
@@ -235,6 +258,40 @@ impl StreamingUploader for HdfsStreamingUploader {
     }
 }
 
+/// Store multiple parts in a map, and concatenate them on finish.
+pub struct OpendalMemoryStreamingUploader {
+    op: Operator,
+    path: String,
+    buf: BytesMut,
+}
+impl OpendalMemoryStreamingUploader {
+    pub fn new(op: Operator, path: String) -> Self {
+        Self {
+            op,
+            path,
+            buf: BytesMut::new(),
+        }
+    }
+}
+#[async_trait::async_trait]
+impl StreamingUploader for OpendalMemoryStreamingUploader {
+    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
+        self.buf.put(data);
+        Ok(())
+    }
+
+    async fn finish(self: Box<Self>) -> ObjectResult<()> {
+        // Create fs backend builder.
+
+        self.op.object(&self.path).write(self.buf.clone()).await?;
+        Ok(())
+    }
+
+    fn get_memory_usage(&self) -> u64 {
+        self.buf.capacity() as u64
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
@@ -249,42 +306,43 @@ mod tests {
         ret
     }
     #[tokio::test]
-    async fn test_hdfs_upload() {
+    async fn test_memory_upload() {
         let block = Bytes::from("123456");
-        let namenode = "hdfs://127.0.0.1:9000";
-        let s3 = HdfsObjectStore::new(namenode.to_string());
-        s3.upload("/abc", block).await.unwrap();
+        let store = OpendalObjectStore::new_memory_engine();
+        store.upload("/abc", block).await.unwrap();
 
         // No such object.
-        s3.read("/ab", Some(BlockLocation { offset: 0, size: 3 }))
+        store
+            .read("/ab", Some(BlockLocation { offset: 0, size: 3 }))
             .await
             .unwrap_err();
 
-        let bytes = s3
+        let bytes = store
             .read("/abc", Some(BlockLocation { offset: 4, size: 2 }))
             .await
             .unwrap();
         assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_string());
 
         // Overflow.
-        s3.read("/abc", Some(BlockLocation { offset: 4, size: 4 }))
+        store
+            .read("/abc", Some(BlockLocation { offset: 4, size: 4 }))
             .await
             .unwrap_err();
 
-        s3.delete("/abc").await.unwrap();
+        store.delete("/abc").await.unwrap();
 
         // No such object.
-        s3.read("/abc", Some(BlockLocation { offset: 0, size: 3 }))
+        store
+            .read("/abc", Some(BlockLocation { offset: 0, size: 3 }))
             .await
             .unwrap_err();
     }
 
     #[tokio::test]
-    async fn test_hdfs_metadata() {
+    async fn test_memory_metadata() {
         let block = Bytes::from("123456");
         let path = "/abc".to_string();
-        let namenode = "hdfs://127.0.0.1:9000";
-        let obj_store = HdfsObjectStore::new(namenode.to_string());
+        let obj_store = OpendalObjectStore::new_memory_engine();
         obj_store.upload("/abc", block).await.unwrap();
 
         let metadata = obj_store.metadata("/abc").await.unwrap();
@@ -292,32 +350,31 @@ mod tests {
         obj_store.delete(&path).await.unwrap();
     }
 
+    // opendal memory engine does not support delete objects.
+    // #[tokio::test]
+    // async fn test_memory_delete_objects() {
+    //     let block1 = Bytes::from("123456");
+    //     let block2 = Bytes::from("987654");
+    //     let store = OpendalObjectStore::new_memory_engine();
+    //     store.upload("/abc", block1).await.unwrap();
+    //     store.upload("/klm", block2).await.unwrap();
+
+    //     assert_eq!(store.list("").await.unwrap().len(), 2);
+
+    //     let str_list = [
+    //         String::from("/abc"),
+    //         String::from("/klm"),
+    //         String::from("/xyz"),
+    //     ];
+
+    //     store.delete_objects(&str_list).await.unwrap();
+
+    //     assert_eq!(store.list("").await.unwrap().len(), 0);
+    // }
+
     #[tokio::test]
-    async fn test_hdfs_delete_objects() {
-        let block1 = Bytes::from("123456");
-        let block2 = Bytes::from("987654");
-        let namenode = "hdfs://127.0.0.1:9000";
-        let store = HdfsObjectStore::new(namenode.to_string());
-        store.upload("/abc", block1).await.unwrap();
-        store.upload("/klm", block2).await.unwrap();
-
-        assert_eq!(store.list("").await.unwrap().len(), 2);
-
-        let str_list = [
-            String::from("/abc"),
-            String::from("/klm"),
-            String::from("/xyz"),
-        ];
-
-        store.delete_objects(&str_list).await.unwrap();
-
-        assert_eq!(store.list("").await.unwrap().len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_hdfs_read_multi_block() {
-        let namenode = "hdfs://127.0.0.1:9000";
-        let store = HdfsObjectStore::new(namenode.to_string());
+    async fn test_memory_read_multi_block() {
+        let store = OpendalObjectStore::new_memory_engine();
         let payload = gen_test_payload();
         store
             .upload("test.obj", Bytes::from(payload.clone()))
@@ -347,13 +404,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_hdfs_streaming_upload() {
+    async fn test_memory_streaming_upload() {
         let blocks = vec![Bytes::from("123"), Bytes::from("456"), Bytes::from("789")];
         let obj = Bytes::from("123456789");
 
-        let namenode = "hdfs://127.0.0.1:9000";
-        let store = HdfsObjectStore::new(namenode.to_string());
-        let mut uploader = store.streaming_upload("/yyy").unwrap();
+        let store = OpendalObjectStore::new_memory_engine();
+        let mut uploader = store.in_memory_streaming_upload("/temp").unwrap();
 
         for block in blocks {
             uploader.write_bytes(block).await.unwrap();
@@ -361,21 +417,18 @@ mod tests {
         uploader.finish().await.unwrap();
 
         // Read whole object.
-        let read_obj = store.read("/yyy", None).await.unwrap();
+        let read_obj = store.read("/temp", None).await.unwrap();
         assert!(read_obj.eq(&obj));
 
         // Read part of the object.
         let read_obj = store
-            .read("/yyy", Some(BlockLocation { offset: 4, size: 2 }))
+            .read("/temp", Some(BlockLocation { offset: 4, size: 2 }))
             .await
             .unwrap();
         assert_eq!(
             String::from_utf8(read_obj.to_vec()).unwrap(),
             "56".to_string()
         );
-        // store
-        //     .delete("/yyy")
-        //     .await
-        //     .unwrap();
+        store.delete("/temp").await.unwrap();
     }
 }

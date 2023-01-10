@@ -102,7 +102,7 @@ pub fn add_storage_backend(
         }
         ([], [], [opendal]) => {
             cmd.arg("--state-store")
-            .arg(format!("hummock+hdfs://{}", opendal.namenode));
+            .arg(format!("hummock+hdfs://{}@{}", opendal.namenode, opendal.root));
             true
         }
 

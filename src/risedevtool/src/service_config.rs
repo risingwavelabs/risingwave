@@ -228,6 +228,7 @@ pub struct OpendalConfig {
 
     pub id: String,
     pub namenode: String,
+    pub root: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

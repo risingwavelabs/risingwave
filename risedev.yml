@@ -38,7 +38,8 @@ profile:
      # If you want to use opendal, enable the following lines:
       - use: opendal
         namenode: "127.0.0.1:9000"
-        
+        root: risingwave
+
       # If you want to create CDC source, uncomment the following line
       # - use: connector-node
 
@@ -863,6 +864,8 @@ template:
     id: opendal
 
     namenode: 127.0.0.1:9000"
+
+    root: risingwave
 
   # aws-s3 is a placeholder service to provide configurations
   aws-s3:
