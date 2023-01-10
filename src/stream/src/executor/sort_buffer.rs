@@ -28,7 +28,7 @@ use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_storage::StateStore;
 
-use super::{Barrier, PkIndices, StreamExecutorResult, Watermark};
+use super::{Barrier, PkIndices, StreamExecutorResult};
 use crate::common::table::state_table::StateTable;
 
 /// [`SortBufferKey`] contains a record's timestamp and pk.
@@ -111,7 +111,7 @@ impl<S: StateStore> SortBuffer<S> {
 
     /// Store all rows in one [`StreamChunk`] to the buffer.
     /// TODO: Only insertions are supported now.
-    pub fn handle_chunk(&mut self, chunk: &StreamChunk) {
+    pub fn insert(&mut self, chunk: &StreamChunk) {
         for (op, row_ref) in chunk.rows() {
             assert_eq!(
                 op,
@@ -128,24 +128,15 @@ impl<S: StateStore> SortBuffer<S> {
         }
     }
 
-    /// Handle the watermark and output a stream that is ordered by the sort key.
-    pub fn handle_watermark<'a, 'b: 'a>(
+    /// Output a stream that is ordered by the sort key.
+    pub fn iter_until<'a, 'b: 'a>(
         &'a mut self,
-        watermark: &'b Watermark,
+        watermark_val: &'b ScalarImpl,
     ) -> impl Iterator<Item = DataChunk> + 'a {
-        let Watermark {
-            col_idx,
-            data_type: _,
-            val,
-        } = watermark;
-        let last_watermark = self.last_watermark.replace(val.clone());
+        let last_watermark = self.last_watermark.replace(watermark_val.clone());
         let g = move || {
-            if *col_idx != self.sort_column_index {
-                return;
-            }
             let mut data_chunk_builder =
                 DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-            let watermark_value = val;
             // Only records with timestamp greater than the last watermark will be output, so
             // records will only be emitted exactly once unless recovery.
             let start_bound = if let Some(last_watermark) = last_watermark.clone() {
@@ -167,7 +158,7 @@ impl<S: StateStore> SortBuffer<S> {
                 }
                 // Only when a record's timestamp is prior to the watermark should it be
                 // sent to downstream.
-                if time_col <= watermark_value {
+                if time_col <= watermark_val {
                     // Add the record to stream chunk data. Note that we retrieve the
                     // record from a BTreeMap, so data in this chunk should be ordered
                     // by timestamp and pk.
@@ -249,7 +240,7 @@ mod tests {
 
     use super::SortBuffer;
     use crate::common::table::state_table::StateTable;
-    use crate::executor::{Barrier, PkIndices, Watermark};
+    use crate::executor::{Barrier, PkIndices};
 
     fn chunks_to_rows(chunks: impl Iterator<Item = DataChunk>) -> Vec<OwnedRow> {
         let mut rows = vec![];
@@ -305,7 +296,7 @@ mod tests {
             + 3 6
             + 4 7",
         );
-        let watermark1 = Watermark::new(1, DataType::Int64, 3i64.into());
+        let watermark1 = 3i64.into();
         let chunk2 = StreamChunk::from_pretty(
             " I  I
             + 98 4
@@ -313,14 +304,14 @@ mod tests {
             + 60 8
             + 13 9",
         );
-        let watermark2 = Watermark::new(1, DataType::Int64, 7i64.into());
+        let watermark2 = 7i64.into();
         let barrier1 = Barrier::new_test_barrier(3);
-        sort_buffer.handle_chunk(&chunk1);
-        let output = sort_buffer.handle_watermark(&watermark1);
+        sort_buffer.insert(&chunk1);
+        let output = sort_buffer.iter_until(&watermark1);
         let rows1 = chunks_to_rows(output);
         assert_eq!(rows1, vec![row_pretty("1 1"), row_pretty("2 2")]);
-        sort_buffer.handle_chunk(&chunk2);
-        let output = sort_buffer.handle_watermark(&watermark2);
+        sort_buffer.insert(&chunk2);
+        let output = sort_buffer.iter_until(&watermark2);
         let rows2 = chunks_to_rows(output);
         assert_eq!(
             rows2,
@@ -360,9 +351,9 @@ mod tests {
                 .await
                 .unwrap();
 
-        let watermark3 = Watermark::new(1, DataType::Int64, 8i64.into());
+        let watermark3 = 8i64.into();
 
-        let output = sort_buffer.handle_watermark(&watermark3);
+        let output = sort_buffer.iter_until(&watermark3);
         let rows3 = chunks_to_rows(output);
         assert_eq!(
             rows3,
@@ -375,8 +366,8 @@ mod tests {
             ]
         );
 
-        let watermark4 = Watermark::new(1, DataType::Int64, 9i64.into());
-        let output = sort_buffer.handle_watermark(&watermark4);
+        let watermark4 = 9i64.into();
+        let output = sort_buffer.iter_until(&watermark4);
         let rows4 = chunks_to_rows(output);
         assert_eq!(rows4, vec![row_pretty("13 9")]);
     }
