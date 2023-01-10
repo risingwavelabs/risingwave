@@ -19,7 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::pin_version_response;

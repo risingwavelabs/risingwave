@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::mem::swap;
 use std::ops::RangeBounds;
 use std::sync::atomic::AtomicUsize;
@@ -22,17 +22,10 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    add_new_sub_level, summarize_group_deltas, GroupDeltasSummary, HummockLevelsExt,
-    HummockVersionExt,
-};
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{
-    HummockVersion, HummockVersionDelta, HummockVersionDeltas, LevelType,
-};
+use risingwave_pb::hummock::{HummockVersion, HummockVersionDeltas};
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{
@@ -166,13 +159,9 @@ impl SyncUncommittedData {
 
 impl LocalVersion {
     pub fn new(pinned_version: PinnedVersion) -> Self {
-        let local_related_version = pinned_version.version();
-        let local_related_version =
-            pinned_version.new_local_related_pin_version(local_related_version);
         Self {
             shared_buffer: BTreeMap::default(),
             pinned_version,
-            local_related_version,
             sync_uncommitted_data: Default::default(),
             max_sync_epoch: 0,
             sealed_epoch: 0,
@@ -439,7 +428,7 @@ impl LocalVersion {
                     }
                 }
             }
-            for (_, group_deltas) in &mut delta.group_deltas {
+            for group_deltas in delta.group_deltas.values_mut() {
                 for group_delta in &mut group_deltas.group_deltas {
                     if let Some(DeltaType::IntraLevel(level_delta)) = &mut group_delta.delta_type {
                         if level_delta.level_idx > 0

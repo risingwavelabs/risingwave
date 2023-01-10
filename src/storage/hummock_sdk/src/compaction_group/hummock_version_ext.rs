@@ -115,6 +115,9 @@ pub trait HummockVersionExt {
     fn level_iter<F: FnMut(&Level) -> bool>(&self, compaction_group_id: CompactionGroupId, f: F);
 
     fn get_sst_ids(&self) -> Vec<u64>;
+}
+
+pub trait HummockVersionUpdateExt {
     fn init_with_parent_group(
         &mut self,
         parent_group_id: CompactionGroupId,
@@ -246,7 +249,9 @@ impl HummockVersionExt for HummockVersion {
             .map(|group| group.levels.len() + 1)
             .unwrap_or(0)
     }
+}
 
+impl HummockVersionUpdateExt for HummockVersion {
     fn init_with_parent_group(
         &mut self,
         parent_group_id: CompactionGroupId,
@@ -663,7 +668,9 @@ mod tests {
     };
 
     use super::HummockLevelsExt;
-    use crate::compaction_group::hummock_version_ext::HummockVersionExt;
+    use crate::compaction_group::hummock_version_ext::{
+        HummockVersionExt, HummockVersionUpdateExt,
+    };
 
     #[test]
     fn test_get_sst_ids() {
