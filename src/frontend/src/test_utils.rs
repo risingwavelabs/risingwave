@@ -23,15 +23,16 @@ use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
-    IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
+    FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable, View as ProstView,
+    Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
+    Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
+    View as ProstView,
 };
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
@@ -273,6 +274,10 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn create_function(&self, _function: ProstFunction) -> Result<()> {
+        todo!()
+    }
+
     async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
         if let Some(source_id) = source_id {
             self.drop_table_or_source_id(source_id);
@@ -356,6 +361,10 @@ impl CatalogWriter for MockCatalogWriter {
             .write()
             .drop_table(database_id, schema_id, index_table_id);
         Ok(())
+    }
+
+    async fn drop_function(&self, _function_id: FunctionId) -> Result<()> {
+        todo!()
     }
 
     async fn drop_database(&self, database_id: u32) -> Result<()> {

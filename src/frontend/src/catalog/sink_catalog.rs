@@ -14,7 +14,8 @@
 
 use risingwave_pb::catalog::Sink as ProstSink;
 
-use super::SinkId;
+use super::{RelationCatalog, SinkId};
+use crate::user::UserId;
 use crate::WithOptions;
 
 #[derive(Clone, Debug)]
@@ -23,7 +24,7 @@ pub struct SinkCatalog {
     pub name: String,
 
     pub properties: WithOptions,
-    pub owner: u32,
+    pub owner: UserId,
 }
 
 impl From<&ProstSink> for SinkCatalog {
@@ -34,5 +35,11 @@ impl From<&ProstSink> for SinkCatalog {
             properties: WithOptions::new(sink.properties.clone()),
             owner: sink.owner,
         }
+    }
+}
+
+impl RelationCatalog for SinkCatalog {
+    fn owner(&self) -> UserId {
+        self.owner
     }
 }

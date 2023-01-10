@@ -30,9 +30,11 @@ mod expr_literal;
 mod expr_nested_construct;
 mod expr_quaternary_bytes;
 pub mod expr_regexp;
+mod expr_some_all;
 mod expr_ternary_bytes;
 mod expr_to_char_const_tmpl;
 mod expr_to_timestamp_const_tmpl;
+mod expr_udf;
 pub mod expr_unary;
 mod expr_vnode;
 mod template;
@@ -61,6 +63,7 @@ use crate::expr::expr_field::FieldExpression;
 use crate::expr::expr_in::InExpression;
 use crate::expr::expr_nested_construct::NestedConstructExpression;
 use crate::expr::expr_regexp::RegexpMatchExpression;
+use crate::expr::expr_udf::UdfExpression;
 use crate::expr::expr_vnode::VnodeExpression;
 use crate::ExprError;
 
@@ -133,6 +136,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         DateTrunc => build_date_trunc_expr(prost),
 
         // Dedicated types
+        All | Some => build_some_all_expr_prost(prost),
         In => InExpression::try_from(prost).map(Expression::boxed),
         Case => CaseExpression::try_from(prost).map(Expression::boxed),
         Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
@@ -155,11 +159,12 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             let RexNode::FuncCall(func_call_node) = rex_node else {
                 bail!("Expected RexNode::FuncCall in Now");
             };
-            let Some(bind_timestamp) = func_call_node.children.first() else {
+            let Option::Some(bind_timestamp) = func_call_node.children.first() else {
                 bail!("Expected epoch timestamp bound into Now");
             };
             LiteralExpression::try_from(bind_timestamp).map(Expression::boxed)
         }
+        Udf => UdfExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",
             prost.get_expr_type()

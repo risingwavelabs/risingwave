@@ -56,6 +56,7 @@ pub mod store_impl;
 pub mod table;
 pub mod write_batch;
 
+pub mod mem_table;
 #[cfg(test)]
 #[cfg(feature = "failpoints")]
 mod storage_failpoints;

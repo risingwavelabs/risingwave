@@ -40,7 +40,7 @@ import Title from "../components/Title"
 import { ActorBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { StreamNode } from "../proto/gen/stream_plan"
-import { getFragments, getRelations } from "./api/streaming"
+import { getFragments, getStreamingJobs } from "./api/streaming"
 
 function buildPlanNodeDependency(
   fragment: TableFragments_Fragment
@@ -128,7 +128,7 @@ function useFetch<T>(fetchFn: () => Promise<T>) {
 }
 
 export default function Streaming() {
-  const { response: relationList } = useFetch(getRelations)
+  const { response: relationList } = useFetch(getStreamingJobs)
   const { response: fragmentList } = useFetch(getFragments)
 
   const [selectedFragmentId, setSelectedFragmentId] = useState<number>()
