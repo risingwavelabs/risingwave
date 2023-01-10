@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefMut;
-
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use paste::paste;
@@ -222,16 +220,6 @@ impl ExprImpl {
     pub fn eval_row_const(&self) -> Result<Datum> {
         assert!(self.is_const());
         self.eval_row(&OwnedRow::empty())
-    }
-
-    /// Rewrites casts, comparisons and arithmetic that depend on the session timezone.
-    pub fn rewrite_with_timezone(
-        self,
-        session_timezone: &mut RefMut<'_, SessionTimezone>,
-    ) -> ExprImpl {
-        let res = session_timezone.rewrite_expr(self);
-        assert!(session_timezone.used);
-        res
     }
 }
 
