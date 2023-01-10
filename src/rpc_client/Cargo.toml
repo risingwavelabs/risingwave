@@ -12,8 +12,6 @@ anyhow = "1"
 async-trait = "0.1"
 async_stack_trace = { path = "../utils/async_stack_trace" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-tower = { version = "0.4", features = ["full"] }
-tower-http = { version = "0.3", optional = true }
 http = "0.2"
 paste = "1"
 rand = "0.8"
@@ -32,6 +30,8 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.3", optional = true }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]

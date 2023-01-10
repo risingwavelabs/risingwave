@@ -90,7 +90,7 @@ tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc",
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util = { version = "0.7", features = ["codec", "io", "tracing"] }
 tonic = { version = "0.8", features = ["async-trait", "axum", "channel", "codegen", "flate2", "gzip", "h2", "hyper", "hyper-timeout", "prost", "prost-derive", "prost1", "rustls-pemfile", "tls", "tls-roots-common", "tls-webpki-roots", "tokio", "tokio-rustls", "tower", "tracing-futures", "transport", "webpki-roots"] }
-tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "filter", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
+tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "filter", "full", "futures-core", "futures-util", "hdrhistogram", "hedge", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "reconnect", "retry", "slab", "spawn-ready", "steer", "timeout", "tokio", "tokio-util", "tracing", "util"] }
 tower-http = { version = "0.3", features = ["add-extension", "cors", "map-response-body", "tower", "util"] }
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_trace", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["once_cell", "std"] }
@@ -175,7 +175,7 @@ tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc",
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util = { version = "0.7", features = ["codec", "io", "tracing"] }
 tonic = { version = "0.8", features = ["async-trait", "axum", "channel", "codegen", "flate2", "gzip", "h2", "hyper", "hyper-timeout", "prost", "prost-derive", "prost1", "rustls-pemfile", "tls", "tls-roots-common", "tls-webpki-roots", "tokio", "tokio-rustls", "tower", "tracing-futures", "transport", "webpki-roots"] }
-tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "filter", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
+tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "filter", "full", "futures-core", "futures-util", "hdrhistogram", "hedge", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "reconnect", "retry", "slab", "spawn-ready", "steer", "timeout", "tokio", "tokio-util", "tracing", "util"] }
 tower-http = { version = "0.3", features = ["add-extension", "cors", "map-response-body", "tower", "util"] }
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_trace", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["once_cell", "std"] }
