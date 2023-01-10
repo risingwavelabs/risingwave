@@ -240,6 +240,10 @@ where
     fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
         async { unimplemented!("should not be called new local again") }
     }
+
+    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
+        self.global.validate_read_epoch(epoch)
+    }
 }
 
 impl<G: StateStore> LocalGlobalStateStoreHolder<G::Local, G> {

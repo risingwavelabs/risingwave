@@ -590,6 +590,11 @@ impl StateStore for HummockStorageV1 {
     fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
         async { self.clone() }
     }
+
+    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+        // Returns Ok directly, since removal of HummockStorageV1 is planned.
+        Ok(())
+    }
 }
 
 pub struct HummockStateStoreIter {

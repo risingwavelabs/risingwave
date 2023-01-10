@@ -53,7 +53,7 @@ pub struct StorageTable<S: StateStore> {
     table_id: TableId,
 
     /// State store backend.
-    store: S,
+    store: Arc<S>,
 
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
     /// RowSeqScanExecutor.
@@ -195,7 +195,7 @@ impl<S: StateStore> StorageTable<S> {
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         Self {
             table_id,
-            store,
+            store: Arc::new(store),
             schema,
             pk_serializer,
             mapping: Arc::new(mapping),
@@ -242,7 +242,7 @@ impl<S: StateStore> StorageTable<S> {
     ) -> StorageResult<Option<OwnedRow>> {
         let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
-        self.store.try_wait_epoch(wait_epoch).await?;
+        self.store.try_wait_epoch(wait_epoch.clone()).await?;
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
         assert!(pk.len() <= self.pk_indices.len());
@@ -257,6 +257,7 @@ impl<S: StateStore> StorageTable<S> {
             read_version_from_backup: read_backup,
         };
         if let Some(value) = self.store.get(&serialized_pk, epoch, read_options).await? {
+            self.store.validate_read_epoch(wait_epoch)?;
             let full_row = self.row_deserializer.deserialize(value)?;
             let result_row = self.mapping.project(full_row).into_owned_row();
             Ok(Some(result_row))
@@ -344,7 +345,7 @@ impl<S: StateStore> StorageTable<S> {
                     read_version_from_backup: read_backup,
                 };
                 let iter = StorageTableIterInner::<S>::new(
-                    &self.store,
+                    self.store.clone(),
                     self.mapping.clone(),
                     self.row_deserializer.clone(),
                     raw_key_range,
@@ -526,12 +527,16 @@ struct StorageTableIterInner<S: StateStore> {
     mapping: Arc<ColumnMapping>,
 
     row_deserializer: Arc<RowDeserializer>,
+
+    store: Arc<S>,
+
+    read_epoch: HummockReadEpoch,
 }
 
 impl<S: StateStore> StorageTableIterInner<S> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     async fn new<R, B>(
-        store: &S,
+        store: Arc<S>,
         mapping: Arc<ColumnMapping>,
         row_deserializer: Arc<RowDeserializer>,
         raw_key_range: R,
@@ -547,12 +552,14 @@ impl<S: StateStore> StorageTableIterInner<S> {
             raw_key_range.start_bound().map(|b| b.as_ref().to_vec()),
             raw_key_range.end_bound().map(|b| b.as_ref().to_vec()),
         );
-        store.try_wait_epoch(epoch).await?;
+        store.try_wait_epoch(epoch.clone()).await?;
         let iter = store.iter(range, raw_epoch, read_options).await?;
         let iter = Self {
             iter,
             mapping,
             row_deserializer,
+            store,
+            read_epoch: epoch,
         };
         Ok(iter)
     }
@@ -575,5 +582,6 @@ impl<S: StateStore> StorageTableIterInner<S> {
             let row = self.mapping.project(full_row).into_owned_row();
             yield (key.to_vec(), row)
         }
+        self.store.validate_read_epoch(self.read_epoch)?
     }
 }

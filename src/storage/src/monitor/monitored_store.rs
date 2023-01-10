@@ -221,6 +221,10 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
         async move { MonitoredStateStore::new(self.inner.new_local(table_id).await, self.stats.clone()) }
     }
+
+    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
+        self.inner.validate_read_epoch(epoch)
+    }
 }
 
 impl MonitoredStateStore<HummockStorage> {

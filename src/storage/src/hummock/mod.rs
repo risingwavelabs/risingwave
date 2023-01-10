@@ -139,6 +139,9 @@ pub struct HummockStorage {
     tracing: Arc<risingwave_tracing::RwTracingService>,
 
     backup_reader: BackupReaderRef,
+
+    /// current_epoch < min_current_epoch cannot be read.
+    min_current_epoch: Arc<AtomicU64>,
 }
 
 impl HummockStorage {
@@ -193,6 +196,8 @@ impl HummockStorage {
             filter_key_extractor_manager.clone(),
         ));
 
+        let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
+        let min_current_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
         let hummock_event_handler = HummockEventHandler::new(
             event_tx.clone(),
             event_rx,
@@ -204,7 +209,7 @@ impl HummockStorage {
             context: compactor_context,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
-            seal_epoch: hummock_event_handler.sealed_epoch(),
+            seal_epoch,
             hummock_event_sender: event_tx.clone(),
             pinned_version: hummock_event_handler.pinned_version(),
             hummock_version_reader: HummockVersionReader::new(sstable_store, stats.clone()),
@@ -214,6 +219,7 @@ impl HummockStorage {
             read_version_mapping: hummock_event_handler.read_version_mapping(),
             tracing,
             backup_reader,
+            min_current_epoch,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
