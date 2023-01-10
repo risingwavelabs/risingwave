@@ -51,6 +51,12 @@ impl Ord for OwnedRow {
     }
 }
 
+impl AsRef<OwnedRow> for OwnedRow {
+    fn as_ref(&self) -> &OwnedRow {
+        self
+    }
+}
+
 impl OwnedRow {
     /// Returns an empty row.
     ///

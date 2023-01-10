@@ -80,6 +80,7 @@ export interface GrantPrivilege {
     | { $case: "sourceId"; sourceId: number }
     | { $case: "sinkId"; sinkId: number }
     | { $case: "viewId"; viewId: number }
+    | { $case: "functionId"; functionId: number }
     | { $case: "allTablesSchemaId"; allTablesSchemaId: number }
     | { $case: "allSourcesSchemaId"; allSourcesSchemaId: number };
   actionWithOpts: GrantPrivilege_ActionWithGrantOption[];
@@ -390,6 +391,8 @@ export const GrantPrivilege = {
         ? { $case: "sinkId", sinkId: Number(object.sinkId) }
         : isSet(object.viewId)
         ? { $case: "viewId", viewId: Number(object.viewId) }
+        : isSet(object.functionId)
+        ? { $case: "functionId", functionId: Number(object.functionId) }
         : isSet(object.allTablesSchemaId)
         ? { $case: "allTablesSchemaId", allTablesSchemaId: Number(object.allTablesSchemaId) }
         : isSet(object.allSourcesSchemaId)
@@ -409,6 +412,7 @@ export const GrantPrivilege = {
     message.object?.$case === "sourceId" && (obj.sourceId = Math.round(message.object?.sourceId));
     message.object?.$case === "sinkId" && (obj.sinkId = Math.round(message.object?.sinkId));
     message.object?.$case === "viewId" && (obj.viewId = Math.round(message.object?.viewId));
+    message.object?.$case === "functionId" && (obj.functionId = Math.round(message.object?.functionId));
     message.object?.$case === "allTablesSchemaId" &&
       (obj.allTablesSchemaId = Math.round(message.object?.allTablesSchemaId));
     message.object?.$case === "allSourcesSchemaId" &&
@@ -450,6 +454,13 @@ export const GrantPrivilege = {
     }
     if (object.object?.$case === "viewId" && object.object?.viewId !== undefined && object.object?.viewId !== null) {
       message.object = { $case: "viewId", viewId: object.object.viewId };
+    }
+    if (
+      object.object?.$case === "functionId" &&
+      object.object?.functionId !== undefined &&
+      object.object?.functionId !== null
+    ) {
+      message.object = { $case: "functionId", functionId: object.object.functionId };
     }
     if (
       object.object?.$case === "allTablesSchemaId" &&

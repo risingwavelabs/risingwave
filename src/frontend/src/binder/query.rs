@@ -250,10 +250,10 @@ impl Binder {
                 let Cte { alias, query, .. } = cte_table;
                 let table_name = alias.name.real_value();
                 let bound_query = self.bind_query(query)?;
-                let cte_id = self.next_cte_id();
+                let share_id = self.next_share_id();
                 self.context
                     .cte_to_relation
-                    .insert(table_name, Rc::new((cte_id, bound_query, alias)));
+                    .insert(table_name, Rc::new((share_id, bound_query, alias)));
             }
             Ok(())
         }
