@@ -5570,7 +5570,6 @@ dependencies = [
  "minitrace-jaeger",
  "moka",
  "nix 0.25.0",
- "opendal",
  "opentelemetry",
  "opentelemetry-jaeger",
  "parking_lot 0.12.1",

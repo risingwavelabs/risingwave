@@ -31,8 +31,14 @@ use super::{
 #[derive(Clone)]
 pub struct OpendalObjectStore {
     op: Operator,
+    engine_type: EngineType,
     namenode: String,
     root: String,
+}
+#[derive(Clone)]
+enum EngineType {
+    Memory,
+    Hdfs,
 }
 
 impl OpendalObjectStore {
@@ -51,6 +57,7 @@ impl OpendalObjectStore {
         let op: Operator = Operator::new(builder.build().unwrap());
         Self {
             op,
+            engine_type: EngineType::Hdfs,
             namenode,
             root: root.to_string(),
         }
@@ -66,6 +73,7 @@ impl OpendalObjectStore {
         let op: Operator = Operator::new(builder.build().unwrap());
         Self {
             op,
+            engine_type: EngineType::Memory,
             namenode: namenode.to_string(),
             root: root.to_string(),
         }
@@ -78,14 +86,6 @@ impl OpendalObjectStore {
         Some(&Bytes::from(self.op.object(path).read().await?))
             .ok_or_else(|| ObjectError::internal(format!("no object at path '{}'", path)))
             .map(f)
-    }
-
-    #[cfg(test)]
-    fn in_memory_streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
-        Ok(Box::new(OpendalMemoryStreamingUploader::new(
-            self.op.clone(),
-            path.to_string(),
-        )))
     }
 }
 
@@ -105,11 +105,17 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
-        Ok(Box::new(HdfsStreamingUploader::new(
-            path.to_string(),
-            self.namenode.clone(),
-            self.root.clone(),
-        )))
+        match self.engine_type {
+            EngineType::Memory => Ok(Box::new(OpendalMemoryStreamingUploader::new(
+                self.op.clone(),
+                path.to_string(),
+            ))),
+            EngineType::Hdfs => Ok(Box::new(HdfsStreamingUploader::new(
+                path.to_string(),
+                self.namenode.clone(),
+                self.root.clone(),
+            ))),
+        }
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -423,7 +429,7 @@ mod tests {
         let obj = Bytes::from("123456789");
 
         let store = OpendalObjectStore::new_memory_engine();
-        let mut uploader = store.in_memory_streaming_upload("/temp").unwrap();
+        let mut uploader = store.streaming_upload("/temp").unwrap();
 
         for block in blocks {
             uploader.write_bytes(block).await.unwrap();
