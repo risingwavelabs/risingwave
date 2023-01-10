@@ -26,7 +26,7 @@ profile:
       # - use: aws-s3
       #   bucket: test-bucket
       # If you want to use other s3 compatible object store, open this flag:
-        # s3-compatible: true
+        # s3-compatible: false
 
       # if you want to enable etcd backend, uncomment the following lines.
       # - use: etcd
@@ -36,9 +36,9 @@ profile:
       - use: frontend
 
      # If you want to use opendal, enable the following lines:
-      - use: opendal
-        namenode: "127.0.0.1:9000"
-        root: risingwave
+      # - use: opendal
+      #   namenode: "127.0.0.1:9000"
+      #   root: risingwave
 
       # If you want to create CDC source, uncomment the following line
       # - use: connector-node
