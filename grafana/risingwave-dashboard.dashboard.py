@@ -1336,7 +1336,7 @@ def section_streaming_actors(outer_panels):
                     ],
                 ),
                 panels.timeseries_actor_ops(
-                    "Aggregation Executor Cache",
+                    "Aggregation Executor Cache Statistics For Each Key/State",
                     "",
                     [
                         panels.target(
@@ -1346,6 +1346,20 @@ def section_streaming_actors(outer_panels):
                         panels.target(
                             f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
                             "total lookups {{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_actor_ops(
+                    "Aggregation Executor Cache Statistics For Each StreamChunk",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_agg_chunk_lookup_miss_count')}[$__rate_interval])",
+                            "chunk-level cache miss {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_agg_chunk_lookup_total_count')}[$__rate_interval])",
+                            "chunk-level total lookups {{actor_id}}",
                         ),
                     ],
                 ),
