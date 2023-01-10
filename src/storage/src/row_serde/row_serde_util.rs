@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::error::Result;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
@@ -25,10 +26,11 @@ pub fn serialize_pk_with_vnode(
     pk: impl Row,
     serializer: &OrderedRowSerde,
     vnode: VirtualNode,
-) -> Vec<u8> {
-    let mut result = vnode.to_be_bytes().to_vec();
-    pk.memcmp_serialize_into(serializer, &mut result);
-    result
+) -> Bytes {
+    let mut buffer = BytesMut::new();
+    buffer.put_slice(&vnode.to_be_bytes()[..]);
+    pk.memcmp_serialize_into(serializer, &mut buffer);
+    buffer.freeze()
 }
 
 // NOTE: Only for debug purpose now

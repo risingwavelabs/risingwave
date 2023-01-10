@@ -18,11 +18,13 @@ use itertools::Itertools;
 use risingwave_common::catalog::{TableDesc, TableId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType as ProstTableType};
+use risingwave_pb::catalog::table::{
+    OptionalAssociatedSourceId, TableType as ProstTableType, TableVersion as ProstTableVersion,
+};
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
 use super::column_catalog::ColumnCatalog;
-use super::{DatabaseId, FragmentId, RelationCatalog, SchemaId};
+use super::{ColumnId, DatabaseId, FragmentId, RelationCatalog, SchemaId};
 use crate::optimizer::property::FieldOrder;
 use crate::user::UserId;
 use crate::WithOptions;
@@ -117,6 +119,9 @@ pub struct TableCatalog {
     pub handle_pk_conflict: bool,
 
     pub read_prefix_len_hint: usize,
+
+    /// Per-table catalog version, used by schema change. `None` for internal tables and tests.
+    pub version: Option<TableVersion>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -155,6 +160,38 @@ impl TableType {
             Self::MaterializedView => ProstTableType::MaterializedView,
             Self::Index => ProstTableType::Index,
             Self::Internal => ProstTableType::Internal,
+        }
+    }
+}
+
+/// The version of a table, used by schema change. See [`ProstTableVersion`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableVersion {
+    pub version_id: u64,
+    pub next_column_id: ColumnId,
+}
+
+impl TableVersion {
+    /// Create an initial version for a table, with the given max column id.
+    #[cfg(test)]
+    pub fn new_initial_for_test(max_column_id: ColumnId) -> Self {
+        Self {
+            version_id: 0,
+            next_column_id: max_column_id.next(),
+        }
+    }
+
+    pub fn from_prost(prost: ProstTableVersion) -> Self {
+        Self {
+            version_id: prost.version,
+            next_column_id: ColumnId::from(prost.next_column_id),
+        }
+    }
+
+    pub fn to_prost(&self) -> ProstTableVersion {
+        ProstTableVersion {
+            version: self.version_id,
+            next_column_id: self.next_column_id.into(),
         }
     }
 }
@@ -229,6 +266,14 @@ impl TableCatalog {
         self.pk.as_ref()
     }
 
+    /// Get the column IDs of the primary key.
+    pub fn pk_column_ids(&self) -> Vec<ColumnId> {
+        self.pk
+            .iter()
+            .map(|f| self.columns[f.index].column_id())
+            .collect()
+    }
+
     /// Get a [`TableDesc`] of the table.
     pub fn table_desc(&self) -> TableDesc {
         use risingwave_common::catalog::TableOption;
@@ -272,6 +317,11 @@ impl TableCatalog {
         self.definition.clone()
     }
 
+    /// Get a reference to the table catalog's version.
+    pub fn version(&self) -> Option<&TableVersion> {
+        self.version.as_ref()
+    }
+
     pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
         ProstTable {
             id: self.id.table_id,
@@ -305,6 +355,7 @@ impl TableCatalog {
             definition: self.definition.clone(),
             handle_pk_conflict: self.handle_pk_conflict,
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
+            version: self.version.as_ref().map(TableVersion::to_prost),
         }
     }
 }
@@ -352,9 +403,10 @@ impl From<ProstTable> for TableCatalog {
             vnode_col_index: tb.vnode_col_index.map(|x| x.index as usize),
             row_id_index: tb.row_id_index.map(|x| x.index as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
-            definition: tb.definition.clone(),
+            definition: tb.definition,
             handle_pk_conflict: tb.handle_pk_conflict,
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
+            version: tb.version.map(TableVersion::from_prost),
         }
     }
 }
@@ -379,12 +431,12 @@ mod tests {
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
-    use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType as ProstTableType};
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan_common::{
         ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
     };
 
+    use super::*;
     use crate::catalog::column_catalog::ColumnCatalog;
     use crate::catalog::row_id_column_desc;
     use crate::catalog::table_catalog::{TableCatalog, TableType};
@@ -401,7 +453,7 @@ mod tests {
             table_type: ProstTableType::Table as i32,
             columns: vec![
                 ProstColumnCatalog {
-                    column_desc: Some((&row_id_column_desc(ColumnId::new(0))).into()),
+                    column_desc: Some((&row_id_column_desc()).into()),
                     is_hidden: true,
                 },
                 ProstColumnCatalog {
@@ -448,6 +500,10 @@ mod tests {
             read_prefix_len_hint: 0,
             vnode_col_index: None,
             row_id_index: None,
+            version: Some(ProstTableVersion {
+                version: 0,
+                next_column_id: 2,
+            }),
         }
         .into();
 
@@ -459,7 +515,7 @@ mod tests {
                 name: "test".to_string(),
                 table_type: TableType::Table,
                 columns: vec![
-                    ColumnCatalog::row_id_column(ColumnId::new(0)),
+                    ColumnCatalog::row_id_column(),
                     ColumnCatalog {
                         column_desc: ColumnDesc {
                             data_type: DataType::new_struct(
@@ -508,6 +564,7 @@ mod tests {
                 definition: "".into(),
                 handle_pk_conflict: false,
                 read_prefix_len_hint: 0,
+                version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

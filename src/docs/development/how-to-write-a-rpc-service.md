@@ -27,7 +27,7 @@ impl Health for HealthServiceImpl {
 }
 ```
 
-Also see the other services in `src/<component>/src/rcp/service/` for further examples. Above service defines a `HealthCheckRequest` and a `HealthCheckResponse`, which use proto messages. We have to define these proto messages
+Also see the other services in `src/<component>/src/rcp/service/` for further examples. Above service defines a `HealthCheckRequest` and a `HealthCheckResponse`, which use proto messages. We have to define these proto messages.
 
 ## Proto definitions
 
@@ -54,7 +54,7 @@ service Health {
 }
 ```
 
-Make sure to lint your file using [buf](https://docs.buf.build/installation)
+Make sure to lint your file using [buf](https://docs.buf.build/installation).
 
 ## Use service 
 
@@ -85,5 +85,5 @@ tokio::spawn(async move {
 });
 ```
 
-To use your service you need to generate some boilerplate code, like e.g. the service definition. Running `risedev d` should generate this boilerplate code
+To use your service you need to generate some boilerplate code, like e.g. the service definition. Running `risedev d` should generate this boilerplate code.
 
