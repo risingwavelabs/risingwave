@@ -1,18 +1,20 @@
 # https://github.com/risingwavelabs/risingwave/issues/7115
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table t (id int);
+CREATE TABLE t (id int);
 
 statement ok
-create materialized view v as select count(*) cnt from t;
+CREATE MATERIALIZED VIEW v as SELECT COUNT(*) cnt FROM t;
 
-# FIXME(Noel): Distributed mode not debugged yet, force local mode for now.
 statement ok
-SET QUERY_MODE TO local;
+INSERT INTO t VALUES(1), (4), (6), (0), (5);
 
-query I
-select * from v join (select count(*) from t) T;
+query II
+SELECT * FROM v JOIN (SELECT COUNT(*) FROM t) T;
 ----
+5 5
 
 statement ok
 DROP MATERIALIZED VIEW v;
