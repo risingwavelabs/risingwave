@@ -74,9 +74,7 @@ impl StoreLocalStatistic {
         self.cache_meta_block_miss += local_cache_meta_block_miss;
     }
 
-    pub fn report(&self, metrics: &HummockStateStoreMetrics, table_id_label: Option<&str>) {
-        let table_id_label = table_id_label.map_or("", |table_id| table_id);
-
+    pub fn report(&self, metrics: &HummockStateStoreMetrics, table_id_label: &str) {
         if self.cache_data_block_total > 0 {
             metrics
                 .sst_store_block_request_counts

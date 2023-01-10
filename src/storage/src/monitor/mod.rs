@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod state_store_metrics;
+mod hummock_state_store_metrics;
 
-pub use state_store_metrics::*;
+pub use hummock_state_store_metrics::*;
 mod monitored_store;
 pub use monitored_store::*;
 mod hummock_metrics;

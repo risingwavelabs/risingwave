@@ -332,6 +332,6 @@ impl Drop for HummockStorageIterator {
     fn drop(&mut self) {
         let mut stats = StoreLocalStatistic::default();
         self.collect_local_statistic(&mut stats);
-        stats.report(&self.metrics, Some(self.table_id.to_string().as_str()));
+        stats.report(&self.metrics, self.table_id.to_string().as_str());
     }
 }

@@ -471,8 +471,7 @@ impl HummockVersionReader {
                         .await?
                         {
                             // todo add global stat to report
-                            local_stats
-                                .report(self.state_store_metrics.as_ref(), Some(table_id_label));
+                            local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                             return Ok(v.into_user_value());
                         }
                     }
@@ -509,14 +508,14 @@ impl HummockVersionReader {
                     )
                     .await?
                     {
-                        local_stats.report(self.state_store_metrics.as_ref(), Some(table_id_label));
+                        local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                         return Ok(v.into_user_value());
                     }
                 }
             }
         }
 
-        local_stats.report(self.state_store_metrics.as_ref(), Some(table_id_label));
+        local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
         self.state_store_metrics
             .iter_merge_sstable_counts
             .with_label_values(&[table_id_label, "sub-iter"])
@@ -769,7 +768,7 @@ impl HummockVersionReader {
             .rewind()
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
-        local_stats.report(self.state_store_metrics.deref(), Some(table_id_label));
+        local_stats.report(self.state_store_metrics.deref(), table_id_label);
         Ok(HummockStorageIterator::new(
             user_iter,
             self.state_store_metrics.clone(),
