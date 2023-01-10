@@ -363,7 +363,6 @@ export interface SinkNode_PropertiesEntry {
 }
 
 export interface ProjectNode {
-  /** the three fields should have the same length */
   selectList: ExprNode[];
   /**
    * this two field is expressing a list of usize pair, which means when project receives a
