@@ -76,10 +76,13 @@ impl ToDistributedBatch for BatchFilter {
 
 impl ToBatchProst for BatchFilter {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let mut expr_impl = ExprImpl::from(self.logical.predicate().clone());
-        expr_impl = self.base.ctx().expr_with_session_timezone(expr_impl);
         NodeBody::Filter(FilterNode {
-            search_condition: Some(expr_impl.to_expr_proto()),
+            search_condition: Some(
+                self.base
+                    .ctx()
+                    .expr_with_session_timezone(ExprImpl::from(self.logical.predicate().clone()))
+                    .to_expr_proto(),
+            ),
         })
     }
 }
