@@ -107,7 +107,7 @@ impl ElectionClient for EtcdElectionClient {
         let mut stop_ = stop.clone();
 
         let handle = tokio::spawn(async move {
-            let result = match lease_client.keep_alive(lease_id).await {
+            let (mut keeper, mut resp_stream) = match lease_client.keep_alive(lease_id).await {
                 Ok(resp) => resp,
                 Err(e) => {
                     tracing::warn!(
@@ -119,7 +119,6 @@ impl ElectionClient for EtcdElectionClient {
                     return;
                 }
             };
-            let (mut keeper, mut resp_stream) = result;
 
             let mut ticker = time::interval(Duration::from_secs(1));
 
@@ -128,8 +127,7 @@ impl ElectionClient for EtcdElectionClient {
                     biased;
 
                     _ = ticker.tick() => {
-                        let resp = keeper.keep_alive().await;
-                        if let Err(err) = resp {
+                        if let Err(err) = keeper.keep_alive().await {
                             tracing::error!("keep alive for lease {} failed {}", lease_id, err);
                             keep_alive_fail_tx.send(()).unwrap();
                             break;
