@@ -26,11 +26,26 @@ use crate::MetaResult;
 
 const META_ELECTION_KEY: &str = "__meta_election";
 
+pub struct ElectionMember {
+    pub id: String,
+    pub lease: i64,
+}
+
+impl From<ElectionMember> for MetaLeaderInfo {
+    fn from(val: ElectionMember) -> Self {
+        let ElectionMember { id, lease } = val;
+        MetaLeaderInfo {
+            node_address: id,
+            lease_id: lease as u64,
+        }
+    }
+}
+
 #[async_trait::async_trait]
 pub trait ElectionClient: Send + Sync + 'static {
     async fn run_once(&self, ttl: i64, stop: watch::Receiver<()>) -> MetaResult<()>;
-    async fn leader(&self) -> MetaResult<Option<MetaLeaderInfo>>;
-    async fn get_members(&self) -> MetaResult<Vec<(String, i64, bool)>>;
+    async fn leader(&self) -> MetaResult<Option<ElectionMember>>;
+    async fn get_members(&self) -> MetaResult<Vec<ElectionMember>>;
     async fn is_leader(&self) -> bool;
 }
 
@@ -46,7 +61,7 @@ impl ElectionClient for EtcdElectionClient {
         self.is_leader.load(Ordering::Relaxed)
     }
 
-    async fn leader(&self) -> MetaResult<Option<MetaLeaderInfo>> {
+    async fn leader(&self) -> MetaResult<Option<ElectionMember>> {
         let mut election_client = self.client.election_client();
         let leader = election_client.leader(META_ELECTION_KEY).await;
 
@@ -57,9 +72,9 @@ impl ElectionClient for EtcdElectionClient {
         }?;
 
         Ok(leader.and_then(|leader| {
-            leader.kv().map(|leader_kv| MetaLeaderInfo {
-                node_address: String::from_utf8_lossy(leader_kv.value()).to_string(),
-                lease_id: leader_kv.lease() as u64,
+            leader.kv().map(|leader_kv| ElectionMember {
+                id: String::from_utf8_lossy(leader_kv.value()).to_string(),
+                lease: leader_kv.lease(),
             })
         }))
     }
@@ -218,7 +233,7 @@ impl ElectionClient for EtcdElectionClient {
         Ok(())
     }
 
-    async fn get_members(&self) -> MetaResult<Vec<(String, i64, bool)>> {
+    async fn get_members(&self) -> MetaResult<Vec<ElectionMember>> {
         let mut client = self.client.kv_client();
         let keys = client
             .get(META_ELECTION_KEY, Some(GetOptions::new().with_prefix()))
@@ -228,13 +243,9 @@ impl ElectionClient for EtcdElectionClient {
         Ok(keys
             .kvs()
             .iter()
-            .enumerate()
-            .map(|(i, kv)| {
-                (
-                    String::from_utf8_lossy(kv.value()).to_string(),
-                    kv.lease(),
-                    i == 0,
-                )
+            .map(|kv| ElectionMember {
+                id: String::from_utf8_lossy(kv.value()).to_string(),
+                lease: kv.lease(),
             })
             .collect())
     }
@@ -255,7 +266,6 @@ impl EtcdElectionClient {
         })
     }
 }
-//
 // #[cfg(madsim)]
 // #[cfg(test)]
 // mod tests {

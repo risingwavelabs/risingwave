@@ -92,12 +92,8 @@ pub async fn rpc_serve(
             let meta_store = Arc::new(EtcdMetaStore::new(client));
 
             let election_client = Arc::new(
-                EtcdElectionClient::new(
-                    endpoints,
-                    Some(options),
-                    address_info.endpoint.clone(),
-                )
-                .await?,
+                EtcdElectionClient::new(endpoints, Some(options), address_info.endpoint.clone())
+                    .await?,
             );
 
             rpc_serve_with_store(
@@ -187,7 +183,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         };
 
         let current_leader = if let Some(election_client) = election_client.as_ref() {
-            election_client.leader().await.unwrap().unwrap()
+            election_client.leader().await.unwrap().unwrap().into()
         } else {
             MetaLeaderInfo {
                 node_address: address_info.listen_addr.clone().to_string(),
