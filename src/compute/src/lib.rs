@@ -121,8 +121,7 @@ fn validate_opts(opts: &ComputeNodeOpts) {
             "parallelism {} is larger than the total cpu available {} that can be acquired.",
             opts.parallelism, total_cpu_available
         );
-        tracing::error!(error_msg);
-        panic!("{}", error_msg);
+        tracing::warn!(error_msg);
     }
 }
 
