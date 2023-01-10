@@ -82,6 +82,7 @@ pub mod row_id_gen;
 mod simple;
 mod sink;
 mod sort;
+mod sort_buffer;
 pub mod source;
 pub mod subtask;
 mod top_n;
