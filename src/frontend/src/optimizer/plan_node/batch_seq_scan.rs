@@ -246,7 +246,10 @@ impl ToBatchProst for BatchSeqScan {
 
 impl ToLocalBatch for BatchSeqScan {
     fn to_local(&self) -> Result<PlanRef> {
-        let dist = if let Some(distribution_key) = self.logical.distribution_key()
+        let dist =
+        if self.logical.is_sys_table() {
+            Distribution::Single
+        } else if let Some(distribution_key) = self.logical.distribution_key()
         && !distribution_key.is_empty() {
             Distribution::UpstreamHashShard(
                 distribution_key,
