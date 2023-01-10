@@ -159,3 +159,20 @@ macro_rules! rpc_client_method_impl {
         )*
     }
 }
+
+#[macro_export]
+macro_rules! meta_rpc_client_method_impl {
+    ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
+        $(
+            pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
+                let guard = self.core.lock().await;
+                Ok(guard
+                    .$client
+                    .to_owned()
+                    .$fn_name(request)
+                    .await?
+                    .into_inner())
+            }
+        )*
+    }
+}

@@ -51,6 +51,10 @@ pub struct Args {
     #[clap(long, default_value = "2")]
     compactor_nodes: usize,
 
+    /// The number of meta nodes.
+    #[clap(long, default_value = "2")]
+    meta_nodes: usize,
+
     /// The number of CPU cores for each compute node.
     ///
     /// This determines worker_node_parallelism.
@@ -140,6 +144,7 @@ async fn main() {
         compute_nodes: args.compute_nodes,
         compactor_nodes: args.compactor_nodes,
         compute_node_cores: args.compute_node_cores,
+        meta_nodes: args.meta_nodes,
         etcd_timeout_rate: args.etcd_timeout_rate,
         etcd_data_path: args.etcd_data,
     };
