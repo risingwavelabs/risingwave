@@ -212,6 +212,14 @@ impl<W: SstableWriter> SstableBuilder<W> {
             // 2. extract_key key is not duplicate
             if !extract_key.is_empty() && extract_key != self.last_extract_key.as_slice() {
                 // avoid duplicate add to bloom filter
+
+                println!(
+                    "raw_key {:?} user_key {:?} extract_key {:?} hash {:?}",
+                    self.raw_key,
+                    user_key(&self.raw_key),
+                    extract_key,
+                    xxh32::xxh32(extract_key, 0)
+                );
                 self.user_key_hashes.push(xxh32::xxh32(extract_key, 0));
                 self.last_extract_key.clear();
                 self.last_extract_key.extend_from_slice(extract_key);

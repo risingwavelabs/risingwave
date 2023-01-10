@@ -78,6 +78,10 @@ impl HummockStorageV1 {
         epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
+        println!(
+            "table_key {:?} prefix_hint {:?}",
+            table_key, read_options.prefix_hint
+        );
         let table_id = read_options.table_id;
         let table_id_string = table_id.to_string();
         let table_id_label = table_id_string.as_str();
@@ -124,7 +128,11 @@ impl HummockStorageV1 {
             table_counts += table_count;
         }
 
-        let dist_key_hash = Sstable::hash_for_bloom_filter(table_key.dist_key());
+        let dist_key_hash = read_options
+            .prefix_hint
+            .as_ref()
+            .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref()));
+
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.
         let encoded_user_key = UserKey::new(read_options.table_id, table_key).encode();
