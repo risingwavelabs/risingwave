@@ -311,7 +311,7 @@ impl LocalStreamManager {
 
     /// Force stop all actors on this worker.
     pub async fn stop_all_actors(&self) -> StreamResult<()> {
-        self.core.lock().await.drop_all_actors();
+        self.core.lock().await.drop_all_actors().await;
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
         self.clear_all_senders_and_collect_rx();
@@ -331,15 +331,6 @@ impl LocalStreamManager {
     ) -> StreamResult<()> {
         let mut core = self.core.lock().await;
         core.update_actors(actors, hanging_channels)
-    }
-
-    /// This function was called while [`LocalStreamManager`] exited.
-    pub async fn wait_all(self) -> StreamResult<()> {
-        let handles = self.core.lock().await.take_all_handles()?;
-        for (_id, handle) in handles {
-            handle.await.unwrap();
-        }
-        Ok(())
     }
 
     /// This function could only be called once during the lifecycle of `LocalStreamManager` for
@@ -435,12 +426,12 @@ impl LocalStreamManagerCore {
 
     #[cfg(test)]
     fn for_test() -> Self {
-        use risingwave_storage::monitor::StateStoreMetrics;
+        use risingwave_storage::monitor::MonitoredStorageMetrics;
 
         let register = prometheus::Registry::new();
         let streaming_metrics = Arc::new(StreamingMetrics::new(register));
         Self::new_inner(
-            StateStoreImpl::shared_in_memory_store(Arc::new(StateStoreMetrics::unused())),
+            StateStoreImpl::shared_in_memory_store(Arc::new(MonitoredStorageMetrics::unused())),
             SharedContext::for_test(),
             streaming_metrics,
             StreamingConfig::default(),
@@ -783,10 +774,15 @@ impl LocalStreamManagerCore {
     }
 
     /// `drop_all_actors` is invoked by meta node via RPC for recovery purpose.
-    fn drop_all_actors(&mut self) {
-        for (actor_id, handle) in self.handles.drain() {
+    async fn drop_all_actors(&mut self) {
+        for (actor_id, handle) in &self.handles {
             tracing::debug!("force stopping actor {}", actor_id);
             handle.abort();
+        }
+        for (actor_id, handle) in self.handles.drain() {
+            tracing::debug!("join actor {}", actor_id);
+            let result = handle.await;
+            assert!(result.is_ok() || result.unwrap_err().is_cancelled());
         }
         self.actors.clear();
         self.context.clear_channels();

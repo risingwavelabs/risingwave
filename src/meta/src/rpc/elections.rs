@@ -23,7 +23,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use risingwave_pb::meta::{MetaLeaderInfo, MetaLeaseInfo};
 use tokio::sync::oneshot::Sender;
-use tokio::sync::watch::Receiver;
+use tokio::sync::watch::Receiver as WatchReceiver;
 use tokio::task::JoinHandle;
 
 use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
@@ -290,7 +290,7 @@ pub async fn run_elections<S: MetaStore>(
     MetaLeaderInfo,
     JoinHandle<()>,
     Sender<()>,
-    Receiver<(MetaLeaderInfo, bool)>,
+    WatchReceiver<(MetaLeaderInfo, bool)>,
 )> {
     // Randomize interval to reduce mitigate likelihood of simultaneous requests
     let mut rng: StdRng = SeedableRng::from_entropy();

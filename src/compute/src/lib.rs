@@ -47,7 +47,9 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "127.0.0.1:5688")]
     pub host: String,
 
-    // Optional, we will use listen_address if not specified.
+    /// The address of the compute node's meta client.
+    ///
+    /// Optional, we will use listen_address if not specified.
     #[clap(long)]
     pub client_address: Option<String>,
 
@@ -120,8 +122,7 @@ fn validate_opts(opts: &ComputeNodeOpts) {
             "parallelism {} is larger than the total cpu available {} that can be acquired.",
             opts.parallelism, total_cpu_available
         );
-        tracing::error!(error_msg);
-        panic!("{}", error_msg);
+        tracing::warn!(error_msg);
     }
 }
 

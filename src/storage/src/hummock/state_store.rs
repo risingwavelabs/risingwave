@@ -126,10 +126,8 @@ impl HummockStorage {
                     let read_guard = self.read_version_mapping.read();
                     read_guard
                         .get(&table_id)
-                        .unwrap()
-                        .values()
-                        .cloned()
-                        .collect_vec()
+                        .map(|v| v.values().cloned().collect_vec())
+                        .unwrap_or(Vec::new())
                 };
 
                 // When the system has just started and no state has been created, the memory state
