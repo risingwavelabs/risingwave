@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use fixedbitset::FixedBitSet;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 
@@ -39,6 +40,9 @@ pub struct PlanBase {
     /// means the stream contains only insert operation.
     pub append_only: bool,
     pub functional_dependency: FunctionalDependencySet,
+    /// The watermark column indices of the PlanNode's output. There could be watermark output from
+    /// this stream operator.
+    pub watermark_columns: FixedBitSet,
 }
 
 impl generic::GenericPlanRef for PlanBase {
@@ -72,6 +76,7 @@ impl PlanBase {
         functional_dependency: FunctionalDependencySet,
     ) -> Self {
         let id = ctx.next_plan_node_id();
+        let watermark_cols = FixedBitSet::with_capacity(schema.len());
         Self {
             id,
             ctx,
@@ -82,6 +87,7 @@ impl PlanBase {
             // Logical plan node won't touch `append_only` field
             append_only: true,
             functional_dependency,
+            watermark_columns: watermark_cols,
         }
     }
 
@@ -92,8 +98,10 @@ impl PlanBase {
         functional_dependency: FunctionalDependencySet,
         dist: Distribution,
         append_only: bool,
+        watermark_columns: FixedBitSet,
     ) -> Self {
         let id = ctx.next_plan_node_id();
+        assert_eq!(watermark_columns.len(), schema.len());
         Self {
             id,
             ctx,
@@ -103,6 +111,7 @@ impl PlanBase {
             logical_pk,
             append_only,
             functional_dependency,
+            watermark_columns,
         }
     }
 
@@ -114,6 +123,7 @@ impl PlanBase {
     ) -> Self {
         let id = ctx.next_plan_node_id();
         let functional_dependency = FunctionalDependencySet::new(schema.len());
+        let watermark_cols = FixedBitSet::with_capacity(schema.len());
         Self {
             id,
             ctx,
@@ -124,6 +134,7 @@ impl PlanBase {
             // Batch plan node won't touch `append_only` field
             append_only: true,
             functional_dependency,
+            watermark_columns: watermark_cols,
         }
     }
 
@@ -135,6 +146,7 @@ impl PlanBase {
             plan_node.functional_dependency().clone(),
             plan_node.distribution().clone(),
             plan_node.append_only(),
+            plan_node.watermark_columns().clone(),
         )
     }
 }

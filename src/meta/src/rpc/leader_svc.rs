@@ -24,6 +24,7 @@ use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
+use risingwave_pb::leader::leader_service_server::LeaderServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
@@ -52,6 +53,7 @@ use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
+use crate::rpc::service::leader_service::LeaderServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::MetaStore;
@@ -62,6 +64,7 @@ use crate::{hummock, MetaResult};
 pub struct ElectionCoordination {
     pub election_handle: JoinHandle<()>,
     pub election_shutdown: OneSender<()>,
+    pub leader_rx: WatchReceiver<(MetaLeaderInfo, bool)>,
 }
 
 /// Starts all services needed for the meta leader node
@@ -309,8 +312,7 @@ pub async fn start_leader_srv<S: MetaStore>(
         }
     };
 
-    // FIXME: Add service discovery for leader
-    // https://github.com/risingwavelabs/risingwave/issues/6755
+    let leader_srv = LeaderServiceImpl::new(election_coordination.leader_rx);
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
@@ -319,6 +321,7 @@ pub async fn start_leader_srv<S: MetaStore>(
         .add_service(StreamManagerServiceServer::new(stream_srv))
         .add_service(HummockManagerServiceServer::new(hummock_srv))
         .add_service(NotificationServiceServer::new(notification_srv))
+        .add_service(LeaderServiceServer::new(leader_srv))
         .add_service(DdlServiceServer::new(ddl_srv))
         .add_service(UserServiceServer::new(user_srv))
         .add_service(ScaleServiceServer::new(scale_srv))

@@ -1278,9 +1278,12 @@ impl ToStream for LogicalJoin {
         {
             Ok(dynamic_filter)
         } else {
-            Err(RwError::from(ErrorCode::NotImplemented(
-                "stream nested-loop join".to_string(),
-                None.into(),
+            Err(RwError::from(ErrorCode::NotSupported(
+                "streaming nested-loop join".to_string(),
+                // TODO: replace the link with user doc
+                "The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. \
+                 Consider rewriting the query to use dynamic filter as a substitute if possible.\n\
+                 See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md".to_owned(),
             )))
         }
     }

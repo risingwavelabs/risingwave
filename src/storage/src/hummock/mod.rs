@@ -221,7 +221,6 @@ impl HummockStorage {
         Ok(instance)
     }
 
-    // TODO: make it self function and remove hummock_event_sender parameter
     async fn new_local_inner(&self, table_id: TableId) -> LocalHummockStorage {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.hummock_event_sender
