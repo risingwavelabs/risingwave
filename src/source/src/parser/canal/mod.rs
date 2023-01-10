@@ -37,8 +37,8 @@ mod tests {
         let payload = br#"{"data":[{"id":"1","name":"mike","is_adult":"0","balance":"1500.62","reg_time":"2018-01-01 00:00:01","win_rate":"0.65"}],"database":"demo","es":1668673476000,"id":7,"isDdl":false,"mysqlType":{"id":"int","name":"varchar(40)","is_adult":"boolean","balance":"decimal(10,2)","reg_time":"timestamp","win_rate":"double"},"old":[{"balance":"1000.62"}],"pkNames":null,"sql":"","sqlType":{"id":4,"name":12,"is_adult":-6,"balance":3,"reg_time":93,"win_rate":8},"table":"demo","ts":1668673476732,"type":"UPDATE"}"#;
         let parser = CanalJsonParser;
         let descs = vec![
-            SourceColumnDesc::simple("id", DataType::Int64, 0.into()),
-            SourceColumnDesc::simple("name", DataType::Varchar, 1.into()),
+            SourceColumnDesc::simple("ID", DataType::Int64, 0.into()),
+            SourceColumnDesc::simple("NAME", DataType::Varchar, 1.into()),
             SourceColumnDesc::simple("is_adult", DataType::Boolean, 2.into()),
             SourceColumnDesc::simple("balance", DataType::Decimal, 3.into()),
             SourceColumnDesc::simple("reg_time", DataType::Timestamp, 4.into()),

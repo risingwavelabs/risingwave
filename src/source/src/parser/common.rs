@@ -67,7 +67,9 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
                 .field_names
                 .iter()
                 .zip_eq(struct_type_info.fields.iter())
-                .map(|field| simd_json_parse_value(field.1, v.get(field.0.as_str())))
+                .map(|field| {
+                    simd_json_parse_value(field.1, v.get(field.0.to_ascii_lowercase().as_str()))
+                })
                 .collect::<Result<Vec<Datum>>>()?;
             ScalarImpl::Struct(StructValue::new(fields))
         }

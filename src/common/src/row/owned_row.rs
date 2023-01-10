@@ -50,6 +50,12 @@ impl Ord for OwnedRow {
     }
 }
 
+impl AsRef<OwnedRow> for OwnedRow {
+    fn as_ref(&self) -> &OwnedRow {
+        self
+    }
+}
+
 impl OwnedRow {
     pub const fn new(values: Vec<Datum>) -> Self {
         Self(values)

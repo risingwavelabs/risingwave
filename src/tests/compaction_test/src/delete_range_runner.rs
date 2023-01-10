@@ -341,7 +341,7 @@ async fn run_compare_result(
 
 struct NormalState {
     storage: LocalHummockStorage,
-    cache: BTreeMap<Vec<u8>, StorageValue>,
+    cache: BTreeMap<Bytes, StorageValue>,
     table_id: TableId,
     epoch: u64,
 }
@@ -388,7 +388,7 @@ impl NormalState {
     ) -> Result<(), String> {
         let data = std::mem::take(&mut self.cache)
             .into_iter()
-            .map(|(key, val)| (Bytes::from(key), val))
+            .map(|(key, val)| (key, val))
             .collect_vec();
         self.storage
             .ingest_batch(
@@ -462,20 +462,20 @@ impl NormalState {
             let tkey = full_key.user_key.table_key.0.clone();
             if let Some(cache_val) = self.cache.get(&tkey) {
                 if cache_val.user_value.is_some() {
-                    ret.push((Bytes::from(tkey), cache_val.user_value.clone().unwrap()));
+                    ret.push((tkey, cache_val.user_value.clone().unwrap()));
                 } else {
                     continue;
                 }
             } else {
-                ret.push((Bytes::from(tkey), val));
+                ret.push((tkey, val));
             }
         }
         for (key, val) in self.cache.range((
-            Bound::Included(left.to_vec()),
-            Bound::Excluded(right.to_vec()),
+            Bound::Included(Bytes::from(left.to_vec())),
+            Bound::Excluded(Bytes::from(right.to_vec())),
         )) {
             if let Some(uval) = val.user_value.as_ref() {
-                ret.push((Bytes::from(key.clone()), uval.clone()));
+                ret.push((key.clone(), uval.clone()));
             }
         }
         ret.sort_by(|a, b| a.0.cmp(&b.0));
@@ -487,7 +487,7 @@ impl NormalState {
 impl CheckState for NormalState {
     async fn delete_range(&mut self, left: &[u8], right: &[u8]) {
         self.cache
-            .retain(|key, _| key.as_slice().lt(left) || key.as_slice().ge(right));
+            .retain(|key: &Bytes, _| key.as_ref().lt(left) || key.as_ref().ge(right));
         let mut iter = Box::pin(
             self.storage
                 .iter(
@@ -516,8 +516,10 @@ impl CheckState for NormalState {
     }
 
     fn insert(&mut self, key: &[u8], val: &[u8]) {
-        self.cache
-            .insert(key.to_vec(), StorageValue::new_put(val.to_vec()));
+        self.cache.insert(
+            Bytes::from(key.to_vec()),
+            StorageValue::new_put(val.to_vec()),
+        );
     }
 
     async fn get(&self, key: &[u8]) -> Option<Bytes> {
