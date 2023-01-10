@@ -27,6 +27,7 @@ risingwave_meta = { path = "../meta" }
 risingwave_rt = { path = "../utils/runtime" }
 sync-point = { path = "../utils/sync-point" }
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
+tempfile = "3.3.0"
 tikv-jemallocator = { version = "0.5", features = ["profiling", "stats"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

@@ -104,10 +104,12 @@ impl HummockValue<Vec<u8>> {
             _ => Err(HummockError::decode_error("non-empty but format error")),
         }
     }
+}
 
+impl<B: AsRef<[u8]>> HummockValue<B> {
     pub fn as_slice(&self) -> HummockValue<&[u8]> {
         match self {
-            HummockValue::Put(data) => HummockValue::Put(data),
+            HummockValue::Put(data) => HummockValue::Put(data.as_ref()),
             HummockValue::Delete => HummockValue::Delete,
         }
     }
@@ -136,13 +138,6 @@ impl<'a> HummockValue<&'a [u8]> {
 }
 
 impl HummockValue<Bytes> {
-    pub fn as_slice(&self) -> HummockValue<&[u8]> {
-        match self {
-            HummockValue::Put(data) => HummockValue::Put(&data[..]),
-            HummockValue::Delete => HummockValue::Delete,
-        }
-    }
-
     pub fn to_vec(&self) -> HummockValue<Vec<u8>> {
         match self {
             HummockValue::Put(data) => HummockValue::Put(data.to_vec()),

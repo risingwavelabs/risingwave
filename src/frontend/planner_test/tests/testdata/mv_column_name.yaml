@@ -55,7 +55,7 @@
   stream_plan: |
     StreamMaterialize { columns: [count, max], pk_columns: [] }
     └─StreamProject { exprs: [sum0(count), max(max(t.a))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum0(count), sum0(count), max(max(t.a))] }
+      └─StreamGlobalSimpleAgg { aggs: [count, sum0(count), max(max(t.a))] }
         └─StreamExchange { dist: Single }
           └─StreamHashAgg { group_key: [Vnode(t._row_id)], aggs: [count, count, max(t.a)] }
             └─StreamProject { exprs: [t.a, t._row_id, Vnode(t._row_id)] }
