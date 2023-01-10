@@ -227,6 +227,7 @@ pub struct OpendalConfig {
     phantom_use: Option<String>,
 
     pub id: String,
+    pub engine: String,
     pub namenode: String,
     pub root: String,
 }

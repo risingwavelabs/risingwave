@@ -101,9 +101,14 @@ pub fn add_storage_backend(
             true
         }
         ([], [], [opendal]) => {
-            cmd.arg("--state-store")
-            .arg(format!("hummock+hdfs://{}@{}", opendal.namenode, opendal.root));
-            true
+            if opendal.engine == "hdfs"{
+                cmd.arg("--state-store")
+                .arg(format!("hummock+hdfs://{}@{}", opendal.namenode, opendal.root));
+                true
+            }
+            else{
+                unimplemented!()
+            }
         }
 
         (other_minio, other_s3, _) => {
