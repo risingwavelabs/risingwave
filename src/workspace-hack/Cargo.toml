@@ -59,6 +59,7 @@ log = { version = "0.4", default-features = false, features = ["kv_unstable", "s
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2", features = ["std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
+multimap = { version = "0.8", features = ["serde", "serde_impl"] }
 nom = { version = "7", features = ["alloc", "std"] }
 num-bigint = { version = "0.4", features = ["std"] }
 num-integer = { version = "0.1", features = ["i128", "std"] }
@@ -142,6 +143,7 @@ log = { version = "0.4", default-features = false, features = ["kv_unstable", "s
 madsim-tokio = { version = "0.2", default-features = false, features = ["fs", "io-util", "macros", "net", "process", "rt", "rt-multi-thread", "signal", "sync", "time", "tracing"] }
 memchr = { version = "2", features = ["std"] }
 minimal-lexical = { version = "0.2", default-features = false, features = ["std"] }
+multimap = { version = "0.8", features = ["serde", "serde_impl"] }
 nom = { version = "7", features = ["alloc", "std"] }
 num-bigint = { version = "0.4", features = ["std"] }
 num-integer = { version = "0.1", features = ["i128", "std"] }
