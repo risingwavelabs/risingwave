@@ -125,11 +125,6 @@ async fn main() {
     use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts};
     use risingwave_simulation::slt::*;
 
-    tracing_subscriber::fmt()
-        // no ANSI color codes when output to file
-        .with_ansi(console::colors_enabled_stderr() && console::colors_enabled())
-        .init();
-
     let args = Args::parse();
     let config = Configuration {
         config_path: args.config_path.unwrap_or_default(),

@@ -104,6 +104,11 @@ pub struct Cluster {
 
 impl Cluster {
     pub async fn start(conf: Configuration) -> Result<Self> {
+        tracing_subscriber::fmt()
+            // no ANSI color codes when output to file
+            .with_ansi(console::colors_enabled_stderr() && console::colors_enabled())
+            .init();
+
         let handle = madsim::runtime::Handle::current();
         println!("seed = {}", handle.seed());
         println!("{:#?}", conf);
