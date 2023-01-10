@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
@@ -28,6 +29,9 @@ use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::Result as RwResult;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl};
+use risingwave_expr::vector_op::timestamptz::timestamptz_to_string;
+
+use crate::session::SessionImpl;
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
@@ -44,17 +48,33 @@ pin_project! {
         chunk_stream: VS,
         column_types: Vec<DataType>,
         format: bool,
+        session: StaticSessionData,
     }
 }
+
+// Static session data frozen at the time of the creation of the stream
+struct StaticSessionData {
+    timezone: String,
+}
+
 impl<VS> DataChunkToRowSetAdapter<VS>
 where
     VS: Stream<Item = Result<DataChunk, BoxedError>>,
 {
-    pub fn new(chunk_stream: VS, column_types: Vec<DataType>, format: bool) -> Self {
+    pub fn new(
+        chunk_stream: VS,
+        column_types: Vec<DataType>,
+        format: bool,
+        session: Arc<SessionImpl>,
+    ) -> Self {
+        let static_session = StaticSessionData {
+            timezone: session.config().get_timezone().into(),
+        };
         Self {
             chunk_stream,
             column_types,
             format,
+            session: static_session,
         }
     }
 }
@@ -72,7 +92,7 @@ where
             Poll::Ready(chunk) => match chunk {
                 Some(chunk_result) => match chunk_result {
                     Ok(chunk) => Poll::Ready(Some(
-                        to_pg_rows(this.column_types, chunk, *this.format)
+                        to_pg_rows(this.column_types, chunk, *this.format, this.session)
                             .map_err(|err| err.into()),
                     )),
                     Err(err) => Poll::Ready(Some(Err(err))),
@@ -84,17 +104,42 @@ where
 }
 
 /// Format scalars according to postgres convention.
-fn pg_value_format(data_type: &DataType, d: ScalarRefImpl<'_>, format: bool) -> RwResult<Bytes> {
+fn pg_value_format(
+    data_type: &DataType,
+    d: ScalarRefImpl<'_>,
+    format: bool,
+    session: &StaticSessionData,
+) -> RwResult<Bytes> {
     // format == false means TEXT format
     // format == true means BINARY format
     if !format {
-        Ok(d.text_format(data_type).into())
+        if *data_type == DataType::Timestamptz {
+            Ok(timestamptz_to_string_with_session(d, session))
+        } else {
+            Ok(d.text_format(data_type).into())
+        }
     } else {
         d.binary_format(data_type)
     }
 }
 
-fn to_pg_rows(column_types: &[DataType], chunk: DataChunk, format: bool) -> RwResult<Vec<Row>> {
+fn timestamptz_to_string_with_session(d: ScalarRefImpl<'_>, session: &StaticSessionData) -> Bytes {
+    let mut buf = String::new();
+    match d {
+        ScalarRefImpl::<'_>::Int64(d) => {
+            timestamptz_to_string(d, &session.timezone, &mut buf).unwrap()
+        }
+        _ => unreachable!(),
+    };
+    buf.into()
+}
+
+fn to_pg_rows(
+    column_types: &[DataType],
+    chunk: DataChunk,
+    format: bool,
+    session: &StaticSessionData,
+) -> RwResult<Vec<Row>> {
     chunk
         .rows()
         .map(|r| {
@@ -102,7 +147,7 @@ fn to_pg_rows(column_types: &[DataType], chunk: DataChunk, format: bool) -> RwRe
                 .iter()
                 .zip_eq(column_types)
                 .map(|(data, t)| match data {
-                    Some(data) => Some(pg_value_format(t, data, format)).transpose(),
+                    Some(data) => Some(pg_value_format(t, data, format, session)).transpose(),
                     None => Ok(None),
                 })
                 .try_collect()?;
@@ -163,6 +208,9 @@ mod tests {
              3 7 7.01 vvv
              4 . .    .  ",
         );
+        let static_session = StaticSessionData {
+            timezone: "UTC".into(),
+        };
         let rows = to_pg_rows(
             &[
                 DataType::Int32,
@@ -172,6 +220,7 @@ mod tests {
             ],
             chunk,
             false,
+            &static_session,
         );
         let expected: Vec<Vec<Option<Bytes>>> = vec![
             vec![
@@ -201,8 +250,11 @@ mod tests {
     #[test]
     fn test_value_format() {
         use {DataType as T, ScalarRefImpl as S};
+        let static_session = StaticSessionData {
+            timezone: "UTC".into(),
+        };
 
-        let f = |t, d, f| pg_value_format(t, d, f).unwrap();
+        let f = |t, d, f| pg_value_format(t, d, f, &static_session).unwrap();
         assert_eq!(&f(&T::Float32, S::Float32(1_f32.into()), false), "1");
         assert_eq!(&f(&T::Float32, S::Float32(f32::NAN.into()), false), "NaN");
         assert_eq!(&f(&T::Float64, S::Float64(f64::NAN.into()), false), "NaN");
@@ -224,5 +276,9 @@ mod tests {
         );
         assert_eq!(&f(&T::Boolean, S::Bool(true), false), "t");
         assert_eq!(&f(&T::Boolean, S::Bool(false), false), "f");
+        assert_eq!(
+            &f(&T::Timestamptz, S::Int64(-1), false),
+            "1969-12-31 23:59:59.999999+00:00"
+        );
     }
 }

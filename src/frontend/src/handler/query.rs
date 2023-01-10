@@ -146,6 +146,7 @@ pub async fn handle_query(
                 local_execute(session.clone(), query, query_snapshot).await?,
                 column_types,
                 format,
+                session.clone(),
             )),
             // Local mode do not support cancel tasks.
             QueryMode::Distributed => {
@@ -153,6 +154,7 @@ pub async fn handle_query(
                     distribute_execute(session.clone(), query, query_snapshot).await?,
                     column_types,
                     format,
+                    session.clone(),
                 ))
             }
         }
