@@ -552,7 +552,7 @@ pub use stream_table_scan::StreamTableScan;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 
-use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
+use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition};
