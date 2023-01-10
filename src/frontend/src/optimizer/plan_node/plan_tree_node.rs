@@ -15,7 +15,6 @@
 use smallvec::SmallVec;
 
 use super::PlanRef;
-use crate::expr::{ExprImpl, ExprRewriter};
 use crate::utils::ColIndexMapping;
 
 /// The trait [`PlanNode`](super::PlanNode) really need about tree structure and used by optimizer
