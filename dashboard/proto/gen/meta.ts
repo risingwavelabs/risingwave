@@ -1,6 +1,6 @@
 /* eslint-disable */
 import { MetaBackupManifestId } from "./backup_service";
-import { Database, Index, Schema, Sink, Source, Table, View } from "./catalog";
+import { Database, Function, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import {
   HostAddress,
   ParallelUnit,
@@ -374,6 +374,7 @@ export interface MetaSnapshot {
   tables: Table[];
   indexes: Index[];
   views: View[];
+  functions: Function[];
   users: UserInfo[];
   parallelUnitMappings: ParallelUnitMapping[];
   nodes: WorkerNode[];
@@ -401,6 +402,7 @@ export interface SubscribeResponse {
     | { $case: "sink"; sink: Sink }
     | { $case: "index"; index: Index }
     | { $case: "view"; view: View }
+    | { $case: "function"; function: Function }
     | { $case: "user"; user: UserInfo }
     | { $case: "parallelUnitMapping"; parallelUnitMapping: ParallelUnitMapping }
     | { $case: "node"; node: WorkerNode }
@@ -1459,6 +1461,7 @@ function createBaseMetaSnapshot(): MetaSnapshot {
     tables: [],
     indexes: [],
     views: [],
+    functions: [],
     users: [],
     parallelUnitMappings: [],
     nodes: [],
@@ -1479,6 +1482,7 @@ export const MetaSnapshot = {
       tables: Array.isArray(object?.tables) ? object.tables.map((e: any) => Table.fromJSON(e)) : [],
       indexes: Array.isArray(object?.indexes) ? object.indexes.map((e: any) => Index.fromJSON(e)) : [],
       views: Array.isArray(object?.views) ? object.views.map((e: any) => View.fromJSON(e)) : [],
+      functions: Array.isArray(object?.functions) ? object.functions.map((e: any) => Function.fromJSON(e)) : [],
       users: Array.isArray(object?.users) ? object.users.map((e: any) => UserInfo.fromJSON(e)) : [],
       parallelUnitMappings: Array.isArray(object?.parallelUnitMappings)
         ? object.parallelUnitMappings.map((e: any) => ParallelUnitMapping.fromJSON(e))
@@ -1532,6 +1536,11 @@ export const MetaSnapshot = {
     } else {
       obj.views = [];
     }
+    if (message.functions) {
+      obj.functions = message.functions.map((e) => e ? Function.toJSON(e) : undefined);
+    } else {
+      obj.functions = [];
+    }
     if (message.users) {
       obj.users = message.users.map((e) => e ? UserInfo.toJSON(e) : undefined);
     } else {
@@ -1568,6 +1577,7 @@ export const MetaSnapshot = {
     message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
     message.indexes = object.indexes?.map((e) => Index.fromPartial(e)) || [];
     message.views = object.views?.map((e) => View.fromPartial(e)) || [];
+    message.functions = object.functions?.map((e) => Function.fromPartial(e)) || [];
     message.users = object.users?.map((e) => UserInfo.fromPartial(e)) || [];
     message.parallelUnitMappings = object.parallelUnitMappings?.map((e) => ParallelUnitMapping.fromPartial(e)) || [];
     message.nodes = object.nodes?.map((e) => WorkerNode.fromPartial(e)) || [];
@@ -1646,6 +1656,8 @@ export const SubscribeResponse = {
         ? { $case: "index", index: Index.fromJSON(object.index) }
         : isSet(object.view)
         ? { $case: "view", view: View.fromJSON(object.view) }
+        : isSet(object.function)
+        ? { $case: "function", function: Function.fromJSON(object.function) }
         : isSet(object.user)
         ? { $case: "user", user: UserInfo.fromJSON(object.user) }
         : isSet(object.parallelUnitMapping)
@@ -1690,6 +1702,8 @@ export const SubscribeResponse = {
     message.info?.$case === "index" &&
       (obj.index = message.info?.index ? Index.toJSON(message.info?.index) : undefined);
     message.info?.$case === "view" && (obj.view = message.info?.view ? View.toJSON(message.info?.view) : undefined);
+    message.info?.$case === "function" &&
+      (obj.function = message.info?.function ? Function.toJSON(message.info?.function) : undefined);
     message.info?.$case === "user" && (obj.user = message.info?.user ? UserInfo.toJSON(message.info?.user) : undefined);
     message.info?.$case === "parallelUnitMapping" && (obj.parallelUnitMapping = message.info?.parallelUnitMapping
       ? ParallelUnitMapping.toJSON(message.info?.parallelUnitMapping)
@@ -1737,6 +1751,9 @@ export const SubscribeResponse = {
     }
     if (object.info?.$case === "view" && object.info?.view !== undefined && object.info?.view !== null) {
       message.info = { $case: "view", view: View.fromPartial(object.info.view) };
+    }
+    if (object.info?.$case === "function" && object.info?.function !== undefined && object.info?.function !== null) {
+      message.info = { $case: "function", function: Function.fromPartial(object.info.function) };
     }
     if (object.info?.$case === "user" && object.info?.user !== undefined && object.info?.user !== null) {
       message.info = { $case: "user", user: UserInfo.fromPartial(object.info.user) };

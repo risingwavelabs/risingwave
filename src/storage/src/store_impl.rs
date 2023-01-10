@@ -250,7 +250,7 @@ pub mod verify {
     use crate::storage_value::StorageValue;
     use crate::store::*;
     use crate::store_impl::{AsHummockTrait, HummockTrait};
-    use crate::{StateStore, StateStoreIter};
+    use crate::StateStore;
 
     fn assert_result_eq<Item: PartialEq + Debug, E>(
         first: &std::result::Result<Item, E>,
@@ -279,25 +279,6 @@ pub mod verify {
     impl<A: AsHummockTrait, E> AsHummockTrait for VerifyStateStore<A, E> {
         fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
             self.actual.as_hummock_trait()
-        }
-    }
-
-    impl<A: StateStoreIter<Item: PartialEq + Debug>, E: StateStoreIter<Item = A::Item>>
-        StateStoreIter for VerifyStateStore<A, E>
-    {
-        type Item = A::Item;
-
-        type NextFuture<'a> = impl NextFutureTrait<'a, A::Item>;
-
-        fn next(&mut self) -> Self::NextFuture<'_> {
-            async {
-                let actual = self.actual.next().await;
-                if let Some(expected) = &mut self.expected {
-                    let expected = expected.next().await;
-                    assert_result_eq(&actual, &expected);
-                }
-                actual
-            }
         }
     }
 
@@ -611,6 +592,7 @@ impl HummockTrait for HummockStorage {
         Some(self)
     }
 }
+
 impl HummockTrait for HummockStorageV1 {
     fn sstable_id_manager(&self) -> &SstableIdManagerRef {
         self.sstable_id_manager()
@@ -680,6 +662,7 @@ pub mod boxed_state_store {
     // For StateStoreRead
 
     pub type BoxStateStoreReadIterStream = BoxStream<'static, StorageResult<StateStoreIterItem>>;
+
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
         async fn get<'a>(
@@ -796,10 +779,12 @@ pub mod boxed_state_store {
         DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreWrite
     {
     }
+
     impl<S: DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreWrite>
         DynamicDispatchedLocalStateStore for S
     {
     }
+
     pub type BoxDynamicDispatchedLocalStateStore = Box<dyn DynamicDispatchedLocalStateStore>;
 
     impl_state_store_read_for_box!(BoxDynamicDispatchedLocalStateStore);
@@ -846,6 +831,7 @@ pub mod boxed_state_store {
     }
 
     pub type BoxDynamicDispatchedStateStore = Box<dyn DynamicDispatchedStateStore>;
+
     // With this trait, we can implement `Clone` for BoxDynamicDispatchedStateStore
     pub trait DynamicDispatchedStateStoreCloneBox {
         fn clone_box(&self) -> BoxDynamicDispatchedStateStore;
@@ -858,6 +844,7 @@ pub mod boxed_state_store {
         + AsHummockTrait
     {
     }
+
     impl<
             S: DynamicDispatchedStateStoreCloneBox
                 + DynamicDispatchedStateStoreRead

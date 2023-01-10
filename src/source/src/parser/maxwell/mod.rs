@@ -30,8 +30,8 @@ mod test {
     async fn test_json_parser() {
         let parser = MaxwellParser;
         let descs = vec![
-            SourceColumnDesc::simple("id", DataType::Int32, 0.into()),
-            SourceColumnDesc::simple("name", DataType::Varchar, 1.into()),
+            SourceColumnDesc::simple("ID", DataType::Int32, 0.into()),
+            SourceColumnDesc::simple("NAME", DataType::Varchar, 1.into()),
             SourceColumnDesc::simple("is_adult", DataType::Int16, 2.into()),
             SourceColumnDesc::simple("birthday", DataType::Timestamp, 3.into()),
         ];

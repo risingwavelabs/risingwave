@@ -33,6 +33,8 @@ message ExprNode {
     OR = 22;
     NOT = 23;
     IN = 24;
+    SOME = 25;
+    ALL = 26;
     // bitwise operators
     BITWISE_AND = 31;
     BITWISE_OR = 32;
@@ -119,6 +121,8 @@ message ExprNode {
     VNODE = 1101;
     // Non-deterministic functions
     NOW = 2022;
+    // User defined functions
+    UDF = 3000;
   }
   Type expr_type = 1;
   data.DataType return_type = 3;
@@ -126,6 +130,7 @@ message ExprNode {
     InputRefExpr input_ref = 4;
     data.Datum constant = 5;
     FunctionCall func_call = 6;
+    UserDefinedFunction udf = 7;
   }
 }
 
@@ -214,4 +219,12 @@ message AggCall {
   }
   repeated OrderByField order_by_fields = 5;
   ExprNode filter = 6;
+}
+
+message UserDefinedFunction {
+  repeated ExprNode children = 1;
+  string name = 2;
+  repeated data.DataType arg_types = 3;
+  string language = 4;
+  string path = 5;
 }

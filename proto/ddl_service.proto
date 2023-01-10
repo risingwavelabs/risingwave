@@ -138,6 +138,25 @@ message CreateTableResponse {
   uint64 version = 3;
 }
 
+message CreateFunctionRequest {
+  catalog.Function function = 1;
+}
+
+message CreateFunctionResponse {
+  common.Status status = 1;
+  uint32 function_id = 2;
+  uint64 version = 3;
+}
+
+message DropFunctionRequest {
+  uint32 function_id = 1;
+}
+
+message DropFunctionResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message DropTableRequest {
   oneof source_id {
     uint32 id = 1;
@@ -212,5 +231,7 @@ service DdlService {
   rpc DropView(DropViewRequest) returns (DropViewResponse);
   rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);
   rpc DropIndex(DropIndexRequest) returns (DropIndexResponse);
+  rpc CreateFunction(CreateFunctionRequest) returns (CreateFunctionResponse);
+  rpc DropFunction(DropFunctionRequest) returns (DropFunctionResponse);
   rpc ReplaceTablePlan(ReplaceTablePlanRequest) returns (ReplaceTablePlanResponse);
 }
