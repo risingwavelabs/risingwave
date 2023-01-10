@@ -303,6 +303,33 @@ impl Binder {
             "pg_table_is_visible" => return Ok(ExprImpl::literal_bool(true)),
             "pg_encoding_to_char" => return Ok(ExprImpl::literal_varchar("UTF8".into())),
             "has_database_privilege" => return Ok(ExprImpl::literal_bool(true)),
+            "pg_backend_pid" if inputs.is_empty() => {
+                // FIXME: the session id is not global unique in multi-frontend env.
+                return Ok(ExprImpl::literal_int(self.session_id.0));
+            }
+            "pg_cancel_backend" => {
+                return if inputs.len() == 1 {
+                    // TODO: implement real cancel rather than just return false as an workaround.
+                    Ok(ExprImpl::literal_bool(false))
+                } else {
+                    Err(ErrorCode::ExprError(
+                        "Too many/few arguments for pg_cancel_backend()".into(),
+                    )
+                    .into())
+                };
+            }
+            "pg_terminate_backend" => {
+                return if inputs.len() == 1 {
+                    // TODO: implement real terminate rather than just return false as an
+                    // workaround.
+                    Ok(ExprImpl::literal_bool(false))
+                } else {
+                    Err(ErrorCode::ExprError(
+                        "Too many/few arguments for pg_terminate_backend()".into(),
+                    )
+                    .into())
+                };
+            }
             // internal
             "rw_vnode" => ExprType::Vnode,
             // TODO: include version/tag/commit_id

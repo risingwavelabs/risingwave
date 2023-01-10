@@ -201,6 +201,7 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_ROLES, vec![0], read_roles_info },
     { PG_CATALOG, PG_SHDESCRIPTION, vec![0], read_shdescription_info },
     { PG_CATALOG, PG_TABLESPACE, vec![0], read_tablespace_info },
+    { PG_CATALOG, PG_STAT_ACTIVITY, vec![0], read_stat_activity },
     { INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
     { INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
     { RW_CATALOG, RW_META_SNAPSHOT, vec![], read_meta_snapshot await },

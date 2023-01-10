@@ -35,6 +35,7 @@ pub use bind_context::{BindContext, LateralBindContext};
 pub use delete::BoundDelete;
 pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;
+use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
@@ -57,6 +58,7 @@ pub struct Binder {
     // TODO: maybe we can only lock the database, but not the whole catalog.
     catalog: CatalogReadGuard,
     db_name: String,
+    session_id: SessionId,
     context: BindContext,
     auth_context: Arc<AuthContext>,
     bind_timestamp_ms: u64,
@@ -94,6 +96,7 @@ impl Binder {
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
             db_name: session.database().to_string(),
+            session_id: session.id(),
             context: BindContext::new(),
             auth_context: session.auth_context(),
             bind_timestamp_ms: now_ms,
