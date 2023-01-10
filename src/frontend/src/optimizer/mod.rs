@@ -467,7 +467,8 @@ impl PlanRoot {
             if plan.node_type() == PlanNodeType::BatchExchange {
                 return false;
             }
-            is_candidate_table_scan(&plan) || plan.inputs().into_iter().any(no_exchange_before_table_scan)
+            is_candidate_table_scan(&plan)
+                || plan.inputs().into_iter().any(no_exchange_before_table_scan)
         }
 
         assert_eq!(plan.distribution(), &Distribution::Single);
