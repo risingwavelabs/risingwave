@@ -377,6 +377,33 @@ pub fn map_table_key_range(range: (Bound<Vec<u8>>, Bound<Vec<u8>>)) -> TableKeyR
     (range.0.map(TableKey), range.1.map(TableKey))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MergedImmKey<T: AsRef<[u8]>> {
+    pub table_key: TableKey<T>,
+    pub epoch: HummockEpoch,
+}
+
+impl<T: AsRef<[u8]>> MergedImmKey<T> {
+    pub fn new(table_key: TableKey<T>, epoch: HummockEpoch) -> Self {
+        Self { table_key, epoch }
+    }
+}
+
+impl<T: AsRef<[u8]> + Ord + Eq> Ord for MergedImmKey<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // When `user_key` is the same, greater epoch comes first.
+        self.table_key
+            .cmp(&other.table_key)
+            .then_with(|| other.epoch.cmp(&self.epoch))
+    }
+}
+
+impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for MergedImmKey<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 /// [`UserKey`] is is an internal concept in storage. In the storage interface, user specifies
 /// `table_key` and `table_id` (in [`ReadOptions`] or [`WriteOptions`]) as the input. The storage
 /// will group these two values into one struct for convenient filtering.

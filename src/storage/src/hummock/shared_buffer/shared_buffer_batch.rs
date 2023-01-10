@@ -172,6 +172,10 @@ impl SharedBufferBatch {
         self.table_id
     }
 
+    pub fn count(&self) -> usize {
+        self.inner.len()
+    }
+
     pub fn get(&self, table_key: TableKey<&[u8]>) -> Option<HummockValue<Bytes>> {
         // Perform binary search on table key because the items in SharedBufferBatch is ordered by
         // table key.
@@ -358,13 +362,21 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
         }
     }
 
-    fn current_item(&self) -> &SharedBufferItem {
+    pub(crate) fn current_item(&self) -> &SharedBufferItem {
         assert!(self.is_valid());
         let idx = match D::direction() {
             DirectionEnum::Forward => self.current_idx,
             DirectionEnum::Backward => self.inner.len() - self.current_idx - 1,
         };
         self.inner.get(idx).unwrap()
+    }
+
+    pub fn blocking_next(&mut self) {
+        self.current_idx += 1;
+    }
+
+    pub fn epoch(&self) -> HummockEpoch {
+        self.epoch
     }
 }
 
