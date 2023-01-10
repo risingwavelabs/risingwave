@@ -34,12 +34,14 @@ use crate::catalog::system_catalog::pg_catalog::{
 use crate::expr::{Expr, ExprImpl, InputRef, TableFunction, TableFunctionType};
 
 mod join;
+mod share;
 mod subquery;
 mod table_or_source;
 mod watermark;
 mod window_table_function;
 
 pub use join::BoundJoin;
+pub use share::BoundShare;
 pub use subquery::BoundSubquery;
 pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable};
 pub use watermark::BoundWatermark;
@@ -59,6 +61,7 @@ pub enum Relation {
     WindowTableFunction(Box<BoundWindowTableFunction>),
     TableFunction(Box<TableFunction>),
     Watermark(Box<BoundWatermark>),
+    Share(Box<BoundShare>),
 }
 
 impl Relation {
@@ -260,7 +263,7 @@ impl Binder {
         if schema_name.is_none() && let Some(item) = self.context.cte_to_relation.get(&table_name) {
             // Handles CTE
 
-            let (_cte_id, query, mut original_alias) = item.deref().clone();
+            let (share_id, query, mut original_alias) = item.deref().clone();
             debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.
 
             if let Some(from_alias) = alias {
@@ -280,10 +283,14 @@ impl Binder {
                     .fields
                     .iter()
                     .map(|f| (false, f.clone())),
-                table_name,
+                table_name.clone(),
                 Some(original_alias),
             )?;
-            Ok(Relation::Subquery(Box::new(BoundSubquery { query })))
+
+            // Share the CTE.
+            let input_relation = Relation::Subquery(Box::new(BoundSubquery { query }));
+            let share_relation = Relation::Share(Box::new(BoundShare { share_id, input: input_relation }));
+            Ok(share_relation)
         } else {
 
             self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias)

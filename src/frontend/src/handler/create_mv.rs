@@ -18,7 +18,7 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
-use super::privilege::{check_privileges, resolve_relation_privileges};
+use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::handler::HandlerArgs;
@@ -60,7 +60,7 @@ pub(super) fn get_column_names(
         if let Some(relation) = &select.from {
             let mut check_items = Vec::new();
             resolve_relation_privileges(relation, Action::Select, &mut check_items);
-            check_privileges(session, &check_items)?;
+            session.check_privileges(&check_items)?;
         }
     }
 

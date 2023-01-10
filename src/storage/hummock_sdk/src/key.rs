@@ -359,10 +359,7 @@ impl<T: AsRef<[u8]>> TableKey<T> {
 impl<T: AsRef<[u8]>> Debug for TableKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TableKey")
-            .field(
-                "table_key",
-                &String::from_utf8(self.0.as_ref().to_vec()).unwrap(),
-            )
+            .field("table_key", &self.0.as_ref().to_vec())
             .finish()
     }
 }

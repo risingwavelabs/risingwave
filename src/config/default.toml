@@ -1,3 +1,0 @@
-[meta]
-disable_recovery = true
-max_heartbeat_interval_secs = 600
