@@ -45,7 +45,7 @@ impl MonitoredHummockMetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MonitoredHummockMetaClient {
-    async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
+    async fn unpin_version_before(&mut self, unpin_version_before: HummockVersionId) -> Result<()> {
         self.stats.unpin_version_before_counts.inc();
         let timer = self.stats.unpin_version_before_latency.start_timer();
         let res = self
@@ -56,11 +56,11 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn get_current_version(&self) -> Result<HummockVersion> {
+    async fn get_current_version(&mut self) -> Result<HummockVersion> {
         self.meta_client.get_current_version().await
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
+    async fn pin_snapshot(&mut self) -> Result<HummockSnapshot> {
         self.stats.pin_snapshot_counts.inc();
         let timer = self.stats.pin_snapshot_latency.start_timer();
         let res = self.meta_client.pin_snapshot().await;
@@ -68,7 +68,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn get_epoch(&self) -> Result<HummockSnapshot> {
+    async fn get_epoch(&mut self) -> Result<HummockSnapshot> {
         self.stats.pin_snapshot_counts.inc();
         let timer = self.stats.pin_snapshot_latency.start_timer();
         let res = self.meta_client.get_epoch().await;
@@ -76,7 +76,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn unpin_snapshot(&self) -> Result<()> {
+    async fn unpin_snapshot(&mut self) -> Result<()> {
         self.stats.unpin_snapshot_counts.inc();
         let timer = self.stats.unpin_snapshot_latency.start_timer();
         let res = self.meta_client.unpin_snapshot().await;
@@ -84,11 +84,11 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         res
     }
 
-    async fn unpin_snapshot_before(&self, _min_epoch: HummockEpoch) -> Result<()> {
+    async fn unpin_snapshot_before(&mut self, _min_epoch: HummockEpoch) -> Result<()> {
         unreachable!("Currently CNs should not call this function")
     }
 
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+    async fn get_new_sst_ids(&mut self, number: u32) -> Result<SstIdRange> {
         self.stats.get_new_sst_ids_counts.inc();
         let timer = self.stats.get_new_sst_ids_latency.start_timer();
         let res = self.meta_client.get_new_sst_ids(number).await;
@@ -97,7 +97,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     }
 
     async fn report_compaction_task(
-        &self,
+        &mut self,
         compact_task: CompactTask,
         table_stats_change: TableStatsMap,
     ) -> Result<()> {
@@ -112,7 +112,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     }
 
     async fn commit_epoch(
-        &self,
+        &mut self,
         _epoch: HummockEpoch,
         _sstables: Vec<LocalSstableInfo>,
     ) -> Result<()> {
@@ -120,7 +120,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     }
 
     async fn subscribe_compact_tasks(
-        &self,
+        &mut self,
         max_concurrent_task_number: u64,
     ) -> Result<BoxStream<'static, CompactTaskItem>> {
         self.meta_client
@@ -129,7 +129,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     }
 
     async fn report_compaction_task_progress(
-        &self,
+        &mut self,
         progress: Vec<CompactTaskProgress>,
     ) -> Result<()> {
         self.meta_client
@@ -137,16 +137,16 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
             .await
     }
 
-    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
+    async fn report_vacuum_task(&mut self, vacuum_task: VacuumTask) -> Result<()> {
         self.meta_client.report_vacuum_task(vacuum_task).await
     }
 
-    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
+    async fn get_compaction_groups(&mut self) -> Result<Vec<CompactionGroup>> {
         self.meta_client.get_compaction_groups().await
     }
 
     async fn trigger_manual_compaction(
-        &self,
+        &mut self,
         compaction_group_id: u64,
         table_id: u32,
         level: u32,
@@ -156,11 +156,11 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
             .await
     }
 
-    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
+    async fn report_full_scan_task(&mut self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
         self.meta_client.report_full_scan_task(sst_ids).await
     }
 
-    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+    async fn trigger_full_gc(&mut self, sst_retention_time_sec: u64) -> Result<()> {
         self.meta_client
             .trigger_full_gc(sst_retention_time_sec)
             .await

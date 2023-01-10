@@ -731,7 +731,7 @@ impl MetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MetaClient {
-    async fn unpin_version_before(&self, unpin_version_before: HummockVersionId) -> Result<()> {
+    async fn unpin_version_before(&mut self, unpin_version_before: HummockVersionId) -> Result<()> {
         let req = UnpinVersionBeforeRequest {
             context_id: self.worker_id(),
             unpin_version_before,
@@ -750,7 +750,7 @@ impl HummockMetaClient for MetaClient {
             .unwrap())
     }
 
-    async fn pin_snapshot(&self) -> Result<HummockSnapshot> {
+    async fn pin_snapshot(&mut self) -> Result<HummockSnapshot> {
         let req = PinSnapshotRequest {
             context_id: self.worker_id(),
         };
@@ -758,13 +758,13 @@ impl HummockMetaClient for MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
-    async fn get_epoch(&self) -> Result<HummockSnapshot> {
+    async fn get_epoch(&mut self) -> Result<HummockSnapshot> {
         let req = GetEpochRequest {};
         let resp = self.inner.get_epoch(req).await?;
         Ok(resp.snapshot.unwrap())
     }
 
-    async fn unpin_snapshot(&self) -> Result<()> {
+    async fn unpin_snapshot(&mut self) -> Result<()> {
         let req = UnpinSnapshotRequest {
             context_id: self.worker_id(),
         };
@@ -772,7 +772,7 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()> {
+    async fn unpin_snapshot_before(&mut self, pinned_epochs: HummockEpoch) -> Result<()> {
         let req = UnpinSnapshotBeforeRequest {
             context_id: self.worker_id(),
             // For unpin_snapshot_before, we do not care about snapshots list but only min epoch.
@@ -785,7 +785,7 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+    async fn get_new_sst_ids(&mut self, number: u32) -> Result<SstIdRange> {
         let resp = self
             .inner
             .get_new_sst_ids(GetNewSstIdsRequest { number })
@@ -794,7 +794,7 @@ impl HummockMetaClient for MetaClient {
     }
 
     async fn report_compaction_task(
-        &self,
+        &mut self,
         compact_task: CompactTask,
         table_stats_change: HashMap<u32, risingwave_hummock_sdk::table_stats::TableStats>,
     ) -> Result<()> {
@@ -808,7 +808,7 @@ impl HummockMetaClient for MetaClient {
     }
 
     async fn commit_epoch(
-        &self,
+        &mut self,
         _epoch: HummockEpoch,
         _sstables: Vec<LocalSstableInfo>,
     ) -> Result<()> {
@@ -820,7 +820,7 @@ impl HummockMetaClient for MetaClient {
     }
 
     async fn subscribe_compact_tasks(
-        &self,
+        &mut self,
         max_concurrent_task_number: u64,
     ) -> Result<BoxStream<'static, CompactTaskItem>> {
         let req = SubscribeCompactTasksRequest {
@@ -832,7 +832,7 @@ impl HummockMetaClient for MetaClient {
     }
 
     async fn report_compaction_task_progress(
-        &self,
+        &mut self,
         progress: Vec<CompactTaskProgress>,
     ) -> Result<()> {
         let req = ReportCompactionTaskProgressRequest {
@@ -843,7 +843,7 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
+    async fn report_vacuum_task(&mut self, vacuum_task: VacuumTask) -> Result<()> {
         let req = ReportVacuumTaskRequest {
             vacuum_task: Some(vacuum_task),
         };
@@ -851,20 +851,20 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
+    async fn report_full_scan_task(&mut self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
         let req = ReportFullScanTaskRequest { sst_ids };
         self.inner.report_full_scan_task(req).await?;
         Ok(())
     }
 
-    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
+    async fn get_compaction_groups(&mut self) -> Result<Vec<CompactionGroup>> {
         let req = GetCompactionGroupsRequest {};
         let resp = self.inner.get_compaction_groups(req).await?;
         Ok(resp.compaction_groups)
     }
 
     async fn trigger_manual_compaction(
-        &self,
+        &mut self,
         compaction_group_id: u64,
         table_id: u32,
         level: u32,
@@ -882,81 +882,13 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {
+    async fn trigger_full_gc(&mut self, sst_retention_time_sec: u64) -> Result<()> {
         self.inner
             .trigger_full_gc(TriggerFullGcRequest {
                 sst_retention_time_sec,
             })
             .await?;
         Ok(())
-    }
-}
-
-// TODO: move imports up to other imports
-use std::future::Future;
-use std::pin::Pin;
-use std::task::{Context, Poll};
-
-use http::{Request, Response};
-use tonic::body::BoxBody;
-use tonic::transport::Body;
-use tower::Service;
-
-#[derive(Clone, Debug)]
-pub struct MetaFailoverSvc {
-    inner: Channel,
-}
-
-impl MetaFailoverSvc {
-    pub fn new(inner: Channel) -> Self {
-        MetaFailoverSvc { inner }
-    }
-}
-
-impl Service<Request<BoxBody>> for MetaFailoverSvc {
-    type Error = Box<dyn std::error::Error + Send + Sync>;
-    #[allow(clippy::type_complexity)]
-    type Future =
-        Pin<Box<dyn Future<Output = std::result::Result<Self::Response, Self::Error>> + Send>>;
-    type Response = Response<Body>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<std::result::Result<(), Self::Error>> {
-        self.inner.poll_ready(cx).map_err(Into::into)
-    }
-
-    /// requests have to be retried, in case of meta failover
-    fn call(&mut self, req: Request<BoxBody>) -> Self::Future {
-        let clone = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, clone);
-
-        Box::pin(async move {
-            // TODO: fail on failure, but still change inner?
-            let response = inner.call(req).await;
-            // TODO: remove MetaFailoverSvc again
-            if false && response.is_err() {
-                let mut leader_client = LeaderServiceClient::new(inner.clone());
-                let resp = leader_client
-                    .leader(LeaderRequest {})
-                    .await
-                    .expect("Expect that leader service always knows who leader is")
-                    .into_inner();
-
-                let leader_addr: HostAddress = resp
-                    .leader_addr
-                    .expect("Expect that leader service always knows who leader is");
-                let addr = format!(
-                    "http://{}:{}",
-                    leader_addr.get_host(),
-                    leader_addr.get_port()
-                );
-                let leader_channel = get_channel(addr.as_str(), 1, 1, 1, 1).await?;
-                // TODO: we need to update inner somehow
-                // self.inner = leader_channel;
-            }
-
-            let res = response?;
-            Ok(res)
-        })
     }
 }
 
@@ -995,16 +927,27 @@ pub async fn get_channel(
     .await
 }
 
+// internal mutality
+// https://doc.rust-lang.org/book/ch15-05-interior-mutability.html
+// atomic may also work
+// arc mutex
+
 /// Client to meta server. Cloning the instance is lightweight.
 ///
 /// It is a wrapper of tonic client. See [`meta_rpc_client_method_impl`].
 #[derive(Debug, Clone)]
 struct GrpcMetaClient {
+    // TODO: alternative:
+    // leader_service: LeaderServiceClient<Channel>
     // Client needs access to the channel to handle LeaderRequest during meta failover
     meta_connection: Channel,
 
-    // TODO: alternative:
-    // leader_service: LeaderServiceClient<Channel>
+    // Do I need Rc<RefCell<Client>> or RefCell<Client>?
+    // RefCell<Client>: Mutable reference by one
+    // Rc<RefCell<Client>>: Mutable reference by many
+
+    // Do we only ever have one thread accessing this?
+    // Update this, because the chanel changed, do I need to protect the update step with a MutEx?
     cluster_client: ClusterServiceClient<Channel>,
     heartbeat_client: HeartbeatServiceClient<Channel>,
     ddl_client: DdlServiceClient<Channel>,
