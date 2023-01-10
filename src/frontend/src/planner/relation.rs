@@ -16,15 +16,15 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::binder::{
-    BoundBaseTable, BoundJoin, BoundSource, BoundSystemTable, BoundWatermark,
+    BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, TableFunction};
 use crate::optimizer::plan_node::{
-    LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalSource,
+    LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare, LogicalSource,
     LogicalTableFunction, PlanRef,
 };
 use crate::planner::Planner;
@@ -44,6 +44,7 @@ impl Planner {
             Relation::Source(s) => self.plan_source(*s),
             Relation::TableFunction(tf) => self.plan_table_function(*tf),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
+            Relation::Share(share) => self.plan_share(*share),
         }
     }
 
@@ -133,19 +134,25 @@ impl Planner {
         Ok(LogicalTableFunction::new(table_function, self.ctx()).into())
     }
 
+    pub(super) fn plan_share(&mut self, share: BoundShare) -> Result<PlanRef> {
+        match self.share_cache.get(&share.share_id) {
+            None => {
+                let result = self.plan_relation(share.input)?;
+                let logical_share = LogicalShare::create(result);
+                self.share_cache
+                    .insert(share.share_id, logical_share.clone());
+                Ok(logical_share)
+            }
+            Some(result) => Ok(result.clone()),
+        }
+    }
+
     pub(super) fn plan_watermark(&mut self, _watermark: BoundWatermark) -> Result<PlanRef> {
         todo!("plan watermark");
     }
 
-    fn plan_tumble_window(
-        &mut self,
-        input: Relation,
-        time_col: InputRef,
-        args: Vec<ExprImpl>,
-    ) -> Result<PlanRef> {
-        let mut args = args.into_iter();
-
-        let col_data_types: Vec<_> = match &input {
+    fn collect_col_data_types_for_tumble_window(relation: &Relation) -> Result<Vec<DataType>> {
+        let col_data_types = match relation {
             Relation::Source(s) => s
                 .catalog
                 .columns
@@ -165,6 +172,7 @@ impl Planner {
                 .iter()
                 .map(|f| f.data_type())
                 .collect(),
+            Relation::Share(share) => Self::collect_col_data_types_for_tumble_window(&share.input)?,
             r => {
                 return Err(ErrorCode::BindError(format!(
                     "Invalid input relation to tumble: {r:?}"
@@ -172,6 +180,17 @@ impl Planner {
                 .into())
             }
         };
+        Ok(col_data_types)
+    }
+
+    fn plan_tumble_window(
+        &mut self,
+        input: Relation,
+        time_col: InputRef,
+        args: Vec<ExprImpl>,
+    ) -> Result<PlanRef> {
+        let mut args = args.into_iter();
+        let col_data_types: Vec<_> = Self::collect_col_data_types_for_tumble_window(&input)?;
 
         match (args.next(), args.next()) {
             (Some(window_size @ ExprImpl::Literal(_)), None) => {

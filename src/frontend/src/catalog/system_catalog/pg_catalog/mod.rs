@@ -29,6 +29,7 @@ pub mod pg_operator;
 pub mod pg_roles;
 pub mod pg_settings;
 pub mod pg_shdescription;
+pub mod pg_stat_activity;
 pub mod pg_tablespace;
 pub mod pg_type;
 pub mod pg_user;
@@ -54,6 +55,7 @@ pub use pg_operator::*;
 pub use pg_roles::*;
 pub use pg_settings::*;
 pub use pg_shdescription::*;
+pub use pg_stat_activity::*;
 pub use pg_tablespace::*;
 pub use pg_type::*;
 pub use pg_user::*;
@@ -586,5 +588,9 @@ impl SysCatalogReaderImpl {
 
     pub(super) fn read_tablespace_info(&self) -> Result<Vec<OwnedRow>> {
         Ok(PG_TABLESPACE_DATA_ROWS.clone())
+    }
+
+    pub(super) fn read_stat_activity(&self) -> Result<Vec<OwnedRow>> {
+        Ok(vec![])
     }
 }

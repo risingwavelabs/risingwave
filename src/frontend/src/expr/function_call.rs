@@ -17,7 +17,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
+use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::{ExprDisplay, ExprType};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -182,6 +182,37 @@ impl FunctionCall {
             func_type,
             return_type,
             inputs,
+        }
+    }
+
+    pub fn new_binary_op_func(
+        mut func_types: Vec<ExprType>,
+        mut inputs: Vec<ExprImpl>,
+    ) -> Result<ExprImpl> {
+        let expr_type = func_types.remove(0);
+        match expr_type {
+            ExprType::Some | ExprType::All => {
+                let ensure_return_boolean = |return_type: &DataType| {
+                    if &DataType::Boolean == return_type {
+                        Ok(())
+                    } else {
+                        Err(ErrorCode::BindError(
+                            "op ANY/ALL (array) requires operator to yield boolean".to_string(),
+                        ))
+                    }
+                };
+
+                let return_type = infer_some_all(func_types, &mut inputs)?;
+                ensure_return_boolean(&return_type)?;
+
+                Ok(FunctionCall::new_unchecked(expr_type, inputs, return_type).into())
+            }
+            ExprType::Not | ExprType::IsNotNull | ExprType::IsNull => Ok(FunctionCall::new(
+                expr_type,
+                vec![Self::new_binary_op_func(func_types, inputs)?],
+            )?
+            .into()),
+            _ => Ok(FunctionCall::new(expr_type, inputs)?.into()),
         }
     }
 
