@@ -23,6 +23,7 @@ use tokio::sync::watch;
 use tokio::sync::watch::Sender as WatchSender;
 use tokio::task::JoinHandle;
 use tokio::time;
+use tokio::time::Instant;
 
 use super::follower_svc::start_follower_srv;
 use crate::manager::MetaOpts;
@@ -170,7 +171,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 None
             };
 
-            let mut ticker = time::interval(Duration::from_secs(1));
+            let mut ticker = time::interval_at(
+                Instant::now() + Duration::from_millis(100),
+                Duration::from_secs(1),
+            );
 
             while !election_client.is_leader().await {
                 ticker.tick().await;
