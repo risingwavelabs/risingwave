@@ -297,7 +297,8 @@ impl StreamingMetrics {
             exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
         );
         let join_read_duration_per_chunk =
-            register_histogram_vec_with_registry!(opts, &["actor_id"], registry).unwrap();
+            register_histogram_vec_with_registry!(opts, &["actor_id", "wait_side"], registry)
+                .unwrap();
 
         let join_cached_entries = register_int_gauge_vec_with_registry!(
             "stream_join_cached_entries",
