@@ -1546,10 +1546,10 @@ impl Parser {
             self.parse_create_view(false, or_replace)
         } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
             self.parse_create_view(true, or_replace)
-        } else if self.parse_keyword(Keyword::SOURCE) {
-            self.parse_create_source(false, or_replace)
         } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::SOURCE]) {
-            self.parse_create_source(true, or_replace)
+            parser_err!("CREATE MATERIALIZED SOURCE has been deprecated, use CREATE TABLE instead")
+        } else if self.parse_keyword(Keyword::SOURCE) {
+            self.parse_create_source(or_replace)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_create_sink(or_replace)
         } else if self.parse_keyword(Keyword::FUNCTION) {
@@ -1623,13 +1623,8 @@ impl Parser {
     // [WITH (properties)]?
     // ROW FORMAT <row_format: Ident>
     // [ROW SCHEMA LOCATION <row_schema_location: String>]?
-    pub fn parse_create_source(
-        &mut self,
-        is_materialized: bool,
-        _or_replace: bool,
-    ) -> Result<Statement, ParserError> {
+    pub fn parse_create_source(&mut self, _or_replace: bool) -> Result<Statement, ParserError> {
         Ok(Statement::CreateSource {
-            is_materialized,
             stmt: CreateSourceStatement::parse_to(self)?,
         })
     }
@@ -3054,13 +3049,8 @@ impl Parser {
                         return Ok(Statement::ShowObjects(ShowObject::MaterializedView {
                             schema: self.parse_from_and_identifier()?,
                         }));
-                    } else if self.parse_keyword(Keyword::SOURCES) {
-                        return Ok(Statement::ShowObjects(ShowObject::MaterializedSource {
-                            schema: self.parse_from_and_identifier()?,
-                        }));
                     } else {
-                        return self
-                            .expected("VIEWS or SOURCES after MATERIALIZED", self.peek_token());
+                        return self.expected("VIEWS after MATERIALIZED", self.peek_token());
                     }
                 }
                 Keyword::COLUMNS => {

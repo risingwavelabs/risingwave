@@ -596,9 +596,6 @@ impl PlanRoot {
         let mut stream_plan = self.gen_stream_plan()?;
 
         match dml_flag {
-            // TODO: remove this branch after we deprecate the materialized source
-            DmlFlag::Disable => { /* do nothing */ }
-
             // NOTE(stonepage): we can not use this the plan's input append-only property here
             DmlFlag::All | DmlFlag::AppendOnly => {
                 // Add DML node.

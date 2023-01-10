@@ -33,11 +33,6 @@
   formatted_ast: |
     ShowObjects(Source { schema: Some(Ident { value: "t", quote_style: None }) })
 
-- input: SHOW MATERIALIZED SOURCES FROM t
-  formatted_sql: SHOW MATERIALIZED SOURCES FROM t
-  formatted_ast: |
-    ShowObjects(MaterializedSource { schema: Some(Ident { value: "t", quote_style: None }) })
-
 - input: DESCRIBE schema.t
   formatted_sql: DESCRIBE schema.t
   formatted_ast: |

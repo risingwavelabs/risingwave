@@ -1,12 +1,12 @@
 statement ok
-create materialized source s with (
+create table s with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = '127.0.0.1:29092'
 ) row format json;
 
 statement ok
-drop source s
+drop table s
 
 query T
 show sources
@@ -54,7 +54,7 @@ statement ok
 drop source s
 
 statement ok
-create materialized source s with (
+create table s with (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = '127.0.0.1:29092'
@@ -63,11 +63,11 @@ create materialized source s with (
 query T
 show sources
 ----
-s
 
 query T
 show tables
 ----
+s
 
 statement ok
-drop source s
+drop table s

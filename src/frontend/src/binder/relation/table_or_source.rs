@@ -301,15 +301,7 @@ impl Binder {
                 .get_table_by_name(db_name, schema_path, table_name)?;
 
         match table.table_type() {
-            TableType::Table => {
-                // TODO(Yuanxin): Remove this after supporting `CREATE TABLE WITH connector`.
-                if table.associated_source_id().is_some() {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "cannot change materialized source \"{table_name}\""
-                    ))
-                    .into());
-                }
-            }
+            TableType::Table => {}
             TableType::Index => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "cannot change index \"{table_name}\""

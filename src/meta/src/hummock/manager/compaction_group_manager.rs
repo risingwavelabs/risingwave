@@ -118,7 +118,7 @@ impl<S: MetaStore> HummockManager<S> {
             == Some(true);
         let table_option = TableOption::build_table_option(table_properties);
         let mut pairs = vec![];
-        // materialized_view or materialized_source
+        // materialized_view
         pairs.push((
             table_fragments.table_id().table_id,
             if is_independent_compaction_group {

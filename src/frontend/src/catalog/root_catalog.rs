@@ -483,7 +483,6 @@ impl Catalog {
 
         // Resolve source first.
         if schema.get_source_by_name(relation_name).is_some() {
-            // TODO: check if it is a materialized source and improve the err msg
             Err(CatalogError::Duplicated(
                 "source",
                 relation_name.to_string(),

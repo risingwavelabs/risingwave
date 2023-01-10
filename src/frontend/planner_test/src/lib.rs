@@ -254,17 +254,17 @@ impl TestCase {
     async fn create_source(&self, session: Arc<SessionImpl>) -> Result<Option<TestCaseResult>> {
         match self.create_source.clone() {
             Some(source) => {
+                let object_to_create = if let Some(true) = source.materialized {
+                    "TABLE"
+                } else {
+                    "SOURCE"
+                };
                 if let Some(content) = source.file {
-                    let materialized = if let Some(true) = source.materialized {
-                        "materialized".to_string()
-                    } else {
-                        "".to_string()
-                    };
                     let sql = format!(
-                        r#"CREATE {} SOURCE {}
+                        r#"CREATE {} {}
     WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
     ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
-                        materialized, source.name, source.row_format
+                        object_to_create, source.name, source.row_format
                     );
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
@@ -336,12 +336,8 @@ impl TestCase {
                     )
                     .await?;
                 }
-                Statement::CreateSource {
-                    is_materialized,
-                    stmt,
-                } => {
-                    create_source::handle_create_source(handler_args, is_materialized, stmt)
-                        .await?;
+                Statement::CreateSource { stmt } => {
+                    create_source::handle_create_source(handler_args, stmt).await?;
                 }
                 Statement::CreateIndex {
                     name,
