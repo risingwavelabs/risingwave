@@ -310,10 +310,12 @@ script = '''
 set -e
 echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build $(tput setaf 4)risingwave_cmd(_all) and risedev$(tput sgr0) crates."
 
+[[ $RISINGWAVE_BUILD_PROFILE == release ]] && export RISEDEV_CARGO_FEATURE_FLAGS="static-link static-log-level"
 [[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
 echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
 cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev \
+            --features "${RISEDEV_CARGO_FEATURE_FLAGS}" \
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
             ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
 '''
