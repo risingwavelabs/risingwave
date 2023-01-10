@@ -3428,36 +3428,8 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.12"
-source = "git+https://github.com/madsim-rs/madsim?rev=6c0a0c4#6c0a0c42f2ae8e674eda00e93790c81bcf739dcd"
-dependencies = [
- "ahash 0.7.6",
- "async-channel",
- "async-task",
- "bincode",
- "bytes",
- "downcast-rs",
- "futures-util",
- "lazy_static",
- "libc",
- "madsim-macros 0.2.12 (git+https://github.com/madsim-rs/madsim?rev=6c0a0c4)",
- "naive-timer",
- "rand 0.8.5",
- "rustversion",
- "serde",
- "spin 0.9.4",
- "tokio",
- "tokio-util",
- "toml",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "madsim"
 version = "0.2.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1d2469ca5362ee2674302c477af49577be8d08f2922e4005e83a63661d7ceb5"
+source = "git+https://github.com/madsim-rs/madsim?rev=fd6546c#fd6546c9c024760e0f47ca74f28f4c94fc457ad5"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3468,7 +3440,7 @@ dependencies = [
  "futures-util",
  "lazy_static",
  "libc",
- "madsim-macros 0.2.12 (registry+https://github.com/rust-lang/crates.io-index)",
+ "madsim-macros",
  "naive-timer",
  "rand 0.8.5",
  "rustversion",
@@ -3484,16 +3456,17 @@ dependencies = [
 [[package]]
 name = "madsim-etcd-client"
 version = "0.2.11"
-source = "git+https://github.com/madsim-rs/madsim?rev=6c0a0c4#6c0a0c42f2ae8e674eda00e93790c81bcf739dcd"
+source = "git+https://github.com/madsim-rs/madsim?rev=fd6546c#fd6546c9c024760e0f47ca74f28f4c94fc457ad5"
 dependencies = [
  "etcd-client",
  "futures-util",
  "http",
- "madsim 0.2.12",
+ "madsim",
  "serde",
  "serde_with",
  "spin 0.9.4",
  "thiserror",
+ "tokio",
  "toml",
  "tonic",
  "tracing",
@@ -3502,19 +3475,7 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
-dependencies = [
- "darling",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "madsim-macros"
-version = "0.2.12"
-source = "git+https://github.com/madsim-rs/madsim?rev=6c0a0c4#6c0a0c42f2ae8e674eda00e93790c81bcf739dcd"
+source = "git+https://github.com/madsim-rs/madsim?rev=fd6546c#fd6546c9c024760e0f47ca74f28f4c94fc457ad5"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -3534,7 +3495,7 @@ dependencies = [
  "futures-util",
  "libc",
  "log",
- "madsim 0.2.13",
+ "madsim",
  "rdkafka-sys",
  "serde",
  "serde_derive",
@@ -3553,7 +3514,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a95122ce38cd63608a480fa7ebd8216f79ba8228cea34744e1a93e9c49f21872"
 dependencies = [
  "futures-lite",
- "madsim 0.2.13",
+ "madsim",
  "tokio",
 ]
 
@@ -3566,7 +3527,7 @@ dependencies = [
  "async-stream",
  "chrono",
  "futures-util",
- "madsim 0.2.13",
+ "madsim",
  "tonic",
  "tracing",
 ]
@@ -6220,7 +6181,7 @@ dependencies = [
  "futures",
  "glob",
  "itertools",
- "madsim 0.2.13",
+ "madsim",
  "madsim-etcd-client",
  "madsim-rdkafka",
  "madsim-tokio",
