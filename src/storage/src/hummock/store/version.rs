@@ -681,10 +681,10 @@ impl HummockVersionReader {
                         delete_range_iter
                             .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
                     }
-                    sstables.push((*sstable_info).clone());
+                    sstables.push(sstable);
                 }
 
-                non_overlapping_iters.push(ConcatIterator::new(
+                non_overlapping_iters.push(ConcatIterator::new_with_prefetch(
                     sstables,
                     self.sstable_store.clone(),
                     Arc::new(SstableIteratorReadOptions::default()),
