@@ -187,7 +187,7 @@ pub trait ObjectStore: Send + Sync {
 pub enum ObjectStoreImpl {
     InMem(MonitoredObjectStore<InMemObjectStore>),
     Disk(MonitoredObjectStore<DiskObjectStore>),
-    Hdfs(MonitoredObjectStore<OpendalObjectStore>),
+    Opendal(MonitoredObjectStore<OpendalObjectStore>),
     S3(MonitoredObjectStore<S3ObjectStore>),
     S3Compatible(MonitoredObjectStore<S3ObjectStore>),
     Hybrid {
@@ -236,8 +236,8 @@ macro_rules! object_store_impl_method_body {
                     assert!(path.is_remote(), "get local path in pure disk object store: {:?}", $path);
                     $dispatch_macro!(disk, $method_name, path.as_str() $(, $args)*)
                 },
-                ObjectStoreImpl::Hdfs(hdfs) => {
-                    assert!(path.is_remote(), "get local path in pure hdfs object store: {:?}", $path);
+                ObjectStoreImpl::Opendal(hdfs) => {
+                    assert!(path.is_remote(), "get local path in pure opendal object store engine: {:?}", $path);
                     $dispatch_macro!(hdfs, $method_name, path.as_str() $(, $args)*)
                 },
                 ObjectStoreImpl::S3(s3) => {
@@ -256,7 +256,7 @@ macro_rules! object_store_impl_method_body {
                         ObjectStorePath::Local(_) => match local.as_ref() {
                             ObjectStoreImpl::InMem(in_mem) => $dispatch_macro!(in_mem, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::Disk(disk) => $dispatch_macro!(disk, $method_name, path.as_str() $(, $args)*),
-                            ObjectStoreImpl::Hdfs(_) => unreachable!("Hdfs cannot be used as local object store"),
+                            ObjectStoreImpl::Opendal(_) => unreachable!("Opendal object store cannot be used as local object store"),
                             ObjectStoreImpl::S3(_) => unreachable!("S3 cannot be used as local object store"),
                             ObjectStoreImpl::S3Compatible(_) => unreachable!("S3 compatible cannot be used as local object store"),
                             ObjectStoreImpl::Hybrid {..} => unreachable!("local object store of hybrid object store cannot be hybrid")
@@ -264,7 +264,7 @@ macro_rules! object_store_impl_method_body {
                         ObjectStorePath::Remote(_) => match remote.as_ref() {
                             ObjectStoreImpl::InMem(in_mem) => $dispatch_macro!(in_mem, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::Disk(disk) => $dispatch_macro!(disk, $method_name, path.as_str() $(, $args)*),
-                            ObjectStoreImpl::Hdfs(hdfs) => $dispatch_macro!(hdfs, $method_name, path.as_str() $(, $args)*),
+                            ObjectStoreImpl::Opendal(hdfs) => $dispatch_macro!(hdfs, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::S3(s3) => $dispatch_macro!(s3, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::S3Compatible(s3_compatible) => $dispatch_macro!(s3_compatible, $method_name, path.as_str() $(, $args)*),
                             ObjectStoreImpl::Hybrid {..} => unreachable!("remote object store of hybrid object store cannot be hybrid")
@@ -296,8 +296,8 @@ macro_rules! object_store_impl_method_body_slice {
                     assert!(paths_loc.is_empty(), "get local path in pure disk object store: {:?}", $paths);
                     $dispatch_macro!(disk, $method_name, &paths_rem $(, $args)*)
                 },
-                ObjectStoreImpl::Hdfs(hdfs) => {
-                    assert!(paths_loc.is_empty(), "get local path in pure hdfs object store: {:?}", $paths);
+                ObjectStoreImpl::Opendal(hdfs) => {
+                    assert!(paths_loc.is_empty(), "get local path in pure opendal object store: {:?}", $paths);
                     $dispatch_macro!(hdfs, $method_name, &paths_rem $(, $args)*)
                 },
                 ObjectStoreImpl::S3(s3) => {
@@ -316,7 +316,7 @@ macro_rules! object_store_impl_method_body_slice {
                     match local.as_ref() {
                         ObjectStoreImpl::InMem(in_mem) =>  $dispatch_macro!(in_mem, $method_name, &paths_loc $(, $args)*),
                         ObjectStoreImpl::Disk(disk) =>  $dispatch_macro!(disk, $method_name, &paths_loc $(, $args)*),
-                        ObjectStoreImpl::Hdfs(_) => unreachable!("S3 cannot be used as local object store"),
+                        ObjectStoreImpl::Opendal(_) => unreachable!("Opendal object store cannot be used as local object store"),
                         ObjectStoreImpl::S3(_) => unreachable!("S3 cannot be used as local object store"),
                         ObjectStoreImpl::S3Compatible(_) => unreachable!("S3 cannot be used as local object store"),
                         ObjectStoreImpl::Hybrid {..} => unreachable!("local object store of hybrid object store cannot be hybrid")
@@ -326,7 +326,7 @@ macro_rules! object_store_impl_method_body_slice {
                     match remote.as_ref() {
                         ObjectStoreImpl::InMem(in_mem) =>  $dispatch_macro!(in_mem, $method_name, &paths_rem $(, $args)*),
                         ObjectStoreImpl::Disk(disk) =>  $dispatch_macro!(disk, $method_name, &paths_rem $(, $args)*),
-                        ObjectStoreImpl::Hdfs(hdfs) =>  $dispatch_macro!(hdfs, $method_name, &paths_rem $(, $args)*),
+                        ObjectStoreImpl::Opendal(hdfs) =>  $dispatch_macro!(hdfs, $method_name, &paths_rem $(, $args)*),
                         ObjectStoreImpl::S3(s3) =>  $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*),
                         ObjectStoreImpl::S3Compatible(s3) =>  $dispatch_macro!(s3, $method_name, &paths_rem $(, $args)*),
                         ObjectStoreImpl::Hybrid {..} => unreachable!("remote object store of hybrid object store cannot be hybrid")
@@ -397,7 +397,7 @@ impl ObjectStoreImpl {
         match self {
             ObjectStoreImpl::InMem(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::Disk(store) => store.inner.get_object_prefix(obj_id),
-            ObjectStoreImpl::Hdfs(store) => store.inner.get_object_prefix(obj_id),
+            ObjectStoreImpl::Opendal(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::S3(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::S3Compatible(store) => store.inner.get_object_prefix(obj_id),
             ObjectStoreImpl::Hybrid { local, remote } => {
@@ -823,7 +823,7 @@ pub async fn parse_remote_object_store(
         hdfs if hdfs.starts_with("hdfs://") => {
             let hdfs = hdfs.strip_prefix("hdfs://").unwrap();
             let (namenode, root) = hdfs.split_once('@').unwrap();
-            ObjectStoreImpl::Hdfs(
+            ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_hdfs_engine(namenode.to_string(), root.to_string())
                     .monitored(metrics),
             )
@@ -885,7 +885,7 @@ pub fn parse_local_object_store(url: &str, metrics: Arc<ObjectStoreMetrics>) -> 
             tracing::warn!("You're using Hummock in-memory local object store. This should never be used in benchmarks and production environment.");
             ObjectStoreImpl::InMem(InMemObjectStore::new().monitored(metrics))
         }
-        hdfs if hdfs.starts_with("hdfs://") => ObjectStoreImpl::Hdfs(
+        hdfs if hdfs.starts_with("hdfs://") => ObjectStoreImpl::Opendal(
             OpendalObjectStore::new_hdfs_engine(hdfs.to_string(), "risingwave".to_string())
                 .monitored(metrics),
         ),
