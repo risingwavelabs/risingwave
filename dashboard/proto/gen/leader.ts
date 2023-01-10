@@ -10,6 +10,18 @@ export interface LeaderResponse {
   leaderAddr: HostAddress | undefined;
 }
 
+export interface MemberRequest {
+}
+
+export interface Member {
+  memberAddr: HostAddress | undefined;
+  leaseId: number;
+}
+
+export interface MemberResponse {
+  members: Member[];
+}
+
 function createBaseLeaderRequest(): LeaderRequest {
   return {};
 }
@@ -51,6 +63,82 @@ export const LeaderResponse = {
     message.leaderAddr = (object.leaderAddr !== undefined && object.leaderAddr !== null)
       ? HostAddress.fromPartial(object.leaderAddr)
       : undefined;
+    return message;
+  },
+};
+
+function createBaseMemberRequest(): MemberRequest {
+  return {};
+}
+
+export const MemberRequest = {
+  fromJSON(_: any): MemberRequest {
+    return {};
+  },
+
+  toJSON(_: MemberRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MemberRequest>, I>>(_: I): MemberRequest {
+    const message = createBaseMemberRequest();
+    return message;
+  },
+};
+
+function createBaseMember(): Member {
+  return { memberAddr: undefined, leaseId: 0 };
+}
+
+export const Member = {
+  fromJSON(object: any): Member {
+    return {
+      memberAddr: isSet(object.memberAddr) ? HostAddress.fromJSON(object.memberAddr) : undefined,
+      leaseId: isSet(object.leaseId) ? Number(object.leaseId) : 0,
+    };
+  },
+
+  toJSON(message: Member): unknown {
+    const obj: any = {};
+    message.memberAddr !== undefined &&
+      (obj.memberAddr = message.memberAddr ? HostAddress.toJSON(message.memberAddr) : undefined);
+    message.leaseId !== undefined && (obj.leaseId = Math.round(message.leaseId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Member>, I>>(object: I): Member {
+    const message = createBaseMember();
+    message.memberAddr = (object.memberAddr !== undefined && object.memberAddr !== null)
+      ? HostAddress.fromPartial(object.memberAddr)
+      : undefined;
+    message.leaseId = object.leaseId ?? 0;
+    return message;
+  },
+};
+
+function createBaseMemberResponse(): MemberResponse {
+  return { members: [] };
+}
+
+export const MemberResponse = {
+  fromJSON(object: any): MemberResponse {
+    return { members: Array.isArray(object?.members) ? object.members.map((e: any) => Member.fromJSON(e)) : [] };
+  },
+
+  toJSON(message: MemberResponse): unknown {
+    const obj: any = {};
+    if (message.members) {
+      obj.members = message.members.map((e) => e ? Member.toJSON(e) : undefined);
+    } else {
+      obj.members = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<MemberResponse>, I>>(object: I): MemberResponse {
+    const message = createBaseMemberResponse();
+    message.members = object.members?.map((e) => Member.fromPartial(e)) || [];
     return message;
   },
 };
