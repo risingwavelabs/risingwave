@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,13 +24,13 @@
 #![warn(clippy::await_holding_lock)]
 #![deny(rustdoc::broken_intra_doc_links)]
 
+mod compaction_test_runner;
 mod delete_range_runner;
-mod runner;
 
 use clap::Parser;
 pub use delete_range_runner::start_delete_range;
 
-use crate::runner::compaction_test_main;
+use crate::compaction_test_runner::compaction_test_main;
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Debug)]
@@ -73,6 +73,10 @@ pub struct CompactionTestOpts {
     /// [`risingwave_common::config`] instead of command line arguments.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    /// The path to the configuration file used for the embedded meta node.
+    #[clap(long, default_value = "src/config/ci-compaction-test-meta.toml")]
+    pub config_path_for_meta: String,
 }
 
 use std::future::Future;

@@ -103,7 +103,7 @@ class Panels:
                          title,
                          description,
                          targets,
-                         legendCols=["max"]):
+                         legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -120,7 +120,7 @@ class Panels:
                               title,
                               description,
                               targets,
-                              legendCols=["max"]):
+                              legendCols=["mean"]):
         # Percentage should fall into 0.0-1.0
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
@@ -139,7 +139,7 @@ class Panels:
                            title,
                            description,
                            targets,
-                           legendCols=["max"]):
+                           legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -157,7 +157,7 @@ class Panels:
                                  title,
                                  description,
                                  targets,
-                                 legendCols=["max"]):
+                                 legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -175,7 +175,7 @@ class Panels:
                                        title,
                                        description,
                                        targets,
-                                       legendCols=["max"]):
+                                       legendCols=["mean"]):
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
@@ -193,7 +193,7 @@ class Panels:
                                  title,
                                  description,
                                  targets,
-                                 legendCols=["max"]):
+                                 legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -211,7 +211,7 @@ class Panels:
                                  title,
                                  description,
                                  targets,
-                                 legendCols=["max"]):
+                                 legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -229,7 +229,7 @@ class Panels:
                          title,
                          description,
                          targets,
-                         legendCols=["max"]):
+                         legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -243,7 +243,7 @@ class Panels:
             legendCalcs=legendCols,
         )
 
-    def timeseries_row(self, title, description, targets, legendCols=["max"]):
+    def timeseries_row(self, title, description, targets, legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -257,7 +257,7 @@ class Panels:
             legendCalcs=legendCols,
         )
 
-    def timeseries_ms(self, title, description, targets, legendCols=["max"]):
+    def timeseries_ms(self, title, description, targets, legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -274,7 +274,7 @@ class Panels:
                              title,
                              description,
                              targets,
-                             legendCols=["max"]):
+                             legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -292,7 +292,7 @@ class Panels:
                           title,
                           description,
                           targets,
-                          legendCols=["max"]):
+                          legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -306,7 +306,7 @@ class Panels:
             legendCalcs=legendCols,
         )
 
-    def timeseries_ops(self, title, description, targets, legendCols=["max"]):
+    def timeseries_ops(self, title, description, targets, legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -324,7 +324,7 @@ class Panels:
                              title,
                              description,
                              targets,
-                             legendCols=["max"]):
+                             legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -342,7 +342,7 @@ class Panels:
                                    title,
                                    description,
                                    targets,
-                                   legendCols=["max"]):
+                                   legendCols=["mean"]):
         gridPos = self.layout.next_one_third_width_graph()
         return TimeSeries(
             title=title,
@@ -360,7 +360,7 @@ class Panels:
                           title,
                           description,
                           targets,
-                          legendCols=["max"]):
+                          legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -378,7 +378,7 @@ class Panels:
                           title,
                           description,
                           targets,
-                          legendCols=["max"]):
+                          legendCols=["mean"]):
         gridPos = self.layout.next_half_width_graph()
         return TimeSeries(
             title=title,
@@ -1298,6 +1298,16 @@ def section_streaming_actors(outer_panels):
                         panels.target(
                             f"rate({metric('stream_join_actor_input_waiting_duration_ns')}[$__rate_interval]) / 1000000000",
                             "{{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Join Actor Match Duration Per Second",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_join_match_duration_ns')}[$__rate_interval]) / 1000000000",
+                            "{{actor_id}}.{{side}}",
                         ),
                     ],
                 ),

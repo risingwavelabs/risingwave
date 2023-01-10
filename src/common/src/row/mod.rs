@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,7 +24,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::hash::{BuildHasher, Hasher};
 
-use bytes::BufMut;
+use bytes::{BufMut, Bytes, BytesMut};
 pub use chain::Chain;
 pub use compacted_row::CompactedRow;
 pub use empty::{empty, Empty};
@@ -94,6 +94,14 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
         let mut buf = Vec::with_capacity(self.len()); // each datum is at least 1 byte
         self.value_serialize_into(&mut buf);
         buf
+    }
+
+    /// Serializes the row with value encoding and returns the bytes.
+    #[inline]
+    fn value_serialize_bytes(&self) -> Bytes {
+        let mut buf = BytesMut::with_capacity(self.len()); // each datum is at least 1 byte
+        self.value_serialize_into(&mut buf);
+        buf.freeze()
     }
 
     /// Serializes the row with memcomparable encoding, into the given `buf`. As each datum may have

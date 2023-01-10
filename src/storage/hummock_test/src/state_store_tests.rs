@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -823,21 +823,21 @@ async fn test_write_anytime_inner(
             futures::pin_mut!(iter);
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"aa".to_vec().into(), epoch),
                     Bytes::from("111")
                 ),
                 iter.try_next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"bb".to_vec().into(), epoch),
                     Bytes::from("222")
                 ),
                 iter.try_next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"cc".to_vec().into(), epoch),
                     Bytes::from("333")
                 ),
                 iter.try_next().await.unwrap().unwrap()
@@ -944,14 +944,14 @@ async fn test_write_anytime_inner(
             futures::pin_mut!(iter);
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"aa".to_vec().into(), epoch),
                     Bytes::from("111_new")
                 ),
                 iter.try_next().await.unwrap().unwrap()
             );
             assert_eq!(
                 (
-                    FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch),
+                    FullKey::for_test(TableId::default(), b"cc".to_vec().into(), epoch),
                     Bytes::from("333")
                 ),
                 iter.try_next().await.unwrap().unwrap()

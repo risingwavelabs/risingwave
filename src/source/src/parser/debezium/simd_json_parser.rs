@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -80,10 +80,14 @@ impl DebeziumJsonParser {
                     })?;
 
                 writer.update(|column| {
-                    let before =
-                        simd_json_parse_value(&column.data_type, before.get(column.name.as_str()))?;
-                    let after =
-                        simd_json_parse_value(&column.data_type, after.get(column.name.as_str()))?;
+                    let before = simd_json_parse_value(
+                        &column.data_type,
+                        before.get(column.name.to_ascii_lowercase().as_str()),
+                    )?;
+                    let after = simd_json_parse_value(
+                        &column.data_type,
+                        after.get(column.name.to_ascii_lowercase().as_str()),
+                    )?;
 
                     Ok((before, after))
                 })
@@ -99,8 +103,11 @@ impl DebeziumJsonParser {
                     })?;
 
                 writer.insert(|column| {
-                    simd_json_parse_value(&column.data_type, after.get(column.name.as_str()))
-                        .map_err(Into::into)
+                    simd_json_parse_value(
+                        &column.data_type,
+                        after.get(column.name.to_ascii_lowercase().as_str()),
+                    )
+                    .map_err(Into::into)
                 })
             }
             DEBEZIUM_DELETE_OP => {
@@ -114,8 +121,11 @@ impl DebeziumJsonParser {
                     })?;
 
                 writer.delete(|column| {
-                    simd_json_parse_value(&column.data_type, before.get(column.name.as_str()))
-                        .map_err(Into::into)
+                    simd_json_parse_value(
+                        &column.data_type,
+                        before.get(column.name.to_ascii_lowercase().as_str()),
+                    )
+                    .map_err(Into::into)
                 })
             }
             _ => Err(RwError::from(ProtocolError(format!(

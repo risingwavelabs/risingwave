@@ -1,4 +1,4 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -200,7 +200,7 @@ where
     fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
         let child = self.child.eval_checked(data_chunk)?;
 
-        let bitmap = match data_chunk.get_visibility_ref() {
+        let bitmap = match data_chunk.visibility() {
             Some(vis) => vis & child.null_bitmap(),
             None => child.null_bitmap().clone(),
         };
@@ -281,7 +281,7 @@ where
         let right = self.right.eval_checked(data_chunk)?;
         assert_eq!(left.len(), right.len());
 
-        let mut bitmap = match data_chunk.get_visibility_ref() {
+        let mut bitmap = match data_chunk.visibility() {
             Some(vis) => vis.clone(),
             None => Bitmap::ones(data_chunk.capacity()),
         };
@@ -369,7 +369,7 @@ where
         let right = self.right.eval_checked(data_chunk)?;
         assert_eq!(left.len(), right.len());
 
-        let mut bitmap = match data_chunk.get_visibility_ref() {
+        let mut bitmap = match data_chunk.visibility() {
             Some(vis) => vis.clone(),
             None => Bitmap::ones(data_chunk.capacity()),
         };

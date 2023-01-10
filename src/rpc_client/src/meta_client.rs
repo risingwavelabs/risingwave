@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::stream::BoxStream;
-use risingwave_common::catalog::{CatalogVersion, IndexId, TableId};
+use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
@@ -30,11 +30,13 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable, View as ProstView,
+    Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
+    Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
+    View as ProstView,
 };
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
+use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
@@ -229,20 +231,31 @@ impl MetaClient {
         Ok((resp.sink_id, resp.version))
     }
 
-    pub async fn create_materialized_source(
+    pub async fn create_function(
         &self,
-        source: ProstSource,
+        function: ProstFunction,
+    ) -> Result<(FunctionId, CatalogVersion)> {
+        let request = CreateFunctionRequest {
+            function: Some(function),
+        };
+        let resp = self.inner.create_function(request).await?;
+        Ok((resp.function_id.into(), resp.version))
+    }
+
+    pub async fn create_table(
+        &self,
+        source: Option<ProstSource>,
         table: ProstTable,
         graph: StreamFragmentGraph,
-    ) -> Result<(TableId, u32, CatalogVersion)> {
-        let request = CreateMaterializedSourceRequest {
+    ) -> Result<(TableId, CatalogVersion)> {
+        let request = CreateTableRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
-            source: Some(source),
+            source,
         };
-        let resp = self.inner.create_materialized_source(request).await?;
+        let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.table_id.into(), resp.source_id, resp.version))
+        Ok((resp.table_id.into(), resp.version))
     }
 
     pub async fn create_view(&self, view: ProstView) -> Result<(u32, CatalogVersion)> {
@@ -268,17 +281,17 @@ impl MetaClient {
         Ok((resp.index_id.into(), resp.version))
     }
 
-    pub async fn drop_materialized_source(
+    pub async fn drop_table(
         &self,
-        source_id: u32,
+        source_id: Option<u32>,
         table_id: TableId,
     ) -> Result<CatalogVersion> {
-        let request = DropMaterializedSourceRequest {
-            source_id,
+        let request = DropTableRequest {
+            source_id: source_id.map(SourceId::Id),
             table_id: table_id.table_id(),
         };
 
-        let resp = self.inner.drop_materialized_source(request).await?;
+        let resp = self.inner.drop_table(request).await?;
         Ok(resp.version)
     }
 
@@ -305,6 +318,14 @@ impl MetaClient {
             index_id: index_id.index_id,
         };
         let resp = self.inner.drop_index(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_function(&self, function_id: FunctionId) -> Result<CatalogVersion> {
+        let request = DropFunctionRequest {
+            function_id: function_id.0,
+        };
+        let resp = self.inner.drop_function(request).await?;
         Ok(resp.version)
     }
 
@@ -522,16 +543,6 @@ impl MetaClient {
         self.inner
             .rise_ctl_get_pinned_snapshots_summary(request)
             .await
-    }
-
-    pub async fn reset_current_version(&self) -> Result<HummockVersion> {
-        let req = ResetCurrentVersionRequest {};
-        Ok(self
-            .inner
-            .reset_current_version(req)
-            .await?
-            .old_version
-            .unwrap())
     }
 
     pub async fn init_metadata_for_replay(
@@ -940,7 +951,7 @@ macro_rules! for_all_meta_rpc {
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
-            ,{ ddl_client, create_materialized_source, CreateMaterializedSourceRequest, CreateMaterializedSourceResponse }
+            ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
@@ -948,7 +959,8 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
             ,{ ddl_client, create_index, CreateIndexRequest, CreateIndexResponse }
-            ,{ ddl_client, drop_materialized_source, DropMaterializedSourceRequest, DropMaterializedSourceResponse }
+            ,{ ddl_client, create_function, CreateFunctionRequest, CreateFunctionResponse }
+            ,{ ddl_client, drop_table, DropTableRequest, DropTableResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_view, DropViewRequest, DropViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
@@ -956,10 +968,10 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_database, DropDatabaseRequest, DropDatabaseResponse }
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
+            ,{ ddl_client, drop_function, DropFunctionRequest, DropFunctionResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
-            ,{ hummock_client, reset_current_version, ResetCurrentVersionRequest, ResetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
             ,{ hummock_client, list_version_deltas, ListVersionDeltasRequest, ListVersionDeltasResponse }
             ,{ hummock_client, get_assigned_compact_task_num, GetAssignedCompactTaskNumRequest, GetAssignedCompactTaskNumResponse }

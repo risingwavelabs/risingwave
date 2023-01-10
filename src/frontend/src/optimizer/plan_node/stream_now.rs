@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -36,11 +37,13 @@ pub struct StreamNow {
 impl StreamNow {
     pub fn new(ctx: OptimizerContextRef) -> Self {
         let schema = Schema::new(vec![Field {
-            data_type: DataType::Timestamp,
+            data_type: DataType::Timestamptz,
             name: String::from("now"),
             sub_fields: vec![],
             type_name: String::default(),
         }]);
+        let mut watermark_cols = FixedBitSet::with_capacity(1);
+        watermark_cols.set(0, true);
         let base = PlanBase::new_stream(
             ctx,
             schema,
@@ -48,6 +51,7 @@ impl StreamNow {
             FunctionalDependencySet::default(),
             Distribution::Single,
             false,
+            watermark_cols,
         );
         Self { base }
     }

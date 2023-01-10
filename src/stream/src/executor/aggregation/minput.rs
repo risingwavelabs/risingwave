@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::marker::PhantomData;
 
 use futures::{pin_mut, StreamExt};
@@ -190,7 +189,7 @@ impl<S: StateStore> MaterializedInputState<S> {
             let mut cache_filler = self.cache.begin_syncing();
             #[for_await]
             for state_row in all_data_iter.take(cache_filler.capacity()) {
-                let state_row: Cow<'_, OwnedRow> = state_row?;
+                let state_row: OwnedRow = state_row?;
                 let cache_key = {
                     let mut cache_key = Vec::new();
                     self.cache_key_serializer.serialize(
@@ -208,6 +207,7 @@ impl<S: StateStore> MaterializedInputState<S> {
                     .collect();
                 cache_filler.insert(cache_key, cache_value);
             }
+            cache_filler.finish();
         }
         assert!(self.cache.is_synced());
         Ok(self.cache.get_output())

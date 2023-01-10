@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,21 +14,16 @@
 
 use std::fmt::Write;
 
-use risingwave_common::array::{StringWriter, WrittenGuard};
-
 use crate::Result;
 
 #[inline(always)]
-pub fn md5(s: &str, writer: StringWriter<'_>) -> Result<WrittenGuard> {
-    let mut writer = writer.begin();
+pub fn md5(s: &str, writer: &mut dyn Write) -> Result<()> {
     write!(writer, "{:x}", ::md5::compute(s)).unwrap();
-    Ok(writer.finish())
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::array::{Array, ArrayBuilder, Utf8ArrayBuilder};
-
     use super::*;
 
     #[test]
@@ -43,12 +38,9 @@ mod tests {
         ];
 
         for (s, expected) in cases {
-            let mut builder = Utf8ArrayBuilder::new(1);
-            let writer = builder.writer();
-            let _guard = md5(s, writer)?;
-            let array = builder.finish();
-            let v = array.value_at(0).unwrap();
-            assert_eq!(v, expected);
+            let mut writer = String::new();
+            md5(s, &mut writer)?;
+            assert_eq!(writer, expected);
         }
         Ok(())
     }

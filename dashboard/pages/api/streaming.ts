@@ -1,11 +1,11 @@
 /*
- * Copyright 2022 Singularity Data
+ * Copyright 2023 Singularity Data
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -37,13 +37,16 @@ export interface Relation {
   id: number
   name: string
   owner: number
-  dependentRelations: number[]
   columns: ColumnCatalog[]
 }
 
-export async function getRelations(): Promise<Relation[]> {
-  const materialized_views: Relation[] = await getMaterializedViews()
-  const sinks: Relation[] = await getSinks()
+export interface StreamingJob extends Relation {
+  dependentRelations: number[]
+}
+
+export async function getStreamingJobs(): Promise<StreamingJob[]> {
+  const materialized_views: StreamingJob[] = await getMaterializedViews()
+  const sinks: StreamingJob[] = await getSinks()
   let relations = materialized_views.concat(sinks)
   relations = sortBy(relations, (x) => x.id)
   return relations

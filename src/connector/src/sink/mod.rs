@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -173,10 +173,6 @@ pub type Result<T> = std::result::Result<T, SinkError>;
 
 #[derive(Error, Debug)]
 pub enum SinkError {
-    #[error("MySql error: {0}")]
-    MySql(String),
-    #[error("MySql inner error: {0}")]
-    MySqlInner(#[from] mysql_async::Error),
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
     #[error("Remote sink error: {0}")]

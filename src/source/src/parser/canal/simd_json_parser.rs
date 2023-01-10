@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
-use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp, str_to_timestampz};
+use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp, str_to_timestamptz};
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use super::util::at_least_one_ok;
@@ -82,7 +82,7 @@ impl CanalJsonParser {
                         writer.insert(|column| {
                             cannal_simd_json_parse_value(
                                 &column.data_type,
-                                v.get(column.name.as_str()),
+                                v.get(column.name.to_ascii_lowercase().as_str()),
                             )
                         })
                     })
@@ -121,14 +121,15 @@ impl CanalJsonParser {
                             // in origin canal, old only contains the changed columns but data
                             // contains all columns.
                             // in ticdc, old contains all fields
+                            let col_name_lc = column.name.to_ascii_lowercase();
                             let before_value = before
-                                .get(column.name.as_str())
-                                .or_else(|| after.get(column.name.as_str()));
+                                .get(col_name_lc.as_str())
+                                .or_else(|| after.get(col_name_lc.as_str()));
                             let before =
                                 cannal_simd_json_parse_value(&column.data_type, before_value)?;
                             let after = cannal_simd_json_parse_value(
                                 &column.data_type,
-                                after.get(column.name.as_str()),
+                                after.get(col_name_lc.as_str()),
                             )?;
                             Ok((before, after))
                         })
@@ -154,7 +155,7 @@ impl CanalJsonParser {
                         writer.delete(|column| {
                             cannal_simd_json_parse_value(
                                 &column.data_type,
-                                v.get(column.name.as_str()),
+                                v.get(column.name.to_ascii_lowercase().as_str()),
                             )
                         })
                     })
@@ -220,7 +221,7 @@ fn cannal_do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> R
         DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
         DataType::Time => str_to_date(ensure_str!(v, "time"))?.into(),
         DataType::Timestamp => str_to_timestamp(ensure_str!(v, "string"))?.into(),
-        DataType::Timestampz => str_to_timestampz(ensure_str!(v, "string"))?.into(),
+        DataType::Timestamptz => str_to_timestamptz(ensure_str!(v, "string"))?.into(),
         _ => {
             return Err(RwError::from(InternalError(format!(
                 "cannal data source not support type {}",

@@ -1,11 +1,11 @@
 /*
- * Copyright 2022 Singularity Data
+ * Copyright 2023 Singularity Data
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,11 +24,11 @@ import { Fragment, useCallback, useEffect, useState } from "react"
 import { StreamGraph } from "../components/StreamGraph"
 import Title from "../components/Title"
 import { ActorPoint } from "../lib/layout"
-import { getRelations, Relation } from "./api/streaming"
+import { getStreamingJobs, StreamingJob } from "./api/streaming"
 
 const SIDEBAR_WIDTH = "200px"
 
-function buildDependencyAsEdges(list: Relation[]): ActorPoint[] {
+function buildDependencyAsEdges(list: StreamingJob[]): ActorPoint[] {
   const edges = []
   const relationSet = new Set(list.map((r) => r.id))
   for (const r of reverse(sortBy(list, "id"))) {
@@ -48,13 +48,13 @@ function buildDependencyAsEdges(list: Relation[]): ActorPoint[] {
 
 export default function StreamingGraph() {
   const toast = useToast()
-  const [relationList, setRelationList] = useState<Relation[]>()
+  const [streamingJobList, setStreamingJobList] = useState<StreamingJob[]>()
 
   useEffect(() => {
     async function doFetch() {
       try {
-        setRelationList(
-          (await getRelations()).filter((x) => !x.name.startsWith("__"))
+        setStreamingJobList(
+          (await getStreamingJobs()).filter((x) => !x.name.startsWith("__"))
         )
       } catch (e: any) {
         toast({
@@ -72,12 +72,12 @@ export default function StreamingGraph() {
   }, [toast])
 
   const mvDependencyCallback = useCallback(() => {
-    if (relationList) {
-      return buildDependencyAsEdges(relationList)
+    if (streamingJobList) {
+      return buildDependencyAsEdges(streamingJobList)
     } else {
       return undefined
     }
-  }, [relationList])
+  }, [streamingJobList])
 
   const mvDependency = mvDependencyCallback()
 
@@ -100,7 +100,7 @@ export default function StreamingGraph() {
           </Text>
           <Box flex={1} overflowY="scroll">
             <VStack width="full" spacing={1}>
-              {relationList?.map((r) => {
+              {streamingJobList?.map((r) => {
                 const match = router.query.id === r.id.toString()
                 return (
                   <Link href={`?id=${r.id}`} key={r.id}>

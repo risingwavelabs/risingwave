@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -34,6 +34,7 @@ static AVAILABLE_ACTION_ON_SOURCE: &[Action] = &[
 static AVAILABLE_ACTION_ON_MVIEW: &[Action] = &[Action::Select { columns: None }];
 static AVAILABLE_ACTION_ON_VIEW: &[Action] = AVAILABLE_ACTION_ON_MVIEW;
 static AVAILABLE_ACTION_ON_SINK: &[Action] = &[];
+static AVAILABLE_ACTION_ON_FUNCTION: &[Action] = &[];
 
 pub fn check_privilege_type(privilege: &Privileges, objects: &GrantObjects) -> Result<()> {
     match privilege {
@@ -113,6 +114,7 @@ pub fn available_prost_privilege(object: ProstObject) -> ProstPrivilege {
         }
         ProstObject::ViewId(_) => AVAILABLE_ACTION_ON_VIEW.to_vec(),
         ProstObject::SinkId(_) => AVAILABLE_ACTION_ON_SINK.to_vec(),
+        ProstObject::FunctionId(_) => AVAILABLE_ACTION_ON_FUNCTION.to_vec(),
     };
     let actions = actions
         .iter()

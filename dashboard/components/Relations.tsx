@@ -1,11 +1,11 @@
 /*
- * Copyright 2022 Singularity Data
+ * Copyright 2023 Singularity Data
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -44,7 +44,8 @@ export type Column<R> = {
 export function Relations<R extends Relation>(
   title: string,
   getRelations: () => Promise<R[]>,
-  extraColumns: Column<R>[] = []
+  extraColumns: Column<R>[] = [],
+  isStreamingJob: boolean = true // only show metrics and graphs for streaming jobs
 ) {
   const toast = useToast()
   const [relationList, setRelationList] = useState<R[]>([])
@@ -83,9 +84,13 @@ export function Relations<R extends Relation>(
                   {c.name}
                 </Th>
               ))}
-              <Th width={1}>Metrics</Th>
-              <Th width={1}>Depends</Th>
-              <Th width={1}>Fragments</Th>
+              {isStreamingJob && (
+                <>
+                  <Th width={1}>Metrics</Th>
+                  <Th width={1}>Depends</Th>
+                  <Th width={1}>Fragments</Th>
+                </>
+              )}
               <Th>Visible Columns</Th>
             </Tr>
           </Thead>
@@ -98,40 +103,44 @@ export function Relations<R extends Relation>(
                 {extraColumns.map((c) => (
                   <Td key={c.name}>{c.content(r)}</Td>
                 ))}
-                <Td>
-                  <Button
-                    size="sm"
-                    aria-label="view metrics"
-                    colorScheme="teal"
-                    variant="link"
-                  >
-                    M
-                  </Button>
-                </Td>
-                <Td>
-                  <Link href={`/streaming_graph/?id=${r.id}`}>
-                    <Button
-                      size="sm"
-                      aria-label="view metrics"
-                      colorScheme="teal"
-                      variant="link"
-                    >
-                      D
-                    </Button>
-                  </Link>
-                </Td>
-                <Td>
-                  <Link href={`/streaming_plan/?id=${r.id}`}>
-                    <Button
-                      size="sm"
-                      aria-label="view metrics"
-                      colorScheme="teal"
-                      variant="link"
-                    >
-                      F
-                    </Button>
-                  </Link>
-                </Td>
+                {isStreamingJob && (
+                  <>
+                    <Td>
+                      <Button
+                        size="sm"
+                        aria-label="view metrics"
+                        colorScheme="teal"
+                        variant="link"
+                      >
+                        M
+                      </Button>
+                    </Td>
+                    <Td>
+                      <Link href={`/streaming_graph/?id=${r.id}`}>
+                        <Button
+                          size="sm"
+                          aria-label="view dependents"
+                          colorScheme="teal"
+                          variant="link"
+                        >
+                          D
+                        </Button>
+                      </Link>
+                    </Td>
+                    <Td>
+                      <Link href={`/streaming_plan/?id=${r.id}`}>
+                        <Button
+                          size="sm"
+                          aria-label="view fragments"
+                          colorScheme="teal"
+                          variant="link"
+                        >
+                          F
+                        </Button>
+                      </Link>
+                    </Td>
+                  </>
+                )}
                 <Td overflowWrap="normal">
                   {r.columns
                     .filter((col) => !col.isHidden)

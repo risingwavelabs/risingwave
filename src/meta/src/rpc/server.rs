@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -117,7 +117,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     lease_interval_secs: u64,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, WatchSender<()>)> {
-    // Initialize managers.
+    // Initialize managers
     let (_, election_handle, election_shutdown, mut leader_rx) = run_elections(
         address_info.listen_addr.clone().to_string(),
         meta_store.clone(),
@@ -127,9 +127,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let mut services_leader_rx = leader_rx.clone();
     let mut note_status_leader_rx = leader_rx.clone();
-
-    // FIXME: add fencing mechanism
-    // https://github.com/risingwavelabs/risingwave/issues/6786
 
     // print current leader/follower status of this node
     tokio::spawn(async move {
@@ -157,6 +154,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     });
 
     let (svc_shutdown_tx, mut svc_shutdown_rx) = WatchChannel(());
+    let f_leader_rx = leader_rx.clone();
 
     let join_handle = tokio::spawn(async move {
         let span = tracing::span!(tracing::Level::INFO, "services");
@@ -169,8 +167,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .expect("Leader sender dropped");
 
         // run follower services until node becomes leader
-        // FIXME: Add service discovery for follower
-        // https://github.com/risingwavelabs/risingwave/issues/6755
         let svc_shutdown_rx_clone = svc_shutdown_rx.clone();
         let (follower_shutdown_tx, follower_shutdown_rx) = OneChannel::<()>();
         let follower_handle: Option<JoinHandle<()>> = if !node_is_leader(&leader_rx) {
@@ -181,6 +177,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                     svc_shutdown_rx_clone,
                     follower_shutdown_rx,
                     address_info_clone,
+                    f_leader_rx,
                 )
                 .await;
             }))
@@ -215,6 +212,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         let elect_coord = ElectionCoordination {
             election_handle,
             election_shutdown,
+            leader_rx,
         };
 
         let current_leader = services_leader_rx.borrow().0.clone();
@@ -238,19 +236,28 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 mod tests {
     use core::panic;
 
+    use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
+    use risingwave_pb::common::HostAddress;
+    use risingwave_pb::leader::LeaderRequest;
+    use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
     use tokio::time::sleep;
-    use tonic::transport::Endpoint;
+    use tonic::transport::{Channel, Endpoint};
 
     use super::*;
+    use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
+    use crate::storage::Transaction;
 
     const WAIT_INTERVAL: Duration = Duration::from_secs(5);
 
     /// Start `n` meta nodes on localhost. First node will be started at `meta_port`, 2nd node on
     /// `meta_port + 1`, ...
-    async fn setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
+    /// Call this, if you need more control over your `meta_store` in your test
+    async fn setup_n_nodes_inner(
+        n: u16,
+        meta_port: u16,
+        meta_store: &Arc<MemStore>,
+    ) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
         use std::net::{IpAddr, Ipv4Addr};
-
-        let meta_store = Arc::new(MemStore::default());
 
         let mut node_controllers: Vec<(JoinHandle<()>, WatchSender<()>)> = vec![];
         for i in 0..n {
@@ -280,6 +287,36 @@ mod tests {
         node_controllers
     }
 
+    /// wrapper for `setup_n_nodes_inner`
+    async fn setup_n_nodes(n: u16, meta_port: u16) -> Vec<(JoinHandle<()>, WatchSender<()>)> {
+        let meta_store = Arc::new(MemStore::default());
+        setup_n_nodes_inner(n, meta_port, &meta_store).await
+    }
+
+    /// Get a Channel to a meta node without re-trying the connection.
+    ///
+    /// ### Returns
+    /// Null on error, else the channel
+    async fn get_meta_channel(meta_addr: String) -> Result<Channel, tonic::transport::Error> {
+        let meta_addr_clone = meta_addr.clone();
+        let endpoint = Endpoint::from_shared(meta_addr)
+            .unwrap()
+            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
+        endpoint
+            .http2_keep_alive_interval(Duration::from_secs(60))
+            .keep_alive_timeout(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(5))
+            .connect()
+            .await
+            .inspect_err(|e| {
+                tracing::warn!(
+                    "Failed to connect to meta server {}, wait for online: {}",
+                    meta_addr_clone,
+                    e
+                );
+            })
+    }
+
     /// Check for `number_of_nodes` meta leader nodes, starting at `meta_port`, `meta_port + 1`, ...
     /// Simulates `number_of_nodes` compute nodes, starting at `meta_port`, `meta_port + 1`, ...
     ///
@@ -287,10 +324,8 @@ mod tests {
     /// Number of nodes which currently are leaders. Number is not snapshoted. If there is a
     /// leader failover in process, you may get an incorrect result
     async fn number_of_leaders(number_of_nodes: u16, meta_port: u16, host_port: u16) -> u16 {
-        use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
         use risingwave_common::util::addr::HostAddr;
-        use risingwave_pb::common::{HostAddress, WorkerType};
-        use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
+        use risingwave_pb::common::WorkerType;
         use risingwave_pb::meta::AddWorkerNodeRequest;
 
         let mut leader_count = 0;
@@ -303,27 +338,16 @@ mod tests {
                 port: host_port + i,
             };
 
-            let endpoint = Endpoint::from_shared(meta_addr.to_string())
-                .unwrap()
-                .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
-            let channel = endpoint
-                .http2_keep_alive_interval(Duration::from_secs(60))
-                .keep_alive_timeout(Duration::from_secs(60))
-                .connect_timeout(Duration::from_secs(5))
-                .connect()
-                .await
-                .inspect_err(|e| {
-                    tracing::warn!(
-                        "Failed to connect to meta server {}, wait for online: {}",
-                        meta_addr,
-                        e
-                    );
-                })
-                .unwrap();
+            // check if node is leader
+            // Only leader nodes support adding worker nodes
+            let channel = match get_meta_channel(meta_addr).await {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let cluster_client = ClusterServiceClient::new(channel);
 
             // check if node is leader
             // Only leader nodes support adding worker nodes
-            let cluster_client = ClusterServiceClient::new(channel);
             let resp = cluster_client
                 .to_owned()
                 .add_worker_node(AddWorkerNodeRequest {
@@ -336,9 +360,7 @@ mod tests {
                 })
                 .await;
 
-            if resp.is_ok() {
-                leader_count += 1;
-            }
+            leader_count += resp.is_ok() as u16;
         }
         leader_count
     }
@@ -390,6 +412,179 @@ mod tests {
         }
     }
 
+    /// Get the current leader as reported by this node
+    ///
+    /// ## Return
+    /// None if it can not reach the node at localhost: `meta_port`, else the reported leader
+    /// address
+    async fn get_leader_addr(meta_port: u16) -> Option<HostAddress> {
+        use risingwave_pb::leader::leader_service_client::LeaderServiceClient;
+
+        let port = meta_port;
+        let meta_addr = format!("http://127.0.0.1:{}", port);
+
+        let channel = match get_meta_channel(meta_addr).await {
+            Ok(c) => c,
+            Err(_) => return None,
+        };
+        let leader_client = LeaderServiceClient::new(channel);
+        let reported_leader_addr: HostAddress = leader_client
+            .to_owned()
+            .leader(LeaderRequest {})
+            .await
+            .unwrap()
+            .into_inner()
+            .leader_addr
+            .expect("Node should always know who leader is");
+        Some(reported_leader_addr)
+    }
+
+    /// Ping leader service for `number_of_nodes` meta leader nodes, starting at `meta_port`,
+    /// `meta_port + 1`, ...
+    ///
+    /// ## Returns
+    /// The leader node on which all meta nodes agree
+    /// Panics if not all nodes agree
+    /// Not snapshotted. If there is a leader failover in process, you may get an incorrect result
+    ///
+    /// ## Arguments
+    /// Will query `number_of_nodes` meta nodes, starting at localhost `meta_port`.
+    /// Skips nodes that cannot be reached
+    async fn get_agreed_leader(number_of_nodes: u16, meta_port: u16) -> HostAddress {
+        let mut reported_leader_addr: Vec<HostAddress> = vec![];
+        for i in 0..number_of_nodes {
+            if let Some(leader_addr) = get_leader_addr(meta_port + i).await {
+                reported_leader_addr.push(leader_addr);
+            }
+        }
+        reported_leader_addr.dedup();
+        assert_eq!(
+            1,
+            reported_leader_addr.len(),
+            "Iteration 0: All nodes should agree on who leader is. Instead we got the following leaders {:?}",
+            reported_leader_addr
+        );
+        reported_leader_addr.first().unwrap().clone()
+    }
+
+    /// Adding nodes should not cause leader failover
+    #[tokio::test]
+    async fn test_leader_svc_add_nodes() {
+        let number_of_nodes = 2;
+        let meta_port = 1300;
+        let node_controllers_1 = setup_n_nodes(number_of_nodes, meta_port).await;
+        let original_leader = get_agreed_leader(number_of_nodes, meta_port).await;
+
+        // add nodes
+        let node_controllers_2 =
+            setup_n_nodes(number_of_nodes, meta_port + number_of_nodes + 1).await;
+        assert_eq!(
+            original_leader,
+            get_agreed_leader(number_of_nodes, meta_port).await,
+            "1: Leader should stay the same if nodes are added"
+        );
+
+        // shut down all nodes
+        for c in [node_controllers_1, node_controllers_2] {
+            for (join_handle, shutdown_tx) in c {
+                if shutdown_tx.send(()).is_ok() {
+                    join_handle.await.unwrap();
+                }
+            }
+        }
+    }
+
+    /// Deletes all leader nodes one after another
+    /// Asserts that all nodes agree on who leader is
+    /// Gets next leader to delete by using leader service from nodes
+    #[tokio::test]
+    async fn test_leader_svc_delete_everything() {
+        let number_of_nodes = 5;
+        let meta_port = 1250;
+        let node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
+
+        // All nodes should agree on who the leader is on beginning
+        let mut current_leader = get_agreed_leader(number_of_nodes, meta_port).await;
+
+        // delete all nodes on after another
+        for _ in 1..number_of_nodes {
+            // Shutdown current reported leader
+            let leader_port = current_leader.port as u16;
+            let offset = leader_port - meta_port;
+            let _ = &node_controllers[offset as usize]
+                .1
+                .send(())
+                .expect("Sending shutdown to leader should not fail");
+            sleep(WAIT_INTERVAL).await;
+
+            // Check if all nodes agree on who leader is
+            current_leader = get_agreed_leader(number_of_nodes, meta_port).await;
+        }
+
+        // assert that we still have 1 leader
+        let leader_count = number_of_leaders(number_of_nodes, meta_port, 2350).await;
+        assert_eq!(
+            leader_count, 1,
+            "After test: Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
+
+        for (join_handle, shutdown_tx) in node_controllers {
+            if shutdown_tx.send(()).is_ok() {
+                join_handle.await.unwrap();
+            }
+        }
+    }
+
+    /// Deletes all leader nodes one after another by triggering fencing
+    /// Asserts that all nodes agree on who leader is
+    /// Gets next leader to delete by using leader service from nodes
+    #[tokio::test]
+    async fn test_leader_svc_fence_everything() {
+        let number_of_nodes = 4;
+        let meta_port = 2250;
+        let meta_store = Arc::new(MemStore::default());
+        let node_controllers = setup_n_nodes_inner(number_of_nodes, meta_port, &meta_store).await;
+
+        // All nodes should agree on who the leader is on beginning
+        let _ = get_agreed_leader(number_of_nodes, meta_port).await;
+
+        // delete nodes by triggering fencing
+        for (delete_leader, delete_lease) in &[(true, true), (true, false), (false, true)] {
+            // trigger fencing on the current leader
+            let mut txn = Transaction::default();
+            if *delete_leader {
+                txn.delete(
+                    META_CF_NAME.to_string(),
+                    META_LEADER_KEY.as_bytes().to_vec(),
+                );
+            }
+            if *delete_lease {
+                txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
+            }
+            meta_store.txn(txn).await.unwrap();
+            sleep(WAIT_INTERVAL).await;
+
+            // Check if all nodes agree on who leader is
+            let _ = get_agreed_leader(number_of_nodes, meta_port).await;
+        }
+
+        // assert that we still have 1 leader
+        let leader_count = number_of_leaders(number_of_nodes, meta_port, 1000).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader, instead got {} leaders",
+            leader_count
+        );
+
+        // send shutdown to all nodes. There should only be one more node left
+        for (join_handle, shutdown_tx) in node_controllers {
+            if shutdown_tx.send(()).is_ok() {
+                join_handle.await.unwrap();
+            }
+        }
+    }
+
     /// returns number of leaders after failover
     async fn test_failover(number_of_nodes: u16, meta_port: u16, compute_port: u16) -> u16 {
         let node_controllers = setup_n_nodes(number_of_nodes, meta_port).await;
@@ -413,8 +608,9 @@ mod tests {
         // skipping first meta_port, since that node was former leader and got killed
         let leaders = number_of_leaders(number_of_nodes - 1, meta_port + 1, compute_port).await;
         for (join_handle, shutdown_tx) in node_controllers {
-            let _ = shutdown_tx.send(());
-            join_handle.await.unwrap();
+            if shutdown_tx.send(()).is_ok() {
+                join_handle.await.unwrap();
+            }
         }
         leaders
     }
@@ -437,5 +633,56 @@ mod tests {
             "Expected to have 1 leader, instead got {} leaders",
             leader_count
         );
+    }
+
+    /// Creates `number_of_nodes` meta nodes
+    /// Deletes leader and or lease `number_of_nodes` times
+    /// After each deletion asserts that we have the correct number of leader nodes
+    #[tokio::test]
+    async fn test_fencing() {
+        let meta_port = 1600;
+        let compute_port = 1700;
+        let number_of_nodes = 4;
+
+        let meta_store = Arc::new(MemStore::default());
+        let vec_meta_handlers = setup_n_nodes_inner(number_of_nodes, meta_port, &meta_store).await;
+
+        // we should have 1 leader on startup
+        let leader_count = number_of_leaders(number_of_nodes, meta_port, compute_port).await;
+        assert_eq!(
+            leader_count, 1,
+            "Expected to have 1 leader at beginning, instead got {} leaders",
+            leader_count
+        );
+
+        let del = vec![(true, true), (true, false), (false, true)];
+
+        for (delete_leader, delete_lease) in del {
+            // delete leader/lease info in meta store
+            let mut txn = Transaction::default();
+            if delete_leader {
+                txn.delete(
+                    META_CF_NAME.to_string(),
+                    META_LEADER_KEY.as_bytes().to_vec(),
+                );
+            }
+            if delete_lease {
+                txn.delete(META_CF_NAME.to_string(), META_LEASE_KEY.as_bytes().to_vec());
+            }
+            meta_store.txn(txn).await.unwrap();
+            sleep(WAIT_INTERVAL).await;
+
+            // assert that we still have 1 leader
+            let leader_count = number_of_leaders(number_of_nodes, meta_port, compute_port).await;
+            assert_eq!(
+                leader_count, 1,
+                "Expected to have 1 leader, instead got {} leaders",
+                leader_count
+            );
+        }
+
+        for ele in vec_meta_handlers {
+            ele.0.abort();
+        }
     }
 }

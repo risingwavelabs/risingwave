@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,7 +24,6 @@ use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ParallelUnitId, VirtualNode};
-use risingwave_common::util::prost::is_stream_source;
 use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -467,8 +466,9 @@ where
 
             if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
                 let stream_node = fragment.actors.first().unwrap().get_nodes().unwrap();
-                let source_node = TableFragments::find_source_node(stream_node).unwrap();
-                if is_stream_source(source_node) {
+                let source_node =
+                    TableFragments::find_source_node_with_stream_source(stream_node).unwrap();
+                if source_node.source_inner.is_some() {
                     stream_source_fragment_ids.insert(*fragment_id);
                 }
             }

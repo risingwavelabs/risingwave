@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -350,33 +350,31 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             dt @ DataType::Date
             | dt @ DataType::Time
             | dt @ DataType::Timestamp
-            | dt @ DataType::Timestampz
+            | dt @ DataType::Timestamptz
             | dt @ DataType::Interval
             | dt @ DataType::Bytea,
             scalar,
         ) => {
             json!(scalar.to_text_with_type(&dt))
         }
-        (DataType::List { .. }, ScalarRefImpl::List(list_ref)) => {
-            let mut vec = Vec::with_capacity(field.sub_fields.len());
-            for (sub_datum_ref, sub_field) in list_ref
-                .values_ref()
-                .into_iter()
-                .zip_eq(field.sub_fields.iter())
-            {
-                let value = datum_to_json_object(sub_field, sub_datum_ref)?;
+        (DataType::List { datatype }, ScalarRefImpl::List(list_ref)) => {
+            let mut vec = Vec::with_capacity(list_ref.values_ref().len());
+            let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
+            for sub_datum_ref in list_ref.values_ref() {
+                let value = datum_to_json_object(&inner_field, sub_datum_ref)?;
                 vec.push(value);
             }
             json!(vec)
         }
-        (DataType::Struct { .. }, ScalarRefImpl::Struct(struct_ref)) => {
-            let mut map = Map::with_capacity(field.sub_fields.len());
-            for (sub_datum_ref, sub_field) in struct_ref
-                .fields_ref()
-                .into_iter()
-                .zip_eq(field.sub_fields.iter())
-            {
-                let value = datum_to_json_object(sub_field, sub_datum_ref)?;
+        (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
+            let mut map = Map::with_capacity(st.fields.len());
+            for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq(
+                st.fields
+                    .iter()
+                    .zip_eq(st.field_names.iter())
+                    .map(|(dt, name)| Field::with_name(dt.clone(), name)),
+            ) {
+                let value = datum_to_json_object(&sub_field, sub_datum_ref)?;
                 map.insert(sub_field.name.clone(), value);
             }
             json!(map)

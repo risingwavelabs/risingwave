@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -134,6 +134,7 @@ async fn compaction_test(
         table_type: 0,
         append_only: false,
         row_id_index: None,
+        version: None,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -165,7 +166,7 @@ async fn compaction_test(
         },
     );
     hummock_manager_ref
-        .init_metadata_for_replay(
+        .init_metadata_for_version_replay(
             vec![delete_key_table, delete_range_table],
             vec![group1, group2],
         )
@@ -341,7 +342,7 @@ async fn run_compare_result(
 
 struct NormalState {
     storage: LocalHummockStorage,
-    cache: BTreeMap<Vec<u8>, StorageValue>,
+    cache: BTreeMap<Bytes, StorageValue>,
     table_id: TableId,
     epoch: u64,
 }
@@ -388,7 +389,7 @@ impl NormalState {
     ) -> Result<(), String> {
         let data = std::mem::take(&mut self.cache)
             .into_iter()
-            .map(|(key, val)| (Bytes::from(key), val))
+            .map(|(key, val)| (key, val))
             .collect_vec();
         self.storage
             .ingest_batch(
@@ -462,20 +463,20 @@ impl NormalState {
             let tkey = full_key.user_key.table_key.0.clone();
             if let Some(cache_val) = self.cache.get(&tkey) {
                 if cache_val.user_value.is_some() {
-                    ret.push((Bytes::from(tkey), cache_val.user_value.clone().unwrap()));
+                    ret.push((tkey, cache_val.user_value.clone().unwrap()));
                 } else {
                     continue;
                 }
             } else {
-                ret.push((Bytes::from(tkey), val));
+                ret.push((tkey, val));
             }
         }
         for (key, val) in self.cache.range((
-            Bound::Included(left.to_vec()),
-            Bound::Excluded(right.to_vec()),
+            Bound::Included(Bytes::from(left.to_vec())),
+            Bound::Excluded(Bytes::from(right.to_vec())),
         )) {
             if let Some(uval) = val.user_value.as_ref() {
-                ret.push((Bytes::from(key.clone()), uval.clone()));
+                ret.push((key.clone(), uval.clone()));
             }
         }
         ret.sort_by(|a, b| a.0.cmp(&b.0));
@@ -487,7 +488,7 @@ impl NormalState {
 impl CheckState for NormalState {
     async fn delete_range(&mut self, left: &[u8], right: &[u8]) {
         self.cache
-            .retain(|key, _| key.as_slice().lt(left) || key.as_slice().ge(right));
+            .retain(|key: &Bytes, _| key.as_ref().lt(left) || key.as_ref().ge(right));
         let mut iter = Box::pin(
             self.storage
                 .iter(
@@ -516,8 +517,10 @@ impl CheckState for NormalState {
     }
 
     fn insert(&mut self, key: &[u8], val: &[u8]) {
-        self.cache
-            .insert(key.to_vec(), StorageValue::new_put(val.to_vec()));
+        self.cache.insert(
+            Bytes::from(key.to_vec()),
+            StorageValue::new_put(val.to_vec()),
+        );
     }
 
     async fn get(&self, key: &[u8]) -> Option<Bytes> {

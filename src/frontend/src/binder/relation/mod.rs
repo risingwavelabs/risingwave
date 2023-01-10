@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
+use std::ops::Deref;
 use std::str::FromStr;
 
 use itertools::Itertools;
@@ -33,14 +34,16 @@ use crate::catalog::system_catalog::pg_catalog::{
 use crate::expr::{Expr, ExprImpl, InputRef, TableFunction, TableFunctionType};
 
 mod join;
+mod share;
 mod subquery;
 mod table_or_source;
 mod watermark;
 mod window_table_function;
 
 pub use join::BoundJoin;
+pub use share::BoundShare;
 pub use subquery::BoundSubquery;
-pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable, BoundTableSource};
+pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable};
 pub use watermark::BoundWatermark;
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
@@ -58,6 +61,7 @@ pub enum Relation {
     WindowTableFunction(Box<BoundWindowTableFunction>),
     TableFunction(Box<TableFunction>),
     Watermark(Box<BoundWatermark>),
+    Share(Box<BoundShare>),
 }
 
 impl Relation {
@@ -256,10 +260,10 @@ impl Binder {
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
-        if schema_name.is_none() && let Some(bound_query) = self.cte_to_relation.get(&table_name) {
+        if schema_name.is_none() && let Some(item) = self.context.cte_to_relation.get(&table_name) {
             // Handles CTE
 
-            let (query, mut original_alias) = bound_query.clone();
+            let (share_id, query, mut original_alias) = item.deref().clone();
             debug_assert_eq!(original_alias.name.real_value(), table_name); // The original CTE alias ought to be its table name.
 
             if let Some(from_alias) = alias {
@@ -279,10 +283,14 @@ impl Binder {
                     .fields
                     .iter()
                     .map(|f| (false, f.clone())),
-                table_name,
+                table_name.clone(),
                 Some(original_alias),
             )?;
-            Ok(Relation::Subquery(Box::new(BoundSubquery { query })))
+
+            // Share the CTE.
+            let input_relation = Relation::Subquery(Box::new(BoundSubquery { query }));
+            let share_relation = Relation::Share(Box::new(BoundShare { share_id, input: input_relation }));
+            Ok(share_relation)
         } else {
 
             self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias)

@@ -16,7 +16,8 @@ profile:
 
   # The default configuration will start 1 compute node, 1 meta node and 1 frontend.
   default:
-    config-path: src/config/default.toml
+    # Specify a configuration file to override the default settings
+    # config-path: src/config/example.toml
     steps:
       # If you want to use the local s3 storage, enable the following line
       # - use: minio
@@ -68,7 +69,6 @@ profile:
 
   # The minimum config to use with risectl.
   for-ctl:
-    config-path: src/config/default.toml
     steps:
       - use: minio
       - use: meta-node
@@ -132,7 +132,6 @@ profile:
         persist-data: true
 
   3etcd-3meta-1cn-1fe:
-    config-path: src/config/default.toml
     steps:
       - use: etcd
         unsafe-no-fsync: true
@@ -163,62 +162,6 @@ profile:
         exporter-port: 21250
       - use: compute-node
       - use: frontend
-
-  ##########################################
-  ### Configuration used for ./risedev p ###
-  ##########################################
-
-  playground:
-    config-path: src/config/playground.toml
-    steps:
-      - use: meta-node
-      - use: compute-node
-        total-memory-bytes: 2147483648
-        parallelism: 2
-      - use: frontend
-
-  playground-3cn:
-    config-path: src/config/playground.toml
-    steps:
-      - use: meta-node
-      - use: compute-node
-        port: 5687
-        exporter-port: 1222
-      - use: compute-node
-        port: 5688
-        exporter-port: 1223
-      - use: compute-node
-        port: 5689
-        exporter-port: 1224
-      - use: frontend
-      - use: compactor
-
-  docker-playground:
-    config-path: src/config/default.toml
-    steps:
-      - use: meta-node
-        listen-address: "0.0.0.0"
-        address: "127.0.0.1"
-      - use: compute-node
-        listen-address: "0.0.0.0"
-        address: "127.0.0.1"
-      - use: frontend
-        listen-address: "0.0.0.0"
-        address: "127.0.0.1"
-
-  # The profile for the online playground
-  online-docker-playground:
-    config-path: src/config/playground.toml
-    steps:
-      - use: meta-node
-        listen-address: "0.0.0.0"
-        address: "127.0.0.1"
-      - use: compute-node
-        listen-address: "0.0.0.0"
-        address: "127.0.0.1"
-      - use: frontend
-        listen-address: "0.0.0.0"
-        address: "127.0.0.1"
 
   ######################################
   ### Configurations used in Compose ###
@@ -697,6 +640,9 @@ template:
 
     # Id of this instance
     id: meta-node-${port}
+
+    # RPC endpoint for connector node colocated with Meta
+    connector-rpc-endpoint: "127.0.0.1:60061"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false

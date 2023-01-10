@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,9 +29,12 @@ mod expr_is_null;
 mod expr_literal;
 mod expr_nested_construct;
 mod expr_quaternary_bytes;
-mod expr_regexp;
+pub mod expr_regexp;
+mod expr_some_all;
 mod expr_ternary_bytes;
 mod expr_to_char_const_tmpl;
+mod expr_to_timestamp_const_tmpl;
+mod expr_udf;
 pub mod expr_unary;
 mod expr_vnode;
 mod template;
@@ -46,6 +49,8 @@ pub use expr_literal::*;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common::{bail, try_match_expand};
+use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::ExprNode;
 
 use super::Result;
@@ -58,6 +63,7 @@ use crate::expr::expr_field::FieldExpression;
 use crate::expr::expr_in::InExpression;
 use crate::expr::expr_nested_construct::NestedConstructExpression;
 use crate::expr::expr_regexp::RegexpMatchExpression;
+use crate::expr::expr_udf::UdfExpression;
 use crate::expr::expr_vnode::VnodeExpression;
 use crate::ExprError;
 
@@ -113,6 +119,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             build_nullable_binary_expr_prost(prost)
         }
         ToChar => build_to_char_expr(prost),
+        ToTimestamp1 => build_to_timestamp_expr(prost),
         Length => build_length_expr(prost),
         Replace => build_replace_expr(prost),
         Like => build_like_expr(prost),
@@ -129,6 +136,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         DateTrunc => build_date_trunc_expr(prost),
 
         // Dedicated types
+        All | Some => build_some_all_expr_prost(prost),
         In => InExpression::try_from(prost).map(Expression::boxed),
         Case => CaseExpression::try_from(prost).map(Expression::boxed),
         Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
@@ -146,6 +154,17 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             ArrayConcatExpression::try_from(prost).map(Expression::boxed)
         }
         Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
+        Now => {
+            let rex_node = try_match_expand!(prost.get_rex_node(), Ok)?;
+            let RexNode::FuncCall(func_call_node) = rex_node else {
+                bail!("Expected RexNode::FuncCall in Now");
+            };
+            let Option::Some(bind_timestamp) = func_call_node.children.first() else {
+                bail!("Expected epoch timestamp bound into Now");
+            };
+            LiteralExpression::try_from(bind_timestamp).map(Expression::boxed)
+        }
+        Udf => UdfExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",
             prost.get_expr_type()

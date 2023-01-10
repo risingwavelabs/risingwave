@@ -137,3 +137,33 @@ select l.len, count(*) > 2*10 from (select length(s1.c1) as len from s1) as l gr
 
 statement ok
 drop source s1;
+
+statement ok
+create materialized source s1 (v1 struct<v2 int> [], c1 varchar []) with (
+    connector = 'datagen',
+    fields.v1.length = '2',
+    fields.v1._.v2.kind = 'random',
+    fields.v1._.v2.min = '1',
+    fields.v1._.v2.max = '2',
+    fields.v1._.v2.seed = '1',
+    fields.c1.length = '3',
+    fields.c1._.kind = 'random',
+    fields.c1._.length = '1',
+    fields.c1._.seed = '3',
+    datagen.rows.per.second = '10',
+    datagen.split.num = '5'
+) row format json;
+
+# Wait enough time to ensure Datagen connector generate data
+sleep 2s
+
+statement ok
+flush;
+
+query T
+select count(*) > 10 from s1;
+----
+t
+
+statement ok
+drop source s1;

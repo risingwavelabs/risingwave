@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,7 @@ use risingwave_common::array::ListValue;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
@@ -28,7 +28,7 @@ use crate::binder::bind_context::Clause;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal, OrderBy, Subquery, SubqueryKind,
-    TableFunction, TableFunctionType, WindowFunction, WindowFunctionType,
+    TableFunction, TableFunctionType, UserDefinedFunction, WindowFunction, WindowFunctionType,
 };
 use crate::utils::Condition;
 
@@ -96,6 +96,23 @@ impl Binder {
             return Ok(TableFunction::new(function_type, inputs)?.into());
         }
 
+        // user defined function
+        // TODO: resolve schema name
+        if let Some(func) = self
+            .catalog
+            .first_valid_schema(
+                &self.db_name,
+                &self.search_path,
+                &self.auth_context.user_name,
+            )?
+            .get_function_by_name_args(
+                &function_name,
+                &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
+            )
+        {
+            return Ok(UserDefinedFunction::new(func.clone(), inputs).into());
+        }
+
         // normal function
         let mut inputs = inputs;
         let function_type = match function_name.as_str() {
@@ -127,7 +144,8 @@ impl Binder {
             "abs" => ExprType::Abs,
             "mod" => ExprType::Modulus,
             // temporal/chrono
-            "to_timestamp" => ExprType::ToTimestamp,
+            "to_timestamp" if inputs.len() == 1 => ExprType::ToTimestamp,
+            "to_timestamp" if inputs.len() == 2 => ExprType::ToTimestamp1,
             "date_trunc" => ExprType::DateTrunc,
             // string
             "substr" => ExprType::Substr,
@@ -283,13 +301,51 @@ impl Binder {
                 };
             }
             "pg_table_is_visible" => return Ok(ExprImpl::literal_bool(true)),
+            "pg_encoding_to_char" => return Ok(ExprImpl::literal_varchar("UTF8".into())),
+            "has_database_privilege" => return Ok(ExprImpl::literal_bool(true)),
+            "pg_backend_pid" if inputs.is_empty() => {
+                // FIXME: the session id is not global unique in multi-frontend env.
+                return Ok(ExprImpl::literal_int(self.session_id.0));
+            }
+            "pg_cancel_backend" => {
+                return if inputs.len() == 1 {
+                    // TODO: implement real cancel rather than just return false as an workaround.
+                    Ok(ExprImpl::literal_bool(false))
+                } else {
+                    Err(ErrorCode::ExprError(
+                        "Too many/few arguments for pg_cancel_backend()".into(),
+                    )
+                    .into())
+                };
+            }
+            "pg_terminate_backend" => {
+                return if inputs.len() == 1 {
+                    // TODO: implement real terminate rather than just return false as an
+                    // workaround.
+                    Ok(ExprImpl::literal_bool(false))
+                } else {
+                    Err(ErrorCode::ExprError(
+                        "Too many/few arguments for pg_terminate_backend()".into(),
+                    )
+                    .into())
+                };
+            }
             // internal
             "rw_vnode" => ExprType::Vnode,
             // TODO: include version/tag/commit_id
             // TODO: choose which pg version we should return.
             "version" => return Ok(ExprImpl::literal_varchar("PostgreSQL 13.9-RW".to_string())),
             // non-deterministic
-            "now" => ExprType::Now,
+            "now" => {
+                self.ensure_now_function_allowed()?;
+                if !self.in_create_mv {
+                    inputs.push(ExprImpl::from(Literal::new(
+                        Some(ScalarImpl::Int64((self.bind_timestamp_ms * 1000) as i64)),
+                        DataType::Timestamptz,
+                    )));
+                }
+                ExprType::Now
+            }
             _ => {
                 return Err(ErrorCode::NotImplemented(
                     format!("unsupported function: {:?}", function_name),
@@ -487,6 +543,22 @@ impl Binder {
                     .into());
                 }
             }
+        }
+        Ok(())
+    }
+
+    fn ensure_now_function_allowed(&self) -> Result<()> {
+        if self.in_create_mv
+            && !matches!(
+                self.context.clause,
+                Some(Clause::Where) | Some(Clause::Having)
+            )
+        {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "For creation of materialized views, `NOW()` function is only allowed in `WHERE` and `HAVING`. Found in clause: {:?}",
+                self.context.clause
+            ))
+            .into());
         }
         Ok(())
     }

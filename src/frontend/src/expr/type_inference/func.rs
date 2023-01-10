@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,7 +16,7 @@ use itertools::Itertools as _;
 use num_integer::Integer as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::struct_type::StructType;
-use risingwave_common::types::{DataType, DataTypeName};
+use risingwave_common::types::{DataType, DataTypeName, ScalarImpl};
 pub use risingwave_expr::sig::func::*;
 
 use super::{align_types, cast_ok_base, CastContext};
@@ -54,6 +54,47 @@ pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<Dat
     Ok(sig.ret_type.into())
 }
 
+pub fn infer_some_all(
+    mut func_types: Vec<ExprType>,
+    inputs: &mut Vec<ExprImpl>,
+) -> Result<DataType> {
+    let element_type = if inputs[1].is_unknown() {
+        None
+    } else if let DataType::List { datatype } = inputs[1].return_type() {
+        Some(DataTypeName::from(*datatype))
+    } else {
+        return Err(ErrorCode::BindError(
+            "op ANY/ALL (array) requires array on right side".to_string(),
+        )
+        .into());
+    };
+
+    let final_type = func_types.pop().unwrap();
+    let actuals = vec![
+        (!inputs[0].is_unknown()).then_some(inputs[0].return_type().into()),
+        element_type,
+    ];
+    let sig = infer_type_name(&FUNC_SIG_MAP, final_type, &actuals)?;
+    if DataTypeName::from(inputs[0].return_type()) != sig.inputs_type[0] {
+        inputs[0] = inputs[0].clone().cast_implicit(sig.inputs_type[0].into())?;
+    }
+    if element_type != Some(sig.inputs_type[1]) {
+        inputs[1] = inputs[1].clone().cast_implicit(DataType::List {
+            datatype: Box::new(sig.inputs_type[1].into()),
+        })?;
+    }
+
+    let inputs_owned = std::mem::take(inputs);
+    let mut func_call =
+        FunctionCall::new_unchecked(final_type, inputs_owned, sig.ret_type.into()).into();
+    while let Some(func_type) = func_types.pop() {
+        func_call = FunctionCall::new(func_type, vec![func_call])?.into();
+    }
+    let return_type = func_call.return_type();
+    *inputs = vec![func_call];
+    Ok(return_type)
+}
+
 macro_rules! ensure_arity {
     ($func:literal, $lower:literal <= | $inputs:ident | <= $upper:literal) => {
         if !($lower <= $inputs.len() && $inputs.len() <= $upper) {
@@ -84,6 +125,17 @@ macro_rules! ensure_arity {
                 "Function `{}` takes {} arguments ({} given)",
                 $func,
                 $num,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
+    ($func:literal, | $inputs:ident | <= $upper:literal) => {
+        if !($inputs.len() <= $upper) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes at most {} arguments ({} given)",
+                $func,
+                $upper,
                 $inputs.len(),
             ))
             .into());
@@ -356,11 +408,44 @@ fn infer_type_for_special(
         ExprType::RegexpMatch => {
             ensure_arity!("regexp_match", 2 <= | inputs | <= 3);
             if inputs.len() == 3 {
-                return Err(ErrorCode::NotImplemented(
-                    "flag in regexp_match".to_string(),
-                    4545.into(),
-                )
-                .into());
+                match &inputs[2] {
+                    ExprImpl::Literal(flag) => {
+                        match flag.get_data() {
+                            Some(flag) => {
+                                let ScalarImpl::Utf8(flag) = flag else {
+                                    return Err(ErrorCode::BindError(
+                                        "flag in regexp_match must be a literal string".to_string(),
+                                    ).into());
+                                };
+                                for c in flag.chars() {
+                                    if c == 'g' {
+                                        return Err(ErrorCode::InvalidInputSyntax(
+                                            "regexp_match() does not support the \"global\" option. Use the regexp_matches function instead."
+                                                .to_string(),
+                                        )
+                                        .into());
+                                    }
+                                    if !"ic".contains(c) {
+                                        return Err(ErrorCode::NotImplemented(
+                                            format!("invalid regular expression option: \"{c}\""),
+                                            None.into(),
+                                        )
+                                        .into());
+                                    }
+                                }
+                            }
+                            None => {
+                                // flag is NULL. Will return NULL.
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(ErrorCode::BindError(
+                            "flag in regexp_match must be a literal string".to_string(),
+                        )
+                        .into())
+                    }
+                }
             }
             Ok(Some(DataType::List {
                 datatype: Box::new(DataType::Varchar),
@@ -434,8 +519,8 @@ fn infer_type_for_special(
             Ok(Some(DataType::Int16))
         }
         ExprType::Now => {
-            ensure_arity!("now", | inputs | == 0);
-            Ok(Some(DataType::Timestamp))
+            ensure_arity!("now", | inputs | <= 1);
+            Ok(Some(DataType::Timestamptz))
         }
         _ => Ok(None),
     }
@@ -525,7 +610,7 @@ fn is_preferred(t: DataTypeName) -> bool {
     use DataTypeName as T;
     matches!(
         t,
-        T::Float64 | T::Boolean | T::Varchar | T::Timestampz | T::Interval
+        T::Float64 | T::Boolean | T::Varchar | T::Timestamptz | T::Interval
     )
 }
 
@@ -956,15 +1041,15 @@ mod tests {
             (
                 "`top_matches` ranks by exact count then preferred count",
                 vec![
-                    vec![T::Float64, T::Float64, T::Float64, T::Timestampz], // 0 exact 3 preferred
-                    vec![T::Float64, T::Int32, T::Float32, T::Timestamp],    // 1 exact 1 preferred
-                    vec![T::Float32, T::Float32, T::Int32, T::Timestampz],   // 1 exact 0 preferred
-                    vec![T::Int32, T::Float64, T::Float32, T::Timestampz],   // 1 exact 1 preferred
-                    vec![T::Int32, T::Int16, T::Int32, T::Timestampz], // 2 exact 1 non-castable
-                    vec![T::Int32, T::Float64, T::Float32, T::Date],   // 1 exact 1 preferred
+                    vec![T::Float64, T::Float64, T::Float64, T::Timestamptz], /* 0 exact 3 preferred */
+                    vec![T::Float64, T::Int32, T::Float32, T::Timestamp], // 1 exact 1 preferred
+                    vec![T::Float32, T::Float32, T::Int32, T::Timestamptz], // 1 exact 0 preferred
+                    vec![T::Int32, T::Float64, T::Float32, T::Timestamptz], // 1 exact 1 preferred
+                    vec![T::Int32, T::Int16, T::Int32, T::Timestamptz],   // 2 exact 1 non-castable
+                    vec![T::Int32, T::Float64, T::Float32, T::Date],      // 1 exact 1 preferred
                 ],
                 &[Some(T::Int32), Some(T::Int32), Some(T::Int32), None] as &[_],
-                Ok(&[T::Int32, T::Float64, T::Float32, T::Timestampz] as &[_]),
+                Ok(&[T::Int32, T::Float64, T::Float32, T::Timestamptz] as &[_]),
             ),
             (
                 "Rule 4e fails and Rule 4f unique.",

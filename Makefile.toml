@@ -387,7 +387,7 @@ cat <<\EOF > "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/risedev-profiles.user.ym
 # - develop the cluster with the new profiles by `./risedev dev <new-profile-name>`
 
 my-default-example:
-  config-path: src/config/default.toml
+  config-path: src/config/my_config.toml
   steps:
     - use: meta-node
     - use: compute-node
@@ -586,7 +586,7 @@ cargo build \
 category = "RiseDev - Deterministic Simulation Test"
 description = "Run unit tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
@@ -645,6 +645,18 @@ script = """
 set -e
 
 cargo run -p risingwave_simulation "$@"
+"""
+
+[tasks.sslt-build-all]
+category = "RiseDev - Deterministic Simulation End-to-end Test"
+description = "Build deterministic simulation runner and tests"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo build -p risingwave_simulation --tests "$@"
 """
 
 [tasks.sslt-cov]

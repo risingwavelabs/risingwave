@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,7 +23,6 @@ use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
-use crate::cache::LruManagerRef;
 use crate::common::table::state_table::StateTable;
 use crate::common::StreamChunkBuilder;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
@@ -31,6 +30,7 @@ use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::{Barrier, Executor, Message, PkIndices};
+use crate::task::AtomicU64Ref;
 
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
@@ -104,9 +104,7 @@ pub struct LookupExecutorParams<S: StateStore> {
 
     pub state_table: StateTable<S>,
 
-    pub lru_manager: Option<LruManagerRef>,
-
-    pub cache_size: usize,
+    pub watermark_epoch: AtomicU64Ref,
 
     pub chunk_size: usize,
 }
@@ -125,8 +123,7 @@ impl<S: StateStore> LookupExecutor<S> {
             schema: output_schema,
             column_mapping,
             state_table,
-            lru_manager,
-            cache_size,
+            watermark_epoch,
             chunk_size,
         } = params;
 
@@ -223,7 +220,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(lru_manager, cache_size),
+            lookup_cache: LookupCache::new(watermark_epoch),
             chunk_size,
         }
     }
@@ -404,17 +401,18 @@ impl<S: StateStore> LookupExecutor<S> {
                         .await?
                 }
                 false => {
-                    self.arrangement
-                        .state_table
-                        .iter_prev_epoch_with_pk_prefix(&lookup_row)
-                        .await?
+                    unreachable!("iter over prev epoch is not deprecated")
+                    // self.arrangement
+                    //     .state_table
+                    //     .iter_prev_epoch_with_pk_prefix(&lookup_row)
+                    //     .await?
                 }
             };
 
             pin_mut!(all_data_iter);
             while let Some(inner) = all_data_iter.next().await {
                 // Only need value (include storage pk).
-                let row = inner.unwrap().into_owned();
+                let row = inner.unwrap();
                 all_rows.push(row);
             }
         }

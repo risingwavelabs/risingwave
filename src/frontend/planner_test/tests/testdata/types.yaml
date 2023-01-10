@@ -15,13 +15,9 @@
 - sql: values (''::float(53));
   logical_plan: |
     LogicalValues { rows: [['':Varchar::Float64]], schema: Schema { fields: [*VALUES*_0.column_0:Float64] } }
-- sql: values (''::float(54));
-  binder_error: |-
-    Feature is not yet implemented: unsupported data type: FLOAT(54)
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: values (''::timestamp with time zone);
   logical_plan: |
-    LogicalValues { rows: [['':Varchar::Timestampz]], schema: Schema { fields: [*VALUES*_0.column_0:Timestampz] } }
+    LogicalValues { rows: [['':Varchar::Timestamptz]], schema: Schema { fields: [*VALUES*_0.column_0:Timestamptz] } }
 - sql: values (''::time with time zone);
   binder_error: |-
     Feature is not yet implemented: unsupported data type: TIME WITH TIME ZONE

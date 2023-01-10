@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -219,7 +219,7 @@ pub fn create_streaming_agg_impl(
                         timestamp,
                         StreamingMinAgg::<NaiveDateTimeArray>
                     ),
-                    (Min, timestampz, timestampz, StreamingMinAgg::<I64Array>),
+                    (Min, timestamptz, timestamptz, StreamingMinAgg::<I64Array>),
                     (Min, varchar, varchar, StreamingMinAgg::<Utf8Array>),
                     (Min, bytea, bytea, StreamingMinAgg::<BytesArray>),
                     // Max
@@ -238,7 +238,7 @@ pub fn create_streaming_agg_impl(
                         timestamp,
                         StreamingMaxAgg::<NaiveDateTimeArray>
                     ),
-                    (Max, timestampz, timestampz, StreamingMaxAgg::<I64Array>),
+                    (Max, timestamptz, timestamptz, StreamingMaxAgg::<I64Array>),
                     (Max, varchar, varchar, StreamingMaxAgg::<Utf8Array>),
                     (Max, bytea, bytea, StreamingMaxAgg::<BytesArray>),
                 ]

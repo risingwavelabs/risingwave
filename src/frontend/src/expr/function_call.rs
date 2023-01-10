@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
+use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::{ExprDisplay, ExprType};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -185,6 +185,37 @@ impl FunctionCall {
         }
     }
 
+    pub fn new_binary_op_func(
+        mut func_types: Vec<ExprType>,
+        mut inputs: Vec<ExprImpl>,
+    ) -> Result<ExprImpl> {
+        let expr_type = func_types.remove(0);
+        match expr_type {
+            ExprType::Some | ExprType::All => {
+                let ensure_return_boolean = |return_type: &DataType| {
+                    if &DataType::Boolean == return_type {
+                        Ok(())
+                    } else {
+                        Err(ErrorCode::BindError(
+                            "op ANY/ALL (array) requires operator to yield boolean".to_string(),
+                        ))
+                    }
+                };
+
+                let return_type = infer_some_all(func_types, &mut inputs)?;
+                ensure_return_boolean(&return_type)?;
+
+                Ok(FunctionCall::new_unchecked(expr_type, inputs, return_type).into())
+            }
+            ExprType::Not | ExprType::IsNotNull | ExprType::IsNull => Ok(FunctionCall::new(
+                expr_type,
+                vec![Self::new_binary_op_func(func_types, inputs)?],
+            )?
+            .into()),
+            _ => Ok(FunctionCall::new(expr_type, inputs)?.into()),
+        }
+    }
+
     pub fn decompose(self) -> (ExprType, Vec<ExprImpl>, DataType) {
         (self.func_type, self.inputs, self.return_type)
     }
@@ -208,8 +239,8 @@ impl FunctionCall {
         self.func_type
     }
 
+    /// Refer to [`ExprType`] for details.
     pub fn is_pure(&self) -> bool {
-        // See proto for details
         0 < self.func_type as i32 && self.func_type as i32 <= 600
     }
 
@@ -300,6 +331,9 @@ impl std::fmt::Debug for FunctionCallDisplay<'_> {
             }
             ExprType::BitwiseXor => {
                 explain_verbose_binary_op(f, "#", &that.inputs, self.input_schema)
+            }
+            ExprType::Now => {
+                write!(f, "{:?}", that.func_type)
             }
             _ => {
                 let func_name = format!("{:?}", that.func_type);

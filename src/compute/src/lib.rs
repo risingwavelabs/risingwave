@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,11 +17,14 @@
 #![feature(generators)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
+#![feature(result_option_inspect)]
+#![feature(allocator_api)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
 extern crate tracing;
 
+pub mod memory_management;
 pub mod rpc;
 pub mod server;
 
@@ -44,7 +47,9 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "127.0.0.1:5688")]
     pub host: String,
 
-    // Optional, we will use listen_address if not specified.
+    /// The address of the compute node's meta client.
+    ///
+    /// Optional, we will use listen_address if not specified.
     #[clap(long)]
     pub client_address: Option<String>,
 
@@ -105,7 +110,12 @@ fn validate_opts(opts: &ComputeNodeOpts) {
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
-    let total_cpu_available = total_cpu_available() as usize;
+    if opts.parallelism == 0 {
+        let error_msg = "parallelism should not be zero";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+    let total_cpu_available = total_cpu_available().ceil() as usize;
     if opts.parallelism > total_cpu_available {
         let error_msg = format!(
             "parallelism {} is larger than the total cpu available {} that can be acquired.",
@@ -157,5 +167,5 @@ fn default_total_memory_bytes() -> usize {
 }
 
 fn default_parallelism() -> usize {
-    total_cpu_available() as usize
+    total_cpu_available().ceil() as usize
 }

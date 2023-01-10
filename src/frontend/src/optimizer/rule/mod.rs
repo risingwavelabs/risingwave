@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -73,8 +73,14 @@ mod union_to_distinct_rule;
 pub use union_to_distinct_rule::*;
 mod agg_project_merge_rule;
 pub use agg_project_merge_rule::*;
+mod agg_dedup_group_key_rule;
+pub use agg_dedup_group_key_rule::*;
 mod union_merge_rule;
 pub use union_merge_rule::*;
+mod dag_to_tree_rule;
+pub use dag_to_tree_rule::*;
+mod apply_share_eliminate_rule;
+pub use apply_share_eliminate_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -85,6 +91,7 @@ macro_rules! for_all_rules {
             ,{ApplyProjectTransposeRule}
             ,{ApplyScanRule}
             ,{ApplyJoinTransposeRule}
+            ,{ApplyShareEliminateRule}
             ,{ApplyToJoinRule}
             ,{MaxOneRowEliminateRule}
             ,{DistinctAggRule}
@@ -103,6 +110,8 @@ macro_rules! for_all_rules {
             ,{UnionToDistinctRule}
             ,{AggProjectMergeRule}
             ,{UnionMergeRule}
+            ,{DagToTreeRule}
+            ,{AggDedupGroupKeyRule}
         }
     };
 }

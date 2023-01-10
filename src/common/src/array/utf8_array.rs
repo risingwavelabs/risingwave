@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,13 +16,13 @@ use std::fmt::{Display, Write};
 
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
-use super::bytes_array::{BytesWriter, PartialBytesWriter, WrittenGuard};
+use super::bytes_array::{BytesWriter, PartialBytesWriter};
 use super::{Array, ArrayBuilder, ArrayMeta, BytesArray, BytesArrayBuilder};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::Bitmap;
 
 /// `Utf8Array` is a collection of Rust Utf8 `str`s. It's a wrapper of `BytesArray`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Utf8Array {
     bytes: BytesArray,
 }
@@ -89,16 +89,6 @@ impl<'a> FromIterator<&'a str> for Utf8Array {
 }
 
 impl Utf8Array {
-    /// Retrieve the ownership of the single string value.
-    ///
-    /// Panics if there're multiple or no values.
-    #[inline]
-    pub fn into_single_value(self) -> Option<Box<str>> {
-        self.bytes
-            .into_single_value()
-            .map(|bytes| unsafe { std::str::from_boxed_utf8_unchecked(bytes) })
-    }
-
     pub fn into_bytes_array(self) -> BytesArray {
         self.bytes
     }
@@ -116,6 +106,10 @@ impl Utf8Array {
             }
         }
         builder.finish()
+    }
+
+    pub(super) fn data(&self) -> &[u8] {
+        self.bytes.data()
     }
 }
 
@@ -169,23 +163,6 @@ pub struct StringWriter<'a> {
 }
 
 impl<'a> StringWriter<'a> {
-    /// `write_ref` will consume `StringWriter` and pass the ownership of `builder` to `BytesGuard`.
-    #[inline]
-    pub fn write_ref(self, value: &str) -> WrittenGuard {
-        self.bytes.write_ref(value.as_bytes())
-    }
-
-    /// `write_from_char_iter` will consume `StringWriter` and write the characters from the `iter`.
-    ///
-    /// Prefer [`StringWriter::begin`] for writing multiple string pieces.
-    pub fn write_from_char_iter(self, iter: impl Iterator<Item = char>) -> WrittenGuard {
-        let mut writer = self.begin();
-        for c in iter {
-            writer.write_char(c).unwrap();
-        }
-        writer.finish()
-    }
-
     /// `begin` will create a `PartialStringWriter`, which allow multiple appendings to create a new
     /// record.
     pub fn begin(self) -> PartialStringWriter<'a> {
@@ -202,24 +179,16 @@ pub struct PartialStringWriter<'a> {
 }
 
 impl<'a> PartialStringWriter<'a> {
-    /// `write_ref` will append partial dirty data to `builder`.
-    /// `PartialStringWriter::write_ref` is different from `StringWriter::write_ref`
-    /// in that it allows us to call it multiple times.
-    #[inline]
-    pub fn write_ref(&mut self, value: &str) {
-        self.bytes.write_ref(value.as_bytes());
-    }
-
     /// `finish` will be called while the entire record is written.
     /// Exactly one new record was appended and the `builder` can be safely used.
-    pub fn finish(self) -> WrittenGuard {
+    pub fn finish(self) {
         self.bytes.finish()
     }
 }
 
 impl Write for PartialStringWriter<'_> {
     fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        self.write_ref(s);
+        self.bytes.write_ref(s.as_bytes());
         Ok(())
     }
 }
@@ -249,11 +218,11 @@ mod tests {
     #[test]
     fn test_utf8_partial_writer() {
         let mut builder = Utf8ArrayBuilder::new(0);
-        let _guard: WrittenGuard = {
+        {
             let writer = builder.writer();
             let mut partial_writer = writer.begin();
             for _ in 0..2 {
-                partial_writer.write_ref("ran");
+                partial_writer.write_str("ran").unwrap();
             }
             partial_writer.finish()
         };
@@ -267,31 +236,29 @@ mod tests {
     fn test_utf8_partial_writer_failed() {
         let mut builder = Utf8ArrayBuilder::new(0);
         // Write a record.
-        let _guard: WrittenGuard = {
+        {
             let writer = builder.writer();
             let mut partial_writer = writer.begin();
-            partial_writer.write_ref("Dia");
-            partial_writer.write_ref("na");
+            partial_writer.write_str("Dia").unwrap();
+            partial_writer.write_str("na").unwrap();
             partial_writer.finish()
         };
 
         // Write a record failed.
-        let _maybe_guard: Option<WrittenGuard> = {
+        {
             let writer = builder.writer();
             let mut partial_writer = writer.begin();
-            partial_writer.write_ref("Ca");
-            partial_writer.write_ref("rol");
-
+            partial_writer.write_str("Ca").unwrap();
+            partial_writer.write_str("rol").unwrap();
             // We don't finish here.
-            None
         };
 
         // Write a record.
-        let _guard: WrittenGuard = {
+        {
             let writer = builder.writer();
             let mut partial_writer = writer.begin();
-            partial_writer.write_ref("Ki");
-            partial_writer.write_ref("ra");
+            partial_writer.write_str("Ki").unwrap();
+            partial_writer.write_str("ra").unwrap();
             partial_writer.finish()
         };
 

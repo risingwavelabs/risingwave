@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
+use std::fmt::{Debug, Write};
 use std::sync::LazyLock;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::StrftimeItems;
 use ouroboros::self_referencing;
-use risingwave_common::array::{StringWriter, WrittenGuard};
 use risingwave_common::types::NaiveDateTimeWrapper;
 
 use crate::Result;
@@ -45,12 +44,12 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
     // https://www.postgresql.org/docs/current/functions-formatting.html
     static PG_PATTERNS: &[&str] = &[
         "HH24", "hh24", "HH12", "hh12", "HH", "hh", "MI", "mi", "SS", "ss", "YYYY", "yyyy", "YY",
-        "yy", "IYYY", "iyyy", "IY", "iy", "MM", "mm", "DD", "dd",
+        "yy", "IYYY", "iyyy", "IY", "iy", "MM", "mm", "Month", "Mon", "DD", "dd",
     ];
     // https://docs.rs/chrono/latest/chrono/format/strftime/index.html
     static CHRONO_PATTERNS: &[&str] = &[
         "%H", "%H", "%I", "%I", "%I", "%I", "%M", "%M", "%S", "%S", "%Y", "%Y", "%y", "%y", "%G",
-        "%G", "%g", "%g", "%m", "%m", "%d", "%d",
+        "%G", "%g", "%g", "%m", "%m", "%B", "%b", "%d", "%d",
     ];
     static AC: LazyLock<AhoCorasick> = LazyLock::new(|| {
         AhoCorasickBuilder::new()
@@ -75,12 +74,14 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
 pub fn to_char_timestamp(
     data: NaiveDateTimeWrapper,
     tmpl: &str,
-    writer: StringWriter<'_>,
-) -> Result<WrittenGuard> {
+    writer: &mut dyn Write,
+) -> Result<()> {
     let pattern = compile_pattern_to_chrono(tmpl);
-    let res = data
-        .0
-        .format_with_items(pattern.borrow_items().iter())
-        .to_string();
-    Ok(writer.write_ref(&res))
+    write!(
+        writer,
+        "{}",
+        data.0.format_with_items(pattern.borrow_items().iter())
+    )
+    .unwrap();
+    Ok(())
 }
