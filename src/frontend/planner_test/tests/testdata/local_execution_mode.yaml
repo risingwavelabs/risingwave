@@ -7,7 +7,7 @@
   batch_local_plan: |
     BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
     ├─BatchExchange { order: [], dist: Single }
-    | └─BatchScan { table: v, columns: [v.cnt], distribution: Single }
+    | └─BatchScan { table: v, columns: [v.cnt], distribution: SomeShard }
     └─BatchSimpleAgg { aggs: [count] }
       └─BatchExchange { order: [], dist: Single }
         └─BatchScan { table: t, columns: [], distribution: SomeShard }

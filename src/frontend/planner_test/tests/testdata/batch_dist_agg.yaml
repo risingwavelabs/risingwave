@@ -17,7 +17,7 @@
   batch_local_plan: |
     BatchSimpleAgg { aggs: [max(s.v)] }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchScan { table: s, columns: [s.v], distribution: Single }
+      └─BatchScan { table: s, columns: [s.v], distribution: SomeShard }
 - id: extreme_on_T
   before:
   - create_tables
@@ -165,4 +165,4 @@
     BatchProject { exprs: [max(s.v)] }
     └─BatchHashAgg { group_key: [s.k], aggs: [max(s.v)] }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchScan { table: s, columns: [s.k, s.v], distribution: Single }
+        └─BatchScan { table: s, columns: [s.k, s.v], distribution: SomeShard }
