@@ -1,0 +1,11 @@
+query I
+SELECT pg_cancel_backend(pid)
+FROM pg_stat_activity
+WHERE pid=1024;
+----
+
+query I
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE pid=1024;
+----

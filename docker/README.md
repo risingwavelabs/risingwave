@@ -1,5 +1,15 @@
 # Docker Images
 
+## Published images
+
+- `latest` on GHCR (latest nightly build): `ghcr.io/risingwavelabs/risingwave:latest` 
+- `latest` on Docker Hub (latest release): `risingwavelabs/risingwave:latest`
+- Other tags available on both GHCR and Docker Hub:
+  - `nightly-yyyyMMdd`, e.g., `nightly-20230108`
+  - `vX.Y.Z`, e.g., `v0.1.15`
+
+## Build the images
+
 The docker images for x86_64 are built with AVX2 SIMD extensions, while the images for aarch64 are built with NEON SIMD extensions. These must be available on your machine. If your machine does not support these extensions, you must build the docker image with the build-arg `simd_disabled=true`.
 
 To build the images, simply run:
@@ -17,6 +27,8 @@ docker build . -f docker/Dockerfile --build-arg simd_disabled=true
 ```
 
 from the project root and run any subsequent docker commands on the resultant image.
+
+## Use the images
 
 To ensure you are using the latest version of RisingWave image,
 
@@ -47,10 +59,12 @@ To clean all data, run:
 docker-compose down -v
 ```
 
-For RisingWave kernel hackers, we always recommend using [risedev](../src/risedevtool/README.md) to start the full cluster, instead of using docker images.
-See [CONTRIBUTING](../CONTRIBUTING.md) for more information.
+> **Note**
+>
+> For RisingWave kernel hackers, we always recommend using [risedev](../src/risedevtool/README.md) to start the full cluster, instead of using docker images.
+> See [CONTRIBUTING](../CONTRIBUTING.md) for more information.
 
-# Generate docker-compose.yml
+## Generate docker-compose.yml
 
 ```bash
 ./risedev compose

@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package catalog;
 
+import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
 
@@ -73,6 +74,18 @@ message Index {
   // The index of `InputRef` is the column index of the primary table.
   repeated expr.ExprNode index_item = 8;
   repeated int32 original_columns = 9;
+}
+
+message Function {
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+  repeated data.DataType arg_types = 5;
+  data.DataType return_type = 6;
+  string language = 7;
+  string path = 8;
+  uint32 owner = 9;
 }
 
 // See `TableCatalog` struct in frontend crate for more information.

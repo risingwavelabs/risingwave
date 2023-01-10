@@ -38,7 +38,11 @@ impl JsonParser {
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         writer.insert(|desc| {
-            simd_json_parse_value(&desc.data_type, value.get(desc.name.as_str())).map_err(|e| {
+            simd_json_parse_value(
+                &desc.data_type,
+                value.get(desc.name.to_ascii_lowercase().as_str()),
+            )
+            .map_err(|e| {
                 tracing::error!(
                     "failed to process value ({}): {}",
                     String::from_utf8_lossy(payload),

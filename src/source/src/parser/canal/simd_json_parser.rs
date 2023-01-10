@@ -82,7 +82,7 @@ impl CanalJsonParser {
                         writer.insert(|column| {
                             cannal_simd_json_parse_value(
                                 &column.data_type,
-                                v.get(column.name.as_str()),
+                                v.get(column.name.to_ascii_lowercase().as_str()),
                             )
                         })
                     })
@@ -121,14 +121,15 @@ impl CanalJsonParser {
                             // in origin canal, old only contains the changed columns but data
                             // contains all columns.
                             // in ticdc, old contains all fields
+                            let col_name_lc = column.name.to_ascii_lowercase();
                             let before_value = before
-                                .get(column.name.as_str())
-                                .or_else(|| after.get(column.name.as_str()));
+                                .get(col_name_lc.as_str())
+                                .or_else(|| after.get(col_name_lc.as_str()));
                             let before =
                                 cannal_simd_json_parse_value(&column.data_type, before_value)?;
                             let after = cannal_simd_json_parse_value(
                                 &column.data_type,
-                                after.get(column.name.as_str()),
+                                after.get(col_name_lc.as_str()),
                             )?;
                             Ok((before, after))
                         })
@@ -154,7 +155,7 @@ impl CanalJsonParser {
                         writer.delete(|column| {
                             cannal_simd_json_parse_value(
                                 &column.data_type,
-                                v.get(column.name.as_str()),
+                                v.get(column.name.to_ascii_lowercase().as_str()),
                             )
                         })
                     })

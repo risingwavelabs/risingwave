@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { DataType } from "./data";
 import { ExprNode } from "./expr";
 import {
   ColumnCatalog,
@@ -95,6 +96,18 @@ export interface Index {
    */
   indexItem: ExprNode[];
   originalColumns: number[];
+}
+
+export interface Function {
+  id: number;
+  schemaId: number;
+  databaseId: number;
+  name: string;
+  argTypes: DataType[];
+  returnType: DataType | undefined;
+  language: string;
+  path: string;
+  owner: number;
 }
 
 /** See `TableCatalog` struct in frontend crate for more information. */
@@ -636,6 +649,71 @@ export const Index = {
     message.primaryTableId = object.primaryTableId ?? 0;
     message.indexItem = object.indexItem?.map((e) => ExprNode.fromPartial(e)) || [];
     message.originalColumns = object.originalColumns?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseFunction(): Function {
+  return {
+    id: 0,
+    schemaId: 0,
+    databaseId: 0,
+    name: "",
+    argTypes: [],
+    returnType: undefined,
+    language: "",
+    path: "",
+    owner: 0,
+  };
+}
+
+export const Function = {
+  fromJSON(object: any): Function {
+    return {
+      id: isSet(object.id) ? Number(object.id) : 0,
+      schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
+      databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+      argTypes: Array.isArray(object?.argTypes) ? object.argTypes.map((e: any) => DataType.fromJSON(e)) : [],
+      returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
+      language: isSet(object.language) ? String(object.language) : "",
+      path: isSet(object.path) ? String(object.path) : "",
+      owner: isSet(object.owner) ? Number(object.owner) : 0,
+    };
+  },
+
+  toJSON(message: Function): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
+    message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
+    message.name !== undefined && (obj.name = message.name);
+    if (message.argTypes) {
+      obj.argTypes = message.argTypes.map((e) => e ? DataType.toJSON(e) : undefined);
+    } else {
+      obj.argTypes = [];
+    }
+    message.returnType !== undefined &&
+      (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
+    message.language !== undefined && (obj.language = message.language);
+    message.path !== undefined && (obj.path = message.path);
+    message.owner !== undefined && (obj.owner = Math.round(message.owner));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function>, I>>(object: I): Function {
+    const message = createBaseFunction();
+    message.id = object.id ?? 0;
+    message.schemaId = object.schemaId ?? 0;
+    message.databaseId = object.databaseId ?? 0;
+    message.name = object.name ?? "";
+    message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
+    message.returnType = (object.returnType !== undefined && object.returnType !== null)
+      ? DataType.fromPartial(object.returnType)
+      : undefined;
+    message.language = object.language ?? "";
+    message.path = object.path ?? "";
+    message.owner = object.owner ?? 0;
     return message;
   },
 };
