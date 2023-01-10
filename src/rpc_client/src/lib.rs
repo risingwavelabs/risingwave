@@ -48,7 +48,6 @@ mod hummock_meta_client;
 mod meta_client;
 // mod sink_client;
 mod stream_client;
-use std::time::Duration;
 
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::ConnectorClient;

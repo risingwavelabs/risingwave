@@ -61,7 +61,6 @@ use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
-use tower::ServiceBuilder;
 
 use crate::error::Result;
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
@@ -103,11 +102,18 @@ impl MetaClient {
             worker_id: self.worker_id(),
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
-        tokio_retry::Retry::spawn(retry_strategy, || async {
-            let request = request.clone();
-            self.inner.subscribe(request).await
-        })
-        .await
+        let mut resp = self.inner.subscribe(request.clone()).await;
+        if resp.is_err() {
+            for sleep in retry_strategy {
+                // TODO: async sleep here for sleep
+                let request = request.clone();
+                resp = self.inner.subscribe(request).await;
+                if resp.is_ok() {
+                    return resp;
+                }
+            }
+        }
+        resp
     }
 
     // TODO: Try to split up the client to have one version that is
@@ -127,12 +133,20 @@ impl MetaClient {
             worker_node_parallelism: worker_node_parallelism as u64,
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
-        let resp = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let request = request.clone();
-            grpc_meta_client.add_worker_node(request).await
-        })
-        .await?;
-        let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
+        // TODO: try to do this without a loop and instead with some functional magic
+        let mut resp = grpc_meta_client.add_worker_node(request.clone()).await;
+        if resp.is_err() {
+            for sleep in retry_strategy {
+                // TODO: async sleep here for sleep
+                let request = request.clone();
+                resp = grpc_meta_client.add_worker_node(request).await;
+                if resp.is_ok() {
+                    break;
+                }
+            }
+        }
+
+        let worker_node = resp?.node.expect("AddWorkerNodeResponse::node is empty");
         Ok(Self {
             worker_id: worker_node.id,
             worker_type,
@@ -147,11 +161,19 @@ impl MetaClient {
             host: Some(addr.to_protobuf()),
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
-        tokio_retry::Retry::spawn(retry_strategy, || async {
-            let request = request.clone();
-            self.inner.activate_worker_node(request).await
-        })
-        .await?;
+        let mut resp = self.inner.activate_worker_node(request.clone()).await;
+        if resp.is_err() {
+            for sleep in retry_strategy {
+                // TODO: async sleep here for sleep
+                let request = request.clone();
+                resp = self.inner.activate_worker_node(request).await;
+                if resp.is_ok() {
+                    break;
+                }
+            }
+        }
+        // return error if all retries failed
+        resp?;
 
         Ok(())
     }
@@ -438,7 +460,7 @@ impl MetaClient {
     ///
     /// When sending heartbeat RPC, it also carries extra info from `extra_info_sources`.
     pub fn start_heartbeat_loop(
-        meta_client: MetaClient,
+        mut meta_client: MetaClient,
         min_interval: Duration,
         max_interval: Duration,
         extra_info_sources: Vec<ExtraInfoSourceRef>,
@@ -718,7 +740,7 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_current_version(&self) -> Result<HummockVersion> {
+    async fn get_current_version(&mut self) -> Result<HummockVersion> {
         let req = GetCurrentVersionRequest::default();
         Ok(self
             .inner
