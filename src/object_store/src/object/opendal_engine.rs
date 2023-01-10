@@ -32,8 +32,6 @@ use super::{
 pub struct OpendalObjectStore {
     op: Operator,
     engine_type: EngineType,
-    namenode: String,
-    root: String,
 }
 #[derive(Clone)]
 enum EngineType {
@@ -58,8 +56,6 @@ impl OpendalObjectStore {
         Self {
             op,
             engine_type: EngineType::Hdfs,
-            namenode,
-            root: root.to_string(),
         }
     }
 
@@ -68,14 +64,10 @@ impl OpendalObjectStore {
         // Create fs backend builder.
         let mut builder = memory::Builder::default();
 
-        let root = "temp";
-        let namenode = "";
         let op: Operator = Operator::new(builder.build().unwrap());
         Self {
             op,
             engine_type: EngineType::Memory,
-            namenode: namenode.to_string(),
-            root: root.to_string(),
         }
     }
 
@@ -111,9 +103,8 @@ impl ObjectStore for OpendalObjectStore {
                 path.to_string(),
             ))),
             EngineType::Hdfs => Ok(Box::new(HdfsStreamingUploader::new(
+                self.op.clone(),
                 path.to_string(),
-                self.namenode.clone(),
-                self.root.clone(),
             ))),
         }
     }
@@ -233,18 +224,16 @@ fn find_block(obj: &Bytes, block: BlockLocation) -> ObjectResult<Bytes> {
 }
 /// Store multiple parts in a map, and concatenate them on finish.
 pub struct HdfsStreamingUploader {
+    op: Operator,
     path: String,
     buf: BytesMut,
-    namenode: String,
-    root: String,
 }
 impl HdfsStreamingUploader {
-    pub fn new(path: String, namenode: String, root: String) -> Self {
+    pub fn new(op: Operator, path: String) -> Self {
         Self {
+            op,
             path,
             buf: BytesMut::new(),
-            namenode,
-            root,
         }
     }
 }
@@ -256,19 +245,7 @@ impl StreamingUploader for HdfsStreamingUploader {
     }
 
     async fn finish(self: Box<Self>) -> ObjectResult<()> {
-        // Create fs backend builder.
-        let mut builder = hdfs::Builder::default();
-        // Set the name node for hdfs.
-        builder.name_node(&self.namenode);
-        // Set the root for hdfs, all operations will happen under this root.
-        //
-        // NOTE: the root must be absolute path.
-        builder.root(&self.root);
-
-        // `Accessor` provides the low level APIs, we will use `Operator` normally.
-        let op: Operator = Operator::new(builder.build().unwrap());
-
-        op.object(&self.path).write(self.buf).await?;
+        self.op.object(&self.path).write(self.buf).await?;
 
         Ok(())
     }

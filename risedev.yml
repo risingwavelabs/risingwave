@@ -44,7 +44,7 @@ profile:
       # - use: connector-node
 
       # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
-      - use: compactor
+      # - use: compactor
 
       # If you want to enable metrics, uncomment those two lines.
       # - use: prometheus
