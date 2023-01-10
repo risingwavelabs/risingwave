@@ -20,6 +20,8 @@ use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
 use crate::array::{ListRef, ListValue, StructRef, StructValue};
+use crate::catalog::{ColumnDesc, ColumnId};
+use crate::row::Row;
 use crate::types::struct_type::StructType;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
@@ -30,6 +32,97 @@ pub mod error;
 use error::ValueEncodingError;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
+
+enum Width {
+    Mid(u8),
+    Large(u16),
+    Extra(u32),
+}
+
+pub struct RowEncoding {
+    flag: u8,
+    non_null_datum_nums: Width,
+    non_null_column_ids: Vec<ColumnId>,
+    offsets: Vec<Width>,
+    buf: Vec<u8>,
+}
+
+impl RowEncoding {
+    pub fn new() -> Self {
+        RowEncoding {
+            flag: 0b_10000000,
+            non_null_datum_nums: Width::Mid(0),
+            non_null_column_ids: vec![],
+            offsets: vec![],
+            buf: vec![],
+        }
+    }
+
+    pub fn set_width(&mut self, non_null_column_nums: usize) {
+        self.non_null_datum_nums = match non_null_column_nums {
+            n if n <= u8::MAX as usize => {
+                self.flag &= 0b0100;
+                Width::Mid(n as u8)
+            }
+            n if n <= u16::MAX as usize => {
+                self.flag &= 0b1000;
+                Width::Large(n as u16)
+            }
+            n if n <= u32::MAX as usize => {
+                self.flag &= 0b1100;
+                Width::Extra(n as u32)
+            }
+            _ => unreachable!("the number of columns exceeds u32"),
+        }
+    }
+
+    pub fn update_non_null_datum_nums(&mut self, non_null_column_ids: Vec<ColumnId>) {
+        self.set_width(non_null_column_ids.len());
+        self.non_null_column_ids = non_null_column_ids;
+    }
+
+    pub fn encode(&mut self, datum_refs: impl Iterator<Item = impl ToDatumRef>) {
+        assert!(self.buf.is_empty(), "should not encode one RowEncoding object multiple times.");
+        let mut maybe_offset = vec![];
+        for datum in datum_refs {
+            maybe_offset.push(self.buf.len());
+            serialize_datum_into(datum, &mut self.buf);
+        }
+        match *maybe_offset.last().expect("should encode at least one column") {
+            n if n <= u8::MAX as usize => {
+                self.flag &= 0b01;
+                self.offsets = maybe_offset.iter().map(|m| Width::Mid(*m as u8)).collect_vec();
+            }
+            n if n <= u16::MAX as usize => {
+                self.flag &= 0b10;
+                self.offsets = maybe_offset.iter().map(|m| Width::Large(*m as u16)).collect_vec();
+            }
+            n if n <= u32::MAX as usize => {
+                self.flag &= 0b11;
+                self.offsets = maybe_offset.iter().map(|m| Width::Large(*m as u16)).collect_vec();
+            }
+            _ => unreachable!("encoding length exceeds u32"),
+        }
+    }
+}
+
+pub fn serialize_row_column_aware(
+    column_desc: &Vec<ColumnDesc>,
+    row: impl Row,
+    append_to: impl BufMut,
+) {
+    let encoding = encode_datums(column_desc, row.iter());
+}
+
+pub fn encode_datums(
+    column_desc: &Vec<ColumnDesc>,
+    datum_refs: impl Iterator<Item = impl ToDatumRef>,
+) -> RowEncoding {
+    let mut encoding = RowEncoding::new();
+    encoding.update_non_null_datum_nums(column_desc.iter().map(|c| c.column_id).collect_vec());
+    encoding.encode(datum_refs);
+    encoding
+}
 
 /// Serialize a datum into bytes and return (Not order guarantee, used in value encoding).
 pub fn serialize_datum(cell: impl ToDatumRef) -> Vec<u8> {
