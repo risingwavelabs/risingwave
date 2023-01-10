@@ -204,9 +204,10 @@ impl<S: StateStore> SortBuffer<S> {
             .to_owned_datum()
             .unwrap();
         let pk = row.project(&self.pk_indices).into_owned_row();
-        let (_, (row, persisted)) = self.buffer.remove_entry(&(timestamp_datum, pk)).unwrap();
-        if persisted {
-            self.state_table.delete(&row);
+        if let Some((_, (row, persisted))) = self.buffer.remove_entry(&(timestamp_datum, pk)) {
+            if persisted {
+                self.state_table.delete(&row);
+            }
         }
     }
 
