@@ -39,8 +39,9 @@
         └─LogicalProject { exprs: [t2.v2, t2.v2] }
           └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_error: |-
-    Feature is not yet implemented: stream nested-loop join
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
 - name: |
     Output indices of Dynamic Filter
     TODO: currently implemented by adding a Project, https://github.com/risingwavelabs/risingwave/issues/3419
@@ -80,8 +81,9 @@
         └─LogicalProject { exprs: [t2.v2, t2.v2] }
           └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_error: |-
-    Feature is not yet implemented: stream nested-loop join
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
 - name: Ensure error on output columns from inner
   before:
   - create_tables
@@ -93,8 +95,9 @@
     └─LogicalAgg { aggs: [max(t2.v2)] }
       └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_error: |-
-    Feature is not yet implemented: stream nested-loop join
-    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
 - name: Use Inner Join for equi condition
   before:
   - create_tables
