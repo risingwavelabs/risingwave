@@ -28,8 +28,11 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, LevelType};
+use risingwave_pb::hummock::{
+    HummockVersion, HummockVersionDelta, HummockVersionDeltas, LevelType,
+};
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{
@@ -343,11 +346,7 @@ impl LocalVersion {
             .or_insert_with(|| SharedBuffer::new(global_upload_task_size))
     }
 
-    pub fn set_pinned_version(
-        &mut self,
-        new_pinned_version: HummockVersion,
-        version_deltas: Option<Vec<HummockVersionDelta>>,
-    ) {
+    pub fn set_pinned_version(&mut self, new_pinned_version: HummockVersion) {
         let new_max_committed_epoch = new_pinned_version.max_committed_epoch;
         if self.pinned_version.max_committed_epoch() < new_max_committed_epoch {
             assert!(self
@@ -357,22 +356,7 @@ impl LocalVersion {
         }
 
         let new_pinned_version = self.pinned_version.new_pin_version(new_pinned_version);
-        match version_deltas {
-            Some(version_deltas) => {
-                let mut new_local_related_version = self.local_related_version.version();
-                for delta in version_deltas {
-                    assert_eq!(new_local_related_version.id, delta.prev_id);
-                    self.apply_version_delta_local_related(&mut new_local_related_version, &delta);
-                }
-                self.local_related_version =
-                    new_pinned_version.new_local_related_pin_version(new_local_related_version);
-            }
-            None => {
-                self.clear_committed_data(new_max_committed_epoch);
-                self.local_related_version =
-                    new_pinned_version.new_local_related_pin_version(new_pinned_version.version());
-            }
-        };
+        self.clear_committed_data(new_max_committed_epoch);
         // update pinned version
         self.pinned_version = new_pinned_version;
     }
@@ -439,6 +423,41 @@ impl LocalVersion {
         self.shared_buffer.clear();
     }
 
+    pub fn filter_local_sst(&self, version_deltas: &mut HummockVersionDeltas) {
+        let mut max_committed_epoch = self.pinned_version.max_committed_epoch();
+        for delta in &mut version_deltas.version_deltas {
+            if delta.max_committed_epoch <= max_committed_epoch {
+                continue;
+            }
+            let mut local_sst_ids = HashSet::new();
+            for (epoch, data) in &self.sync_uncommitted_data {
+                if *epoch <= delta.max_committed_epoch {
+                    if let SyncUncommittedDataStage::Synced(ssts, _) = &data.stage {
+                        for sst in ssts {
+                            local_sst_ids.insert(sst.sst_info.id);
+                        }
+                    }
+                }
+            }
+            for (_, group_deltas) in &mut delta.group_deltas {
+                for group_delta in &mut group_deltas.group_deltas {
+                    if let Some(DeltaType::IntraLevel(level_delta)) = &mut group_delta.delta_type {
+                        if level_delta.level_idx > 0
+                            || level_delta.inserted_table_infos.is_empty()
+                            || !level_delta.removed_table_ids.is_empty()
+                        {
+                            continue;
+                        }
+                        level_delta
+                            .inserted_table_infos
+                            .retain(|sst| local_sst_ids.contains(&sst.id));
+                    }
+                }
+            }
+            max_committed_epoch = delta.max_committed_epoch;
+        }
+    }
+
     pub fn clear_committed_data(
         &mut self,
         max_committed_epoch: HummockEpoch,
@@ -481,105 +500,5 @@ impl LocalVersion {
             },
             None => vec![],
         }
-    }
-
-    fn apply_version_delta_local_related(
-        &mut self,
-        version: &mut HummockVersion,
-        version_delta: &HummockVersionDelta,
-    ) {
-        assert!(version.max_committed_epoch <= version_delta.max_committed_epoch);
-        let mut compaction_group_synced_ssts =
-            if version.max_committed_epoch < version_delta.max_committed_epoch {
-                let synced_ssts = self
-                    .clear_committed_data(version_delta.max_committed_epoch)
-                    .into_iter()
-                    .flatten()
-                    .collect_vec();
-                let mut compaction_group_ssts: HashMap<_, Vec<_>> = HashMap::new();
-                let mut sst_ids = HashSet::new();
-                for LocalSstableInfo {
-                    compaction_group_id,
-                    sst_info: sst,
-                    ..
-                } in synced_ssts
-                {
-                    sst_ids.insert(sst.get_id());
-                    compaction_group_ssts
-                        .entry(compaction_group_id)
-                        .or_default()
-                        .push(sst);
-                }
-                Some((compaction_group_ssts, sst_ids))
-            } else {
-                None
-            };
-
-        for (compaction_group_id, group_deltas) in &version_delta.group_deltas {
-            let summary = summarize_group_deltas(group_deltas);
-            if let Some(group_construct) = &summary.group_construct {
-                version.levels.insert(
-                    *compaction_group_id,
-                    <Levels as HummockLevelsExt>::build_initial_levels(
-                        group_construct.get_group_config().unwrap(),
-                    ),
-                );
-                let parent_group_id = group_construct.get_parent_group_id();
-                version.init_with_parent_group(
-                    parent_group_id,
-                    *compaction_group_id,
-                    &HashSet::from_iter(group_construct.get_table_ids().iter().cloned()),
-                );
-            }
-            let has_destroy = summary.group_destroy.is_some();
-            let levels = version
-                .levels
-                .get_mut(compaction_group_id)
-                .expect("compaction group id should exist");
-
-            match &mut compaction_group_synced_ssts {
-                Some((_compaction_group_ssts, sst_ids)) => {
-                    // The version delta is generated from a `commit_epoch` call.
-                    let GroupDeltasSummary {
-                        delete_sst_levels,
-                        delete_sst_ids_set,
-                        insert_sst_level_id,
-                        insert_sub_level_id,
-                        mut insert_table_infos,
-                        ..
-                    } = summary;
-                    assert!(
-                        delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty()
-                            || has_destroy,
-                        "there should not be any sst deleted in a commit_epoch call. Epoch: {}",
-                        version_delta.max_committed_epoch
-                    );
-                    assert!(
-                        insert_sst_level_id == 0 || insert_table_infos.is_empty(),
-                        "an commit_epoch call should always insert sst into L0, but not insert to {}",
-                        insert_sst_level_id
-                    );
-                    insert_table_infos.retain(|info| sst_ids.contains(&info.id));
-                    if !insert_table_infos.is_empty() {
-                        add_new_sub_level(
-                            levels.l0.as_mut().unwrap(),
-                            insert_sub_level_id,
-                            LevelType::Overlapping,
-                            insert_table_infos,
-                        );
-                    }
-                }
-                None => {
-                    // The version delta is generated from a compaction
-                    levels.apply_compact_ssts(summary, true);
-                }
-            }
-            if has_destroy {
-                version.levels.remove(compaction_group_id);
-            }
-        }
-        version.id = version_delta.id;
-        version.max_committed_epoch = version_delta.max_committed_epoch;
-        version.safe_epoch = version_delta.safe_epoch;
     }
 }

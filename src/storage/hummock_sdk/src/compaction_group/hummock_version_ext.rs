@@ -378,7 +378,7 @@ impl HummockVersionExt for HummockVersion {
                 );
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
-                levels.apply_compact_ssts(summary, false);
+                levels.apply_compact_ssts(summary);
             }
             if has_destroy {
                 self.levels.remove(compaction_group_id);
@@ -437,7 +437,7 @@ pub trait HummockLevelsExt {
     fn get_level0(&self) -> &OverlappingLevel;
     fn get_level(&self, idx: usize) -> &Level;
     fn get_level_mut(&mut self, idx: usize) -> &mut Level;
-    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary, local_related_only: bool);
+    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary);
     fn build_initial_levels(compaction_config: &CompactionConfig) -> Levels;
 }
 
@@ -454,7 +454,7 @@ impl HummockLevelsExt for Levels {
         &mut self.levels[level_idx - 1]
     }
 
-    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary, local_related_only: bool) {
+    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary) {
         let GroupDeltasSummary {
             delete_sst_levels,
             delete_sst_ids_set,
@@ -474,7 +474,7 @@ impl HummockLevelsExt for Levels {
                 deleted = level_delete_ssts(&mut self.levels[idx], &delete_sst_ids_set) || deleted;
             }
         }
-        if local_related_only && !delete_sst_ids_set.is_empty() && !deleted {
+        if !delete_sst_ids_set.is_empty() && !deleted {
             // If no sst is deleted, the current delta will not be related to the local version.
             // Therefore, if we only care local related data, we can return without inserting the
             // ssts.
@@ -486,31 +486,12 @@ impl HummockLevelsExt for Levels {
                 let index = l0
                     .sub_levels
                     .partition_point(|level| level.sub_level_id < insert_sub_level_id);
-                if local_related_only {
-                    // Some sub level in the full hummock version may be empty in the local related
-                    // pruned version, so it's possible the level to be inserted is not found
-                    if index == l0.sub_levels.len()
-                        || l0.sub_levels[index].sub_level_id > insert_sub_level_id
-                    {
-                        // level not found, insert a new level
-                        let new_level = new_sub_level(
-                            insert_sub_level_id,
-                            LevelType::Nonoverlapping,
-                            insert_table_infos,
-                        );
-                        l0.sub_levels.insert(index, new_level);
-                    } else {
-                        // level found, add to the level.
-                        level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
-                    }
-                } else {
-                    assert!(
-                        index < l0.sub_levels.len() && l0.sub_levels[index].sub_level_id == insert_sub_level_id,
-                        "should find the level to insert into when applying compaction generated delta. sub level idx: {}",
-                        insert_sub_level_id
-                    );
-                    level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
-                }
+                assert!(
+                    index < l0.sub_levels.len() && l0.sub_levels[index].sub_level_id == insert_sub_level_id,
+                    "should find the level to insert into when applying compaction generated delta. sub level idx: {}",
+                    insert_sub_level_id
+                );
+                level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
             } else {
                 let idx = insert_sst_level_id as usize - 1;
                 level_insert_ssts(&mut self.levels[idx], insert_table_infos);
