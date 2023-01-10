@@ -17,7 +17,9 @@ use std::borrow::Borrow;
 use risingwave_common::util::addr::{leader_info_to_host_addr, HostAddr};
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::leader::leader_service_server::LeaderService;
-use risingwave_pb::leader::{LeaderRequest, LeaderResponse, Member, MemberRequest, MemberResponse};
+use risingwave_pb::leader::{
+    LeaderRequest, LeaderResponse, Member, MembersRequest, MembersResponse,
+};
 use risingwave_pb::meta::MetaLeaderInfo;
 use tonic::{Request, Response, Status};
 
@@ -64,8 +66,8 @@ impl LeaderService for LeaderServiceImpl {
 
     async fn members(
         &self,
-        _request: Request<MemberRequest>,
-    ) -> Result<Response<MemberResponse>, Status> {
+        _request: Request<MembersRequest>,
+    ) -> Result<Response<MembersResponse>, Status> {
         let members = if let Some(election_client) = self.election_client.borrow() {
             let mut members = vec![];
             for member in election_client.get_members().await? {
@@ -91,6 +93,6 @@ impl LeaderService for LeaderServiceImpl {
             }]
         };
 
-        Ok(Response::new(MemberResponse { members }))
+        Ok(Response::new(MembersResponse { members }))
     }
 }

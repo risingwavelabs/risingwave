@@ -10,18 +10,18 @@ message LeaderResponse {
   common.HostAddress leader_addr = 1;
 }
 
-message MemberRequest {}
+message MembersRequest {}
 
 message Member {
   common.HostAddress member_addr = 1;
   int64 lease_id = 2;
 }
 
-message MemberResponse {
+message MembersResponse {
   repeated Member members = 1;
 }
 
 service LeaderService {
   rpc Leader(LeaderRequest) returns (LeaderResponse);
-  rpc Members(MemberRequest) returns (MemberResponse);
+  rpc Members(MembersRequest) returns (MembersResponse);
 }
