@@ -15,7 +15,6 @@
 use core::time::Duration;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::future::Future;
 use std::io::Write;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -37,7 +36,6 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::{stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
-use task_stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
@@ -666,9 +664,7 @@ impl LocalStreamManagerCore {
                     None => actor.right_future(),
                 };
                 let instrumented = monitor.instrument(traced);
-                let ctx1 = actor_context.clone();
-                println!("fire a actor for create source");
-                let allocation_stated = allocation_stat_for_stream(
+                let allocation_stated = task_stats_alloc::allocation_stat(
                     instrumented,
                     Duration::from_millis(1000),
                     move |bytes| {
@@ -677,9 +673,8 @@ impl LocalStreamManagerCore {
                             .with_label_values(&[&actor_id_str])
                             .set(bytes as i64);
 
-                        actor_context.clone().store_mem_usage(bytes);
+                        actor_context.store_mem_usage(bytes);
                     },
-                    ctx1,
                 );
                 self.runtime.spawn(allocation_stated)
             };
@@ -860,42 +855,6 @@ impl LocalStreamManagerCore {
     pub fn get_watermark_epoch(&self) -> AtomicU64Ref {
         self.watermark_epoch.clone()
     }
-}
-
-pub async fn allocation_stat_for_stream<Fut, T, F>(
-    future: Fut,
-    interval: Duration,
-    mut report: F,
-    ctx: ActorContextRef,
-) -> T
-where
-    Fut: Future<Output = T>,
-    F: FnMut(usize),
-{
-    BYTES_ALLOCATED
-        .scope(TaskLocalBytesAllocated::new(), async move {
-            // The guard has the same lifetime as the counter so that the counter will keep positive
-            // in the whole scope. When the scope exits, the guard is released, so the counter can
-            // reach zero eventually and then `drop` itself.
-            let _guard = Box::new(114514);
-            let monitor = async move {
-                let mut interval = tokio::time::interval(interval);
-                loop {
-                    interval.tick().await;
-                    BYTES_ALLOCATED.with(|bytes| report(bytes.val()));
-                }
-            };
-            let output = tokio::select! {
-                biased;
-                _ = monitor => unreachable!(),
-                output = future => {
-                    ctx.store_mem_usage(0);
-                    output
-                },
-            };
-            output
-        })
-        .await
 }
 
 #[cfg(test)]
