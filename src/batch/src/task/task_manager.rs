@@ -223,7 +223,7 @@ impl BatchManager {
             }
             // Alternatively, we can use a bool flag to indicate end of execution.
             // Now we use only store 0 bytes in Context after execution ends.
-            let mem_usage = t.get_mem_usage();
+            let mem_usage = t.mem_usage();
             if mem_usage > max_mem {
                 max_mem = mem_usage;
                 max_mem_task_id = Some(t_id.clone());
@@ -239,7 +239,7 @@ impl BatchManager {
 
     /// Called by global memory manager for total usage of batch tasks. This op is designed to be
     /// light-weight
-    pub fn get_all_memory_usage(&self) -> usize {
+    pub fn total_mem_usage(&self) -> usize {
         self.total_mem_val.get() as usize
     }
 

@@ -89,7 +89,7 @@ impl ActorContext {
         self.cur_mem_val.store(val, Ordering::Relaxed);
     }
 
-    pub fn get_mem_usage(&self) -> usize {
+    pub fn mem_usage(&self) -> usize {
         self.cur_mem_val.load(Ordering::Relaxed)
     }
 }

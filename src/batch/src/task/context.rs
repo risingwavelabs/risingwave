@@ -62,7 +62,7 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
 
     fn store_mem_usage(&self, val: usize);
 
-    fn get_mem_usage(&self) -> usize;
+    fn mem_usage(&self) -> usize;
 }
 
 /// Batch task context on compute node.
@@ -130,7 +130,7 @@ impl BatchTaskContext for ComputeNodeContext {
         self.cur_mem_val.store(val, Ordering::Relaxed);
     }
 
-    fn get_mem_usage(&self) -> usize {
+    fn mem_usage(&self) -> usize {
         self.cur_mem_val.load(Ordering::Relaxed)
     }
 }
