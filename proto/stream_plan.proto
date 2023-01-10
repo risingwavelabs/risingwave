@@ -142,7 +142,6 @@ message SinkNode {
 }
 
 message ProjectNode {
-  // the three fields should have the same length
   repeated expr.ExprNode select_list = 1;
   // this two field is expressing a list of usize pair, which means when project receives a
   // watermark with `watermark_input_key[i]` column index, it should derive a new watermark
