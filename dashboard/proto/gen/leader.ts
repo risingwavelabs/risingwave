@@ -10,7 +10,7 @@ export interface LeaderResponse {
   leaderAddr: HostAddress | undefined;
 }
 
-export interface MemberRequest {
+export interface MembersRequest {
 }
 
 export interface Member {
@@ -18,7 +18,7 @@ export interface Member {
   leaseId: number;
 }
 
-export interface MemberResponse {
+export interface MembersResponse {
   members: Member[];
 }
 
@@ -67,22 +67,22 @@ export const LeaderResponse = {
   },
 };
 
-function createBaseMemberRequest(): MemberRequest {
+function createBaseMembersRequest(): MembersRequest {
   return {};
 }
 
-export const MemberRequest = {
-  fromJSON(_: any): MemberRequest {
+export const MembersRequest = {
+  fromJSON(_: any): MembersRequest {
     return {};
   },
 
-  toJSON(_: MemberRequest): unknown {
+  toJSON(_: MembersRequest): unknown {
     const obj: any = {};
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<MemberRequest>, I>>(_: I): MemberRequest {
-    const message = createBaseMemberRequest();
+  fromPartial<I extends Exact<DeepPartial<MembersRequest>, I>>(_: I): MembersRequest {
+    const message = createBaseMembersRequest();
     return message;
   },
 };
@@ -117,16 +117,16 @@ export const Member = {
   },
 };
 
-function createBaseMemberResponse(): MemberResponse {
+function createBaseMembersResponse(): MembersResponse {
   return { members: [] };
 }
 
-export const MemberResponse = {
-  fromJSON(object: any): MemberResponse {
+export const MembersResponse = {
+  fromJSON(object: any): MembersResponse {
     return { members: Array.isArray(object?.members) ? object.members.map((e: any) => Member.fromJSON(e)) : [] };
   },
 
-  toJSON(message: MemberResponse): unknown {
+  toJSON(message: MembersResponse): unknown {
     const obj: any = {};
     if (message.members) {
       obj.members = message.members.map((e) => e ? Member.toJSON(e) : undefined);
@@ -136,8 +136,8 @@ export const MemberResponse = {
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<MemberResponse>, I>>(object: I): MemberResponse {
-    const message = createBaseMemberResponse();
+  fromPartial<I extends Exact<DeepPartial<MembersResponse>, I>>(object: I): MembersResponse {
+    const message = createBaseMembersResponse();
     message.members = object.members?.map((e) => Member.fromPartial(e)) || [];
     return message;
   },
