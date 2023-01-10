@@ -6,20 +6,13 @@ create table t (id int);
 statement ok
 create materialized view v as select count(*) cnt from t;
 
+# FIXME(Noel): Distributed mode not debugged yet, force local mode for now.
 statement ok
 SET QUERY_MODE TO local;
 
 query I
 select * from v join (select count(*) from t) T;
 ----
-
-# FIXME(Noel): Distributed mode not debugged yet.
-# statement ok
-# SET query_mode TO distributed;
-#
-# query I
-# select * from v join (select count(*) from t) T;
-# ----
 
 statement ok
 DROP MATERIALIZED VIEW v;
