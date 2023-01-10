@@ -13,7 +13,7 @@ etcd-client = { version = "0.2.11", package = "madsim-etcd-client" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
 itertools = "0.10"
-madsim = "0.2.12"
+madsim = "0.2.13"
 paste = "1"
 rand = "0.8"
 rdkafka = { package = "madsim-rdkafka", version = "=0.2.8-alpha", features = ["cmake-build"] }

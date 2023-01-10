@@ -47,7 +47,9 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "127.0.0.1:5688")]
     pub host: String,
 
-    // Optional, we will use listen_address if not specified.
+    /// The address of the compute node's meta client.
+    ///
+    /// Optional, we will use listen_address if not specified.
     #[clap(long)]
     pub client_address: Option<String>,
 
