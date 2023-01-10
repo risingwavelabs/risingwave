@@ -46,6 +46,14 @@ macro_rules! impl_chrono_wrapper {
                 $variant_name(data)
             }
         }
+
+        impl std::str::FromStr for $variant_name {
+            type Err = chrono::ParseError;
+
+            fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+                Ok($variant_name(s.parse()?))
+            }
+        }
     };
 }
 

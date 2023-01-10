@@ -2396,6 +2396,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "gen-iter"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33ab36ccf1ed3d9c719f4c8725b34482c530f6d569c084ea762490b5e19f77bf"
+
+[[package]]
 name = "generator"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3659,6 +3665,9 @@ name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "mysql_async"
@@ -6280,6 +6289,7 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
+ "gen-iter",
  "global_stats_alloc",
  "hyper",
  "iter-chunks",
@@ -6292,6 +6302,7 @@ dependencies = [
  "memcomparable",
  "minitrace",
  "minstant",
+ "multimap",
  "num-traits",
  "parking_lot 0.12.1",
  "paste",
@@ -8343,6 +8354,7 @@ dependencies = [
  "madsim-tokio",
  "memchr",
  "minimal-lexical",
+ "multimap",
  "nom 7.1.1",
  "num-bigint",
  "num-integer",
