@@ -46,6 +46,7 @@ pub struct AvroParser {
     schema: Schema,
     schema_resolver: Option<ConfluentSchemaResolver>,
 }
+
 // confluent_wire_format, kafka only, subject-name: "${topic-name}-value"
 impl AvroParser {
     pub async fn new(
@@ -167,6 +168,20 @@ impl AvroParser {
                     datatype: Box::new(item_type),
                 }
             }
+            Schema::Union(union_schema) if union_schema.is_nullable() => {
+                let nested_schema = union_schema
+                    .variants()
+                    .iter()
+                    .find_or_first(|s| **s != Schema::Null)
+                    .ok_or_else(|| {
+                        RwError::from(InternalError(format!(
+                            "unsupported type in Avro: {:?}",
+                            union_schema
+                        )))
+                    })?;
+
+                Self::avro_type_mapping(nested_schema)?
+            }
             _ => {
                 return Err(RwError::from(InternalError(format!(
                     "unsupported type in Avro: {:?}",
@@ -199,7 +214,7 @@ impl AvroParser {
                 None => {
                     return Err(RwError::from(ProtocolError(
                         "avro parse unexpected eof".to_string(),
-                    )))
+                    )));
                 }
             }
         };
@@ -253,26 +268,26 @@ fn from_avro_value(value: Value) -> Result<Datum> {
                 millis / 1_000,
                 (millis % 1_000) as u32 * 1_000_000,
             )
-            .map_err(|e| {
-                let err_msg = format!(
-                    "avro parse error.wrong timestamp millis value {}, err {:?}",
-                    millis, e
-                );
-                RwError::from(InternalError(err_msg))
-            })?,
+                .map_err(|e| {
+                    let err_msg = format!(
+                        "avro parse error.wrong timestamp millis value {}, err {:?}",
+                        millis, e
+                    );
+                    RwError::from(InternalError(err_msg))
+                })?,
         ),
         Value::TimestampMicros(micros) => ScalarImpl::NaiveDateTime(
             NaiveDateTimeWrapper::with_secs_nsecs(
                 micros / 1_000_000,
                 (micros % 1_000_000) as u32 * 1_000,
             )
-            .map_err(|e| {
-                let err_msg = format!(
-                    "avro parse error.wrong timestamp micros value {}, err {:?}",
-                    micros, e
-                );
-                RwError::from(InternalError(err_msg))
-            })?,
+                .map_err(|e| {
+                    let err_msg = format!(
+                        "avro parse error.wrong timestamp micros value {}, err {:?}",
+                        micros, e
+                    );
+                    RwError::from(InternalError(err_msg))
+                })?,
         ),
         Value::Duration(duration) => {
             let months = u32::from(duration.months()) as i32;
@@ -295,6 +310,7 @@ fn from_avro_value(value: Value) -> Result<Datum> {
                 .collect::<Result<Vec<Datum>>>()?;
             ScalarImpl::List(ListValue::new(rw_values))
         }
+        Value::Union(_, value) => return from_avro_value(*value),
         _ => {
             let err_msg = format!("avro parse error.unsupported value {:?}", value);
             return Err(RwError::from(InternalError(err_msg)));
@@ -312,9 +328,9 @@ impl SourceParser for AvroParser {
         payload: &'b [u8],
         writer: SourceStreamChunkRowWriter<'c>,
     ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
+        where
+            'b: 'a,
+            'c: 'a,
     {
         self.parse_inner(payload, writer)
     }
@@ -328,6 +344,7 @@ mod test {
 
     use apache_avro::types::{Record, Value};
     use apache_avro::{Codec, Days, Duration, Millis, Months, Schema, Writer};
+    use itertools::Itertools;
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
@@ -399,15 +416,14 @@ mod test {
 
     #[tokio::test]
     async fn test_avro_parser() {
-        let avro_parser_rs = new_avro_parser_from_local("simple-schema.avsc").await;
-        assert!(avro_parser_rs.is_ok());
-        let avro_parser = avro_parser_rs.unwrap();
+        let avro_parser = new_avro_parser_from_local("simple-schema.avsc")
+            .await
+            .unwrap();
         let schema = &avro_parser.schema;
         let record = build_avro_data(schema);
         assert_eq!(record.fields.len(), 10);
         let mut writer = Writer::with_codec(schema, Vec::new(), Codec::Snappy);
-        let append_rs = writer.append(record.clone());
-        assert!(append_rs.is_ok());
+        writer.append(record.clone()).unwrap();
         let flush = writer.flush().unwrap();
         assert!(flush > 0);
         let input_data = writer.into_inner().unwrap();
@@ -424,7 +440,7 @@ mod test {
         for (i, field) in record.fields.iter().enumerate() {
             let value = field.clone().1;
             match value {
-                Value::String(str) => {
+                Value::String(str) | Value::Union(_, box Value::String(str)) => {
                     assert_eq!(row[i], Some(ScalarImpl::Utf8(str.into_boxed_str())));
                 }
                 Value::Boolean(bool_val) => {
@@ -454,7 +470,7 @@ mod test {
                             millis / 1000,
                             (millis % 1000) as u32 * 1_000_000,
                         )
-                        .unwrap(),
+                            .unwrap(),
                     ));
                     assert_eq!(row[i], datetime);
                 }
@@ -464,7 +480,7 @@ mod test {
                             micros / 1_000_000,
                             (micros % 1_000_000) as u32 * 1_000,
                         )
-                        .unwrap(),
+                            .unwrap(),
                     ));
                     assert_eq!(row[i], datetime);
                 }
@@ -566,7 +582,7 @@ mod test {
         } = schema.clone()
         {
             for field in &fields {
-                match field.schema {
+                match &field.schema {
                     Schema::String => {
                         record.put(field.name.as_str(), "str_value".to_string());
                     }
@@ -616,6 +632,29 @@ mod test {
                             Value::Duration(Duration::new(months, days, millis)),
                         );
                     }
+
+                    Schema::Union(union_schema) if union_schema.is_nullable() => {
+                        let inner_schema = union_schema
+                            .variants()
+                            .iter()
+                            .find_or_first(|s| s != &&Schema::Null)
+                            .unwrap();
+                        match inner_schema {
+                            Schema::Boolean => {
+                                record.put(
+                                    field.name.as_str(),
+                                    Value::Union(1, Box::new(Value::Boolean(true))),
+                                );
+                            }
+                            Schema::String => {
+                                record.put(
+                                    field.name.as_str(),
+                                    Value::Union(1, Box::new(Value::String("test".to_string()))),
+                                );
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
                     _ => {
                         unreachable!()
                     }
@@ -630,7 +669,9 @@ mod test {
         let avro_parser_rs = new_avro_parser_from_local("simple-schema.avsc")
             .await
             .unwrap();
-        println!("{:?}", avro_parser_rs.map_to_columns().unwrap());
+        let columns = avro_parser_rs.map_to_columns().unwrap();
+        assert_eq!(columns.len(), 10);
+        println!("{:?}", columns);
     }
 
     #[tokio::test]
@@ -639,5 +680,16 @@ mod test {
         assert!(avro_parser_rs.is_ok());
         let avro_parser = avro_parser_rs.unwrap();
         println!("avro_parser = {:?}", avro_parser);
+    }
+
+    #[tokio::test]
+    async fn test_avro_union_type() {
+        let avro_parser_rs = new_avro_parser_from_local("simple-schema.avsc").await;
+        // assert!(avro_parser_rs.is_ok());
+        let avro_parser = avro_parser_rs.unwrap();
+        let schema = &avro_parser.schema;
+        let mut record = Record::new(schema).unwrap();
+        record.put("name", Value::Null);
+        assert_eq!(record.fields.len(), 10)
     }
 }

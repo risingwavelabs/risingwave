@@ -14,7 +14,7 @@
     },
     {
       "name": "name",
-      "type": "string",
+      "type": ["null", "string"],
       "default": ""
     },
     {
