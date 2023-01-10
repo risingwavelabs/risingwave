@@ -70,6 +70,9 @@ pub struct MetaNodeOpts {
     host: Option<String>,
 
     #[clap(long)]
+    endpoint: Option<String>,
+
+    #[clap(long)]
     dashboard_host: Option<String>,
 
     #[clap(long)]
@@ -131,6 +134,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         tracing::info!("Starting meta node with config {:?}", config);
         tracing::info!("Starting meta node with options {:?}", opts);
         let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
+        let endpoint = opts.endpoint.unwrap_or_else(|| meta_addr.clone());
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
@@ -158,6 +162,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         tracing::info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
+            endpoint,
             addr: meta_addr,
             listen_addr,
             prometheus_addr,

@@ -255,3 +255,63 @@ impl EtcdElectionClient {
         })
     }
 }
+//
+// #[cfg(madsim)]
+// #[cfg(test)]
+// mod tests {
+//     use std::sync::Arc;
+//     use std::time::Duration;
+//
+//     use tokio::sync::watch;
+//     use tokio::time;
+//
+//     use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
+//
+//     #[tokio::test]
+//     async fn test_election() {
+//         let handle = tokio::spawn(async move {
+//             let addr = "0.0.0.0:2388".parse().unwrap();
+//             let mut builder = etcd_client::SimServer::builder();
+//             builder.serve(addr).await;
+//         });
+//
+//         let mut clients: Vec<Arc<dyn ElectionClient>> = vec![];
+//
+//         for i in 0..3 {
+//             clients.push(Arc::new(
+//                 EtcdElectionClient::new(
+//                     vec!["localhost:2388".to_string()],
+//                     None,
+//                     format!("client_{}", i).to_string(),
+//                 )
+//                 .await
+//                 .unwrap(),
+//             ));
+//         }
+//
+//         let (stop_sender, stop_receiver) = watch::channel(());
+//
+//         for client in &clients {
+//             let client_ = client.clone();
+//             let stop = stop_sender.subscribe();
+//
+//             tokio::spawn(async move {
+//                 let mut ticker = time::interval(Duration::from_secs(1));
+//                 loop {
+//                     ticker.tick().await;
+//                     client_.run_once(3, stop.clone()).await.unwrap();
+//                 }
+//             });
+//         }
+//
+//         for client in &clients {
+//             assert!(!client.is_leader().await);
+//         }
+//
+//         time::sleep(Duration::from_secs(10)).await;
+//
+//         for client in &clients {
+//             assert!(!client.is_leader().await);
+//         }
+//     }
+// }

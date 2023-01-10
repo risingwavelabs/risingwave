@@ -42,6 +42,7 @@ pub enum MetaStoreBackend {
 
 #[derive(Clone)]
 pub struct AddressInfo {
+    pub endpoint: String,
     pub addr: String,
     pub listen_addr: SocketAddr,
     pub prometheus_addr: Option<SocketAddr>,
@@ -52,6 +53,7 @@ pub struct AddressInfo {
 impl Default for AddressInfo {
     fn default() -> Self {
         Self {
+            endpoint: "".to_string(),
             addr: "127.0.0.1:0000".to_string(),
             listen_addr: SocketAddr::V4("127.0.0.1:0000".parse().unwrap()),
             prometheus_addr: None,
@@ -93,7 +95,7 @@ pub async fn rpc_serve(
                 EtcdElectionClient::new(
                     endpoints,
                     Some(options),
-                    address_info.listen_addr.clone().to_string(),
+                    address_info.endpoint.clone(),
                 )
                 .await?,
             );
