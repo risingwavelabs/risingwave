@@ -140,7 +140,7 @@ pub(crate) fn gen_create_index_plan(
     }
 
     // Manually assemble the materialization plan for the index MV.
-    let materialize = assemble_materialize(
+    let mut materialize = assemble_materialize(
         table_name,
         table_desc.clone(),
         context,
@@ -159,7 +159,9 @@ pub(crate) fn gen_create_index_plan(
     let (index_database_id, index_schema_id) =
         session.get_database_and_schema_id_for_create(Some(schema_name))?;
 
-    let index_table = materialize.table();
+    let index_table = materialize.table_mut();
+    // Inherit table properties
+    index_table.properties = table.properties.clone();
     let mut index_table_prost = index_table.to_prost(index_schema_id, index_database_id);
     index_table_prost.owner = session.user_id();
 
