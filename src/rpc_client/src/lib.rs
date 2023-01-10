@@ -48,12 +48,19 @@ mod hummock_meta_client;
 mod meta_client;
 // mod sink_client;
 mod stream_client;
+use std::time::Duration;
 
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::ConnectorClient;
 pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
 pub use meta_client::MetaClient;
+use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
+use risingwave_pb::common::HostAddress;
+use risingwave_pb::leader::leader_service_client::LeaderServiceClient;
+use risingwave_pb::leader::LeaderRequest;
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tonic::transport::{Channel, Endpoint};
 
 #[async_trait]
 pub trait RpcClient: Send + Sync + 'static + Clone {
@@ -155,6 +162,56 @@ macro_rules! rpc_client_method_impl {
                     .$fn_name(request)
                     .await?
                     .into_inner())
+            }
+        )*
+    }
+}
+
+// separate macro for connections against meta server to handle meta node failover
+#[macro_export]
+macro_rules! meta_rpc_client_method_impl {
+    ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
+        $(
+            pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
+                use risingwave_pb::leader::leader_service_client::LeaderServiceClient;
+                use risingwave_pb::common::{HostAddress};
+                use risingwave_pb::leader::LeaderRequest;
+                use crate::meta_client::get_channel;
+
+                let req_clone = request.clone();
+                let response = self
+                    .$client
+                    .to_owned()
+                    .$fn_name(request)
+                    .await;
+
+                // meta server is leader. Connection is correct
+                if response.is_ok() {
+                    return Ok(response.unwrap().into_inner());
+                }
+
+                // Invalid connection. Meta service is follower
+                let mut leader_client = LeaderServiceClient::new(self.meta_connection.clone());
+                let resp = leader_client
+                    .leader(LeaderRequest {})
+                    .await
+                    .expect("Expect that leader service always knows who leader is")
+                    .into_inner();
+
+                let leader_addr: HostAddress = resp
+                    .leader_addr
+                    .expect("Expect that leader service always knows who leader is");
+                let addr = format!(
+                    "http://{}:{}",
+                    leader_addr.get_host(),
+                    leader_addr.get_port()
+                );
+                // TODO: this has to be done with some defaults
+                let leader_channel = get_channel(addr.as_str(), 1, 1, 1, 1).await?;
+                self.meta_connection = leader_channel.clone();
+
+
+                Ok(response.unwrap().into_inner())
             }
         )*
     }

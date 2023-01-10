@@ -65,7 +65,7 @@ use tower::ServiceBuilder;
 
 use crate::error::Result;
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
-use crate::{rpc_client_method_impl, ExtraInfoSourceRef};
+use crate::{meta_rpc_client_method_impl, ExtraInfoSourceRef};
 
 type DatabaseId = u32;
 type SchemaId = u32;
@@ -894,7 +894,8 @@ impl Service<Request<BoxBody>> for MetaFailoverSvc {
         Box::pin(async move {
             // TODO: fail on failure, but still change inner?
             let response = inner.call(req).await;
-            if response.is_err() {
+            // TODO: remove MetaFailoverSvc again
+            if false && response.is_err() {
                 let mut leader_client = LeaderServiceClient::new(inner.clone());
                 let resp = leader_client
                     .leader(LeaderRequest {})
@@ -925,7 +926,7 @@ impl Service<Request<BoxBody>> for MetaFailoverSvc {
 ///
 /// ## Arguments:
 /// addr: Should consist out of protocol, IP and port
-async fn get_channel(
+pub async fn get_channel(
     addr: &str,
     max_retry_ms: u64,
     retry_base_interval: u64,
@@ -958,18 +959,23 @@ async fn get_channel(
 
 /// Client to meta server. Cloning the instance is lightweight.
 ///
-/// It is a wrapper of tonic client. See [`rpc_client_method_impl`].
+/// It is a wrapper of tonic client. See [`meta_rpc_client_method_impl`].
 #[derive(Debug, Clone)]
 struct GrpcMetaClient {
-    cluster_client: ClusterServiceClient<MetaFailoverSvc>,
-    heartbeat_client: HeartbeatServiceClient<MetaFailoverSvc>,
-    ddl_client: DdlServiceClient<MetaFailoverSvc>,
-    hummock_client: HummockManagerServiceClient<MetaFailoverSvc>,
-    notification_client: NotificationServiceClient<MetaFailoverSvc>,
-    stream_client: StreamManagerServiceClient<MetaFailoverSvc>,
-    user_client: UserServiceClient<MetaFailoverSvc>,
-    scale_client: ScaleServiceClient<MetaFailoverSvc>,
-    backup_client: BackupServiceClient<MetaFailoverSvc>,
+    // Client needs access to the channel to handle LeaderRequest during meta failover
+    meta_connection: Channel,
+
+    // TODO: alternative:
+    // leader_service: LeaderServiceClient<Channel>
+    cluster_client: ClusterServiceClient<Channel>,
+    heartbeat_client: HeartbeatServiceClient<Channel>,
+    ddl_client: DdlServiceClient<Channel>,
+    hummock_client: HummockManagerServiceClient<Channel>,
+    notification_client: NotificationServiceClient<Channel>,
+    stream_client: StreamManagerServiceClient<Channel>,
+    user_client: UserServiceClient<Channel>,
+    scale_client: ScaleServiceClient<Channel>,
+    backup_client: BackupServiceClient<Channel>,
 }
 
 impl GrpcMetaClient {
@@ -999,11 +1005,6 @@ impl GrpcMetaClient {
             Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC,
         )
         .await?;
-
-        // TODO: rename var here
-        let channel = ServiceBuilder::new()
-            .layer_fn(MetaFailoverSvc::new)
-            .service(channel);
 
         let mut leader_client = LeaderServiceClient::new(channel.clone());
         let resp = leader_client
@@ -1036,8 +1037,9 @@ impl GrpcMetaClient {
         let stream_client = StreamManagerServiceClient::new(channel.clone());
         let user_client = UserServiceClient::new(channel.clone());
         let scale_client = ScaleServiceClient::new(channel.clone());
-        let backup_client = BackupServiceClient::new(channel);
+        let backup_client = BackupServiceClient::new(channel.clone());
         Ok(Self {
+            meta_connection: channel,
             cluster_client,
             heartbeat_client,
             ddl_client,
@@ -1134,5 +1136,5 @@ macro_rules! for_all_meta_rpc {
 }
 
 impl GrpcMetaClient {
-    for_all_meta_rpc! { rpc_client_method_impl }
+    for_all_meta_rpc! { meta_rpc_client_method_impl }
 }
