@@ -59,6 +59,8 @@ pub struct StreamingMetrics {
     pub agg_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub agg_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub agg_cached_keys: GenericGaugeVec<AtomicI64>,
+    pub agg_chunk_lookup_miss_count: GenericCounterVec<AtomicU64>,
+    pub agg_chunk_total_lookup_count: GenericCounterVec<AtomicU64>,
 
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
@@ -337,6 +339,22 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let agg_chunk_lookup_miss_count = register_int_counter_vec_with_registry!(
+            "stream_agg_chunk_lookup_miss_count",
+            "Aggregation executor chunk-level lookup miss duration",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_chunk_total_lookup_count = register_int_counter_vec_with_registry!(
+            "stream_agg_chunk_lookup_total_count",
+            "Aggregation executor chunk-level lookup total operation",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -427,6 +445,8 @@ impl StreamingMetrics {
             agg_lookup_miss_count,
             agg_total_lookup_count,
             agg_cached_keys,
+            agg_chunk_lookup_miss_count,
+            agg_chunk_total_lookup_count,
             barrier_inflight_latency,
             barrier_sync_latency,
             sink_commit_duration,
