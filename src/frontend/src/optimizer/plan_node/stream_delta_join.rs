@@ -22,7 +22,7 @@ use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::generic::GenericPlanRef;
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, StreamNode};
-use crate::expr::{Expr, ExprRewriter};
+use crate::expr::Expr;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;

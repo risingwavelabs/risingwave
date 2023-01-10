@@ -50,9 +50,7 @@ pub fn gen_batch_query_plan(
 
     let bound = {
         let mut binder = Binder::new(session);
-        let bound = binder.bind(stmt)?;
-        // binder.append_notice(notice);
-        bound
+        binder.bind(stmt)?
     };
 
     let check_items = resolve_privileges(&bound);

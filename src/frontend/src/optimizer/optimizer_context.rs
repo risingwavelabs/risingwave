@@ -14,7 +14,7 @@
 
 use core::convert::Into;
 use core::fmt::Formatter;
-use std::cell::{RefCell, RefMut};
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -157,8 +157,7 @@ impl OptimizerContext {
 
     pub fn expr_with_session_timezone(&self, expr: ExprImpl) -> ExprImpl {
         let mut session_timezone = self.session_timezone.borrow_mut();
-        let expr = session_timezone.rewrite_expr(expr);
-        expr
+        session_timezone.rewrite_expr(expr)
     }
 
     pub fn append_notice(&self, notice: &mut String) {
