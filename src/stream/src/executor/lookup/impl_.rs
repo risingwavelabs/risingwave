@@ -401,11 +401,10 @@ impl<S: StateStore> LookupExecutor<S> {
                         .await?
                 }
                 false => {
-                    unreachable!("iter over prev epoch is not deprecated")
-                    // self.arrangement
-                    //     .state_table
-                    //     .iter_prev_epoch_with_pk_prefix(&lookup_row)
-                    //     .await?
+                    self.arrangement
+                        .state_table
+                        .iter_prev_epoch_with_pk_prefix(&lookup_row)
+                        .await?
                 }
             };
 
