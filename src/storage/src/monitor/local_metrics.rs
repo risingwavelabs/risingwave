@@ -44,7 +44,7 @@ pub struct StoreLocalStatistic {
 
 impl StoreLocalStatistic {
     pub fn add(&mut self, other: &StoreLocalStatistic) {
-        self.cache_meta_block_miss += other.cache_data_block_miss;
+        self.cache_meta_block_miss += other.cache_meta_block_miss;
         self.cache_meta_block_total += other.cache_meta_block_total;
 
         self.cache_data_block_miss += other.cache_data_block_miss;

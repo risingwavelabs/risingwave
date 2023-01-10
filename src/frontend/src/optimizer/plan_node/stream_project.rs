@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
@@ -52,6 +53,8 @@ impl StreamProject {
             logical.functional_dependency().clone(),
             distribution,
             logical.input().append_only(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            FixedBitSet::with_capacity(logical.schema().len()),
         );
         StreamProject { base, logical }
     }
