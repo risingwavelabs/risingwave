@@ -5227,6 +5227,7 @@ dependencies = [
  "risingwave_rt",
  "sync-point",
  "task_stats_alloc",
+ "tempfile",
  "tikv-jemallocator",
  "tracing",
  "workspace-config",
