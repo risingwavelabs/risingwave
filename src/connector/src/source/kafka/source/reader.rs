@@ -100,13 +100,14 @@ impl SplitReader for KafkaSplitReader {
             consumer.assign(&tpl)?;
         }
 
+        // The two parameters below are only used by developers for performance testing purposes,
+        // so we panic here on purpose if the input is not correctly recognized.
         let bytes_per_second = match properties.bytes_per_second {
             None => usize::MAX,
             Some(number) => number
                 .parse::<usize>()
                 .expect("bytes.per.second expect usize"),
         };
-
         let max_num_messages = match properties.max_num_messages {
             None => usize::MAX,
             Some(number) => number

@@ -33,15 +33,13 @@ pub struct KafkaProperties {
     /// Since kafka source has no concept of splits and its parallelism
     /// is determined by the compute node's parameter, this parameter specifies
     /// the bytes per second in total across all the parallelism.
-    /// We remark that the default parallelism is the same as the number of Kafka topic partitions
     #[serde(rename = "bytes.per.second", alias = "kafka.bytes.per.second")]
     pub bytes_per_second: Option<String>,
 
     /// This parameter is not intended to be exposed to users.
     /// Since kafka source has no concept of splits and its parallelism
     /// is determined by the compute node's parameter, this parameter specifies
-    /// the number of messages total across all the parallelism.
-    /// We remark that the default parallelism is the same as the number of Kafka topic partitions
+    /// the number of messages in total across all the parallelism.
     #[serde(rename = "max.num.messages", alias = "kafka.max.num.messages")]
     pub max_num_messages: Option<String>,
 
