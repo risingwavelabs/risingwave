@@ -357,10 +357,14 @@ impl<S: StateStore> StorageTable<S> {
                     table_id: self.table_id,
                     read_version_from_backup: read_backup,
                 };
+                let pk_serializer = match self.output_indices_in_key.is_empty() {
+                    true => None,
+                    false => Some(Arc::new(self.pk_serializer.clone())),
+                };
                 let iter = StorageTableIterInner::<S>::new(
                     &self.store,
                     self.mapping.clone(),
-                    self.pk_serializer.clone(),
+                    pk_serializer,
                     self.output_indices_in_key.clone(),
                     self.row_deserializer.clone(),
                     raw_key_range,
@@ -543,7 +547,7 @@ struct StorageTableIterInner<S: StateStore> {
     row_deserializer: Arc<RowDeserializer>,
 
     /// Used for serializing and deserializing the primary key.
-    pk_serializer: OrderedRowSerde,
+    pk_serializer: Option<Arc<OrderedRowSerde>>,
 
     output_indices_in_key: Vec<usize>,
 }
@@ -554,7 +558,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
     async fn new<R, B>(
         store: &S,
         mapping: Arc<ColumnMapping>,
-        pk_serializer: OrderedRowSerde,
+        pk_serializer: Option<Arc<OrderedRowSerde>>,
         output_indices_in_key: Vec<usize>,
         row_deserializer: Arc<RowDeserializer>,
         raw_key_range: R,
@@ -596,10 +600,19 @@ impl<S: StateStore> StorageTableIterInner<S> {
             .await?
         {
             let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);
-            let pk = self.pk_serializer.deserialize(key)?;
+
             let full_row = self.row_deserializer.deserialize(value)?;
             let result_row_in_value = self.mapping.project(full_row).into_owned_row();
-            let result_row_in_key = pk.project(&self.output_indices_in_key).into_owned_row();
+
+            let result_row_in_key = match self.pk_serializer.clone() {
+                Some(pk_serializer) => {
+                    let pk = pk_serializer.deserialize(key)?;
+
+                    pk.project(&self.output_indices_in_key).into_owned_row()
+                }
+                None => OwnedRow::empty(),
+            };
+
             let row = result_row_in_key
                 .chain(result_row_in_value)
                 .into_owned_row();
