@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use multimap::MultiMap;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
@@ -102,6 +103,21 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let degree_state_table_r =
             StateTable::from_table_catalog(degree_table_r, store, Some(vnodes)).await;
 
+        let wm_jk_indices = node
+            .get_watermark_jk_indices()
+            .iter()
+            .map(|idx| *idx as usize);
+        let wm_output_indices_l = node
+            .get_watermark_output_indices_l()
+            .iter()
+            .map(|idx| *idx as usize);
+        let wm_output_indices_r = node
+            .get_watermark_output_indices_r()
+            .iter()
+            .map(|idx| *idx as usize);
+        let wm_in_jk_to_output_l = MultiMap::from_iter(wm_jk_indices.zip_eq(wm_output_indices_l));
+        let wm_in_jk_to_output_r = MultiMap::from_iter(wm_jk_indices.zip_eq(wm_output_indices_r));
+
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
             source_l,
@@ -124,6 +140,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             join_type_proto: node.get_join_type()?,
             join_key_data_types,
             chunk_size: params.env.config().developer.stream_chunk_size,
+            wm_in_jk_to_output_l,
+            wm_in_jk_to_output_r,
         };
 
         args.dispatch()
@@ -152,6 +170,8 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     join_type_proto: JoinTypeProto,
     join_key_data_types: Vec<DataType>,
     chunk_size: usize,
+    wm_in_jk_to_output_l: MultiMap<usize, usize>,
+    wm_in_jk_to_output_r: MultiMap<usize, usize>,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
@@ -182,6 +202,8 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                         self.is_append_only,
                         self.metrics,
                         self.chunk_size,
+                        self.wm_in_jk_to_output_l,
+                        self.wm_in_jk_to_output_r,
                     ),
                 ))
             };

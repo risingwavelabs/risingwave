@@ -260,6 +260,10 @@ impl StreamNode for StreamHashJoin {
                 .map(|&x| x as u32)
                 .collect(),
             is_append_only: self.is_append_only,
+            // TODO: derive watermark
+            watermark_jk_indices: vec![],
+            watermark_output_indices_l: vec![],
+            watermark_output_indices_r: vec![],
         })
     }
 }

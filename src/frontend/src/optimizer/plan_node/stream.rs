@@ -625,6 +625,10 @@ pub fn to_stream_prost_body(
                 right_degree_table: Some(right_degree_table.to_internal_table_prost()),
                 output_indices: me.core.output_indices.iter().map(|&x| x as u32).collect(),
                 is_append_only: me.is_append_only,
+                // TODO: derive watermark
+                watermark_jk_indices: vec![],
+                watermark_output_indices_l: vec![],
+                watermark_output_indices_r: vec![],
             })
         }
         Node::HopWindow(me) => {

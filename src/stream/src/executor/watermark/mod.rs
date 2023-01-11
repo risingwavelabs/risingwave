@@ -51,8 +51,13 @@ impl<ID: Ord + Hash> BufferedWatermarks<ID> {
         });
     }
 
-    /// Handle a new watermark message. Optionally returns the watermark message to emit.
-    pub fn handle_watermark(&mut self, buffer_id: ID, watermark: Watermark) -> Option<Watermark> {
+    /// Handle a new watermark message. Optionally returns the watermark message to emit and the
+    /// buffer id.
+    pub fn handle_watermark(
+        &mut self,
+        buffer_id: ID,
+        watermark: Watermark,
+    ) -> Option<(Watermark, ID)> {
         // Note: The staged watermark buffer should be created before handling the watermark.
         let mut staged = self.other_buffered_watermarks.get_mut(&buffer_id).unwrap();
 
@@ -68,21 +73,20 @@ impl<ID: Ord + Hash> BufferedWatermarks<ID> {
     }
 
     /// Check the watermark heap and decide whether to emit a watermark message.
-    pub fn check_watermark_heap(&mut self) -> Option<Watermark> {
+    pub fn check_watermark_heap(&mut self) -> Option<(Watermark, ID)> {
         let len = self.other_buffered_watermarks.len();
         let mut watermark_to_emit = None;
         while !self.first_buffered_watermarks.is_empty()
             && (self.first_buffered_watermarks.len() == len
-                || watermark_to_emit.as_ref().map_or(false, |watermark| {
+                || watermark_to_emit.as_ref().map_or(false, |(watermark, _)| {
                     watermark == &self.first_buffered_watermarks.peek().unwrap().0 .0
                 }))
         {
-            let Reverse((watermark, actor_id)) = self.first_buffered_watermarks.pop().unwrap();
-            watermark_to_emit = Some(watermark);
-            let staged = self.other_buffered_watermarks.get_mut(&actor_id).unwrap();
+            let Reverse((watermark, id)) = self.first_buffered_watermarks.pop().unwrap();
+            watermark_to_emit = Some((watermark, id));
+            let staged = self.other_buffered_watermarks.get_mut(&id).unwrap();
             if let Some(first) = staged.staged.pop_front() {
-                self.first_buffered_watermarks
-                    .push(Reverse((first, actor_id)));
+                self.first_buffered_watermarks.push(Reverse((first, id)));
             } else {
                 staged.in_heap = false;
             }
@@ -91,7 +95,7 @@ impl<ID: Ord + Hash> BufferedWatermarks<ID> {
     }
 
     /// Remove buffers and return watermark to emit.
-    pub fn remove_buffer(&mut self, buffer_ids_to_remove: HashSet<ID>) -> Option<Watermark> {
+    pub fn remove_buffer(&mut self, buffer_ids_to_remove: HashSet<ID>) -> Option<(Watermark, ID)> {
         self.first_buffered_watermarks
             .retain(|Reverse((_, id))| !buffer_ids_to_remove.contains(id));
         self.other_buffered_watermarks

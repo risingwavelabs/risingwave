@@ -193,7 +193,7 @@ impl MergeExecutor {
                             for buffers in select_all.buffered_watermarks.values_mut() {
                                 // Call `check_heap` in case the only upstream(s) that does not have
                                 // watermark in heap is removed
-                                if let Some(watermark) = buffers.remove_buffer(
+                                if let Some((watermark, _)) = buffers.remove_buffer(
                                     update.removed_upstream_actor_id.iter().copied().collect(),
                                 ) {
                                     yield Message::Watermark(watermark);
@@ -378,7 +378,9 @@ impl SelectReceivers {
             .buffered_watermarks
             .entry(col_idx)
             .or_insert_with(|| BufferedWatermarks::with_ids(self.upstream_actor_ids.clone()));
-        watermarks.handle_watermark(actor_id, watermark)
+        watermarks
+            .handle_watermark(actor_id, watermark)
+            .map(|(wm, _)| wm)
     }
 
     /// Consume `other` and add its upstreams to `self`. The two streams must be at the clean state

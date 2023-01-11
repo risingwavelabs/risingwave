@@ -599,6 +599,14 @@ impl Watermark {
             val,
         })
     }
+
+    pub fn with_idx(self, idx: usize) -> Self {
+        Self {
+            col_idx: idx,
+            data_type: self.data_type,
+            val: self.val,
+        }
+    }
 }
 
 #[derive(Debug, EnumAsInner, PartialEq)]

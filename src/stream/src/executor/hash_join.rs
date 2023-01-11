@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use async_stack_trace::StackTrace;
 use fixedbitset::FixedBitSet;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use multimap::MultiMap;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::HashKey;
@@ -35,8 +37,10 @@ use super::barrier_align::*;
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::managed_state::join::*;
 use super::monitor::StreamingMetrics;
+use super::watermark::*;
 use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
+    Watermark,
 };
 use crate::common::table::state_table::StateTable;
 use crate::common::{InfallibleExpression, StreamChunkBuilder};
@@ -165,6 +169,8 @@ struct JoinSide<K: HashKey, S: StateStore> {
     i2o_mapping: Vec<(usize, usize)>,
     /// Whether degree table is needed for this side.
     need_degree_table: bool,
+    /// Mapping from watermark indices in join key to output indices.
+    wm_in_jk_to_output: MultiMap<usize, usize>,
 }
 
 impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
@@ -175,6 +181,8 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
             .field("col_types", &self.all_data_types)
             .field("start_pos", &self.start_pos)
             .field("i2o_mapping", &self.i2o_mapping)
+            .field("need_degree_table", &self.need_degree_table)
+            .field("wm_in_jk_to_output", &self.wm_in_jk_to_output)
             .finish()
     }
 }
@@ -236,6 +244,11 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time
     chunk_size: usize,
+
+    /// watermark column index -> `BufferedWatermarks`
+    watermark_buffers: BTreeMap<usize, BufferedWatermarks<SideTypePrimitive>>,
+    /// Watermark indices in join key.
+    wm_indices_in_jk: HashSet<usize>,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
@@ -251,6 +264,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
             .field("pk_indices", &self.pk_indices)
             .field("schema", &self.schema)
             .field("actual_output_data_types", &self.actual_output_data_types)
+            .field("wm_in_jk_to_output", &self.wm_indices_in_jk)
             .finish()
     }
 }
@@ -414,6 +428,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
+        wm_in_jk_to_output_l: MultiMap<usize, usize>,
+        wm_in_jk_to_output_r: MultiMap<usize, usize>,
     ) -> Self {
         let side_l_column_n = input_l.schema().len();
 
@@ -524,6 +540,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             StreamChunkBuilder::get_i2o_mapping(output_indices.iter().cloned(), left_len, right_len)
         };
 
+        let wm_indices_in_jk: HashSet<_> = wm_in_jk_to_output_l.keys().copied().collect();
+        assert_eq!(
+            wm_in_jk_to_output_r.keys().copied().collect::<HashSet<_>>(),
+            wm_indices_in_jk
+        );
+
+        let watermark_buffers = BTreeMap::from_iter(wm_indices_in_jk.iter().map(|idx| {
+            (
+                *idx,
+                BufferedWatermarks::with_ids(vec![SideType::Left, SideType::Right]),
+            )
+        }));
+
         Self {
             ctx: ctx.clone(),
             input_l: Some(input_l),
@@ -548,10 +577,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 ), // TODO: decide the target cap
                 join_key_indices: join_key_indices_l,
                 all_data_types: state_all_data_types_l,
+                i2o_mapping: left_to_output,
                 pk_indices: state_pk_indices_l,
                 start_pos: 0,
-                i2o_mapping: left_to_output,
                 need_degree_table: need_degree_table_l,
+                wm_in_jk_to_output: wm_in_jk_to_output_l,
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
@@ -575,6 +605,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 start_pos: side_l_column_n,
                 i2o_mapping: right_to_output,
                 need_degree_table: need_degree_table_r,
+                wm_in_jk_to_output: wm_in_jk_to_output_r,
             },
             pk_indices,
             cond,
@@ -583,6 +614,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             append_only_optimize,
             metrics,
             chunk_size,
+            watermark_buffers,
+            wm_indices_in_jk,
         }
     }
 
@@ -617,8 +650,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 .with_label_values(&[&actor_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             match msg? {
-                AlignedMessage::WatermarkLeft(_) | AlignedMessage::WatermarkRight(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                AlignedMessage::WatermarkLeft(watermark) => {
+                    for watermark_to_emit in self.handle_watermark(SideType::Left, watermark)? {
+                        yield Message::Watermark(watermark_to_emit);
+                    }
+                }
+                AlignedMessage::WatermarkRight(watermark) => {
+                    for watermark_to_emit in self.handle_watermark(SideType::Right, watermark)? {
+                        yield Message::Watermark(watermark_to_emit);
+                    }
                 }
                 AlignedMessage::Left(chunk) => {
                     let mut left_time = Duration::from_nanos(0);
@@ -636,13 +676,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.chunk_size,
                     ) {
                         left_time += left_start_time.elapsed();
-                        yield chunk.map(|v| match v {
-                            Message::Watermark(_) => {
-                                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-                            }
-                            Message::Chunk(chunk) => Message::Chunk(chunk),
-                            barrier @ Message::Barrier(_) => barrier,
-                        })?;
+                        yield Message::Chunk(chunk?);
                         left_start_time = minstant::Instant::now();
                     }
                     left_time += left_start_time.elapsed();
@@ -667,13 +701,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         self.chunk_size,
                     ) {
                         right_time += right_start_time.elapsed();
-                        yield chunk.map(|v| match v {
-                            Message::Watermark(_) => {
-                                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-                            }
-                            Message::Chunk(chunk) => Message::Chunk(chunk),
-                            barrier @ Message::Barrier(_) => barrier,
-                        })?;
+                        yield Message::Chunk(chunk?);
                         right_start_time = minstant::Instant::now();
                     }
                     right_time += right_start_time.elapsed();
@@ -740,6 +768,52 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         Ok(())
     }
 
+    fn handle_watermark(
+        &mut self,
+        side: SideTypePrimitive,
+        watermark: Watermark,
+    ) -> StreamExecutorResult<Vec<Watermark>> {
+        let (side_update, side_match) = if side == SideType::Left {
+            (&mut self.side_l, &mut self.side_r)
+        } else {
+            (&mut self.side_r, &mut self.side_l)
+        };
+
+        // State cleaning
+        if self.wm_indices_in_jk.contains(&watermark.col_idx)
+            && watermark.col_idx == side_update.join_key_indices[0]
+        {
+            side_match.ht.update_watermark(watermark.val.clone());
+        }
+
+        // Select watermarks to yield.
+        let wm_in_jk = side_update
+            .join_key_indices
+            .iter()
+            .positions(|idx| *idx == watermark.col_idx);
+
+        let mut watermarks_to_emit = vec![];
+        for idx in wm_in_jk {
+            let buffers = self
+                .watermark_buffers
+                .get_mut(&idx)
+                .ok_or_else(|| anyhow!("Should not receive a watermark on column {}", idx))?;
+            if let Some((selected_watermark, selected_side)) =
+                buffers.handle_watermark(side, watermark.clone())
+            {
+                let output_idices = if selected_side == side {
+                    side_update.wm_in_jk_to_output.get_vec(&idx).unwrap()
+                } else {
+                    side_match.wm_in_jk_to_output.get_vec(&idx).unwrap()
+                };
+                for output_idx in output_idices {
+                    watermarks_to_emit.push(selected_watermark.clone().with_idx(*output_idx));
+                }
+            };
+        }
+        Ok(watermarks_to_emit)
+    }
+
     /// the data the hash table and match the coming
     /// data chunk with the executor state
     async fn hash_eq_match(
@@ -770,7 +844,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         OwnedRow::new(new_row)
     }
 
-    #[try_stream(ok = Message, error = StreamExecutorError)]
+    #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     #[expect(clippy::too_many_arguments)]
     async fn eq_join_oneside<'a, const SIDE: SideTypePrimitive>(
         ctx: &'a ActorContextRef,
@@ -839,7 +913,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                     if let Some(chunk) = hashjoin_chunk_builder
                                         .with_match_on_insert(&row, &matched_row)
                                     {
-                                        yield Message::Chunk(chunk);
+                                        yield chunk;
                                     }
                                 }
                                 if side_match.need_degree_table {
@@ -860,19 +934,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             if let Some(chunk) =
                                 hashjoin_chunk_builder.forward_if_not_matched(op, row)
                             {
-                                yield Message::Chunk(chunk);
+                                yield chunk;
                             }
                         } else if let Some(chunk) =
                             hashjoin_chunk_builder.forward_exactly_once_if_matched(op, row)
                         {
-                            yield Message::Chunk(chunk);
+                            yield chunk;
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
                         hashjoin_chunk_builder.forward_if_not_matched(op, row)
                     {
-                        yield Message::Chunk(chunk);
+                        yield chunk;
                     }
 
                     if append_only_optimize && let Some(row) = append_only_matched_row {
@@ -899,7 +973,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                     if let Some(chunk) = hashjoin_chunk_builder
                                         .with_match_on_delete(&row, &matched_row)
                                     {
-                                        yield Message::Chunk(chunk);
+                                        yield chunk;
                                     }
                                 }
                             }
@@ -908,19 +982,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             if let Some(chunk) =
                                 hashjoin_chunk_builder.forward_if_not_matched(op, row)
                             {
-                                yield Message::Chunk(chunk);
+                                yield chunk;
                             }
                         } else if let Some(chunk) =
                             hashjoin_chunk_builder.forward_exactly_once_if_matched(op, row)
                         {
-                            yield Message::Chunk(chunk);
+                            yield chunk;
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
                         hashjoin_chunk_builder.forward_if_not_matched(op, row)
                     {
-                        yield Message::Chunk(chunk);
+                        yield chunk;
                     }
                     if append_only_optimize {
                         unreachable!();
@@ -933,7 +1007,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             }
         }
         if let Some(chunk) = hashjoin_chunk_builder.take() {
-            yield Message::Chunk(chunk);
+            yield chunk;
         }
     }
 }
@@ -1000,6 +1074,8 @@ mod tests {
         .await;
         (state_table, degree_state_table)
     }
+
+    fn create_watermark_map() -> (MultiMap<usize, usize>, MultiMap<usize, usize>) {}
 
     fn create_cond() -> BoxedExpression {
         let left_expr = InputRefExpression::new(DataType::Int64, 1);
