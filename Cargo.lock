@@ -5380,6 +5380,7 @@ dependencies = [
  "global_stats_alloc",
  "log",
  "madsim-tokio",
+ "risingwave_common",
  "risingwave_compaction_test",
  "risingwave_compactor",
  "risingwave_compute",

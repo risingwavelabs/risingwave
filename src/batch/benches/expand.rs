@@ -15,13 +15,11 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, ExpandExecutor};
-use risingwave_common::types::DataType;
-use tikv_jemallocator::Jemalloc;
+use risingwave_common::{types::DataType, enable_jemalloc_on_linux};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+enable_jemalloc_on_linux!();
 
 fn create_expand_executor(
     column_subsets: Vec<Vec<usize>>,
