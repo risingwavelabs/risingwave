@@ -64,7 +64,9 @@ pub trait HashKeyDispatcher: Sized {
     fn data_types(&self) -> &[DataType];
 
     fn dispatch(self) -> Self::Output {
-        match calc_hash_key_kind(self.data_types()) {
+        let k = calc_hash_key_kind(self.data_types());
+        tracing::debug!("dispatch {:?} to {:?}", self.data_types(), k);
+        match k {
             HashKeyKind::Key8 => self.dispatch_impl::<hash::Key8>(),
             HashKeyKind::Key16 => self.dispatch_impl::<hash::Key16>(),
             HashKeyKind::Key32 => self.dispatch_impl::<hash::Key32>(),
