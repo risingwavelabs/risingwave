@@ -20,7 +20,7 @@ use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
 use crate::array::{ListRef, ListValue, StructRef, StructValue};
-use crate::catalog::{ColumnDesc, ColumnId};
+use crate::catalog::ColumnId;
 use crate::row::Row;
 use crate::types::struct_type::StructType;
 use crate::types::{
@@ -33,6 +33,7 @@ use error::ValueEncodingError;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
+#[derive(Clone, Copy)]
 enum Width {
     Mid(u8),
     Large(u16),
@@ -61,18 +62,45 @@ impl RowEncoding {
     pub fn set_width(&mut self, non_null_column_nums: usize) {
         self.non_null_datum_nums = match non_null_column_nums {
             n if n <= u8::MAX as usize => {
-                self.flag &= 0b0100;
+                self.flag |= 0b0100;
                 Width::Mid(n as u8)
             }
             n if n <= u16::MAX as usize => {
-                self.flag &= 0b1000;
+                self.flag |= 0b1000;
                 Width::Large(n as u16)
             }
             n if n <= u32::MAX as usize => {
-                self.flag &= 0b1100;
+                self.flag |= 0b1100;
                 Width::Extra(n as u32)
             }
             _ => unreachable!("the number of columns exceeds u32"),
+        }
+    }
+
+    pub fn set_big(&mut self, maybe_offset: Vec<usize>, max_offset: usize) {
+        self.offsets = match max_offset {
+            n if n <= u8::MAX as usize => {
+                self.flag |= 0b01;
+                maybe_offset
+                    .into_iter()
+                    .map(|m| Width::Mid(m as u8))
+                    .collect_vec()
+            }
+            n if n <= u16::MAX as usize => {
+                self.flag |= 0b10;
+                maybe_offset
+                    .into_iter()
+                    .map(|m| Width::Large(m as u16))
+                    .collect_vec()
+            }
+            n if n <= u32::MAX as usize => {
+                self.flag |= 0b11;
+                maybe_offset
+                    .into_iter()
+                    .map(|m| Width::Large(m as u16))
+                    .collect_vec()
+            }
+            _ => unreachable!("encoding length exceeds u32"),
         }
     }
 
@@ -82,44 +110,48 @@ impl RowEncoding {
     }
 
     pub fn encode(&mut self, datum_refs: impl Iterator<Item = impl ToDatumRef>) {
-        assert!(self.buf.is_empty(), "should not encode one RowEncoding object multiple times.");
+        assert!(
+            self.buf.is_empty(),
+            "should not encode one RowEncoding object multiple times."
+        );
         let mut maybe_offset = vec![];
         for datum in datum_refs {
             maybe_offset.push(self.buf.len());
             serialize_datum_into(datum, &mut self.buf);
         }
-        match *maybe_offset.last().expect("should encode at least one column") {
-            n if n <= u8::MAX as usize => {
-                self.flag &= 0b01;
-                self.offsets = maybe_offset.iter().map(|m| Width::Mid(*m as u8)).collect_vec();
-            }
-            n if n <= u16::MAX as usize => {
-                self.flag &= 0b10;
-                self.offsets = maybe_offset.iter().map(|m| Width::Large(*m as u16)).collect_vec();
-            }
-            n if n <= u32::MAX as usize => {
-                self.flag &= 0b11;
-                self.offsets = maybe_offset.iter().map(|m| Width::Large(*m as u16)).collect_vec();
-            }
-            _ => unreachable!("encoding length exceeds u32"),
+        let max_offset = *maybe_offset
+            .last()
+            .expect("should encode at least one column");
+        self.set_big(maybe_offset, max_offset);
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut row_bytes = vec![];
+        row_bytes.put_u8(self.flag);
+        serialize_width(self.non_null_datum_nums, &mut row_bytes);
+        for id in self.non_null_column_ids.iter() {
+            row_bytes.put_i32_le(id.get_id());
         }
+        for &offset in self.offsets.iter() {
+            serialize_width(offset, &mut row_bytes);
+        }
+        row_bytes.extend(self.buf.iter());
+
+        row_bytes
     }
 }
 
-pub fn serialize_row_column_aware(
-    column_desc: &Vec<ColumnDesc>,
-    row: impl Row,
-    append_to: impl BufMut,
-) {
-    let encoding = encode_datums(column_desc, row.iter());
+pub fn serialize_row_column_aware(column_ids: Vec<ColumnId>, row: impl Row) -> Vec<u8> {
+    let encoding = encode_datums(column_ids, row.iter());
+    encoding.serialize()
 }
 
 pub fn encode_datums(
-    column_desc: &Vec<ColumnDesc>,
+    column_ids: Vec<ColumnId>,
     datum_refs: impl Iterator<Item = impl ToDatumRef>,
 ) -> RowEncoding {
     let mut encoding = RowEncoding::new();
-    encoding.update_non_null_datum_nums(column_desc.iter().map(|c| c.column_id).collect_vec());
+    encoding.update_non_null_datum_nums(column_ids);
     encoding.encode(datum_refs);
     encoding
 }
@@ -178,6 +210,14 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         }
         ScalarRefImpl::Struct(s) => serialize_struct(s, buf),
         ScalarRefImpl::List(v) => serialize_list(v, buf),
+    }
+}
+
+fn serialize_width(width: Width, buf: &mut impl BufMut) {
+    match width {
+        Width::Mid(w) => buf.put_u8(w),
+        Width::Large(w) => buf.put_u16_le(w),
+        Width::Extra(w) => buf.put_u32_le(w),
     }
 }
 
@@ -326,4 +366,56 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
     let mut bytes = [0; 16];
     data.copy_to_slice(&mut bytes);
     Ok(Decimal::unordered_deserialize(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::catalog::ColumnId;
+    use crate::row::OwnedRow;
+    use crate::types::ScalarImpl::*;
+
+    #[test]
+    fn test_row_encoding() {
+        let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
+        let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
+        let row2 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abd".into()))]);
+        let row3 = OwnedRow::new(vec![Some(Int16(6)), Some(Utf8("abc".into()))]);
+        let rows = vec![row1, row2, row3];
+        let mut array = vec![];
+        for row in &rows {
+            let row_bytes = serialize_row_column_aware(column_ids.clone(), row);
+            array.push(row_bytes);
+        }
+        let zero_le_bytes = 0_i32.to_le_bytes();
+        let one_le_bytes = 1_i32.to_le_bytes();
+        assert_eq!(
+            array[0],
+            [
+                0b10000101, // flag
+                2, // column nums
+                zero_le_bytes[0], // start id 0
+                zero_le_bytes[1],
+                zero_le_bytes[2],
+                zero_le_bytes[3],
+                one_le_bytes[0], // start id 1
+                one_le_bytes[1],
+                one_le_bytes[2],
+                one_le_bytes[3],
+                0, // offset0: 0
+                3, // offset1: 3
+                1, // i16: 5
+                5,
+                0, // str: abc
+                1,
+                3,
+                0,
+                0,
+                0,
+                b'a',
+                b'b',
+                b'c'
+            ]
+        );
+    }
 }
