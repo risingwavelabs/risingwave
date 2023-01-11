@@ -92,7 +92,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 let n = self.rng.gen_range(1..=100); // Avoid ambiguous type
                 Expr::Array(self.gen_simple_scalar_list(ty, n))
             }
-            // ENABLE(Noel): Tracking issue <https://github.com/risingwavelabs/risingwave/issues/7189>
+            // ENABLE: https://github.com/risingwavelabs/risingwave/issues/6934
             // T::Struct(ref inner) => Expr::Row(
             //     inner
             //         .fields
