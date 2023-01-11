@@ -56,7 +56,7 @@ use crate::hummock::{
     HummockResult, Sstable,
 };
 use crate::mem_table::MemtableLocalStateStore;
-use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use crate::monitor::{HummockStateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
@@ -79,6 +79,8 @@ impl HummockStorageV1 {
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let table_id = read_options.table_id;
+        let table_id_string = table_id.to_string();
+        let table_id_label = table_id_string.as_str();
         let mut local_stats = StoreLocalStatistic::default();
         let ReadVersion {
             shared_buffer_data,
@@ -101,7 +103,7 @@ impl HummockStorageV1 {
             )
             .await?;
             if let Some(v) = value {
-                local_stats.report(self.stats.as_ref());
+                local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                 return Ok(v.into_user_value());
             }
             table_counts += table_count;
@@ -116,7 +118,7 @@ impl HummockStorageV1 {
             )
             .await?;
             if let Some(v) = value {
-                local_stats.report(self.stats.as_ref());
+                local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                 return Ok(v.into_user_value());
             }
             table_counts += table_count;
@@ -149,7 +151,7 @@ impl HummockStorageV1 {
                         )
                         .await?
                         {
-                            local_stats.report(self.stats.as_ref());
+                            local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                             return Ok(v.into_user_value());
                         }
                     }
@@ -185,17 +187,17 @@ impl HummockStorageV1 {
                     )
                     .await?
                     {
-                        local_stats.report(self.stats.as_ref());
+                        local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                         return Ok(v.into_user_value());
                     }
                 }
             }
         }
 
-        local_stats.report(self.stats.as_ref());
-        self.stats
+        local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
+        self.state_store_metrics
             .iter_merge_sstable_counts
-            .with_label_values(&["sub-iter"])
+            .with_label_values(&["", "sub-iter"])
             .observe(table_counts as f64);
         Ok(None)
     }
@@ -247,7 +249,6 @@ impl HummockStorageV1 {
                 build_ordered_merge_iter::<T>(
                     &uncommitted_data,
                     self.sstable_store.clone(),
-                    self.stats.clone(),
                     &mut local_stats,
                     iter_read_options.clone(),
                 )
@@ -262,7 +263,6 @@ impl HummockStorageV1 {
                 build_ordered_merge_iter::<T>(
                     &sync_uncommitted_data,
                     self.sstable_store.clone(),
-                    self.stats.clone(),
                     &mut local_stats,
                     iter_read_options.clone(),
                 )
@@ -272,9 +272,9 @@ impl HummockStorageV1 {
                 .await?,
             ))
         }
-        self.stats
+        self.state_store_metrics
             .iter_merge_sstable_counts
-            .with_label_values(&["memory-iter"])
+            .with_label_values(&["", "memory-iter"])
             .observe(overlapped_iters.len() as f64);
 
         // Generate iterators for versioned ssts by filter out ssts that do not overlap with the
@@ -382,9 +382,9 @@ impl HummockStorageV1 {
             }
         }
 
-        self.stats
+        self.state_store_metrics
             .iter_merge_sstable_counts
-            .with_label_values(&["sub-iter"])
+            .with_label_values(&["", "sub-iter"])
             .observe(overlapped_iters.len() as f64);
 
         // TODO: implement delete range if the code of this file would not be delete.
@@ -406,10 +406,13 @@ impl HummockStorageV1 {
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
 
-        local_stats.report(self.stats.as_ref());
+        local_stats.report(
+            self.state_store_metrics.as_ref(),
+            table_id.to_string().as_str(),
+        );
         Ok(HummockStateStoreIter::new(
             user_iterator,
-            self.stats.clone(),
+            self.state_store_metrics.clone(),
         ))
     }
 }
@@ -592,12 +595,12 @@ impl StateStore for HummockStorageV1 {
 
 pub struct HummockStateStoreIter {
     inner: DirectedUserIterator,
-    metrics: Arc<StateStoreMetrics>,
+    metrics: Arc<HummockStateStoreMetrics>,
 }
 
 impl HummockStateStoreIter {
     #[allow(dead_code)]
-    fn new(inner: DirectedUserIterator, metrics: Arc<StateStoreMetrics>) -> Self {
+    fn new(inner: DirectedUserIterator, metrics: Arc<HummockStateStoreMetrics>) -> Self {
         Self { inner, metrics }
     }
 
@@ -630,6 +633,6 @@ impl Drop for HummockStateStoreIter {
     fn drop(&mut self) {
         let mut stats = StoreLocalStatistic::default();
         self.collect_local_statistic(&mut stats);
-        stats.report(&self.metrics);
+        stats.report(&self.metrics, "");
     }
 }
