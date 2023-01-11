@@ -932,6 +932,7 @@ async fn get_channel(
 
 // internal mutability
 // https://doc.rust-lang.org/book/ch15-05-interior-mutability.html
+// see https://doc.rust-lang.org/book/ch16-03-shared-state.html#using-mutexes-to-allow-access-to-data-from-one-thread-at-a-time
 // atomic may also work
 // arc mutex
 
@@ -946,22 +947,6 @@ async fn get_channel(
 /// It is a wrapper of tonic client. See [`meta_rpc_client_method_impl`].
 #[derive(Debug, Clone)]
 struct GrpcMetaClient {
-    // This has to be the multithreaded version.
-    // I need mutexes
-    // see https://doc.rust-lang.org/book/ch16-03-shared-state.html#using-mutexes-to-allow-access-to-data-from-one-thread-at-a-time
-    // Do i actually need mutexes? Simultaneous access by threads bad?
-    // Maybe I can implement internal mutability differently?
-
-    // Do I need Rc<RefCell<Client>> or RefCell<Client>?
-    // RefCell<Client>: Mutable reference by one
-    // Rc<RefCell<Client>>: Mutable reference by many
-
-    // Do we only ever have one thread accessing this? -> No. Multithreaded
-    // Update this, because the channel changed, do I need to protect the update step with a MutEx?
-    // -> Yes. Update this all at once
-
-    // TODO: I will probably need to add Arc here
-    // see https://doc.rust-lang.org/book/ch16-03-shared-state.html#using-mutexes-to-allow-access-to-data-from-one-thread-at-a-time
     leader_client: Arc<Mutex<LeaderServiceClient<Channel>>>,
     cluster_client: Arc<Mutex<ClusterServiceClient<Channel>>>,
     heartbeat_client: Arc<Mutex<HeartbeatServiceClient<Channel>>>,
@@ -973,8 +958,6 @@ struct GrpcMetaClient {
     scale_client: Arc<Mutex<ScaleServiceClient<Channel>>>,
     backup_client: Arc<Mutex<BackupServiceClient<Channel>>>,
 }
-
-// TODO: Undo the changes in the Cargo files in the PR
 
 // Retry base interval in ms for connecting to meta server.
 pub const CONN_RETRY_BASE_INTERVAL_MS: u64 = 100;
