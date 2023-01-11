@@ -3051,6 +3051,11 @@ impl Parser {
                 Keyword::SCHEMAS => {
                     return Ok(Statement::ShowObjects(ShowObject::Schema));
                 }
+                Keyword::VIEWS => {
+                    return Ok(Statement::ShowObjects(ShowObject::View {
+                        schema: self.parse_from_and_identifier()?,
+                    }));
+                }
                 Keyword::MATERIALIZED => {
                     if self.parse_keyword(Keyword::VIEWS) {
                         return Ok(Statement::ShowObjects(ShowObject::MaterializedView {
