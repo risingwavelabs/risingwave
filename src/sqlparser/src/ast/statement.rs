@@ -23,7 +23,7 @@ use crate::ast::{
     display_comma_separated, display_separated, ColumnDef, ObjectName, SqlOption, TableConstraint,
 };
 use crate::keywords::Keyword;
-use crate::parser::{IsOptional, Parser, ParserError};
+use crate::parser::{IsOptional, Parser, ParserError, UPSTREAM_SOURCE_KEY};
 use crate::tokenizer::Token;
 
 /// Consumes token from the parser into an AST node.
@@ -270,9 +270,14 @@ impl ParseTo for CreateSourceStatement {
         let option = with_properties
             .0
             .iter()
-            .find(|&opt| opt.name.real_value() == "connector");
+            .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         // row format for cdc source must be debezium json
         let source_schema = if let Some(opt) = option && opt.value.to_string().contains("-cdc") {
+            if p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+            {
+                return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
+            }
             SourceSchema::DebeziumJson
         } else {
             impl_parse_to!([Keyword::ROW, Keyword::FORMAT], p);
