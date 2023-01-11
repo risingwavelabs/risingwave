@@ -43,6 +43,7 @@ impl From<ElectionMember> for MetaLeaderInfo {
 
 #[async_trait::async_trait]
 pub trait ElectionClient: Send + Sync + 'static {
+    fn id(&self) -> MetaResult<String>;
     async fn run_once(&self, ttl: i64, stop: watch::Receiver<()>) -> MetaResult<()>;
     async fn leader(&self) -> MetaResult<Option<ElectionMember>>;
     async fn get_members(&self) -> MetaResult<Vec<ElectionMember>>;
@@ -86,12 +87,14 @@ impl ElectionClient for EtcdElectionClient {
 
         self.is_leader.store(false, Ordering::Relaxed);
 
-        let leader_resp = election_client.leader(META_ELECTION_KEY).await;
-
         // is restored leader from previous session?
         let mut restored_leader = false;
 
-        let mut lease_id = match leader_resp.map(|mut resp| resp.take_kv()) {
+        let mut lease_id = match election_client
+            .leader(META_ELECTION_KEY)
+            .await
+            .map(|mut resp| resp.take_kv())
+        {
             // leader exists, restore leader
             Ok(Some(leader_kv)) if leader_kv.value() == self.id.as_bytes() => {
                 tracing::info!("restoring leader from lease {}", leader_kv.lease());
@@ -266,6 +269,10 @@ impl ElectionClient for EtcdElectionClient {
             })
             .collect())
     }
+
+    fn id(&self) -> MetaResult<String> {
+        Ok(self.id.clone())
+    }
 }
 
 impl EtcdElectionClient {
@@ -283,62 +290,115 @@ impl EtcdElectionClient {
         })
     }
 }
-// #[cfg(madsim)]
-// #[cfg(test)]
-// mod tests {
-//     use std::sync::Arc;
-//     use std::time::Duration;
-//
-//     use tokio::sync::watch;
-//     use tokio::time;
-//
-//     use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
-//
-//     #[tokio::test]
-//     async fn test_election() {
-//         let handle = tokio::spawn(async move {
-//             let addr = "0.0.0.0:2388".parse().unwrap();
-//             let mut builder = etcd_client::SimServer::builder();
-//             builder.serve(addr).await;
-//         });
-//
-//         let mut clients: Vec<Arc<dyn ElectionClient>> = vec![];
-//
-//         for i in 0..3 {
-//             clients.push(Arc::new(
-//                 EtcdElectionClient::new(
-//                     vec!["localhost:2388".to_string()],
-//                     None,
-//                     format!("client_{}", i).to_string(),
-//                 )
-//                 .await
-//                 .unwrap(),
-//             ));
-//         }
-//
-//         let (stop_sender, stop_receiver) = watch::channel(());
-//
-//         for client in &clients {
-//             let client_ = client.clone();
-//             let stop = stop_sender.subscribe();
-//
-//             tokio::spawn(async move {
-//                 let mut ticker = time::interval(Duration::from_secs(1));
-//                 loop {
-//                     ticker.tick().await;
-//                     client_.run_once(3, stop.clone()).await.unwrap();
-//                 }
-//             });
-//         }
-//
-//         for client in &clients {
-//             assert!(!client.is_leader().await);
-//         }
-//
-//         time::sleep(Duration::from_secs(10)).await;
-//
-//         for client in &clients {
-//             assert!(!client.is_leader().await);
-//         }
-//     }
-// }
+
+#[cfg(madsim)]
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use itertools::Itertools;
+    use tokio::sync::watch;
+    use tokio::time;
+
+    use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
+
+    #[tokio::test]
+    async fn test_election() {
+        let handle = tokio::spawn(async move {
+            let addr = "0.0.0.0:2388".parse().unwrap();
+            let mut builder = etcd_client::SimServer::builder();
+            builder.serve(addr).await;
+        });
+
+        let mut clients: Vec<(watch::Sender<()>, Arc<dyn ElectionClient>)> = vec![];
+
+        for i in 0..3 {
+            let (stop_sender, stop_receiver) = watch::channel(());
+            clients.push((
+                stop_sender,
+                Arc::new(
+                    EtcdElectionClient::new(
+                        vec!["localhost:2388".to_string()],
+                        None,
+                        format!("client_{}", i).to_string(),
+                    )
+                    .await
+                    .unwrap(),
+                ),
+            ));
+        }
+
+        for client in &clients {
+            assert!(!client.1.is_leader().await);
+        }
+
+        for (stop_sender, client) in &clients {
+            let client_ = client.clone();
+            let stop = stop_sender.subscribe();
+
+            tokio::spawn(async move {
+                let mut ticker = time::interval(Duration::from_secs(1));
+                loop {
+                    ticker.tick().await;
+                    if let Ok(_) = client_.run_once(3, stop.clone()).await {
+                        break;
+                    }
+                }
+            });
+        }
+
+        time::sleep(Duration::from_secs(10)).await;
+
+        let mut leaders = vec![];
+        let mut followers = vec![];
+        for (sender, client) in &clients {
+            if client.is_leader().await {
+                leaders.push((sender, client));
+            } else {
+                followers.push((sender, client));
+            }
+        }
+
+        assert_eq!(leaders.len(), 1);
+        assert_eq!(followers.len(), 2);
+
+        let leader = leaders.into_iter().next().unwrap();
+
+        // stop leader
+        leader.0.send(()).unwrap();
+
+        time::sleep(Duration::from_secs(10)).await;
+
+        let mut new_leaders = vec![];
+        let mut new_followers = vec![];
+        for (sender, client) in followers {
+            if client.is_leader().await {
+                new_leaders.push((sender, client));
+            } else {
+                new_followers.push((sender, client));
+            }
+        }
+
+        assert_eq!(new_leaders.len(), 1);
+        assert_eq!(new_followers.len(), 1);
+
+        let leader = new_leaders.into_iter().next().unwrap();
+        let election_leader = leader.1.leader().await.unwrap().unwrap();
+
+        assert_eq!(election_leader.id, leader.1.id().unwrap());
+
+        let lease_id = election_leader.lease;
+
+        let client = etcd_client::Client::connect(&vec!["localhost:2388"], None)
+            .await
+            .unwrap();
+        client.lease_client().revoke(lease_id).await.unwrap();
+
+        time::sleep(Duration::from_secs(10)).await;
+
+        let leader = new_followers.into_iter().next().unwrap();
+
+        assert!(leader.1.is_leader().await);
+    }
+}
