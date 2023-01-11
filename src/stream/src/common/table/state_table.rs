@@ -546,7 +546,7 @@ impl<S: StateStore> StateTable<S> {
                 }
 
                 let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
-                    Some(serialized_pk.clone())
+                    Some(serialized_pk.slice(VirtualNode::SIZE..))
                 } else {
                     None
                 };
