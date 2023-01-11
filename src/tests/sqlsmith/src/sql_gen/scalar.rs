@@ -33,7 +33,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             T::Timestamptz => &T::Timestamp,
             _ => typ,
         };
-        if self.rng.gen_range(1..=10) == 1 {
+        // NOTE(kwannoel): Gen NULL generates many invalid queries, decrease probability of it.
+        if self.rng.gen_bool(0.02) {
             // NOTE(kwannoel): We generate Cast with NULL to avoid generating lots of ambiguous
             // expressions. For instance agg calls such as `max(NULL)` may be generated,
             // and coerced to VARCHAR, where we require a `NULL::int` instead.
