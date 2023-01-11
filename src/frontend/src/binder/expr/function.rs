@@ -21,6 +21,7 @@ use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::RW_VERSION;
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
@@ -193,20 +194,9 @@ impl Binder {
                     )
                     .into());
                 }
-                let version: String;
-                #[cfg(debug_assertions)]
-                {
-                    let output = std::process::Command::new("git")
-                        .args(["rev-parse", "HEAD"])
-                        .output()
-                        .unwrap();
-                    version = String::from_utf8(output.stdout).unwrap();
-                }
-                #[cfg(not(debug_assertions))]
-                {
-                    use risingwave_common::RW_VERSION;
-                    version = String::from(RW_VERSION);
-                }
+
+                let version = String::from(RW_VERSION);
+
                 return Ok(ExprImpl::literal_varchar(version));
             }
             "current_database" if inputs.is_empty() => {
