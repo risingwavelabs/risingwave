@@ -9,5 +9,12 @@ pip3 install pyarrow
 # run server
 python3 arrow_flight.py
 # run client
-cargo run
+cargo run --example client
+```
+
+Risingwave client:
+
+```sql
+dev=> create function gcd(int, int) returns int as 'http://localhost:8815' language arrow_flight;
+dev=> select gcd(25, 15);
 ```

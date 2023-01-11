@@ -49,5 +49,5 @@ async fn main() {
         .await
         .expect("failed to call function");
 
-    dbg!(output);
+    println!("{:?}", output);
 }
