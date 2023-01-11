@@ -1850,10 +1850,27 @@ impl Parser {
         // PostgreSQL supports `WITH ( options )`, before `AS`
         let with_options = self.parse_with_properties()?;
 
-        // Table can be created with an external stream source.
-        let source_schema = if self.parse_keywords(&[Keyword::ROW, Keyword::FORMAT]) {
-            Some(SourceSchema::parse_to(self)?)
+        let option = with_options
+            .iter()
+            .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
+        let source_schema = if let Some(opt) = option {
+            // Table is created with an external connector.
+            if opt.value.to_string().contains("-cdc") {
+                // cdc connectors
+                if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+                {
+                    return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
+                } else {
+                    Some(SourceSchema::DebeziumJson)
+                }
+            } else {
+                // non-cdc connectors
+                self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
+                Some(SourceSchema::parse_to(self)?)
+            }
         } else {
+            // Table is NOT created with an external connector.
             None
         };
 
