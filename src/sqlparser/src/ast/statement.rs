@@ -273,6 +273,9 @@ impl ParseTo for CreateSourceStatement {
             .find(|&opt| opt.name.real_value() == "connector");
         // row format for cdc source must be debezium json
         let source_schema = if let Some(opt) = option && opt.value.to_string().contains("-cdc") {
+            if p.peek_nth_any_of_keywords(0, &[Keyword::ROW]) && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]) {
+                return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
+            }
             SourceSchema::DebeziumJson
         } else {
             impl_parse_to!([Keyword::ROW, Keyword::FORMAT], p);
