@@ -154,8 +154,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         match typ {
             T::Date => tm.format("%F").to_string(),
             T::Timestamp | T::Timestamptz => tm.format("%Y-%m-%d %H:%M:%S").to_string(),
-            // TODO(Noel): Many timestamptz expressions are unsupported in RW, leave this out for
-            // now. T::Timestamptz => {
+            // FIXME(Noel): Tracking issue: https://github.com/risingwavelabs/risingwave/issues/5826
+            // T::Timestamptz => {
             //     let timestamp = tm.format("%Y-%m-%d %H:%M:%S");
             //     let timezone = self.rng.gen_range(0..=15);
             //     format!("{}+{}", timestamp, timezone)
