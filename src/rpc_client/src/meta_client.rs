@@ -127,7 +127,7 @@ impl MetaClient {
         addr: &HostAddr,
         worker_node_parallelism: usize,
     ) -> Result<Self> {
-        let mut grpc_meta_client = GrpcMetaClient::new(meta_addr).await?;
+        let grpc_meta_client = GrpcMetaClient::new(meta_addr).await?;
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
@@ -451,7 +451,7 @@ impl MetaClient {
     ///
     /// When sending heartbeat RPC, it also carries extra info from `extra_info_sources`.
     pub fn start_heartbeat_loop(
-        mut meta_client: MetaClient,
+        meta_client: MetaClient,
         min_interval: Duration,
         max_interval: Duration,
         extra_info_sources: Vec<ExtraInfoSourceRef>,
