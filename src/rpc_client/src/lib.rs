@@ -51,7 +51,8 @@ pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
 pub use meta_client::MetaClient;
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 
-use crate::meta_client::get_channel;
+// TODO: allow unused imports
+use crate::meta_client::get_channel_with_defaults;
 
 #[async_trait]
 pub trait RpcClient: Send + Sync + 'static + Clone {
@@ -195,8 +196,7 @@ macro_rules! meta_rpc_client_method_impl {
                     leader_addr.get_host(),
                     leader_addr.get_port()
                 );
-                // TODO: this has to be done with some defaults
-                let leader_channel = get_channel(addr.as_str(), 1, 1, 1, 1).await?;
+                let leader_channel = get_channel_with_defaults(addr.as_str()).await?;
 
                 // Hold locks on all sub-clients, to update atomically
                 {

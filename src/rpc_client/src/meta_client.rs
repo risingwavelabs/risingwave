@@ -881,11 +881,25 @@ impl HummockMetaClient for MetaClient {
     }
 }
 
+/// wrapper for `get_channel`
+pub async fn get_channel_with_defaults(
+    addr: &str,
+) -> std::result::Result<Channel, tonic::transport::Error> {
+    get_channel(
+        addr,
+        CONN_RETRY_MAX_INTERVAL_MS,
+        CONN_RETRY_BASE_INTERVAL_MS,
+        ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
+        ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC,
+    )
+    .await
+}
+
 /// get a channel against service at `addr`
 ///
 /// ## Arguments:
 /// addr: Should consist out of protocol, IP and port
-pub async fn get_channel(
+async fn get_channel(
     addr: &str,
     max_retry_ms: u64,
     retry_base_interval: u64,
@@ -962,33 +976,26 @@ struct GrpcMetaClient {
 
 // TODO: Undo the changes in the Cargo files in the PR
 
-impl GrpcMetaClient {
-    // Retry base interval in ms for connecting to meta server.
-    const CONN_RETRY_BASE_INTERVAL_MS: u64 = 100;
-    // Max retry interval in ms for connecting to meta server.
-    const CONN_RETRY_MAX_INTERVAL_MS: u64 = 5000;
-    // See `Endpoint::http2_keep_alive_interval`
-    const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
-    // See `Endpoint::keep_alive_timeout`
-    const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
-    // Max retry times for request to meta server.
-    const REQUEST_RETRY_BASE_INTERVAL_MS: u64 = 50;
-    // Max retry times for connecting to meta server.
-    const REQUEST_RETRY_MAX_ATTEMPTS: usize = 10;
-    // Max retry interval in ms for request to meta server.
-    const REQUEST_RETRY_MAX_INTERVAL_MS: u64 = 5000;
+// Retry base interval in ms for connecting to meta server.
+pub const CONN_RETRY_BASE_INTERVAL_MS: u64 = 100;
+// Max retry interval in ms for connecting to meta server.
+pub const CONN_RETRY_MAX_INTERVAL_MS: u64 = 5000;
+// See `Endpoint::http2_keep_alive_interval`
+pub const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
+// See `Endpoint::keep_alive_timeout`
+pub const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
+// Max retry times for request to meta server.
+pub const REQUEST_RETRY_BASE_INTERVAL_MS: u64 = 50;
+// Max retry times for connecting to meta server.
+pub const REQUEST_RETRY_MAX_ATTEMPTS: usize = 10;
+// Max retry interval in ms for request to meta server.
+pub const REQUEST_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
+impl GrpcMetaClient {
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
         tracing::info!("Originally connect against {}", addr);
-        let channel = get_channel(
-            addr,
-            Self::CONN_RETRY_MAX_INTERVAL_MS,
-            Self::CONN_RETRY_BASE_INTERVAL_MS,
-            Self::ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
-            Self::ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC,
-        )
-        .await?;
+        let channel = get_channel_with_defaults(addr).await?;
 
         let mut leader_client = LeaderServiceClient::new(channel.clone());
         let resp = leader_client
@@ -1033,10 +1040,10 @@ impl GrpcMetaClient {
 
     /// Return retry strategy for retrying meta requests.
     pub fn retry_strategy_for_request() -> impl Iterator<Item = Duration> {
-        ExponentialBackoff::from_millis(Self::REQUEST_RETRY_BASE_INTERVAL_MS)
-            .max_delay(Duration::from_millis(Self::REQUEST_RETRY_MAX_INTERVAL_MS))
+        ExponentialBackoff::from_millis(REQUEST_RETRY_BASE_INTERVAL_MS)
+            .max_delay(Duration::from_millis(REQUEST_RETRY_MAX_INTERVAL_MS))
             .map(jitter)
-            .take(Self::REQUEST_RETRY_MAX_ATTEMPTS)
+            .take(REQUEST_RETRY_MAX_ATTEMPTS)
     }
 }
 
