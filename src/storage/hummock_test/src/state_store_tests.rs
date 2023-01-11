@@ -926,7 +926,6 @@ async fn test_write_anytime_inner(
                     .unwrap()
                     .unwrap()
             );
-            println!("finish");
 
             assert!(hummock_storage
                 .get(

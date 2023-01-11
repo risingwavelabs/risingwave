@@ -722,7 +722,7 @@ pub fn to_stream_prost_body(
                 source_id: me.id,
                 source_name: me.name.clone(),
                 state_table: Some(
-                    generic::Source::infer_internal_table_catalog(base)
+                    generic::Source::infer_internal_table_catalog()
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),

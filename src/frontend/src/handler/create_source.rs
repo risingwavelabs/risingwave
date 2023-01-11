@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -264,11 +263,7 @@ pub async fn handle_create_source(
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<RwPgResponse> {
-    // On the premise of ensuring that the materialized_source data can be cleaned up, keep the
-    // state in source
-    let mut with_properties = handler_args.with_options.inner().clone();
-    let retention_second_string_key = PROPERTIES_RETENTION_SECOND_KEY.to_string();
-    with_properties.retain(|k, _| k != &retention_second_string_key);
+    let with_properties = handler_args.with_options.inner().clone();
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 

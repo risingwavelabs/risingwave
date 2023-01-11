@@ -345,15 +345,14 @@ pub async fn get_from_sstable_info(
 
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
-    if dist_key_hash.is_some()
-        && !hit_sstable_bloom_filter(sstable.value(), dist_key_hash.unwrap(), local_stats)
-    {
+    if let Some(hash) = dist_key_hash && !hit_sstable_bloom_filter(sstable.value(), hash, local_stats) {
         if delete_epoch.is_some() {
             return Ok(Some(HummockValue::Delete));
         }
 
         return Ok(None);
     }
+
     // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
     // use default before refinement.
     let mut iter = SstableIterator::create(
