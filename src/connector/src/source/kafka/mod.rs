@@ -31,14 +31,14 @@ pub const KAFKA_CONNECTOR: &str = "kafka";
 pub struct KafkaProperties {
     /// This parameter is not intended to be exposed to users.
     /// This parameter specifies only for one parallelism. The parallelism of kafka source
-    /// is equal to the parallelism passed into compute nodes. So users needs to calculate
+    /// is equal to the parallelism passed into compute nodes. So users need to calculate
     /// how many bytes will be consumed in total across all the parallelism by themselves.
     #[serde(rename = "bytes.per.second", alias = "kafka.bytes.per.second")]
     pub bytes_per_second: Option<String>,
 
     /// This parameter is not intended to be exposed to users.
     /// This parameter specifies only for one parallelism. The parallelism of kafka source
-    /// is equal to the parallelism passed into compute nodes. So users needs to calculate
+    /// is equal to the parallelism passed into compute nodes. So users need to calculate
     /// how many messages will be consumed in total across all the parallelism by themselves.
     #[serde(rename = "max.num.messages", alias = "kafka.max.num.messages")]
     pub max_num_messages: Option<String>,
