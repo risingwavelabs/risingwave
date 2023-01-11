@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -58,6 +58,7 @@ use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
 use risingwave_pb::user::*;
 use tokio::sync::oneshot::Sender;
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
@@ -915,7 +916,7 @@ pub async fn get_channel(
     .await
 }
 
-// internal mutality
+// internal mutability
 // https://doc.rust-lang.org/book/ch15-05-interior-mutability.html
 // atomic may also work
 // arc mutex
@@ -924,7 +925,7 @@ pub async fn get_channel(
 // - Mutex implements internal mutability, but we can also implement that from scratch?
 // - If we use mutex we cannot move futures around, since MutexGuard does not implement Send
 // - If we do not use a mutex, we get "cannot borrow data in a `&` reference as mutable"
-//
+// - Async Mutex? https://tokio.rs/tokio/tutorial/shared-state
 
 /// Client to meta server. Cloning the instance is lightweight.
 ///
@@ -939,7 +940,7 @@ struct GrpcMetaClient {
     // This has to be the multithreaded version.
     // I need mutexes
     // see https://doc.rust-lang.org/book/ch16-03-shared-state.html#using-mutexes-to-allow-access-to-data-from-one-thread-at-a-time
-    // Do i actually need mutexes? Simultanious access by threads bad?
+    // Do i actually need mutexes? Simultaneous access by threads bad?
     // Maybe I can implement internal mutability differently?
 
     // Do I need Rc<RefCell<Client>> or RefCell<Client>?
@@ -952,30 +953,32 @@ struct GrpcMetaClient {
 
     // TODO: I will probably need to add Arc here
     // see https://doc.rust-lang.org/book/ch16-03-shared-state.html#using-mutexes-to-allow-access-to-data-from-one-thread-at-a-time
-    cluster_client: Arc<ClusterServiceClient<Channel>>,
-    heartbeat_client: Arc<HeartbeatServiceClient<Channel>>,
-    ddl_client: Arc<DdlServiceClient<Channel>>,
-    hummock_client: Arc<HummockManagerServiceClient<Channel>>,
-    notification_client: Arc<NotificationServiceClient<Channel>>,
-    stream_client: Arc<StreamManagerServiceClient<Channel>>,
-    user_client: Arc<UserServiceClient<Channel>>,
-    scale_client: Arc<ScaleServiceClient<Channel>>,
-    backup_client: Arc<BackupServiceClient<Channel>>,
+    cluster_client: Arc<Mutex<ClusterServiceClient<Channel>>>,
+    heartbeat_client: Arc<Mutex<HeartbeatServiceClient<Channel>>>,
+    ddl_client: Arc<Mutex<DdlServiceClient<Channel>>>,
+    hummock_client: Arc<Mutex<HummockManagerServiceClient<Channel>>>,
+    notification_client: Arc<Mutex<NotificationServiceClient<Channel>>>,
+    stream_client: Arc<Mutex<StreamManagerServiceClient<Channel>>>,
+    user_client: Arc<Mutex<UserServiceClient<Channel>>>,
+    scale_client: Arc<Mutex<ScaleServiceClient<Channel>>>,
+    backup_client: Arc<Mutex<BackupServiceClient<Channel>>>,
 }
 
 /// Creates a new GrpcMetaClient from a channel
 fn get_grpc_meta_client(channel: Channel) -> GrpcMetaClient {
     GrpcMetaClient {
-        meta_connection: channel,
-        cluster_client: Arc::new(ClusterServiceClient::new(channel.clone())),
-        heartbeat_client: Arc::new(HeartbeatServiceClient::new(channel.clone())),
-        ddl_client: Arc::new(DdlServiceClient::new(channel.clone())),
-        hummock_client: Arc::new(HummockManagerServiceClient::new(channel.clone())),
-        notification_client: Arc::new(NotificationServiceClient::new(channel.clone())),
-        stream_client: Arc::new(StreamManagerServiceClient::new(channel.clone())),
-        user_client: Arc::new(UserServiceClient::new(channel.clone())),
-        scale_client: Arc::new(ScaleServiceClient::new(channel.clone())),
-        backup_client: Arc::new(BackupServiceClient::new(channel.clone())),
+        meta_connection: channel.clone(),
+        cluster_client: Arc::new(Mutex::new(ClusterServiceClient::new(channel.clone()))),
+        heartbeat_client: Arc::new(Mutex::new(HeartbeatServiceClient::new(channel.clone()))),
+        ddl_client: Arc::new(Mutex::new(DdlServiceClient::new(channel.clone()))),
+        hummock_client: Arc::new(Mutex::new(HummockManagerServiceClient::new(
+            channel.clone(),
+        ))),
+        notification_client: Arc::new(Mutex::new(NotificationServiceClient::new(channel.clone()))),
+        stream_client: Arc::new(Mutex::new(StreamManagerServiceClient::new(channel.clone()))),
+        user_client: Arc::new(Mutex::new(UserServiceClient::new(channel.clone()))),
+        scale_client: Arc::new(Mutex::new(ScaleServiceClient::new(channel.clone()))),
+        backup_client: Arc::new(Mutex::new(BackupServiceClient::new(channel))),
     }
 }
 
