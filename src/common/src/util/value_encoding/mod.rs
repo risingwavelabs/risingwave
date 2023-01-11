@@ -156,6 +156,26 @@ pub fn encode_datums(
     encoding
 }
 
+pub fn decode(
+    encoded_bytes: Vec<u8>
+) -> Vec<Datum> {
+    let flag = encoded_bytes.get_u8();
+    let nums_bytes = match *flag & 0b1100 {
+        0b0100 => 1,
+        0b1000 => 2,
+        0b1100 => 4,
+        _ => unreachable!("flag's WW bits corrupted"),
+    };
+    let offset_bytes = match *flag & 0b11 {
+        0b01 => 1,
+        0b10 => 2,
+        0b11 => 4,
+        _ => unreachable!("flag's BB bits corrupted"),
+    };
+    let num_non_null_columns = 
+    todo!()
+}
+
 /// Serialize a datum into bytes and return (Not order guarantee, used in value encoding).
 pub fn serialize_datum(cell: impl ToDatumRef) -> Vec<u8> {
     let mut buf: Vec<u8> = vec![];
@@ -392,7 +412,7 @@ mod tests {
         assert_eq!(
             array[0],
             [
-                0b10000101, // flag
+                0b10000101, // flag mid WW mid BB
                 2, // column nums
                 zero_le_bytes[0], // start id 0
                 zero_le_bytes[1],
