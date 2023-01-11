@@ -930,13 +930,8 @@ pub async fn get_channel(
 /// Client to meta server. Cloning the instance is lightweight.
 ///
 /// It is a wrapper of tonic client. See [`meta_rpc_client_method_impl`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct GrpcMetaClient {
-    // TODO: alternative:
-    // leader_service: LeaderServiceClient<Channel>
-    // Client needs access to the channel to handle LeaderRequest during meta failover
-    meta_connection: Channel,
-
     // This has to be the multithreaded version.
     // I need mutexes
     // see https://doc.rust-lang.org/book/ch16-03-shared-state.html#using-mutexes-to-allow-access-to-data-from-one-thread-at-a-time
@@ -953,6 +948,7 @@ struct GrpcMetaClient {
 
     // TODO: I will probably need to add Arc here
     // see https://doc.rust-lang.org/book/ch16-03-shared-state.html#using-mutexes-to-allow-access-to-data-from-one-thread-at-a-time
+    leader_client: Arc<Mutex<LeaderServiceClient<Channel>>>,
     cluster_client: Arc<Mutex<ClusterServiceClient<Channel>>>,
     heartbeat_client: Arc<Mutex<HeartbeatServiceClient<Channel>>>,
     ddl_client: Arc<Mutex<DdlServiceClient<Channel>>>,
@@ -964,10 +960,20 @@ struct GrpcMetaClient {
     backup_client: Arc<Mutex<BackupServiceClient<Channel>>>,
 }
 
-/// Creates a new GrpcMetaClient from a channel
+// TODO: Undo the changes in the Cargo files in the PR
+
+// TODO: Remove this function
+async fn test(channel: Channel) {
+    let client = get_grpc_meta_client(channel.clone());
+    let mut cluster_c = client.cluster_client.as_ref().lock().await;
+    *cluster_c = ClusterServiceClient::new(channel);
+}
+
+// Remove this function again? Do I call this function only once?
+/// Creates a new `GrpcMetaClient` from a channel
 fn get_grpc_meta_client(channel: Channel) -> GrpcMetaClient {
     GrpcMetaClient {
-        meta_connection: channel.clone(),
+        leader_client: Arc::new(Mutex::new(LeaderServiceClient::new(channel.clone()))),
         cluster_client: Arc::new(Mutex::new(ClusterServiceClient::new(channel.clone()))),
         heartbeat_client: Arc::new(Mutex::new(HeartbeatServiceClient::new(channel.clone()))),
         ddl_client: Arc::new(Mutex::new(DdlServiceClient::new(channel.clone()))),
@@ -979,13 +985,6 @@ fn get_grpc_meta_client(channel: Channel) -> GrpcMetaClient {
         user_client: Arc::new(Mutex::new(UserServiceClient::new(channel.clone()))),
         scale_client: Arc::new(Mutex::new(ScaleServiceClient::new(channel.clone()))),
         backup_client: Arc::new(Mutex::new(BackupServiceClient::new(channel))),
-    }
-}
-
-// TODO: Do I still need a custom implementation, now that I use Arc<Mutex?
-impl Clone for GrpcMetaClient {
-    fn clone(&self) -> GrpcMetaClient {
-        get_grpc_meta_client(self.meta_connection.clone())
     }
 }
 
