@@ -887,10 +887,10 @@ pub async fn get_channel_with_defaults(
 ) -> std::result::Result<Channel, tonic::transport::Error> {
     get_channel(
         addr,
-        CONN_RETRY_MAX_INTERVAL_MS,
-        CONN_RETRY_BASE_INTERVAL_MS,
-        ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
-        ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC,
+        GRPC_CONN_RETRY_MAX_INTERVAL_MS,
+        GRPC_CONN_RETRY_BASE_INTERVAL_MS,
+        GRPC_ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
+        GRPC_ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC,
     )
     .await
 }
@@ -960,19 +960,19 @@ struct GrpcMetaClient {
 }
 
 // Retry base interval in ms for connecting to meta server.
-pub const CONN_RETRY_BASE_INTERVAL_MS: u64 = 100;
+const GRPC_CONN_RETRY_BASE_INTERVAL_MS: u64 = 100;
 // Max retry interval in ms for connecting to meta server.
-pub const CONN_RETRY_MAX_INTERVAL_MS: u64 = 5000;
+const GRPC_CONN_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 // See `Endpoint::http2_keep_alive_interval`
-pub const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
+const GRPC_ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 60;
 // See `Endpoint::keep_alive_timeout`
-pub const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
+const GRPC_ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 60;
 // Max retry times for request to meta server.
-pub const REQUEST_RETRY_BASE_INTERVAL_MS: u64 = 50;
+const GRPC_REQUEST_RETRY_BASE_INTERVAL_MS: u64 = 50;
 // Max retry times for connecting to meta server.
-pub const REQUEST_RETRY_MAX_ATTEMPTS: usize = 10;
+const GRPC_REQUEST_RETRY_MAX_ATTEMPTS: usize = 10;
 // Max retry interval in ms for request to meta server.
-pub const REQUEST_RETRY_MAX_INTERVAL_MS: u64 = 5000;
+const GRPC_REQUEST_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
 impl GrpcMetaClient {
     /// Connect to the meta server `addr`.
@@ -1023,10 +1023,10 @@ impl GrpcMetaClient {
 
     /// Return retry strategy for retrying meta requests.
     pub fn retry_strategy_for_request() -> impl Iterator<Item = Duration> {
-        ExponentialBackoff::from_millis(REQUEST_RETRY_BASE_INTERVAL_MS)
-            .max_delay(Duration::from_millis(REQUEST_RETRY_MAX_INTERVAL_MS))
+        ExponentialBackoff::from_millis(GRPC_REQUEST_RETRY_BASE_INTERVAL_MS)
+            .max_delay(Duration::from_millis(GRPC_REQUEST_RETRY_MAX_INTERVAL_MS))
             .map(jitter)
-            .take(REQUEST_RETRY_MAX_ATTEMPTS)
+            .take(GRPC_REQUEST_RETRY_MAX_ATTEMPTS)
     }
 }
 
