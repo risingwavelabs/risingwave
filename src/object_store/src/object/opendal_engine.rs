@@ -70,15 +70,6 @@ impl OpendalObjectStore {
             engine_type: EngineType::Memory,
         }
     }
-
-    async fn get_object<R, F>(&self, path: &str, f: F) -> ObjectResult<R>
-    where
-        F: Fn(&Bytes) -> R,
-    {
-        Some(&Bytes::from(self.op.object(path).read().await?))
-            .ok_or_else(|| ObjectError::internal(format!("no object at path '{}'", path)))
-            .map(f)
-    }
 }
 
 #[async_trait::async_trait]
@@ -97,23 +88,25 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
-        match self.engine_type {
-            EngineType::Memory => Ok(Box::new(OpendalMemoryStreamingUploader::new(
-                self.op.clone(),
-                path.to_string(),
-            ))),
-            EngineType::Hdfs => Ok(Box::new(HdfsStreamingUploader::new(
-                self.op.clone(),
-                path.to_string(),
-            ))),
-        }
+        Ok(Box::new(HdfsStreamingUploader::new(
+            self.op.clone(),
+            path.to_string(),
+        )))
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        let res = Bytes::from(self.op.object(path).read().await?);
         match block {
-            Some(block) => find_block(&res, block),
-            None => Ok(res),
+            Some(block) => {
+                let range = block.offset as u64..(block.offset + block.size) as u64;
+                let res = Bytes::from(self.op.object(path).range_read(range).await?);
+
+                if block.size != res.len() {
+                    Err(ObjectError::internal("bad block offset and size"))
+                } else {
+                    Ok(res)
+                }
+            }
+            None => Ok(Bytes::from(self.op.object(path).read().await?)),
         }
     }
 
@@ -139,16 +132,8 @@ impl ObjectStore for OpendalObjectStore {
 
         let bytes = match start_pos {
             Some(strat_position) => {
-                self.get_object(path, |obj| {
-                    find_block(
-                        obj,
-                        BlockLocation {
-                            offset: strat_position,
-                            size: obj.len() - strat_position,
-                        },
-                    )
-                })
-                .await??
+                let range = strat_position as u64..;
+                Bytes::from(self.op.object(path).range_read(range).await?)
             }
             None => Bytes::from(self.op.object(path).read().await?),
         };
@@ -217,13 +202,6 @@ impl ObjectStore for OpendalObjectStore {
     }
 }
 
-fn find_block(obj: &Bytes, block: BlockLocation) -> ObjectResult<Bytes> {
-    if block.offset + block.size > obj.len() {
-        Err(ObjectError::internal("bad block offset and size"))
-    } else {
-        Ok(obj.slice(block.offset..(block.offset + block.size)))
-    }
-}
 /// Store multiple parts in a map, and concatenate them on finish.
 pub struct HdfsStreamingUploader {
     op: Operator,
@@ -249,40 +227,6 @@ impl StreamingUploader for HdfsStreamingUploader {
     async fn finish(self: Box<Self>) -> ObjectResult<()> {
         self.op.object(&self.path).write(self.buf).await?;
 
-        Ok(())
-    }
-
-    fn get_memory_usage(&self) -> u64 {
-        self.buf.capacity() as u64
-    }
-}
-
-/// Store multiple parts in a map, and concatenate them on finish.
-pub struct OpendalMemoryStreamingUploader {
-    op: Operator,
-    path: String,
-    buf: BytesMut,
-}
-impl OpendalMemoryStreamingUploader {
-    pub fn new(op: Operator, path: String) -> Self {
-        Self {
-            op,
-            path,
-            buf: BytesMut::new(),
-        }
-    }
-}
-#[async_trait::async_trait]
-impl StreamingUploader for OpendalMemoryStreamingUploader {
-    async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        self.buf.put(data);
-        Ok(())
-    }
-
-    async fn finish(self: Box<Self>) -> ObjectResult<()> {
-        // Create fs backend builder.
-
-        self.op.object(&self.path).write(self.buf.clone()).await?;
         Ok(())
     }
 
@@ -324,7 +268,13 @@ mod tests {
 
         // Overflow.
         store
-            .read("/abc", Some(BlockLocation { offset: 4, size: 4 }))
+            .read(
+                "/abc",
+                Some(BlockLocation {
+                    offset: 4,
+                    size: 40,
+                }),
+            )
             .await
             .unwrap_err();
 
