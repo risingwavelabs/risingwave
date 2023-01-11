@@ -475,8 +475,7 @@ impl<S: StateStore> StorageTable<S> {
             };
             let prefix_len = self
                 .pk_serializer
-                .deserialize_prefix_len(encoded_prefix, self.read_prefix_len_hint)
-                .unwrap();
+                .deserialize_prefix_len(encoded_prefix, self.read_prefix_len_hint)?;
             Some(encoded_prefix[..prefix_len].to_vec())
         } else {
             trace!(
@@ -579,7 +578,6 @@ impl<S: StateStore> StorageTableIterInner<S> {
             row_deserializer,
             pk_serializer,
             output_indices_in_key,
-
         };
         Ok(iter)
     }
