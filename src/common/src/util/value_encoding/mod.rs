@@ -42,27 +42,21 @@ enum Width {
     Extra(u32),
 }
 
-enum Offset {
-    Mid(Vec<u8>),
-    Large(Vec<u16>),
-    Extra(Vec<u32>),
-}
-
 pub struct RowEncoding {
     flag: u8,
     non_null_datum_nums: Width,
     non_null_column_ids: Vec<ColumnId>,
-    offsets: Offset,
+    offsets: Vec<u8>,
     buf: Vec<u8>,
 }
 
 impl RowEncoding {
     pub fn new() -> Self {
         RowEncoding {
-            flag: 0b_10000000,
+            flag: 0b_1000_0000,
             non_null_datum_nums: Width::Mid(0),
             non_null_column_ids: vec![],
-            offsets: Offset::Mid(vec![]),
+            offsets: vec![],
             buf: vec![],
         }
     }
@@ -86,18 +80,25 @@ impl RowEncoding {
     }
 
     pub fn set_big(&mut self, maybe_offset: Vec<usize>, max_offset: usize) {
-        self.offsets = match max_offset {
+        self.offsets = vec![];
+        match max_offset {
             n if n <= u8::MAX as usize => {
                 self.flag |= 0b01;
-                Offset::Mid(maybe_offset.into_iter().map(|m| m as u8).collect_vec())
+                maybe_offset
+                    .into_iter()
+                    .for_each(|m| self.offsets.put_u8(m as u8));
             }
             n if n <= u16::MAX as usize => {
                 self.flag |= 0b10;
-                Offset::Large(maybe_offset.into_iter().map(|m| m as u16).collect_vec())
+                maybe_offset
+                    .into_iter()
+                    .for_each(|m| self.offsets.put_u16_le(m as u16));
             }
             n if n <= u32::MAX as usize => {
                 self.flag |= 0b11;
-                Offset::Extra(maybe_offset.into_iter().map(|m| m as u32).collect_vec())
+                maybe_offset
+                    .into_iter()
+                    .for_each(|m| self.offsets.put_u32_le(m as u32));
             }
             _ => unreachable!("encoding length exceeds u32"),
         }
@@ -118,7 +119,7 @@ impl RowEncoding {
                 maybe_offset.push(self.buf.len());
                 self.non_null_column_ids.push(id);
                 serialize_scalar(v, &mut self.buf);
-            }            
+            }
         }
         let max_offset = *maybe_offset
             .last()
@@ -131,10 +132,10 @@ impl RowEncoding {
         let mut row_bytes = vec![];
         row_bytes.put_u8(self.flag);
         serialize_width(self.non_null_datum_nums, &mut row_bytes);
-        for id in self.non_null_column_ids.iter() {
+        for id in &self.non_null_column_ids {
             row_bytes.put_i32_le(id.get_id());
         }
-        serialize_offsets(&self.offsets, &mut row_bytes);
+        row_bytes.extend(self.offsets.iter());
         row_bytes.extend(self.buf.iter());
 
         row_bytes
@@ -198,8 +199,8 @@ pub fn decode(
                 let mut next_offset_slice =
                     &encoded_bytes[(index + offset_bytes)..(index + 2 * offset_bytes)];
                 let next_offset = deserialize_width(offset_bytes, &mut next_offset_slice);
-                let mut data_slice = &encoded_bytes
-                    [(data_start_idx + this_offset)..(data_start_idx + next_offset)];
+                let mut data_slice =
+                    &encoded_bytes[(data_start_idx + this_offset)..(data_start_idx + next_offset)];
                 deserialize_value(datatype, &mut data_slice)
             } else {
                 let mut data_slice = &encoded_bytes[(data_start_idx + this_offset)..];
@@ -280,26 +281,6 @@ fn serialize_width(width: Width, buf: &mut impl BufMut) {
         Width::Mid(w) => buf.put_u8(w),
         Width::Large(w) => buf.put_u16_le(w),
         Width::Extra(w) => buf.put_u32_le(w),
-    }
-}
-
-fn serialize_offsets(offset: &Offset, buf: &mut impl BufMut) {
-    match offset {
-        Offset::Mid(v) => {
-            for offset in v.iter() {
-                buf.put_u8(*offset);
-            }
-        }
-        Offset::Large(v) => {
-            for offset in v.iter() {
-                buf.put_u16_le(*offset);
-            }
-        }
-        Offset::Extra(v) => {
-            for offset in v.iter() {
-                buf.put_u32_le(*offset);
-            }
-        }
     }
 }
 
@@ -513,28 +494,16 @@ mod tests {
     fn test_row_decoding() {
         let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
         let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
-        let mut row_bytes = serialize_row_column_aware(column_ids.clone(), row1.clone());
+        let row_bytes = serialize_row_column_aware(column_ids.clone(), row1.clone());
         let data_types = vec![DataType::Int16, DataType::Varchar];
-        let decoded = decode(&column_ids[..], &data_types[..], &mut row_bytes[..]);
+        let decoded = decode(&column_ids[..], &data_types[..], &row_bytes[..]);
         assert_eq!(decoded, vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
-        let data_types1 = vec![
-            DataType::Varchar,
-            DataType::Int16,
-            DataType::Date,
-        ];
-        let mut row_bytes1 = serialize_row_column_aware(column_ids.clone(), row1);
+        let data_types1 = vec![DataType::Varchar, DataType::Int16, DataType::Date];
         let decoded1 = decode(
-            &[
-                ColumnId::new(1),
-                ColumnId::new(5),
-                ColumnId::new(6),
-            ],
+            &[ColumnId::new(1), ColumnId::new(5), ColumnId::new(6)],
             &data_types1[..],
-            &mut row_bytes1[..],
+            &row_bytes[..],
         );
-        assert_eq!(
-            decoded1,
-            vec![Some(Utf8("abc".into())), None, None]
-        );
+        assert_eq!(decoded1, vec![Some(Utf8("abc".into())), None, None]);
     }
 }
