@@ -23,7 +23,7 @@ macro_rules! enable_jemalloc_on_linux {
 }
 
 #[macro_export]
-macro_rules! enable_sys_jemalloc_on_linux {
+macro_rules! enable_task_local_jemalloc_on_linux {
     () => {
         #[cfg(target_os = "linux")]
         #[global_allocator]

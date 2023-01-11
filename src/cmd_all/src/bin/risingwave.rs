@@ -21,9 +21,9 @@ use std::env;
 use anyhow::{bail, Result};
 use clap::StructOpt;
 use risingwave_cmd_all::playground;
-use risingwave_common::enable_sys_jemalloc_on_linux;
+use risingwave_common::enable_task_local_jemalloc_on_linux;
 
-enable_sys_jemalloc_on_linux!();
+enable_task_local_jemalloc_on_linux!();
 
 type RwFns = HashMap<&'static str, Box<dyn Fn(Vec<String>) -> Result<()>>>;
 
