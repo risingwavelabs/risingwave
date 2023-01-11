@@ -16,9 +16,8 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::{Deref, RangeBounds};
-use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -513,7 +512,6 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -755,6 +753,28 @@ mod tests {
         );
         assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"aaa")));
         assert!(!shared_buffer_batch.check_delete_by_range(TableKey(b"bbb")));
+        assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"ddd")));
+        assert!(!shared_buffer_batch.check_delete_by_range(TableKey(b"eee")));
+    }
+
+    #[tokio::test]
+    async fn test_shared_buffer_batch_delete_range2() {
+        let epoch = 1;
+        let delete_ranges = vec![
+            (Bytes::from(b"aaa".to_vec()), Bytes::from(b"bbb".to_vec())),
+            (Bytes::from(b"aaa".to_vec()), Bytes::from(b"ccc".to_vec())),
+            (Bytes::from(b"ddd".to_vec()), Bytes::from(b"eee".to_vec())),
+        ];
+        let shared_buffer_batch = SharedBufferBatch::build_shared_buffer_batch(
+            epoch,
+            vec![],
+            0,
+            delete_ranges,
+            Default::default(),
+            None,
+        );
+        assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"aaa")));
+        assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"bbb")));
         assert!(shared_buffer_batch.check_delete_by_range(TableKey(b"ddd")));
         assert!(!shared_buffer_batch.check_delete_by_range(TableKey(b"eee")));
     }

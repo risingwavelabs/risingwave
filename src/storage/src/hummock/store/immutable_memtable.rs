@@ -15,48 +15,55 @@
 use std::collections::binary_heap::PeekMut;
 use std::collections::BinaryHeap;
 use std::future::Future;
-use std::io::Seek;
 use std::marker::PhantomData;
-use std::ops::{Deref, RangeBounds};
+use std::ops::Deref;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::row::Row;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, EPOCH_LEN};
 use risingwave_hummock_sdk::HummockEpoch;
-use zstd::zstd_safe::WriteBuf;
+use spin::mutex::SpinMutex;
 
 use crate::hummock::iterator::{
     Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
     HummockIteratorDirection,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatch, SharedBufferBatchId, SharedBufferBatchIterator,
+    SharedBufferBatchId, SharedBufferBatchIterator,
 };
 use crate::hummock::shared_buffer::SHARED_BUFFER_BATCH_ID_GENERATOR;
 use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
-use crate::hummock::utils::{range_overlap, MemoryTracker};
+use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{DeleteRangeTombstone, HummockResult, MemoryLimiter};
+use crate::hummock::{
+    DeleteRangeAggregator, DeleteRangeAggregatorBuilder, DeleteRangeTombstone, HummockResult,
+    MemoryLimiter, SingleDeleteRangeIterator,
+};
 use crate::monitor::StoreLocalStatistic;
 
 // NOTES: After we merged multiple imms into a merged imm,
 // there will be multiple versions for a single key, we put those versions into a vector and
-// sort them in descending order, aka Newest to oldest.
+// sort them in descending order, aka newest to oldest.
 pub(crate) type MergedImmItem = (TableKey<Vec<u8>>, Vec<(HummockEpoch, HummockValue<Bytes>)>);
 
-#[derive(Debug)]
 pub(crate) struct MergedImmutableMemtableInner {
     payload: Vec<MergedImmItem>,
     range_tombstone_list: Vec<DeleteRangeTombstone>,
+
+    // Used for point-get to filter out deleted key
+    delete_range_agg: SpinMutex<DeleteRangeAggregator<SingleDeleteRangeIterator>>,
     size: usize,
     /// The minimum epoch of all merged imm
     min_epoch: HummockEpoch,
     batch_id: ImmId,
+
+    /// This should be used to remove imms in the `StagingVersion` when
+    /// we finished the merge task and remove the MergedImm itself
+    /// after we finished a sync/spill task
     merged_imm_ids: Vec<ImmId>,
+
     _tracker: Option<MemoryTracker>,
 }
 
@@ -66,11 +73,20 @@ impl MergedImmutableMemtableInner {
         range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
         min_epoch: HummockEpoch,
+        range_tombstone_watermark: HummockEpoch,
         merged_imm_ids: Vec<ImmId>,
     ) -> Self {
+        let mut builder = DeleteRangeAggregatorBuilder::default();
+        builder.add_tombstone(range_tombstone_list.clone());
+        let del_range_agg = builder.build(range_tombstone_watermark, false);
+
         Self {
             payload,
             range_tombstone_list,
+            delete_range_agg: SpinMutex::new(DeleteRangeAggregator::new(
+                del_range_agg.iter(),
+                range_tombstone_watermark,
+            )),
             size,
             min_epoch,
             batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
@@ -100,10 +116,6 @@ impl MergedImmutableMemtableInner {
         }
     }
 
-    pub fn get_payload(&self) -> &Vec<MergedImmItem> {
-        &self.payload
-    }
-
     pub fn get_merged_imm_ids(&self) -> &Vec<ImmId> {
         &self.merged_imm_ids
     }
@@ -124,8 +136,8 @@ impl Deref for MergedImmutableMemtableInner {
 }
 
 /// Merge of multiple imms, which will contain data from multiple epochs.
-/// That is the key of will be encoded with epoch
-#[derive(Clone, Debug, PartialEq)]
+/// To be notice, there will be no new imms added into the merged imm after it has built.
+#[derive(Clone, PartialEq)]
 pub struct MergedImmutableMemtable {
     inner: Arc<MergedImmutableMemtableInner>,
     table_id: TableId,
@@ -142,6 +154,7 @@ impl MergedImmutableMemtable {
         let mut range_tombstone_list = Vec::new();
         let mut num_keys = 0;
         let mut min_epoch = HummockEpoch::MAX;
+        let mut max_epoch = HummockEpoch::MIN;
         let mut size = 0;
         let mut merged_imm_ids = Vec::with_capacity(imms.len());
 
@@ -156,10 +169,11 @@ impl MergedImmutableMemtable {
             num_keys += imm.count();
             size += imm.size();
             min_epoch = std::cmp::min(min_epoch, imm.epoch());
-            let mut delete_range_tombstones = imm.get_delete_range_tombstones();
-            range_tombstone_list.append(&mut delete_range_tombstones);
-            let mut iter = imm.into_forward_iter();
-            heap.push(Node { iter });
+            max_epoch = std::cmp::max(max_epoch, imm.epoch());
+            range_tombstone_list.extend(imm.get_delete_range_tombstones());
+            heap.push(Node {
+                iter: imm.into_forward_iter(),
+            });
         }
 
         let mut items = Vec::with_capacity(num_keys);
@@ -206,6 +220,7 @@ impl MergedImmutableMemtable {
                 range_tombstone_list,
                 size,
                 min_epoch,
+                max_epoch,
                 merged_imm_ids,
             )),
             table_id,
@@ -274,20 +289,10 @@ impl MergedImmutableMemtable {
         self.inner.range_tombstone_list.clone()
     }
 
-    pub fn check_delete_by_range(&self, table_key: TableKey<&[u8]>) -> bool {
-        if self.inner.range_tombstone_list.is_empty() {
-            return false;
-        }
-        let idx = self
-            .inner
-            .range_tombstone_list
-            .partition_point(|item| item.end_user_key.table_key.as_ref().le(table_key.as_ref()));
-        idx < self.inner.range_tombstone_list.len()
-            && self.inner.range_tombstone_list[idx]
-                .start_user_key
-                .table_key
-                .as_ref()
-                .le(table_key.as_ref())
+    pub fn check_delete_by_range(&self, table_key: TableKey<&[u8]>, epoch: HummockEpoch) -> bool {
+        let mut lock = self.inner.delete_range_agg.lock();
+        // should_delete needs a &mut self, so wraps it in a spinlock
+        lock.should_delete(&UserKey::new(self.table_id, table_key), epoch)
     }
 
     #[inline(always)]
@@ -383,7 +388,7 @@ impl<D: HummockIteratorDirection> HummockIterator for MergedImmIterator<D> {
     fn value(&self) -> HummockValue<&[u8]> {
         let item = self.current_item();
         // Use linear scan here to exploit cpu cache prefetch
-        for (e, v) in item.1.iter() {
+        for (e, v) in &item.1 {
             if *e <= self.epoch {
                 return v.as_slice();
             }
@@ -467,6 +472,7 @@ mod tests {
     use crate::hummock::iterator::test_utils::{
         iterator_test_table_key_of, transform_shared_buffer,
     };
+    use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 
     #[tokio::test]
     async fn test_merge_imms_basic() {
@@ -489,7 +495,7 @@ mod tests {
         let imm1 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items1.clone()),
             epoch,
-            table_id.clone(),
+            table_id,
         );
         let shared_buffer_items2: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
             (
@@ -509,7 +515,7 @@ mod tests {
         let imm2 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items2.clone()),
             epoch,
-            table_id.clone(),
+            table_id,
         );
 
         let shared_buffer_items3: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
@@ -530,7 +536,7 @@ mod tests {
         let imm3 = SharedBufferBatch::for_test(
             transform_shared_buffer(shared_buffer_items3.clone()),
             epoch,
-            table_id.clone(),
+            table_id,
         );
 
         let batch_items = vec![
@@ -593,16 +599,15 @@ mod tests {
         }
     }
 
+    // FIXME: fix this case
     #[tokio::test]
     async fn test_merge_imms_delete_range() {
         let table_id = TableId { table_id: 1004 };
         let epoch = 1;
         let delete_ranges = vec![
             (Bytes::from(b"aaa".to_vec()), Bytes::from(b"bbb".to_vec())),
-            (Bytes::from(b"ddd".to_vec()), Bytes::from(b"eee".to_vec())),
             (Bytes::from(b"hhh".to_vec()), Bytes::from(b"lll".to_vec())),
         ];
-
         let shared_buffer_items1: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
             (
                 iterator_test_table_key_of(1),
@@ -617,19 +622,20 @@ mod tests {
                 HummockValue::put(Bytes::from("value3")),
             ),
         ];
-
+        let sorted_items1 = transform_shared_buffer(shared_buffer_items1);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items1);
         let imm1 = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
-            transform_shared_buffer(shared_buffer_items1),
-            0,
+            sorted_items1,
+            size,
             delete_ranges,
-            Default::default(),
+            table_id,
             None,
         );
 
         let epoch = 2;
         let delete_ranges = vec![
-            (Bytes::from(b"aaa".to_vec()), Bytes::from(b"ccc".to_vec())),
+            (Bytes::from(b"ddd".to_vec()), Bytes::from(b"eee".to_vec())),
             (Bytes::from(b"fff".to_vec()), Bytes::from(b"ggg".to_vec())),
         ];
         let shared_buffer_items2: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
@@ -646,28 +652,33 @@ mod tests {
                 HummockValue::put(Bytes::from("value32")),
             ),
         ];
+        let sorted_items2 = transform_shared_buffer(shared_buffer_items2);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items2);
         let imm2 = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
-            transform_shared_buffer(shared_buffer_items2),
-            0,
+            sorted_items2,
+            size,
             delete_ranges,
-            Default::default(),
+            table_id,
             None,
         );
 
         let imms = vec![imm2, imm1];
-        let merged_imm = MergedImmutableMemtable::build_merged_imm(table_id, imms.clone(), None);
+        let merged_imm = MergedImmutableMemtable::build_merged_imm(table_id, imms, None);
 
-        assert!(merged_imm.check_delete_by_range(TableKey(b"aaa")));
-        assert!(merged_imm.check_delete_by_range(TableKey(b"bbb")));
-        assert!(!merged_imm.check_delete_by_range(TableKey(b"ccc")));
-        assert!(!merged_imm.check_delete_by_range(TableKey(b"eee")));
+        // FIXME: aaa is deleted in epoch=1, this should be true
+        assert!(merged_imm.check_delete_by_range(TableKey(b"aaa"), epoch));
 
-        assert!(merged_imm.check_delete_by_range(TableKey(b"fff")));
-        assert!(!merged_imm.check_delete_by_range(TableKey(b"ggg")));
-        assert!(merged_imm.check_delete_by_range(TableKey(b"hhh")));
-        assert!(merged_imm.check_delete_by_range(TableKey(b"hhi")));
-        assert!(merged_imm.check_delete_by_range(TableKey(b"kkk")));
-        assert!(!merged_imm.check_delete_by_range(TableKey(b"lll")));
+        assert!(!merged_imm.check_delete_by_range(TableKey(b"bbb"), epoch));
+        assert!(!merged_imm.check_delete_by_range(TableKey(b"ccc"), epoch));
+        assert!(merged_imm.check_delete_by_range(TableKey(b"ddd"), epoch));
+        assert!(!merged_imm.check_delete_by_range(TableKey(b"eee"), epoch));
+
+        assert!(merged_imm.check_delete_by_range(TableKey(b"fff"), epoch));
+        assert!(!merged_imm.check_delete_by_range(TableKey(b"ggg"), epoch));
+        assert!(merged_imm.check_delete_by_range(TableKey(b"hhh"), epoch));
+        assert!(merged_imm.check_delete_by_range(TableKey(b"hhi"), epoch));
+        assert!(merged_imm.check_delete_by_range(TableKey(b"kkk"), epoch));
+        assert!(!merged_imm.check_delete_by_range(TableKey(b"lll"), epoch));
     }
 }

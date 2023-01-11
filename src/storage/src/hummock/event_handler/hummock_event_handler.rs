@@ -33,7 +33,7 @@ use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::hummock::compactor::{compact, Context};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::event_handler::uploader::{
-    HummockUploader, ImmMergeTask, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
+    HummockUploader, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
 };
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -427,7 +427,10 @@ impl HummockEventHandler {
                         self.handle_data_spilled(staging_sstable_info);
                     }
                     UploaderEvent::ImmMerged(merge_result) => {
-                        todo!("handle imm merged");
+                        let mut write_guard = merge_result.read_version.write();
+                        write_guard.update(VersionUpdate::Staging(StagingData::MergedImmMem(
+                            merge_result.merged_imm,
+                        )));
                     }
                 },
                 Either::Right(event) => {

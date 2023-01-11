@@ -3,7 +3,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::HummockEpoch;
 
-use crate::hummock::iterator::{HummockIterator, RangeIteratorTyped};
+use crate::hummock::iterator::RangeIteratorTyped;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchId;
 use crate::hummock::store::immutable_memtable::MergedImmutableMemtable;
 use crate::hummock::store::memtable::ImmutableMemtable;
@@ -13,7 +13,7 @@ use crate::monitor::StoreLocalStatistic;
 
 /// Abstraction of the immutable memtable used in the read path of `HummockReadVersion`.
 /// Only provide interfaces needed in the read path.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum ImmutableMemtableImpl {
     Imm(ImmutableMemtable),
     MergedImm(MergedImmutableMemtable),
@@ -52,6 +52,7 @@ impl ImmutableMemtableImpl {
         }
     }
 
+    /// For merged imm, the epoch will be the minimum epoch of all the merged imms
     pub fn epoch(&self) -> u64 {
         match self {
             ImmutableMemtableImpl::Imm(batch) => batch.epoch(),
@@ -92,10 +93,10 @@ impl ImmutableMemtableImpl {
         }
     }
 
-    pub fn check_delete_by_range(&self, table_key: TableKey<&[u8]>) -> bool {
+    pub fn check_delete_by_range(&self, table_key: TableKey<&[u8]>, epoch: HummockEpoch) -> bool {
         match self {
             ImmutableMemtableImpl::Imm(batch) => batch.check_delete_by_range(table_key),
-            ImmutableMemtableImpl::MergedImm(m) => m.check_delete_by_range(table_key),
+            ImmutableMemtableImpl::MergedImm(m) => m.check_delete_by_range(table_key, epoch),
         }
     }
 
@@ -114,7 +115,7 @@ pub fn get_from_imm(
     epoch: HummockEpoch,
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<HummockValue<Bytes>> {
-    if imm.check_delete_by_range(table_key) {
+    if imm.check_delete_by_range(table_key, epoch) {
         return Some(HummockValue::Delete);
     }
     imm.get(table_key, epoch).map(|v| {
@@ -122,9 +123,3 @@ pub fn get_from_imm(
         v
     })
 }
-
-// TODO: iterator abstraction for imm and merged_imm
-// pub enum ImmutableMemtableIterator<D> {
-//     Imm(SharedBufferBatchIterator<D>),
-//     MergedImm(MergedImmIterator<D>),
-// }

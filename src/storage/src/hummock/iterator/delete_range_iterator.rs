@@ -210,10 +210,6 @@ impl ForwardMergeRangeIterator {
     pub fn add_sst_iter(&mut self, iter: SstableDeleteRangeIterator) {
         self.unused_iters.push(RangeIteratorTyped::Sst(iter));
     }
-
-    // pub fn add_merged_imm_iter(&mut self, iter: MergedImmDeleteRangeIterator) {
-    //     self.unused_iters.push(RangeIteratorTyped::MergedImm(iter));
-    // }
 }
 
 impl DeleteRangeIterator for ForwardMergeRangeIterator {

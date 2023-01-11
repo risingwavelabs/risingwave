@@ -33,7 +33,6 @@ use tracing::{error, warn};
 
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchInner;
 use crate::hummock::store::immutable_memtable::MergedImmutableMemtable;
 use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo};
@@ -739,7 +738,7 @@ impl HummockUploader {
     fn poll_imm_merge_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<ImmMergeTaskResult>> {
         // only poll the oldest merge task if there is any
         if let Some(task) = self.imm_merging_tasks.back_mut() {
-            return match ready!(task.poll_unpin(cx)) {
+            match ready!(task.poll_unpin(cx)) {
                 Ok(merged_imm) => {
                     // pop the finished task
                     // TODO: if we polled a finished task, we can continue to poll the next task and
@@ -751,7 +750,7 @@ impl HummockUploader {
                     }))
                 }
                 Err(e) => Poll::Ready(None),
-            };
+            }
         } else {
             Poll::Ready(None)
         }
@@ -763,8 +762,8 @@ pub(crate) struct NextUploaderEvent<'a> {
 }
 
 pub struct ImmMergeTaskResult {
-    merged_imm: MergedImmutableMemtable,
-    read_version: Arc<parking_lot::RwLock<HummockReadVersion>>,
+    pub merged_imm: MergedImmutableMemtable,
+    pub read_version: Arc<parking_lot::RwLock<HummockReadVersion>>,
 }
 
 pub(crate) enum UploaderEvent {

@@ -34,7 +34,6 @@ use super::HummockStorage;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::store::immutable_memtable_impl::ImmutableMemtableImpl;
-use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::hummock::store::version::read_filter_for_batch;
 use crate::hummock::{HummockEpoch, HummockError};
