@@ -21,7 +21,10 @@
     BatchProject { exprs: [Case(null:Boolean, 1:Int32)] }
     └─BatchValues { rows: [[]] }
 - name: implicit cast boolean (JOIN ON NULL)
-  sql: "create table t1(v1 int); \ncreate table t2(v1 int); \nselect t1.v1 from t1 join t2 on NULL;\n"
+  sql: |
+    create table t1(v1 int);
+    create table t2(v1 int);
+    select t1.v1 from t1 join t2 on NULL;
   batch_plan: |
     BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
     ├─BatchExchange { order: [], dist: Single }
@@ -64,7 +67,10 @@
     BatchProject { exprs: [Case('y':Varchar::Boolean, 1:Int32)] }
     └─BatchValues { rows: [[]] }
 - name: implicit cast boolean (JOIN ON VARCHAR)
-  sql: "create table t1(v1 int); \ncreate table t2(v1 int); \nselect t1.v1 from t1 join t2 on 'y';\n"
+  sql: |
+    create table t1(v1 int);
+    create table t2(v1 int);
+    select t1.v1 from t1 join t2 on 'y';
   batch_plan: |
     BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
     ├─BatchExchange { order: [], dist: Single }

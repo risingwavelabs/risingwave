@@ -213,7 +213,6 @@ impl Binder {
                     .enforce_bool_clause("current_schemas")
                     .map_err(|_| no_match_err)?;
 
-                println!("input: {:?}", input);
                 let ExprImpl::Literal(literal) = &input else {
                     return Err(ErrorCode::NotImplemented(
                         "Only boolean literals are supported in `current_schemas`.".to_string(), None.into()
