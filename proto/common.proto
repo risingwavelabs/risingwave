@@ -74,8 +74,3 @@ message BatchQueryEpoch {
     uint64 backup = 3;
   }
 }
-
-message ClusterConfig {
-  // The URL that workers in the cluster can use to access storage backend.
-  string state_store_url = 1;
-}

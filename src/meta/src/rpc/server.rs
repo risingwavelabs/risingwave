@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use etcd_client::ConnectOptions;
 use risingwave_common::util::addr::leader_info_to_host_addr;
-use risingwave_pb::meta::MetaLeaderInfo;
+use risingwave_pb::meta::{ClusterConfig, MetaLeaderInfo};
 use tokio::sync::oneshot::channel as OneChannel;
 use tokio::sync::watch::{
     channel as WatchChannel, Receiver as WatchReceiver, Sender as WatchSender,
@@ -67,6 +67,7 @@ pub async fn rpc_serve(
     meta_store_backend: MetaStoreBackend,
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
+    cluster_config: ClusterConfig,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, WatchSender<()>)> {
     match meta_store_backend {
@@ -88,6 +89,7 @@ pub async fn rpc_serve(
                 address_info,
                 max_heartbeat_interval,
                 lease_interval_secs,
+                cluster_config,
                 opts,
             )
             .await
@@ -99,6 +101,7 @@ pub async fn rpc_serve(
                 address_info,
                 max_heartbeat_interval,
                 lease_interval_secs,
+                cluster_config,
                 opts,
             )
             .await
@@ -115,6 +118,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     address_info: AddressInfo,
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
+    cluster_config: ClusterConfig,
     opts: MetaOpts,
 ) -> MetaResult<(JoinHandle<()>, WatchSender<()>)> {
     // Initialize managers
@@ -220,6 +224,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             meta_store,
             address_info,
             max_heartbeat_interval,
+            cluster_config,
             opts,
             current_leader,
             elect_coord,
@@ -277,6 +282,7 @@ mod tests {
                     info,
                     Duration::from_secs(4),
                     1,
+                    ClusterConfig::default(),
                     MetaOpts::test(false),
                 )
                 .await
@@ -357,6 +363,7 @@ mod tests {
                         port: host_addr.port as i32,
                     }),
                     worker_node_parallelism: 5,
+                    verify_config: None,
                 })
                 .await;
 

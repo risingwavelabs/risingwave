@@ -17,12 +17,17 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::common::worker_node::State;
-use risingwave_pb::common::{ClusterConfig, HostAddress, ParallelUnit, WorkerNode, WorkerType};
-use risingwave_pb::meta::heartbeat_request;
+use risingwave_pb::common::{HostAddress, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::worker_verify_config::WorkerConfig;
+use risingwave_pb::meta::{
+    heartbeat_request, ClusterConfig, CompactorConfig, ComputeNodeConfig, FrontendConfig,
+    WorkerVerifyConfig,
+};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
@@ -63,7 +68,7 @@ pub struct ClusterManager<S: MetaStore> {
 
     max_heartbeat_interval: Duration,
 
-    cluster_config: ClusterConfig,
+    config_manager: ClusterConfigManager,
 
     core: RwLock<ClusterManagerCore>,
 }
@@ -72,16 +77,19 @@ impl<S> ClusterManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> MetaResult<Self> {
+    pub async fn new(
+        env: MetaSrvEnv<S>,
+        max_heartbeat_interval: Duration,
+        startup_cluster_config: ClusterConfig,
+    ) -> MetaResult<Self> {
         let meta_store = env.meta_store_ref();
-        let core = ClusterManagerCore::new(meta_store.clone()).await?;
-        let cluster_config = ClusterConfig {
-            state_store_url: env.opts.state_store_url.clone(),
-        };
+        let config_manager =
+            ClusterConfigManager::new(meta_store.as_ref(), startup_cluster_config).await?;
+        let core = ClusterManagerCore::new(meta_store).await?;
         Ok(Self {
             env,
             max_heartbeat_interval,
-            cluster_config,
+            config_manager,
             core: RwLock::new(core),
         })
     }
@@ -373,8 +381,8 @@ where
         self.core.read().await.get_worker_by_id(worker_id)
     }
 
-    pub fn cluster_config(&self) -> &ClusterConfig {
-        &self.cluster_config
+    pub fn cluster_config_maanger(&self) -> &ClusterConfigManager {
+        &self.config_manager
     }
 }
 
@@ -391,7 +399,7 @@ impl ClusterManagerCore {
     where
         S: MetaStore,
     {
-        let workers = Worker::list(&*meta_store).await?;
+        let workers = Worker::list(meta_store.as_ref()).await?;
         let mut worker_map = HashMap::new();
         let mut parallel_units = Vec::new();
 
@@ -504,6 +512,97 @@ impl ClusterManagerCore {
     }
 }
 
+pub struct ClusterConfigManager {
+    /// The complete cluster config that is persisted.
+    cluster_config: ClusterConfig,
+    /// A subset of `ClusterConfig` used to verify frontend config.
+    frontend_config: FrontendConfig,
+    /// A subset of `ClusterConfig` used to verify compute node config.
+    compute_node_config: ComputeNodeConfig,
+    /// A subset of `ClusterConfig` used to verify compactor config.
+    compactor_config: CompactorConfig,
+}
+
+impl ClusterConfigManager {
+    async fn new<S: MetaStore>(meta_store: &S, startup_config: ClusterConfig) -> MetaResult<Self> {
+        let mut persisted_config = ClusterConfig::list(meta_store).await?;
+
+        // Prioritize the persisted config.
+        let cluster_config = if persisted_config.is_empty() {
+            startup_config.insert(meta_store).await?;
+            startup_config
+        } else if persisted_config.len() > 1 {
+            return Err(anyhow!(
+                "More than one ClusterConfig persisted in meta store: {:?}",
+                persisted_config
+            )
+            .into());
+        } else {
+            if persisted_config.first().unwrap() != &startup_config {
+                tracing::warn!("Using cluster config from meta store, ignoring command line options and config file");
+            }
+            persisted_config.pop().unwrap()
+        };
+
+        tracing::info!(
+            "Starting meta node with cluster config {:?}",
+            cluster_config
+        );
+
+        let frontend_config = FrontendConfig {};
+        let compute_node_config = ComputeNodeConfig {
+            state_store_url: cluster_config.state_store_url.clone(),
+        };
+        let compactor_config = CompactorConfig {
+            state_store_url: cluster_config.state_store_url.clone(),
+        };
+
+        Ok(Self {
+            cluster_config,
+            frontend_config,
+            compute_node_config,
+            compactor_config,
+        })
+    }
+
+    /// Verify a the config for the given `worker_type`. If all fields match, return the
+    /// complete [`ClusterConfig`]. If `config_to_verify` is `None`, the verification will pass
+    /// directly.
+    pub fn verify_worker(
+        &self,
+        worker_type: WorkerType,
+        config_to_verify: Option<WorkerVerifyConfig>,
+    ) -> MetaResult<ClusterConfig> {
+        macro_rules! compare_config {
+            ($config:ident, $worker_type:ident, $( { $worker_variant:ident, $config_name:ident } ),*) => {
+                match $config {
+                    $(WorkerConfig::$worker_variant(c) => {
+                        if !matches!($worker_type, WorkerType::$worker_variant) {
+                            Err(anyhow!("worker type and config type mismatch").into())
+                        } else if c == self.$config_name {
+                            Ok(self.cluster_config.clone())
+                        } else {
+                            Err(anyhow!("worker config and cluster config mismatch").into())
+                        }
+                    }),*
+                }
+            };
+        }
+
+        if let Some(c) = config_to_verify {
+            let c = c.worker_config.unwrap();
+            compare_config!(
+                c, worker_type,
+                { Frontend, frontend_config },
+                { ComputeNode, compute_node_config },
+                { Compactor, compactor_config }
+            )
+        } else {
+            Ok(self.cluster_config.clone())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -514,7 +613,7 @@ mod tests {
         let env = MetaSrvEnv::for_test().await;
 
         let cluster_manager = Arc::new(
-            ClusterManager::new(env.clone(), Duration::new(0, 0))
+            ClusterManager::new(env.clone(), Duration::new(0, 0), ClusterConfig::default())
                 .await
                 .unwrap(),
         );
@@ -575,6 +674,85 @@ mod tests {
     ) {
         let parallel_units = cluster_manager.list_active_parallel_units().await;
         assert_eq!(parallel_units.len(), parallel_count);
+    }
+
+    #[tokio::test]
+    async fn test_config_manager() {
+        let env = MetaSrvEnv::for_test().await;
+
+        let initial_config = ClusterConfig {
+            state_store_url: "123".to_string(),
+        };
+        let config_manager = ClusterConfigManager::new(env.meta_store(), initial_config.clone())
+            .await
+            .unwrap();
+
+        // Config should be persisted in meta store.
+        assert_eq!(
+            ClusterConfig::list(env.meta_store()).await.unwrap(),
+            vec![initial_config.clone()]
+        );
+
+        assert_eq!(
+            config_manager
+                .verify_worker(WorkerType::ComputeNode, None)
+                .unwrap(),
+            initial_config
+        );
+
+        let verify_config = Some(WorkerVerifyConfig {
+            worker_config: Some(WorkerConfig::ComputeNode(ComputeNodeConfig {
+                state_store_url: "123".to_string(),
+            })),
+        });
+        assert_eq!(
+            config_manager
+                .verify_worker(WorkerType::ComputeNode, verify_config.clone())
+                .unwrap(),
+            initial_config
+        );
+
+        // Mismatching config and worker type.
+        assert!(config_manager
+            .verify_worker(WorkerType::Compactor, verify_config)
+            .is_err());
+
+        // Mismatching config field.
+        let verify_config = Some(WorkerVerifyConfig {
+            worker_config: Some(WorkerConfig::ComputeNode(ComputeNodeConfig {
+                state_store_url: "abc".to_string(),
+            })),
+        });
+        assert!(config_manager
+            .verify_worker(WorkerType::Compactor, verify_config)
+            .is_err());
+
+        let wrong_config = ClusterConfig {
+            state_store_url: "abc".to_string(),
+        };
+
+        let config_manager = ClusterConfigManager::new(env.meta_store(), wrong_config.clone())
+            .await
+            .unwrap();
+
+        // Config should be immutable.
+        assert_eq!(
+            ClusterConfig::list(env.meta_store()).await.unwrap(),
+            vec![initial_config.clone()]
+        );
+
+        // THe new `config_manager` should use `initial_config`.
+        let verify_config = Some(WorkerVerifyConfig {
+            worker_config: Some(WorkerConfig::ComputeNode(ComputeNodeConfig {
+                state_store_url: "123".to_string(),
+            })),
+        });
+        assert_eq!(
+            config_manager
+                .verify_worker(WorkerType::ComputeNode, verify_config)
+                .unwrap(),
+            initial_config
+        );
     }
 
     // This test takes seconds because the TTL is measured in seconds.

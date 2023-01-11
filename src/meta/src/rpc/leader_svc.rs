@@ -30,7 +30,7 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
-use risingwave_pb::meta::MetaLeaderInfo;
+use risingwave_pb::meta::{ClusterConfig, MetaLeaderInfo};
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use tokio::sync::oneshot::Sender as OneSender;
 use tokio::sync::watch::Receiver as WatchReceiver;
@@ -73,10 +73,12 @@ pub struct ElectionCoordination {
 ///
 /// ## Returns
 /// Returns an error if the service initialization failed
+#[allow(clippy::too_many_arguments)]
 pub async fn start_leader_srv<S: MetaStore>(
     meta_store: Arc<S>,
     address_info: AddressInfo,
     max_heartbeat_interval: Duration,
+    cluster_config: ClusterConfig,
     opts: MetaOpts,
     current_leader: MetaLeaderInfo,
     election_coordination: ElectionCoordination,
@@ -91,7 +93,7 @@ pub async fn start_leader_srv<S: MetaStore>(
     monitor_process(registry).unwrap();
 
     let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), max_heartbeat_interval)
+        ClusterManager::new(env.clone(), max_heartbeat_interval, cluster_config)
             .await
             .unwrap(),
     );

@@ -757,6 +757,7 @@ mod tests {
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::meta::table_fragments::Fragment;
+    use risingwave_pb::meta::ClusterConfig;
     use risingwave_pb::stream_plan::*;
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,
@@ -913,8 +914,14 @@ mod tests {
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true))).await;
             let meta_metrics = Arc::new(MetaMetrics::new());
-            let cluster_manager =
-                Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
+            let cluster_manager = Arc::new(
+                ClusterManager::new(
+                    env.clone(),
+                    Duration::from_secs(3600),
+                    ClusterConfig::default(),
+                )
+                .await?,
+            );
             let host = HostAddress {
                 host: host.to_string(),
                 port: port as i32,

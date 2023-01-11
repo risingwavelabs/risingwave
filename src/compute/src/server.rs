@@ -32,7 +32,9 @@ use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
-use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
+use risingwave_rpc_client::{
+    ComputeClientPool, ExtraInfoSourceRef, MetaClient, WorkerVerifyConfig,
+};
 use risingwave_source::dml_manager::DmlManager;
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_storage::hummock::compactor::{
@@ -87,6 +89,7 @@ pub async fn compute_node_serve(
         WorkerType::ComputeNode,
         &client_addr,
         opts.parallelism,
+        WorkerVerifyConfig::for_compute_node(opts.state_store),
     )
     .await
     .unwrap();
@@ -117,7 +120,6 @@ pub async fn compute_node_serve(
 
     let mut join_handle_vec = vec![];
     let state_store_url = cluster_config.state_store_url.as_str();
-    assert_eq!(state_store_url, opts.state_store);
     let state_store = StateStoreImpl::new(
         state_store_url,
         &opts.file_cache_dir,
@@ -147,8 +149,8 @@ pub async fn compute_node_serve(
         extra_info_sources.push(storage.sstable_id_manager().clone());
         // Note: we treat `hummock+memory-shared` as a shared storage, so we won't start the
         // compactor along with compute node.
-        if opts.state_store == "hummock+memory"
-            || opts.state_store.starts_with("hummock+disk")
+        if state_store_url == "hummock+memory"
+            || state_store_url.starts_with("hummock+disk")
             || storage_config.disable_remote_compactor
         {
             tracing::info!("start embedded compactor");

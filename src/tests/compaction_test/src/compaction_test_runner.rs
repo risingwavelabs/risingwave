@@ -31,7 +31,7 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
-use risingwave_rpc_client::{HummockMetaClient, MetaClient};
+use risingwave_rpc_client::{HummockMetaClient, MetaClient, WorkerVerifyConfig};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
@@ -231,7 +231,7 @@ async fn init_metadata_for_replay(
             tracing::info!("Ctrl+C received, now exiting");
             std::process::exit(0);
         },
-        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, client_addr, 0) => {
+        ret = MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, client_addr, 0, WorkerVerifyConfig::need_not_verify()) => {
             meta_client = ret.unwrap().0;
         },
     }
@@ -242,8 +242,14 @@ async fn init_metadata_for_replay(
     let tables = meta_client.risectl_list_state_tables().await?;
     let compaction_groups = meta_client.risectl_list_compaction_group().await?;
 
-    let (new_meta_client, _) =
-        MetaClient::register_new(new_meta_endpoint, WorkerType::RiseCtl, client_addr, 0).await?;
+    let (new_meta_client, _) = MetaClient::register_new(
+        new_meta_endpoint,
+        WorkerType::RiseCtl,
+        client_addr,
+        0,
+        WorkerVerifyConfig::need_not_verify(),
+    )
+    .await?;
     new_meta_client.activate(client_addr).await.unwrap();
     if ci_mode {
         let table_to_check = tables.iter().find(|t| t.name == "nexmark_q7").unwrap();
@@ -267,9 +273,14 @@ async fn pull_version_deltas(
 ) -> anyhow::Result<Vec<HummockVersionDelta>> {
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-    let (meta_client, _) =
-        MetaClient::register_new(cluster_meta_endpoint, WorkerType::RiseCtl, client_addr, 0)
-            .await?;
+    let (meta_client, _) = MetaClient::register_new(
+        cluster_meta_endpoint,
+        WorkerType::RiseCtl,
+        client_addr,
+        0,
+        WorkerVerifyConfig::need_not_verify(),
+    )
+    .await?;
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned pull worker id {}", worker_id);
     meta_client.activate(client_addr).await.unwrap();
@@ -316,8 +327,14 @@ async fn start_replay(
 
     // Register to the cluster.
     // We reuse the RiseCtl worker type here
-    let (meta_client, _) =
-        MetaClient::register_new(&opts.meta_address, WorkerType::RiseCtl, &client_addr, 0).await?;
+    let (meta_client, _) = MetaClient::register_new(
+        &opts.meta_address,
+        WorkerType::RiseCtl,
+        &client_addr,
+        0,
+        WorkerVerifyConfig::need_not_verify(),
+    )
+    .await?;
     let worker_id = meta_client.worker_id();
     tracing::info!("Assigned replay worker id {}", worker_id);
     meta_client.activate(&client_addr).await.unwrap();

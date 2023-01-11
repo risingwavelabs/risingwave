@@ -19,11 +19,14 @@ use std::time::{Duration, SystemTime};
 use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::meta::heartbeat_request::extra_info::Info;
+use risingwave_pb::meta::ClusterConfig;
 
 use crate::model::{MetadataModel, MetadataModelResult};
 
-/// Column family name for cluster.
+/// Column family name for worker.
 const WORKER_CF_NAME: &str = "cf/worker";
+/// Column family name for cluster config.
+const CLUSTER_CONFIG_CF_NAME: &str = "cf/cluster_config";
 
 pub const INVALID_EXPIRE_AT: u64 = 0;
 
@@ -112,5 +115,27 @@ impl Worker {
 
     pub fn info_version_id(&self) -> u64 {
         self.info_version_id
+    }
+}
+
+impl MetadataModel for ClusterConfig {
+    // There should only be one cluster config so `KeyType` does not matter.
+    type KeyType = u32;
+    type ProstType = ClusterConfig;
+
+    fn cf_name() -> String {
+        CLUSTER_CONFIG_CF_NAME.to_string()
+    }
+
+    fn to_protobuf(&self) -> Self::ProstType {
+        self.clone()
+    }
+
+    fn from_protobuf(prost: Self::ProstType) -> Self {
+        prost
+    }
+
+    fn key(&self) -> MetadataModelResult<Self::KeyType> {
+        Ok(0)
     }
 }

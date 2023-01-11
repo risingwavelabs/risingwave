@@ -29,6 +29,7 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockSnapshot, HummockVersion, KeyRange, SstableInfo,
 };
+use risingwave_pb::meta::ClusterConfig;
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction_group::TableOption;
@@ -278,9 +279,13 @@ pub async fn setup_compute_env_with_config(
 ) {
     let env = MetaSrvEnv::for_test().await;
     let cluster_manager = Arc::new(
-        ClusterManager::new(env.clone(), Duration::from_secs(1))
-            .await
-            .unwrap(),
+        ClusterManager::new(
+            env.clone(),
+            Duration::from_secs(1),
+            ClusterConfig::default(),
+        )
+        .await
+        .unwrap(),
     );
 
     let compactor_manager = Arc::new(CompactorManager::for_test());

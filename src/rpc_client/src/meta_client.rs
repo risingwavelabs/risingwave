@@ -34,7 +34,7 @@ use risingwave_pb::catalog::{
     Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
     View as ProstView,
 };
-use risingwave_pb::common::{ClusterConfig, WorkerType};
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
@@ -49,7 +49,7 @@ use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::reschedule_request::Reschedule as ProstReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
-use risingwave_pb::meta::*;
+use risingwave_pb::meta::{WorkerVerifyConfig as ProstWorkerVerifyConfig, *};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
@@ -113,12 +113,14 @@ impl MetaClient {
         worker_type: WorkerType,
         addr: &HostAddr,
         worker_node_parallelism: usize,
+        verify_cluster_config: WorkerVerifyConfig,
     ) -> Result<(Self, ClusterConfig)> {
         let grpc_meta_client = GrpcMetaClient::new(meta_addr).await?;
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
             worker_node_parallelism: worker_node_parallelism as u64,
+            verify_config: verify_cluster_config.inner,
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
         let resp = tokio_retry::Retry::spawn(retry_strategy, || async {
@@ -1020,4 +1022,43 @@ macro_rules! for_all_meta_rpc {
 
 impl GrpcMetaClient {
     for_all_meta_rpc! { rpc_client_method_impl }
+}
+
+/// A wrapper for [`risingwave_pb::meta::WorkerVerifyConfig`] to simplify construction.
+pub struct WorkerVerifyConfig {
+    inner: Option<ProstWorkerVerifyConfig>,
+}
+
+use worker_verify_config::WorkerConfig;
+
+impl WorkerVerifyConfig {
+    pub fn for_frontend() -> Self {
+        Self {
+            inner: Some(ProstWorkerVerifyConfig {
+                worker_config: Some(WorkerConfig::Frontend(FrontendConfig {})),
+            }),
+        }
+    }
+
+    pub fn for_compute_node(state_store_url: String) -> Self {
+        Self {
+            inner: Some(ProstWorkerVerifyConfig {
+                worker_config: Some(WorkerConfig::ComputeNode(ComputeNodeConfig {
+                    state_store_url,
+                })),
+            }),
+        }
+    }
+
+    pub fn for_compactor(state_store_url: String) -> Self {
+        Self {
+            inner: Some(ProstWorkerVerifyConfig {
+                worker_config: Some(WorkerConfig::Compactor(CompactorConfig { state_store_url })),
+            }),
+        }
+    }
+
+    pub fn need_not_verify() -> Self {
+        Self { inner: None }
+    }
 }

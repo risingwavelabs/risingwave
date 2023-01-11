@@ -272,6 +272,7 @@ mod test {
     use risingwave_pb::catalog::Table;
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
+    use risingwave_pb::meta::ClusterConfig;
     use risingwave_pb::stream_plan::stream_node::NodeBody;
     use risingwave_pb::stream_plan::{
         FragmentTypeFlag, MaterializeNode, StreamActor, StreamNode, TopNNode,
@@ -283,8 +284,14 @@ mod test {
     #[tokio::test]
     async fn test_schedule() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
-        let cluster_manager =
-            Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
+        let cluster_manager = Arc::new(
+            ClusterManager::new(
+                env.clone(),
+                Duration::from_secs(3600),
+                ClusterConfig::default(),
+            )
+            .await?,
+        );
 
         let node_count = 4;
         let fake_parallelism = 4;

@@ -54,10 +54,15 @@ where
             .cluster_manager
             .add_worker_node(worker_type, host, worker_node_parallelism)
             .await?;
+
+        let cluster_config = self
+            .cluster_manager
+            .cluster_config_maanger()
+            .verify_worker(worker_type, req.verify_config)?;
         Ok(Response::new(AddWorkerNodeResponse {
             status: None,
             node: Some(worker_node),
-            cluster_config: Some(self.cluster_manager.cluster_config().clone()),
+            cluster_config: Some(cluster_config),
         }))
     }
 

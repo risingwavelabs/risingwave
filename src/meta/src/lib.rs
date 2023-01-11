@@ -50,6 +50,7 @@ use std::time::Duration;
 
 use clap::{ArgEnum, Parser};
 pub use error::{MetaError, MetaResult};
+use risingwave_pb::meta::ClusterConfig;
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
@@ -132,6 +133,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // slow compile in release mode.
     Box::pin(async move {
         let config = load_config(&opts.config_path);
+        let cluster_config = get_cluster_config(&opts);
         tracing::info!("Starting meta node with config {:?}", config);
         tracing::info!("Starting meta node with options {:?}", opts);
         let meta_addr = opts.host.unwrap_or_else(|| opts.listen_addr.clone());
@@ -173,6 +175,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             backend,
             max_heartbeat_interval,
             config.meta.meta_leader_lease_secs,
+            cluster_config,
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
                 barrier_interval,
@@ -200,4 +203,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         .unwrap();
         join_handle.await.unwrap();
     })
+}
+
+fn get_cluster_config(opts: &MetaNodeOpts) -> ClusterConfig {
+    ClusterConfig {
+        state_store_url: opts.state_store.clone(),
+    }
 }

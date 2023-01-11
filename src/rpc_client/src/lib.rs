@@ -46,6 +46,7 @@ mod compute_client;
 mod connector_client;
 mod hummock_meta_client;
 mod meta_client;
+pub use meta_client::WorkerVerifyConfig;
 // mod sink_client;
 mod stream_client;
 

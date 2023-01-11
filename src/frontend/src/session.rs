@@ -41,7 +41,9 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
-use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
+use risingwave_rpc_client::{
+    ComputeClientPool, ComputeClientPoolRef, MetaClient, WorkerVerifyConfig,
+};
 use risingwave_source::monitor::SourceMetrics;
 use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -167,6 +169,7 @@ impl FrontendEnv {
             WorkerType::Frontend,
             &frontend_address,
             0,
+            WorkerVerifyConfig::for_frontend(),
         )
         .await?;
 
