@@ -20,6 +20,7 @@ use risingwave_batch::task::BatchManager;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
+#[cfg(target_os = "linux")]
 use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 use tracing;
 
@@ -68,9 +69,16 @@ impl GlobalMemoryManager {
         watermark_epoch.store(epoch, Ordering::Relaxed);
     }
 
+    /// Jemalloc is not supported on non-Linux OSs, because tikv-jemalloc is not available.
+    /// See the comments for the macro enable_jemalloc_on_linux!();
+    // FIXME: remove such limitation after #7180
+    #[cfg(not(target_os = "linux"))]
+    pub async fn run(self: Arc<Self>, _: Arc<BatchManager>, _: Arc<LocalStreamManager>) {}
+
     /// Memory manager will get memory usage from batch and streaming, and do some actions.
     /// 1. if batch exceeds, kill running query.
     /// 2. if streaming exceeds, evict cache by watermark.
+    #[cfg(target_os = "linux")]
     pub async fn run(
         self: Arc<Self>,
         _batch_mgr: Arc<BatchManager>,
