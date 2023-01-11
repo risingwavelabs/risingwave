@@ -30,7 +30,8 @@ use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    ReadOptions, StateStore, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
+    LocalStateStore, NewLocalOptions, ReadOptions, StateStore, StateStoreRead, StateStoreWrite,
+    SyncResult, WriteOptions,
 };
 
 use crate::get_test_notification_client;
@@ -780,7 +781,7 @@ async fn test_write_anytime_inner(
     let epoch1 = initial_epoch + 1;
 
     let assert_old_value = |epoch| {
-        let hummock_storage = hummock_storage.clone();
+        let hummock_storage = &hummock_storage;
         async move {
             // check point get
             assert_eq!(
@@ -905,7 +906,7 @@ async fn test_write_anytime_inner(
     assert_old_value(epoch1).await;
 
     let assert_new_value = |epoch| {
-        let hummock_storage = hummock_storage.clone();
+        let hummock_storage = &hummock_storage;
         async move {
             // check point get
             assert_eq!(
@@ -1203,7 +1204,7 @@ async fn test_multiple_epoch_sync_inner(
         .await
         .unwrap();
     let test_get = || {
-        let hummock_storage_clone = hummock_storage.clone();
+        let hummock_storage_clone = &hummock_storage;
         async move {
             assert_eq!(
                 hummock_storage_clone
@@ -1285,6 +1286,7 @@ async fn test_multiple_epoch_sync_inner(
 async fn test_gc_watermark_and_clear_shared_buffer() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
 
+    let hummock_storage = hummock_storage.into_global();
     assert_eq!(
         hummock_storage
             .sstable_id_manager()
@@ -1292,23 +1294,20 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         HummockSstableId::MAX
     );
 
+    let mut local_hummock_storage = hummock_storage
+        .new_local(NewLocalOptions::for_test(Default::default()))
+        .await;
+
     let initial_epoch = hummock_storage.get_pinned_version().max_committed_epoch();
     let epoch1 = initial_epoch + 1;
-    let batch1 = vec![
-        (Bytes::from("aa"), StorageValue::new_put("111")),
-        (Bytes::from("bb"), StorageValue::new_put("222")),
-    ];
-    hummock_storage
-        .ingest_batch(
-            batch1,
-            vec![],
-            WriteOptions {
-                epoch: epoch1,
-                table_id: Default::default(),
-            },
-        )
-        .await
+    local_hummock_storage.init(epoch1);
+    local_hummock_storage
+        .insert(Bytes::from("aa"), Bytes::from("111"), None)
         .unwrap();
+    local_hummock_storage
+        .insert(Bytes::from("bb"), Bytes::from("222"), None)
+        .unwrap();
+    local_hummock_storage.flush(Vec::new()).await.unwrap();
 
     assert_eq!(
         hummock_storage
@@ -1318,18 +1317,11 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     );
 
     let epoch2 = initial_epoch + 2;
-    let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
-    hummock_storage
-        .ingest_batch(
-            batch2,
-            vec![],
-            WriteOptions {
-                epoch: epoch2,
-                table_id: Default::default(),
-            },
-        )
-        .await
+    local_hummock_storage.seal_current_epoch(epoch2);
+    local_hummock_storage
+        .delete(Bytes::from("bb"), Bytes::from("222"))
         .unwrap();
+    local_hummock_storage.flush(Vec::new()).await.unwrap();
 
     assert_eq!(
         hummock_storage
@@ -1345,6 +1337,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
             .min()
             .unwrap()
     };
+    local_hummock_storage.seal_current_epoch(u64::MAX);
     let sync_result1 = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
     let min_sst_id_epoch1 = min_sst_id(&sync_result1);
     assert_eq!(
@@ -1379,7 +1372,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 
     hummock_storage.clear_shared_buffer().await.unwrap();
 
-    let read_version = hummock_storage.local.read_version();
+    let read_version = local_hummock_storage.inner().read_version();
 
     let read_version = read_version.read();
     assert!(read_version.staging().imm.is_empty());

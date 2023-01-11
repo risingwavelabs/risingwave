@@ -19,7 +19,6 @@ use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::error;
 
@@ -173,10 +172,10 @@ impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
 }
 
 impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
+    type FlushFuture<'a> = impl Future<Output = StorageResult<usize>> + 'a;
     type GetFuture<'a> = impl GetFutureTrait<'a>;
     type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
     type IterStream<'a> = impl StateStoreIterItemStream + 'a;
-    type SealEpochFuture<'a> = impl Future<Output = StorageResult<()>> + 'a;
 
     fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
         // TODO: collect metrics
@@ -188,6 +187,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
+        // TODO: may collect the metrics as local
         self.monitored_iter(self.inner.iter(key_range, read_options))
             .map_ok(identity)
     }
@@ -200,6 +200,11 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
         // TODO: collect metrics
         self.inner.delete(key, old_val)
+    }
+
+    fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_> {
+        // TODO: collect metrics
+        self.inner.flush(delete_ranges)
     }
 
     fn epoch(&self) -> u64 {
@@ -215,13 +220,9 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.inner.init(epoch)
     }
 
-    fn seal_current_epoch(
-        &mut self,
-        next_epoch: u64,
-        delete_ranges: Vec<(Bytes, Bytes)>,
-    ) -> Self::SealEpochFuture<'_> {
+    fn seal_current_epoch(&mut self, next_epoch: u64) {
         // TODO: may collect metrics
-        self.inner.seal_current_epoch(next_epoch, delete_ranges)
+        self.inner.seal_current_epoch(next_epoch)
     }
 }
 
@@ -281,8 +282,8 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         }
     }
 
-    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async move { MonitoredStateStore::new(self.inner.new_local(table_id).await, self.stats.clone()) }
+    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
+        async move { MonitoredStateStore::new(self.inner.new_local(option).await, self.stats.clone()) }
     }
 }
 

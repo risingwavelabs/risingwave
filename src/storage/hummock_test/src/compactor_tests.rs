@@ -54,9 +54,7 @@ pub(crate) mod tests {
     };
     use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
     use risingwave_storage::storage_value::StorageValue;
-    use risingwave_storage::store::{
-        ReadOptions, StateStoreReadExt, StateStoreWrite, WriteOptions,
-    };
+    use risingwave_storage::store::*;
 
     use crate::get_test_notification_client;
     use crate::test_utils::{
@@ -477,7 +475,7 @@ pub(crate) mod tests {
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
         for idx in 0..kv_count {
             epoch += 1;
-            let mut local = storage.local.start_write_batch(WriteOptions {
+            let mut local = storage.start_write_batch(WriteOptions {
                 epoch,
                 table_id: existing_table_id.into(),
             });
@@ -633,11 +631,12 @@ pub(crate) mod tests {
         .await;
 
         // register the local_storage to global_storage
-        let storage_1 =
-            HummockV2MixedStateStore::new(global_storage.clone(), TableId::from(1)).await;
-
-        let storage_2 =
-            HummockV2MixedStateStore::new(global_storage.clone(), TableId::from(2)).await;
+        let mut storage_1 = global_storage
+            .new_local(NewLocalOptions::for_test(TableId::from(1)))
+            .await;
+        let mut storage_2 = global_storage
+            .new_local(NewLocalOptions::for_test(TableId::from(2)))
+            .await;
 
         let filter_key_extractor_manager = global_storage.filter_key_extractor_manager().clone();
         filter_key_extractor_manager.update(
@@ -670,9 +669,9 @@ pub(crate) mod tests {
         let mut epoch: u64 = 1;
         for index in 0..kv_count {
             let (table_id, storage) = if index % 2 == 0 {
-                (drop_table_id, storage_1.clone())
+                (drop_table_id, &mut storage_1)
             } else {
-                (existing_table_ids, storage_2.clone())
+                (existing_table_ids, &mut storage_2)
             };
             register_table_ids_to_compaction_group(
                 &hummock_manager_ref,
@@ -681,16 +680,20 @@ pub(crate) mod tests {
             )
             .await;
             epoch += 1;
-            let mut local = storage.start_write_batch(WriteOptions {
-                epoch,
-                table_id: TableId::from(table_id),
-            });
+            storage.init(epoch);
 
-            let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
-            local.put(ramdom_key, StorageValue::new_put(val.clone()));
-            local.ingest().await.unwrap();
+            let random_key = rand::thread_rng().gen::<[u8; 32]>();
+            storage
+                .insert(
+                    Bytes::copy_from_slice(random_key.as_slice()),
+                    val.clone(),
+                    None,
+                )
+                .unwrap();
+            storage.flush(Vec::new()).await.unwrap();
+            storage.seal_current_epoch(u64::MAX);
 
-            let ssts = storage
+            let ssts = global_storage
                 .seal_and_sync_epoch(epoch)
                 .await
                 .unwrap()

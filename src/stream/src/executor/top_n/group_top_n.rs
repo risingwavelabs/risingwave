@@ -554,7 +554,7 @@ mod tests {
                 order_by_2(),
                 1,
                 vec![1, 2],
-                state_table.clone(),
+                state_table,
                 Arc::new(AtomicU64::new(0)),
             )
             .unwrap(),

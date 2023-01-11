@@ -438,9 +438,8 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![0],
     );
 
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch.inc();
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
         Some(4_i32.into()),
@@ -451,7 +450,9 @@ async fn test_row_seq_scan() -> Result<()> {
         Some(5_i32.into()),
         Some(8_i64.into()),
     ]));
-    state.commit_for_test(epoch.inc()).await.unwrap();
+
+    epoch.inc();
+    state.commit(epoch).await.unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table,

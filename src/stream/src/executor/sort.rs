@@ -211,7 +211,7 @@ impl<S: StateStore> SortExecutor<S> {
                     } else {
                         // If the barrier is not a checkpoint, then there is no actual data to
                         // commit. Therefore, we simply update the epoch of state table.
-                        self.state_table.commit_no_data_expected(barrier.epoch).await;
+                        self.state_table.commit_no_data_expected(barrier.epoch);
                     }
 
                     // Update the vnode bitmap for the state table if asked. Also update the buffer.
@@ -342,7 +342,7 @@ mod tests {
         let watermark1 = 3_i64;
         let watermark2 = 7_i64;
 
-        let state_table = create_state_table().await;
+        let state_table = create_state_table(MemoryStateStore::new()).await;
         let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table);
 
         // Init barrier
@@ -432,8 +432,9 @@ mod tests {
         );
         let watermark = 3_i64;
 
-        let state_table = create_state_table().await;
-        let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table.clone());
+        let state_store = MemoryStateStore::new();
+        let state_table = create_state_table(state_store.clone()).await;
+        let (mut tx, mut sort_executor) = create_executor(sort_column_index, state_table);
 
         // Init barrier
         tx.push_barrier(1, false);
@@ -458,6 +459,7 @@ mod tests {
         // Consume the barrier
         sort_executor.next().await.unwrap().unwrap();
 
+        let state_table = create_state_table(state_store.clone()).await;
         // Mock fail over
         let (mut recovered_tx, mut recovered_sort_executor) =
             create_executor(sort_column_index, state_table);
@@ -491,8 +493,9 @@ mod tests {
         vec![0]
     }
 
-    async fn create_state_table() -> StateTable<MemoryStateStore> {
-        let memory_state_store = MemoryStateStore::new();
+    async fn create_state_table(
+        memory_state_store: MemoryStateStore,
+    ) -> StateTable<MemoryStateStore> {
         let table_id = TableId::new(1);
         let column_descs = vec![
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),

@@ -48,9 +48,8 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
         vec![OrderType::Ascending],
         vec![0],
     );
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch.inc();
 
     for idx in 0..row_count {
         let idx = idx as i32;
@@ -60,7 +59,9 @@ pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore>
             Some(idx.into()),
         ]));
     }
-    state.commit_for_test(epoch).await.unwrap();
+
+    epoch.inc();
+    state.commit(epoch).await.unwrap();
 
     table
 }

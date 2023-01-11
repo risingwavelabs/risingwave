@@ -361,8 +361,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
             self.arrangement
                 .state_table
-                .commit_no_data_expected(barrier.epoch)
-                .await;
+                .commit_no_data_expected(barrier.epoch);
 
             self.last_barrier = Some(barrier)
         }

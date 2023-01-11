@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::{stream, StreamExt};
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
@@ -234,7 +234,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
             if n_appended_ops == 0 {
                 // Agg result is not changed.
-                result_table.commit_no_data_expected(epoch).await;
+                result_table.commit_no_data_expected(epoch);
                 return Ok(None);
             }
 
@@ -259,10 +259,10 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         } else {
             // No state is changed.
             // Call commit on state table to increment the epoch.
-            stream::iter(iter_table_storage(storages)).for_each(|state_table| async {
-                state_table.commit_no_data_expected(epoch).await;
-            }).await;
-            result_table.commit_no_data_expected(epoch).await;
+            iter_table_storage(storages).for_each(|state_table| {
+                state_table.commit_no_data_expected(epoch);
+            });
+            result_table.commit_no_data_expected(epoch);
             Ok(None)
         }
     }

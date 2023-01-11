@@ -13,14 +13,11 @@
 // limitations under the License.
 
 use std::collections::Bound;
-use std::fmt::Debug;
 use std::future::Future;
 use std::ops::Deref;
 use std::sync::Arc;
 
-use async_stream::try_stream;
 use bytes::Bytes;
-use futures::TryStreamExt;
 use risingwave_common::catalog::TableId;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -43,7 +40,6 @@ use risingwave_storage::hummock::event_handler::HummockEvent;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
-use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
 use risingwave_storage::monitor::StateStoreMetrics;
@@ -103,53 +99,13 @@ pub(crate) trait HummockStateStoreTestTrait: StateStore + StateStoreWrite {
     }
 }
 
-fn assert_result_eq<Item: PartialEq + Debug, E>(
-    first: &std::result::Result<Item, E>,
-    second: &std::result::Result<Item, E>,
-) {
-    match (first, second) {
-        (Ok(first), Ok(second)) => {
-            assert_eq!(first, second);
-        }
-        (Err(_), Err(_)) => {}
-        _ => panic!("result not equal"),
-    }
-}
-
 pub struct LocalGlobalStateStoreHolder<L, G> {
-    pub(crate) local: L,
-    pub(crate) global: G,
+    local: L,
+    global: G,
 }
 
-impl<L: StateStoreReadIterStream, G: StateStoreReadIterStream> LocalGlobalStateStoreHolder<L, G> {
-    fn into_stream(self) -> impl StateStoreReadIterStream {
-        try_stream! {
-            let local = self.local;
-            let global = self.global;
-            futures::pin_mut!(local);
-            futures::pin_mut!(global);
-            loop {
-                let local_result = local.try_next().await;
-                let global_result = global.try_next().await;
-                assert_result_eq(&local_result, &global_result);
-                let local_next = local_result?;
-                match local_next {
-                    Some(local_next) => {
-                        yield local_next;
-                    },
-                    None => {
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
-
-pub(crate) type LocalGlobalStateStoreIterStream<L: StateStoreRead, G: StateStoreRead> =
-    impl StateStoreReadIterStream;
-impl<L: StateStoreRead, G: StateStoreRead> StateStoreRead for LocalGlobalStateStoreHolder<L, G> {
-    type IterStream = LocalGlobalStateStoreIterStream<L, G>;
+impl<L: StaticSendSync, G: StateStoreRead> StateStoreRead for LocalGlobalStateStoreHolder<L, G> {
+    type IterStream = G::IterStream;
 
     define_state_store_read_associated_type!();
 
@@ -159,12 +115,7 @@ impl<L: StateStoreRead, G: StateStoreRead> StateStoreRead for LocalGlobalStateSt
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
-        async move {
-            let local = self.local.get(key, epoch, read_options.clone()).await;
-            let global = self.global.get(key, epoch, read_options).await;
-            assert_result_eq(&local, &global);
-            local
-        }
+        self.global.get(key, epoch, read_options)
     }
 
     fn iter(
@@ -173,18 +124,7 @@ impl<L: StateStoreRead, G: StateStoreRead> StateStoreRead for LocalGlobalStateSt
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
-        async move {
-            let local_iter = self
-                .local
-                .iter(key_range.clone(), epoch, read_options.clone())
-                .await?;
-            let global_iter = self.global.iter(key_range, epoch, read_options).await?;
-            Ok(LocalGlobalStateStoreHolder {
-                local: local_iter,
-                global: global_iter,
-            }
-            .into_stream())
-        }
+        self.global.iter(key_range, epoch, read_options)
     }
 }
 
@@ -202,19 +142,13 @@ impl<L: StateStoreWrite, G: StaticSendSync> StateStoreWrite for LocalGlobalState
     }
 }
 
-impl<G: Clone, L: Clone> Clone for LocalGlobalStateStoreHolder<G, L> {
+impl<G, L> Clone for LocalGlobalStateStoreHolder<G, L> {
     fn clone(&self) -> Self {
-        Self {
-            local: self.local.clone(),
-            global: self.global.clone(),
-        }
+        unimplemented!("clone is not implemented")
     }
 }
 
-impl<G: StateStore> StateStore for LocalGlobalStateStoreHolder<G::Local, G>
-where
-    <G as StateStore>::Local: Clone,
-{
+impl<G: StateStore> StateStore for LocalGlobalStateStoreHolder<G::Local, G> {
     type Local = G::Local;
 
     type NewLocalFuture<'a> = impl Future<Output = G::Local> + Send;
@@ -237,7 +171,7 @@ where
         async move { self.global.clear_shared_buffer().await }
     }
 
-    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
+    fn new_local(&self, _option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
         async { unimplemented!("should not be called new local again") }
     }
 }
@@ -245,14 +179,20 @@ where
 impl<G: StateStore> LocalGlobalStateStoreHolder<G::Local, G> {
     pub async fn new(state_store: G, table_id: TableId) -> Self {
         LocalGlobalStateStoreHolder {
-            local: state_store.new_local(table_id).await,
+            local: state_store
+                .new_local(NewLocalOptions::for_test(table_id))
+                .await,
             global: state_store,
         }
+    }
+
+    pub fn into_global(self) -> G {
+        self.global
     }
 }
 
 pub type HummockV2MixedStateStore =
-    LocalGlobalStateStoreHolder<LocalHummockStorage, HummockStorage>;
+    LocalGlobalStateStoreHolder<<HummockStorage as StateStore>::Local, HummockStorage>;
 
 impl Deref for HummockV2MixedStateStore {
     type Target = HummockStorage;

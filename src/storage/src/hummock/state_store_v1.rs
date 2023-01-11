@@ -24,7 +24,6 @@ use futures::TryFutureExt;
 use itertools::Itertools;
 use minitrace::future::FutureExt;
 use minitrace::Span;
-use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::key::{
     bound_table_key_range, map_table_key_range, user_key, FullKey, TableKey, TableKeyRange, UserKey,
@@ -56,6 +55,7 @@ use crate::hummock::{
     DeleteRangeAggregator, ForwardIter, HummockEpoch, HummockError, HummockIteratorType,
     HummockResult, Sstable,
 };
+use crate::mem_table::MemtableLocalStateStore;
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -473,7 +473,7 @@ impl StateStoreWrite for HummockStorageV1 {
 }
 
 impl StateStore for HummockStorageV1 {
-    type Local = BatchWriteLocalStateStore<Self>;
+    type Local = MemtableLocalStateStore<Self>;
 
     type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
@@ -585,8 +585,8 @@ impl StateStore for HummockStorageV1 {
         }
     }
 
-    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async move { BatchWriteLocalStateStore::new(self.clone(), table_id) }
+    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
+        async move { MemtableLocalStateStore::new(self.clone(), option) }
     }
 }
 

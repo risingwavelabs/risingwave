@@ -19,7 +19,6 @@ use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use futures::Stream;
-use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
@@ -81,9 +80,9 @@ impl StateStoreWrite for PanicStateStore {
 impl LocalStateStore for PanicStateStore {
     type IterStream<'a> = PanicStateStoreStream;
 
+    type FlushFuture<'a> = impl Future<Output = StorageResult<usize>> + 'a;
     type GetFuture<'a> = impl GetFutureTrait<'a>;
     type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
-    type SealEpochFuture<'a> = impl Future<Output = StorageResult<()>> + 'a;
 
     fn get<'a>(&'a self, _key: &'a [u8], _read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
@@ -114,6 +113,12 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
+    fn flush(&mut self, _delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_> {
+        async {
+            panic!("should not operate on the panic state store!");
+        }
+    }
+
     fn epoch(&self) -> u64 {
         panic!("should not operate on the panic state store!");
     }
@@ -126,14 +131,8 @@ impl LocalStateStore for PanicStateStore {
         panic!("should not operate on the panic state store!");
     }
 
-    fn seal_current_epoch(
-        &mut self,
-        _next_epoch: u64,
-        _delete_ranges: Vec<(Bytes, Bytes)>,
-    ) -> Self::SealEpochFuture<'_> {
-        async {
-            panic!("should not operate on the panic state store!");
-        }
+    fn seal_current_epoch(&mut self, _next_epoch: u64) {
+        panic!("should not operate on the panic state store!")
     }
 }
 
@@ -166,7 +165,7 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
+    fn new_local(&self, _option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
         async {
             panic!("should not call new local from the panic state store");
         }

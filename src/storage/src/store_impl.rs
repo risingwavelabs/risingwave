@@ -242,7 +242,6 @@ pub mod verify {
     use bytes::Bytes;
     use futures::{pin_mut, TryStreamExt};
     use futures_async_stream::try_stream;
-    use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use tracing::log::warn;
 
@@ -387,10 +386,10 @@ pub mod verify {
     }
 
     impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {
+        type FlushFuture<'a> = impl Future<Output = StorageResult<usize>> + 'a;
         type GetFuture<'a> = impl GetFutureTrait<'a>;
         type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
         type IterStream<'a> = impl StateStoreIterItemStream + 'a;
-        type SealEpochFuture<'a> = impl Future<Output = StorageResult<()>> + 'a;
 
         fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
             async move {
@@ -429,20 +428,29 @@ pub mod verify {
             new_val: Bytes,
             old_val: Option<Bytes>,
         ) -> StorageResult<()> {
-            self.actual
-                .insert(key.clone(), new_val.clone(), old_val.clone())?;
             if let Some(expected) = &mut self.expected {
-                expected.insert(key, new_val, old_val)?;
+                expected.insert(key.clone(), new_val.clone(), old_val.clone())?;
             }
+            self.actual.insert(key, new_val, old_val)?;
+
             Ok(())
         }
 
         fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
-            self.actual.delete(key.clone(), old_val.clone())?;
             if let Some(expected) = &mut self.expected {
-                expected.delete(key, old_val)?;
+                expected.delete(key.clone(), old_val.clone())?;
             }
+            self.actual.delete(key, old_val)?;
             Ok(())
+        }
+
+        fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_> {
+            async move {
+                if let Some(expected) = &mut self.expected {
+                    expected.flush(delete_ranges.clone()).await?;
+                }
+                self.actual.flush(delete_ranges).await
+            }
         }
 
         fn init(&mut self, epoch: u64) {
@@ -452,22 +460,10 @@ pub mod verify {
             }
         }
 
-        fn seal_current_epoch(
-            &mut self,
-            next_epoch: u64,
-            delete_ranges: Vec<(Bytes, Bytes)>,
-        ) -> Self::SealEpochFuture<'_> {
-            async move {
-                if let Some(expected) = &mut self.expected {
-                    expected
-                        .seal_current_epoch(next_epoch, delete_ranges.clone())
-                        .await?;
-                }
-                self.actual
-                    .seal_current_epoch(next_epoch, delete_ranges)
-                    .await?;
-
-                Ok(())
+        fn seal_current_epoch(&mut self, next_epoch: u64) {
+            self.actual.seal_current_epoch(next_epoch);
+            if let Some(expected) = &mut self.expected {
+                expected.seal_current_epoch(next_epoch);
             }
         }
 
@@ -516,15 +512,15 @@ pub mod verify {
             async move { self.actual.clear_shared_buffer().await }
         }
 
-        fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
+        fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
             async move {
                 let expected = if let Some(expected) = &self.expected {
-                    Some(expected.new_local(table_id).await)
+                    Some(expected.new_local(option.clone()).await)
                 } else {
                     None
                 };
                 VerifyStateStore {
-                    actual: self.actual.new_local(table_id).await,
+                    actual: self.actual.new_local(option).await,
                     expected,
                 }
             }
@@ -751,7 +747,6 @@ pub mod boxed_state_store {
     use bytes::Bytes;
     use futures::stream::BoxStream;
     use futures::StreamExt;
-    use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::HummockReadEpoch;
 
     use crate::error::StorageResult;
@@ -826,17 +821,15 @@ pub mod boxed_state_store {
 
         fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()>;
 
+        async fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> StorageResult<usize>;
+
         fn epoch(&self) -> u64;
 
         fn is_dirty(&self) -> bool;
 
         fn init(&mut self, epoch: u64);
 
-        async fn seal_current_epoch(
-            &mut self,
-            next_epoch: u64,
-            delete_ranges: Vec<(Bytes, Bytes)>,
-        ) -> StorageResult<()>;
+        fn seal_current_epoch(&mut self, next_epoch: u64);
     }
 
     #[async_trait::async_trait]
@@ -870,6 +863,10 @@ pub mod boxed_state_store {
             self.delete(key, old_val)
         }
 
+        async fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> StorageResult<usize> {
+            self.flush(delete_ranges).await
+        }
+
         fn epoch(&self) -> u64 {
             self.epoch()
         }
@@ -882,12 +879,8 @@ pub mod boxed_state_store {
             self.init(epoch)
         }
 
-        async fn seal_current_epoch(
-            &mut self,
-            next_epoch: u64,
-            delete_ranges: Vec<(Bytes, Bytes)>,
-        ) -> StorageResult<()> {
-            self.seal_current_epoch(next_epoch, delete_ranges).await
+        fn seal_current_epoch(&mut self, next_epoch: u64) {
+            self.seal_current_epoch(next_epoch)
         }
     }
 
@@ -896,9 +889,9 @@ pub mod boxed_state_store {
     impl LocalStateStore for BoxDynamicDispatchedLocalStateStore {
         type IterStream<'a> = BoxLocalStateStoreIterStream<'a>;
 
+        type FlushFuture<'a> = impl Future<Output = StorageResult<usize>> + 'a;
         type GetFuture<'a> = impl GetFutureTrait<'a>;
         type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
-        type SealEpochFuture<'a> = impl Future<Output = StorageResult<()>> + 'a;
 
         fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
             self.deref().get(key, read_options)
@@ -925,6 +918,10 @@ pub mod boxed_state_store {
             self.deref_mut().delete(key, old_val)
         }
 
+        fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_> {
+            self.deref_mut().flush(delete_ranges)
+        }
+
         fn epoch(&self) -> u64 {
             self.deref().epoch()
         }
@@ -937,13 +934,8 @@ pub mod boxed_state_store {
             self.deref_mut().init(epoch)
         }
 
-        fn seal_current_epoch(
-            &mut self,
-            next_epoch: u64,
-            delete_ranges: Vec<(Bytes, Bytes)>,
-        ) -> Self::SealEpochFuture<'_> {
-            self.deref_mut()
-                .seal_current_epoch(next_epoch, delete_ranges)
+        fn seal_current_epoch(&mut self, next_epoch: u64) {
+            self.deref_mut().seal_current_epoch(next_epoch)
         }
     }
 
@@ -959,7 +951,7 @@ pub mod boxed_state_store {
 
         async fn clear_shared_buffer(&self) -> StorageResult<()>;
 
-        async fn new_local(&self, table_id: TableId) -> BoxDynamicDispatchedLocalStateStore;
+        async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore;
     }
 
     #[async_trait::async_trait]
@@ -980,8 +972,8 @@ pub mod boxed_state_store {
             self.clear_shared_buffer().await
         }
 
-        async fn new_local(&self, table_id: TableId) -> BoxDynamicDispatchedLocalStateStore {
-            Box::new(self.new_local(table_id).await)
+        async fn new_local(&self, option: NewLocalOptions) -> BoxDynamicDispatchedLocalStateStore {
+            Box::new(self.new_local(option).await)
         }
     }
 
@@ -1074,8 +1066,8 @@ pub mod boxed_state_store {
             self.deref().seal_epoch(epoch, is_checkpoint)
         }
 
-        fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-            self.deref().new_local(table_id)
+        fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
+            self.deref().new_local(option)
         }
     }
 }

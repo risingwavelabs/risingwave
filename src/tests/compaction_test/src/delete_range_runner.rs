@@ -45,7 +45,7 @@ use risingwave_storage::hummock::{
     TieredCache,
 };
 use risingwave_storage::monitor::StateStoreMetrics;
-use risingwave_storage::store::{LocalStateStore, ReadOptions};
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
 use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
@@ -264,14 +264,16 @@ async fn run_compare_result(
     test_range: u64,
     test_count: u64,
 ) -> Result<(), String> {
-    let mut normal = NormalState::new(hummock, 1, 0).await;
-    let mut delete_range = DeleteRangeState::new(hummock, 2, 0).await;
+    let init_epoch = hummock.get_pinned_version().max_committed_epoch() + 1;
+    let mut normal = NormalState::new(hummock, 1, init_epoch).await;
+    let mut delete_range = DeleteRangeState::new(hummock, 2, init_epoch).await;
     const RANGE_BASE: u64 = 400;
     let range_mod = test_range / RANGE_BASE;
 
     let mut rng = StdRng::seed_from_u64(10097);
     let mut overlap_ranges = vec![];
-    for epoch in 1..test_count {
+    for epoch_idx in 0..test_count {
+        let epoch = init_epoch + epoch_idx;
         for idx in 0..1000 {
             let op = rng.next_u32() % 50;
             let key_number = rng.next_u64() % test_range;
@@ -320,8 +322,9 @@ async fn run_compare_result(
                 delete_range.insert(key.as_bytes(), val.as_bytes());
             }
         }
-        normal.commit(epoch).await?;
-        delete_range.commit(epoch).await?;
+        let next_epoch = epoch + 1;
+        normal.commit(next_epoch).await?;
+        delete_range.commit(next_epoch).await?;
         // let checkpoint = epoch % 10 == 0;
         let ret = hummock.seal_and_sync_epoch(epoch).await.unwrap();
         meta_client
@@ -356,7 +359,6 @@ impl DeleteRangeState {
 
 #[async_trait::async_trait]
 trait CheckState {
-    fn init(&mut self, epoch: u64);
     async fn delete_range(&mut self, left: &[u8], right: &[u8]);
     async fn get(&self, key: &[u8]) -> Option<Bytes>;
     async fn scan(&self, left: &[u8], right: &[u8]) -> Vec<(Bytes, Bytes)>;
@@ -367,7 +369,7 @@ trait CheckState {
 impl NormalState {
     async fn new(hummock: &HummockStorage, table_id: u32, epoch: u64) -> Self {
         let table_id = TableId::new(table_id);
-        let mut storage = hummock.new_local(table_id).await;
+        let mut storage = hummock.new_local(NewLocalOptions::for_test(table_id)).await;
         storage.init(epoch);
         Self { storage, table_id }
     }
@@ -375,12 +377,13 @@ impl NormalState {
     async fn commit_impl(
         &mut self,
         delete_ranges: Vec<(Bytes, Bytes)>,
-        epoch: u64,
+        next_epoch: u64,
     ) -> Result<(), String> {
         self.storage
-            .seal_current_epoch(epoch, delete_ranges)
+            .flush(delete_ranges)
             .await
             .map_err(|e| format!("{:?}", e))?;
+        self.storage.seal_current_epoch(next_epoch);
         Ok(())
     }
 
@@ -483,21 +486,13 @@ impl CheckState for NormalState {
         self.scan_impl(left, right, true).await
     }
 
-    async fn commit(&mut self, epoch: u64) -> Result<(), String> {
-        self.commit_impl(vec![], epoch).await
-    }
-
-    fn init(&mut self, epoch: u64) {
-        self.storage.init(epoch);
+    async fn commit(&mut self, next_epoch: u64) -> Result<(), String> {
+        self.commit_impl(vec![], next_epoch).await
     }
 }
 
 #[async_trait::async_trait]
 impl CheckState for DeleteRangeState {
-    fn init(&mut self, epoch: u64) {
-        self.inner.init(epoch);
-    }
-
     async fn delete_range(&mut self, left: &[u8], right: &[u8]) {
         self.delete_ranges
             .push((Bytes::copy_from_slice(left), Bytes::copy_from_slice(right)));
@@ -529,9 +524,10 @@ impl CheckState for DeleteRangeState {
         self.inner.insert(key, val);
     }
 
-    async fn commit(&mut self, epoch: u64) -> Result<(), String> {
-        let delete_ranges = std::mem::take(&mut self.delete_ranges);
-        self.inner.commit_impl(delete_ranges, epoch).await
+    async fn commit(&mut self, next_epoch: u64) -> Result<(), String> {
+        let mut delete_ranges = std::mem::take(&mut self.delete_ranges);
+        delete_ranges.sort();
+        self.inner.commit_impl(delete_ranges, next_epoch).await
     }
 }
 

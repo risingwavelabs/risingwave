@@ -37,6 +37,7 @@ use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::hummock::store::version::read_filter_for_batch;
 use crate::hummock::{HummockEpoch, HummockError};
+use crate::mem_table::MemtableLocalStateStore;
 use crate::store::*;
 use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type, StateStore,
@@ -168,7 +169,7 @@ impl StateStoreRead for HummockStorage {
 }
 
 impl StateStore for HummockStorage {
-    type Local = BatchWriteLocalStateStore<LocalHummockStorage>;
+    type Local = MemtableLocalStateStore<LocalHummockStorage>;
 
     type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
@@ -288,8 +289,8 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async move { BatchWriteLocalStateStore::new(self.new_local_inner(table_id).await, table_id) }
+    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
+        async move { MemtableLocalStateStore::new(self.new_local_inner(option.table_id).await, option) }
     }
 }
 

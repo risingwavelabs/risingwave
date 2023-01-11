@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
 use crate::error::StorageResult;
+use crate::mem_table::MemtableLocalStateStore;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
@@ -605,7 +606,7 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
 }
 
 impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
-    type Local = BatchWriteLocalStateStore<Self>;
+    type Local = MemtableLocalStateStore<Self>;
 
     type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
@@ -634,8 +635,8 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
         async move { Ok(()) }
     }
 
-    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async move { BatchWriteLocalStateStore::new(self.clone(), table_id) }
+    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
+        async move { MemtableLocalStateStore::new(self.clone(), option) }
     }
 }
 
