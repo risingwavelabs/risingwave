@@ -955,31 +955,37 @@ struct GrpcMetaClient {
     backup_client: Arc<Mutex<BackupServiceClient<Channel>>>,
 }
 
+/// Creates a new GrpcMetaClient from a channel
+fn get_grpc_meta_client(channel: Channel) -> GrpcMetaClient {
+    let cluster_client = Arc::new(Mutex::new(ClusterServiceClient::new(channel.clone())));
+    let heartbeat_client = Arc::new(Mutex::new(HeartbeatServiceClient::new(channel.clone())));
+    let ddl_client = Arc::new(Mutex::new(DdlServiceClient::new(channel.clone())));
+    let hummock_client = Arc::new(Mutex::new(HummockManagerServiceClient::new(
+        channel.clone(),
+    )));
+    let notification_client = Arc::new(Mutex::new(NotificationServiceClient::new(channel.clone())));
+    let stream_client = Arc::new(Mutex::new(StreamManagerServiceClient::new(channel.clone())));
+    let user_client = Arc::new(Mutex::new(UserServiceClient::new(channel.clone())));
+    let scale_client = Arc::new(Mutex::new(ScaleServiceClient::new(channel.clone())));
+    let backup_client = Arc::new(Mutex::new(BackupServiceClient::new(channel.clone())));
+    GrpcMetaClient {
+        meta_connection: channel,
+        cluster_client,
+        heartbeat_client,
+        ddl_client,
+        hummock_client,
+        notification_client,
+        stream_client,
+        user_client,
+        scale_client,
+        backup_client,
+    }
+}
+
+// TODO: Do I still need a custom implementation, now that I use Arc<Mutex?
 impl Clone for GrpcMetaClient {
     fn clone(&self) -> GrpcMetaClient {
-        // TODO: Code duplication. Same as in new function. DNRY
-        let mc = self.meta_connection.clone();
-        let cluster_client = Arc::new(Mutex::new(ClusterServiceClient::new(mc.clone())));
-        let heartbeat_client = Arc::new(Mutex::new(HeartbeatServiceClient::new(mc.clone())));
-        let ddl_client = Arc::new(Mutex::new(DdlServiceClient::new(mc.clone())));
-        let hummock_client = Arc::new(Mutex::new(HummockManagerServiceClient::new(mc.clone())));
-        let notification_client = Arc::new(Mutex::new(NotificationServiceClient::new(mc.clone())));
-        let stream_client = Arc::new(Mutex::new(StreamManagerServiceClient::new(mc.clone())));
-        let user_client = Arc::new(Mutex::new(UserServiceClient::new(mc.clone())));
-        let scale_client = Arc::new(Mutex::new(ScaleServiceClient::new(mc.clone())));
-        let backup_client = Arc::new(Mutex::new(BackupServiceClient::new(mc.clone())));
-        GrpcMetaClient {
-            meta_connection: mc,
-            cluster_client,
-            heartbeat_client,
-            ddl_client,
-            hummock_client,
-            notification_client,
-            stream_client,
-            user_client,
-            scale_client,
-            backup_client,
-        }
+        get_grpc_meta_client(self.meta_connection.clone())
     }
 }
 
@@ -1034,31 +1040,7 @@ impl GrpcMetaClient {
         );
         tracing::info!("Current leader is {}", leader_addr_str);
 
-        // TODO: Repeats itself with the clone method. DNRY
-        let cluster_client = Arc::new(Mutex::new(ClusterServiceClient::new(channel.clone())));
-        let heartbeat_client = Arc::new(Mutex::new(HeartbeatServiceClient::new(channel.clone())));
-        let ddl_client = Arc::new(Mutex::new(DdlServiceClient::new(channel.clone())));
-        let hummock_client = Arc::new(Mutex::new(HummockManagerServiceClient::new(
-            channel.clone(),
-        )));
-        let notification_client =
-            Arc::new(Mutex::new(NotificationServiceClient::new(channel.clone())));
-        let stream_client = Arc::new(Mutex::new(StreamManagerServiceClient::new(channel.clone())));
-        let user_client = Arc::new(Mutex::new(UserServiceClient::new(channel.clone())));
-        let scale_client = Arc::new(Mutex::new(ScaleServiceClient::new(channel.clone())));
-        let backup_client = Arc::new(Mutex::new(BackupServiceClient::new(channel.clone())));
-        Ok(Self {
-            meta_connection: channel,
-            cluster_client,
-            heartbeat_client,
-            ddl_client,
-            hummock_client,
-            notification_client,
-            stream_client,
-            user_client,
-            scale_client,
-            backup_client,
-        })
+        Ok(get_grpc_meta_client(channel))
     }
 
     /// Return retry strategy for retrying meta requests.
