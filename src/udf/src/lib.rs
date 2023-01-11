@@ -48,12 +48,14 @@ impl ArrowFlightUdfClient {
         let info = response.into_inner();
         let schema = Schema::try_from(info)
             .map_err(|e| FlightError::DecodeError(format!("Error decoding schema: {e}")))?;
-        if &schema != returns {
-            return Err(tonic::Status::unavailable(format!(
-                "Schema mismatch: expected {:?}, got {:?}",
-                returns, schema
-            ))
-            .into());
+        let expect_types: Vec<_> = returns.fields.iter().map(|f| f.data_type()).collect();
+        let actual_types: Vec<_> = schema.fields.iter().map(|f| f.data_type()).collect();
+        if expect_types != actual_types {
+            return Err(Error::SchemaMismatch {
+                function_name: name.into(),
+                expected: format!("{:?}", expect_types),
+                actual: format!("{:?}", actual_types),
+            });
         }
         Ok(FunctionId(path))
     }
@@ -97,8 +99,14 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("failed to connect to UDF service: {0}")]
     Connect(#[from] tonic::transport::Error),
-    #[error("failed to check function: {0}")]
-    Check(#[from] tonic::Status),
-    #[error("Error calling UDF: {0}")]
+    #[error("failed to check UDF: {0}")]
+    Tonic(#[from] tonic::Status),
+    #[error("failed to call UDF: {0}")]
     Flight(#[from] FlightError),
+    #[error("schema mismatch: function {function_name:?}, expected return types {expected}, actual {actual}")]
+    SchemaMismatch {
+        function_name: String,
+        expected: String,
+        actual: String,
+    },
 }

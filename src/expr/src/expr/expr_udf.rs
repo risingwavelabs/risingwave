@@ -66,17 +66,19 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
             bail!("expect UDF");
         };
         // connect to UDF service and check the function
-        let (client, function_id) = tokio::runtime::Handle::current().block_on(async {
-            let client = ArrowFlightUdfClient::connect(&udf.path).await?;
-            let args = Schema::new(
-                udf.arg_types
-                    .iter()
-                    .map(|t| Field::new("", DataType::from(t).into(), true))
-                    .collect(),
-            );
-            let returns = Schema::new(vec![Field::new("", (&return_type).into(), true)]);
-            let id = client.check(&udf.name, &args, &returns).await?;
-            Ok((client, id)) as risingwave_udf::Result<_>
+        let (client, function_id) = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                let client = ArrowFlightUdfClient::connect(&udf.path).await?;
+                let args = Schema::new(
+                    udf.arg_types
+                        .iter()
+                        .map(|t| Field::new("", DataType::from(t).into(), true))
+                        .collect(),
+                );
+                let returns = Schema::new(vec![Field::new("", (&return_type).into(), true)]);
+                let id = client.check(&udf.name, &args, &returns).await?;
+                Ok((client, id)) as risingwave_udf::Result<_>
+            })
         })?;
         Ok(Self {
             children: udf.children.iter().map(build_from_prost).try_collect()?,
