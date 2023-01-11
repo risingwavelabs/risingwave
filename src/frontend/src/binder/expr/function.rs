@@ -21,7 +21,6 @@ use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::RW_VERSION;
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
@@ -187,18 +186,6 @@ impl Binder {
                 };
                 return Ok(ExprImpl::literal_varchar(v));
             }
-            "rw_version" => {
-                if !inputs.is_empty() {
-                    return Err(ErrorCode::ExprError(
-                        "rw_version() does not accept any arguments".into(),
-                    )
-                    .into());
-                }
-
-                let version = String::from(RW_VERSION);
-
-                return Ok(ExprImpl::literal_varchar(version));
-            }
             "current_database" if inputs.is_empty() => {
                 return Ok(ExprImpl::literal_varchar(self.db_name.clone()));
             }
@@ -347,7 +334,12 @@ impl Binder {
             "rw_vnode" => ExprType::Vnode,
             // TODO: include version/tag/commit_id
             // TODO: choose which pg version we should return.
-            "version" => return Ok(ExprImpl::literal_varchar("PostgreSQL 13.9-RW".to_string())),
+            "version" => {
+                return Ok(ExprImpl::literal_varchar(format!(
+                    "PostgreSQL 13.9-RW {}",
+                    env!("CARGO_PKG_VERSION")
+                )))
+            }
             // non-deterministic
             "now" => {
                 self.ensure_now_function_allowed()?;
