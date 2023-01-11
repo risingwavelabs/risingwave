@@ -920,6 +920,12 @@ pub async fn get_channel(
 // atomic may also work
 // arc mutex
 
+// - I need internal mutability, because I need to change the clients inside the GrpcMetaClient
+// - Mutex implements internal mutability, but we can also implement that from scratch?
+// - If we use mutex we cannot move futures around, since MutexGuard does not implement Send
+// - If we do not use a mutex, we get "cannot borrow data in a `&` reference as mutable"
+//
+
 /// Client to meta server. Cloning the instance is lightweight.
 ///
 /// It is a wrapper of tonic client. See [`meta_rpc_client_method_impl`].
@@ -933,8 +939,8 @@ struct GrpcMetaClient {
     // This has to be the multithreaded version.
     // I need mutexes
     // see https://doc.rust-lang.org/book/ch16-03-shared-state.html#using-mutexes-to-allow-access-to-data-from-one-thread-at-a-time
-    // Do i actually need mutexes? Is it bad if multiple threads access the clients at the same
-    // time?
+    // Do i actually need mutexes? Simultanious access by threads bad?
+    // Maybe I can implement internal mutability differently?
 
     // Do I need Rc<RefCell<Client>> or RefCell<Client>?
     // RefCell<Client>: Mutable reference by one

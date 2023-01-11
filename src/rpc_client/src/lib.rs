@@ -180,7 +180,7 @@ macro_rules! meta_rpc_client_method_impl {
                 let req_clone = request.clone();
                 let response = self
                     .$client
-                    .get_mut() // TODO: Some sort of deref
+                    .as_ref() // TODO: Some sort of deref
                     .$fn_name(request)
                     .await;
 
@@ -207,7 +207,7 @@ macro_rules! meta_rpc_client_method_impl {
                 );
                 // TODO: this has to be done with some defaults
                 let leader_channel = get_channel(addr.as_str(), 1, 1, 1, 1).await?;
-                self.meta_connection = leader_channel.clone();
+                // self.meta_connection = leader_channel.clone();
 
 
                 Ok(response.unwrap().into_inner())
