@@ -86,7 +86,7 @@ impl ElectionClient for EtcdElectionClient {
         let mut election_client = self.client.election_client();
         let mut stop = stop;
 
-        let _send_resp = self.is_leader_sender.send(false);
+        self.is_leader_sender.send_replace(false);
 
         tracing::info!("client {} start election", self.id);
 
@@ -218,7 +218,7 @@ impl ElectionClient for EtcdElectionClient {
 
         let mut observe_stream = election_client.observe(META_ELECTION_KEY).await?;
 
-        let _send_resp = self.is_leader_sender.send(true);
+        self.is_leader_sender.send_replace(true);
 
         loop {
             tokio::select! {
@@ -251,7 +251,7 @@ impl ElectionClient for EtcdElectionClient {
 
         tracing::warn!("client {} lost leadership", self.id);
 
-        let _send_resp = self.is_leader_sender.send(false);
+        self.is_leader_sender.send_replace(false);
 
         Ok(())
     }
