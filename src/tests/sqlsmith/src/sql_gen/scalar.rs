@@ -34,6 +34,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             _ => typ,
         };
         if self.rng.gen_range(1..=10) == 1 {
+            // NOTE(kwannoel): We generate Cast with NULL to avoid generating lots of ambiguous
+            // expressions. For instance agg calls such as `max(NULL)` may be generated,
+            // and coerced to VARCHAR, where we require a `NULL::int` instead.
             return Expr::Cast {
                 expr: Box::new(sql_null()),
                 data_type: data_type_to_ast_data_type(typ),
