@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// If https://github.com/tikv/jemallocator/issues/22 is resolved, we may inline this
+/// If <https://github.com/tikv/jemallocator/issues/22> is resolved, we may inline this
 #[macro_export]
 macro_rules! enable_jemalloc_on_linux {
     () => {
