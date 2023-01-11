@@ -88,9 +88,16 @@ impl ElectionClient for EtcdElectionClient {
 
         let leader_resp = election_client.leader(META_ELECTION_KEY).await;
 
+        // is restored leader from previous session?
+        let mut restored_leader = false;
+
         let mut lease_id = match leader_resp.map(|mut resp| resp.take_kv()) {
-            // leader exists
-            Ok(Some(leader_kv)) if leader_kv.value() == self.id.as_bytes() => Ok(leader_kv.lease()),
+            // leader exists, restore leader
+            Ok(Some(leader_kv)) if leader_kv.value() == self.id.as_bytes() => {
+                tracing::info!("restoring leader from lease {}", leader_kv.lease());
+                restored_leader = true;
+                Ok(leader_kv.lease())
+            }
 
             // leader kv not exists (may not happen)
             Ok(_) => lease_client.grant(ttl, None).await.map(|resp| resp.id()),
@@ -104,12 +111,18 @@ impl ElectionClient for EtcdElectionClient {
             Err(e) => Err(e),
         }?;
 
+        tracing::info!("use lease id {}", lease_id);
+
         // try keep alive
         let (mut keeper, mut resp_stream) = lease_client.keep_alive(lease_id).await?;
         let _resp = keeper.keep_alive().await?;
         let resp = resp_stream.message().await?;
         if let Some(resp) = resp && resp.ttl() <= 0 {
             tracing::info!("lease {} expired or revoked, re-granting", lease_id);
+            if restored_leader {
+                tracing::info!("restored leader lease {} lost", lease_id);
+                restored_leader = false;
+            }
             // renew lease_id
             lease_id = lease_client.grant(ttl, None).await.map(|resp| resp.id())?;
             tracing::info!("lease {} re-granted", lease_id);
@@ -180,18 +193,22 @@ impl ElectionClient for EtcdElectionClient {
 
         let _guard = scopeguard::guard(handle, |handle| handle.abort());
 
-        tokio::select! {
-            biased;
+        if !restored_leader {
+            tracing::info!("no restored leader, campaigning");
+            tokio::select! {
+                biased;
 
-            _ = stop.changed() => {
-                tracing::info!("stop signal received");
-                return Ok(());
-            }
+                _ = stop.changed() => {
+                    tracing::info!("stop signal received");
+                    return Ok(());
+                }
 
-            _ = election_client.campaign(META_ELECTION_KEY, self.id.as_bytes().to_vec(), lease_id) => {
-                tracing::info!("client {} wins election {}", self.id, META_ELECTION_KEY);
-            }
-        };
+                campaign_resp = election_client.campaign(META_ELECTION_KEY, self.id.as_bytes().to_vec(), lease_id) => {
+                    campaign_resp?;
+                    tracing::info!("client {} wins election {}", self.id, META_ELECTION_KEY);
+                }
+            };
+        }
 
         let mut observe_stream = election_client.observe(META_ELECTION_KEY).await?;
 
