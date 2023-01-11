@@ -195,16 +195,26 @@ pub fn create_cache_key_serde(
     {
         // validate storage_key = group_by + order_by + additional_pk
         for i in 0..group_by.len() {
-            assert_eq!(storage_key[i].column_idx, group_by[i]);
+            assert_eq!(
+                storage_key[i].column_idx, group_by[i],
+                "\nstorage_key = {:?}\ngroup_by = {:?}",
+                storage_key, group_by
+            );
         }
         for i in group_by.len()..(group_by.len() + order_by.len()) {
-            assert_eq!(storage_key[i], order_by[i - group_by.len()]);
+            assert_eq!(
+                storage_key[i],
+                order_by[i - group_by.len()],
+                "\nstorage_key = {:?}\norder_by = {:?}",
+                storage_key,
+                order_by
+            );
         }
         let pk_indices = pk_indices.iter().copied().collect::<HashSet<_>>();
         for i in (group_by.len() + order_by.len())..storage_key.len() {
             assert!(
                 pk_indices.contains(&storage_key[i].column_idx),
-                "storage_key = {:?}, pk_indices = {:?}",
+                "\nstorage_key = {:?}\npk_indices = {:?}",
                 storage_key,
                 pk_indices
             );

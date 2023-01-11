@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -74,7 +75,19 @@ impl LogicalTopN {
         group_key: Vec<usize>,
     ) -> Self {
         let mut topn = Self::new(input, limit, offset, with_ties, order);
-        topn.core.group_key = group_key;
+        // deduplicate group key and order
+        let mut indices = HashSet::new();
+        topn.core.group_key = group_key
+            .into_iter()
+            .filter(|k| indices.insert(*k))
+            .collect();
+        topn.core.order.field_order = topn
+            .core
+            .order
+            .field_order
+            .into_iter()
+            .filter(|f| indices.insert(f.index))
+            .collect();
         topn
     }
 

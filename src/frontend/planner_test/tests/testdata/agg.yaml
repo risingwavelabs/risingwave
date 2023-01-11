@@ -335,36 +335,38 @@
     select distinct on (v1, v3) v1, v2 from t order by v3, v1;
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2] }
-    └─LogicalTopN { order: "[t.v3 ASC, t.v1 ASC]", limit: 1, offset: 0, group_key: [0, 2] }
+    └─LogicalTopN { order: "[]", limit: 1, offset: 0, group_key: [0, 2] }
       └─LogicalProject { exprs: [t.v1, t.v2, t.v3] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   batch_plan: |
     BatchProject { exprs: [t.v1, t.v2] }
     └─BatchExchange { order: [t.v3 ASC, t.v1 ASC], dist: Single }
-      └─BatchGroupTopN { order: "[t.v3 ASC, t.v1 ASC]", limit: 1, offset: 0, group_key: [0, 2] }
-        └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3) }
-          └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+      └─BatchSort { order: [t.v3 ASC, t.v1 ASC] }
+        └─BatchGroupTopN { order: "[]", limit: 1, offset: 0, group_key: [0, 2] }
+          └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3) }
+            └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
 - name: distinct on
   sql: |
     create table t (v1 int, v2 int, v3 int);
     select distinct on (v1, v3) v1, v2 from t order by v1, v3;
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2] }
-    └─LogicalTopN { order: "[t.v1 ASC, t.v3 ASC]", limit: 1, offset: 0, group_key: [0, 2] }
+    └─LogicalTopN { order: "[]", limit: 1, offset: 0, group_key: [0, 2] }
       └─LogicalProject { exprs: [t.v1, t.v2, t.v3] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   batch_plan: |
     BatchProject { exprs: [t.v1, t.v2] }
     └─BatchExchange { order: [t.v1 ASC, t.v3 ASC], dist: Single }
-      └─BatchGroupTopN { order: "[t.v1 ASC, t.v3 ASC]", limit: 1, offset: 0, group_key: [0, 2] }
-        └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3) }
-          └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+      └─BatchSort { order: [t.v1 ASC, t.v3 ASC] }
+        └─BatchGroupTopN { order: "[]", limit: 1, offset: 0, group_key: [0, 2] }
+          └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3) }
+            └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
 - name: distinct on
   sql: |
     create table t (v1 int, v2 int);
     select distinct on (v1) v1, v2 from t order by v1;
   logical_plan: |
-    LogicalTopN { order: "[t.v1 ASC]", limit: 1, offset: 0, group_key: [0] }
+    LogicalTopN { order: "[]", limit: 1, offset: 0, group_key: [0] }
     └─LogicalProject { exprs: [t.v1, t.v2] }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - name: distinct on
@@ -373,16 +375,17 @@
     select distinct on(v1) v2 + v3 from t order by v1;
   logical_plan: |
     LogicalProject { exprs: [(t.v2 + t.v3)] }
-    └─LogicalTopN { order: "[t.v1 ASC]", limit: 1, offset: 0, group_key: [1] }
+    └─LogicalTopN { order: "[]", limit: 1, offset: 0, group_key: [1] }
       └─LogicalProject { exprs: [(t.v2 + t.v3), t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   batch_plan: |
     BatchProject { exprs: [(t.v2 + t.v3)] }
     └─BatchExchange { order: [t.v1 ASC], dist: Single }
-      └─BatchGroupTopN { order: "[t.v1 ASC]", limit: 1, offset: 0, group_key: [1] }
-        └─BatchExchange { order: [], dist: HashShard(t.v1) }
-          └─BatchProject { exprs: [(t.v2 + t.v3), t.v1] }
-            └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
+      └─BatchSort { order: [t.v1 ASC] }
+        └─BatchGroupTopN { order: "[]", limit: 1, offset: 0, group_key: [1] }
+          └─BatchExchange { order: [], dist: HashShard(t.v1) }
+            └─BatchProject { exprs: [(t.v2 + t.v3), t.v1] }
+              └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
 - name: arguments out-of-order
   sql: |
     create table t(v1 int, v2 int, v3 int);
