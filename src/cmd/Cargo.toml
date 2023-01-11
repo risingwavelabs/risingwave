@@ -14,7 +14,6 @@ static-log-level = ["workspace-config/enable-static-log-level"]
 [dependencies]
 anyhow = "1"
 clap = { version = "3", features = ["derive"] }
-global_stats_alloc = { path = "../utils/global_stats_alloc" }
 log = { version = "0.4" }
 risingwave_compaction_test = { path = "../tests/compaction_test" }
 risingwave_compactor = { path = "../storage/compactor" }
