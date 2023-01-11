@@ -962,32 +962,6 @@ struct GrpcMetaClient {
 
 // TODO: Undo the changes in the Cargo files in the PR
 
-// TODO: Remove this function
-async fn test(channel: Channel) {
-    let client = get_grpc_meta_client(channel.clone());
-    let mut cluster_c = client.cluster_client.as_ref().lock().await;
-    *cluster_c = ClusterServiceClient::new(channel);
-}
-
-// Remove this function again? Do I call this function only once?
-/// Creates a new `GrpcMetaClient` from a channel
-fn get_grpc_meta_client(channel: Channel) -> GrpcMetaClient {
-    GrpcMetaClient {
-        leader_client: Arc::new(Mutex::new(LeaderServiceClient::new(channel.clone()))),
-        cluster_client: Arc::new(Mutex::new(ClusterServiceClient::new(channel.clone()))),
-        heartbeat_client: Arc::new(Mutex::new(HeartbeatServiceClient::new(channel.clone()))),
-        ddl_client: Arc::new(Mutex::new(DdlServiceClient::new(channel.clone()))),
-        hummock_client: Arc::new(Mutex::new(HummockManagerServiceClient::new(
-            channel.clone(),
-        ))),
-        notification_client: Arc::new(Mutex::new(NotificationServiceClient::new(channel.clone()))),
-        stream_client: Arc::new(Mutex::new(StreamManagerServiceClient::new(channel.clone()))),
-        user_client: Arc::new(Mutex::new(UserServiceClient::new(channel.clone()))),
-        scale_client: Arc::new(Mutex::new(ScaleServiceClient::new(channel.clone()))),
-        backup_client: Arc::new(Mutex::new(BackupServiceClient::new(channel))),
-    }
-}
-
 impl GrpcMetaClient {
     // Retry base interval in ms for connecting to meta server.
     const CONN_RETRY_BASE_INTERVAL_MS: u64 = 100;
@@ -1039,7 +1013,22 @@ impl GrpcMetaClient {
         );
         tracing::info!("Current leader is {}", leader_addr_str);
 
-        Ok(get_grpc_meta_client(channel))
+        Ok(GrpcMetaClient {
+            leader_client: Arc::new(Mutex::new(LeaderServiceClient::new(channel.clone()))),
+            cluster_client: Arc::new(Mutex::new(ClusterServiceClient::new(channel.clone()))),
+            heartbeat_client: Arc::new(Mutex::new(HeartbeatServiceClient::new(channel.clone()))),
+            ddl_client: Arc::new(Mutex::new(DdlServiceClient::new(channel.clone()))),
+            hummock_client: Arc::new(Mutex::new(HummockManagerServiceClient::new(
+                channel.clone(),
+            ))),
+            notification_client: Arc::new(Mutex::new(NotificationServiceClient::new(
+                channel.clone(),
+            ))),
+            stream_client: Arc::new(Mutex::new(StreamManagerServiceClient::new(channel.clone()))),
+            user_client: Arc::new(Mutex::new(UserServiceClient::new(channel.clone()))),
+            scale_client: Arc::new(Mutex::new(ScaleServiceClient::new(channel.clone()))),
+            backup_client: Arc::new(Mutex::new(BackupServiceClient::new(channel))),
+        })
     }
 
     /// Return retry strategy for retrying meta requests.

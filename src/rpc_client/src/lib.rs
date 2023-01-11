@@ -164,8 +164,6 @@ macro_rules! meta_rpc_client_method_impl {
     ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
         $(
             pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
-
-
                 let req_clone = request.clone();
                 {
                     let response = self
@@ -183,8 +181,7 @@ macro_rules! meta_rpc_client_method_impl {
                 } // release MutexGuard on $client
 
                 // Invalid connection. Meta service is follower
-                let mut leader_client = LeaderServiceClient::new(self.meta_connection.clone());
-                let resp = leader_client
+                let resp = self.leader_client.as_ref().lock().await
                     .leader(LeaderRequest {})
                     .await
                     .expect("Expect that leader service always knows who leader is")
