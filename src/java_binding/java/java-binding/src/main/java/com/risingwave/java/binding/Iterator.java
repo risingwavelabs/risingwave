@@ -9,12 +9,12 @@ public class Iterator implements AutoCloseable {
         this.isClosed = false;
     }
 
-    public Record next() {
+    public KeyedRow next() {
         long pointer = Binding.iteratorNext(this.pointer);
         if (pointer == 0) {
             return null;
         }
-        return new Record(pointer);
+        return new KeyedRow(pointer);
     }
 
     @Override

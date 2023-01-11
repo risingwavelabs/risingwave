@@ -22,7 +22,7 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::panic::catch_unwind;
 
-use iterator::{Iterator, Record};
+use iterator::{Iterator, KeyedRow};
 use jni::objects::{JClass, JObject, JString};
 use jni::sys::{jboolean, jbyteArray, jint, jlong};
 use jni::JNIEnv;
@@ -174,10 +174,10 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNew(
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>(
     env: EnvParam<'a>,
     mut pointer: Pointer<'a, Iterator>,
-) -> Pointer<'static, Record> {
+) -> Pointer<'static, KeyedRow> {
     execute_and_catch(env, move || match pointer.as_mut().next()? {
         None => Ok(Pointer::null()),
-        Some(record) => Ok(record.into()),
+        Some(row) => Ok(row.into()),
     })
 }
 
@@ -190,9 +190,9 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorClose(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_recordGetKey<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetKey<'a>(
     env: EnvParam<'a>,
-    pointer: Pointer<'a, Record>,
+    pointer: Pointer<'a, KeyedRow>,
 ) -> ByteArray<'a> {
     execute_and_catch(env, move || {
         Ok(ByteArray::from(
@@ -202,9 +202,9 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_recordGetKey<'a>
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_recordIsNull<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowIsNull<'a>(
     env: EnvParam<'a>,
-    pointer: Pointer<'a, Record>,
+    pointer: Pointer<'a, KeyedRow>,
     idx: jint,
 ) -> jboolean {
     execute_and_catch(
@@ -214,18 +214,18 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_recordIsNull<'a>
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_recordGetInt64Value<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt64Value<'a>(
     env: EnvParam<'a>,
-    pointer: Pointer<'a, Record>,
+    pointer: Pointer<'a, KeyedRow>,
     idx: jint,
 ) -> jlong {
     execute_and_catch(env, move || Ok(pointer.as_ref().get_int64(idx as usize)))
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_recordGetStringValue<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetStringValue<'a>(
     env: EnvParam<'a>,
-    pointer: Pointer<'a, Record>,
+    pointer: Pointer<'a, KeyedRow>,
     idx: jint,
 ) -> JString<'a> {
     execute_and_catch(env, move || {
@@ -234,9 +234,9 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_recordGetStringV
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_recordClose<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowClose<'a>(
     _env: EnvParam<'a>,
-    pointer: Pointer<'a, Record>,
+    pointer: Pointer<'a, KeyedRow>,
 ) {
     pointer.drop()
 }
