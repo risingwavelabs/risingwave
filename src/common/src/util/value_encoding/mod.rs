@@ -113,13 +113,12 @@ impl RowEncoding {
             "should not encode one RowEncoding object multiple times."
         );
         let mut maybe_offset = vec![];
-        for (datum, id) in datum_refs.zip_eq(column_ids.iter()) {
-            if datum.to_datum_ref().is_none() {
-                continue;
-            }
-            maybe_offset.push(self.buf.len());
-            self.non_null_column_ids.push(*id);
-            serialize_datum_into(datum, &mut self.buf);
+        for (datum, &id) in datum_refs.zip_eq(column_ids.iter()) {
+            if let Some(v) = datum.to_datum_ref() {
+                maybe_offset.push(self.buf.len());
+                self.non_null_column_ids.push(id);
+                serialize_scalar(v, &mut self.buf);
+            }            
         }
         let max_offset = *maybe_offset
             .last()
@@ -200,10 +199,10 @@ pub fn decode(
                     &encoded_bytes[(index + offset_bytes)..(index + 2 * offset_bytes)];
                 let next_offset = deserialize_width(offset_bytes, &mut next_offset_slice);
                 let mut data_slice = &encoded_bytes
-                    [(data_start_idx + this_offset + 1)..(data_start_idx + next_offset)];
+                    [(data_start_idx + this_offset)..(data_start_idx + next_offset)];
                 deserialize_value(datatype, &mut data_slice)
             } else {
-                let mut data_slice = &encoded_bytes[(data_start_idx + this_offset + 1)..];
+                let mut data_slice = &encoded_bytes[(data_start_idx + this_offset)..];
                 deserialize_value(datatype, &mut data_slice)
             };
             if let Ok(d) = data {
@@ -514,9 +513,28 @@ mod tests {
     fn test_row_decoding() {
         let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
         let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
-        let mut row_bytes = serialize_row_column_aware(column_ids.clone(), row1);
+        let mut row_bytes = serialize_row_column_aware(column_ids.clone(), row1.clone());
         let data_types = vec![DataType::Int16, DataType::Varchar];
         let decoded = decode(&column_ids[..], &data_types[..], &mut row_bytes[..]);
         assert_eq!(decoded, vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
+        let data_types1 = vec![
+            DataType::Varchar,
+            DataType::Int16,
+            DataType::Date,
+        ];
+        let mut row_bytes1 = serialize_row_column_aware(column_ids.clone(), row1);
+        let decoded1 = decode(
+            &[
+                ColumnId::new(1),
+                ColumnId::new(5),
+                ColumnId::new(6),
+            ],
+            &data_types1[..],
+            &mut row_bytes1[..],
+        );
+        assert_eq!(
+            decoded1,
+            vec![Some(Utf8("abc".into())), None, None]
+        );
     }
 }
