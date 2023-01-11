@@ -959,26 +959,17 @@ struct GrpcMetaClient {
 
 /// Creates a new GrpcMetaClient from a channel
 fn get_grpc_meta_client(channel: Channel) -> GrpcMetaClient {
-    let cluster_client = Arc::new(ClusterServiceClient::new(channel.clone()));
-    let heartbeat_client = Arc::new(HeartbeatServiceClient::new(channel.clone()));
-    let ddl_client = Arc::new(DdlServiceClient::new(channel.clone()));
-    let hummock_client = Arc::new(HummockManagerServiceClient::new(channel.clone()));
-    let notification_client = Arc::new(NotificationServiceClient::new(channel.clone()));
-    let stream_client = Arc::new(StreamManagerServiceClient::new(channel.clone()));
-    let user_client = Arc::new(UserServiceClient::new(channel.clone()));
-    let scale_client = Arc::new(ScaleServiceClient::new(channel.clone()));
-    let backup_client = Arc::new(BackupServiceClient::new(channel.clone()));
     GrpcMetaClient {
         meta_connection: channel,
-        cluster_client,
-        heartbeat_client,
-        ddl_client,
-        hummock_client,
-        notification_client,
-        stream_client,
-        user_client,
-        scale_client,
-        backup_client,
+        cluster_client: Arc::new(ClusterServiceClient::new(channel.clone())),
+        heartbeat_client: Arc::new(HeartbeatServiceClient::new(channel.clone())),
+        ddl_client: Arc::new(DdlServiceClient::new(channel.clone())),
+        hummock_client: Arc::new(HummockManagerServiceClient::new(channel.clone())),
+        notification_client: Arc::new(NotificationServiceClient::new(channel.clone())),
+        stream_client: Arc::new(StreamManagerServiceClient::new(channel.clone())),
+        user_client: Arc::new(UserServiceClient::new(channel.clone())),
+        scale_client: Arc::new(ScaleServiceClient::new(channel.clone())),
+        backup_client: Arc::new(BackupServiceClient::new(channel.clone())),
     }
 }
 
