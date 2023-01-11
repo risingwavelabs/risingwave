@@ -170,7 +170,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 None
             };
 
-            while !*state_watcher.borrow() {
+            while !*state_watcher.borrow_and_update() {
                 if let Err(e) = state_watcher.changed().await {
                     tracing::error!("state watcher recv failed {}", e.to_string());
                 }
