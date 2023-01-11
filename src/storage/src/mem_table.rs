@@ -577,7 +577,6 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                     }
                 }
             }
-            println!("ingest batch: {:?} {}", kv_pairs, self.epoch());
             self.inner
                 .ingest_batch(
                     kv_pairs,

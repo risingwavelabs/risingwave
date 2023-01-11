@@ -607,42 +607,18 @@ impl<S: StateStore> StateTable<S> {
     }
 
     fn insert_inner(&mut self, key_bytes: Bytes, value_bytes: Bytes) {
-        println!(
-            "insert key {:?}, value: {:?}",
-            deserialize_pk_with_vnode(&key_bytes, &self.pk_serde).unwrap(),
-            self.row_deserializer
-                .deserialize(value_bytes.as_ref())
-                .unwrap()
-        );
         self.local_store
             .insert(key_bytes, value_bytes, None)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
     fn delete_inner(&mut self, key_bytes: Bytes, value_bytes: Bytes) {
-        println!(
-            "delete key {:?}, value: {:?}",
-            deserialize_pk_with_vnode(&key_bytes, &self.pk_serde).unwrap(),
-            self.row_deserializer
-                .deserialize(value_bytes.as_ref())
-                .unwrap()
-        );
         self.local_store
             .delete(key_bytes, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
     }
 
     fn update_inner(&mut self, key_bytes: Bytes, old_value_bytes: Bytes, new_value_bytes: Bytes) {
-        println!(
-            "update key {:?}, new value: {:?}, old value: {:?}",
-            deserialize_pk_with_vnode(&key_bytes, &self.pk_serde).unwrap(),
-            self.row_deserializer
-                .deserialize(new_value_bytes.as_ref())
-                .unwrap(),
-            self.row_deserializer
-                .deserialize(old_value_bytes.as_ref())
-                .unwrap()
-        );
         self.local_store
             .insert(key_bytes, new_value_bytes, Some(old_value_bytes))
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
