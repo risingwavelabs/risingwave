@@ -23,9 +23,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::ErrorCode::{ConnectorError, ProtocolError};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
+use risingwave_common::types::Datum;
 use risingwave_common::util::select_all;
 use risingwave_connector::source::{
-    Column, ConnectorProperties, ConnectorState, SourceMessage, SplitId, SplitMetaData,
+    Column, ConnectorProperties, ConnectorState, SourceMessage, SourceMeta, SplitId, SplitMetaData,
     SplitReaderImpl,
 };
 use risingwave_connector::ConnectorParams;
@@ -172,6 +173,9 @@ impl ConnectorSourceReader {
             for msg in batch {
                 if let Some(content) = msg.payload {
                     split_offset_mapping.insert(msg.split_id, msg.offset);
+
+                    let old_op_num = builder.op_num();
+
                     if let Err(e) = self
                         .parser
                         .parse(content.as_ref(), builder.row_writer())
@@ -180,13 +184,31 @@ impl ConnectorSourceReader {
                         tracing::warn!("message parsing failed {}, skipping", e.to_string());
                         continue;
                     }
-                    // fulfill the timestamp column if it exists
-                    if let Some(ts) = msg.timestamp {
-                        builder
-                            .row_writer()
-                            .insert_timestamp(Some(i64_to_timestamptz(ts).unwrap().into()));
-                    } else {
-                        builder.row_writer().insert_timestamp(None);
+
+                    let new_op_num = builder.op_num();
+
+                    // new_op_num - old_op_num is the number of rows added to the builder
+                    for _ in old_op_num..new_op_num {
+                        // TODO: support more kinds of SourceMeta
+                        if let SourceMeta::Kafka(kafka_meta) = msg.meta.clone() {
+                            let f = |desc: &SourceColumnDesc| -> Result<Option<Datum>> {
+                                if !desc.is_meta {
+                                    return Ok(None);
+                                }
+                                match desc.name.as_str() {
+                                    "_rw_kafka_timestamp" => Ok(Some(
+                                        kafka_meta
+                                            .timestamp
+                                            .map(|ts| i64_to_timestamptz(ts).unwrap().into()),
+                                    )),
+                                    _ => unreachable!(
+                                        "kafka will not have this meta column: {}",
+                                        desc.name
+                                    ),
+                                }
+                            };
+                            builder.row_writer().fulfill(f)?;
+                        }
                     }
                 }
             }

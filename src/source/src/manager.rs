@@ -27,7 +27,8 @@ pub struct SourceColumnDesc {
     pub fields: Vec<ColumnDesc>,
     /// Now `skip_parse` is used to indicate whether the column is a row id column.
     pub skip_parse: bool,
-    pub is_timestamp: bool,
+
+    pub is_meta: bool,
 }
 
 impl SourceColumnDesc {
@@ -44,21 +45,21 @@ impl SourceColumnDesc {
             column_id,
             fields: vec![],
             skip_parse: false,
-            is_timestamp: false,
+            is_meta: false,
         }
     }
 }
 
 impl From<&ColumnDesc> for SourceColumnDesc {
     fn from(c: &ColumnDesc) -> Self {
-        let is_timestamp = c.name.ends_with("timestamp") && c.name.starts_with("_rw");
+        let is_meta = c.name.starts_with("_rw");
         Self {
             name: c.name.clone(),
             data_type: c.data_type.clone(),
             column_id: c.column_id,
             fields: c.field_descs.clone(),
             skip_parse: false,
-            is_timestamp,
+            is_meta,
         }
     }
 }

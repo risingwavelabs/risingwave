@@ -16,7 +16,13 @@ use bytes::Bytes;
 use chrono::{TimeZone, Utc};
 use google_cloud_pubsub::subscriber::ReceivedMessage;
 
-use crate::source::{SourceMessage, SplitId};
+use crate::source::{SourceMessage, SourceMeta, SplitId};
+
+#[derive(Debug, Clone)]
+pub struct GooglePubsubMeta {
+    // timestamp(milliseconds) of message append in mq
+    pub timestamp: Option<i64>,
+}
 
 /// Tag a `ReceivedMessage` from cloud pubsub so we can inject the virtual split-id into the
 /// `SourceMessage`
@@ -46,7 +52,9 @@ impl From<TaggedReceivedMessage> for SourceMessage {
             },
             offset: timestamp.timestamp_nanos().to_string(),
             split_id,
-            timestamp: None,
+            meta: SourceMeta::GooglePubsub(GooglePubsubMeta {
+                timestamp: Some(timestamp.timestamp_millis()),
+            }),
         }
     }
 }

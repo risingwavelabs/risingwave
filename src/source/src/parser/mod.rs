@@ -84,6 +84,10 @@ impl SourceStreamChunkBuilder {
             None,
         )
     }
+
+    pub fn op_num(&self) -> usize {
+        self.op_builder.len()
+    }
 }
 
 /// `SourceStreamChunkRowWriter` is responsible to write one row (Insert/Delete) or two rows
@@ -196,7 +200,7 @@ impl SourceStreamChunkRowWriter<'_> {
             .zip_eq(self.builders.iter_mut())
             .enumerate()
             .try_for_each(|(idx, (desc, builder))| -> Result<()> {
-                if desc.is_timestamp {
+                if desc.is_meta {
                     return Ok(());
                 }
                 let output = if desc.skip_parse {
@@ -234,17 +238,38 @@ impl SourceStreamChunkRowWriter<'_> {
         self.do_action::<OpActionInsert>(f)
     }
 
-    pub fn insert_timestamp(&mut self, ts: Datum) {
-        if self.op_builder.last() == Some(&Op::Insert) {
-            if let Some((_, builder)) = self
-                .descs
-                .iter()
-                .zip_eq(self.builders.iter_mut())
-                .find(|(desc, _)| desc.is_timestamp)
-            {
-                builder.append_datum(&ts)
-            }
-        }
+    /// For other op like 'insert', 'update', 'delete', we will leave the hollow for the meta column
+    /// builder. e.g after insert
+    /// `data_budiler` = [1], `meta_column_builder` = [], `op` = [insert]
+    ///
+    /// This function is used to fulfill this hollow in `meta_column_builder`.
+    /// e.g after fulfill
+    /// `data_budiler` = [1], `meta_column_builder` = [1], `op` = [insert]
+    pub fn fulfill(
+        &mut self,
+        mut f: impl FnMut(&SourceColumnDesc) -> Result<Option<Datum>>,
+    ) -> Result<WriteGuard> {
+        let mut modify_col = vec![];
+
+        self.descs
+            .iter()
+            .zip_eq(self.builders.iter_mut())
+            .enumerate()
+            .try_for_each(|(idx, (desc, builder))| -> Result<()> {
+                if let Some(output) = f(desc)? {
+                    builder.append_datum(output);
+                    modify_col.push(idx);
+                }
+                Ok(())
+            })
+            .inspect_err(|e| {
+                tracing::warn!("failed to parse source data: {}", e);
+                modify_col.iter().for_each(|idx| {
+                    self.builders[*idx].pop().unwrap();
+                });
+            })?;
+
+        Ok(WriteGuard(()))
     }
 
     /// Write a `Delete` record to the [`StreamChunk`].

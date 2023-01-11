@@ -15,6 +15,7 @@
 mod generator;
 mod reader;
 
+pub use generator::*;
 pub use reader::*;
 
 const SEQUENCE_FIELD_KIND: &str = "sequence";

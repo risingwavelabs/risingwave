@@ -14,7 +14,7 @@
 
 use pulsar::consumer::Message;
 
-use crate::source::SourceMessage;
+use crate::source::{SourceMessage, SourceMeta};
 
 impl From<Message<Vec<u8>>> for SourceMessage {
     fn from(msg: Message<Vec<u8>>) -> Self {
@@ -30,7 +30,7 @@ impl From<Message<Vec<u8>>> for SourceMessage {
                 message_id.batch_index.unwrap_or(-1)
             ),
             split_id: msg.topic.into(),
-            timestamp: None,
+            meta: SourceMeta::Empty,
         }
     }
 }

@@ -491,7 +491,7 @@ mod test {
                 data_type: DataType::Int32,
                 column_id: ColumnId::from(0),
                 skip_parse: false,
-                is_timestamp: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
@@ -499,7 +499,7 @@ mod test {
                 data_type: DataType::Int64,
                 column_id: ColumnId::from(1),
                 skip_parse: false,
-                is_timestamp: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
@@ -507,7 +507,7 @@ mod test {
                 data_type: DataType::Varchar,
                 column_id: ColumnId::from(2),
                 skip_parse: false,
-                is_timestamp: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
@@ -515,7 +515,7 @@ mod test {
                 data_type: DataType::Float32,
                 column_id: ColumnId::from(3),
                 skip_parse: false,
-                is_timestamp: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
@@ -523,7 +523,7 @@ mod test {
                 data_type: DataType::Float64,
                 column_id: ColumnId::from(4),
                 skip_parse: false,
-                is_timestamp: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
@@ -531,7 +531,7 @@ mod test {
                 data_type: DataType::Boolean,
                 column_id: ColumnId::from(5),
                 skip_parse: false,
-                is_timestamp: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
@@ -539,7 +539,7 @@ mod test {
                 data_type: DataType::Date,
                 column_id: ColumnId::from(6),
                 skip_parse: false,
-                is_timestamp: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
@@ -547,7 +547,7 @@ mod test {
                 data_type: DataType::Timestamp,
                 column_id: ColumnId::from(7),
                 skip_parse: false,
-                is_timestamp: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
@@ -555,7 +555,7 @@ mod test {
                 data_type: DataType::Timestamp,
                 column_id: ColumnId::from(8),
                 skip_parse: false,
-                is_timestamp: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
@@ -563,7 +563,7 @@ mod test {
                 data_type: DataType::Interval,
                 column_id: ColumnId::from(9),
                 skip_parse: false,
-                is_timestamp: false,
+                is_meta: false,
                 fields: vec![],
             },
         ]

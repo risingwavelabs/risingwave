@@ -30,9 +30,13 @@ use serde::{Deserialize, Serialize};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
+use super::datagen::DatagenMeta;
 use super::filesystem::{
     FsSplit, FsSplitReader, S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR,
 };
+use super::google_pubsub::GooglePubsubMeta;
+use super::kafka::KafkaMeta;
+use super::nexmark::source::message::NexmarkMeta;
 use crate::source::cdc::{
     CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, MYSQL_CDC_CONNECTOR,
     POSTGRES_CDC_CONNECTOR,
@@ -282,13 +286,34 @@ pub type SplitId = Arc<str>;
 
 /// The message pumped from the external source service.
 /// The third-party message structs will eventually be transformed into this struct.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct SourceMessage {
     pub payload: Option<Bytes>,
     pub offset: String,
     pub split_id: SplitId,
-    pub timestamp: Option<i64>,
+
+    pub meta: SourceMeta,
 }
+
+#[derive(Debug, Clone)]
+pub enum SourceMeta {
+    Kafka(KafkaMeta),
+    Nexmark(NexmarkMeta),
+    GooglePubsub(GooglePubsubMeta),
+    Datagen(DatagenMeta),
+    // For the source that doesn't have meta data.
+    Empty,
+}
+
+/// Implement Eq manually to ignore the `meta` field.
+impl PartialEq for SourceMessage {
+    fn eq(&self, other: &Self) -> bool {
+        self.offset == other.offset
+            && self.split_id == other.split_id
+            && self.payload == other.payload
+    }
+}
+impl Eq for SourceMessage {}
 
 /// The message pumped from the external source service.
 /// The third-party message structs will eventually be transformed into this struct.

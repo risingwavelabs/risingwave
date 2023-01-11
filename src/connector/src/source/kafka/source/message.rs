@@ -14,9 +14,16 @@
 
 use bytes::Bytes;
 use rdkafka::message::BorrowedMessage;
-use rdkafka::Message;
+use rdkafka::{Message, Timestamp};
 
 use crate::source::base::SourceMessage;
+use crate::source::SourceMeta;
+
+#[derive(Debug, Clone)]
+pub struct KafkaMeta {
+    // timestamp(milliseconds) of message append in mq
+    pub timestamp: Option<i64>,
+}
 
 impl<'a> From<BorrowedMessage<'a>> for SourceMessage {
     fn from(message: BorrowedMessage<'a>) -> Self {
@@ -25,7 +32,13 @@ impl<'a> From<BorrowedMessage<'a>> for SourceMessage {
             payload: message.payload().map(Bytes::copy_from_slice),
             offset: message.offset().to_string(),
             split_id: message.partition().to_string().into(),
-            timestamp: message.timestamp().to_millis(),
+            meta: SourceMeta::Kafka(KafkaMeta {
+                timestamp: if let Timestamp::LogAppendTime(ts) = message.timestamp() {
+                    Some(ts)
+                } else {
+                    None
+                },
+            }),
         }
     }
 }
