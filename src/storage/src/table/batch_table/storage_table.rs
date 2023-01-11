@@ -59,8 +59,10 @@ pub struct StorageTable<S: StateStore> {
     /// RowSeqScanExecutor.
     schema: Schema,
 
-    /// Used for serializing the primary key.
+    /// Used for serializing and deserializing the primary key.
     pk_serializer: OrderedRowSerde,
+
+    output_indices_in_key: Vec<usize>,
 
     /// Mapping from column id to column index for deserializing the row.
     mapping: Arc<ColumnMapping>,
@@ -177,12 +179,19 @@ impl<S: StateStore> StorageTable<S> {
         assert_eq!(order_types.len(), pk_indices.len());
 
         let (output_columns, output_indices) = find_columns_by_ids(&table_columns, &column_ids);
-        assert!(
-            output_indices.iter().all(|i| value_indices.contains(i)),
-            "output_indices must be a subset of value_indices"
-        );
+        let mut output_indices_in_value = vec![];
+        let mut output_indices_in_key = vec![];
+
+        for idx in output_indices {
+            if value_indices.contains(&idx) {
+                output_indices_in_value.push(idx);
+            } else {
+                output_indices_in_key.push(idx);
+            }
+        }
+
         let schema = Schema::new(output_columns.iter().map(Into::into).collect());
-        let mapping = ColumnMapping::new(output_indices);
+        let mapping = ColumnMapping::new(output_indices_in_value);
 
         let pk_data_types = pk_indices
             .iter()
@@ -198,6 +207,7 @@ impl<S: StateStore> StorageTable<S> {
             store,
             schema,
             pk_serializer,
+            output_indices_in_key,
             mapping: Arc::new(mapping),
             row_deserializer: Arc::new(row_deserializer),
             pk_indices,
@@ -258,7 +268,11 @@ impl<S: StateStore> StorageTable<S> {
         };
         if let Some(value) = self.store.get(&serialized_pk, epoch, read_options).await? {
             let full_row = self.row_deserializer.deserialize(value)?;
-            let result_row = self.mapping.project(full_row).into_owned_row();
+            let result_row_in_value = self.mapping.project(full_row).into_owned_row();
+            let result_row_in_key = pk.project(&self.output_indices_in_key).into_owned_row();
+            let result_row = result_row_in_key
+                .chain(result_row_in_value)
+                .into_owned_row();
             Ok(Some(result_row))
         } else {
             Ok(None)
@@ -346,6 +360,8 @@ impl<S: StateStore> StorageTable<S> {
                 let iter = StorageTableIterInner::<S>::new(
                     &self.store,
                     self.mapping.clone(),
+                    self.pk_serializer.clone(),
+                    self.output_indices_in_key.clone(),
                     self.row_deserializer.clone(),
                     raw_key_range,
                     read_options,
@@ -526,13 +542,21 @@ struct StorageTableIterInner<S: StateStore> {
     mapping: Arc<ColumnMapping>,
 
     row_deserializer: Arc<RowDeserializer>,
+
+    /// Used for serializing and deserializing the primary key.
+    pk_serializer: OrderedRowSerde,
+
+    output_indices_in_key: Vec<usize>,
 }
 
 impl<S: StateStore> StorageTableIterInner<S> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
+    #[allow(clippy::too_many_arguments)]
     async fn new<R, B>(
         store: &S,
         mapping: Arc<ColumnMapping>,
+        pk_serializer: OrderedRowSerde,
+        output_indices_in_key: Vec<usize>,
         row_deserializer: Arc<RowDeserializer>,
         raw_key_range: R,
         read_options: ReadOptions,
@@ -553,6 +577,9 @@ impl<S: StateStore> StorageTableIterInner<S> {
             iter,
             mapping,
             row_deserializer,
+            pk_serializer,
+            output_indices_in_key,
+
         };
         Ok(iter)
     }
@@ -571,8 +598,14 @@ impl<S: StateStore> StorageTableIterInner<S> {
             .await?
         {
             let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);
+            let pk = self.pk_serializer.deserialize(key)?;
             let full_row = self.row_deserializer.deserialize(value)?;
-            let row = self.mapping.project(full_row).into_owned_row();
+            let result_row_in_value = self.mapping.project(full_row).into_owned_row();
+            let result_row_in_key = pk.project(&self.output_indices_in_key).into_owned_row();
+            let row = result_row_in_key
+                .chain(result_row_in_value)
+                .into_owned_row();
+
             yield (key.to_vec(), row)
         }
     }

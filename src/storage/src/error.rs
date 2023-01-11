@@ -32,6 +32,9 @@ pub enum StorageError {
     #[error("Deserialize row error {0}.")]
     DeserializeRow(ValueEncodingError),
 
+    #[error("Deserialize pk error {0}.")]
+    DeserializeOrderedRow(RwError),
+
     #[error("Sled error: {0}")]
     Sled(
         #[backtrace]
@@ -51,6 +54,12 @@ impl From<ValueEncodingError> for StorageError {
 impl From<StorageError> for RwError {
     fn from(s: StorageError) -> Self {
         ErrorCode::StorageError(Box::new(s)).into()
+    }
+}
+
+impl From<RwError> for StorageError {
+    fn from(s: RwError) -> Self {
+        StorageError::DeserializeOrderedRow(s)
     }
 }
 
