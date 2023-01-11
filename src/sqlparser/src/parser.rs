@@ -28,6 +28,8 @@ use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::*;
 
+pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserError {
     TokenizerError(String),
