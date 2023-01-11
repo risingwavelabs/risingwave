@@ -933,6 +933,8 @@ struct GrpcMetaClient {
     // This has to be the multithreaded version.
     // I need mutexes
     // see https://doc.rust-lang.org/book/ch16-03-shared-state.html#using-mutexes-to-allow-access-to-data-from-one-thread-at-a-time
+    // Do i actually need mutexes? Is it bad if multiple threads access the clients at the same
+    // time?
 
     // Do I need Rc<RefCell<Client>> or RefCell<Client>?
     // RefCell<Client>: Mutable reference by one
@@ -944,30 +946,28 @@ struct GrpcMetaClient {
 
     // TODO: I will probably need to add Arc here
     // see https://doc.rust-lang.org/book/ch16-03-shared-state.html#using-mutexes-to-allow-access-to-data-from-one-thread-at-a-time
-    cluster_client: Arc<Mutex<ClusterServiceClient<Channel>>>,
-    heartbeat_client: Arc<Mutex<HeartbeatServiceClient<Channel>>>,
-    ddl_client: Arc<Mutex<DdlServiceClient<Channel>>>,
-    hummock_client: Arc<Mutex<HummockManagerServiceClient<Channel>>>,
-    notification_client: Arc<Mutex<NotificationServiceClient<Channel>>>,
-    stream_client: Arc<Mutex<StreamManagerServiceClient<Channel>>>,
-    user_client: Arc<Mutex<UserServiceClient<Channel>>>,
-    scale_client: Arc<Mutex<ScaleServiceClient<Channel>>>,
-    backup_client: Arc<Mutex<BackupServiceClient<Channel>>>,
+    cluster_client: Arc<ClusterServiceClient<Channel>>,
+    heartbeat_client: Arc<HeartbeatServiceClient<Channel>>,
+    ddl_client: Arc<DdlServiceClient<Channel>>,
+    hummock_client: Arc<HummockManagerServiceClient<Channel>>,
+    notification_client: Arc<NotificationServiceClient<Channel>>,
+    stream_client: Arc<StreamManagerServiceClient<Channel>>,
+    user_client: Arc<UserServiceClient<Channel>>,
+    scale_client: Arc<ScaleServiceClient<Channel>>,
+    backup_client: Arc<BackupServiceClient<Channel>>,
 }
 
 /// Creates a new GrpcMetaClient from a channel
 fn get_grpc_meta_client(channel: Channel) -> GrpcMetaClient {
-    let cluster_client = Arc::new(Mutex::new(ClusterServiceClient::new(channel.clone())));
-    let heartbeat_client = Arc::new(Mutex::new(HeartbeatServiceClient::new(channel.clone())));
-    let ddl_client = Arc::new(Mutex::new(DdlServiceClient::new(channel.clone())));
-    let hummock_client = Arc::new(Mutex::new(HummockManagerServiceClient::new(
-        channel.clone(),
-    )));
-    let notification_client = Arc::new(Mutex::new(NotificationServiceClient::new(channel.clone())));
-    let stream_client = Arc::new(Mutex::new(StreamManagerServiceClient::new(channel.clone())));
-    let user_client = Arc::new(Mutex::new(UserServiceClient::new(channel.clone())));
-    let scale_client = Arc::new(Mutex::new(ScaleServiceClient::new(channel.clone())));
-    let backup_client = Arc::new(Mutex::new(BackupServiceClient::new(channel.clone())));
+    let cluster_client = Arc::new(ClusterServiceClient::new(channel.clone()));
+    let heartbeat_client = Arc::new(HeartbeatServiceClient::new(channel.clone()));
+    let ddl_client = Arc::new(DdlServiceClient::new(channel.clone()));
+    let hummock_client = Arc::new(HummockManagerServiceClient::new(channel.clone()));
+    let notification_client = Arc::new(NotificationServiceClient::new(channel.clone()));
+    let stream_client = Arc::new(StreamManagerServiceClient::new(channel.clone()));
+    let user_client = Arc::new(UserServiceClient::new(channel.clone()));
+    let scale_client = Arc::new(ScaleServiceClient::new(channel.clone()));
+    let backup_client = Arc::new(BackupServiceClient::new(channel.clone()));
     GrpcMetaClient {
         meta_connection: channel,
         cluster_client,
