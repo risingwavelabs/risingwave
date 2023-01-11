@@ -22,8 +22,6 @@ use tokio::sync::oneshot::channel as OneChannel;
 use tokio::sync::watch;
 use tokio::sync::watch::Sender as WatchSender;
 use tokio::task::JoinHandle;
-use tokio::time;
-use tokio::time::Instant;
 
 use super::follower_svc::start_follower_srv;
 use crate::manager::MetaOpts;
@@ -151,9 +149,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let join_handle = tokio::spawn(async move {
         if let Some(election_client) = election_client.clone() {
+            let mut state_watcher = election_client.subscribe();
             let svc_shutdown_rx_clone = svc_shutdown_rx.clone();
             let (follower_shutdown_tx, follower_shutdown_rx) = OneChannel::<()>();
-            let follower_handle: Option<JoinHandle<()>> = if !election_client.is_leader().await {
+            let follower_handle: Option<JoinHandle<()>> = if !*state_watcher.borrow() {
                 let address_info_clone = address_info.clone();
 
                 let election_client_ = election_client.clone();
@@ -171,13 +170,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                 None
             };
 
-            let mut ticker = time::interval_at(
-                Instant::now() + Duration::from_millis(100),
-                Duration::from_secs(1),
-            );
-
-            while !election_client.is_leader().await {
-                ticker.tick().await;
+            while !*state_watcher.borrow() {
+                if let Err(e) = state_watcher.changed().await {
+                    tracing::error!("state watcher recv failed {}", e.to_string());
+                }
             }
 
             if let Some(handle) = follower_handle {

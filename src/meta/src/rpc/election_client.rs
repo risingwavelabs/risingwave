@@ -13,18 +13,18 @@
 // limitations under the License.
 
 use std::borrow::BorrowMut;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use etcd_client::{Client, ConnectOptions, Error, GetOptions};
 use risingwave_pb::meta::MetaLeaderInfo;
+use tokio::sync::watch::Receiver;
 use tokio::sync::{oneshot, watch};
 use tokio::time;
 use tokio_stream::StreamExt;
 
 use crate::MetaResult;
 
-const META_ELECTION_KEY: &str = "__meta_election";
+const META_ELECTION_KEY: &str = "__meta_election_";
 
 pub struct ElectionMember {
     pub id: String,
@@ -45,21 +45,22 @@ impl From<ElectionMember> for MetaLeaderInfo {
 pub trait ElectionClient: Send + Sync + 'static {
     fn id(&self) -> MetaResult<String>;
     async fn run_once(&self, ttl: i64, stop: watch::Receiver<()>) -> MetaResult<()>;
+    fn subscribe(&self) -> watch::Receiver<bool>;
     async fn leader(&self) -> MetaResult<Option<ElectionMember>>;
     async fn get_members(&self) -> MetaResult<Vec<ElectionMember>>;
     async fn is_leader(&self) -> bool;
 }
 
 pub struct EtcdElectionClient {
-    pub client: Client,
-    is_leader: AtomicBool,
-    pub id: String,
+    client: Client,
+    id: String,
+    is_leader_sender: watch::Sender<bool>,
 }
 
 #[async_trait::async_trait]
 impl ElectionClient for EtcdElectionClient {
     async fn is_leader(&self) -> bool {
-        self.is_leader.load(Ordering::Relaxed)
+        *self.is_leader_sender.borrow()
     }
 
     async fn leader(&self) -> MetaResult<Option<ElectionMember>> {
@@ -85,7 +86,9 @@ impl ElectionClient for EtcdElectionClient {
         let mut election_client = self.client.election_client();
         let mut stop = stop;
 
-        self.is_leader.store(false, Ordering::Relaxed);
+        let _send_resp = self.is_leader_sender.send(false);
+
+        tracing::info!("client {} start election", self.id);
 
         // is restored leader from previous session?
         let mut restored_leader = false;
@@ -215,7 +218,7 @@ impl ElectionClient for EtcdElectionClient {
 
         let mut observe_stream = election_client.observe(META_ELECTION_KEY).await?;
 
-        self.is_leader.store(true, Ordering::Relaxed);
+        let _send_resp = self.is_leader_sender.send(true);
 
         loop {
             tokio::select! {
@@ -248,7 +251,7 @@ impl ElectionClient for EtcdElectionClient {
 
         tracing::warn!("client {} lost leadership", self.id);
 
-        self.is_leader.store(false, Ordering::Relaxed);
+        let _send_resp = self.is_leader_sender.send(false);
 
         Ok(())
     }
@@ -273,6 +276,10 @@ impl ElectionClient for EtcdElectionClient {
     fn id(&self) -> MetaResult<String> {
         Ok(self.id.clone())
     }
+
+    fn subscribe(&self) -> Receiver<bool> {
+        self.is_leader_sender.subscribe()
+    }
 }
 
 impl EtcdElectionClient {
@@ -283,10 +290,11 @@ impl EtcdElectionClient {
     ) -> MetaResult<Self> {
         let client = Client::connect(&endpoints, options.clone()).await?;
 
+        let (sender, _) = watch::channel(false);
         Ok(Self {
             client,
-            is_leader: AtomicBool::from(false),
             id,
+            is_leader_sender: sender,
         })
     }
 }
