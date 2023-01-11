@@ -22,8 +22,6 @@
 #![feature(associated_type_defaults)]
 #![feature(generators)]
 
-#[cfg(madsim)]
-use std::collections::HashMap;
 use std::iter::repeat;
 use std::sync::Arc;
 
@@ -37,8 +35,6 @@ use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::heartbeat_request::extra_info;
-#[cfg(madsim)]
-use tokio::sync::Mutex;
 
 pub mod error;
 use error::{Result, RpcError};
@@ -53,13 +49,9 @@ pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef}
 pub use connector_client::ConnectorClient;
 pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
 pub use meta_client::MetaClient;
-use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
-use risingwave_pb::common::HostAddress;
-use risingwave_pb::leader::leader_service_client::LeaderServiceClient;
-use risingwave_pb::leader::LeaderRequest;
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
-use tonic::transport::{Channel, Endpoint};
+
+use crate::meta_client::get_channel;
 
 #[async_trait]
 pub trait RpcClient: Send + Sync + 'static + Clone {
@@ -172,24 +164,23 @@ macro_rules! meta_rpc_client_method_impl {
     ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
         $(
             pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
-                use risingwave_pb::leader::leader_service_client::LeaderServiceClient;
-                use risingwave_pb::common::{HostAddress};
-                use risingwave_pb::leader::LeaderRequest;
-                use crate::meta_client::get_channel;
+
 
                 let req_clone = request.clone();
-                let response = self
-                    .$client
-                    .as_ref()
-                    .lock()
-                    .await // TODO: Some sort of deref
-                    .$fn_name(request)
-                    .await;
+                {
+                    let response = self
+                        .$client
+                        .as_ref()
+                        .lock()
+                        .await
+                        .$fn_name(request)
+                        .await;
 
-                // meta server is leader. Connection is correct
-                if response.is_ok() {
-                    return Ok(response.unwrap().into_inner());
-                }
+                    // meta server is leader. Connection is correct
+                    if response.is_ok() {
+                        return Ok(response.unwrap().into_inner());
+                    }
+                } // release MutexGuard on $client
 
                 // Invalid connection. Meta service is follower
                 let mut leader_client = LeaderServiceClient::new(self.meta_connection.clone());
@@ -209,11 +200,41 @@ macro_rules! meta_rpc_client_method_impl {
                 );
                 // TODO: this has to be done with some defaults
                 let leader_channel = get_channel(addr.as_str(), 1, 1, 1, 1).await?;
-                // self.meta_connection = leader_channel.clone();
 
-                // TODO: Do the request again against the leader meta node
+                // Hold locks on all sub-clients, to update atomically
+                {
+                    // TODO: either update channel, or also update LeaderServiceClient
+                    let mut cluster_c = self.cluster_client.as_ref().lock().await;
+                    let mut heartbeat_c = self.heartbeat_client.as_ref().lock().await;
+                    let mut ddl_c = self.ddl_client.as_ref().lock().await;
+                    let mut hummock_c = self.hummock_client.as_ref().lock().await;
+                    let mut notification_c = self.notification_client.as_ref().lock().await;
+                    let mut stream_c = self.stream_client.as_ref().lock().await;
+                    let mut user_c = self.user_client.as_ref().lock().await;
+                    let mut scale_c = self.scale_client.as_ref().lock().await;
+                    let mut backup_c = self.backup_client.as_ref().lock().await;
 
-                Ok(response.unwrap().into_inner())
+                    *cluster_c = ClusterServiceClient::new(leader_channel.clone());
+                    *heartbeat_c = HeartbeatServiceClient::new(leader_channel.clone());
+                    *ddl_c = DdlServiceClient::new(leader_channel.clone());
+                    *hummock_c = HummockManagerServiceClient::new(leader_channel.clone());
+                    *notification_c = NotificationServiceClient::new(leader_channel.clone());
+                    *stream_c = StreamManagerServiceClient::new(leader_channel.clone());
+                    *user_c = UserServiceClient::new(leader_channel.clone());
+                    *scale_c = ScaleServiceClient::new(leader_channel.clone());
+                    *backup_c = BackupServiceClient::new(leader_channel);
+                } // release MutexGuards on all clients
+
+                // Recursive in case we have another faulty connection?
+                // self.$fn_name(req_clone).await
+                let response = self
+                    .$client
+                    .as_ref()
+                    .lock()
+                    .await
+                    .$fn_name(req_clone)
+                    .await?;
+                Ok(response.into_inner())
             }
         )*
     }
