@@ -79,7 +79,7 @@ where
     T: NotificationClient,
     S: ObserverState,
 {
-    pub async fn new(mut client: T, observer_states: S) -> Self {
+    pub async fn new(client: T, observer_states: S) -> Self {
         let rx = client
             .subscribe(S::SubscribeType::subscribe_type())
             .await
@@ -214,7 +214,7 @@ impl<T: Send + 'static> Channel for Streaming<T> {
 #[async_trait::async_trait]
 pub trait NotificationClient: Send + Sync + 'static {
     type Channel: Channel<Item = SubscribeResponse>;
-    async fn subscribe(&mut self, subscribe_type: SubscribeType) -> Result<Self::Channel>;
+    async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel>;
 }
 
 pub struct RpcNotificationClient {
@@ -231,7 +231,7 @@ impl RpcNotificationClient {
 impl NotificationClient for RpcNotificationClient {
     type Channel = Streaming<SubscribeResponse>;
 
-    async fn subscribe(&mut self, subscribe_type: SubscribeType) -> Result<Self::Channel> {
+    async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel> {
         self.meta_client
             .subscribe(subscribe_type)
             .await
