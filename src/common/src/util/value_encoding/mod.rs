@@ -104,24 +104,24 @@ impl RowEncoding {
         }
     }
 
-    pub fn update_non_null_datum_nums(&mut self, non_null_column_ids: Vec<ColumnId>) {
-        self.set_width(non_null_column_ids.len());
-        self.non_null_column_ids = non_null_column_ids;
-    }
-
-    pub fn encode(&mut self, datum_refs: impl Iterator<Item = impl ToDatumRef>) {
+    pub fn encode(&mut self, datum_refs: impl Iterator<Item = impl ToDatumRef>, column_ids: Vec<ColumnId>) {
         assert!(
-            self.buf.is_empty(),
+            self.buf.is_empty() && self.non_null_column_ids.is_empty(),
             "should not encode one RowEncoding object multiple times."
         );
         let mut maybe_offset = vec![];
-        for datum in datum_refs {
+        for (datum, id) in datum_refs.zip_eq(column_ids.iter()) {
+            if datum.to_datum_ref().is_none() {
+                continue;
+            }
             maybe_offset.push(self.buf.len());
+            self.non_null_column_ids.push(*id);
             serialize_datum_into(datum, &mut self.buf);
         }
         let max_offset = *maybe_offset
             .last()
             .expect("should encode at least one column");
+        self.set_width(self.non_null_column_ids.len());
         self.set_big(maybe_offset, max_offset);
     }
 
@@ -151,28 +151,31 @@ pub fn encode_datums(
     datum_refs: impl Iterator<Item = impl ToDatumRef>,
 ) -> RowEncoding {
     let mut encoding = RowEncoding::new();
-    encoding.update_non_null_datum_nums(column_ids);
-    encoding.encode(datum_refs);
+    // encoding.update_non_null_datum_nums(column_ids);
+    encoding.encode(datum_refs, column_ids);
     encoding
 }
 
 pub fn decode(
-    encoded_bytes: Vec<u8>
+    need_columns: &[ColumnId],
+    mut encoded_bytes: &[u8]
 ) -> Vec<Datum> {
     let flag = encoded_bytes.get_u8();
-    let nums_bytes = match *flag & 0b1100 {
+    let nums_bytes = match flag & 0b1100 {
         0b0100 => 1,
         0b1000 => 2,
         0b1100 => 4,
         _ => unreachable!("flag's WW bits corrupted"),
     };
-    let offset_bytes = match *flag & 0b11 {
+    let offset_bytes = match flag & 0b11 {
         0b01 => 1,
         0b10 => 2,
         0b11 => 4,
         _ => unreachable!("flag's BB bits corrupted"),
     };
-    let num_non_null_columns = 
+    let non_null_datum_nums = deserialize_width(nums_bytes, &mut encoded_bytes);
+    
+    
     todo!()
 }
 
@@ -313,6 +316,15 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
             datatype: item_type,
         } => deserialize_list(item_type, data)?,
     })
+}
+
+fn deserialize_width(len: u8, data: &mut impl Buf) -> Width {
+    match len {
+        1 => Width::Mid(data.get_u8()),
+        2 => Width::Large(data.get_u16_le()),
+        4 => Width::Extra(data.get_u32_le()),
+        _ => unreachable!("Width's len should be either 1, 2, or 4"),
+    }
 }
 
 fn deserialize_struct(struct_def: &StructType, data: &mut impl Buf) -> Result<ScalarImpl> {
