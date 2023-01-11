@@ -35,6 +35,8 @@
 #![allow(incomplete_features)]
 
 #[macro_use]
+pub mod jemalloc;
+#[macro_use]
 pub mod error;
 #[macro_use]
 pub mod array;

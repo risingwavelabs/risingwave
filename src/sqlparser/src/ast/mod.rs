@@ -256,6 +256,10 @@ pub enum Expr {
         op: BinaryOperator,
         right: Box<Expr>,
     },
+    /// Some operation e.g. `foo > Some(bar)`, It will be wrapped in the right side of BinaryExpr
+    SomeOp(Box<Expr>),
+    /// ALL operation e.g. `foo > ALL(bar)`, It will be wrapped in the right side of BinaryExpr
+    AllOp(Box<Expr>),
     /// Unary operation e.g. `NOT foo`
     UnaryOp { op: UnaryOperator, expr: Box<Expr> },
     /// CAST an expression to a different data type e.g. `CAST(foo AS VARCHAR)`
@@ -399,6 +403,8 @@ impl fmt::Display for Expr {
                 op,
                 fmt_expr_with_paren(right)
             ),
+            Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
+            Expr::AllOp(expr) => write!(f, "ALL({})", expr),
             Expr::UnaryOp { op, expr } => {
                 if op == &UnaryOperator::PGPostfixFactorial {
                     write!(f, "{}{}", expr, op)
@@ -712,6 +718,7 @@ pub enum ShowObject {
     Table { schema: Option<Ident> },
     Database,
     Schema,
+    View { schema: Option<Ident> },
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
     Sink { schema: Option<Ident> },
@@ -735,6 +742,9 @@ impl fmt::Display for ShowObject {
             ShowObject::Table { schema } => {
                 write!(f, "TABLES{}", fmt_schema(schema))
             }
+            ShowObject::View { schema } => {
+                write!(f, "VIEWS{}", fmt_schema(schema))
+            }
             ShowObject::MaterializedView { schema } => {
                 write!(f, "MATERIALIZED VIEWS{}", fmt_schema(schema))
             }
@@ -757,6 +767,7 @@ pub enum ShowCreateType {
     Index,
     Source,
     Sink,
+    Function,
 }
 
 impl fmt::Display for ShowCreateType {
@@ -768,6 +779,7 @@ impl fmt::Display for ShowCreateType {
             ShowCreateType::Index => f.write_str("INDEX"),
             ShowCreateType::Source => f.write_str("SOURCE"),
             ShowCreateType::Sink => f.write_str("SINK"),
+            ShowCreateType::Function => f.write_str("FUNCTION"),
         }
     }
 }

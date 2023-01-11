@@ -16,14 +16,16 @@ use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::catalog::{valid_table_name, IndexId, TableId};
+use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, TableId};
+use risingwave_common::types::DataType;
 use risingwave_pb::catalog::{
-    Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink, Source as ProstSource,
-    Table as ProstTable, View as ProstView,
+    Function as ProstFunction, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
+    Source as ProstSource, Table as ProstTable, View as ProstView,
 };
 
 use super::source_catalog::SourceCatalog;
 use super::ViewId;
+use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
 use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
@@ -49,6 +51,8 @@ pub struct SchemaCatalog {
     indexes_by_table_id: HashMap<TableId, Vec<Arc<IndexCatalog>>>,
     view_by_name: HashMap<String, Arc<ViewCatalog>>,
     view_by_id: HashMap<ViewId, Arc<ViewCatalog>>,
+    function_by_name: HashMap<String, HashMap<Vec<DataType>, Arc<FunctionCatalog>>>,
+    function_by_id: HashMap<FunctionId, Arc<FunctionCatalog>>,
 
     // This field only available when schema is "pg_catalog". Meanwhile, others will be empty.
     system_table_by_name: HashMap<String, SystemCatalog>,
@@ -182,6 +186,35 @@ impl SchemaCatalog {
         self.view_by_name.remove(&view_ref.name).unwrap();
     }
 
+    pub fn create_function(&mut self, prost: &ProstFunction) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let function = FunctionCatalog::from(prost);
+        let args = function.arg_types.clone();
+        let function_ref = Arc::new(function);
+
+        self.function_by_name
+            .entry(name)
+            .or_default()
+            .try_insert(args, function_ref.clone())
+            .expect("function already exists with same argument types");
+        self.function_by_id
+            .try_insert(id.into(), function_ref)
+            .expect("function id exists");
+    }
+
+    pub fn drop_function(&mut self, id: FunctionId) {
+        let function_ref = self
+            .function_by_id
+            .remove(&id)
+            .expect("function not found by id");
+        self.function_by_name
+            .get_mut(&function_ref.name)
+            .expect("function not found by name")
+            .remove(&function_ref.arg_types)
+            .expect("function not found by argument types");
+    }
+
     pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
@@ -279,6 +312,14 @@ impl SchemaCatalog {
         self.view_by_name.get(view_name)
     }
 
+    pub fn get_function_by_name_args(
+        &self,
+        name: &str,
+        args: &[DataType],
+    ) -> Option<&Arc<FunctionCatalog>> {
+        self.function_by_name.get(name)?.get(args)
+    }
+
     pub fn id(&self) -> SchemaId {
         self.id
     }
@@ -310,6 +351,8 @@ impl From<&ProstSchema> for SchemaCatalog {
             system_table_by_name: HashMap::new(),
             view_by_name: HashMap::new(),
             view_by_id: HashMap::new(),
+            function_by_name: HashMap::new(),
+            function_by_id: HashMap::new(),
         }
     }
 }

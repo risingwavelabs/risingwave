@@ -327,6 +327,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(ProjectSet, c
 #[derive(Debug, Clone)]
 pub struct Project {
     pub core: generic::Project<PlanRef>,
+    watermark_derivations: Vec<(usize, usize)>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Project, core, input);
 
@@ -678,12 +679,19 @@ pub fn to_stream_prost_body(
                 .collect();
             ProstNode::ProjectSet(ProjectSetNode { select_list })
         }
-        Node::Project(me) => {
-            let me = &me.core;
-            ProstNode::Project(ProjectNode {
-                select_list: me.exprs.iter().map(Expr::to_expr_proto).collect(),
-            })
-        }
+        Node::Project(me) => ProstNode::Project(ProjectNode {
+            select_list: me.core.exprs.iter().map(Expr::to_expr_proto).collect(),
+            watermark_input_key: me
+                .watermark_derivations
+                .iter()
+                .map(|(x, _)| *x as u32)
+                .collect(),
+            watermark_output_key: me
+                .watermark_derivations
+                .iter()
+                .map(|(_, y)| *y as u32)
+                .collect(),
+        }),
         Node::Sink(me) => ProstNode::Sink(SinkNode {
             table_id: me.sink_desc.id().into(),
             properties: me.sink_desc.properties.inner().clone(),

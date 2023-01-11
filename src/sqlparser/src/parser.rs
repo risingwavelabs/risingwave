@@ -28,6 +28,8 @@ use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::*;
 
+pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParserError {
     TokenizerError(String),
@@ -1081,11 +1083,40 @@ impl Parser {
         };
 
         if let Some(op) = regular_binary_operator {
-            Ok(Expr::BinaryOp {
-                left: Box::new(expr),
-                op,
-                right: Box::new(self.parse_subexpr(precedence)?),
-            })
+            // `all/any/some` only appears to the right of the binary op.
+            if let Some(keyword) =
+                self.parse_one_of_keywords(&[Keyword::ANY, Keyword::ALL, Keyword::SOME])
+            {
+                self.expect_token(&Token::LParen)?;
+                // In upstream's PR of parser-rs, there is `self.parser_subexpr(precedence)` here.
+                // But it will fail to parse `select 1 = any(null and true);`.
+                let right = self.parse_expr()?;
+                self.expect_token(&Token::RParen)?;
+
+                // TODO: support `all/any/some(subquery)`.
+                if let Expr::Subquery(_) = &right {
+                    parser_err!("ANY/SOME/ALL(Subquery) is not implemented")?;
+                }
+
+                let right = match keyword {
+                    Keyword::ALL => Box::new(Expr::AllOp(Box::new(right))),
+                    // `SOME` is a synonym for `ANY`.
+                    Keyword::ANY | Keyword::SOME => Box::new(Expr::SomeOp(Box::new(right))),
+                    _ => unreachable!(),
+                };
+
+                Ok(Expr::BinaryOp {
+                    left: Box::new(expr),
+                    op,
+                    right,
+                })
+            } else {
+                Ok(Expr::BinaryOp {
+                    left: Box::new(expr),
+                    op,
+                    right: Box::new(self.parse_subexpr(precedence)?),
+                })
+            }
         } else if let Token::Word(w) = &tok {
             match w.keyword {
                 Keyword::IS => {
@@ -3020,6 +3051,11 @@ impl Parser {
                 Keyword::SCHEMAS => {
                     return Ok(Statement::ShowObjects(ShowObject::Schema));
                 }
+                Keyword::VIEWS => {
+                    return Ok(Statement::ShowObjects(ShowObject::View {
+                        schema: self.parse_from_and_identifier()?,
+                    }));
+                }
                 Keyword::MATERIALIZED => {
                     if self.parse_keyword(Keyword::VIEWS) {
                         return Ok(Statement::ShowObjects(ShowObject::MaterializedView {
@@ -3078,9 +3114,10 @@ impl Parser {
                 Keyword::INDEX => ShowCreateType::Index,
                 Keyword::SOURCE => ShowCreateType::Source,
                 Keyword::SINK => ShowCreateType::Sink,
+                Keyword::FUNCTION => ShowCreateType::Function,
                 _ => {
                     return self.expected(
-                        "TABLE, MATERIALIZED VIEW, VIEW, INDEX, SOURCE or SINK",
+                        "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE or SINK",
                         self.peek_token(),
                     )
                 }
@@ -3091,7 +3128,7 @@ impl Parser {
             });
         }
         self.expected(
-            "TABLE, MATERIALIZED VIEW, VIEW, INDEX, SOURCE or SINK",
+            "TABLE, MATERIALIZED VIEW, VIEW, INDEX, FUNCTION, SOURCE or SINK",
             self.peek_token(),
         )
     }

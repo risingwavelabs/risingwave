@@ -395,6 +395,12 @@ impl DataType {
     }
 }
 
+impl From<DataType> for ProstDataType {
+    fn from(data_type: DataType) -> Self {
+        data_type.to_protobuf()
+    }
+}
+
 /// `Scalar` is a trait over all possible owned types in the evaluation
 /// framework.
 ///
