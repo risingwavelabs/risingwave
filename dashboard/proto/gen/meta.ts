@@ -2,7 +2,6 @@
 import { MetaBackupManifestId } from "./backup_service";
 import { Database, Function, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import {
-  ClusterConfig,
   HostAddress,
   ParallelUnit,
   ParallelUnitMapping,
@@ -322,10 +321,40 @@ export interface ListTableFragmentsResponse_TableFragmentsEntry {
   value: ListTableFragmentsResponse_TableFragmentInfo | undefined;
 }
 
+/** Complete cluster config that is persisted by meta node. */
+export interface ClusterConfig {
+  /** The URL that workers in the cluster can use to access storage backend. */
+  stateStoreUrl: string;
+}
+
+export interface FrontendConfig {
+}
+
+export interface ComputeNodeConfig {
+  stateStoreUrl: string;
+}
+
+export interface CompactorConfig {
+  stateStoreUrl: string;
+}
+
+/**
+ * A subset of `ClusterConfig`. For backward compatibility, the worker node
+ * needs to send its config derived from command line options and config from
+ * `risingwave.toml` to meta node to ensure configuration consistency.
+ */
+export interface WorkerVerifyConfig {
+  workerConfig?: { $case: "frontend"; frontend: FrontendConfig } | {
+    $case: "computeNode";
+    computeNode: ComputeNodeConfig;
+  } | { $case: "compactor"; compactor: CompactorConfig };
+}
+
 export interface AddWorkerNodeRequest {
   workerType: WorkerType;
   host: HostAddress | undefined;
   workerNodeParallelism: number;
+  verifyConfig: WorkerVerifyConfig | undefined;
 }
 
 export interface AddWorkerNodeResponse {
@@ -1200,8 +1229,159 @@ export const ListTableFragmentsResponse_TableFragmentsEntry = {
   },
 };
 
+function createBaseClusterConfig(): ClusterConfig {
+  return { stateStoreUrl: "" };
+}
+
+export const ClusterConfig = {
+  fromJSON(object: any): ClusterConfig {
+    return { stateStoreUrl: isSet(object.stateStoreUrl) ? String(object.stateStoreUrl) : "" };
+  },
+
+  toJSON(message: ClusterConfig): unknown {
+    const obj: any = {};
+    message.stateStoreUrl !== undefined && (obj.stateStoreUrl = message.stateStoreUrl);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ClusterConfig>, I>>(object: I): ClusterConfig {
+    const message = createBaseClusterConfig();
+    message.stateStoreUrl = object.stateStoreUrl ?? "";
+    return message;
+  },
+};
+
+function createBaseFrontendConfig(): FrontendConfig {
+  return {};
+}
+
+export const FrontendConfig = {
+  fromJSON(_: any): FrontendConfig {
+    return {};
+  },
+
+  toJSON(_: FrontendConfig): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<FrontendConfig>, I>>(_: I): FrontendConfig {
+    const message = createBaseFrontendConfig();
+    return message;
+  },
+};
+
+function createBaseComputeNodeConfig(): ComputeNodeConfig {
+  return { stateStoreUrl: "" };
+}
+
+export const ComputeNodeConfig = {
+  fromJSON(object: any): ComputeNodeConfig {
+    return { stateStoreUrl: isSet(object.stateStoreUrl) ? String(object.stateStoreUrl) : "" };
+  },
+
+  toJSON(message: ComputeNodeConfig): unknown {
+    const obj: any = {};
+    message.stateStoreUrl !== undefined && (obj.stateStoreUrl = message.stateStoreUrl);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ComputeNodeConfig>, I>>(object: I): ComputeNodeConfig {
+    const message = createBaseComputeNodeConfig();
+    message.stateStoreUrl = object.stateStoreUrl ?? "";
+    return message;
+  },
+};
+
+function createBaseCompactorConfig(): CompactorConfig {
+  return { stateStoreUrl: "" };
+}
+
+export const CompactorConfig = {
+  fromJSON(object: any): CompactorConfig {
+    return { stateStoreUrl: isSet(object.stateStoreUrl) ? String(object.stateStoreUrl) : "" };
+  },
+
+  toJSON(message: CompactorConfig): unknown {
+    const obj: any = {};
+    message.stateStoreUrl !== undefined && (obj.stateStoreUrl = message.stateStoreUrl);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CompactorConfig>, I>>(object: I): CompactorConfig {
+    const message = createBaseCompactorConfig();
+    message.stateStoreUrl = object.stateStoreUrl ?? "";
+    return message;
+  },
+};
+
+function createBaseWorkerVerifyConfig(): WorkerVerifyConfig {
+  return { workerConfig: undefined };
+}
+
+export const WorkerVerifyConfig = {
+  fromJSON(object: any): WorkerVerifyConfig {
+    return {
+      workerConfig: isSet(object.frontend)
+        ? { $case: "frontend", frontend: FrontendConfig.fromJSON(object.frontend) }
+        : isSet(object.computeNode)
+        ? { $case: "computeNode", computeNode: ComputeNodeConfig.fromJSON(object.computeNode) }
+        : isSet(object.compactor)
+        ? { $case: "compactor", compactor: CompactorConfig.fromJSON(object.compactor) }
+        : undefined,
+    };
+  },
+
+  toJSON(message: WorkerVerifyConfig): unknown {
+    const obj: any = {};
+    message.workerConfig?.$case === "frontend" &&
+      (obj.frontend = message.workerConfig?.frontend
+        ? FrontendConfig.toJSON(message.workerConfig?.frontend)
+        : undefined);
+    message.workerConfig?.$case === "computeNode" && (obj.computeNode = message.workerConfig?.computeNode
+      ? ComputeNodeConfig.toJSON(message.workerConfig?.computeNode)
+      : undefined);
+    message.workerConfig?.$case === "compactor" && (obj.compactor = message.workerConfig?.compactor
+      ? CompactorConfig.toJSON(message.workerConfig?.compactor)
+      : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<WorkerVerifyConfig>, I>>(object: I): WorkerVerifyConfig {
+    const message = createBaseWorkerVerifyConfig();
+    if (
+      object.workerConfig?.$case === "frontend" &&
+      object.workerConfig?.frontend !== undefined &&
+      object.workerConfig?.frontend !== null
+    ) {
+      message.workerConfig = { $case: "frontend", frontend: FrontendConfig.fromPartial(object.workerConfig.frontend) };
+    }
+    if (
+      object.workerConfig?.$case === "computeNode" &&
+      object.workerConfig?.computeNode !== undefined &&
+      object.workerConfig?.computeNode !== null
+    ) {
+      message.workerConfig = {
+        $case: "computeNode",
+        computeNode: ComputeNodeConfig.fromPartial(object.workerConfig.computeNode),
+      };
+    }
+    if (
+      object.workerConfig?.$case === "compactor" &&
+      object.workerConfig?.compactor !== undefined &&
+      object.workerConfig?.compactor !== null
+    ) {
+      message.workerConfig = {
+        $case: "compactor",
+        compactor: CompactorConfig.fromPartial(object.workerConfig.compactor),
+      };
+    }
+    return message;
+  },
+};
+
 function createBaseAddWorkerNodeRequest(): AddWorkerNodeRequest {
-  return { workerType: WorkerType.UNSPECIFIED, host: undefined, workerNodeParallelism: 0 };
+  return { workerType: WorkerType.UNSPECIFIED, host: undefined, workerNodeParallelism: 0, verifyConfig: undefined };
 }
 
 export const AddWorkerNodeRequest = {
@@ -1210,6 +1390,7 @@ export const AddWorkerNodeRequest = {
       workerType: isSet(object.workerType) ? workerTypeFromJSON(object.workerType) : WorkerType.UNSPECIFIED,
       host: isSet(object.host) ? HostAddress.fromJSON(object.host) : undefined,
       workerNodeParallelism: isSet(object.workerNodeParallelism) ? Number(object.workerNodeParallelism) : 0,
+      verifyConfig: isSet(object.verifyConfig) ? WorkerVerifyConfig.fromJSON(object.verifyConfig) : undefined,
     };
   },
 
@@ -1219,6 +1400,8 @@ export const AddWorkerNodeRequest = {
     message.host !== undefined && (obj.host = message.host ? HostAddress.toJSON(message.host) : undefined);
     message.workerNodeParallelism !== undefined &&
       (obj.workerNodeParallelism = Math.round(message.workerNodeParallelism));
+    message.verifyConfig !== undefined &&
+      (obj.verifyConfig = message.verifyConfig ? WorkerVerifyConfig.toJSON(message.verifyConfig) : undefined);
     return obj;
   },
 
@@ -1229,6 +1412,9 @@ export const AddWorkerNodeRequest = {
       ? HostAddress.fromPartial(object.host)
       : undefined;
     message.workerNodeParallelism = object.workerNodeParallelism ?? 0;
+    message.verifyConfig = (object.verifyConfig !== undefined && object.verifyConfig !== null)
+      ? WorkerVerifyConfig.fromPartial(object.verifyConfig)
+      : undefined;
     return message;
   },
 };

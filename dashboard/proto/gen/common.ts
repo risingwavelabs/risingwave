@@ -220,11 +220,6 @@ export interface BatchQueryEpoch {
   };
 }
 
-export interface ClusterConfig {
-  /** The URL that workers in the cluster can use to access storage backend. */
-  stateStoreUrl: string;
-}
-
 function createBaseStatus(): Status {
   return { code: Status_Code.UNSPECIFIED, message: "" };
 }
@@ -488,28 +483,6 @@ export const BatchQueryEpoch = {
     if (object.epoch?.$case === "backup" && object.epoch?.backup !== undefined && object.epoch?.backup !== null) {
       message.epoch = { $case: "backup", backup: object.epoch.backup };
     }
-    return message;
-  },
-};
-
-function createBaseClusterConfig(): ClusterConfig {
-  return { stateStoreUrl: "" };
-}
-
-export const ClusterConfig = {
-  fromJSON(object: any): ClusterConfig {
-    return { stateStoreUrl: isSet(object.stateStoreUrl) ? String(object.stateStoreUrl) : "" };
-  },
-
-  toJSON(message: ClusterConfig): unknown {
-    const obj: any = {};
-    message.stateStoreUrl !== undefined && (obj.stateStoreUrl = message.stateStoreUrl);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<ClusterConfig>, I>>(object: I): ClusterConfig {
-    const message = createBaseClusterConfig();
-    message.stateStoreUrl = object.stateStoreUrl ?? "";
     return message;
   },
 };
