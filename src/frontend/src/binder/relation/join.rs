@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, Result};
-
 use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
@@ -21,7 +20,7 @@ use risingwave_sqlparser::ast::{
 
 use crate::binder::bind_context::BindContext;
 use crate::binder::{Binder, Relation, COLUMN_GROUP_PREFIX};
-use crate::expr::{ExprImpl};
+use crate::expr::ExprImpl;
 
 #[derive(Debug, Clone)]
 pub struct BoundJoin {
