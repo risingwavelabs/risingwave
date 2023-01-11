@@ -53,7 +53,6 @@ smallvec = "1"
 static_assertions = "1"
 sysinfo = "0.26"
 thiserror = "1"
-tikv-jemalloc-ctl = "0.5"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -70,6 +69,9 @@ tower-http = { version = "0.3", features = ["add-extension", "cors"] }
 tracing = "0.1"
 twox-hash = "1"
 url = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tikv-jemalloc-ctl = "0.5"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
