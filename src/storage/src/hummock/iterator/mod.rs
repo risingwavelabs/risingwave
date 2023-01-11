@@ -47,7 +47,9 @@ use crate::hummock::{
 mod delete_range_iterator;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
-pub use delete_range_iterator::{DeleteRangeIterator, ForwardMergeRangeIterator};
+pub use delete_range_iterator::{
+    DeleteRangeIterator, ForwardMergeRangeIterator, RangeIteratorTyped,
+};
 
 use crate::monitor::StoreLocalStatistic;
 

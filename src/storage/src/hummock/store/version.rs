@@ -43,6 +43,8 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::store::immutable_memtable::MergedImmutableMemtable;
+use crate::hummock::store::immutable_memtable_impl::{get_from_imm, ImmutableMemtableImpl};
 use crate::hummock::store::state_store::HummockStorageIterator;
 use crate::hummock::utils::{
     check_subset_preserve_order, filter_single_sst, prune_ssts, range_overlap, search_sst_idx,
@@ -59,9 +61,8 @@ use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIt
 
 pub type CommittedVersion = PinnedVersion;
 
-/// The value of threshold is related to the number of in-flight barriers
-/// and the frequency of checkpoint.
-/// todo: We should not use a fixed number here
+/// The value of threshold should be related to the number of in-flight barriers
+/// and the frequency of checkpoint. We may tune this value later.
 const IMM_MERGE_THRESHOLD: usize = 5;
 
 /// Data not committed to Hummock. There are two types of staging data:
@@ -133,8 +134,8 @@ pub struct StagingVersion {
     // newer data comes first
     // Note: Currently, building imm and writing to staging version is not atomic, and therefore
     // imm of smaller batch id may be added later than one with greater batch id
-    // TODO: replace ImmutableMemtable with ImmutableMemtableImpl
-    pub imm: VecDeque<ImmutableMemtable>,
+    // TODO: replace ImmutableMemtable with the wrapper
+    pub imm: VecDeque<ImmutableMemtableImpl>,
     // newer data comes first
     pub sst: VecDeque<StagingSstableInfo>,
 }
@@ -149,12 +150,12 @@ impl StagingVersion {
         table_id: TableId,
         table_key_range: &'a TableKeyRange,
     ) -> (
-        impl Iterator<Item = &ImmutableMemtable> + 'a,
+        impl Iterator<Item = &ImmutableMemtableImpl> + 'a,
         impl Iterator<Item = &SstableInfo> + 'a,
     ) {
         let overlapped_imms = self.imm.iter().filter(move |imm| {
             imm.epoch() <= max_epoch_inclusive
-                && imm.table_id == table_id
+                && imm.table_id() == table_id
                 && imm.epoch() > min_epoch_exclusive
                 && range_overlap(table_key_range, imm.start_table_key(), imm.end_table_key())
         });
@@ -193,7 +194,9 @@ pub struct HummockReadVersion {
     /// Remote version for committed data.
     committed: CommittedVersion,
 
-    onging_merge_imms: Option<Vec<ImmId>>,
+    // TODO: we need to find a way to deduplicate merge imm request
+    // onging_merge_imms: Option<Vec<ImmId>>,
+    onging_merge_task: bool,
 }
 
 impl HummockReadVersion {
@@ -209,7 +212,7 @@ impl HummockReadVersion {
             },
 
             committed: committed_version,
-            onging_merge_imms: None,
+            onging_merge_task: false,
         }
     }
 
@@ -233,7 +236,7 @@ impl HummockReadVersion {
                         debug_assert!(item.batch_id() < imm.batch_id());
                     }
 
-                    self.staging.imm.push_front(imm)
+                    self.staging.imm.push_front(ImmutableMemtableImpl::Imm(imm))
                 }
                 StagingData::Sst(staging_sst) => {
                     // The following properties must be ensured:
@@ -312,44 +315,51 @@ impl HummockReadVersion {
     pub fn get_imms_to_merge(&mut self) -> Option<Vec<ImmutableMemtable>> {
         // check the number of imms in staging,
         // if the number is greater than the threshold, we need to merge them to a large imm
-        if self.onging_merge_imms.is_none() && self.staging.imm.len() >= IMM_MERGE_THRESHOLD {
-            let len = self.staging.imm.len();
-            let mut imms = Vec::with_capacity(len);
-            let mut imm_ids = Vec::with_capacity(len);
-            for imm in self.staging.imm.iter() {
-                imms.push(imm.clone());
-                imm_ids.push(imm.batch_id());
-            }
-            self.onging_merge_imms = Some(imm_ids);
-            Some(imms)
+        if !self.onging_merge_task && self.staging.imm.len() >= IMM_MERGE_THRESHOLD {
+            let imms_to_merge = self
+                .staging
+                .imm
+                .iter()
+                .flat_map(|imm| {
+                    if let ImmutableMemtableImpl::Imm(imm) = imm {
+                        Some(imm.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec();
+            self.onging_merge_task = true;
+            Some(imms_to_merge)
         } else {
             None
         }
     }
 
-    pub fn on_imm_merge_finished(&mut self, merged_imm: ImmutableMemtable) {
+    pub fn on_imm_merge_finished(&mut self, merged_imm: MergedImmutableMemtable) {
         // When merge task finished, we should remove those small imms from staging and
         // add the merged imm into staging
-        if let Some(merged_imm_ids) = self.onging_merge_imms.take() {
-            let staging_imm_count = self.staging.imm.len();
-            #[cfg(debug_assertions)]
-            {
-                // check the last `merged_imm_ids.len()` imms in staging are the same as
-                // `merged_imm_ids`
-                let diff = staging_imm_count - merged_imm_ids.len();
-                for (i, imm) in self.staging.imm.iter().skip(diff).enumerate() {
-                    if i >= merged_imm_ids.len() {
-                        break;
-                    }
-                    assert_eq!(imm.batch_id(), merged_imm_ids[i]);
+        let staging_imm_count = self.staging.imm.len();
+        let merged_imm_ids = merged_imm.get_merged_imm_ids();
+        #[cfg(debug_assertions)]
+        {
+            // check the last `merged_imm_ids.len()` imms in staging are the same as
+            // `merged_imm_ids`
+            let diff = staging_imm_count - merged_imm_ids.len();
+            for (i, imm) in self.staging.imm.iter().skip(diff).enumerate() {
+                if i >= merged_imm_ids.len() {
+                    break;
                 }
+                assert_eq!(imm.batch_id(), merged_imm_ids[i]);
             }
-
-            self.staging
-                .imm
-                .truncate(staging_imm_count - merged_imm_ids.len());
-            self.staging.imm.push_back(merged_imm);
         }
+        self.staging
+            .imm
+            .truncate(staging_imm_count - merged_imm_ids.len());
+        self.staging
+            .imm
+            .push_back(ImmutableMemtableImpl::MergedImm(merged_imm));
+        // clear flag
+        self.onging_merge_task = false;
     }
 
     pub fn staging(&self) -> &StagingVersion {
@@ -371,7 +381,11 @@ pub fn read_filter_for_batch(
     table_id: TableId,
     key_range: &TableKeyRange,
     read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
-) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+) -> StorageResult<(
+    Vec<ImmutableMemtableImpl>,
+    Vec<SstableInfo>,
+    CommittedVersion,
+)> {
     assert!(!read_version_vec.is_empty());
     let read_version_guard_vec = read_version_vec
         .iter()
@@ -417,7 +431,11 @@ pub fn read_filter_for_local(
     table_id: TableId,
     table_key_range: &TableKeyRange,
     read_version: Arc<RwLock<HummockReadVersion>>,
-) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+) -> StorageResult<(
+    Vec<ImmutableMemtableImpl>,
+    Vec<SstableInfo>,
+    CommittedVersion,
+)> {
     let read_version_guard = read_version.read();
     let (imm_iter, sst_iter) =
         read_version_guard
@@ -456,7 +474,11 @@ impl HummockVersionReader {
         table_key: TableKey<&'a [u8]>,
         epoch: u64,
         read_options: ReadOptions,
-        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
+        read_version_tuple: (
+            Vec<ImmutableMemtableImpl>,
+            Vec<SstableInfo>,
+            CommittedVersion,
+        ),
     ) -> StorageResult<Option<Bytes>> {
         let mut table_counts = 0;
         let mut local_stats = StoreLocalStatistic::default();
@@ -464,7 +486,7 @@ impl HummockVersionReader {
 
         // 1. read staging data
         for imm in &imms {
-            if let Some(data) = get_from_batch(imm, table_key, &mut local_stats) {
+            if let Some(data) = get_from_imm(imm, table_key, epoch, &mut local_stats) {
                 return Ok(data.into_user_value());
             }
         }
@@ -575,7 +597,11 @@ impl HummockVersionReader {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
+        read_version_tuple: (
+            Vec<ImmutableMemtableImpl>,
+            Vec<SstableInfo>,
+            CommittedVersion,
+        ),
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
         let (imms, uncommitted_ssts, committed) = read_version_tuple;
 
@@ -588,9 +614,17 @@ impl HummockVersionReader {
             .observe(imms.len() as f64);
         for imm in imms {
             if imm.has_range_tombstone() && !read_options.ignore_range_tombstone {
-                delete_range_iter.add_batch_iter(imm.delete_range_iter());
+                delete_range_iter.add_imm_iter(imm.delete_range_iter());
             }
-            staging_iters.push(HummockIteratorUnion::First(imm.into_forward_iter()));
+            let hummock_iter = match imm {
+                ImmutableMemtableImpl::Imm(batch) => {
+                    HummockIteratorUnion::First(batch.into_forward_iter())
+                }
+                ImmutableMemtableImpl::MergedImm(m) => {
+                    HummockIteratorUnion::Second(m.into_forward_iter(epoch))
+                }
+            };
+            staging_iters.push(hummock_iter);
         }
         let mut staging_sst_iter_count = 0;
         // encode once
@@ -618,7 +652,7 @@ impl HummockVersionReader {
                     .add_sst_iter(SstableDeleteRangeIterator::new(table_holder.clone()));
             }
             staging_sst_iter_count += 1;
-            staging_iters.push(HummockIteratorUnion::Second(SstableIterator::new(
+            staging_iters.push(HummockIteratorUnion::Third(SstableIterator::new(
                 table_holder,
                 self.sstable_store.clone(),
                 Arc::new(SstableIteratorReadOptions::default()),
@@ -628,6 +662,7 @@ impl HummockVersionReader {
             .iter_merge_sstable_counts
             .with_label_values(&["staging-sst-iter"])
             .observe(staging_sst_iter_count as f64);
+        // TODO:
         let staging_iter: StagingDataIterator = OrderedMergeIteratorInner::new(staging_iters);
 
         // 2. build iterator from committed

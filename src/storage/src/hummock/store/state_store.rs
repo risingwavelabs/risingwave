@@ -33,6 +33,7 @@ use crate::hummock::iterator::{
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
+use crate::hummock::store::immutable_memtable::MergedImmIterator;
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::{MemoryLimiter, SstableIterator};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -97,9 +98,11 @@ impl HummockStorageCore {
         let mut write_guard = self.read_version.write();
         write_guard.update(info);
 
+        // check whether we need to merge some immutable memtables
         if let Some(imms) = write_guard.get_imms_to_merge() {
             self.event_sender
                 .send(HummockEvent::ImmToMerge {
+                    table_id: self.instance_guard.table_id,
                     read_version: self.read_version.clone(),
                     imms,
                 })
@@ -283,7 +286,12 @@ impl LocalHummockStorage {
 }
 
 pub type StagingDataIterator = OrderedMergeIteratorInner<
-    HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
+    HummockIteratorUnion<
+        Forward,
+        SharedBufferBatchIterator<Forward>,
+        MergedImmIterator<Forward>,
+        SstableIterator,
+    >,
 >;
 type HummockStorageIteratorPayload = UnorderedMergeIteratorInner<
     HummockIteratorUnion<

@@ -62,6 +62,7 @@ pub enum HummockEvent {
     ImmToUploader(ImmutableMemtable),
 
     ImmToMerge {
+        table_id: TableId,
         read_version: Arc<RwLock<HummockReadVersion>>,
         imms: Vec<ImmutableMemtable>,
     },
@@ -128,10 +129,11 @@ impl HummockEvent {
                 table_id, instance_id
             ),
             HummockEvent::ImmToMerge {
+                table_id,
                 read_version: _,
                 imms,
             } => {
-                format!("ImmToMerge imms {:?}", imms)
+                format!("ImmToMerge table_id: {:?} imms {:?}", table_id, imms)
             }
 
             #[cfg(any(test, feature = "test"))]

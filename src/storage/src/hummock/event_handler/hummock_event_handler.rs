@@ -426,7 +426,7 @@ impl HummockEventHandler {
                     UploaderEvent::DataSpilled(staging_sstable_info) => {
                         self.handle_data_spilled(staging_sstable_info);
                     }
-                    UploaderEvent::ImmMerged => {
+                    UploaderEvent::ImmMerged(merge_result) => {
                         todo!("handle imm merged");
                     }
                 },
@@ -458,8 +458,12 @@ impl HummockEventHandler {
                             self.uploader.may_flush();
                         }
 
-                        HummockEvent::ImmToMerge { read_version, imms } => {
-                            self.uploader.start_merge_imms(read_version, imms);
+                        HummockEvent::ImmToMerge {
+                            table_id,
+                            read_version,
+                            imms,
+                        } => {
+                            self.uploader.start_merge_imms(table_id, read_version, imms);
                         }
 
                         HummockEvent::SealEpoch {

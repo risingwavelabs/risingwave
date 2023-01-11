@@ -33,6 +33,7 @@ use super::utils::validate_epoch;
 use super::HummockStorage;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::event_handler::HummockEvent;
+use crate::hummock::store::immutable_memtable_impl::ImmutableMemtableImpl;
 use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::hummock::store::version::read_filter_for_batch;
@@ -92,7 +93,11 @@ impl HummockStorage {
     async fn build_read_version_tuple_from_backup(
         &self,
         epoch: u64,
-    ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+    ) -> StorageResult<(
+        Vec<ImmutableMemtableImpl>,
+        Vec<SstableInfo>,
+        CommittedVersion,
+    )> {
         match self.backup_reader.try_get_hummock_version(epoch).await {
             Ok(Some(backup_version)) => {
                 validate_epoch(backup_version.safe_epoch(), epoch)?;
@@ -112,34 +117,41 @@ impl HummockStorage {
         epoch: u64,
         table_id: TableId,
         key_range: &TableKeyRange,
-    ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+    ) -> StorageResult<(
+        Vec<ImmutableMemtableImpl>,
+        Vec<SstableInfo>,
+        CommittedVersion,
+    )> {
         let pinned_version = self.pinned_version.load();
         validate_epoch(pinned_version.safe_epoch(), epoch)?;
 
         // check epoch if lower mce
-        let read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion) =
-            if epoch <= pinned_version.max_committed_epoch() {
-                // read committed_version directly without build snapshot
+        let read_version_tuple: (
+            Vec<ImmutableMemtableImpl>,
+            Vec<SstableInfo>,
+            CommittedVersion,
+        ) = if epoch <= pinned_version.max_committed_epoch() {
+            // read committed_version directly without build snapshot
+            (Vec::default(), Vec::default(), (**pinned_version).clone())
+        } else {
+            let read_version_vec = {
+                let read_guard = self.read_version_mapping.read();
+                read_guard
+                    .get(&table_id)
+                    .unwrap()
+                    .values()
+                    .cloned()
+                    .collect_vec()
+            };
+
+            // When the system has just started and no state has been created, the memory state
+            // may be empty
+            if read_version_vec.is_empty() {
                 (Vec::default(), Vec::default(), (**pinned_version).clone())
             } else {
-                let read_version_vec = {
-                    let read_guard = self.read_version_mapping.read();
-                    read_guard
-                        .get(&table_id)
-                        .unwrap()
-                        .values()
-                        .cloned()
-                        .collect_vec()
-                };
-
-                // When the system has just started and no state has been created, the memory state
-                // may be empty
-                if read_version_vec.is_empty() {
-                    (Vec::default(), Vec::default(), (**pinned_version).clone())
-                } else {
-                    read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
-                }
-            };
+                read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?
+            }
+        };
 
         Ok(read_version_tuple)
     }

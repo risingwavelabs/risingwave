@@ -26,6 +26,7 @@ use risingwave_storage::hummock::iterator::test_utils::{
     iterator_test_table_key_of, iterator_test_user_key_of,
 };
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+use risingwave_storage::hummock::store::immutable_memtable_impl::ImmutableMemtableImpl;
 use risingwave_storage::hummock::store::memtable::ImmutableMemtable;
 use risingwave_storage::hummock::store::version::{
     read_filter_for_batch, read_filter_for_local, HummockReadVersion, StagingData,
@@ -72,9 +73,7 @@ async fn test_read_version_basic() {
                 .staging()
                 .prune_overlap(0, epoch, TableId::default(), &key_range);
 
-        let staging_imm = staging_imm_iter
-            .cloned()
-            .collect::<Vec<ImmutableMemtable>>();
+        let staging_imm = staging_imm_iter.cloned().collect_vec();
 
         assert_eq!(1, staging_imm.len());
         assert_eq!(0, staging_sst_iter.count());
@@ -111,9 +110,7 @@ async fn test_read_version_basic() {
                     .staging()
                     .prune_overlap(0, epoch, TableId::default(), &key_range);
 
-            let staging_imm = staging_imm_iter
-                .cloned()
-                .collect::<Vec<ImmutableMemtable>>();
+            let staging_imm = staging_imm_iter.cloned().collect_vec();
 
             assert_eq!(1, staging_imm.len() as u64);
             assert_eq!(0, staging_sst_iter.count());
