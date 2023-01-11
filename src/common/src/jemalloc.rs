@@ -21,3 +21,13 @@ macro_rules! enable_jemalloc_on_linux {
         static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
     };
 }
+
+#[macro_export]
+macro_rules! enable_sys_jemalloc_on_linux {
+    () => {
+        #[cfg(target_os = "linux")]
+        #[global_allocator]
+        static GLOBAL: task_stats_alloc::TaskLocalAlloc<tikv_jemallocator::Jemalloc> =
+            task_stats_alloc::TaskLocalAlloc(tikv_jemallocator::Jemalloc);
+    };
+}

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use stats_alloc::StatsAlloc;
-use tikv_jemallocator::Jemalloc;
-
-pub static INSTRUMENTED_JEMALLOC: StatsAlloc<Jemalloc> = StatsAlloc::new(Jemalloc);
+/// Tesla, 2023/1/10: did not see any usages. Remove?
+#[cfg(target_os = "linux")]
+pub static INSTRUMENTED_JEMALLOC: stats_alloc::StatsAlloc<tikv_jemallocator::Jemalloc> =
+    stats_alloc::StatsAlloc::new(tikv_jemallocator::Jemalloc);

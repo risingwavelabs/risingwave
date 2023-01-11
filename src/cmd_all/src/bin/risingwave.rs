@@ -15,18 +15,15 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![feature(let_chains)]
 
-use task_stats_alloc::TaskLocalAlloc;
-use tikv_jemallocator::Jemalloc;
-
-#[global_allocator]
-static GLOBAL: TaskLocalAlloc<Jemalloc> = TaskLocalAlloc(Jemalloc);
-
 use std::collections::HashMap;
 use std::env;
 
 use anyhow::{bail, Result};
 use clap::StructOpt;
 use risingwave_cmd_all::playground;
+use risingwave_common::enable_sys_jemalloc_on_linux;
+
+enable_sys_jemalloc_on_linux!();
 
 type RwFns = HashMap<&'static str, Box<dyn Fn(Vec<String>) -> Result<()>>>;
 
