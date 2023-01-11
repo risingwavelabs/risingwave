@@ -86,14 +86,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 let n = self.rng.gen_range(1..=100); // Avoid ambiguous type
                 Expr::Array(self.gen_simple_scalar_list(ty, n))
             }
-            // TODO(Noel): Renable after https://github.com/risingwavelabs/risingwave/issues/7189
-            // T::Struct(ref inner) => Expr::Row(
-            //     inner
-            //         .fields
-            //         .iter()
-            //         .map(|typ| self.gen_simple_scalar(typ))
-            //         .collect(),
-            // ),
+            T::Struct(ref inner) => Expr::Row(
+                inner
+                    .fields
+                    .iter()
+                    .map(|typ| self.gen_simple_scalar(typ))
+                    .collect(),
+            ),
             _ => sql_null(),
         }
     }
