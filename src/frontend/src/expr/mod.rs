@@ -188,6 +188,23 @@ impl ExprImpl {
         FunctionCall::new_cast(self, target, CastContext::Explicit)
     }
 
+    /// Shorthand to enforce implicit cast to boolean
+    pub fn enforce_bool_clause(self, clause: &str) -> Result<ExprImpl> {
+        if self.is_unknown() {
+            let inner = self.cast_implicit(DataType::Boolean)?;
+            return Ok(inner);
+        }
+        let return_type = self.return_type();
+        if return_type != DataType::Boolean {
+            bail!(
+                "argument of {} must be boolean, not type {:?}",
+                clause,
+                return_type
+            )
+        }
+        Ok(self)
+    }
+
     /// Create "cast" expr to string (`varchar`) type. This is different from a real cast, as
     /// boolean is converted to a single char rather than full word.
     ///
@@ -795,6 +812,7 @@ macro_rules! assert_eq_input_ref {
 
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
+use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
 

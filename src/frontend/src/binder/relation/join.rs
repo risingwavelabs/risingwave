@@ -198,14 +198,9 @@ impl Binder {
                 (expr, Some(relation))
             }
             JoinConstraint::On(expr) => {
-                let bound_expr = self.bind_expr(expr)?;
-                if bound_expr.return_type() != DataType::Boolean {
-                    return Err(ErrorCode::InternalError(format!(
-                        "argument of ON must be boolean, not type {:?}",
-                        bound_expr.return_type()
-                    ))
-                    .into());
-                }
+                let bound_expr = self
+                    .bind_expr(expr)
+                    .and_then(|expr| expr.enforce_bool_clause("JOIN ON"))?;
                 (bound_expr, None)
             }
         })
