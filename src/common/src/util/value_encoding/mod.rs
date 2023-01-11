@@ -15,6 +15,8 @@
 //! Value encoding is an encoding format which converts the data into a binary form (not
 //! memcomparable).
 
+use std::collections::HashMap;
+
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
@@ -40,11 +42,17 @@ enum Width {
     Extra(u32),
 }
 
+enum Offset {
+    Mid(Vec<u8>),
+    Large(Vec<u16>),
+    Extra(Vec<u32>),
+}
+
 pub struct RowEncoding {
     flag: u8,
     non_null_datum_nums: Width,
     non_null_column_ids: Vec<ColumnId>,
-    offsets: Vec<Width>,
+    offsets: Offset,
     buf: Vec<u8>,
 }
 
@@ -54,7 +62,7 @@ impl RowEncoding {
             flag: 0b_10000000,
             non_null_datum_nums: Width::Mid(0),
             non_null_column_ids: vec![],
-            offsets: vec![],
+            offsets: Offset::Mid(vec![]),
             buf: vec![],
         }
     }
@@ -81,30 +89,25 @@ impl RowEncoding {
         self.offsets = match max_offset {
             n if n <= u8::MAX as usize => {
                 self.flag |= 0b01;
-                maybe_offset
-                    .into_iter()
-                    .map(|m| Width::Mid(m as u8))
-                    .collect_vec()
+                Offset::Mid(maybe_offset.into_iter().map(|m| m as u8).collect_vec())
             }
             n if n <= u16::MAX as usize => {
                 self.flag |= 0b10;
-                maybe_offset
-                    .into_iter()
-                    .map(|m| Width::Large(m as u16))
-                    .collect_vec()
+                Offset::Large(maybe_offset.into_iter().map(|m| m as u16).collect_vec())
             }
             n if n <= u32::MAX as usize => {
                 self.flag |= 0b11;
-                maybe_offset
-                    .into_iter()
-                    .map(|m| Width::Large(m as u16))
-                    .collect_vec()
+                Offset::Extra(maybe_offset.into_iter().map(|m| m as u32).collect_vec())
             }
             _ => unreachable!("encoding length exceeds u32"),
         }
     }
 
-    pub fn encode(&mut self, datum_refs: impl Iterator<Item = impl ToDatumRef>, column_ids: Vec<ColumnId>) {
+    pub fn encode(
+        &mut self,
+        datum_refs: impl Iterator<Item = impl ToDatumRef>,
+        column_ids: Vec<ColumnId>,
+    ) {
         assert!(
             self.buf.is_empty() && self.non_null_column_ids.is_empty(),
             "should not encode one RowEncoding object multiple times."
@@ -132,9 +135,7 @@ impl RowEncoding {
         for id in self.non_null_column_ids.iter() {
             row_bytes.put_i32_le(id.get_id());
         }
-        for &offset in self.offsets.iter() {
-            serialize_width(offset, &mut row_bytes);
-        }
+        serialize_offsets(&self.offsets, &mut row_bytes);
         row_bytes.extend(self.buf.iter());
 
         row_bytes
@@ -158,7 +159,8 @@ pub fn encode_datums(
 
 pub fn decode(
     need_columns: &[ColumnId],
-    mut encoded_bytes: &[u8]
+    schema: &[DataType],
+    mut encoded_bytes: &[u8],
 ) -> Vec<Datum> {
     let flag = encoded_bytes.get_u8();
     let nums_bytes = match flag & 0b1100 {
@@ -174,9 +176,47 @@ pub fn decode(
         _ => unreachable!("flag's BB bits corrupted"),
     };
     let non_null_datum_nums = deserialize_width(nums_bytes, &mut encoded_bytes);
-    
-    
-    todo!()
+    let id_to_index = (0..non_null_datum_nums)
+        .into_iter()
+        .fold(HashMap::new(), |mut map, i| {
+            map.insert(ColumnId::new(encoded_bytes.get_i32_le()), i);
+            map
+        });
+    // let column_id_start_idx = 1 + nums_bytes;
+    let offsets_start_idx = 0;
+    // let mut one_offset = &encoded_bytes[offsets_start_idx..offsets_start_idx+4];
+    // let mut another_offset = &encoded_bytes[offsets_start_idx+4..offsets_start_idx+8];
+    // let one_offset_val = one_offset.get_i32_le();
+    let data_start_idx = offsets_start_idx + non_null_datum_nums * offset_bytes;
+    let mut datums = vec![];
+    datums.reserve(schema.len());
+    for (id, datatype) in need_columns.iter().zip_eq(schema.iter()) {
+        if let Some(&index) = id_to_index.get(id) {
+            // let base_offset_idx = offsets_start_idx + 4 * index;
+            let mut this_offset_slice = &encoded_bytes[index..(index + offset_bytes)];
+            let this_offset = deserialize_width(offset_bytes, &mut this_offset_slice);
+            let data = if index + 1 < data_start_idx {
+                let mut next_offset_slice =
+                    &encoded_bytes[(index + offset_bytes)..(index + 2 * offset_bytes)];
+                let next_offset = deserialize_width(offset_bytes, &mut next_offset_slice);
+                let mut data_slice = &encoded_bytes
+                    [(data_start_idx + this_offset + 1)..(data_start_idx + next_offset)];
+                deserialize_value(datatype, &mut data_slice)
+            } else {
+                let mut data_slice = &encoded_bytes[(data_start_idx + this_offset + 1)..];
+                deserialize_value(datatype, &mut data_slice)
+            };
+            if let Ok(d) = data {
+                datums.push(Some(d));
+            } else {
+                unreachable!("decode error");
+            }
+        } else {
+            datums.push(None);
+        }
+    }
+
+    datums
 }
 
 /// Serialize a datum into bytes and return (Not order guarantee, used in value encoding).
@@ -241,6 +281,26 @@ fn serialize_width(width: Width, buf: &mut impl BufMut) {
         Width::Mid(w) => buf.put_u8(w),
         Width::Large(w) => buf.put_u16_le(w),
         Width::Extra(w) => buf.put_u32_le(w),
+    }
+}
+
+fn serialize_offsets(offset: &Offset, buf: &mut impl BufMut) {
+    match offset {
+        Offset::Mid(v) => {
+            for offset in v.iter() {
+                buf.put_u8(*offset);
+            }
+        }
+        Offset::Large(v) => {
+            for offset in v.iter() {
+                buf.put_u16_le(*offset);
+            }
+        }
+        Offset::Extra(v) => {
+            for offset in v.iter() {
+                buf.put_u32_le(*offset);
+            }
+        }
     }
 }
 
@@ -318,11 +378,11 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
     })
 }
 
-fn deserialize_width(len: u8, data: &mut impl Buf) -> Width {
+fn deserialize_width(len: usize, data: &mut impl Buf) -> usize {
     match len {
-        1 => Width::Mid(data.get_u8()),
-        2 => Width::Large(data.get_u16_le()),
-        4 => Width::Extra(data.get_u32_le()),
+        1 => data.get_u8() as usize,
+        2 => data.get_u16_le() as usize,
+        4 => data.get_u32_le() as usize,
         _ => unreachable!("Width's len should be either 1, 2, or 4"),
     }
 }
@@ -424,8 +484,8 @@ mod tests {
         assert_eq!(
             array[0],
             [
-                0b10000101, // flag mid WW mid BB
-                2, // column nums
+                0b10000101,       // flag mid WW mid BB
+                2,                // column nums
                 zero_le_bytes[0], // start id 0
                 zero_le_bytes[1],
                 zero_le_bytes[2],
@@ -449,5 +509,14 @@ mod tests {
                 b'c'
             ]
         );
+    }
+    #[test]
+    fn test_row_decoding() {
+        let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
+        let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
+        let mut row_bytes = serialize_row_column_aware(column_ids.clone(), row1);
+        let data_types = vec![DataType::Int16, DataType::Varchar];
+        let decoded = decode(&column_ids[..], &data_types[..], &mut row_bytes[..]);
+        assert_eq!(decoded, vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
     }
 }
