@@ -22,8 +22,8 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
 
 use crate::sql_gen::expr::sql_null;
-use crate::sql_gen::SqlGenerator;
 use crate::sql_gen::types::data_type_to_ast_data_type;
+use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(super) fn gen_simple_scalar(&mut self, typ: &DataType) -> Expr {
@@ -37,7 +37,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             return Expr::Cast {
                 expr: Box::new(sql_null()),
                 data_type: data_type_to_ast_data_type(typ),
-            }
+            };
         }
         match *typ {
             T::Int64 => Expr::Value(Value::Number(
