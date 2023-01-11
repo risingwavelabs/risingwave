@@ -292,7 +292,7 @@ pub async fn handle_create_source(
         &with_properties,
         row_id_index,
         &pk_column_ids,
-        false,
+        is_materialized,
     )
     .await?;
 
