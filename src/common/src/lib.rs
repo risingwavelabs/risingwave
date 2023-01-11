@@ -59,3 +59,5 @@ pub mod test_prelude {
     pub use super::array::{DataChunkTestExt, StreamChunkTestExt};
     pub use super::catalog::test_utils::ColumnDescTestExt;
 }
+
+pub const RW_VERSION: &str = "v0.1.15";

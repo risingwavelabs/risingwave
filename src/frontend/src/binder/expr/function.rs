@@ -186,6 +186,29 @@ impl Binder {
                 };
                 return Ok(ExprImpl::literal_varchar(v));
             }
+            "rw_version" => {
+                if !inputs.is_empty() {
+                    return Err(ErrorCode::ExprError(
+                        "rw_version() does not accept any arguments".into(),
+                    )
+                    .into());
+                }
+                let version: String;
+                #[cfg(debug_assertions)]
+                {
+                    let output = std::process::Command::new("git")
+                        .args(["rev-parse", "HEAD"])
+                        .output()
+                        .unwrap();
+                    version = String::from_utf8(output.stdout).unwrap();
+                }
+                #[cfg(not(debug_assertions))]
+                {
+                    use risingwave_common::RW_VERSION;
+                    version = String::from(RW_VERSION);
+                }
+                return Ok(ExprImpl::literal_varchar(version));
+            }
             "current_database" if inputs.is_empty() => {
                 return Ok(ExprImpl::literal_varchar(self.db_name.clone()));
             }
