@@ -28,7 +28,7 @@ use crate::sql_gen::SqlGenerator;
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(super) fn gen_simple_scalar(&mut self, typ: &DataType) -> Expr {
         use DataType as T;
-        // FIXME(kwannoel): disable timestamptz due to <https://github.com/risingwavelabs/risingwave/issues/5826>
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
         let typ = match typ {
             T::Timestamptz => &T::Timestamp,
             _ => typ,
@@ -147,10 +147,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let hour = 60 * minute;
         let day = 24 * hour;
         let week = 7 * day;
-        // `0` is not generated due to:
-        // Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/4504>
-        // It is tracked under refinements:
-        // <https://github.com/risingwavelabs/risingwave/issues/3896>
+        // TODO(kwannoel): Generate 0
+        // Tracked: <https://github.com/risingwavelabs/risingwave/issues/3896>
         let choices = [1, minute, hour, day, week, rand_secs];
         let secs = choices.choose(&mut self.rng).unwrap();
 
@@ -158,7 +156,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         match typ {
             T::Date => tm.format("%F").to_string(),
             T::Timestamp | T::Timestamptz => tm.format("%Y-%m-%d %H:%M:%S").to_string(),
-            // FIXME(Noel): Tracking issue: https://github.com/risingwavelabs/risingwave/issues/5826
+            // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
             // T::Timestamptz => {
             //     let timestamp = tm.format("%Y-%m-%d %H:%M:%S");
             //     let timezone = self.rng.gen_range(0..=15);

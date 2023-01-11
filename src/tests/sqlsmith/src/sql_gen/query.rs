@@ -237,7 +237,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             T::Varchar,
             T::Date,
             T::Timestamp,
-            // FIXME(Noel): Tracking issue: https://github.com/risingwavelabs/risingwave/issues/5826
+            // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
             // T::Timestamptz,
             T::Time,
             T::Interval,
