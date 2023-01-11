@@ -5807,6 +5807,7 @@ version = "0.2.0-alpha"
 dependencies = [
  "aho-corasick",
  "anyhow",
+ "arrow-array",
  "arrow-schema",
  "async-stream",
  "async-trait",

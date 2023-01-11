@@ -18,6 +18,7 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 
 use arrow_schema::{Field, Schema};
+use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
 use risingwave_common::for_all_variants;
 use risingwave_common::row::OwnedRow;
@@ -46,11 +47,27 @@ impl Expression for UdfExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        todo!("evaluate UDF")
+        let columns: Vec<_> = self
+            .children
+            .iter()
+            .map(|c| c.eval_checked(input).map(|a| ("", a.as_ref().into())))
+            .try_collect()?;
+        let input =
+            arrow_array::RecordBatch::try_from_iter(columns).expect("failed to build record batch");
+        let output = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.client.call(&self.function_id, input))
+        })?;
+        let array = output
+            .columns()
+            .get(0)
+            .ok_or(risingwave_udf::Error::NoColumn)?;
+        Ok(Arc::new(array.into()))
     }
 
-    fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
-        todo!("evaluate UDF")
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let chunk = DataChunk::from_rows(std::slice::from_ref(input), &self.arg_types);
+        let output_chunk = self.eval(&chunk)?;
+        Ok(output_chunk.to_datum())
     }
 }
 

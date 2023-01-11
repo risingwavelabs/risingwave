@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use arrow_array::{Int32Array, RecordBatch};
 use arrow_schema::{DataType, Field, Schema};
-use futures_util::{stream, StreamExt};
 use risingwave_udf::ArrowFlightUdfClient;
 
 #[tokio::main]
@@ -45,12 +44,10 @@ async fn main() {
     )
     .unwrap();
 
-    let mut output = client
-        .call(&id, stream::once(async { input }))
+    let output = client
+        .call(&id, input)
         .await
         .expect("failed to call function");
 
-    while let Some(batch) = output.next().await {
-        dbg!(batch.unwrap());
-    }
+    dbg!(output);
 }

@@ -19,7 +19,7 @@ use arrow_flight::error::FlightError;
 use arrow_flight::flight_service_client::FlightServiceClient;
 use arrow_flight::{FlightData, FlightDescriptor};
 use arrow_schema::Schema;
-use futures_util::{Stream, StreamExt, TryStreamExt};
+use futures_util::{stream, Stream, StreamExt, TryStreamExt};
 use tonic::transport::Channel;
 
 /// Client for external function service based on Arrow Flight.
@@ -61,7 +61,13 @@ impl ArrowFlightUdfClient {
     }
 
     /// Call a function.
-    pub async fn call(
+    pub async fn call(&self, id: &FunctionId, input: RecordBatch) -> Result<RecordBatch> {
+        let mut output_stream = self.call_stream(id, stream::once(async { input })).await?;
+        output_stream.next().await.ok_or(Error::NoReturned)?
+    }
+
+    /// Call a function with streaming input and output.
+    pub async fn call_stream(
         &self,
         id: &FunctionId,
         inputs: impl Stream<Item = RecordBatch> + Send + 'static,
@@ -109,4 +115,8 @@ pub enum Error {
         expected: String,
         actual: String,
     },
+    #[error("UDF service returned no data")]
+    NoReturned,
+    #[error("UDF service returned a batch with no column")]
+    NoColumn,
 }
