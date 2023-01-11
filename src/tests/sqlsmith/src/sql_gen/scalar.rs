@@ -33,8 +33,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             T::Timestamptz => &T::Timestamp,
             _ => typ,
         };
-        // NOTE(kwannoel): Gen NULL generates many invalid queries, decrease probability of it.
-        if self.rng.gen_bool(0.02) {
+        // NOTE(kwannoel): Since this generates many invalid queries,
+        // its probability should be set to low, e.g. 0.02.
+        // ENABLE(kwannoel): Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/7327>
+        if self.rng.gen_bool(0.0) {
             // NOTE(kwannoel): We generate Cast with NULL to avoid generating lots of ambiguous
             // expressions. For instance agg calls such as `max(NULL)` may be generated,
             // and coerced to VARCHAR, where we require a `NULL::int` instead.
@@ -90,13 +92,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 let n = self.rng.gen_range(1..=100); // Avoid ambiguous type
                 Expr::Array(self.gen_simple_scalar_list(ty, n))
             }
-            T::Struct(ref inner) => Expr::Row(
-                inner
-                    .fields
-                    .iter()
-                    .map(|typ| self.gen_simple_scalar(typ))
-                    .collect(),
-            ),
+            // ENABLE(Noel): Tracking issue <https://github.com/risingwavelabs/risingwave/issues/7189>
+            // T::Struct(ref inner) => Expr::Row(
+            //     inner
+            //         .fields
+            //         .iter()
+            //         .map(|typ| self.gen_simple_scalar(typ))
+            //         .collect(),
+            // ),
             _ => sql_null(),
         }
     }
