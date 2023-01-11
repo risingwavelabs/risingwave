@@ -1385,13 +1385,6 @@ where
         ) in compaction_groups.iter()
         {
             if !new_hummock_version.levels.contains_key(group_id) {
-                new_hummock_version
-                    .levels
-                    .try_insert(
-                        *group_id,
-                        <Levels as HummockLevelsExt>::build_initial_levels(compaction_config),
-                    )
-                    .unwrap();
                 new_groups.push(*group_id);
                 let group_deltas = &mut new_version_delta
                     .group_deltas
@@ -1408,6 +1401,7 @@ where
                 let split_id_vers = new_hummock_version.init_with_parent_group(
                     *parent_group_id,
                     *group_id,
+                    <Levels as HummockLevelsExt>::build_initial_levels(compaction_config),
                     member_table_ids,
                 );
                 if !split_id_vers.is_empty() && let Some(parent_compact_status) =

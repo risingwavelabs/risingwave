@@ -56,7 +56,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
         // TODO: to use `prefetch: false` after `prefetch` be supported by
         // SstableIteratorReadOptions
         let mut iter = SstableIterator::new(
-            holder,
+            holder.value().clone(),
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
         );

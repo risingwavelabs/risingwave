@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::KeyComparator;
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
+use crate::hummock::{BlockIterator, Sstable, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 pub trait SstableIteratorType: HummockIterator + 'static {
@@ -42,7 +42,7 @@ pub struct SstableIterator {
     cur_idx: usize,
 
     /// Reference to the sst
-    pub sst: TableHolder,
+    pub sst: Arc<Sstable>,
 
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
@@ -50,7 +50,7 @@ pub struct SstableIterator {
 
 impl SstableIterator {
     pub fn new(
-        sstable: TableHolder,
+        sstable: Arc<Sstable>,
         sstable_store: SstableStoreRef,
         _options: Arc<SstableIteratorReadOptions>,
     ) -> Self {
@@ -68,7 +68,7 @@ impl SstableIterator {
         tracing::trace!(
             target: "events::storage::sstable::block_seek",
             "table iterator seek: sstable_id = {}, block_id = {}",
-            self.sst.value().id,
+            self.sst.id,
             idx,
         );
 
@@ -77,13 +77,13 @@ impl SstableIterator {
         // do cooperative scheduling.
         tokio::task::consume_budget().await;
 
-        if idx >= self.sst.value().block_count() {
+        if idx >= self.sst.block_count() {
             self.block_iter = None;
         } else {
             let block = self
                 .sstable_store
                 .get(
-                    self.sst.value(),
+                    self.sst.as_ref(),
                     idx as u64,
                     crate::hummock::CachePolicy::Fill,
                     &mut self.stats,
@@ -130,7 +130,6 @@ impl HummockIterator for SstableIterator {
 
     fn value(&self) -> HummockValue<&[u8]> {
         let raw_value = self.block_iter.as_ref().expect("no block iter").value();
-
         HummockValue::from_slice(raw_value).expect("decode error")
     }
 
@@ -147,7 +146,6 @@ impl HummockIterator for SstableIterator {
             let encoded_key = key.encode();
             let block_idx = self
                 .sst
-                .value()
                 .meta
                 .block_metas
                 .partition_point(|block_meta| {
@@ -184,7 +182,7 @@ impl SstableIteratorType for SstableIterator {
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
     ) -> Self {
-        SstableIterator::new(sstable, sstable_store, options)
+        SstableIterator::new(sstable.value().clone(), sstable_store, options)
     }
 }
 

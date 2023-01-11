@@ -25,7 +25,8 @@ use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_retry::strategy::jitter;
 
-use crate::hummock::local_version::LocalHummockVersion;
+use crate::hummock::local_version::{LocalGroup, LocalHummockVersion};
+use crate::hummock::Sstable;
 
 #[derive(Debug, Clone)]
 pub enum PinVersionAction {
@@ -131,9 +132,9 @@ impl PinnedVersion {
         compaction_group_id: CompactionGroupId,
     ) -> Vec<&Level> {
         let mut ret = vec![];
-        let levels = self.version.groups.get(&compaction_group_id).unwrap();
-        ret.extend(levels.l0.sub_levels.iter().rev());
-        ret.extend(levels.levels.iter());
+        let group = self.version.groups.get(&compaction_group_id).unwrap();
+        ret.extend(group.levels.l0.as_ref().unwrap().sub_levels.iter().rev());
+        ret.extend(group.levels.levels.iter());
         ret
     }
 
@@ -142,6 +143,37 @@ impl PinnedVersion {
             Some(compaction_group_id) => self.levels_by_compaction_groups_id(*compaction_group_id),
             None => vec![],
         }
+    }
+
+    pub fn level_and_cache(&self, table_id: TableId) -> Vec<(&Level, &Vec<Arc<Sstable>>)> {
+        match self.compaction_group_index.get(&table_id) {
+            Some(compaction_group_id) => {
+                let mut ret = vec![];
+                let group = self.version.groups.get(compaction_group_id).unwrap();
+                for (idx, sub_level) in group
+                    .levels
+                    .l0
+                    .as_ref()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .enumerate()
+                    .rev()
+                {
+                    ret.push((sub_level, &group.sub_level_cache[idx]));
+                }
+                for (idx, level) in group.levels.levels.iter().enumerate() {
+                    ret.push((level, &group.base_level_cache[idx]));
+                }
+                ret
+            }
+            None => vec![],
+        }
+    }
+
+    pub fn get_group(&self, table_id: TableId) -> Option<&LocalGroup> {
+        let compaction_group_id = self.compaction_group_index.get(&table_id)?;
+        self.version.groups.get(compaction_group_id)
     }
 
     pub fn max_committed_epoch(&self) -> u64 {

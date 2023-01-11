@@ -23,7 +23,7 @@ use risingwave_pb::hummock::SstableInfo;
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockResult, SstableIteratorType, SstableStoreRef};
+use crate::hummock::{HummockResult, Sstable, SstableIteratorType, SstableStoreRef};
 use crate::monitor::StoreLocalStatistic;
 
 /// Served as the concrete implementation of `ConcatIterator` and `BackwardConcatIterator`.
@@ -60,6 +60,10 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
             stats: StoreLocalStatistic::default(),
             read_options,
         }
+    }
+
+    pub fn with_prefetch(_tables: Vec<Arc<Sstable>>, _sstable_store: SstableStoreRef) -> Self {
+        unimplemented!()
     }
 
     /// Seeks to a table, and then seeks to the key if `seek_key` is given.

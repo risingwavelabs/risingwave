@@ -65,17 +65,24 @@ pub fn validate_epoch(safe_epoch: u64, epoch: u64) -> HummockResult<()> {
 }
 
 pub fn validate_table_key_range(version: &LocalHummockVersion) {
-    version.groups.values().for_each(|levels| {
-        levels.l0.sub_levels.iter().for_each(|level| {
-            for t in &level.table_infos {
-                assert!(
-                    t.key_range.is_some(),
-                    "key_range in table [{}] is none",
-                    t.id
-                );
-            }
-        });
-        levels.levels.iter().for_each(|level| {
+    version.groups.values().for_each(|group| {
+        group
+            .levels
+            .l0
+            .as_ref()
+            .unwrap()
+            .sub_levels
+            .iter()
+            .for_each(|level| {
+                for t in &level.table_infos {
+                    assert!(
+                        t.key_range.is_some(),
+                        "key_range in table [{}] is none",
+                        t.id
+                    );
+                }
+            });
+        group.levels.levels.iter().for_each(|level| {
             for t in &level.table_infos {
                 assert!(
                     t.key_range.is_some(),

@@ -116,7 +116,12 @@ async fn build_table(
 
 async fn scan_all_table(info: &SstableInfo, sstable_store: SstableStoreRef) {
     let mut stats = StoreLocalStatistic::default();
-    let table = sstable_store.sstable(info, &mut stats).await.unwrap();
+    let table = sstable_store
+        .sstable(info, &mut stats)
+        .await
+        .unwrap()
+        .value()
+        .clone();
     let default_read_options = Arc::new(SstableIteratorReadOptions::default());
     // warm up to make them all in memory. I do not use CachePolicy::Fill because it will fetch
     // block from meta.

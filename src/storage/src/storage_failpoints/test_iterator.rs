@@ -180,7 +180,9 @@ async fn test_failpoints_merge_invalid_key() {
                         &mut StoreLocalStatistic::default(),
                     )
                     .await
-                    .unwrap(),
+                    .unwrap()
+                    .value()
+                    .clone(),
                 sstable_store.clone(),
                 Arc::new(SstableIteratorReadOptions::default()),
             ));
@@ -284,7 +286,9 @@ async fn test_failpoints_user_read_err() {
             sstable_store
                 .sstable(&table0.get_sstable_info(), &mut stats)
                 .await
-                .unwrap(),
+                .unwrap()
+                .value()
+                .clone(),
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
         )),
@@ -292,7 +296,9 @@ async fn test_failpoints_user_read_err() {
             sstable_store
                 .sstable(&table1.get_sstable_info(), &mut stats)
                 .await
-                .unwrap(),
+                .unwrap()
+                .value()
+                .clone(),
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions::default()),
         )),

@@ -322,7 +322,6 @@ impl SstableStore {
         self.meta_cache.clear();
     }
 
-
     pub async fn sstable_no_cache(&self, sst: &SstableInfo) -> HummockResult<Arc<Sstable>> {
         let sst_id = sst.id;
         let meta_path = self.get_sst_data_path(sst_id);
@@ -340,7 +339,6 @@ impl SstableStore {
         let sst = Arc::new(Sstable::new(sst_id, meta));
         Ok(sst)
     }
-
 
     pub async fn sstable_syncable(
         &self,
@@ -736,7 +734,7 @@ mod tests {
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
         assert_eq!(holder.value().meta, meta);
         let mut iter = SstableIterator::new(
-            holder,
+            holder.value().clone(),
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
         );

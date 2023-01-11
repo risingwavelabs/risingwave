@@ -569,7 +569,7 @@ impl HummockVersionReader {
             }
             staging_sst_iter_count += 1;
             staging_iters.push(HummockIteratorUnion::Second(SstableIterator::new(
-                table_holder,
+                table_holder.value().clone(),
                 self.sstable_store.clone(),
                 Arc::new(SstableIteratorReadOptions::default()),
             )));
@@ -592,7 +592,7 @@ impl HummockVersionReader {
         let mut overlapping_iters = Vec::new();
         let mut overlapping_iter_count = 0;
         let mut fetch_meta_reqs = vec![];
-        for level in committed.levels(read_options.table_id) {
+        for (level, cache) in committed.level_and_cache(read_options.table_id) {
             if level.table_infos.is_empty() {
                 continue;
             }
@@ -623,17 +623,38 @@ impl HummockVersionReader {
                     .collect_vec();
                 fetch_meta_reqs.push((level.level_type, fetch_meta_req));
             } else {
-                let table_infos = prune_ssts(
-                    level.table_infos.iter(),
-                    read_options.table_id,
-                    &table_key_range,
-                );
-                if table_infos.is_empty() {
-                    continue;
+                let mut iters = Vec::new();
+
+                for (idx, sstable_info) in level.table_infos.iter().enumerate() {
+                    let sstable = if cache.is_empty() {
+                        self.sstable_store
+                            .sstable(sstable_info, &mut local_stats)
+                            .await?
+                            .value()
+                            .clone()
+                    } else {
+                        cache[idx].clone()
+                    };
+                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
+                        if !hit_sstable_bloom_filter(sstable.as_ref(), *dist_hash, &mut local_stats)
+                        {
+                            continue;
+                        }
+                    }
+                    if !sstable.meta.range_tombstone_list.is_empty()
+                        && !read_options.ignore_range_tombstone
+                    {
+                        delete_range_iter
+                            .add_sst_iter(SstableDeleteRangeIterator::new(sstable.clone()));
+                    }
+                    iters.push(SstableIterator::new(
+                        sstable,
+                        self.sstable_store.clone(),
+                        Arc::new(SstableIteratorReadOptions::default()),
+                    ));
+                    overlapping_iter_count += 1;
                 }
-                // Overlapping
-                let fetch_meta_req = table_infos.into_iter().rev().collect_vec();
-                fetch_meta_reqs.push((level.level_type, fetch_meta_req));
+                overlapping_iters.push(OrderedMergeIteratorInner::new(iters));
             }
         }
         let mut flatten_reqs = vec![];
@@ -664,60 +685,31 @@ impl HummockVersionReader {
         timer.observe_duration();
 
         for (level_type, fetch_meta_req) in fetch_meta_reqs {
-            if level_type == LevelType::Nonoverlapping as i32 {
-                let mut sstables = vec![];
-                for sstable_info in fetch_meta_req {
-                    let (sstable, local_cache_meta_block_miss) =
-                        flatten_resps.pop().unwrap().unwrap();
-                    assert_eq!(sstable_info.id, sstable.value().id);
-                    local_stats.apply_meta_fetch(local_cache_meta_block_miss);
-                    if let Some(key_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(sstable.value(), *key_hash, &mut local_stats) {
-                            continue;
-                        }
+            assert_eq!(level_type, LevelType::Nonoverlapping as i32);
+            let mut sstables = vec![];
+            for sstable_info in fetch_meta_req {
+                let (sstable, local_cache_meta_block_miss) = flatten_resps.pop().unwrap().unwrap();
+                assert_eq!(sstable_info.id, sstable.value().id);
+                local_stats.apply_meta_fetch(local_cache_meta_block_miss);
+                if let Some(key_hash) = bloom_filter_prefix_hash.as_ref() {
+                    if !hit_sstable_bloom_filter(sstable.value(), *key_hash, &mut local_stats) {
+                        continue;
                     }
-                    if !sstable.value().meta.range_tombstone_list.is_empty()
-                        && !read_options.ignore_range_tombstone
-                    {
-                        delete_range_iter
-                            .add_sst_iter(SstableDeleteRangeIterator::new(sstable.value().clone()));
-                    }
-                    sstables.push((*sstable_info).clone());
                 }
-
-                non_overlapping_iters.push(ConcatIterator::new(
-                    sstables,
-                    self.sstable_store.clone(),
-                    Arc::new(SstableIteratorReadOptions::default()),
-                ));
-            } else {
-                let mut iters = Vec::new();
-                for sstable_info in fetch_meta_req {
-                    let (sstable, local_cache_meta_block_miss) =
-                        flatten_resps.pop().unwrap().unwrap();
-                    assert_eq!(sstable_info.id, sstable.value().id);
-                    local_stats.apply_meta_fetch(local_cache_meta_block_miss);
-                    if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref() {
-                        if !hit_sstable_bloom_filter(sstable.value(), *dist_hash, &mut local_stats)
-                        {
-                            continue;
-                        }
-                    }
-                    if !sstable.value().meta.range_tombstone_list.is_empty()
-                        && !read_options.ignore_range_tombstone
-                    {
-                        delete_range_iter
-                            .add_sst_iter(SstableDeleteRangeIterator::new(sstable.value().clone()));
-                    }
-                    iters.push(SstableIterator::new(
-                        sstable,
-                        self.sstable_store.clone(),
-                        Arc::new(SstableIteratorReadOptions::default()),
-                    ));
-                    overlapping_iter_count += 1;
+                if !sstable.value().meta.range_tombstone_list.is_empty()
+                    && !read_options.ignore_range_tombstone
+                {
+                    delete_range_iter
+                        .add_sst_iter(SstableDeleteRangeIterator::new(sstable.value().clone()));
                 }
-                overlapping_iters.push(OrderedMergeIteratorInner::new(iters));
+                sstables.push((*sstable_info).clone());
             }
+
+            non_overlapping_iters.push(ConcatIterator::new(
+                sstables,
+                self.sstable_store.clone(),
+                Arc::new(SstableIteratorReadOptions::default()),
+            ));
         }
 
         self.stats
