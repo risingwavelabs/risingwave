@@ -17,8 +17,8 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use itertools::Itertools;
 use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::{hash, enable_jemalloc_on_linux};
 use risingwave_common::types::DataType;
+use risingwave_common::{enable_jemalloc_on_linux, hash};
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::vector_op::agg::AggStateFactory;
 use risingwave_pb::expr::agg_call::Arg;

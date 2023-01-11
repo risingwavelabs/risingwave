@@ -15,7 +15,8 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, ExpandExecutor};
-use risingwave_common::{types::DataType, enable_jemalloc_on_linux};
+use risingwave_common::enable_jemalloc_on_linux;
+use risingwave_common::types::DataType;
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
