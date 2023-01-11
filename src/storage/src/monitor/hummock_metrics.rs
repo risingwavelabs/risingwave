@@ -131,7 +131,7 @@ impl HummockMetrics {
         }
     }
 
-    /// Creates a new `StateStoreMetrics` instance used in tests or other places.
+    /// Creates a new `HummockStateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(Registry::new())
     }

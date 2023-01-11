@@ -164,7 +164,7 @@ pub(crate) async fn resolve_source_schema(
             // return err if user has not specified a pk
             if row_id_index.is_some() {
                 return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with row format debezium."
+                    "Primary key must be specified when creating source with row format maxwell."
                         .to_string(),
                 )));
             }

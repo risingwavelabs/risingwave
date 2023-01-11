@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use std::ops::Bound;
+use std::ops::Bound::Unbounded;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::TryStreamExt;
+use futures::{pin_mut, TryStreamExt};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, HummockSstableId, LocalSstableInfo};
@@ -26,7 +27,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::{count_stream, default_config_for_test};
 use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     ReadOptions, StateStore, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
@@ -37,6 +38,44 @@ use crate::test_utils::{
     with_hummock_storage_v1, with_hummock_storage_v2, HummockStateStoreTestTrait,
     HummockV2MixedStateStore,
 };
+
+#[tokio::test]
+async fn test_empty_read_v2() {
+    let (hummock_storage, _meta_client) = with_hummock_storage_v2(Default::default()).await;
+    assert!(hummock_storage
+        .get(
+            b"test_key".as_slice(),
+            u64::MAX,
+            ReadOptions {
+                prefix_hint: None,
+                ignore_range_tombstone: false,
+                check_bloom_filter: false,
+                retention_seconds: None,
+                table_id: TableId { table_id: 2333 },
+                read_version_from_backup: false,
+            },
+        )
+        .await
+        .unwrap()
+        .is_none());
+    let stream = hummock_storage
+        .iter(
+            (Unbounded, Unbounded),
+            u64::MAX,
+            ReadOptions {
+                prefix_hint: None,
+                ignore_range_tombstone: false,
+                check_bloom_filter: false,
+                retention_seconds: None,
+                table_id: TableId { table_id: 2333 },
+                read_version_from_backup: false,
+            },
+        )
+        .await
+        .unwrap();
+    pin_mut!(stream);
+    assert!(stream.try_next().await.unwrap().is_none());
+}
 
 #[tokio::test]
 async fn test_basic_v1() {
@@ -520,8 +559,9 @@ async fn test_reload_storage() {
             hummock_manager_ref.clone(),
             worker_node.clone(),
         ),
-        Arc::new(StateStoreMetrics::unused()),
+        Arc::new(HummockStateStoreMetrics::unused()),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
+        Arc::new(CompactorMetrics::unused()),
     )
     .await
     .unwrap();
