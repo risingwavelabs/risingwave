@@ -111,6 +111,8 @@ pub fn gen_create_mv_plan(
         ctx.trace(plan.explain_to_string().unwrap());
     }
 
+    
+
     Ok((plan, table))
 }
 
