@@ -70,7 +70,7 @@ pub struct StorageTable<S: StateStore> {
     /// the value part of output_indices.
     value_output_indices: Vec<usize>,
 
-    /// used for deserializing key part of ouput row from pk.
+    /// used for deserializing key part of output row from pk.
     output_row_in_key_indices: Vec<usize>,
 
     /// Mapping from column id to column index for deserializing the row.
@@ -612,7 +612,7 @@ struct StorageTableIterInner<S: StateStore> {
     /// the value part of output_indices.
     value_output_indices: Vec<usize>,
 
-    /// used for deserializing key part of ouput row from pk.
+    /// used for deserializing key part of output row from pk.
     output_row_in_key_indices: Vec<usize>,
 }
 
