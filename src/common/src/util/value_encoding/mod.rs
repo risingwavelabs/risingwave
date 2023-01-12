@@ -476,11 +476,9 @@ mod tests {
                 one_le_bytes[3],
                 0, // offset0: 0
                 3, // offset1: 3
-                1, // i16: 5
-                5,
-                0, // str: abc
-                1,
-                3,
+                5, // i16: 5
+                0,
+                3, // str: abc
                 0,
                 0,
                 0,
