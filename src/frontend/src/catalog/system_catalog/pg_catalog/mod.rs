@@ -61,7 +61,7 @@ pub use pg_type::*;
 pub use pg_user::*;
 pub use pg_views::*;
 use risingwave_common::array::ListValue;
-use risingwave_common::error::{Result, ErrorCode, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{NaiveDateTimeWrapper, ScalarImpl};
 use risingwave_common::util::epoch::Epoch;
@@ -439,10 +439,18 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(t.owner as i32)),
                             Some(ScalarImpl::Utf8(t.definition.clone().into())),
                             Some(ScalarImpl::Int32(t.id.table_id as i32)),
-                            Some(ScalarImpl::Utf8(t.properties.get("timezone")
-                                .ok_or(ErrorCode::CatalogError(
-                                    format!("timezone missing for materialized view {}", t.name).into()
-                                ))?.to_string().into()
+                            Some(ScalarImpl::Utf8(
+                                t.properties
+                                    .get("timezone")
+                                    .ok_or(ErrorCode::CatalogError(
+                                        format!(
+                                            "timezone missing for materialized view {}",
+                                            t.name
+                                        )
+                                        .into(),
+                                    ))?
+                                    .to_string()
+                                    .into(),
                             )),
                             Some(ScalarImpl::Utf8(json!(fragments).to_string().into())),
                         ]));

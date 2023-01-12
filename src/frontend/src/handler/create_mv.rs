@@ -111,8 +111,6 @@ pub fn gen_create_mv_plan(
         ctx.trace(plan.explain_to_string().unwrap());
     }
 
-    
-
     Ok((plan, table))
 }
 
@@ -131,10 +129,13 @@ pub async fn handle_create_mv(
 
     let (table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
+        let (plan, mut table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
         let context = plan.plan_base().ctx.clone();
         let graph = build_graph(plan);
 
+        table
+            .properties
+            .insert("timezone".into(), context.get_session_timezone());
         context.append_notice(&mut notice);
 
         (table, graph)
