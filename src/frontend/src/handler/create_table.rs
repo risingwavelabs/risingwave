@@ -306,6 +306,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         properties,
         row_id_index,
         &pk_column_ids,
+        true,
     )
     .await?;
 

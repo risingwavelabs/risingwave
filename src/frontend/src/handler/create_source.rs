@@ -32,7 +32,7 @@ use super::create_table::bind_sql_table_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::ColumnId;
+use crate::catalog::{ColumnId, ROW_ID_COLUMN_ID};
 use crate::handler::create_table::{bind_sql_columns, ColumnIdGenerator};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
@@ -83,6 +83,7 @@ async fn extract_protobuf_table_schema(
         .collect_vec())
 }
 
+#[inline(always)]
 pub(crate) fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool {
     with_properties
         .get(UPSTREAM_SOURCE_KEY)
@@ -97,8 +98,10 @@ pub(crate) async fn resolve_source_schema(
     with_properties: &HashMap<String, String>,
     row_id_index: Option<usize>,
     pk_column_ids: &[ColumnId],
+    is_materialized: bool,
 ) -> Result<StreamSourceInfo> {
-    if !is_kafka_source(with_properties)
+    let is_kafka = is_kafka_source(with_properties);
+    if !is_kafka
         && matches!(
             &source_schema,
             SourceSchema::Protobuf(ProtobufSchema {
@@ -118,7 +121,16 @@ pub(crate) async fn resolve_source_schema(
 
     let source_info = match &source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
+            let (expected_column_len, expected_row_id_index) = if is_kafka && !is_materialized {
+                // The first column is `_rw_kafka_timestamp`.
+                (2, 1)
+            } else {
+                (1, 0)
+            };
+            if columns.len() != expected_column_len
+                || pk_column_ids != vec![ROW_ID_COLUMN_ID]
+                || row_id_index != Some(expected_row_id_index)
+            {
                 return Err(RwError::from(ProtocolError(
                     "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string(),
                 )));
@@ -138,7 +150,16 @@ pub(crate) async fn resolve_source_schema(
         }
 
         SourceSchema::Avro(avro_schema) => {
-            if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
+            let (expected_column_len, expected_row_id_index) = if is_kafka && !is_materialized {
+                // The first column is `_rw_kafka_timestamp`.
+                (2, 1)
+            } else {
+                (1, 0)
+            };
+            if columns.len() != expected_column_len
+                || pk_column_ids != vec![ROW_ID_COLUMN_ID]
+                || row_id_index != Some(expected_row_id_index)
+            {
                 return Err(RwError::from(ProtocolError(
                     "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string(),
                 )));
@@ -263,6 +284,7 @@ pub async fn handle_create_source(
         &with_properties,
         row_id_index,
         &pk_column_ids,
+        is_materialized,
     )
     .await?;
 
