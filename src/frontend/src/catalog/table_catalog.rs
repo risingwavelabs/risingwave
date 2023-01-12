@@ -95,7 +95,7 @@ pub struct TableCatalog {
     /// Owner of the table.
     pub owner: UserId,
 
-    /// Properties of the table. For example, `appendonly` or `retention_seconds`.
+    /// Properties of the table. For example, `appendonly`, `retention_seconds` and `timezone`.
     pub properties: WithOptions,
 
     /// The fragment id of the `Materialize` operator for this table.
