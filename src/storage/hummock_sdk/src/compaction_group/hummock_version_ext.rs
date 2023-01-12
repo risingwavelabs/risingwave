@@ -256,6 +256,7 @@ impl HummockVersionExt for HummockVersion {
         member_table_ids: &HashSet<StateTableId>,
     ) -> Vec<(HummockSstableId, u64, u32)> {
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId {
+            self.levels.insert(group_id, cur_levels);
             return vec![];
         }
         let parent_levels = match self.levels.get_mut(&parent_group_id) {
