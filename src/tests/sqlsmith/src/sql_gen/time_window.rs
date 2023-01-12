@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::{Duration, SystemTime};
-
-use chrono::{DateTime, Utc};
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
@@ -109,10 +106,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_size(&mut self, denominator: u64) -> Expr {
-        let secs = self.gen_secs();
-        let secs = secs * denominator;
-        let expr = Self::u64_to_interval_expr(secs);
-        expr
+        let secs = self.gen_secs() * denominator;
+        Self::u64_to_interval_expr(secs)
     }
 }
 
