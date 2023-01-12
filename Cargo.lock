@@ -8344,6 +8344,7 @@ dependencies = [
  "cc",
  "chrono",
  "clap 3.2.23",
+ "combine",
  "criterion",
  "crossbeam-channel",
  "crossbeam-deque",

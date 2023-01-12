@@ -24,6 +24,7 @@ auto_enums = { version = "0.7", features = ["futures", "std"] }
 bytes = { version = "1", features = ["serde", "std"] }
 chrono = { version = "0.4", features = ["clock", "iana-time-zone", "js-sys", "oldtime", "std", "time", "wasm-bindgen", "wasmbind", "winapi"] }
 clap = { version = "3", features = ["atty", "clap_derive", "color", "derive", "env", "once_cell", "std", "strsim", "suggestions", "termcolor"] }
+combine = { version = "4", features = ["alloc", "bytes", "std"] }
 criterion = { version = "0.4", features = ["async", "async_futures", "async_tokio", "cargo_bench_support", "futures", "plotters", "rayon", "tokio"] }
 crossbeam-channel = { version = "0.5", features = ["crossbeam-utils", "std"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
@@ -106,6 +107,7 @@ bytes = { version = "1", features = ["serde", "std"] }
 cc = { version = "1", default-features = false, features = ["jobserver", "parallel"] }
 chrono = { version = "0.4", features = ["clock", "iana-time-zone", "js-sys", "oldtime", "std", "time", "wasm-bindgen", "wasmbind", "winapi"] }
 clap = { version = "3", features = ["atty", "clap_derive", "color", "derive", "env", "once_cell", "std", "strsim", "suggestions", "termcolor"] }
+combine = { version = "4", features = ["alloc", "bytes", "std"] }
 criterion = { version = "0.4", features = ["async", "async_futures", "async_tokio", "cargo_bench_support", "futures", "plotters", "rayon", "tokio"] }
 crossbeam-channel = { version = "0.5", features = ["crossbeam-utils", "std"] }
 crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }

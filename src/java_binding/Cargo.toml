@@ -8,6 +8,7 @@ bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
 jni = "0.20.0"
+prost = "0.11"
 risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }
@@ -25,8 +26,6 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tracing = "0.1"
-prost = "0.11"
-
 
 [lib]
 crate_type = ["cdylib"]
