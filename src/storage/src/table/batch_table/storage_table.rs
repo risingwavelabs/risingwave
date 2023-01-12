@@ -65,7 +65,7 @@ pub struct StorageTable<S: StateStore> {
     output_indices: Vec<usize>,
 
     /// the key part of output_indices.
-    key_output_indices: Vec<usize>,
+    key_output_indices: Option<Vec<usize>>,
 
     /// the value part of output_indices.
     value_output_indices: Vec<usize>,
@@ -227,6 +227,10 @@ impl<S: StateStore> StorageTable<S> {
         let row_deserializer = RowDeserializer::new(data_types);
 
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
+        let key_output_indices = match key_output_indices.is_empty() {
+            true => None,
+            false => Some(key_output_indices),
+        };
         Self {
             table_id,
             store,
@@ -297,35 +301,35 @@ impl<S: StateStore> StorageTable<S> {
         if let Some(value) = self.store.get(&serialized_pk, epoch, read_options).await? {
             let full_row = self.row_deserializer.deserialize(value)?;
             let result_row_in_value = self.mapping.project(full_row).into_owned_row();
-            let result_row_in_key = pk.project(&self.output_row_in_key_indices).into_owned_row();
-            let mut result_row_vec = vec![];
-            for idx in &self.output_indices {
-                if self.value_output_indices.contains(idx) {
-                    let item_position_in_value_indices = &self
-                        .value_output_indices
-                        .iter()
-                        .position(|p| idx == p)
-                        .unwrap();
-                    result_row_vec.push(
-                        result_row_in_value
-                            .index(*item_position_in_value_indices)
-                            .clone(),
-                    );
-                } else {
-                    let item_position_in_pk_indices = &self
-                        .key_output_indices
-                        .iter()
-                        .position(|p| idx == p)
-                        .unwrap();
-                    result_row_vec.push(
-                        result_row_in_key
-                            .index(*item_position_in_pk_indices)
-                            .clone(),
-                    );
+            match &self.key_output_indices {
+                Some(key_output_indices) => {
+                    let result_row_in_key =
+                        pk.project(&self.output_row_in_key_indices).into_owned_row();
+                    let mut result_row_vec = vec![];
+                    for idx in &self.output_indices {
+                        if self.value_output_indices.contains(idx) {
+                            let item_position_in_value_indices = &self
+                                .value_output_indices
+                                .iter()
+                                .position(|p| idx == p)
+                                .unwrap();
+                            result_row_vec.push(
+                                result_row_in_value
+                                    .index(*item_position_in_value_indices)
+                                    .clone(),
+                            );
+                        } else {
+                            let item_position_in_pk_indices =
+                                key_output_indices.iter().position(|p| idx == p).unwrap();
+                            result_row_vec
+                                .push(result_row_in_key.index(item_position_in_pk_indices).clone());
+                        }
+                    }
+                    let result_row = OwnedRow::new(result_row_vec);
+                    Ok(Some(result_row))
                 }
+                None => Ok(Some(result_row_in_value)),
             }
-            let result_row = OwnedRow::new(result_row_vec);
-            Ok(Some(result_row))
         } else {
             Ok(None)
         }
@@ -607,7 +611,7 @@ struct StorageTableIterInner<S: StateStore> {
     output_indices: Vec<usize>,
 
     /// the key part of output_indices.
-    key_output_indices: Vec<usize>,
+    key_output_indices: Option<Vec<usize>>,
 
     /// the value part of output_indices.
     value_output_indices: Vec<usize>,
@@ -624,7 +628,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
         mapping: Arc<ColumnMapping>,
         pk_serializer: Option<Arc<OrderedRowSerde>>,
         output_indices: Vec<usize>,
-        key_output_indices: Vec<usize>,
+        key_output_indices: Option<Vec<usize>>,
         value_output_indices: Vec<usize>,
         output_row_in_key_indices: Vec<usize>,
         row_deserializer: Arc<RowDeserializer>,
@@ -673,45 +677,43 @@ impl<S: StateStore> StorageTableIterInner<S> {
 
             let full_row = self.row_deserializer.deserialize(value)?;
             let result_row_in_value = self.mapping.project(full_row).into_owned_row();
+            match &self.key_output_indices {
+                Some(key_output_indices) => {
+                    let result_row_in_key = match self.pk_serializer.clone() {
+                        Some(pk_serializer) => {
+                            let pk = pk_serializer.deserialize(key)?;
 
-            let result_row_in_key = match self.pk_serializer.clone() {
-                Some(pk_serializer) => {
-                    let pk = pk_serializer.deserialize(key)?;
+                            pk.project(&self.output_row_in_key_indices).into_owned_row()
+                        }
+                        None => OwnedRow::empty(),
+                    };
 
-                    pk.project(&self.output_row_in_key_indices).into_owned_row()
+                    let mut result_row_vec = vec![];
+                    for idx in &self.output_indices {
+                        if self.value_output_indices.contains(idx) {
+                            let item_position_in_value_indices = &self
+                                .value_output_indices
+                                .iter()
+                                .position(|p| idx == p)
+                                .unwrap();
+                            result_row_vec.push(
+                                result_row_in_value
+                                    .index(*item_position_in_value_indices)
+                                    .clone(),
+                            );
+                        } else {
+                            let item_position_in_pk_indices =
+                                key_output_indices.iter().position(|p| idx == p).unwrap();
+                            result_row_vec
+                                .push(result_row_in_key.index(item_position_in_pk_indices).clone());
+                        }
+                    }
+                    let row = OwnedRow::new(result_row_vec);
+
+                    yield (key.to_vec(), row)
                 }
-                None => OwnedRow::empty(),
-            };
-
-            let mut result_row_vec = vec![];
-            for idx in &self.output_indices {
-                if self.value_output_indices.contains(idx) {
-                    let item_position_in_value_indices = &self
-                        .value_output_indices
-                        .iter()
-                        .position(|p| idx == p)
-                        .unwrap();
-                    result_row_vec.push(
-                        result_row_in_value
-                            .index(*item_position_in_value_indices)
-                            .clone(),
-                    );
-                } else {
-                    let item_position_in_pk_indices = &self
-                        .key_output_indices
-                        .iter()
-                        .position(|p| idx == p)
-                        .unwrap();
-                    result_row_vec.push(
-                        result_row_in_key
-                            .index(*item_position_in_pk_indices)
-                            .clone(),
-                    );
-                }
+                None => yield (key.to_vec(), result_row_in_value),
             }
-            let row = OwnedRow::new(result_row_vec);
-
-            yield (key.to_vec(), row)
         }
     }
 }
