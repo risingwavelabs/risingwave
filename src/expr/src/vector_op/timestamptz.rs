@@ -14,12 +14,12 @@
 
 use std::fmt::Write;
 
-use chrono::{Offset, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
 use num_traits::ToPrimitive;
 use risingwave_common::types::{NaiveDateTimeWrapper, OrderedF64};
 
-use crate::vector_op::cast::{str_to_timestamp, str_to_timestamptz as fallible_str_to_timestamptz};
+use crate::vector_op::cast::{str_to_timestamp, str_with_time_zone_to_timestamptz};
 use crate::{ExprError, Result};
 
 /// Just a wrapper to reuse the `map_err` logic.
@@ -72,29 +72,19 @@ pub fn timestamptz_to_string(elem: i64, time_zone: &str, writer: &mut dyn Write)
     let instant_utc = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
     let instant_local = instant_utc.with_timezone(&time_zone);
     // TODO: err if not divisible by 3600 seconds?
-    let hours_offset = instant_local.offset().fix().local_minus_utc() / 3600;
-    if hours_offset >= 0 {
-        write!(
-            writer,
-            "{}+{:0>2}:00",
-            instant_local.naive_local(),
-            hours_offset
-        )
-        .unwrap();
-    } else {
-        write!(
-            writer,
-            "{}-{:0>2}:00",
-            instant_local.naive_local(),
-            -hours_offset
-        )
-        .unwrap();
-    }
+    write!(
+        writer,
+        "{}",
+        instant_local.format("%Y-%m-%d %H:%M:%S%.f%:z")
+    )
+    .map_err(|e| ExprError::Internal(e.into()))?;
     Ok(())
 }
 
+// Tries to interpret the string with a timezone, tries to intepret the string as a timestamp
+// and then adjusts it with the timezone.
 pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<i64> {
-    fallible_str_to_timestamptz(elem)
+    str_with_time_zone_to_timestamptz(elem)
         .or_else(|_| timestamp_at_time_zone(str_to_timestamp(elem)?, time_zone))
 }
 
