@@ -437,11 +437,11 @@ fn gen_table_plan_inner(
         out_names,
     );
 
-    // We should always handle pk conflict in materialize executor when creating table.
-    let handle_pk_conflict = true;
-    let dml_flag = match context.with_options().append_only() {
-        true => DmlFlag::AppendOnly,
-        false => DmlFlag::All,
+    // Handle pk conflict in materialize executor only when the table is not append-only.
+    let (handle_pk_conflict, dml_flag) = if context.with_options().append_only() {
+        (false, DmlFlag::AppendOnly)
+    } else {
+        (true, DmlFlag::All)
     };
 
     let materialize = plan_root.gen_table_plan(
