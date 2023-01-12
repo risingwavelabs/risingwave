@@ -3764,9 +3764,9 @@ dependencies = [
 
 [[package]]
 name = "nexmark"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3de99e4067a851c593a5731569f7a13f0bce1da9f5effcf017b9435ed46eb67"
+checksum = "45fc401175963954a7046238c51799a99eaa4d8be7dd7a0c52dbf00813e52f92"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
