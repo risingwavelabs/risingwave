@@ -256,6 +256,14 @@ impl StateStore for HummockStorage {
         // as `HummockEvent::SealEpoch` is handled asynchronously.
         assert!(epoch > self.seal_epoch.load(MemOrdering::SeqCst));
         self.seal_epoch.store(epoch, MemOrdering::SeqCst);
+        if is_checkpoint {
+            let _ = self.min_current_epoch.compare_exchange(
+                HummockEpoch::MAX,
+                epoch,
+                MemOrdering::SeqCst,
+                MemOrdering::SeqCst,
+            );
+        }
         self.hummock_event_sender
             .send(HummockEvent::SealEpoch {
                 epoch,
@@ -265,9 +273,8 @@ impl StateStore for HummockStorage {
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
-        let pinned_version = self.pinned_version.load();
         self.min_current_epoch
-            .store(pinned_version.max_committed_epoch(), MemOrdering::SeqCst);
+            .store(HummockEpoch::MAX, MemOrdering::SeqCst);
         async move {
             let (tx, rx) = oneshot::channel();
             self.hummock_event_sender

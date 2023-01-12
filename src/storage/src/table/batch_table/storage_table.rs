@@ -53,7 +53,7 @@ pub struct StorageTable<S: StateStore> {
     table_id: TableId,
 
     /// State store backend.
-    store: Arc<S>,
+    store: S,
 
     /// The schema of the output columns, i.e., this table VIEWED BY some executor like
     /// RowSeqScanExecutor.
@@ -195,7 +195,7 @@ impl<S: StateStore> StorageTable<S> {
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         Self {
             table_id,
-            store: Arc::new(store),
+            store,
             schema,
             pk_serializer,
             mapping: Arc::new(mapping),
@@ -345,7 +345,7 @@ impl<S: StateStore> StorageTable<S> {
                     read_version_from_backup: read_backup,
                 };
                 let iter = StorageTableIterInner::<S>::new(
-                    self.store.clone(),
+                    &self.store,
                     self.mapping.clone(),
                     self.row_deserializer.clone(),
                     raw_key_range,
@@ -527,16 +527,12 @@ struct StorageTableIterInner<S: StateStore> {
     mapping: Arc<ColumnMapping>,
 
     row_deserializer: Arc<RowDeserializer>,
-
-    store: Arc<S>,
-
-    read_epoch: HummockReadEpoch,
 }
 
 impl<S: StateStore> StorageTableIterInner<S> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     async fn new<R, B>(
-        store: Arc<S>,
+        store: &S,
         mapping: Arc<ColumnMapping>,
         row_deserializer: Arc<RowDeserializer>,
         raw_key_range: R,
@@ -554,12 +550,11 @@ impl<S: StateStore> StorageTableIterInner<S> {
         );
         store.try_wait_epoch(epoch.clone()).await?;
         let iter = store.iter(range, raw_epoch, read_options).await?;
+        store.validate_read_epoch(epoch)?;
         let iter = Self {
             iter,
             mapping,
             row_deserializer,
-            store,
-            read_epoch: epoch,
         };
         Ok(iter)
     }
@@ -582,6 +577,5 @@ impl<S: StateStore> StorageTableIterInner<S> {
             let row = self.mapping.project(full_row).into_owned_row();
             yield (key.to_vec(), row)
         }
-        self.store.validate_read_epoch(self.read_epoch)?
     }
 }
