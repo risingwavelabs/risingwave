@@ -129,3 +129,6 @@ query T
 select '2022-03-13 09:00:00Z'::timestamptz;
 ----
 2022-03-13 01:00:00-08:00
+
+statement ok 
+set timezone = 'UTC';
