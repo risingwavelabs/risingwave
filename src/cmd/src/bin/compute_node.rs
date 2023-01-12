@@ -14,11 +14,9 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
-use task_stats_alloc::TaskLocalAlloc;
-use tikv_jemallocator::Jemalloc;
+use risingwave_common::enable_task_local_jemalloc_on_linux;
 
-#[global_allocator]
-static GLOBAL: TaskLocalAlloc<Jemalloc> = TaskLocalAlloc(Jemalloc);
+enable_task_local_jemalloc_on_linux!();
 
 #[cfg_attr(coverage, no_coverage)]
 fn main() {

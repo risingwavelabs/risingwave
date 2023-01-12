@@ -69,7 +69,11 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
             .collect(),
         ShowObject::Database => catalog_reader.get_all_database_names(),
         ShowObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
-        // If not include schema name, use default schema name
+        ShowObject::View { schema } => catalog_reader
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .iter_view()
+            .map(|t| t.name.clone())
+            .collect(),
         ShowObject::MaterializedView { schema } => catalog_reader
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_mv()

@@ -82,7 +82,7 @@ use value::*;
 use self::event_handler::ReadVersionMappingType;
 use self::iterator::{BackwardUserIterator, HummockIterator, UserIterator};
 pub use self::sstable_store::*;
-use super::monitor::StateStoreMetrics;
+use super::monitor::HummockStateStoreMetrics;
 use crate::error::StorageResult;
 use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::Context;
@@ -100,7 +100,7 @@ use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData}
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::version::HummockVersionReader;
-use crate::monitor::StoreLocalStatistic;
+use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 use crate::store::ReadOptions;
 
 struct HummockStorageShutdownGuard {
@@ -144,15 +144,16 @@ pub struct HummockStorage {
 
 impl HummockStorage {
     /// Creates a [`HummockStorage`].
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         backup_reader: BackupReaderRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
-        // TODO: separate `HummockStats` from `StateStoreMetrics`.
-        stats: Arc<StateStoreMetrics>,
+        state_store_metrics: Arc<HummockStateStoreMetrics>,
         tracing: Arc<risingwave_tracing::RwTracingService>,
+        compactor_metrics: Arc<CompactorMetrics>,
     ) -> HummockResult<Self> {
         let sstable_id_manager = Arc::new(SstableIdManager::new(
             hummock_meta_client.clone(),
@@ -191,7 +192,7 @@ impl HummockStorage {
             options.clone(),
             sstable_store.clone(),
             hummock_meta_client.clone(),
-            stats.clone(),
+            compactor_metrics.clone(),
             sstable_id_manager.clone(),
             filter_key_extractor_manager.clone(),
         ));
@@ -210,7 +211,10 @@ impl HummockStorage {
             seal_epoch: hummock_event_handler.sealed_epoch(),
             hummock_event_sender: event_tx.clone(),
             pinned_version: hummock_event_handler.pinned_version(),
-            hummock_version_reader: HummockVersionReader::new(sstable_store, stats.clone()),
+            hummock_version_reader: HummockVersionReader::new(
+                sstable_store,
+                state_store_metrics.clone(),
+            ),
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx,
             }),
@@ -314,8 +318,9 @@ impl HummockStorage {
             BackupReader::unused(),
             hummock_meta_client,
             notification_client,
-            Arc::new(StateStoreMetrics::unused()),
+            Arc::new(HummockStateStoreMetrics::unused()),
             Arc::new(risingwave_tracing::RwTracingService::disabled()),
+            Arc::new(CompactorMetrics::unused()),
         )
         .await
     }
@@ -472,7 +477,7 @@ pub struct HummockStorageV1 {
     sstable_store: SstableStoreRef,
 
     /// Statistics
-    stats: Arc<StateStoreMetrics>,
+    state_store_metrics: Arc<HummockStateStoreMetrics>,
 
     sstable_id_manager: SstableIdManagerRef,
 
@@ -494,9 +499,10 @@ impl HummockStorageV1 {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
-        // TODO: separate `HummockStats` from `StateStoreMetrics`.
-        stats: Arc<StateStoreMetrics>,
+        // TODO: separate `HummockStats` from `HummockStateStoreMetrics`.
+        state_store_metrics: Arc<HummockStateStoreMetrics>,
         tracing: Arc<risingwave_tracing::RwTracingService>,
+        compactor_metrics: Arc<CompactorMetrics>,
     ) -> HummockResult<Self> {
         // For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to
         // true in `StorageConfig`
@@ -536,7 +542,7 @@ impl HummockStorageV1 {
             options.clone(),
             sstable_store.clone(),
             hummock_meta_client.clone(),
-            stats.clone(),
+            compactor_metrics.clone(),
             sstable_id_manager.clone(),
             filter_key_extractor_manager.clone(),
         ));
@@ -579,7 +585,7 @@ impl HummockStorageV1 {
             options,
             local_version_manager,
             sstable_store,
-            stats,
+            state_store_metrics,
             sstable_id_manager,
             filter_key_extractor_manager,
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {

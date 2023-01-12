@@ -12,14 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod state_store_metrics;
+mod hummock_state_store_metrics;
 
-pub use state_store_metrics::*;
+pub use hummock_state_store_metrics::*;
 mod monitored_store;
 pub use monitored_store::*;
 mod hummock_metrics;
 pub use hummock_metrics::*;
 
+mod monitored_storage_metrics;
+pub use monitored_storage_metrics::*;
+
+mod compactor_metrics;
+pub use compactor_metrics::*;
+
 mod local_metrics;
-pub use local_metrics::StoreLocalStatistic;
+pub use local_metrics::*;
 pub use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;

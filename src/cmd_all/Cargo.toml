@@ -15,7 +15,6 @@ static-log-level = ["workspace-config/enable-static-log-level"]
 anyhow = "1"
 clap = { version = "3", features = ["derive"] }
 console = "0.15.2"
-global_stats_alloc = { path = "../utils/global_stats_alloc" }
 log = { version = "0.4" }
 risedev = { path = "../risedevtool" }
 risingwave_common = { path = "../common" }
