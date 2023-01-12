@@ -2467,15 +2467,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
 
 [[package]]
-name = "global_stats_alloc"
-version = "0.2.0-alpha"
-dependencies = [
- "stats_alloc",
- "tikv-jemallocator",
- "workspace-hack",
-]
-
-[[package]]
 name = "globset"
 version = "0.4.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3764,9 +3755,9 @@ dependencies = [
 
 [[package]]
 name = "nexmark"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3de99e4067a851c593a5731569f7a13f0bce1da9f5effcf017b9435ed46eb67"
+checksum = "45fc401175963954a7046238c51799a99eaa4d8be7dd7a0c52dbf00813e52f92"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
@@ -5377,9 +5368,9 @@ version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "clap 3.2.23",
- "global_stats_alloc",
  "log",
  "madsim-tokio",
+ "risingwave_common",
  "risingwave_compaction_test",
  "risingwave_compactor",
  "risingwave_compute",
@@ -5401,7 +5392,6 @@ dependencies = [
  "anyhow",
  "clap 3.2.23",
  "console",
- "global_stats_alloc",
  "log",
  "madsim-tokio",
  "risedev",
@@ -6287,7 +6277,6 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "gen-iter",
- "global_stats_alloc",
  "hyper",
  "iter-chunks",
  "itertools",
@@ -6992,12 +6981,6 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
-
-[[package]]
-name = "stats_alloc"
-version = "0.1.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c0e04424e733e69714ca1bbb9204c1a57f09f5493439520f9f68c132ad25eec"
 
 [[package]]
 name = "str_stack"
@@ -8377,8 +8360,6 @@ dependencies = [
  "stable_deref_trait",
  "strum",
  "syn",
- "tikv-jemalloc-sys",
- "tikv-jemallocator",
  "time 0.3.15",
  "tokio",
  "tokio-stream",

@@ -44,8 +44,7 @@ use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContex
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::{
-    CompactorSstableStore, HummockStorage, MemoryLimiter, SstableIdManager, SstableStore,
-    TieredCache,
+    HummockStorage, MemoryLimiter, SstableIdManager, SstableStore, TieredCache,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
@@ -93,7 +92,7 @@ pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()
         storage_config,
         &opts.state_store,
         1000000,
-        2000,
+        800,
     )
     .await
 }
@@ -587,11 +586,6 @@ fn run_compactor_thread(
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Sender<()>,
 ) {
-    let compact_sstable_store = Arc::new(CompactorSstableStore::new(
-        sstable_store.clone(),
-        MemoryLimiter::unlimit(),
-    ));
-
     let context = Arc::new(Context {
         options: config,
         hummock_meta_client: meta_client.clone(),
@@ -606,7 +600,6 @@ fn run_compactor_thread(
     });
     let context = CompactorContext::with_config(
         context,
-        compact_sstable_store,
         CompactorRuntimeConfig {
             max_concurrent_task_number: 4,
         },
@@ -642,7 +635,7 @@ mod tests {
             storage_config,
             "hummock+memory",
             10000,
-            100,
+            60,
         )
         .await
         .unwrap();

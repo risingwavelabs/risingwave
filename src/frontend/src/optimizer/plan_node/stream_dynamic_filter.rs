@@ -24,6 +24,7 @@ use risingwave_pb::stream_plan::DynamicFilterNode;
 use super::generic;
 use super::utils::IndicesDisplay;
 use crate::expr::Expr;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -135,11 +136,12 @@ impl_plan_tree_node_for_binary! { StreamDynamicFilter }
 impl StreamNode for StreamDynamicFilter {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         use generic::dynamic_filter::*;
-        let condition = self
-            .core
-            .predicate()
-            .as_expr_unless_true()
-            .map(|x| x.to_expr_proto());
+        let condition = self.core.predicate().as_expr_unless_true().map(|x| {
+            self.base
+                .ctx()
+                .expr_with_session_timezone(x)
+                .to_expr_proto()
+        });
         let left_index = self.core.left_index;
         let left_table = infer_left_internal_table_catalog(&self.base, left_index)
             .with_id(state.gen_table_id_wrapped());
