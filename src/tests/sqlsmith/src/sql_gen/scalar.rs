@@ -130,11 +130,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let hour = 60 * minute;
         let day = 24 * hour;
         let week = 7 * day;
-        // `0` is not generated due to:
-        // Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/4504>
-        // It is tracked under refinements:
-        // <https://github.com/risingwavelabs/risingwave/issues/3896>
-        let choices = [1, minute, hour, day, week, rand_secs];
+        let choices = [0, 1, minute, hour, day, week, rand_secs];
         let secs = choices.choose(&mut self.rng).unwrap();
 
         let tm = DateTime::<Utc>::from(SystemTime::now() - Duration::from_secs(*secs));
@@ -148,7 +144,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             //     format!("{}+{}", timestamp, timezone)
             // }
             T::Time => tm.format("%T").to_string(),
-            T::Interval => secs.to_string(),
+            T::Interval => {
+                if self.rng.gen_bool(0.5) {
+                    (-(*secs as i64)).to_string()
+                } else {
+                    secs.to_string()
+                }
+            }
             _ => unreachable!(),
         }
     }
