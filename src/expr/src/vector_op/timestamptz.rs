@@ -81,8 +81,8 @@ pub fn timestamptz_to_string(elem: i64, time_zone: &str, writer: &mut dyn Write)
     Ok(())
 }
 
-// Tries to interpret the string with a timezone, tries to intepret the string as a timestamp
-// and then adjusts it with the timezone.
+// Tries to interpret the string with a timezone, and if failing, tries to interpret the string as a timestamp
+// and then adjusts it with the session timezone.
 pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<i64> {
     str_with_time_zone_to_timestamptz(elem)
         .or_else(|_| timestamp_at_time_zone(str_to_timestamp(elem)?, time_zone))

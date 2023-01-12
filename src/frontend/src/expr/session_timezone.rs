@@ -75,7 +75,8 @@ impl SessionTimezone {
                     | (DataType::Varchar, DataType::Timestamptz) => {
                         Some(self.cast_with_timezone(input, return_type))
                     }
-                    (DataType::Date, DataType::Timestamptz) | (DataType::Timestamp, DataType::Timestamptz) => {
+                    (DataType::Date, DataType::Timestamptz)
+                    | (DataType::Timestamp, DataType::Timestamptz) => {
                         input = input.cast_explicit(DataType::Timestamp).unwrap();
                         Some(self.at_timezone(input))
                     }
