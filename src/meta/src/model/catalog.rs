@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
+use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
 
 use crate::model::{MetadataModel, MetadataModelResult};
 
@@ -24,6 +24,8 @@ const CATALOG_SOURCE_CF_NAME: &str = "cf/catalog_source";
 const CATALOG_SINK_CF_NAME: &str = "cf/catalog_sink";
 /// Column family name for index catalog.
 const CATALOG_INDEX_CF_NAME: &str = "cf/catalog_index";
+/// Column family name for function catalog.
+const CATALOG_FUNCTION_CF_NAME: &str = "cf/catalog_function";
 /// Column family name for table catalog.
 const CATALOG_TABLE_CF_NAME: &str = "cf/catalog_table";
 /// Column family name for schema catalog.
@@ -60,6 +62,7 @@ impl_model_for_catalog!(View, CATALOG_VIEW_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Source, CATALOG_SOURCE_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Sink, CATALOG_SINK_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Index, CATALOG_INDEX_CF_NAME, u32, get_id);
+impl_model_for_catalog!(Function, CATALOG_FUNCTION_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Table, CATALOG_TABLE_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Schema, CATALOG_SCHEMA_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Database, CATALOG_DATABASE_CF_NAME, u32, get_id);

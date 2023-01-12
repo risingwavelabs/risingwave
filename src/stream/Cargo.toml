@@ -26,6 +26,7 @@ farmhash = "1"
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
+gen-iter = "0.3"
 global_stats_alloc = { path = "../utils/global_stats_alloc" }
 hyper = "0.14"
 iter-chunks = "0.1"
@@ -36,6 +37,7 @@ maplit = "1.0.2"
 memcomparable = "0.1"
 minitrace = "0.4"
 minstant = "0.1"
+multimap = "0.8"
 num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"

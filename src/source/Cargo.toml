@@ -41,7 +41,7 @@ risingwave_expr = { path = "../expr" }
 risingwave_pb = { path = "../prost" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
-simd-json = "0.7"
+simd-json = { git = "https://github.com/tabVersion/simd-json.git", branch = "main", features = ["key-to-lowercase"] }
 smallvec = "1"
 static_assertions = "1"
 tempfile = "3"
