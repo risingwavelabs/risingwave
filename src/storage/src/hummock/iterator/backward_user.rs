@@ -377,14 +377,17 @@ mod tests {
 
         let backward_iters = vec![
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                handle1,
+                handle1.value().clone(),
                 sstable_store.clone(),
             )),
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                handle2,
+                handle2.value().clone(),
                 sstable_store.clone(),
             )),
-            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(handle0, sstable_store)),
+            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
+                handle0.value().clone(),
+                sstable_store,
+            )),
         ];
 
         let mi = UnorderedMergeIteratorInner::new(backward_iters);
@@ -438,14 +441,17 @@ mod tests {
         let handle2 = cache.insert(table2.id, table2.id, 1, Arc::new(table2));
         let backward_iters = vec![
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                handle0,
+                handle0.value().clone(),
                 sstable_store.clone(),
             )),
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                handle1,
+                handle1.value().clone(),
                 sstable_store.clone(),
             )),
-            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(handle2, sstable_store)),
+            HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
+                handle2.value().clone(),
+                sstable_store,
+            )),
         ];
 
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
@@ -506,11 +512,17 @@ mod tests {
         let cache = create_small_table_cache();
         let backward_iters = vec![
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                cache.insert(table0.id, table0.id, 1, Arc::new(table0)),
+                cache
+                    .insert(table0.id, table0.id, 1, Arc::new(table0))
+                    .value()
+                    .clone(),
                 sstable_store.clone(),
             )),
             HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-                cache.insert(table1.id, table1.id, 1, Arc::new(table1)),
+                cache
+                    .insert(table1.id, table1.id, 1, Arc::new(table1))
+                    .value()
+                    .clone(),
                 sstable_store,
             )),
         ];
@@ -559,7 +571,7 @@ mod tests {
         let cache = create_small_table_cache();
         let handle = cache.insert(sstable.id, sstable.id, 1, Arc::new(sstable));
         let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            handle,
+            handle.value().clone(),
             sstable_store,
         ))];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
@@ -641,7 +653,7 @@ mod tests {
         let cache = create_small_table_cache();
         let handle = cache.insert(sstable.id, sstable.id, 1, Arc::new(sstable));
         let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            handle,
+            handle.value().clone(),
             sstable_store,
         ))];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
@@ -723,7 +735,10 @@ mod tests {
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
         let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            cache.insert(sstable.id, sstable.id, 1, Arc::new(sstable)),
+            cache
+                .insert(sstable.id, sstable.id, 1, Arc::new(sstable))
+                .value()
+                .clone(),
             sstable_store,
         ))];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
@@ -805,7 +820,7 @@ mod tests {
         let handle = cache.insert(sstable.id, sstable.id, 1, Arc::new(sstable));
 
         let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            handle,
+            handle.value().clone(),
             sstable_store,
         ))];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
@@ -905,7 +920,7 @@ mod tests {
         let cache = create_small_table_cache();
         let handle = cache.insert(sstable.id, sstable.id, 1, Arc::new(sstable));
         let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            handle,
+            handle.value().clone(),
             sstable_store,
         ))];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
@@ -1157,7 +1172,7 @@ mod tests {
         let handle0 = cache.insert(table0.id, table0.id, 1, Arc::new(table0));
 
         let backward_iters = vec![HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
-            handle0,
+            handle0.value().clone(),
             sstable_store,
         ))];
 

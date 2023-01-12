@@ -22,12 +22,12 @@ use risingwave_hummock_sdk::KeyComparator;
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::{BlockIterator, Sstable, SstableStoreRef, TableHolder};
+use crate::hummock::{BlockIterator, Sstable, SstableStoreRef};
 use crate::monitor::StoreLocalStatistic;
 
 pub trait SstableIteratorType: HummockIterator + 'static {
     fn create(
-        sstable: TableHolder,
+        sstable: Arc<Sstable>,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
     ) -> Self;
@@ -178,11 +178,11 @@ impl HummockIterator for SstableIterator {
 
 impl SstableIteratorType for SstableIterator {
     fn create(
-        sstable: TableHolder,
+        sstable: Arc<Sstable>,
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
     ) -> Self {
-        SstableIterator::new(sstable.value().clone(), sstable_store, options)
+        SstableIterator::new(sstable, sstable_store, options)
     }
 }
 
@@ -195,6 +195,7 @@ mod tests {
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::sstable_store::TableHolder;
     use crate::hummock::test_utils::{
         create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
         gen_test_sstable, test_key_of, test_value_of, TEST_KEYS_COUNT,
@@ -204,7 +205,7 @@ mod tests {
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
         let mut sstable_iter = SstableIterator::create(
-            handle,
+            handle.value().clone(),
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
         );
@@ -252,7 +253,7 @@ mod tests {
         let handle = cache.insert(0, 0, 1, Arc::new(sstable));
 
         let mut sstable_iter = SstableIterator::create(
-            handle,
+            handle.value().clone(),
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
         );
@@ -340,7 +341,9 @@ mod tests {
             sstable_store
                 .sstable(&table.get_sstable_info(), &mut stats)
                 .await
-                .unwrap(),
+                .unwrap()
+                .value()
+                .clone(),
             sstable_store,
             Arc::new(SstableIteratorReadOptions { prefetch: true }),
         );

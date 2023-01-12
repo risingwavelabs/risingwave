@@ -373,7 +373,7 @@ impl HummockStorageV1 {
 
                     overlapped_iters.push(HummockIteratorUnion::Fourth(
                         T::SstableIteratorType::create(
-                            sstable,
+                            sstable.value().clone(),
                             self.sstable_store(),
                             iter_read_options.clone(),
                         ),

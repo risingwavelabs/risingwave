@@ -98,7 +98,7 @@ use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::shared_buffer::{OrderSortedUncommittedData, UncommittedData};
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
+use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::store::version::HummockVersionReader;
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 use crate::store::ReadOptions;
@@ -360,7 +360,7 @@ pub async fn get_from_sstable_info(
     // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
     // use default before refinement.
     let mut iter = SstableIterator::create(
-        sstable,
+        sstable.value().clone(),
         sstable_store_ref.clone(),
         Arc::new(SstableIteratorReadOptions::default()),
     );

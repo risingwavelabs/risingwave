@@ -618,6 +618,15 @@ impl HummockVersionReader {
                     start_table_idx < level.table_infos.len()
                         && end_table_idx < level.table_infos.len()
                 );
+                if !cache.is_empty() {
+                    let sstables = cache[start_table_idx..=end_table_idx].to_vec();
+                    non_overlapping_iters.push(ConcatIterator::new_with_prefetch(
+                        sstables,
+                        self.sstable_store.clone(),
+                        Arc::new(SstableIteratorReadOptions::default()),
+                    ));
+                    continue;
+                }
 
                 let fetch_meta_req = level.table_infos[start_table_idx..=end_table_idx]
                     .iter()
@@ -713,10 +722,10 @@ impl HummockVersionReader {
                     delete_range_iter
                         .add_sst_iter(SstableDeleteRangeIterator::new(sstable.value().clone()));
                 }
-                sstables.push((*sstable_info).clone());
+                sstables.push(sstable);
             }
 
-            non_overlapping_iters.push(ConcatIterator::new(
+            non_overlapping_iters.push(ConcatIterator::new_with_prefetch_cache(
                 sstables,
                 self.sstable_store.clone(),
                 Arc::new(SstableIteratorReadOptions::default()),

@@ -17,7 +17,6 @@ use std::future::Future;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::must_match;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::SstableInfo;
@@ -31,7 +30,8 @@ use crate::monitor::StoreLocalStatistic;
 
 enum ConcatItem {
     Unfetched(SstableInfo),
-    Prefetched(TableHolder),
+    Prefetched(Arc<Sstable>),
+    PrefetchedCache(TableHolder),
 }
 
 impl ConcatItem {
@@ -39,25 +39,32 @@ impl ConcatItem {
         &mut self,
         sstable_store: &SstableStore,
         stats: &mut StoreLocalStatistic,
-    ) -> HummockResult<TableHolder> {
-        if let ConcatItem::Unfetched(sstable_info) = self {
-            let table = sstable_store.sstable(sstable_info, stats).await?;
-            *self = ConcatItem::Prefetched(table);
+    ) -> HummockResult<Arc<Sstable>> {
+        match self {
+            ConcatItem::Unfetched(sstable_info) => {
+                let holder = sstable_store.sstable(sstable_info, stats).await?;
+                let sstable = holder.value().clone();
+                *self = ConcatItem::PrefetchedCache(holder);
+                Ok(sstable)
+            }
+            ConcatItem::Prefetched(sstable) => Ok(sstable.clone()),
+            ConcatItem::PrefetchedCache(holder) => Ok(holder.value().clone()),
         }
-        Ok(must_match!(self, ConcatItem::Prefetched(table) => table.clone()))
     }
 
     fn smallest_key(&self) -> &[u8] {
         match self {
             ConcatItem::Unfetched(sstable_info) => &sstable_info.key_range.as_ref().unwrap().left,
-            ConcatItem::Prefetched(table_holder) => &table_holder.value().meta.smallest_key,
+            ConcatItem::Prefetched(table_holder) => &table_holder.meta.smallest_key,
+            ConcatItem::PrefetchedCache(table_holder) => &table_holder.value().meta.smallest_key,
         }
     }
 
     fn largest_key(&self) -> &[u8] {
         match self {
             ConcatItem::Unfetched(sstable_info) => &sstable_info.key_range.as_ref().unwrap().right,
-            ConcatItem::Prefetched(table_holder) => &table_holder.value().meta.largest_key,
+            ConcatItem::Prefetched(table_holder) => &table_holder.meta.largest_key,
+            ConcatItem::PrefetchedCache(table_holder) => &table_holder.value().meta.largest_key,
         }
     }
 }
@@ -113,8 +120,20 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a backward iterator.
-    pub fn new_with_prefetch(
+    pub fn new_with_prefetch_cache(
         tables: Vec<TableHolder>,
+        sstable_store: SstableStoreRef,
+        read_options: Arc<SstableIteratorReadOptions>,
+    ) -> Self {
+        let tables = tables
+            .into_iter()
+            .map(ConcatItem::PrefetchedCache)
+            .collect_vec();
+        Self::new_inner(tables, sstable_store, read_options)
+    }
+
+    pub fn new_with_prefetch(
+        tables: Vec<Arc<Sstable>>,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
     ) -> Self {

@@ -136,7 +136,7 @@ pub(crate) async fn build_ordered_merge_iter<T: HummockIteratorType>(
                     let table = sstable_store.sstable(sstable_info, local_stats).await?;
                     data_iters.push(UncommittedDataIteratorType::Second(
                         T::SstableIteratorType::create(
-                            table,
+                            table.value().clone(),
                             sstable_store.clone(),
                             read_options.clone(),
                         ),

@@ -52,7 +52,9 @@ async fn test_failpoints_table_read() {
         sstable_store
             .sstable(&info.get_sstable_info(), &mut stats)
             .await
-            .unwrap(),
+            .unwrap()
+            .value()
+            .clone(),
         sstable_store,
         Arc::new(SstableIteratorReadOptions::default()),
     );
@@ -124,7 +126,12 @@ async fn test_failpoints_vacuum_and_metadata() {
     let mut stats = StoreLocalStatistic::default();
 
     let mut sstable_iter = SstableIterator::create(
-        sstable_store.sstable(&info, &mut stats).await.unwrap(),
+        sstable_store
+            .sstable(&info, &mut stats)
+            .await
+            .unwrap()
+            .value()
+            .clone(),
         sstable_store,
         Arc::new(SstableIteratorReadOptions::default()),
     );

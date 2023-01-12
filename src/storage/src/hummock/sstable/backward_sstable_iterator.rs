@@ -22,9 +22,7 @@ use risingwave_hummock_sdk::KeyComparator;
 use crate::hummock::iterator::{Backward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{
-    BlockIterator, HummockResult, SstableIteratorType, SstableStoreRef, TableHolder,
-};
+use crate::hummock::{BlockIterator, HummockResult, Sstable, SstableIteratorType, SstableStoreRef};
 use crate::monitor::StoreLocalStatistic;
 
 /// Iterates backwards on a sstable.
@@ -36,7 +34,7 @@ pub struct BackwardSstableIterator {
     cur_idx: usize,
 
     /// Reference to the sstable
-    pub sst: TableHolder,
+    pub sst: Arc<Sstable>,
 
     sstable_store: SstableStoreRef,
 
@@ -44,10 +42,10 @@ pub struct BackwardSstableIterator {
 }
 
 impl BackwardSstableIterator {
-    pub fn new(sstable: TableHolder, sstable_store: SstableStoreRef) -> Self {
+    pub fn new(sstable: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self {
         Self {
             block_iter: None,
-            cur_idx: sstable.value().meta.block_metas.len() - 1,
+            cur_idx: sstable.meta.block_metas.len() - 1,
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
@@ -56,13 +54,13 @@ impl BackwardSstableIterator {
 
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: isize, seek_key: Option<&[u8]>) -> HummockResult<()> {
-        if idx >= self.sst.value().block_count() as isize || idx < 0 {
+        if idx >= self.sst.block_count() as isize || idx < 0 {
             self.block_iter = None;
         } else {
             let block = self
                 .sstable_store
                 .get(
-                    self.sst.value(),
+                    self.sst.as_ref(),
                     idx as u64,
                     crate::hummock::CachePolicy::Fill,
                     &mut self.stats,
@@ -121,7 +119,7 @@ impl HummockIterator for BackwardSstableIterator {
     /// in the sstable.
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async move {
-            self.seek_idx(self.sst.value().block_count() as isize - 1, None)
+            self.seek_idx(self.sst.block_count() as isize - 1, None)
                 .await
         }
     }
@@ -132,7 +130,6 @@ impl HummockIterator for BackwardSstableIterator {
             let encoded_key_slice = encoded_key.as_slice();
             let block_idx = self
                 .sst
-                .value()
                 .meta
                 .block_metas
                 .partition_point(|block_meta| {
@@ -165,7 +162,7 @@ impl HummockIterator for BackwardSstableIterator {
 
 impl SstableIteratorType for BackwardSstableIterator {
     fn create(
-        sstable: TableHolder,
+        sstable: Arc<Sstable>,
         sstable_store: SstableStoreRef,
         _: Arc<SstableIteratorReadOptions>,
     ) -> Self {
@@ -200,7 +197,7 @@ mod tests {
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Arc::new(sstable));
-        let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
+        let mut sstable_iter = BackwardSstableIterator::new(handle.value().clone(), sstable_store);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
 
@@ -227,7 +224,7 @@ mod tests {
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
         let handle = cache.insert(0, 0, 1, Arc::new(sstable));
-        let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
+        let mut sstable_iter = BackwardSstableIterator::new(handle.value().clone(), sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);

@@ -237,7 +237,9 @@ async fn test_failpoints_backward_merge_invalid_key() {
                         &mut StoreLocalStatistic::default(),
                     )
                     .await
-                    .unwrap(),
+                    .unwrap()
+                    .value()
+                    .clone(),
                 sstable_store.clone(),
             ));
         }
@@ -358,14 +360,18 @@ async fn test_failpoints_backward_user_read_err() {
             sstable_store
                 .sstable(&table0.get_sstable_info(), &mut stats)
                 .await
-                .unwrap(),
+                .unwrap()
+                .value()
+                .clone(),
             sstable_store.clone(),
         )),
         HummockIteratorUnion::Fourth(BackwardSstableIterator::new(
             sstable_store
                 .sstable(&table1.get_sstable_info(), &mut stats)
                 .await
-                .unwrap(),
+                .unwrap()
+                .value()
+                .clone(),
             sstable_store.clone(),
         )),
     ];
