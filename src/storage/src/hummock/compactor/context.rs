@@ -20,7 +20,7 @@ use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::task_progress::TaskProgressManagerRef;
-use crate::hummock::compactor::{CompactionExecutor, CompactorSstableStoreRef};
+use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{MemoryLimiter, SstableIdManagerRef};
 use crate::monitor::CompactorMetrics;
@@ -89,29 +89,22 @@ impl Context {
 #[derive(Clone)]
 pub struct CompactorContext {
     pub context: Arc<Context>,
-    pub sstable_store: CompactorSstableStoreRef,
     config: Arc<tokio::sync::Mutex<CompactorRuntimeConfig>>,
 }
 
 impl CompactorContext {
-    pub fn new(context: Arc<Context>, sstable_store: CompactorSstableStoreRef) -> Self {
+    pub fn new(context: Arc<Context>) -> Self {
         Self::with_config(
             context,
-            sstable_store,
             CompactorRuntimeConfig {
                 max_concurrent_task_number: u64::MAX,
             },
         )
     }
 
-    pub fn with_config(
-        context: Arc<Context>,
-        sstable_store: CompactorSstableStoreRef,
-        config: CompactorRuntimeConfig,
-    ) -> Self {
+    pub fn with_config(context: Arc<Context>, config: CompactorRuntimeConfig) -> Self {
         Self {
             context,
-            sstable_store,
             config: Arc::new(tokio::sync::Mutex::new(config)),
         }
     }
