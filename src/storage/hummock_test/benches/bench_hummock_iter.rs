@@ -19,6 +19,7 @@ use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{pin_mut, TryStreamExt};
 use risingwave_hummock_test::get_test_notification_client;
+use risingwave_hummock_test::test_utils::TestIngestBatch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
@@ -69,13 +70,14 @@ fn criterion_benchmark(c: &mut Criterion) {
         .unwrap()
     });
 
-    let hummock_storage = runtime.block_on(async {
+    let mut hummock_storage = runtime.block_on(async {
         global_hummock_storage
             .new_local(NewLocalOptions::for_test(Default::default()))
             .await
     });
 
     let epoch = 100;
+    hummock_storage.init(epoch);
 
     for batch in batches {
         runtime
@@ -89,6 +91,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             ))
             .unwrap();
     }
+    hummock_storage.seal_current_epoch(u64::MAX);
 
     c.bench_function("bench-hummock-iter", move |b| {
         b.iter(|| {

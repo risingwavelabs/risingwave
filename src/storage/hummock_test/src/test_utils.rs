@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::Bound;
-use std::future::Future;
-use std::ops::Deref;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -24,7 +21,6 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorManager, FilterKeyExtractorManagerRef,
 };
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::test_utils::{
     register_table_ids_to_compaction_group, setup_compute_env,
     update_filter_key_extractor_for_table_ids,
@@ -45,10 +41,6 @@ use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
-use risingwave_storage::{
-    define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type,
-};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::mock_notification_client::get_test_notification_client;
@@ -91,7 +83,36 @@ pub async fn prepare_first_valid_version(
 }
 
 #[async_trait::async_trait]
-pub(crate) trait HummockStateStoreTestTrait: StateStore + StateStoreWrite {
+pub trait TestIngestBatch: LocalStateStore {
+    async fn ingest_batch(
+        &mut self,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
+        write_options: WriteOptions,
+    ) -> StorageResult<usize>;
+}
+
+#[async_trait::async_trait]
+impl<S: LocalStateStore> TestIngestBatch for S {
+    async fn ingest_batch(
+        &mut self,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        delete_ranges: Vec<(Bytes, Bytes)>,
+        write_options: WriteOptions,
+    ) -> StorageResult<usize> {
+        assert_eq!(self.epoch(), write_options.epoch);
+        for (key, value) in kv_pairs {
+            match value.user_value {
+                None => self.delete(key, Bytes::new())?,
+                Some(value) => self.insert(key, value, None)?,
+            }
+        }
+        self.flush(delete_ranges).await
+    }
+}
+
+#[async_trait::async_trait]
+pub(crate) trait HummockStateStoreTestTrait: StateStore {
     fn get_pinned_version(&self) -> PinnedVersion;
     async fn seal_and_sync_epoch(&self, epoch: u64) -> StorageResult<SyncResult> {
         self.seal_epoch(epoch, true);
@@ -99,112 +120,9 @@ pub(crate) trait HummockStateStoreTestTrait: StateStore + StateStoreWrite {
     }
 }
 
-pub struct LocalGlobalStateStoreHolder<L, G> {
-    local: L,
-    global: G,
-}
-
-impl<L: StaticSendSync, G: StateStoreRead> StateStoreRead for LocalGlobalStateStoreHolder<L, G> {
-    type IterStream = G::IterStream;
-
-    define_state_store_read_associated_type!();
-
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_> {
-        self.global.get(key, epoch, read_options)
-    }
-
-    fn iter(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::IterFuture<'_> {
-        self.global.iter(key_range, epoch, read_options)
-    }
-}
-
-impl<L: StateStoreWrite, G: StaticSendSync> StateStoreWrite for LocalGlobalStateStoreHolder<L, G> {
-    define_state_store_write_associated_type!();
-
-    fn ingest_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bytes, Bytes)>,
-        write_options: WriteOptions,
-    ) -> Self::IngestBatchFuture<'_> {
-        self.local
-            .ingest_batch(kv_pairs, delete_ranges, write_options)
-    }
-}
-
-impl<G, L> Clone for LocalGlobalStateStoreHolder<G, L> {
-    fn clone(&self) -> Self {
-        unimplemented!("clone is not implemented")
-    }
-}
-
-impl<G: StateStore> StateStore for LocalGlobalStateStoreHolder<G::Local, G> {
-    type Local = G::Local;
-
-    type NewLocalFuture<'a> = impl Future<Output = G::Local> + Send;
-
-    define_state_store_associated_type!();
-
-    fn try_wait_epoch(&self, epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
-        self.global.try_wait_epoch(epoch)
-    }
-
-    fn sync(&self, epoch: u64) -> Self::SyncFuture<'_> {
-        self.global.sync(epoch)
-    }
-
-    fn seal_epoch(&self, epoch: u64, is_checkpoint: bool) {
-        self.global.seal_epoch(epoch, is_checkpoint)
-    }
-
-    fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
-        async move { self.global.clear_shared_buffer().await }
-    }
-
-    fn new_local(&self, _option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
-        async { unimplemented!("should not be called new local again") }
-    }
-}
-
-impl<G: StateStore> LocalGlobalStateStoreHolder<G::Local, G> {
-    pub async fn new(state_store: G, table_id: TableId) -> Self {
-        LocalGlobalStateStoreHolder {
-            local: state_store
-                .new_local(NewLocalOptions::for_test(table_id))
-                .await,
-            global: state_store,
-        }
-    }
-
-    pub fn into_global(self) -> G {
-        self.global
-    }
-}
-
-pub type HummockV2MixedStateStore =
-    LocalGlobalStateStoreHolder<<HummockStorage as StateStore>::Local, HummockStorage>;
-
-impl Deref for HummockV2MixedStateStore {
-    type Target = HummockStorage;
-
-    fn deref(&self) -> &Self::Target {
-        &self.global
-    }
-}
-
-impl HummockStateStoreTestTrait for HummockV2MixedStateStore {
+impl HummockStateStoreTestTrait for HummockStorage {
     fn get_pinned_version(&self) -> PinnedVersion {
-        self.global.get_pinned_version()
+        self.get_pinned_version()
     }
 }
 
@@ -248,7 +166,7 @@ pub async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHummockMeta
 
 pub async fn with_hummock_storage_v2(
     table_id: TableId,
-) -> (HummockV2MixedStateStore, Arc<MockHummockMetaClient>) {
+) -> (HummockStorage, Arc<MockHummockMetaClient>) {
     let sstable_store = mock_sstable_store();
     let hummock_options = Arc::new(default_config_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -274,10 +192,7 @@ pub async fn with_hummock_storage_v2(
     )
     .await;
 
-    (
-        HummockV2MixedStateStore::new(hummock_storage, table_id).await,
-        meta_client,
-    )
+    (hummock_storage, meta_client)
 }
 
 pub async fn register_test_tables<S: MetaStore>(

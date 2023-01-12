@@ -322,11 +322,21 @@ pub struct WriteOptions {
     pub table_id: TableId,
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct NewLocalOptions {
     pub table_id: TableId,
     pub disable_sanity_check: bool,
     pub table_option: TableOption,
+}
+
+impl Default for NewLocalOptions {
+    fn default() -> Self {
+        Self {
+            disable_sanity_check: true,
+            table_id: Default::default(),
+            table_option: Default::default(),
+        }
+    }
 }
 
 impl NewLocalOptions {

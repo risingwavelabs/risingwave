@@ -599,17 +599,6 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     }
 
     fn init(&mut self, epoch: u64) {
-        if cfg!(any(test, feature = "test")) {
-            let mask = 1u64 << (u64::BITS - 1);
-            if let Some(prev_rev_epoch) = self.epoch {
-                if prev_rev_epoch & mask != 0 {
-                    let prev_epoch = u64::MAX - prev_rev_epoch;
-                    assert!(epoch >= prev_epoch);
-                }
-            }
-            self.epoch = Some(epoch);
-            return;
-        }
         assert!(
             self.epoch.replace(epoch).is_none(),
             "local state store of table id {:?} is init for more than once",
@@ -618,14 +607,6 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     }
 
     fn seal_current_epoch(&mut self, next_epoch: u64) {
-        if cfg!(any(test, feature = "test")) && next_epoch == u64::MAX {
-            // when the `next_epoch` is set to `u64::MAX`, it means that the next epoch is unknown.
-            // The next epoch shall be set in a next `init` call. We store the prev epoch as
-            // `u64::MAX - epoch` so that the epoch can be restored and ensure that the new epoch
-            // set in `init` is greater than current epoch.
-            self.epoch = Some(u64::MAX - self.epoch());
-            return;
-        }
         assert!(!self.is_dirty());
         let prev_epoch = self
             .epoch
@@ -637,57 +618,5 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             next_epoch,
             prev_epoch
         );
-    }
-}
-
-#[cfg(any(test, feature = "test"))]
-pub mod test_write_impl {
-    use bytes::Bytes;
-
-    use super::*;
-    use crate::mem_table::MemtableLocalStateStore;
-    use crate::storage_value::StorageValue;
-    use crate::store::{StateStoreRead, StateStoreWrite, WriteOptions};
-
-    // This is wrapper to make `*mut S` Send.
-    struct SendWrapper<S>(*mut S);
-    unsafe impl<S> Send for SendWrapper<S> {}
-    impl<S> SendWrapper<S> {
-        unsafe fn as_mut(&mut self) -> &mut S {
-            unsafe { &mut *self.0 }
-        }
-    }
-
-    impl<S: StateStoreRead + StateStoreWrite> StateStoreWrite for MemtableLocalStateStore<S> {
-        type IngestBatchFuture<'a> = impl IngestBatchFutureTrait<'a>;
-
-        fn ingest_batch(
-            &self,
-            kv_pairs: Vec<(Bytes, StorageValue)>,
-            delete_ranges: Vec<(Bytes, Bytes)>,
-            write_options: WriteOptions,
-        ) -> Self::IngestBatchFuture<'_> {
-            // This is only for test, therefore can write unsafe code
-            async move {
-                assert!(
-                    !self.is_dirty(),
-                    "calling ingest_batch should ensure that data have been previously flushed"
-                );
-                #[allow(clippy::cast_ref_to_mut)]
-                let mut this = SendWrapper(self as *const Self as *mut Self);
-                unsafe {
-                    this.as_mut().init(write_options.epoch);
-                    for (key, value) in kv_pairs {
-                        match value.user_value {
-                            None => this.as_mut().delete(key, Bytes::new())?,
-                            Some(value) => this.as_mut().insert(key, value, None)?,
-                        }
-                    }
-                    let ret = this.as_mut().flush(delete_ranges).await?;
-                    this.as_mut().seal_current_epoch(u64::MAX);
-                    Ok(ret)
-                }
-            }
-        }
     }
 }

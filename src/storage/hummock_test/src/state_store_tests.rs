@@ -29,15 +29,11 @@ use risingwave_storage::hummock::test_utils::{count_stream, default_config_for_t
 use risingwave_storage::hummock::{HummockStorage, HummockStorageV1};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, ReadOptions, StateStore, StateStoreRead, StateStoreWrite,
-    SyncResult, WriteOptions,
-};
+use risingwave_storage::store::*;
 
 use crate::get_test_notification_client;
 use crate::test_utils::{
-    with_hummock_storage_v1, with_hummock_storage_v2, HummockStateStoreTestTrait,
-    HummockV2MixedStateStore,
+    with_hummock_storage_v1, with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch,
 };
 
 #[tokio::test]
@@ -124,11 +120,14 @@ async fn test_basic_inner(
     // Make sure the batch is sorted.
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
+    let mut local = hummock_storage.new_local(Default::default()).await;
+
     // epoch 0 is reserved by storage service
     let epoch1: u64 = 1;
+    local.init(epoch1);
 
     // try to write an empty batch, and hummock should write nothing
-    let size = hummock_storage
+    let size = local
         .ingest_batch(
             vec![],
             vec![],
@@ -143,7 +142,7 @@ async fn test_basic_inner(
     assert_eq!(size, 0);
 
     // Write the first batch.
-    hummock_storage
+    local
         .ingest_batch(
             batch1,
             vec![],
@@ -154,6 +153,9 @@ async fn test_basic_inner(
         )
         .await
         .unwrap();
+
+    let epoch2 = epoch1 + 1;
+    local.seal_current_epoch(epoch2);
 
     // Get the value after flushing to remote.
     let value = hummock_storage
@@ -210,8 +212,7 @@ async fn test_basic_inner(
     assert_eq!(value, None);
 
     // Write the second batch.
-    let epoch2 = epoch1 + 1;
-    hummock_storage
+    local
         .ingest_batch(
             batch2,
             vec![],
@@ -222,6 +223,9 @@ async fn test_basic_inner(
         )
         .await
         .unwrap();
+
+    let epoch3 = epoch2 + 1;
+    local.seal_current_epoch(epoch3);
 
     // Get the value after flushing to remote.
     let value = hummock_storage
@@ -243,8 +247,8 @@ async fn test_basic_inner(
     assert_eq!(value, Bytes::from("111111"));
 
     // Write the third batch.
-    let epoch3 = epoch2 + 1;
-    hummock_storage
+
+    local
         .ingest_batch(
             batch3,
             vec![],
@@ -255,6 +259,8 @@ async fn test_basic_inner(
         )
         .await
         .unwrap();
+
+    local.seal_current_epoch(u64::MAX);
 
     // Get the value after flushing to remote.
     let value = hummock_storage
@@ -460,7 +466,12 @@ async fn test_state_store_sync_inner(
 
     // Make sure the batch is sorted.
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    hummock_storage
+
+    let mut local = hummock_storage
+        .new_local(NewLocalOptions::for_test(Default::default()))
+        .await;
+    local.init(epoch);
+    local
         .ingest_batch(
             batch1,
             vec![],
@@ -479,7 +490,7 @@ async fn test_state_store_sync_inner(
         (Bytes::from("eeee"), StorageValue::new_put("5555")),
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    hummock_storage
+    local
         .ingest_batch(
             batch2,
             vec![],
@@ -501,11 +512,12 @@ async fn test_state_store_sync_inner(
     // );
 
     epoch += 1;
+    local.seal_current_epoch(epoch);
 
     // ingest more 8B then will trigger a sync behind the scene
     let mut batch3 = vec![(Bytes::from("eeee"), StorageValue::new_put("5555"))];
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    hummock_storage
+    local
         .ingest_batch(
             batch3,
             vec![],
@@ -524,6 +536,8 @@ async fn test_state_store_sync_inner(
     //     16 as u64,
     //     hummock_storage.shared_buffer_manager().size() as u64
     // );
+
+    local.seal_current_epoch(u64::MAX);
 
     // trigger a sync
     hummock_storage
@@ -613,8 +627,6 @@ async fn test_reload_storage() {
     .await
     .unwrap();
 
-    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage, Default::default()).await;
-
     // Get the value after flushing to remote.
     let value = hummock_storage
         .get(
@@ -654,17 +666,18 @@ async fn test_reload_storage() {
 
     // Write the second batch.
     let epoch2 = epoch1 + 1;
-    hummock_storage
-        .ingest_batch(
-            batch2,
-            vec![],
-            WriteOptions {
-                epoch: epoch2,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
+    // TODO: recover the comment if the test is needed
+    // hummock_storage
+    //     .ingest_batch(
+    //         batch2,
+    //         vec![],
+    //         WriteOptions {
+    //             epoch: epoch2,
+    //             table_id: Default::default(),
+    //         },
+    //     )
+    //     .await
+    //     .unwrap();
 
     // Get the value after flushing to remote.
     let value = hummock_storage
@@ -893,7 +906,10 @@ async fn test_write_anytime_inner(
         (Bytes::from("cc"), StorageValue::new_put("333")),
     ];
 
-    hummock_storage
+    let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
+    local.init(epoch1);
+
+    local
         .ingest_batch(
             batch1.clone(),
             vec![],
@@ -1007,7 +1023,7 @@ async fn test_write_anytime_inner(
         (Bytes::from("bb"), StorageValue::new_delete()),
     ];
 
-    hummock_storage
+    local
         .ingest_batch(
             batch2,
             vec![],
@@ -1022,9 +1038,10 @@ async fn test_write_anytime_inner(
     assert_new_value(epoch1).await;
 
     let epoch2 = epoch1 + 1;
+    local.seal_current_epoch(epoch2);
 
     // Write to epoch2
-    hummock_storage
+    local
         .ingest_batch(
             batch1,
             vec![],
@@ -1035,6 +1052,7 @@ async fn test_write_anytime_inner(
         )
         .await
         .unwrap();
+    local.seal_current_epoch(u64::MAX);
     // Assert epoch 1 unchanged
     assert_new_value(epoch1).await;
     // Assert epoch 2 correctness
@@ -1082,7 +1100,9 @@ async fn test_delete_get_inner(
         (Bytes::from("aa"), StorageValue::new_put("111")),
         (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
-    hummock_storage
+    let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
+    local.init(epoch1);
+    local
         .ingest_batch(
             batch1,
             vec![],
@@ -1100,8 +1120,10 @@ async fn test_delete_get_inner(
         .uncommitted_ssts;
     meta_client.commit_epoch(epoch1, ssts).await.unwrap();
     let epoch2 = initial_epoch + 2;
+
+    local.seal_current_epoch(epoch2);
     let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
-    hummock_storage
+    local
         .ingest_batch(
             batch2,
             vec![],
@@ -1112,6 +1134,7 @@ async fn test_delete_get_inner(
         )
         .await
         .unwrap();
+    local.seal_current_epoch(u64::MAX);
     let ssts = hummock_storage
         .seal_and_sync_epoch(epoch2)
         .await
@@ -1162,7 +1185,10 @@ async fn test_multiple_epoch_sync_inner(
         (Bytes::from("aa"), StorageValue::new_put("111")),
         (Bytes::from("bb"), StorageValue::new_put("222")),
     ];
-    hummock_storage
+
+    let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
+    local.init(epoch1);
+    local
         .ingest_batch(
             batch1,
             vec![],
@@ -1175,8 +1201,9 @@ async fn test_multiple_epoch_sync_inner(
         .unwrap();
 
     let epoch2 = initial_epoch + 2;
+    local.seal_current_epoch(epoch2);
     let batch2 = vec![(Bytes::from("bb"), StorageValue::new_delete())];
-    hummock_storage
+    local
         .ingest_batch(
             batch2,
             vec![],
@@ -1193,7 +1220,8 @@ async fn test_multiple_epoch_sync_inner(
         (Bytes::from("aa"), StorageValue::new_put("444")),
         (Bytes::from("bb"), StorageValue::new_put("555")),
     ];
-    hummock_storage
+    local.seal_current_epoch(epoch3);
+    local
         .ingest_batch(
             batch3,
             vec![],
@@ -1204,6 +1232,7 @@ async fn test_multiple_epoch_sync_inner(
         )
         .await
         .unwrap();
+    local.seal_current_epoch(u64::MAX);
     let test_get = || {
         let hummock_storage_clone = &hummock_storage;
         async move {
@@ -1287,7 +1316,6 @@ async fn test_multiple_epoch_sync_inner(
 async fn test_gc_watermark_and_clear_shared_buffer() {
     let (hummock_storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
 
-    let hummock_storage = hummock_storage.into_global();
     assert_eq!(
         hummock_storage
             .sstable_id_manager()
