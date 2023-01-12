@@ -873,17 +873,38 @@ impl HummockMetaClient for MetaClient {
 
 // TODO: rename.
 // TODO: This should take str not just ports
+/// Connecting against the first meta node that is available
+/// If we use `get_channel_with_defaults` directly, we may accidentally connect against crashed node
 async fn util(addresses: &Vec<i32>) -> Option<Channel> {
-    for meta_addr in addresses {
-        // TODO: try http and https?
-        // Should the parameter we pass into the image hold the info if this is http or https?
-        let addr = format!("http://127.0.0.1:{}", *meta_addr);
-        let meta_channel = get_channel_with_defaults(addr.as_str()).await;
-        if meta_channel.is_ok() {
-            return Some(meta_channel.unwrap());
+    let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
+    for s in retry_strategy {
+        for meta_addr in addresses {
+            // Should the parameter we pass into the image hold the info if this is http or https?
+            // -> Yes!
+            let addr = format!("http://127.0.0.1:{}", *meta_addr);
+            let meta_channel = get_channel_no_retry(addr.as_str()).await;
+            if meta_channel.is_ok() {
+                return Some(meta_channel.unwrap());
+            }
+            tokio::time::sleep(s).await;
         }
     }
     None
+}
+
+/// wrapper for `get_channel`
+pub async fn get_channel_no_retry(
+    addr: &str,
+) -> std::result::Result<Channel, tonic::transport::Error> {
+    get_channel(
+        addr,
+        GRPC_CONN_RETRY_MAX_INTERVAL_MS,
+        GRPC_CONN_RETRY_BASE_INTERVAL_MS,
+        GRPC_ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
+        GRPC_ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC,
+        false,
+    )
+    .await
 }
 
 /// wrapper for `get_channel`
@@ -896,6 +917,7 @@ pub async fn get_channel_with_defaults(
         GRPC_CONN_RETRY_BASE_INTERVAL_MS,
         GRPC_ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
         GRPC_ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC,
+        true,
     )
     .await
 }
@@ -910,13 +932,14 @@ async fn get_channel(
     retry_base_interval: u64,
     keep_alive_interval: u64,
     keep_alive_timeout: u64,
+    retry: bool,
 ) -> std::result::Result<Channel, tonic::transport::Error> {
     let endpoint = Endpoint::from_shared(addr.to_string())?
         .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE);
     let retry_strategy = ExponentialBackoff::from_millis(retry_base_interval)
         .max_delay(Duration::from_millis(max_retry_ms))
         .map(jitter);
-    tokio_retry::Retry::spawn(retry_strategy, || async {
+    let do_request = || async {
         let endpoint = endpoint.clone();
         endpoint
             .http2_keep_alive_interval(Duration::from_secs(keep_alive_interval))
@@ -925,14 +948,24 @@ async fn get_channel(
             .connect()
             .await
             .inspect_err(|e| {
+                let wait_msg = if retry {
+                    format!(", wait for online")
+                } else {
+                    "".to_owned()
+                };
                 tracing::warn!(
-                    "Failed to connect to meta server {}, wait for online: {}",
+                    "Failed to connect to meta server {}{}:{}",
                     addr,
+                    wait_msg,
                     e
                 );
             })
-    })
-    .await
+    };
+
+    if retry {
+        return tokio_retry::Retry::spawn(retry_strategy, do_request).await;
+    }
+    do_request().await
 }
 
 // TODO: remove notes
