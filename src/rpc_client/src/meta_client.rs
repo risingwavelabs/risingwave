@@ -892,7 +892,7 @@ async fn util(addresses: &Vec<i32>) -> Option<Channel> {
     None
 }
 
-/// wrapper for `get_channel`
+/// wrapper for `get_channel`. Does not retry
 pub async fn get_channel_no_retry(
     addr: &str,
 ) -> std::result::Result<Channel, tonic::transport::Error> {
@@ -926,6 +926,7 @@ pub async fn get_channel_with_defaults(
 ///
 /// ## Arguments:
 /// addr: Should consist out of protocol, IP and port
+/// retry: If true retries using exponential backoff. If false, only tries once
 async fn get_channel(
     addr: &str,
     max_retry_ms: u64,
