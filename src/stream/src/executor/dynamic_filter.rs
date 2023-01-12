@@ -28,7 +28,9 @@ use risingwave_common::types::{DataType, Datum, ScalarImpl, ToDatumRef, ToOwnedD
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
-use risingwave_pb::expr::expr_node::Type::*;
+use risingwave_pb::expr::expr_node::Type::{
+    GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
+};
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -67,15 +69,11 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         pk_indices: PkIndices,
         executor_id: u64,
         comparator: ExprNodeType,
-        mut state_table_l: StateTable<S>,
-        mut state_table_r: StateTable<S>,
+        state_table_l: StateTable<S>,
+        state_table_r: StateTable<S>,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
     ) -> Self {
-        // TODO: enable sanity check for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
-        state_table_l.disable_sanity_check();
-        state_table_r.disable_sanity_check();
-
         let schema = source_l.schema().clone();
         Self {
             ctx,
@@ -237,7 +235,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         pin_mut!(rhs_stream);
 
         if let Some(res) = rhs_stream.next().await {
-            let value = res?.into_owned();
+            let value = res?;
             assert!(rhs_stream.next().await.is_none());
             Ok(Some(value))
         } else {
@@ -490,7 +488,8 @@ mod tests {
         mem_state: MemoryStateStore,
     ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
-        let state_table_l = StateTable::new_without_distribution(
+        // TODO: enable sanity check for dynamic filter <https://github.com/risingwavelabs/risingwave/issues/3893>
+        let state_table_l = StateTable::new_without_distribution_no_sanity_check(
             mem_state.clone(),
             TableId::new(0),
             vec![column_descs.clone()],
@@ -498,7 +497,7 @@ mod tests {
             vec![0],
         )
         .await;
-        let state_table_r = StateTable::new_without_distribution(
+        let state_table_r = StateTable::new_without_distribution_no_sanity_check(
             mem_state,
             TableId::new(1),
             vec![column_descs],

@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { DataType } from "./data";
 import { ExprNode } from "./expr";
 import {
   ColumnCatalog,
@@ -97,6 +98,18 @@ export interface Index {
   originalColumns: number[];
 }
 
+export interface Function {
+  id: number;
+  schemaId: number;
+  databaseId: number;
+  name: string;
+  argTypes: DataType[];
+  returnType: DataType | undefined;
+  language: string;
+  path: string;
+  owner: number;
+}
+
 /** See `TableCatalog` struct in frontend crate for more information. */
 export interface Table {
   id: number;
@@ -138,6 +151,11 @@ export interface Table {
   definition: string;
   handlePkConflict: boolean;
   readPrefixLenHint: number;
+  /**
+   * Per-table catalog version, used by schema change. `None` for internal tables and tests.
+   * Not to be confused with the global catalog version for notification service.
+   */
+  version: Table_TableVersion | undefined;
 }
 
 export const Table_TableType = {
@@ -191,6 +209,19 @@ export function table_TableTypeToJSON(object: Table_TableType): string {
     default:
       return "UNRECOGNIZED";
   }
+}
+
+export interface Table_TableVersion {
+  /**
+   * The version number, which will be 0 by default and be increased by 1 for
+   * each schema change in the frontend.
+   */
+  version: number;
+  /**
+   * The ID of the next column to be added, which is used to make all columns
+   * in the table have unique IDs, even if some columns have been dropped.
+   */
+  nextColumnId: number;
 }
 
 export interface Table_PropertiesEntry {
@@ -622,6 +653,71 @@ export const Index = {
   },
 };
 
+function createBaseFunction(): Function {
+  return {
+    id: 0,
+    schemaId: 0,
+    databaseId: 0,
+    name: "",
+    argTypes: [],
+    returnType: undefined,
+    language: "",
+    path: "",
+    owner: 0,
+  };
+}
+
+export const Function = {
+  fromJSON(object: any): Function {
+    return {
+      id: isSet(object.id) ? Number(object.id) : 0,
+      schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
+      databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+      argTypes: Array.isArray(object?.argTypes) ? object.argTypes.map((e: any) => DataType.fromJSON(e)) : [],
+      returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
+      language: isSet(object.language) ? String(object.language) : "",
+      path: isSet(object.path) ? String(object.path) : "",
+      owner: isSet(object.owner) ? Number(object.owner) : 0,
+    };
+  },
+
+  toJSON(message: Function): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
+    message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
+    message.name !== undefined && (obj.name = message.name);
+    if (message.argTypes) {
+      obj.argTypes = message.argTypes.map((e) => e ? DataType.toJSON(e) : undefined);
+    } else {
+      obj.argTypes = [];
+    }
+    message.returnType !== undefined &&
+      (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
+    message.language !== undefined && (obj.language = message.language);
+    message.path !== undefined && (obj.path = message.path);
+    message.owner !== undefined && (obj.owner = Math.round(message.owner));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function>, I>>(object: I): Function {
+    const message = createBaseFunction();
+    message.id = object.id ?? 0;
+    message.schemaId = object.schemaId ?? 0;
+    message.databaseId = object.databaseId ?? 0;
+    message.name = object.name ?? "";
+    message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
+    message.returnType = (object.returnType !== undefined && object.returnType !== null)
+      ? DataType.fromPartial(object.returnType)
+      : undefined;
+    message.language = object.language ?? "";
+    message.path = object.path ?? "";
+    message.owner = object.owner ?? 0;
+    return message;
+  },
+};
+
 function createBaseTable(): Table {
   return {
     id: 0,
@@ -645,6 +741,7 @@ function createBaseTable(): Table {
     definition: "",
     handlePkConflict: false,
     readPrefixLenHint: 0,
+    version: undefined,
   };
 }
 
@@ -685,6 +782,7 @@ export const Table = {
       definition: isSet(object.definition) ? String(object.definition) : "",
       handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
       readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
+      version: isSet(object.version) ? Table_TableVersion.fromJSON(object.version) : undefined,
     };
   },
 
@@ -743,6 +841,8 @@ export const Table = {
     message.definition !== undefined && (obj.definition = message.definition);
     message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
     message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
+    message.version !== undefined &&
+      (obj.version = message.version ? Table_TableVersion.toJSON(message.version) : undefined);
     return obj;
   },
 
@@ -790,6 +890,36 @@ export const Table = {
     message.definition = object.definition ?? "";
     message.handlePkConflict = object.handlePkConflict ?? false;
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
+    message.version = (object.version !== undefined && object.version !== null)
+      ? Table_TableVersion.fromPartial(object.version)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseTable_TableVersion(): Table_TableVersion {
+  return { version: 0, nextColumnId: 0 };
+}
+
+export const Table_TableVersion = {
+  fromJSON(object: any): Table_TableVersion {
+    return {
+      version: isSet(object.version) ? Number(object.version) : 0,
+      nextColumnId: isSet(object.nextColumnId) ? Number(object.nextColumnId) : 0,
+    };
+  },
+
+  toJSON(message: Table_TableVersion): unknown {
+    const obj: any = {};
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    message.nextColumnId !== undefined && (obj.nextColumnId = Math.round(message.nextColumnId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Table_TableVersion>, I>>(object: I): Table_TableVersion {
+    const message = createBaseTable_TableVersion();
+    message.version = object.version ?? 0;
+    message.nextColumnId = object.nextColumnId ?? 0;
     return message;
   },
 };

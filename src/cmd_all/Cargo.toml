@@ -15,7 +15,6 @@ static-log-level = ["workspace-config/enable-static-log-level"]
 anyhow = "1"
 clap = { version = "3", features = ["derive"] }
 console = "0.15.2"
-global_stats_alloc = { path = "../utils/global_stats_alloc" }
 log = { version = "0.4" }
 risedev = { path = "../risedevtool" }
 risingwave_common = { path = "../common" }
@@ -27,6 +26,7 @@ risingwave_meta = { path = "../meta" }
 risingwave_rt = { path = "../utils/runtime" }
 sync-point = { path = "../utils/sync-point" }
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
+tempfile = "3.3.0"
 tikv-jemallocator = { version = "0.5", features = ["profiling", "stats"] }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",

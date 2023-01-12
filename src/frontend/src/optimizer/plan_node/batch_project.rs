@@ -22,7 +22,7 @@ use risingwave_pb::expr::ExprNode;
 use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
-use crate::expr::Expr;
+use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::ToLocalBatch;
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
@@ -49,6 +49,10 @@ impl BatchProject {
 
     pub fn as_logical(&self) -> &LogicalProject {
         &self.logical
+    }
+
+    pub fn exprs(&self) -> &Vec<ExprImpl> {
+        self.logical.exprs()
     }
 }
 

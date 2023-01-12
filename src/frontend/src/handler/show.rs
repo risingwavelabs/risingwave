@@ -17,7 +17,7 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, ShowCreateType, ShowObject};
 
@@ -69,7 +69,11 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
             .collect(),
         ShowObject::Database => catalog_reader.get_all_database_names(),
         ShowObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
-        // If not include schema name, use default schema name
+        ShowObject::View { schema } => catalog_reader
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .iter_view()
+            .map(|t| t.name.clone())
+            .collect(),
         ShowObject::MaterializedView { schema } => catalog_reader
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_mv()
@@ -96,7 +100,7 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
 
             return Ok(PgResponse::new_for_stream(
                 StatementType::SHOW_COMMAND,
-                Some(rows.len() as i32),
+                None,
                 rows.into(),
                 vec![
                     PgFieldDescriptor::new(
@@ -121,7 +125,7 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
 
     Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        Some(rows.len() as i32),
+        None,
         rows.into(),
         vec![PgFieldDescriptor::new(
             "Name".to_owned(),
@@ -144,25 +148,24 @@ pub fn handle_show_create_object(
     let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
     let sql = match show_create_type {
         ShowCreateType::MaterializedView => {
-            let table = schema.get_table_by_name(&object_name).ok_or_else(|| {
-                RwError::from(CatalogError::NotFound(
-                    "materialized view",
-                    name.to_string(),
-                ))
-            })?;
-            if !table.is_mview() {
-                return Err(CatalogError::NotFound("materialized view", name.to_string()).into());
-            }
-            format!(
-                "CREATE MATERIALIZED VIEW {} AS {}",
-                table.name, table.definition
-            )
+            let mv = schema
+                .get_table_by_name(&object_name)
+                .filter(|t| t.is_mview())
+                .ok_or_else(|| CatalogError::NotFound("materialized view", name.to_string()))?;
+            mv.create_sql()
         }
         ShowCreateType::View => {
             let view = schema
                 .get_view_by_name(&object_name)
-                .ok_or_else(|| RwError::from(CatalogError::NotFound("view", name.to_string())))?;
-            format!("CREATE VIEW {} AS {}", view.name, view.sql)
+                .ok_or_else(|| CatalogError::NotFound("view", name.to_string()))?;
+            view.create_sql()
+        }
+        ShowCreateType::Table => {
+            let table = schema
+                .get_table_by_name(&object_name)
+                .filter(|t| t.is_table())
+                .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
+            table.create_sql()
         }
         _ => {
             return Err(ErrorCode::NotImplemented(
@@ -176,7 +179,7 @@ pub fn handle_show_create_object(
 
     Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        Some(1),
+        None,
         vec![Row::new(vec![Some(name.into()), Some(sql.into())])].into(),
         vec![
             PgFieldDescriptor::new(

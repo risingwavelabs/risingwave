@@ -245,8 +245,10 @@ mod tests {
         )
         .await
         .unwrap();
-        let ret = collector
-            .get_tombstone_between(&UserKey::default().as_ref(), &UserKey::default().as_ref());
+        let ret = collector.get_tombstone_between(
+            &UserKey::<Bytes>::default().as_ref(),
+            &UserKey::<Bytes>::default().as_ref(),
+        );
         assert_eq!(ret.len(), 1);
         assert_eq!(ret[0], range_tombstones[1]);
     }

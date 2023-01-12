@@ -25,11 +25,12 @@ pub enum Value {
     Number(String),
     /// 'string value'
     SingleQuotedString(String),
+    /// String Constants With C-Style Escapes
+    CstyleEscapesString(String),
     /// N'string value'
     NationalStringLiteral(String),
     /// X'hex value'
     HexStringLiteral(String),
-
     DoubleQuotedString(String),
     /// Boolean value true or false
     Boolean(bool),
@@ -64,6 +65,7 @@ impl fmt::Display for Value {
             Value::SingleQuotedString(v) => write!(f, "'{}'", escape_single_quote_string(v)),
             Value::NationalStringLiteral(v) => write!(f, "N'{}'", v),
             Value::HexStringLiteral(v) => write!(f, "X'{}'", v),
+            Value::CstyleEscapesString(v) => write!(f, "E'{}'", v),
             Value::Boolean(v) => write!(f, "{}", v),
             Value::Interval {
                 value,

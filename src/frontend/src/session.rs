@@ -43,7 +43,7 @@ use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
 use risingwave_source::monitor::SourceMetrics;
-use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, ShowObject, Statement};
+use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::oneshot::Sender;
 use tokio::sync::watch;
@@ -51,11 +51,11 @@ use tokio::task::JoinHandle;
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
-use crate::catalog::root_catalog::{Catalog, SchemaPath};
+use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{check_schema_writable, DatabaseId, SchemaId};
-use crate::handler::handle;
-use crate::handler::privilege::{check_privileges, ObjectCheckItem};
+use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::util::to_pg_field;
+use crate::handler::{handle, HandlerArgs};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::FrontendMetrics;
@@ -68,8 +68,7 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::utils::WithOptions;
-use crate::{FrontendOpts, PgResponseStream, TableCatalog};
+use crate::{FrontendOpts, PgResponseStream};
 
 /// The global environment for the frontend server.
 #[derive(Clone)]
@@ -371,7 +370,7 @@ impl SessionImpl {
             env,
             auth_context,
             user_authenticator,
-            config_map: RwLock::new(Default::default()),
+            config_map: Default::default(),
             id,
         }
     }
@@ -462,52 +461,15 @@ impl SessionImpl {
 
         check_schema_writable(&schema.name())?;
         if schema.name() != DEFAULT_SCHEMA_NAME {
-            check_privileges(
-                self,
-                &vec![ObjectCheckItem::new(
-                    schema.owner(),
-                    Action::Create,
-                    Object::SchemaId(schema.id()),
-                )],
-            )?;
+            self.check_privileges(&[ObjectCheckItem::new(
+                schema.owner(),
+                Action::Create,
+                Object::SchemaId(schema.id()),
+            )])?;
         }
 
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
         Ok((db_id, schema.id()))
-    }
-
-    /// Also check if the user has the privilege to create in the schema.
-    pub fn get_table_catalog_for_create(
-        &self,
-        schema_name: Option<String>,
-        table_name: &str,
-    ) -> Result<(DatabaseId, SchemaId, Arc<TableCatalog>)> {
-        let db_name = self.database();
-
-        let search_path = self.config().get_search_path();
-        let user_name = &self.auth_context().user_name;
-        let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
-
-        let catalog_reader = self.env().catalog_reader().read_guard();
-        let (table, schema_name) =
-            catalog_reader.get_table_by_name(db_name, schema_path, table_name)?;
-
-        let schema = catalog_reader.get_schema_by_name(db_name, schema_name)?;
-
-        check_schema_writable(schema_name)?;
-        if schema_name != DEFAULT_SCHEMA_NAME {
-            check_privileges(
-                self,
-                &vec![ObjectCheckItem::new(
-                    schema.owner(),
-                    Action::Create,
-                    Object::SchemaId(schema.id()),
-                )],
-            )?;
-        }
-
-        let db_id = catalog_reader.get_database_by_name(db_name)?.id();
-        Ok((db_id, schema.id(), table.clone()))
     }
 }
 
@@ -806,12 +768,7 @@ impl Session<PgResponseStream> for SessionImpl {
 
 /// Returns row description of the statement
 fn infer(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result<Vec<PgFieldDescriptor>> {
-    let context = OptimizerContext::new(
-        session,
-        Arc::from(sql),
-        WithOptions::try_from(&stmt)?,
-        ExplainOptions::default(),
-    );
+    let context = OptimizerContext::from_handler_args(HandlerArgs::new(session, &stmt, sql)?);
     let session = context.session_ctx().clone();
 
     let bound = {

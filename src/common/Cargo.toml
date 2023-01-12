@@ -9,6 +9,8 @@ repository = { workspace = true }
 
 [dependencies]
 anyhow = "1"
+arrow-array = "29"
+arrow-schema = "29"
 async-stream = "0.3"
 async-trait = "0.1"
 auto_enums = "0.7"
@@ -16,8 +18,10 @@ bitflags = "1.3.2"
 byteorder = "1"
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 comfy-table = "6"
 crc32fast = "1"
+derivative = "2"
 either = "1"
 enum-as-inner = "0.5"
 fixedbitset = { version = "0.4", features = ["std"] }

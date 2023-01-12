@@ -18,7 +18,7 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
-use super::privilege::{check_privileges, resolve_relation_privileges};
+use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::handler::HandlerArgs;
@@ -47,16 +47,20 @@ pub(super) fn get_column_names(
         // If user provide columns name (col_names.is_some()), we don't need alias.
         // For other expressions (col_names.is_none()), we require the user to explicitly assign an
         // alias.
-        if col_names.is_none() && select.aliases.iter().any(Option::is_none) {
-            return Err(ErrorCode::BindError(
-                "An alias must be specified for an expression".to_string(),
-            )
-            .into());
+        if col_names.is_none() {
+            for (i, alias) in select.aliases.iter().enumerate() {
+                if alias.is_none() {
+                    return Err(ErrorCode::BindError(format!(
+                    "An alias must be specified for the {} expression (counting from 1) in result relation", ordinal(i+1)
+                ))
+                .into());
+                }
+            }
         }
         if let Some(relation) = &select.from {
             let mut check_items = Vec::new();
             resolve_relation_privileges(relation, Action::Select, &mut check_items);
-            check_privileges(session, &check_items)?;
+            session.check_privileges(&check_items)?;
         }
     }
 
@@ -76,10 +80,10 @@ pub fn gen_create_mv_plan(
 
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
-    let definition = query.to_string();
+    let definition = context.normalized_sql().to_owned();
 
     let bound = {
-        let mut binder = Binder::new(session);
+        let mut binder = Binder::new_for_stream(session);
         binder.bind_query(query)?
     };
 
@@ -123,7 +127,7 @@ pub async fn handle_create_mv(
     session.check_relation_name_duplicated(name.clone())?;
 
     let (table, graph) = {
-        let context = OptimizerContext::new_with_handler_args(handler_args);
+        let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
         let graph = build_graph(plan);
 
@@ -148,6 +152,20 @@ It only indicates the physical clustering of the data, which may improve the per
             StatementType::CREATE_MATERIALIZED_VIEW,
         ))
     }
+}
+
+fn ordinal(i: usize) -> String {
+    let s = i.to_string();
+    let suffix = if s.ends_with('1') && !s.ends_with("11") {
+        "st"
+    } else if s.ends_with('2') && !s.ends_with("12") {
+        "nd"
+    } else if s.ends_with('3') && !s.ends_with("13") {
+        "rd"
+    } else {
+        "th"
+    };
+    s + suffix
 }
 
 #[cfg(test)]
@@ -214,7 +232,7 @@ pub mod tests {
         assert_eq!(columns, expected_columns);
     }
 
-    /// When creating MV, The only thing to allow without explicit alias is `InputRef`.
+    /// When creating MV, a unique column name must be specified for each column
     #[tokio::test]
     async fn test_no_alias() {
         let frontend = LocalFrontend::new(Default::default()).await;
@@ -222,12 +240,16 @@ pub mod tests {
         let sql = "create table t(x varchar)";
         frontend.run_sql(sql).await.unwrap();
 
-        // Aggregation without alias is forbidden.
-        let sql = "create materialized view mv1 as select count(x) from t";
+        // Aggregation without alias is ok.
+        let sql = "create materialized view mv0 as select count(x) from t";
+        frontend.run_sql(sql).await.unwrap();
+
+        // Same aggregations without alias is forbidden, because it make the same column name.
+        let sql = "create materialized view mv1 as select count(x), count(*) from t";
         let err = frontend.run_sql(sql).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Bind error: An alias must be specified for an expression"
+            "Invalid input syntax: column \"count\" specified more than once"
         );
 
         // Literal without alias is forbidden.
@@ -235,15 +257,15 @@ pub mod tests {
         let err = frontend.run_sql(sql).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Bind error: An alias must be specified for an expression"
+            "Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation"
         );
 
-        // Function without alias is forbidden.
-        let sql = "create materialized view mv1 as select length(x) from t";
+        // some expression without alias is forbidden.
+        let sql = "create materialized view mv1 as select x is null from t";
         let err = frontend.run_sql(sql).await.unwrap_err();
         assert_eq!(
             err.to_string(),
-            "Bind error: An alias must be specified for an expression"
+            "Bind error: An alias must be specified for the 1st expression (counting from 1) in result relation"
         );
     }
 

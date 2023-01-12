@@ -186,7 +186,7 @@ pub struct Bitmap {
 impl std::fmt::Debug for Bitmap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for data in self.iter() {
-            write!(f, "{}", if data { '1' } else { '0' })?;
+            write!(f, "{}", data as u8)?;
         }
         Ok(())
     }

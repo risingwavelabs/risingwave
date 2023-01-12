@@ -40,7 +40,7 @@ use risingwave_storage::hummock::{
     CachePolicy, CompressionAlgorithm, SstableBuilder, SstableBuilderOptions, SstableIterator,
     SstableStore, SstableWriterOptions, TieredCache,
 };
-use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
+use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
 
 pub fn mock_sstable_store() -> SstableStoreRef {
     let store = InMemObjectStore::new().monitored(Arc::new(ObjectStoreMetrics::unused()));
@@ -183,7 +183,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
     Compactor::compact_and_build_sst(
         &mut builder,
         &task_config,
-        Arc::new(StateStoreMetrics::unused()),
+        Arc::new(CompactorMetrics::unused()),
         iter,
         DummyCompactionFilter,
     )

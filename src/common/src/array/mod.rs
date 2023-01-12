@@ -14,6 +14,7 @@
 
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
+mod arrow;
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
@@ -274,8 +275,13 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArrayMeta {
     Simple, // Simple array without given any extra metadata.
-    Struct { children: Arc<[DataType]> },
-    List { datatype: Box<DataType> },
+    Struct {
+        children: Arc<[DataType]>,
+        children_names: Arc<[String]>,
+    },
+    List {
+        datatype: Box<DataType>,
+    },
 }
 
 impl From<&DataType> for ArrayMeta {
@@ -283,6 +289,7 @@ impl From<&DataType> for ArrayMeta {
         match data_type {
             DataType::Struct(struct_type) => ArrayMeta::Struct {
                 children: struct_type.fields.clone().into(),
+                children_names: struct_type.field_names.clone().into(),
             },
             DataType::List { datatype } => ArrayMeta::List {
                 datatype: datatype.clone(),
@@ -395,8 +402,8 @@ impl From<BytesArray> for ArrayImpl {
 /// `impl_convert` implements several conversions for `Array` and `ArrayBuilder`.
 /// * `ArrayImpl -> &Array` with `impl.as_int16()`.
 /// * `ArrayImpl -> Array` with `impl.into_int16()`.
-/// * `Array -> ArrayImpl` with `From` trait.
 /// * `&ArrayImpl -> &Array` with `From` trait.
+/// * `ArrayImpl -> Array` with `From` trait.
 /// * `ArrayBuilder -> ArrayBuilderImpl` with `From` trait.
 macro_rules! impl_convert {
     ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -675,6 +682,13 @@ impl ArrayImpl {
             }
         };
         Ok(array)
+    }
+}
+
+impl ArrayBuilderImpl {
+    /// Create an array builder from given type.
+    pub fn from_type(datatype: &DataType, capacity: usize) -> Self {
+        datatype.create_array_builder(capacity)
     }
 }
 

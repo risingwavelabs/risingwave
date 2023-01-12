@@ -16,8 +16,11 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::DataType;
+use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
 };
@@ -25,13 +28,18 @@ use risingwave_pb::plan_common::RowFormatType;
 use risingwave_source::{AvroParser, ProtobufParser};
 use risingwave_sqlparser::ast::{AvroSchema, CreateSourceStatement, ProtobufSchema, SourceSchema};
 
-use super::create_table::{bind_sql_columns, bind_sql_table_constraints, gen_materialize_plan};
+use super::create_table::{bind_sql_table_constraints, gen_materialize_plan};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::{ColumnId, ROW_ID_COLUMN_ID};
+use crate::handler::create_table::{bind_sql_columns, ColumnIdGenerator};
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::optimizer::OptimizerContext;
 use crate::stream_fragmenter::build_graph;
+
+pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 /// Map an Avro schema to a relational schema.
 async fn extract_avro_table_schema(
@@ -77,32 +85,27 @@ async fn extract_protobuf_table_schema(
         .collect_vec())
 }
 
-// TODO(Yuanxin): Only create a source w/o materializing.
-pub async fn handle_create_source(
-    handler_args: HandlerArgs,
-    is_materialized: bool,
-    stmt: CreateSourceStatement,
-) -> Result<RwPgResponse> {
-    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(stmt.columns)?;
-    let (mut columns, pk_column_ids, row_id_index) =
-        bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
-    if row_id_index.is_none() && !is_materialized {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "The non-materialized source does not support PRIMARY KEY constraint, please use \"CREATE MATERIALIZED SOURCE\" instead".to_owned(),
-        )
-        .into());
-    }
-    let with_properties = handler_args.with_options.inner().clone();
-    const UPSTREAM_SOURCE_KEY: &str = "connector";
-    // confluent schema registry must be used with kafka
-    let is_kafka = with_properties
-        .get("connector")
+#[inline(always)]
+pub(crate) fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool {
+    with_properties
+        .get(UPSTREAM_SOURCE_KEY)
         .unwrap_or(&"".to_string())
         .to_lowercase()
-        .eq("kafka");
+        .eq(KAFKA_CONNECTOR)
+}
+
+pub(crate) async fn resolve_source_schema(
+    source_schema: SourceSchema,
+    columns: &mut Vec<ColumnCatalog>,
+    with_properties: &HashMap<String, String>,
+    row_id_index: Option<usize>,
+    pk_column_ids: &[ColumnId],
+    is_materialized: bool,
+) -> Result<StreamSourceInfo> {
+    let is_kafka = is_kafka_source(with_properties);
     if !is_kafka
         && matches!(
-            &stmt.source_schema,
+            &source_schema,
             SourceSchema::Protobuf(ProtobufSchema {
                 use_schema_registry: true,
                 ..
@@ -117,9 +120,19 @@ pub async fn handle_create_source(
             UPSTREAM_SOURCE_KEY
         ))));
     }
-    let (columns, source_info) = match &stmt.source_schema {
+
+    let source_info = match &source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
+            let (expected_column_len, expected_row_id_index) = if is_kafka && !is_materialized {
+                // The first column is `_rw_kafka_timestamp`.
+                (2, 1)
+            } else {
+                (1, 0)
+            };
+            if columns.len() != expected_column_len
+                || pk_column_ids != vec![ROW_ID_COLUMN_ID]
+                || row_id_index != Some(expected_row_id_index)
+            {
                 return Err(RwError::from(ProtocolError(
                     "User-defined schema is not allowed with row format protobuf. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#protobuf for more information.".to_string(),
                 )));
@@ -129,58 +142,62 @@ pub async fn handle_create_source(
                 extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
             );
 
-            (
-                columns,
-                StreamSourceInfo {
-                    row_format: RowFormatType::Protobuf as i32,
-                    row_schema_location: protobuf_schema.row_schema_location.0.clone(),
-                    use_schema_registry: protobuf_schema.use_schema_registry,
-                    proto_message_name: protobuf_schema.message_name.0.clone(),
-                    ..Default::default()
-                },
-            )
+            StreamSourceInfo {
+                row_format: RowFormatType::Protobuf as i32,
+                row_schema_location: protobuf_schema.row_schema_location.0.clone(),
+                use_schema_registry: protobuf_schema.use_schema_registry,
+                proto_message_name: protobuf_schema.message_name.0.clone(),
+                ..Default::default()
+            }
         }
+
         SourceSchema::Avro(avro_schema) => {
-            if columns.len() != 1 || pk_column_ids != vec![0.into()] || row_id_index != Some(0) {
+            let (expected_column_len, expected_row_id_index) = if is_kafka && !is_materialized {
+                // The first column is `_rw_kafka_timestamp`.
+                (2, 1)
+            } else {
+                (1, 0)
+            };
+            if columns.len() != expected_column_len
+                || pk_column_ids != vec![ROW_ID_COLUMN_ID]
+                || row_id_index != Some(expected_row_id_index)
+            {
                 return Err(RwError::from(ProtocolError(
                     "User-defined schema is not allowed with row format avro. Please refer to https://www.risingwave.dev/docs/current/sql-create-source/#avro for more information.".to_string(),
                 )));
             }
+
             columns.extend(extract_avro_table_schema(avro_schema, with_properties.clone()).await?);
-            (
-                columns,
-                StreamSourceInfo {
-                    row_format: RowFormatType::Avro as i32,
-                    row_schema_location: avro_schema.row_schema_location.0.clone(),
-                    use_schema_registry: avro_schema.use_schema_registry,
-                    proto_message_name: "".to_owned(),
-                    ..Default::default()
-                },
-            )
-        }
-        SourceSchema::Json => (
-            columns,
+
             StreamSourceInfo {
-                row_format: RowFormatType::Json as i32,
+                row_format: RowFormatType::Avro as i32,
+                row_schema_location: avro_schema.row_schema_location.0.clone(),
+                use_schema_registry: avro_schema.use_schema_registry,
+                proto_message_name: "".to_owned(),
                 ..Default::default()
-            },
-        ),
+            }
+        }
+
+        SourceSchema::Json => StreamSourceInfo {
+            row_format: RowFormatType::Json as i32,
+            ..Default::default()
+        },
+
         SourceSchema::Maxwell => {
             // return err if user has not specified a pk
             if row_id_index.is_some() {
                 return Err(RwError::from(ProtocolError(
-                    "Primary key must be specified when creating source with row format debezium."
+                    "Primary key must be specified when creating source with row format maxwell."
                         .to_string(),
                 )));
             }
-            (
-                columns,
-                StreamSourceInfo {
-                    row_format: RowFormatType::Maxwell as i32,
-                    ..Default::default()
-                },
-            )
+
+            StreamSourceInfo {
+                row_format: RowFormatType::Maxwell as i32,
+                ..Default::default()
+            }
         }
+
         SourceSchema::DebeziumJson => {
             // return err if user has not specified a pk
             if row_id_index.is_some() {
@@ -189,14 +206,13 @@ pub async fn handle_create_source(
                         .to_string(),
                 )));
             }
-            (
-                columns,
-                StreamSourceInfo {
-                    row_format: RowFormatType::DebeziumJson as i32,
-                    ..Default::default()
-                },
-            )
+
+            StreamSourceInfo {
+                row_format: RowFormatType::DebeziumJson as i32,
+                ..Default::default()
+            }
         }
+
         SourceSchema::CanalJson => {
             // return err if user has not specified a pk
             if row_id_index.is_some() {
@@ -205,24 +221,80 @@ pub async fn handle_create_source(
                         .to_string(),
                 )));
             }
-            (
-                columns,
-                StreamSourceInfo {
-                    row_format: RowFormatType::CanalJson as i32,
-                    ..Default::default()
-                },
-            )
-        }
-        SourceSchema::CSV(csv_info) => (
-            columns,
+
             StreamSourceInfo {
-                row_format: RowFormatType::Csv as i32,
-                csv_delimiter: csv_info.delimiter as i32,
-                csv_has_header: csv_info.has_header,
+                row_format: RowFormatType::CanalJson as i32,
                 ..Default::default()
-            },
-        ),
+            }
+        }
+
+        SourceSchema::Csv(csv_info) => StreamSourceInfo {
+            row_format: RowFormatType::Csv as i32,
+            csv_delimiter: csv_info.delimiter as i32,
+            csv_has_header: csv_info.has_header,
+            ..Default::default()
+        },
     };
+
+    Ok(source_info)
+}
+
+// Add a hidden column `_rw_kafka_timestamp` to each message from Kafka source.
+pub(crate) fn check_and_add_timestamp_column(
+    with_properties: &HashMap<String, String>,
+    column_descs: &mut Vec<ColumnDesc>,
+    is_materialized: bool,
+    col_id_gen: &mut ColumnIdGenerator,
+) {
+    if is_kafka_source(with_properties) && !is_materialized {
+        let kafka_timestamp_column = ColumnDesc {
+            data_type: DataType::Timestamptz,
+            column_id: col_id_gen.generate(KAFKA_TIMESTAMP_COLUMN_NAME),
+            name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
+            field_descs: vec![],
+            type_name: "".to_string(),
+        };
+        column_descs.push(kafka_timestamp_column);
+    }
+}
+
+pub async fn handle_create_source(
+    handler_args: HandlerArgs,
+    is_materialized: bool,
+    stmt: CreateSourceStatement,
+) -> Result<RwPgResponse> {
+    let with_properties = handler_args.with_options.inner().clone();
+
+    let mut col_id_gen = ColumnIdGenerator::new_initial();
+
+    let (mut column_descs, pk_column_id_from_columns) =
+        bind_sql_columns(stmt.columns, &mut col_id_gen)?;
+
+    check_and_add_timestamp_column(
+        &with_properties,
+        &mut column_descs,
+        is_materialized,
+        &mut col_id_gen,
+    );
+
+    let (mut columns, pk_column_ids, row_id_index) =
+        bind_sql_table_constraints(column_descs, pk_column_id_from_columns, stmt.constraints)?;
+    if row_id_index.is_none() && !is_materialized {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "The non-materialized source does not support PRIMARY KEY constraint, please use \"CREATE MATERIALIZED SOURCE\" instead".to_owned(),
+        )
+        .into());
+    }
+
+    let source_info = resolve_source_schema(
+        stmt.source_schema,
+        &mut columns,
+        &with_properties,
+        row_id_index,
+        &pk_column_ids,
+        is_materialized,
+    )
+    .await?;
 
     let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
@@ -254,7 +326,7 @@ pub async fn handle_create_source(
     // TODO(Yuanxin): This should be removed after unsupporting `CREATE MATERIALIZED SOURCE`.
     if is_materialized {
         let (graph, table) = {
-            let context = OptimizerContext::new_with_handler_args(handler_args);
+            let context = OptimizerContext::from_handler_args(handler_args);
             let (plan, table) =
                 gen_materialize_plan(context.into(), source.clone(), session.user_id())?;
             let graph = build_graph(plan);
@@ -268,6 +340,7 @@ pub async fn handle_create_source(
     } else {
         catalog_writer.create_source(source).await?;
     }
+
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))
 }
 

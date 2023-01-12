@@ -51,7 +51,7 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::{
         HummockStorage as GlobalHummockStorage, MemoryLimiter, SstableIdManager,
     };
-    use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
+    use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
     use risingwave_storage::storage_value::StorageValue;
     use risingwave_storage::store::{
         ReadOptions, StateStoreReadExt, StateStoreWrite, WriteOptions,
@@ -178,7 +178,7 @@ pub(crate) mod tests {
             options: options.clone(),
             sstable_store,
             hummock_meta_client: hummock_meta_client.clone(),
-            stats: Arc::new(StateStoreMetrics::unused()),
+            compactor_metrics: Arc::new(CompactorMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
             read_memory_limiter: MemoryLimiter::unlimit(),

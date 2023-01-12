@@ -193,7 +193,7 @@ impl<C: BatchTaskContext> LookupExecutorBuilder for InnerSideExecutorBuilder<C> 
                     Box::new(LiteralExpression::new(outer_type.clone(), datum.clone())),
                 )?;
 
-                cast_expr.eval_row(OwnedRow::empty())?
+                cast_expr.eval_row(&OwnedRow::empty())?
             };
 
             scan_range.eq_conds.push(datum);

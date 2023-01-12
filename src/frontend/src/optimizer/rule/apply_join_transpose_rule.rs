@@ -23,10 +23,10 @@ use crate::expr::{
     CollectInputRef, CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprType,
     ExprVisitor, FunctionCall, InputRef,
 };
-use crate::optimizer::plan_correlated_id_finder::{ExprCorrelatedIdFinder, PlanCorrelatedIdFinder};
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalFilter, LogicalJoin, LogicalProject, PlanTreeNodeBinary,
 };
+use crate::optimizer::plan_visitor::{ExprCorrelatedIdFinder, PlanCorrelatedIdFinder};
 use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -342,7 +342,7 @@ impl ApplyJoinTransposeRule {
                     join_left_len: apply_left_len,
                     join_left_offset: 0,
                     join_right_offset: -(join_left_len as isize),
-                    index_mapping: ColIndexMapping::empty(0),
+                    index_mapping: ColIndexMapping::empty(0, 0),
                     correlated_id,
                 };
 
@@ -477,7 +477,7 @@ impl ApplyJoinTransposeRule {
                     join_left_len: apply_left_len,
                     join_left_offset: 0,
                     join_right_offset: -(join_left_len as isize),
-                    index_mapping: ColIndexMapping::empty(0),
+                    index_mapping: ColIndexMapping::empty(0, 0),
                     correlated_id,
                 };
 

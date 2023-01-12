@@ -44,17 +44,20 @@ pub enum StatementType {
     CREATE_SCHEMA,
     CREATE_USER,
     CREATE_INDEX,
+    CREATE_FUNCTION,
     DESCRIBE_TABLE,
     GRANT_PRIVILEGE,
     DROP_TABLE,
     DROP_MATERIALIZED_VIEW,
     DROP_VIEW,
     DROP_INDEX,
+    DROP_FUNCTION,
     DROP_SOURCE,
     DROP_SINK,
     DROP_SCHEMA,
     DROP_DATABASE,
     DROP_USER,
+    ALTER_TABLE,
     REVOKE_PRIVILEGE,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
     // that Statement Type is not designed to be one to one mapping with SqlKind.
@@ -171,6 +174,10 @@ where
         values_stream: VS,
         row_desc: Vec<PgFieldDescriptor>,
     ) -> Self {
+        assert!(
+            stmt_type.is_query() ^ row_cnt.is_some(),
+            "should specify row count for command and not for query: {stmt_type}"
+        );
         Self {
             stmt_type,
             row_cnt,

@@ -23,7 +23,7 @@ use super::task_progress::TaskProgressManagerRef;
 use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{MemoryLimiter, SstableIdManagerRef};
-use crate::monitor::StateStoreMetrics;
+use crate::monitor::CompactorMetrics;
 
 /// A `CompactorContext` describes the context of a compactor.
 #[derive(Clone)]
@@ -38,7 +38,7 @@ pub struct Context {
     pub sstable_store: SstableStoreRef,
 
     /// Statistics.
-    pub stats: Arc<StateStoreMetrics>,
+    pub compactor_metrics: Arc<CompactorMetrics>,
 
     /// True if it is a memory compaction (from shared buffer).
     pub is_share_buffer_compact: bool,
@@ -59,7 +59,7 @@ impl Context {
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        stats: Arc<StateStoreMetrics>,
+        compactor_metrics: Arc<CompactorMetrics>,
         sstable_id_manager: SstableIdManagerRef,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> Self {
@@ -76,7 +76,7 @@ impl Context {
             options,
             hummock_meta_client,
             sstable_store,
-            stats,
+            compactor_metrics,
             is_share_buffer_compact: true,
             compaction_executor,
             filter_key_extractor_manager,

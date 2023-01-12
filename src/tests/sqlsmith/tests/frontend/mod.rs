@@ -19,12 +19,13 @@ use itertools::Itertools;
 use libtest_mimic::{Arguments, Failed, Trial};
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
+use risingwave_frontend::handler::HandlerArgs;
 use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::LocalFrontend;
 use risingwave_frontend::{
-    handler, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef, Planner, WithOptions,
+    handler, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef, Planner,
 };
-use risingwave_sqlparser::ast::{ExplainOptions, Statement};
+use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlsmith::{
     create_table_statement_to_table, is_permissible_error, mview_sql_gen, parse_sql, sql_gen, Table,
 };
@@ -53,7 +54,11 @@ async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: &str) -> Result
 }
 
 fn get_seed_table_sql() -> String {
-    let seed_files = vec!["tests/testdata/tpch.sql", "tests/testdata/nexmark.sql"];
+    let seed_files = vec![
+        "tests/testdata/tpch.sql",
+        "tests/testdata/nexmark.sql",
+        "tests/testdata/alltypes.sql",
+    ];
     seed_files
         .iter()
         .map(|filename| std::fs::read_to_string(filename).unwrap())
@@ -115,6 +120,31 @@ async fn create_tables(
     Ok((tables, setup_sql))
 }
 
+/// Unparse
+fn unparse(sql: Statement) -> String {
+    format!("{}", sql)
+}
+
+/// Parse first SQL statement
+fn parse_first_sql_stmt(sql: &str) -> Statement {
+    parse_sql(sql)[0].clone()
+}
+
+/// Tests property `parse(unparse(parse(sql))) == parse(sql)`
+fn round_trip_parse_test(sql: &str) -> Result<Statement> {
+    let start = parse_first_sql_stmt(sql);
+    let round_trip = parse_first_sql_stmt(&unparse(parse_first_sql_stmt(sql)));
+    if start != round_trip {
+        Err(format!(
+            "Roundtrip test failed\nStart: {}\nRoundtrip: {}",
+            start, round_trip
+        )
+        .into())
+    } else {
+        Ok(start)
+    }
+}
+
 async fn test_stream_query(
     session: Arc<SessionImpl>,
     tables: Vec<Table>,
@@ -131,8 +161,7 @@ async fn test_stream_query(
     let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
     reproduce_failing_queries(setup_sql, &sql);
     // The generated SQL must be parsable.
-    let statements = parse_sql(&sql);
-    let stmt = statements[0].clone();
+    let stmt = round_trip_parse_test(&sql)?;
     let skipped = handle(session.clone(), stmt, &sql).await?;
     if !skipped {
         let drop_sql = format!("DROP MATERIALIZED VIEW {}", table.name);
@@ -179,15 +208,9 @@ fn test_batch_query(
     reproduce_failing_queries(setup_sql, &sql);
 
     // The generated SQL must be parsable.
-    let statements = parse_sql(&sql);
-    let stmt = statements[0].clone();
-    let context: OptimizerContextRef = OptimizerContext::new(
-        session.clone(),
-        Arc::from(sql),
-        WithOptions::try_from(&stmt)?,
-        ExplainOptions::default(),
-    )
-    .into();
+    let stmt = round_trip_parse_test(&sql)?;
+    let context: OptimizerContextRef =
+        OptimizerContext::from_handler_args(HandlerArgs::new(session.clone(), &stmt, &sql)?).into();
 
     match stmt {
         Statement::Query(_) => {

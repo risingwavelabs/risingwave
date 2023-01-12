@@ -33,7 +33,7 @@ use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
 use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, FrontendOpts, OptimizerContext, OptimizerContextRef,
-    PlanRef, Planner, WithOptions,
+    PlanRef, Planner,
 };
 use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -294,11 +294,8 @@ impl TestCase {
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
         for stmt in statements {
-            let handler_args = HandlerArgs {
-                session: session.clone(),
-                sql: Arc::from(sql),
-                with_options: WithOptions::try_from(&stmt)?,
-            };
+            // TODO: `sql` may contain multiple statements here.
+            let handler_args = HandlerArgs::new(session.clone(), &stmt, sql)?;
             match stmt.clone() {
                 Statement::Query(_)
                 | Statement::Insert { .. }
@@ -312,9 +309,7 @@ impl TestCase {
                         ..Default::default()
                     };
                     let context = OptimizerContext::new(
-                        session.clone(),
-                        Arc::from(sql),
-                        WithOptions::try_from(&stmt)?,
+                        HandlerArgs::new(session.clone(), &stmt, sql)?,
                         explain_options,
                     );
                     let ret = self.apply_query(&stmt, context.into())?;
@@ -328,6 +323,7 @@ impl TestCase {
                     columns,
                     constraints,
                     if_not_exists,
+                    source_schema,
                     ..
                 } => {
                     create_table::handle_create_table(
@@ -336,6 +332,7 @@ impl TestCase {
                         columns,
                         constraints,
                         if_not_exists,
+                        source_schema,
                     )
                     .await?;
                 }

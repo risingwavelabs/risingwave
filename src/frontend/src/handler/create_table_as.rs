@@ -13,32 +13,15 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ColumnDesc, Field};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::{BoundSetExpr, BoundStatement};
-use crate::handler::create_table::gen_create_table_plan_without_bind;
+use crate::handler::create_table::{gen_create_table_plan_without_bind, ColumnIdGenerator};
 use crate::handler::query::handle_query;
 use crate::{build_graph, Binder, OptimizerContext};
-
-/// Used in `handle_create_as` to convert filed to column desc
-fn convert_field_to_column_desc(field: &Field, column_id: i32) -> ColumnDesc {
-    let field_descs = field
-        .sub_fields
-        .iter()
-        .map(|field| convert_field_to_column_desc(field, 0))
-        .collect();
-
-    ColumnDesc {
-        data_type: field.data_type(),
-        name: field.name.clone(),
-        column_id: column_id.into(),
-        field_descs,
-        type_name: "".to_string(),
-    }
-}
 
 pub async fn handle_create_as(
     handler_args: HandlerArgs,
@@ -81,13 +64,17 @@ pub async fn handle_create_as(
                 }
             }
 
+            let mut col_id_gen = ColumnIdGenerator::new_initial();
+
             // Create ColumnCatelog by Field
             query
                 .schema()
                 .fields()
                 .iter()
-                .enumerate()
-                .map(|(column_id, field)| convert_field_to_column_desc(field, column_id as i32))
+                .map(|field| {
+                    let id = col_id_gen.generate(&field.name);
+                    ColumnDesc::from_field_with_column_id(field, id.get_id())
+                })
                 .collect()
         } else {
             unreachable!()
@@ -106,14 +93,15 @@ pub async fn handle_create_as(
     });
 
     let (graph, source, table) = {
-        let context = OptimizerContext::new_with_handler_args(handler_args.clone());
+        let context = OptimizerContext::from_handler_args(handler_args.clone());
         let (plan, source, table) = gen_create_table_plan_without_bind(
-            &session,
-            context.into(),
+            context,
             table_name.clone(),
             column_descs,
             None,
             vec![],
+            "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
+            None,          // TODO: support `ALTER TABLE` for `CREATE TABLE AS`
         )?;
         let graph = build_graph(plan);
 
