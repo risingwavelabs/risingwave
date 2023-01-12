@@ -51,7 +51,7 @@ pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
 pub use meta_client::MetaClient;
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 
-// TODO: allow unused imports
+#[allow(unused_imports)]
 use crate::meta_client::get_channel_with_defaults;
 
 #[async_trait]

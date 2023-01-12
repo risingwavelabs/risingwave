@@ -130,7 +130,6 @@ impl MetaClient {
             worker_node_parallelism: worker_node_parallelism as u64,
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
-        // TODO: try to do this without a loop and instead with some functional magic
         let mut resp = grpc_meta_client.add_worker_node(request.clone()).await;
         for s in retry_strategy {
             if resp.is_ok() {
