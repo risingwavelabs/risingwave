@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Write;
+
 use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
 use num_traits::ToPrimitive;
 use risingwave_common::types::{NaiveDateTimeWrapper, OrderedF64};
 
+use crate::vector_op::cast::{str_to_timestamp, str_with_time_zone_to_timestamptz};
 use crate::{ExprError, Result};
 
 /// Just a wrapper to reuse the `map_err` logic.
@@ -62,6 +65,28 @@ pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> R
     Ok(usec)
 }
 
+pub fn timestamptz_to_string(elem: i64, time_zone: &str, writer: &mut dyn Write) -> Result<()> {
+    let time_zone = lookup_time_zone(time_zone)?;
+    let secs = elem.div_euclid(1_000_000);
+    let nsecs = elem.rem_euclid(1_000_000) * 1000;
+    let instant_utc = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
+    let instant_local = instant_utc.with_timezone(&time_zone);
+    write!(
+        writer,
+        "{}",
+        instant_local.format("%Y-%m-%d %H:%M:%S%.f%:z")
+    )
+    .map_err(|e| ExprError::Internal(e.into()))?;
+    Ok(())
+}
+
+// Tries to interpret the string with a timezone, and if failing, tries to interpret the string as a
+// timestamp and then adjusts it with the session timezone.
+pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<i64> {
+    str_with_time_zone_to_timestamptz(elem)
+        .or_else(|_| timestamp_at_time_zone(str_to_timestamp(elem)?, time_zone))
+}
+
 #[inline(always)]
 pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<NaiveDateTimeWrapper> {
     let time_zone = lookup_time_zone(time_zone)?;
@@ -80,7 +105,7 @@ mod tests {
     use itertools::Itertools;
 
     use super::*;
-    use crate::vector_op::cast::{str_to_timestamp, str_to_timestamptz};
+    use crate::vector_op::cast::str_to_timestamp;
 
     #[test]
     fn test_time_zone_conversion() {
@@ -105,7 +130,7 @@ mod tests {
             ["2022-11-06 10:00:00Z", "2022-11-06 02:00:00", "2022-11-06 18:00:00", "2022-11-06 11:00:00"],
         ];
         for case in test_cases {
-            let usecs = str_to_timestamptz(case[0]).unwrap();
+            let usecs = str_to_timestamptz(case[0], "UTC").unwrap();
             case.iter().skip(1).zip_eq(zones).for_each(|(local, zone)| {
                 let local = str_to_timestamp(local).unwrap();
 
@@ -147,7 +172,7 @@ mod tests {
             ("2022-11-06 09:59:00Z", "2022-11-06 01:59:00", "US/Pacific", true),
         ];
         for (instant, local, zone, preferred) in test_cases {
-            let usecs = str_to_timestamptz(instant).unwrap();
+            let usecs = str_to_timestamptz(instant, "UTC").unwrap();
             let local = str_to_timestamp(local).unwrap();
 
             let actual = timestamptz_at_time_zone(usecs, zone).unwrap();
@@ -158,5 +183,36 @@ mod tests {
                 assert_eq!(usecs, actual)
             }
         }
+    }
+
+    #[test]
+    fn test_timestamptz_to_and_from_string() {
+        let str1 = "0001-11-15 15:35:40.999999+08:00";
+        let timestamptz1 = str_to_timestamptz(str1, "UTC").unwrap();
+        assert_eq!(timestamptz1, -62108094259000001);
+
+        let mut writer = String::new();
+        timestamptz_to_string(timestamptz1, "UTC", &mut writer).unwrap();
+        assert_eq!(writer, "0001-11-15 07:35:40.999999+00:00");
+
+        let mut writer = String::new();
+        timestamptz_to_string(timestamptz1, "UTC", &mut writer).unwrap();
+        assert_eq!(writer, "0001-11-15 07:35:40.999999+00:00");
+
+        let str2 = "1969-12-31 23:59:59.999999+00:00";
+        let timestamptz2 = str_to_timestamptz(str2, "UTC").unwrap();
+        assert_eq!(timestamptz2, -1);
+
+        let mut writer = String::new();
+        timestamptz_to_string(timestamptz2, "UTC", &mut writer).unwrap();
+        assert_eq!(writer, str2);
+
+        // Parse a timestamptz from a str without timezone
+        let str3 = "2022-01-01 00:00:00+08:00";
+        let timestamptz3 = str_to_timestamptz(str3, "UTC").unwrap();
+
+        let timestamp_from_no_tz =
+            str_to_timestamptz("2022-01-01 00:00:00", "Asia/Singapore").unwrap();
+        assert_eq!(timestamptz3, timestamp_from_no_tz);
     }
 }

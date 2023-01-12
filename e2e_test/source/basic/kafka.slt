@@ -225,6 +225,23 @@ create materialized source s16 (v1 int, v2 varchar) with (
 ) row format json
 
 statement ok
+create source s17 with (
+  connector = 'kafka', 
+  topic = 'proto_c_bin',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest',
+  proto.message = 'test.User'
+) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema'
+
+statement ok
+create source s18 with (
+  connector = 'kafka', 
+  topic = 'avro_c_bin',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
+) row format avro message 'user' row schema location 'file:///risingwave/avro-complex-schema.avsc'
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
@@ -425,3 +442,9 @@ drop source s15
 
 statement ok
 drop source s16
+
+statement ok
+drop source s17
+
+statement ok
+drop source s18

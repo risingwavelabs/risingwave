@@ -125,11 +125,15 @@ pub async fn handle_create_mv(
     let has_order_by = !query.order_by.is_empty();
 
     session.check_relation_name_duplicated(name.clone())?;
+    let mut notice = String::new();
 
     let (table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
+        let context = plan.plan_base().ctx.clone();
         let graph = build_graph(plan);
+
+        context.append_notice(&mut notice);
 
         (table, graph)
     };
@@ -140,18 +144,14 @@ pub async fn handle_create_mv(
         .await?;
 
     if has_order_by {
-        let notice = r#"
+        notice.push_str(r#"
 The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
-It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view."#;
-        Ok(PgResponse::empty_result_with_notice(
-            StatementType::CREATE_MATERIALIZED_VIEW,
-            notice.to_string(),
-        ))
-    } else {
-        Ok(PgResponse::empty_result(
-            StatementType::CREATE_MATERIALIZED_VIEW,
-        ))
+It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view."#);
     }
+    Ok(PgResponse::empty_result_with_notice(
+        StatementType::CREATE_MATERIALIZED_VIEW,
+        notice.to_string(),
+    ))
 }
 
 fn ordinal(i: usize) -> String {

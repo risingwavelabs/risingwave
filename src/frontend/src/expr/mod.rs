@@ -37,6 +37,7 @@ pub use order_by_expr::{OrderBy, OrderByExpr};
 mod expr_mutator;
 mod expr_rewriter;
 mod expr_visitor;
+mod session_timezone;
 mod type_inference;
 mod utils;
 
@@ -49,6 +50,7 @@ pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
+pub use session_timezone::SessionTimezone;
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{
@@ -186,6 +188,23 @@ impl ExprImpl {
     /// Shorthand to create cast expr to `target` type in explicit context.
     pub fn cast_explicit(self, target: DataType) -> Result<ExprImpl> {
         FunctionCall::new_cast(self, target, CastContext::Explicit)
+    }
+
+    /// Shorthand to enforce implicit cast to boolean
+    pub fn enforce_bool_clause(self, clause: &str) -> Result<ExprImpl> {
+        if self.is_unknown() {
+            let inner = self.cast_implicit(DataType::Boolean)?;
+            return Ok(inner);
+        }
+        let return_type = self.return_type();
+        if return_type != DataType::Boolean {
+            bail!(
+                "argument of {} must be boolean, not type {:?}",
+                clause,
+                return_type
+            )
+        }
+        Ok(self)
     }
 
     /// Create "cast" expr to string (`varchar`) type. This is different from a real cast, as
@@ -795,6 +814,7 @@ macro_rules! assert_eq_input_ref {
 
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
+use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
 
