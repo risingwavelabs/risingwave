@@ -163,6 +163,14 @@ profile:
       - use: compute-node
       - use: frontend
 
+  java-binding-demo:
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+
   ######################################
   ### Configurations used in Compose ###
   ######################################
