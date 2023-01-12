@@ -260,7 +260,10 @@ impl HummockVersionExt for HummockVersion {
             return vec![];
         }
         let parent_levels = match self.levels.get_mut(&parent_group_id) {
-            None => return vec![],
+            None => {
+                self.levels.insert(group_id, cur_levels);
+                return vec![];
+            },
             Some(levels) => levels,
         };
         let split_id_vers = cur_levels.init_with_parent_group(parent_levels, member_table_ids);

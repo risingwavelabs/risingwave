@@ -198,10 +198,14 @@ impl LocalHummockVersion {
         member_table_ids: &HashSet<StateTableId>,
     ) {
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId {
+            self.groups.insert(group_id, new_group);
             return;
         }
         let parent_group = match self.groups.get_mut(&parent_group_id) {
-            None => return,
+            None => {
+                self.groups.insert(group_id, new_group);
+                return;
+            },
             Some(group) => group,
         };
         new_group.init_with_parent_group(parent_group, member_table_ids);
