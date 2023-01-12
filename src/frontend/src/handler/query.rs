@@ -28,7 +28,7 @@ use risingwave_sqlparser::ast::Statement;
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
 use crate::handler::flush::do_flush;
-use crate::handler::privilege::{check_privileges, resolve_privileges};
+use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef};
@@ -54,7 +54,7 @@ pub fn gen_batch_query_plan(
     };
 
     let check_items = resolve_privileges(&bound);
-    check_privileges(session, &check_items)?;
+    session.check_privileges(&check_items)?;
 
     let mut planner = Planner::new(context);
 

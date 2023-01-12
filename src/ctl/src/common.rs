@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod meta_service;
-pub use meta_service::*;
+mod context;
 mod hummock_service;
-
-pub use hummock_service::*;
+mod meta_service;
+pub use context::*;

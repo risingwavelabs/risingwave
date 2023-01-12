@@ -17,7 +17,8 @@ use std::collections::HashMap;
 use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
 
 use super::column_catalog::ColumnCatalog;
-use super::{ColumnId, SourceId};
+use super::{ColumnId, RelationCatalog, SourceId};
+use crate::user::UserId;
 use crate::WithOptions;
 
 /// This struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
@@ -31,7 +32,7 @@ pub struct SourceCatalog {
     pub columns: Vec<ColumnCatalog>,
     pub pk_col_ids: Vec<ColumnId>,
     pub append_only: bool,
-    pub owner: u32,
+    pub owner: UserId,
     pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
     pub properties: HashMap<String, String>,
@@ -69,5 +70,11 @@ impl From<&ProstSource> for SourceCatalog {
             row_id_index,
             properties: with_options.into_inner(),
         }
+    }
+}
+
+impl RelationCatalog for SourceCatalog {
+    fn owner(&self) -> UserId {
+        self.owner
     }
 }

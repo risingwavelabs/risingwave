@@ -1,0 +1,118 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query T
+select 1 = SOME(null);
+----
+NULL
+
+query T
+select 2 < ANY(array[null::integer]);
+----
+NULL
+
+query T
+select 3 >= ALL(array[1, 2, null])
+----
+NULL
+
+query T
+select 1 < ALL(array[]::int[]);
+----
+t
+
+query T
+select 1 <> SOME('{}');
+----
+f
+
+query T
+select 'a' not like ANY(array['a', null]);
+----
+NULL
+
+query T
+select 'a' not like SOME(array['b', null]);
+----
+t
+
+query T
+select 1 < SOME(array[1] || array[2]);
+----
+t
+
+query T
+select 1 = ALL((select array[1]) || array[2]);
+----
+f
+
+query T
+select 1 = ANY((select array[1]) || array[2]);
+----
+t
+
+# `current_schemas(null)` will return null.
+query T
+select 1 < ANY(current_schemas(null)::integer[]);
+----
+NULL
+
+query T
+select 1 <> ANY(array[1, 2]);
+----
+t
+
+query T
+select 1 <> ALL(array[1, 2]);
+----
+f
+
+query T
+select 1 <> ANY(array[2, 3]);
+----
+t
+
+query T
+select 1 <> ALL(array[2, 3]);
+----
+t
+
+statement error
+select 1 = SOME(1);
+
+statement error
+select 1 < ANY(array[null])
+
+statement ok
+create table tmp(id int, vec int[]);
+
+statement ok
+insert into tmp values(1, array[2,3]);
+
+statement ok
+insert into tmp values(2, array[2,3]);
+
+statement ok
+create materialized view mv1 as select id, vec from tmp where id = any(vec);
+
+query TT
+select id, vec from mv1;
+----
+2 {2,3}
+
+statement ok
+create materialized view mv2 as select id, vec from tmp where id <> ALL(vec);
+
+query TT
+select id, vec from mv2;
+----
+1 {2,3}
+
+statement ok
+drop materialized view mv1;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop table tmp;

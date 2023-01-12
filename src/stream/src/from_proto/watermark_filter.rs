@@ -42,7 +42,10 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
                 .expect("vnodes not set for watermark filter"),
         );
 
-        let table = StateTable::from_table_catalog(node.get_table()?, store, Some(vnodes)).await;
+        // TODO: may enable sanity check for watermark filter after we have upsert.
+        let table =
+            StateTable::from_table_catalog_no_sanity_check(node.get_table()?, store, Some(vnodes))
+                .await;
 
         Ok(WatermarkFilterExecutor::new(
             input,

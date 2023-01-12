@@ -44,6 +44,7 @@ impl StreamFilter {
             logical.functional_dependency().clone(),
             dist,
             logical.input().append_only(),
+            logical.input().watermark_columns().clone(),
         );
         StreamFilter { base, logical }
     }

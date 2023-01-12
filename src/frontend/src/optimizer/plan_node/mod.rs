@@ -34,6 +34,7 @@ use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
@@ -90,6 +91,12 @@ impl ColPrunable for PlanRef {
             // Check the share cache first. If cache exists, it means this is the second round of
             // column pruning.
             if let Some((new_share, merge_required_cols)) = ctx.get_share_cache(self.id()) {
+                // Piggyback share remove if its has only one parent.
+                if ctx.get_parent_num(logical_share) == 1 {
+                    let input: PlanRef = logical_share.input();
+                    return input.prune_col(required_cols, ctx);
+                }
+
                 // If it is the first visit, recursively call `prune_col` for its input and
                 // replace it.
                 if ctx.visit_share_at_second_round(self.id()) {
@@ -174,6 +181,12 @@ impl PredicatePushdown for PlanRef {
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
+            // Piggyback share remove if its has only one parent.
+            if ctx.get_parent_num(logical_share) == 1 {
+                let input: PlanRef = logical_share.input();
+                return input.predicate_pushdown(predicate, ctx);
+            }
+
             // `LogicalShare` can't clone, so we implement predicate pushdown for `LogicalShare`
             // here.
             // Basically, we need to wait for all parents of `LogicalShare` to push down the
@@ -320,6 +333,10 @@ impl dyn PlanNode {
 
     pub fn functional_dependency(&self) -> &FunctionalDependencySet {
         &self.plan_base().functional_dependency
+    }
+
+    pub fn watermark_columns(&self) -> &FixedBitSet {
+        &self.plan_base().watermark_columns
     }
 
     /// Serialize the plan node and its children to a stream plan proto.
