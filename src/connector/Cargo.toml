@@ -38,7 +38,7 @@ hyper = "0.14"
 itertools = "0.10"
 maplit = "1.0.2"
 mysql_async = "0.31"
-nexmark = { version = "0.1", features = ["serde"] }
+nexmark = { version = "0.2", features = ["serde"] }
 num-traits = "0.2"
 paste = "1"
 prost = "0.11"
