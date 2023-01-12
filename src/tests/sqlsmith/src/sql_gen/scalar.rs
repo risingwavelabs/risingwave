@@ -35,7 +35,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
         // NOTE(kwannoel): Since this generates many invalid queries,
         // its probability should be set to low, e.g. 0.02.
-        // ENABLE(kwannoel): Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/7327>
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7327
         if self.rng.gen_bool(0.0) {
             // NOTE(kwannoel): We generate Cast with NULL to avoid generating lots of ambiguous
             // expressions. For instance agg calls such as `max(NULL)` may be generated,
