@@ -414,8 +414,8 @@ impl HummockLevelsExt for Levels {
                     .partition_point(|level| level.sub_level_id < insert_sub_level_id);
                 assert!(
                     index < l0.sub_levels.len() && l0.sub_levels[index].sub_level_id == insert_sub_level_id,
-                    "should find the level to insert into when applying compaction generated delta. sub level idx: {}",
-                    insert_sub_level_id
+                    "should find the level to insert into when applying compaction generated delta. sub level idx: {}, sub level count: {}",
+                    insert_sub_level_id, l0.sub_levels.len()
                 );
                 level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
             } else {
