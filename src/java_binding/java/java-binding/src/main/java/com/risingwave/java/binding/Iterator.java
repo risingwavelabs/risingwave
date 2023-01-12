@@ -15,6 +15,7 @@ public class Iterator implements AutoCloseable {
 
     public Iterator(MetaClient metaClient, String stateStore, String dbName, String tableName) {
         metaClient.startHeartbeatLoop(Duration.ofMillis(1000), Duration.ofSeconds(600));
+        // Reply on context invalidation to unpin the version.
         HummockVersion version = metaClient.pinVersion();
         Table tableCatalog = metaClient.getTable(dbName, tableName);
         ReadPlan readPlan =
@@ -41,7 +42,6 @@ public class Iterator implements AutoCloseable {
 
     @Override
     public void close() {
-        // TODO: unpin version
         if (!isClosed) {
             isClosed = true;
             Binding.iteratorClose(pointer);

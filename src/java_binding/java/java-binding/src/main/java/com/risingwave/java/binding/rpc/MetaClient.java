@@ -54,7 +54,14 @@ public class MetaClient implements AutoCloseable {
         @Override
         public void run() {
             HeartbeatRequest req = HeartbeatRequest.newBuilder().setNodeId(workerId).build();
-            heartbeatStub.heartbeat(req);
+
+            try {
+                heartbeatStub
+                        .withDeadlineAfter(timeout.toMillis(), TimeUnit.MILLISECONDS)
+                        .heartbeat(req);
+            } catch (Exception e) {
+                Logger.getGlobal().warning(String.format("Failed to send heartbeat: %s", e));
+            }
 
             Instant now = Instant.now();
             if (Duration.between(lastHeartbeatSent, Instant.now()).compareTo(timeout) > 0) {
