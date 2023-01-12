@@ -14,7 +14,7 @@
 
 use bytes::Bytes;
 use rdkafka::message::BorrowedMessage;
-use rdkafka::{Message, Timestamp};
+use rdkafka::Message;
 
 use crate::source::base::SourceMessage;
 use crate::source::SourceMeta;
@@ -33,11 +33,7 @@ impl<'a> From<BorrowedMessage<'a>> for SourceMessage {
             offset: message.offset().to_string(),
             split_id: message.partition().to_string().into(),
             meta: SourceMeta::Kafka(KafkaMeta {
-                timestamp: if let Timestamp::LogAppendTime(ts) = message.timestamp() {
-                    Some(ts)
-                } else {
-                    None
-                },
+                timestamp: message.timestamp().to_millis(),
             }),
         }
     }

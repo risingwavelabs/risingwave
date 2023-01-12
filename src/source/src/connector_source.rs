@@ -191,23 +191,23 @@ impl ConnectorSourceReader {
                     for _ in old_op_num..new_op_num {
                         // TODO: support more kinds of SourceMeta
                         if let SourceMeta::Kafka(kafka_meta) = msg.meta.clone() {
-                            let f = |desc: &SourceColumnDesc| -> Result<Option<Datum>> {
+                            let f = |desc: &SourceColumnDesc| -> Option<Datum> {
                                 if !desc.is_meta {
-                                    return Ok(None);
+                                    return None;
                                 }
                                 match desc.name.as_str() {
-                                    "_rw_kafka_timestamp" => Ok(Some(
+                                    "_rw_kafka_timestamp" => Some(
                                         kafka_meta
                                             .timestamp
                                             .map(|ts| i64_to_timestamptz(ts).unwrap().into()),
-                                    )),
+                                    ),
                                     _ => unreachable!(
                                         "kafka will not have this meta column: {}",
                                         desc.name
                                     ),
                                 }
                             };
-                            builder.row_writer().fulfill(f)?;
+                            builder.row_writer().fulfill_meta_column(f)?;
                         }
                     }
                 }
@@ -389,7 +389,7 @@ impl SourceDescBuilderV2 {
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
         if let Some(row_id_index) = self.row_id_index.as_ref() {
-            columns[row_id_index.index as usize].skip_parse = true;
+            columns[row_id_index.index as usize].is_row_id = true;
         }
         assert!(
             !self.pk_column_ids.is_empty(),
@@ -433,7 +433,7 @@ impl SourceDescBuilderV2 {
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
         if let Some(row_id_index) = self.row_id_index.as_ref() {
-            columns[row_id_index.index as usize].skip_parse = true;
+            columns[row_id_index.index as usize].is_row_id = true;
         }
         FsConnectorSource::new(
             format,

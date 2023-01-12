@@ -203,7 +203,7 @@ impl SourceStreamChunkRowWriter<'_> {
                 if desc.is_meta {
                     return Ok(());
                 }
-                let output = if desc.skip_parse {
+                let output = if desc.is_row_id {
                     A::DEFAULT_OUTPUT
                 } else {
                     f(desc)?
@@ -245,29 +245,18 @@ impl SourceStreamChunkRowWriter<'_> {
     /// This function is used to fulfill this hollow in `meta_column_builder`.
     /// e.g after fulfill
     /// `data_budiler` = [1], `meta_column_builder` = [1], `op` = [insert]
-    pub fn fulfill(
+    pub fn fulfill_meta_column(
         &mut self,
-        mut f: impl FnMut(&SourceColumnDesc) -> Result<Option<Datum>>,
+        mut f: impl FnMut(&SourceColumnDesc) -> Option<Datum>,
     ) -> Result<WriteGuard> {
-        let mut modify_col = vec![];
-
         self.descs
             .iter()
             .zip_eq(self.builders.iter_mut())
-            .enumerate()
-            .try_for_each(|(idx, (desc, builder))| -> Result<()> {
-                if let Some(output) = f(desc)? {
+            .for_each(|(desc, builder)| {
+                if let Some(output) = f(desc) {
                     builder.append_datum(output);
-                    modify_col.push(idx);
                 }
-                Ok(())
-            })
-            .inspect_err(|e| {
-                tracing::warn!("failed to parse source data: {}", e);
-                modify_col.iter().for_each(|idx| {
-                    self.builders[*idx].pop().unwrap();
-                });
-            })?;
+            });
 
         Ok(WriteGuard(()))
     }
