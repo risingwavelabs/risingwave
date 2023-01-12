@@ -21,7 +21,6 @@ if [ "$ret_code" -ne 0 ]; then
   docker logs "$container_id"
   exit 1
 fi
-docker kill "$container_id"
 
 echo "--- docker images"
 docker images

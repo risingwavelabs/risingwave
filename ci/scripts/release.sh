@@ -3,6 +3,11 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
+echo "--- Check env"
+if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [[ -z "${BINARY_NAME+x}" ]]; then
+  exit 0
+fi
+
 echo "--- Install rust"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain $(cat ./rust-toolchain) -y
 source "$HOME/.cargo/env"
@@ -26,8 +31,13 @@ cargo build -p risingwave_cmd_all --features "static-link static-log-level" --pr
 cd target/release && chmod +x risingwave
 
 echo "--- Upload nightly binary to s3"
-tar -czvf risingwave-"$(date '+%Y%m%d')"-x86_64-unknown-linux.tar.gz risingwave
-aws s3 cp risingwave-"$(date '+%Y%m%d')"-x86_64-unknown-linux.tar.gz s3://risingwave-nightly-pre-built-binary
+if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
+  tar -czvf risingwave-"$(date '+%Y%m%d')"-x86_64-unknown-linux.tar.gz risingwave
+  aws s3 cp risingwave-"$(date '+%Y%m%d')"-x86_64-unknown-linux.tar.gz s3://risingwave-nightly-pre-built-binary
+elif [[ -n "${BINARY_NAME+x}" ]]; then
+    tar -czvf risingwave-${BINARY_NAME}-x86_64-unknown-linux.tar.gz risingwave
+    aws s3 cp risingwave-${BINARY_NAME}-x86_64-unknown-linux.tar.gz s3://risingwave-nightly-pre-built-binary
+fi
 
 if [[ -n "${BUILDKITE_TAG+x}" ]]; then
   echo "--- Install gh cli"
