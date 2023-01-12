@@ -41,8 +41,7 @@ use self::plan_node::{
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
 use self::plan_visitor::{
-    has_batch_delete, has_batch_exchange, has_batch_insert, has_batch_seq_scan,
-    has_batch_seq_scan_where, has_batch_source, has_batch_update, has_logical_apply,
+    has_batch_delete, has_batch_exchange, has_batch_insert, has_batch_update, has_logical_apply,
     has_logical_over_agg, HasMaxOneRowApply,
 };
 use self::property::RequiredDist;
