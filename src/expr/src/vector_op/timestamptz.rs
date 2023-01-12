@@ -71,7 +71,6 @@ pub fn timestamptz_to_string(elem: i64, time_zone: &str, writer: &mut dyn Write)
     let nsecs = elem.rem_euclid(1_000_000) * 1000;
     let instant_utc = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
     let instant_local = instant_utc.with_timezone(&time_zone);
-    // TODO: err if not divisible by 3600 seconds?
     write!(
         writer,
         "{}",
