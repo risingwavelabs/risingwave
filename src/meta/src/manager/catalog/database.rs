@@ -179,6 +179,10 @@ impl DatabaseManager {
         }
     }
 
+    pub fn list_databases(&self) -> Vec<Database> {
+        self.databases.values().cloned().collect_vec()
+    }
+
     pub fn list_creating_tables(&self) -> Vec<Table> {
         self.in_progress_creating_tables
             .values()
