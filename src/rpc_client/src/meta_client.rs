@@ -106,8 +106,8 @@ impl MetaClient {
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
         let mut resp = self.inner.subscribe(request.clone()).await;
         if resp.is_err() {
-            for sleep in retry_strategy {
-                // TODO: async sleep here for sleep
+            for s in retry_strategy {
+                tokio::time::sleep(s).await;
                 let request = request.clone();
                 resp = self.inner.subscribe(request).await;
                 if resp.is_ok() {
@@ -117,9 +117,6 @@ impl MetaClient {
         }
         resp
     }
-
-    // TODO: Try to split up the client to have one version that is
-    // mutable and one version that is immutable?
 
     /// Register the current node to the cluster and set the corresponding worker id.
     pub async fn register_new(
@@ -138,8 +135,8 @@ impl MetaClient {
         // TODO: try to do this without a loop and instead with some functional magic
         let mut resp = grpc_meta_client.add_worker_node(request.clone()).await;
         if resp.is_err() {
-            for sleep in retry_strategy {
-                // TODO: async sleep here for sleep
+            for s in retry_strategy {
+                tokio::time::sleep(s).await;
                 let request = request.clone();
                 resp = grpc_meta_client.add_worker_node(request).await;
                 if resp.is_ok() {
@@ -165,8 +162,8 @@ impl MetaClient {
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
         let mut resp = self.inner.activate_worker_node(request.clone()).await;
         if resp.is_err() {
-            for sleep in retry_strategy {
-                // TODO: async sleep here for sleep
+            for s in retry_strategy {
+                tokio::time::sleep(s).await;
                 let request = request.clone();
                 resp = self.inner.activate_worker_node(request).await;
                 if resp.is_ok() {
