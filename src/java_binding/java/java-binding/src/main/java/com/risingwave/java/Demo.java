@@ -4,15 +4,20 @@ import com.risingwave.java.binding.Iterator;
 import com.risingwave.java.binding.Record;
 import com.risingwave.java.binding.rpc.MetaClient;
 import java.util.Arrays;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 /** Hello world! */
 public class Demo {
     public static void main(String[] args) {
         String stateStore = System.getenv("STATE_STORE");
-        int tableId = Integer.parseInt(System.getenv("TABLE_ID"));
+        String dbName = System.getenv("DB_NAME");
+        String tableName = System.getenv("TABLE_NAME");
+        String metaAddr = System.getenv("META_ADDR");
 
-        try (MetaClient metaClient = new MetaClient("127.0.0.1:5690");
-                Iterator iter = new Iterator(metaClient, stateStore, tableId)) {
+        ScheduledThreadPoolExecutor scheduledThreadPool = new ScheduledThreadPoolExecutor(2);
+
+        try (MetaClient metaClient = new MetaClient(metaAddr, scheduledThreadPool);
+                Iterator iter = new Iterator(metaClient, stateStore, dbName, tableName)) {
             while (true) {
                 try (Record record = iter.next()) {
                     if (record == null) {
@@ -27,5 +32,7 @@ public class Demo {
                 }
             }
         }
+
+        scheduledThreadPool.shutdown();
     }
 }

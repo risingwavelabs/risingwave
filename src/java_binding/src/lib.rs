@@ -39,28 +39,28 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| tokio::runtime::Runtime::ne
 #[derive(Error, Debug)]
 enum BindingError {
     #[error("JniError {error}")]
-    JniError {
+    Jni {
         #[from]
         error: jni::errors::Error,
         backtrace: Backtrace,
     },
 
     #[error("StorageError {error}")]
-    StorageError {
+    Storage {
         #[from]
         error: StorageError,
         backtrace: Backtrace,
     },
 
     #[error("RpcError {error}")]
-    RpcError {
+    Rpc {
         #[from]
         error: RpcError,
         backtrace: Backtrace,
     },
 
     #[error("DecodeError {error}")]
-    DecodeError {
+    Decode {
         #[from]
         error: DecodeError,
         backtrace: Backtrace,
@@ -74,6 +74,7 @@ type BindingResult<T> = std::result::Result<T, BindingError>;
 pub struct ByteArray<'a>(JObject<'a>);
 
 impl<'a> From<jbyteArray> for ByteArray<'a> {
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn from(inner: jbyteArray) -> Self {
         unsafe { Self(JObject::from_raw(inner)) }
     }
@@ -157,11 +158,11 @@ where
     F: FnOnce() -> BindingResult<Ret>,
     Ret: Default,
 {
-    match catch_unwind(std::panic::AssertUnwindSafe(move || inner())) {
-        Ok(Ok(ret)) => ret.into(),
+    match catch_unwind(std::panic::AssertUnwindSafe(inner)) {
+        Ok(Ok(ret)) => ret,
         Ok(Err(e)) => {
             match e {
-                BindingError::JniError {
+                BindingError::Jni {
                     error: jni::errors::Error::JavaException,
                     backtrace,
                 } => {

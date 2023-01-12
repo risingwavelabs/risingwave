@@ -21,7 +21,7 @@ script = '''
 #!/bin/bash
 set -ex
 cd src/java_binding/java
-mvn clean package
+mvn clean install
 '''
 
 [tasks.run-java-binding-demo]

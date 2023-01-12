@@ -16,6 +16,7 @@ use std::ops::Bound::Unbounded;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_common::row::{OwnedRow, RowDeserializer};
 use risingwave_common::types::ScalarImpl;
@@ -28,7 +29,7 @@ use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::{SstableStore, TieredCache};
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::monitor::HummockStateStoreMetrics;
 use risingwave_storage::store::{ReadOptions, StreamTypeOfIter};
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -38,13 +39,13 @@ pub struct Iterator {
 }
 
 pub struct Record {
-    key: Vec<u8>,
+    key: Bytes,
     row: OwnedRow,
 }
 
 impl Record {
     pub fn key(&self) -> &[u8] {
-        self.key.as_slice()
+        self.key.as_ref()
     }
 
     pub fn is_null(&self, idx: usize) -> bool {
@@ -87,7 +88,7 @@ impl Iterator {
             TieredCache::none(),
         ));
         let reader =
-            HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
+            HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
 
         let stream = {
             let stream = reader

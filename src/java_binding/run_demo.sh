@@ -5,29 +5,27 @@
 set -e
 
 TABLE_NAME=java_binding_demo
+DB_NAME=dev
+# State store URL and meta node address is determined by risedev.
+STATE_STORE=hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001
+META_ADDR=127.0.0.1:5690
 
-psql -d dev -h localhost -p 4566 -U root << EOF
+${RISINGWAVE_ROOT}/risedev d java-binding-demo
+
+psql -d ${DB_NAME} -h localhost -p 4566 -U root << EOF
 DROP TABLE IF EXISTS ${TABLE_NAME};
 CREATE TABLE ${TABLE_NAME} (v1 bigint, v2 varchar, v3 bigint);
 INSERT INTO ${TABLE_NAME} values (1, 'aaa', 1), (2, 'bbb', 2);
 FLUSH;
 EOF
 
-TABLES=$(./risedev ctl table list | grep \#)
-DEMO_TABLE_PATTERN="#([0-9]+): ${TABLE_NAME}"
-
-# Get table id for demo table.
-if [[ ${TABLES} =~ ${DEMO_TABLE_PATTERN} ]]; then
-    TABLE_ID=${BASH_REMATCH[1]}
-else
-    echo "Demo table ${TABLE_NAME} not found"
-    exit 1
-fi
-
-# TODO: change hard-coded hummock url
-
 cd ${JAVA_BINDING_ROOT}/java
-TABLE_ID=${TABLE_ID} STATE_STORE=hummock+s3://zhidong-s3-bench mvn exec:exec \
+
+TABLE_NAME=${TABLE_NAME} \
+DB_NAME=${DB_NAME} \
+STATE_STORE=${STATE_STORE} \
+META_ADDR=${META_ADDR} \
+mvn exec:exec \
     -pl java-binding \
     -Dexec.executable=java \
     -Dexec.args=" \
@@ -37,3 +35,6 @@ TABLE_ID=${TABLE_ID} STATE_STORE=hummock+s3://zhidong-s3-bench mvn exec:exec \
 psql -d dev -h localhost -p 4566 -U root << EOF
 DROP TABLE ${TABLE_NAME};
 EOF
+
+cd -
+${RISINGWAVE_ROOT}/risedev k > /dev/null

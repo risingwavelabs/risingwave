@@ -21,7 +21,7 @@
 
     <dependencies>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>${project.groupId}</groupId>
             <artifactId>proto</artifactId>
         </dependency>
         <dependency>
