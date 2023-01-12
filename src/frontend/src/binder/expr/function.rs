@@ -187,18 +187,6 @@ impl Binder {
                 };
                 return Ok(ExprImpl::literal_varchar(v));
             }
-            "rw_version" => {
-                if !inputs.is_empty() {
-                    return Err(ErrorCode::ExprError(
-                        "rw_version() does not accept any arguments".into(),
-                    )
-                    .into());
-                }
-
-                let version = String::from(RW_VERSION);
-
-                return Ok(ExprImpl::literal_varchar(version));
-            }
             "current_database" if inputs.is_empty() => {
                 return Ok(ExprImpl::literal_varchar(self.db_name.clone()));
             }
@@ -345,9 +333,13 @@ impl Binder {
             }
             // internal
             "rw_vnode" => ExprType::Vnode,
-            // TODO: include version/tag/commit_id
             // TODO: choose which pg version we should return.
-            "version" => return Ok(ExprImpl::literal_varchar("PostgreSQL 13.9-RW".to_string())),
+            "version" => {
+                return Ok(ExprImpl::literal_varchar(format!(
+                    "PostgreSQL 13.9-RW-{}",
+                    RW_VERSION
+                )))
+            }
             // non-deterministic
             "now" => {
                 self.ensure_now_function_allowed()?;
