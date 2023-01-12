@@ -105,15 +105,13 @@ impl MetaClient {
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
         let mut resp = self.inner.subscribe(request.clone()).await;
-        if resp.is_err() {
-            for s in retry_strategy {
-                tokio::time::sleep(s).await;
-                let request = request.clone();
-                resp = self.inner.subscribe(request).await;
-                if resp.is_ok() {
-                    return resp;
-                }
+        for s in retry_strategy {
+            if resp.is_ok() {
+                return resp;
             }
+            tokio::time::sleep(s).await;
+            let request = request.clone();
+            resp = self.inner.subscribe(request).await;
         }
         resp
     }
@@ -134,15 +132,13 @@ impl MetaClient {
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
         // TODO: try to do this without a loop and instead with some functional magic
         let mut resp = grpc_meta_client.add_worker_node(request.clone()).await;
-        if resp.is_err() {
-            for s in retry_strategy {
-                tokio::time::sleep(s).await;
-                let request = request.clone();
-                resp = grpc_meta_client.add_worker_node(request).await;
-                if resp.is_ok() {
-                    break;
-                }
+        for s in retry_strategy {
+            if resp.is_ok() {
+                break;
             }
+            tokio::time::sleep(s).await;
+            let request = request.clone();
+            resp = grpc_meta_client.add_worker_node(request).await;
         }
 
         let worker_node = resp?.node.expect("AddWorkerNodeResponse::node is empty");
@@ -161,15 +157,13 @@ impl MetaClient {
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
         let mut resp = self.inner.activate_worker_node(request.clone()).await;
-        if resp.is_err() {
-            for s in retry_strategy {
-                tokio::time::sleep(s).await;
-                let request = request.clone();
-                resp = self.inner.activate_worker_node(request).await;
-                if resp.is_ok() {
-                    break;
-                }
+        for s in retry_strategy {
+            if resp.is_ok() {
+                break;
             }
+            tokio::time::sleep(s).await;
+            let request = request.clone();
+            resp = self.inner.activate_worker_node(request).await;
         }
         // return error if all retries failed
         resp?;
