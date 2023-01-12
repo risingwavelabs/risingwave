@@ -1,12 +1,14 @@
 # Memory (Heap) Profiling Guide
 
+Note that the content below is Linux-exclusive.
+
 ## What is Heap Profile?
 
 A heap profiler records the **stack trace of the allocation** of each **live** object, so it’s possible that function A allocates something and then hand over it to struct B, in this case, the allocation will still be counted on A.
 
 ## Internals
 
-RisingWave uses [tikv-jemallocator](https://crates.io/crates/tikv-jemallocator), which is a Rust wrapper of [jemalloc](https://github.com/jemalloc/jemalloc), as its memory allocator.
+RisingWave uses [tikv-jemallocator](https://crates.io/crates/tikv-jemallocator) on Linux, which is a Rust wrapper of [jemalloc](https://github.com/jemalloc/jemalloc), as its memory allocator. On other platforms, RisingWave uses the default allocator.
 
 Luckily, jemalloc provides built-in profiling support ([official wiki](https://github.com/jemalloc/jemalloc/wiki/Use-Case%3A-Heap-Profiling)). jemallocator exposes the feature via a cargo feature ‘profiling’. [Here](https://gist.github.com/ordian/928dc2bd45022cddd547528f64db9174) is a simple guide to profiling with jemallocator.
 
