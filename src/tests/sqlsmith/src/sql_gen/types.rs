@@ -155,19 +155,31 @@ impl TryFrom<&RwAggFuncSig> for AggFuncSig {
 }
 
 /// Table which maps functions' return types to possible function signatures.
+// ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
 pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<FuncSig>>> = LazyLock::new(|| {
     let mut funcs = HashMap::<DataType, Vec<FuncSig>>::new();
     func_sigs()
+        .filter(|func| {
+            func.inputs_type
+                .iter()
+                .all(|t| *t != DataTypeName::Timestamptz)
+        })
         .filter_map(|func| func.try_into().ok())
         .for_each(|func: FuncSig| funcs.entry(func.ret_type.clone()).or_default().push(func));
     funcs
 });
 
 /// Table which maps aggregate functions' return types to possible function signatures.
+// ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
 pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<AggFuncSig>>> =
     LazyLock::new(|| {
         let mut funcs = HashMap::<DataType, Vec<AggFuncSig>>::new();
         agg_func_sigs()
+            .filter(|func| {
+                func.inputs_type
+                    .iter()
+                    .all(|t| *t != DataTypeName::Timestamptz)
+            })
             .filter_map(|func| func.try_into().ok())
             .for_each(|func: AggFuncSig| {
                 funcs.entry(func.ret_type.clone()).or_default().push(func)
