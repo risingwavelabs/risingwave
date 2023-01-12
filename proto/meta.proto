@@ -201,6 +201,7 @@ message MetaSnapshot {
   repeated catalog.Table tables = 5;
   repeated catalog.Index indexes = 6;
   repeated catalog.View views = 7;
+  repeated catalog.Function functions = 15;
   repeated user.UserInfo users = 8;
   repeated common.ParallelUnitMapping parallel_unit_mappings = 9;
   repeated common.WorkerNode nodes = 10;
@@ -230,6 +231,7 @@ message SubscribeResponse {
     catalog.Sink sink = 8;
     catalog.Index index = 9;
     catalog.View view = 10;
+    catalog.Function function = 18;
     user.UserInfo user = 11;
     common.ParallelUnitMapping parallel_unit_mapping = 12;
     common.WorkerNode node = 13;

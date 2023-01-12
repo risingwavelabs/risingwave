@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::{StorageError, StorageResult};
-use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
+use crate::monitor::{MonitoredStateStore, MonitoredStorageMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
 
@@ -71,8 +71,7 @@ macro_rules! define_state_store_read_associated_type {
 }
 
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send + 'a;
-// TODO: directly return `&[u8]` or `Bytes` to user instead of `Vec<u8>`.
-pub type StateStoreIterItem = (FullKey<Vec<u8>>, Bytes);
+pub type StateStoreIterItem = (FullKey<Bytes>, Bytes);
 pub trait StateStoreIterNextFutureTrait<'a> = NextFutureTrait<'a, StateStoreIterItem>;
 pub trait StateStoreIterItemStream = Stream<Item = StorageResult<StateStoreIterItem>> + Send;
 pub trait StateStoreReadIterStream = StateStoreIterItemStream + 'static;
@@ -230,8 +229,8 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     fn seal_epoch(&self, epoch: u64, is_checkpoint: bool);
 
     /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
-    fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
-        MonitoredStateStore::new(self, stats)
+    fn monitored(self, storage_metrics: Arc<MonitoredStorageMetrics>) -> MonitoredStateStore<Self> {
+        MonitoredStateStore::new(self, storage_metrics)
     }
 
     /// Clears contents in shared buffer.

@@ -88,16 +88,6 @@ where
         }))
     }
 
-    async fn reset_current_version(
-        &self,
-        _request: Request<ResetCurrentVersionRequest>,
-    ) -> Result<Response<ResetCurrentVersionResponse>, Status> {
-        let old_version = self.hummock_manager.reset_current_version().await?;
-        Ok(Response::new(ResetCurrentVersionResponse {
-            old_version: Some(old_version),
-        }))
-    }
-
     async fn replay_version_delta(
         &self,
         request: Request<ReplayVersionDeltaRequest>,
@@ -500,7 +490,7 @@ where
         } = request.into_inner();
 
         self.hummock_manager
-            .init_metadata_for_replay(tables, compaction_groups)
+            .init_metadata_for_version_replay(tables, compaction_groups)
             .await?;
         Ok(Response::new(InitMetadataForReplayResponse {}))
     }

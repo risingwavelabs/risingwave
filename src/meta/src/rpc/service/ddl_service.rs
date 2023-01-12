@@ -16,7 +16,6 @@ use std::collections::HashSet;
 
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::*;
 use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
@@ -34,7 +33,8 @@ use crate::manager::{
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    ActorGraphBuilder, CreateStreamingJobContext, GlobalStreamManagerRef, SourceManagerRef,
+    visit_fragment, ActorGraphBuilder, CreateStreamingJobContext, GlobalStreamManagerRef,
+    SourceManagerRef,
 };
 use crate::{MetaError, MetaResult};
 
@@ -344,22 +344,84 @@ where
         }))
     }
 
+    async fn create_function(
+        &self,
+        request: Request<CreateFunctionRequest>,
+    ) -> Result<Response<CreateFunctionResponse>, Status> {
+        let req = request.into_inner();
+        let id = self.gen_unique_id::<{ IdCategory::Function }>().await?;
+        let mut function = req.get_function()?.clone();
+        function.id = id;
+        let version = self.catalog_manager.create_function(&function).await?;
+
+        Ok(Response::new(CreateFunctionResponse {
+            status: None,
+            function_id: id,
+            version,
+        }))
+    }
+
+    async fn drop_function(
+        &self,
+        request: Request<DropFunctionRequest>,
+    ) -> Result<Response<DropFunctionResponse>, Status> {
+        self.check_barrier_manager_status().await?;
+        let request = request.into_inner();
+
+        let version = self
+            .catalog_manager
+            .drop_function(request.function_id)
+            .await?;
+
+        Ok(Response::new(DropFunctionResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn create_table(
         &self,
         request: Request<CreateTableRequest>,
     ) -> Result<Response<CreateTableResponse>, Status> {
         let request = request.into_inner();
-        let source = request.source;
-        let mview = request.materialized_view.unwrap();
-        let fragment_graph = request.fragment_graph.unwrap();
+        let mut source = request.source;
+        let mut mview = request.materialized_view.unwrap();
+        let mut fragment_graph = request.fragment_graph.unwrap();
 
-        let (table_id, version) = self
-            .create_table_inner(source, mview, fragment_graph)
+        // If we're creating a table with connector, we should additionally fill its ID first.
+        if let Some(source) = &mut source {
+            // Generate source id.
+            let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: Use source category
+            source.id = source_id;
+
+            let mut source_count = 0;
+            for fragment in fragment_graph.fragments.values_mut() {
+                visit_fragment(fragment, |node_body| {
+                    if let NodeBody::Source(source_node) = node_body {
+                        // TODO: Refactor using source id.
+                        source_node.source_inner.as_mut().unwrap().source_id = source_id;
+                        source_count += 1;
+                    }
+                });
+            }
+            assert_eq!(
+                source_count, 1,
+                "require exactly 1 external stream source when creating table with a connector"
+            );
+
+            // Fill in the correct source id for mview.
+            mview.optional_associated_source_id =
+                Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
+        }
+
+        let mut stream_job = StreamingJob::Table(source, mview);
+        let version = self
+            .create_stream_job(&mut stream_job, fragment_graph)
             .await?;
 
         Ok(Response::new(CreateTableResponse {
             status: None,
-            table_id,
+            table_id: stream_job.id(),
             version,
         }))
     }
@@ -422,14 +484,37 @@ where
         Ok(Response::new(RisectlListStateTablesResponse { tables }))
     }
 
+    async fn replace_table_plan(
+        &self,
+        _request: Request<ReplaceTablePlanRequest>,
+    ) -> Result<Response<ReplaceTablePlanResponse>, Status> {
+        Err(Status::unimplemented(
+            "replace table plan is not implemented yet",
+        ))
+    }
+
     async fn java_get_table(
         &self,
         request: Request<JavaGetTableRequest>,
     ) -> Result<Response<JavaGetTableResponse>, Status> {
         let req = request.into_inner();
-        Ok(Response::new(JavaGetTableResponse {
-            table: self.catalog_manager.get_table(req.table_id).await,
-        }))
+        let database = self
+            .catalog_manager
+            .list_databases()
+            .await
+            .into_iter()
+            .find(|db| db.name == req.database_name);
+        if let Some(db) = database {
+            let table = self
+                .catalog_manager
+                .list_tables()
+                .await
+                .into_iter()
+                .find(|t| t.name == req.table_name && t.database_id == db.id);
+            Ok(Response::new(JavaGetTableResponse { table }))
+        } else {
+            Ok(Response::new(JavaGetTableResponse { table: None }))
+        }
     }
 }
 
@@ -458,11 +543,17 @@ where
 
         let (mut ctx, table_fragments) =
             self.prepare_stream_job(stream_job, fragment_graph).await?;
-        match self
-            .stream_manager
-            .create_streaming_job(table_fragments, &mut ctx)
-            .await
-        {
+
+        let result = try {
+            if let Some(source) = stream_job.source() {
+                self.source_manager.register_source(source).await?;
+            }
+            self.stream_manager
+                .create_streaming_job(table_fragments, &mut ctx)
+                .await?;
+        };
+
+        match result {
             Ok(_) => self.finish_stream_job(stream_job, &ctx).await,
             Err(err) => {
                 self.cancel_stream_job(stream_job, &ctx).await?;
@@ -677,78 +768,6 @@ where
             .await;
 
         Ok(version)
-    }
-
-    /// If `source` is `None` here, then there is no external streaming source for this table.
-    async fn create_table_inner(
-        &self,
-        mut source: Option<Source>,
-        mut mview: Table,
-        mut fragment_graph: StreamFragmentGraph,
-    ) -> MetaResult<(TableId, CatalogVersion)> {
-        self.check_barrier_manager_status().await?;
-
-        if let Some(source) = &mut source {
-            // Generate source id.
-            let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: Use source category
-            source.id = source_id;
-
-            // Fill in the correct source id for stream node.
-            fn fill_source_id(stream_node: &mut StreamNode, source_id: u32) -> usize {
-                let mut source_count = 0;
-                if let NodeBody::Source(source_node) = stream_node.node_body.as_mut().unwrap() {
-                    // TODO: Refactor using source id.
-                    source_node.source_inner.as_mut().unwrap().source_id = source_id;
-                    source_count += 1;
-                }
-                for input in &mut stream_node.input {
-                    source_count += fill_source_id(input, source_id);
-                }
-                source_count
-            }
-
-            let mut source_count = 0;
-            for fragment in fragment_graph.fragments.values_mut() {
-                source_count += fill_source_id(fragment.node.as_mut().unwrap(), source_id);
-            }
-            assert_eq!(
-                source_count, 1,
-                "require exactly 1 external stream source when creating table with a connector"
-            );
-
-            // Fill in the correct source id for mview.
-            mview.optional_associated_source_id =
-                Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
-        }
-
-        let mut stream_job = StreamingJob::Table(source.clone(), mview.clone());
-        let (mut ctx, table_fragments) = self
-            .prepare_stream_job(&mut stream_job, fragment_graph)
-            .await?;
-
-        if let Some(source) = &source {
-            if let Err(e) = self.source_manager.register_source(source).await {
-                self.catalog_manager
-                    .cancel_create_table_procedure_with_source(source, &mview)
-                    .await?;
-                return Err(e);
-            }
-        }
-
-        match self
-            .stream_manager
-            .create_streaming_job(table_fragments, &mut ctx)
-            .await
-        {
-            Ok(_) => {
-                let version = self.finish_stream_job(&stream_job, &ctx).await?;
-                Ok((stream_job.id(), version))
-            }
-            Err(err) => {
-                self.cancel_stream_job(&stream_job, &ctx).await?;
-                Err(err)
-            }
-        }
     }
 
     async fn drop_table_inner(

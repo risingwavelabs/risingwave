@@ -135,6 +135,7 @@ impl TableCatalogBuilder {
             definition: "".into(),
             handle_pk_conflict: false,
             read_prefix_len_hint: self.read_prefix_len_hint,
+            version: None, // the internal table is not versioned and can't be schema changed
         }
     }
 

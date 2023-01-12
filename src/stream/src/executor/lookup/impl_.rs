@@ -412,7 +412,7 @@ impl<S: StateStore> LookupExecutor<S> {
             pin_mut!(all_data_iter);
             while let Some(inner) = all_data_iter.next().await {
                 // Only need value (include storage pk).
-                let row = inner.unwrap().into_owned();
+                let row = inner.unwrap();
                 all_rows.push(row);
             }
         }
