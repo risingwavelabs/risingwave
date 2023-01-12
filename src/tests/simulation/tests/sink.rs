@@ -18,8 +18,10 @@ use std::time::Duration;
 
 use anyhow::Result;
 use madsim::export::futures::StreamExt;
+use madsim::rand::prelude::SliceRandom;
+use madsim::rand::thread_rng;
 use madsim::time;
-use rdkafka::consumer::StreamConsumer;
+use rdkafka::consumer::{MessageStream, StreamConsumer};
 use rdkafka::message::BorrowedMessage;
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
 use risingwave_simulation::cluster::{Cluster, Configuration};
@@ -74,23 +76,13 @@ async fn test_sink_append_only() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 
     let mut topics = HashMap::new();
-    topics.insert("t_sink_append_only".to_string(), 3);
+    topics.insert(APPEND_ONLY_TOPIC.to_string(), 3);
     cluster.create_kafka_topics(topics);
 
     time::sleep(Duration::from_secs(10)).await;
 
     cluster.run(ROOT_TABLE_CREATE).await?;
     cluster.run(APPEND_ONLY_SINK_CREATE).await?;
-
-    let materialize_fragment = cluster
-        .locate_one_fragment([
-            identity_contains("materialize"),
-            no_identity_contains("globalSimpleAgg"),
-        ])
-        .await?;
-
-    let id = materialize_fragment.id();
-    cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
 
     let consumer: StreamConsumer<_> = cluster
         .run_on_client(async move {
@@ -114,17 +106,19 @@ async fn test_sink_append_only() -> Result<()> {
 
     let mut stream = consumer.stream();
 
-    for i in &[1, 2, 3, 4, 5] {
-        cluster
-            .run(&format!("insert into t values ({});", i))
-            .await?;
-        cluster.run(&format!("flush;")).await?;
+    let materialize_fragment = cluster
+        .locate_one_fragment([
+            identity_contains("materialize"),
+            no_identity_contains("globalSimpleAgg"),
+        ])
+        .await?;
 
-        let msg = stream.next().await.unwrap().unwrap();
-        let payload = msg.payload().unwrap();
-
-        check_payload(&msg, payload, *i);
-    }
+    let id = materialize_fragment.id();
+    check_kafka_after_insert(&mut cluster, &mut stream, &[1, 2, 3]).await?;
+    cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
+    check_kafka_after_insert(&mut cluster, &mut stream, &[4, 5, 6]).await?;
+    cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
+    check_kafka_after_insert(&mut cluster, &mut stream, &[7, 8, 9]).await?;
 
     Ok(())
 }
@@ -134,7 +128,7 @@ async fn test_sink_debezium() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
 
     let mut topics = HashMap::new();
-    topics.insert("t_sink_debezium".to_string(), 3);
+    topics.insert(DEBEZIUM_TOPIC.to_string(), 3);
     cluster.create_kafka_topics(topics);
 
     time::sleep(Duration::from_secs(10)).await;
@@ -142,16 +136,6 @@ async fn test_sink_debezium() -> Result<()> {
     cluster.run(ROOT_TABLE_CREATE).await?;
     cluster.run(MV_CREATE).await?;
     cluster.run(DEBEZIUM_SINK_CREATE).await?;
-
-    let materialize_fragment = cluster
-        .locate_one_fragment([
-            identity_contains("materialize"),
-            no_identity_contains("globalSimpleAgg"),
-        ])
-        .await?;
-
-    let id = materialize_fragment.id();
-    cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
 
     let consumer: StreamConsumer<_> = cluster
         .run_on_client(async move {
@@ -175,17 +159,45 @@ async fn test_sink_debezium() -> Result<()> {
 
     let mut stream = consumer.stream();
 
-    for i in &[1, 2, 3, 4, 5] {
-        cluster
-            .run(&format!("insert into t values ({});", i))
-            .await?;
-        cluster.run(&format!("flush;")).await?;
+    let materialize_fragment = cluster
+        .locate_one_fragment([
+            identity_contains("materialize"),
+            identity_contains("globalSimpleAgg"),
+        ])
+        .await?;
 
-        let msg = stream.next().await.unwrap().unwrap();
-        let payload = msg.payload().unwrap();
+    let (mut all, used) = materialize_fragment.parallel_unit_usage();
 
-        check_payload(&msg, payload, *i);
-    }
+    assert_eq!(used.len(), 1);
+
+    all.shuffle(&mut thread_rng());
+
+    let mut target_parallel_units = all
+        .into_iter()
+        .filter(|parallel_unit_id| !used.contains(parallel_unit_id));
+
+    let id = materialize_fragment.id();
+
+    check_kafka_after_insert(&mut cluster, &mut stream, &[1, 2, 3]).await?;
+
+    let source_parallel_unit = used.iter().next().cloned().unwrap();
+    let target_parallel_unit = target_parallel_units.next().unwrap();
+    cluster
+        .reschedule(format!(
+            "{id}-[{source_parallel_unit}]+[{target_parallel_unit}]"
+        ))
+        .await?;
+    check_kafka_after_insert(&mut cluster, &mut stream, &[4, 5, 6]).await?;
+
+    let source_parallel_unit = target_parallel_unit;
+    let target_parallel_unit = target_parallel_units.next().unwrap();
+
+    cluster
+        .reschedule(format!(
+            "{id}-[{source_parallel_unit}]+[{target_parallel_unit}]"
+        ))
+        .await?;
+    check_kafka_after_insert(&mut cluster, &mut stream, &[7, 8, 9]).await?;
 
     Ok(())
 }
@@ -213,4 +225,24 @@ fn check_payload(msg: &BorrowedMessage, payload: &[u8], i: i64) {
         }
         _ => unreachable!(),
     }
+}
+
+async fn check_kafka_after_insert(
+    cluster: &mut Cluster,
+    stream: &mut MessageStream<'_>,
+    input: &[i64],
+) -> Result<()> {
+    for i in input {
+        cluster
+            .run(&format!("insert into t values ({});", i))
+            .await?;
+        cluster.run("flush;").await?;
+
+        let msg = stream.next().await.unwrap().unwrap();
+        let payload = msg.payload().unwrap();
+
+        check_payload(&msg, payload, *i);
+    }
+
+    Ok(())
 }
