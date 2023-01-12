@@ -99,8 +99,7 @@ pub struct HummockEventHandler {
     read_version_mapping: Arc<ReadVersionMappingType>,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
-    seal_epoch_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
-    seal_epoch: AtomicU64,
+    seal_epoch: Arc<AtomicU64>,
     pinned_version: Arc<ArcSwap<PinnedVersion>>,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
 
@@ -143,10 +142,7 @@ impl HummockEventHandler {
         pinned_version: PinnedVersion,
         compactor_context: Arc<Context>,
     ) -> Self {
-        let seal_epoch = AtomicU64::new(pinned_version.max_committed_epoch());
-        let (seal_epoch_notifier_tx, _) =
-            tokio::sync::watch::channel(seal_epoch.load(Ordering::Relaxed));
-        let seal_epoch_notifier_tx = Arc::new(seal_epoch_notifier_tx);
+        let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
@@ -167,7 +163,6 @@ impl HummockEventHandler {
             hummock_event_rx,
             pending_sync_requests: Default::default(),
             version_update_notifier_tx,
-            seal_epoch_notifier_tx,
             seal_epoch,
             pinned_version: Arc::new(ArcSwap::from_pointee(pinned_version)),
             write_conflict_detector,
@@ -178,12 +173,12 @@ impl HummockEventHandler {
         }
     }
 
-    pub fn version_update_notifier_tx(&self) -> Arc<tokio::sync::watch::Sender<HummockEpoch>> {
-        self.version_update_notifier_tx.clone()
+    pub fn sealed_epoch(&self) -> Arc<AtomicU64> {
+        self.seal_epoch.clone()
     }
 
-    pub fn seal_epoch_notifier_tx(&self) -> Arc<tokio::sync::watch::Sender<HummockEpoch>> {
-        self.seal_epoch_notifier_tx.clone()
+    pub fn version_update_notifier_tx(&self) -> Arc<tokio::sync::watch::Sender<HummockEpoch>> {
+        self.version_update_notifier_tx.clone()
     }
 
     pub fn pinned_version(&self) -> Arc<ArcSwap<PinnedVersion>> {
@@ -468,10 +463,6 @@ impl HummockEventHandler {
                             if is_checkpoint {
                                 self.uploader.start_sync_epoch(epoch);
                             }
-                            self.seal_epoch.store(epoch, Ordering::SeqCst);
-                            self.seal_epoch_notifier_tx.send_modify(|state| {
-                                *state = epoch;
-                            });
                         }
                         #[cfg(any(test, feature = "test"))]
                         HummockEvent::FlushEvent(sender) => {

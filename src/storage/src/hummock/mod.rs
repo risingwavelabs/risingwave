@@ -15,6 +15,7 @@
 //! Hummock is the state store of the streaming system.
 
 use std::ops::Deref;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
@@ -125,7 +126,7 @@ pub struct HummockStorage {
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
 
-    seal_epoch_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+    seal_epoch: Arc<AtomicU64>,
 
     pinned_version: Arc<ArcSwap<PinnedVersion>>,
 
@@ -203,7 +204,7 @@ impl HummockStorage {
             context: compactor_context,
             buffer_tracker: hummock_event_handler.buffer_tracker().clone(),
             version_update_notifier_tx: hummock_event_handler.version_update_notifier_tx(),
-            seal_epoch_notifier_tx: hummock_event_handler.seal_epoch_notifier_tx(),
+            seal_epoch: hummock_event_handler.sealed_epoch(),
             hummock_event_sender: event_tx.clone(),
             pinned_version: hummock_event_handler.pinned_version(),
             hummock_version_reader: HummockVersionReader::new(sstable_store, stats.clone()),
