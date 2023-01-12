@@ -50,6 +50,7 @@ pub use connector_client::ConnectorClient;
 pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
 pub use meta_client::MetaClient;
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
+use tonic::transport::Channel;
 
 #[allow(unused_imports)]
 use crate::meta_client::get_channel_with_defaults;
@@ -181,21 +182,40 @@ macro_rules! meta_rpc_client_method_impl {
                     }
                 } // release MutexGuard on $client
 
-                // Invalid connection. Meta service is follower
+                // Invalid connection. Meta service is follower or down
                 let resp = self.leader_client.as_ref().lock().await
                     .leader(LeaderRequest {})
-                    .await
-                    .expect("Expect that leader service always knows who leader is")
-                    .into_inner();
+                    .await;
 
-                let leader_addr: HostAddress = resp
+                let leader_addr_response = match resp {
+                    Ok(resp) => {
+                        tracing::info!("Tried to connect against follower. Getting leader address");
+                        resp
+                    }
+                    Err(_) => {
+                        tracing::warn!("Meta node down. Getting leader info from different node");
+                        let node_addresses = vec![5690, 15690, 25690];
+                        let meta_channel = util(&node_addresses).await.unwrap_or_else(|| {
+                            panic!("All meta nodes are down. Tried to connect against nodes at these addresses: {:?}",
+                                node_addresses)
+                        });
+                        let mut leader_client = LeaderServiceClient::new(meta_channel);
+                        leader_client.leader(LeaderRequest{}).await?
+                    }
+                };
+
+                let leader_addr = leader_addr_response
+                    .into_inner()
                     .leader_addr
                     .expect("Expect that leader service always knows who leader is");
+
+                // TODO: Also try with https?
                 let addr = format!(
                     "http://{}:{}",
                     leader_addr.get_host(),
                     leader_addr.get_port()
                 );
+                tracing::info!("Connecting against meta leader node {}", addr);
                 let leader_channel = get_channel_with_defaults(addr.as_str()).await?;
 
                 // Hold locks on all sub-clients, to update atomically
@@ -223,8 +243,9 @@ macro_rules! meta_rpc_client_method_impl {
                     *backup_c = BackupServiceClient::new(leader_channel);
                 } // release MutexGuards on all clients
 
-                // Recursive in case we have another faulty connection?
+                // TODO: Recursive in case we have another faulty connection?
                 // self.$fn_name(req_clone).await
+
                 let response = self
                     .$client
                     .as_ref()
@@ -233,6 +254,7 @@ macro_rules! meta_rpc_client_method_impl {
                     .$fn_name(req_clone)
                     .await?;
                 Ok(response.into_inner())
+
             }
         )*
     }

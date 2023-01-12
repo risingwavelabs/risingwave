@@ -871,6 +871,20 @@ impl HummockMetaClient for MetaClient {
     }
 }
 
+// TODO: rename.
+// TODO: This should take str not just ports
+async fn util(addresses: &Vec<i32>) -> Option<Channel> {
+    for meta_addr in addresses {
+        // TODO: try http and https?
+        let addr = format!("http://127.0.0.1:{}", *meta_addr);
+        let meta_channel = get_channel_with_defaults(addr.as_str()).await;
+        if meta_channel.is_ok() {
+            return Some(meta_channel.unwrap());
+        }
+    }
+    None
+}
+
 /// wrapper for `get_channel`
 pub async fn get_channel_with_defaults(
     addr: &str,
@@ -885,7 +899,7 @@ pub async fn get_channel_with_defaults(
     .await
 }
 
-/// get a channel against service at `addr`
+/// get a channel against server at `addr`
 ///
 /// ## Arguments:
 /// addr: Should consist out of protocol, IP and port
@@ -920,12 +934,14 @@ async fn get_channel(
     .await
 }
 
+// TODO: remove notes
 // internal mutability
 // https://doc.rust-lang.org/book/ch15-05-interior-mutability.html
 // see https://doc.rust-lang.org/book/ch16-03-shared-state.html#using-mutexes-to-allow-access-to-data-from-one-thread-at-a-time
 // atomic may also work
 // arc mutex
 
+// TODO: remove notes
 // - I need internal mutability, because I need to change the clients inside the GrpcMetaClient
 // - Mutex implements internal mutability, but we can also implement that from scratch?
 // - If we use mutex we cannot move futures around, since MutexGuard does not implement Send
