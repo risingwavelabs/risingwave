@@ -24,6 +24,7 @@
 
 use std::iter::repeat;
 use std::sync::Arc;
+use std::{thread, time};
 
 #[cfg(not(madsim))]
 use anyhow::anyhow;
@@ -35,7 +36,6 @@ use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::heartbeat_request::extra_info;
-
 pub mod error;
 use error::{Result, RpcError};
 mod compute_client;
@@ -194,7 +194,13 @@ macro_rules! meta_rpc_client_method_impl {
                     }
                     Err(_) => {
                         tracing::warn!("Meta node down. Getting leader info from different node");
-                        let node_addresses = vec![5690, 15690, 25690];
+                        // We need to give time to all meta nodes to know who the new leader is
+                        // How can we make this more resilient?
+                        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+
+                        // TODO: this have to be the actual addresses from the cmd line arg
+                        // TODO: order this again
+                        let node_addresses = vec![15690, 5690, 25690];
                         let meta_channel = util(&node_addresses).await.unwrap_or_else(|| {
                             panic!("All meta nodes are down. Tried to connect against nodes at these addresses: {:?}",
                                 node_addresses)

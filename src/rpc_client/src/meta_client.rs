@@ -876,6 +876,7 @@ impl HummockMetaClient for MetaClient {
 async fn util(addresses: &Vec<i32>) -> Option<Channel> {
     for meta_addr in addresses {
         // TODO: try http and https?
+        // Should the parameter we pass into the image hold the info if this is http or https?
         let addr = format!("http://127.0.0.1:{}", *meta_addr);
         let meta_channel = get_channel_with_defaults(addr.as_str()).await;
         if meta_channel.is_ok() {
