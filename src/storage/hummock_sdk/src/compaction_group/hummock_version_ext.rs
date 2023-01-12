@@ -94,27 +94,13 @@ pub trait HummockVersionExt {
     ///
     /// Levels belonging to the same compaction group retain their relative order.
     fn get_combined_levels(&self) -> Vec<&Level>;
-    fn iter_tables<F: FnMut(&SstableInfo)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        level_idex: usize,
-        f: F,
-    );
-    fn iter_group_tables<F: FnMut(&SstableInfo)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        f: F,
-    );
-    fn map_level<F: FnMut(&Level)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        level_idex: usize,
-        f: F,
-    );
     fn num_levels(&self, compaction_group_id: CompactionGroupId) -> usize;
     fn level_iter<F: FnMut(&Level) -> bool>(&self, compaction_group_id: CompactionGroupId, f: F);
 
     fn get_sst_ids(&self) -> Vec<u64>;
+}
+
+pub trait HummockVersionUpdateExt {
     fn init_with_parent_group(
         &mut self,
         parent_group_id: CompactionGroupId,
@@ -161,48 +147,6 @@ impl HummockVersionExt for HummockVersion {
             .collect_vec()
     }
 
-    fn iter_tables<F: FnMut(&SstableInfo)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        level_idx: usize,
-        mut f: F,
-    ) {
-        if let Some(levels) = self.levels.get(&compaction_group_id) {
-            if level_idx == 0 {
-                for level in &levels.l0.as_ref().unwrap().sub_levels {
-                    for table in &level.table_infos {
-                        f(table);
-                    }
-                }
-            } else {
-                for table in &levels.levels[level_idx - 1].table_infos {
-                    f(table);
-                }
-            }
-        }
-    }
-
-    fn iter_group_tables<F: FnMut(&SstableInfo)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        mut f: F,
-    ) {
-        if let Some(levels) = self.levels.get(&compaction_group_id) {
-            if let Some(ref l0) = levels.l0 {
-                for sub_level in l0.get_sub_levels() {
-                    for table_info in sub_level.get_table_infos() {
-                        f(table_info);
-                    }
-                }
-            }
-            for level in levels.get_levels() {
-                for table_info in level.get_table_infos() {
-                    f(table_info);
-                }
-            }
-        }
-    }
-
     fn level_iter<F: FnMut(&Level) -> bool>(
         &self,
         compaction_group_id: CompactionGroupId,
@@ -222,23 +166,6 @@ impl HummockVersionExt for HummockVersion {
         }
     }
 
-    fn map_level<F: FnMut(&Level)>(
-        &self,
-        compaction_group_id: CompactionGroupId,
-        level_idx: usize,
-        mut f: F,
-    ) {
-        if let Some(levels) = self.levels.get(&compaction_group_id) {
-            if level_idx == 0 {
-                for sub_level in &levels.l0.as_ref().unwrap().sub_levels {
-                    f(sub_level);
-                }
-            } else {
-                f(&levels.levels[level_idx - 1]);
-            }
-        }
-    }
-
     fn num_levels(&self, compaction_group_id: CompactionGroupId) -> usize {
         // l0 is currently separated from all levels
         self.levels
@@ -246,7 +173,9 @@ impl HummockVersionExt for HummockVersion {
             .map(|group| group.levels.len() + 1)
             .unwrap_or(0)
     }
+}
 
+impl HummockVersionUpdateExt for HummockVersion {
     fn init_with_parent_group(
         &mut self,
         parent_group_id: CompactionGroupId,
@@ -378,7 +307,7 @@ impl HummockVersionExt for HummockVersion {
                 );
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
-                levels.apply_compact_ssts(summary, false);
+                levels.apply_compact_ssts(summary);
             }
             if has_destroy {
                 self.levels.remove(compaction_group_id);
@@ -409,11 +338,14 @@ impl HummockVersionExt for HummockVersion {
     ) -> BTreeMap<HummockSstableId, HashMap<CompactionGroupId, u64>> {
         let mut ret: BTreeMap<_, HashMap<_, _>> = BTreeMap::new();
         for compaction_group_id in self.get_levels().keys() {
-            self.iter_group_tables(*compaction_group_id, |table_info| {
-                let sst_id = table_info.get_id();
-                ret.entry(sst_id)
-                    .or_default()
-                    .insert(*compaction_group_id, table_info.get_divide_version());
+            self.level_iter(*compaction_group_id, |level| {
+                for table_info in level.get_table_infos() {
+                    let sst_id = table_info.get_id();
+                    ret.entry(sst_id)
+                        .or_default()
+                        .insert(*compaction_group_id, table_info.get_divide_version());
+                }
+                true
             });
         }
         ret.retain(|_, v| v.len() != 1 || *v.values().next().unwrap() != 0);
@@ -437,7 +369,7 @@ pub trait HummockLevelsExt {
     fn get_level0(&self) -> &OverlappingLevel;
     fn get_level(&self, idx: usize) -> &Level;
     fn get_level_mut(&mut self, idx: usize) -> &mut Level;
-    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary, local_related_only: bool);
+    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary);
     fn build_initial_levels(compaction_config: &CompactionConfig) -> Levels;
 }
 
@@ -454,7 +386,7 @@ impl HummockLevelsExt for Levels {
         &mut self.levels[level_idx - 1]
     }
 
-    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary, local_related_only: bool) {
+    fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary) {
         let GroupDeltasSummary {
             delete_sst_levels,
             delete_sst_ids_set,
@@ -474,43 +406,18 @@ impl HummockLevelsExt for Levels {
                 deleted = level_delete_ssts(&mut self.levels[idx], &delete_sst_ids_set) || deleted;
             }
         }
-        if local_related_only && !delete_sst_ids_set.is_empty() && !deleted {
-            // If no sst is deleted, the current delta will not be related to the local version.
-            // Therefore, if we only care local related data, we can return without inserting the
-            // ssts.
-            return;
-        }
         if !insert_table_infos.is_empty() {
             if insert_sst_level_id == 0 {
                 let l0 = self.l0.as_mut().unwrap();
                 let index = l0
                     .sub_levels
                     .partition_point(|level| level.sub_level_id < insert_sub_level_id);
-                if local_related_only {
-                    // Some sub level in the full hummock version may be empty in the local related
-                    // pruned version, so it's possible the level to be inserted is not found
-                    if index == l0.sub_levels.len()
-                        || l0.sub_levels[index].sub_level_id > insert_sub_level_id
-                    {
-                        // level not found, insert a new level
-                        let new_level = new_sub_level(
-                            insert_sub_level_id,
-                            LevelType::Nonoverlapping,
-                            insert_table_infos,
-                        );
-                        l0.sub_levels.insert(index, new_level);
-                    } else {
-                        // level found, add to the level.
-                        level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
-                    }
-                } else {
-                    assert!(
-                        index < l0.sub_levels.len() && l0.sub_levels[index].sub_level_id == insert_sub_level_id,
-                        "should find the level to insert into when applying compaction generated delta. sub level idx: {}",
-                        insert_sub_level_id
-                    );
-                    level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
-                }
+                assert!(
+                    index < l0.sub_levels.len() && l0.sub_levels[index].sub_level_id == insert_sub_level_id,
+                    "should find the level to insert into when applying compaction generated delta. sub level idx: {}, sub level count: {}",
+                    insert_sub_level_id, l0.sub_levels.len()
+                );
+                level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
             } else {
                 let idx = insert_sst_level_id as usize - 1;
                 level_insert_ssts(&mut self.levels[idx], insert_table_infos);
@@ -682,7 +589,9 @@ mod tests {
     };
 
     use super::HummockLevelsExt;
-    use crate::compaction_group::hummock_version_ext::HummockVersionExt;
+    use crate::compaction_group::hummock_version_ext::{
+        HummockVersionExt, HummockVersionUpdateExt,
+    };
 
     #[test]
     fn test_get_sst_ids() {
