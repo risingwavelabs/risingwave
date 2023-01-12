@@ -256,6 +256,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         // Derive the dynamic expression
         let l_data_type = input_l.schema().data_types()[self.key_l].clone();
         let r_data_type = input_r.schema().data_types()[0].clone();
+        // The types are aligned by frontend.
+        assert_eq!(l_data_type, r_data_type);
         let dynamic_cond = move |literal: Datum| {
             literal.map(|scalar| {
                 new_binary_expr(
