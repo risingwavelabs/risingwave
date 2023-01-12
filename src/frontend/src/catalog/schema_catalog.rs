@@ -222,6 +222,13 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
+    pub fn iter_internal_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
+        self.table_by_name
+            .iter()
+            .filter(|(_, v)| v.is_internal_table())
+            .map(|(_, v)| v)
+    }
+
     pub fn iter_valid_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
