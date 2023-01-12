@@ -36,12 +36,12 @@
 - input: SHOW INTERNAL TABLES
   formatted_sql: SHOW INTERNAL TABLES
   formatted_ast: |
-    ShowObjects(MaterializedView { schema: None })
+    ShowObjects(InternalTable { schema: None })
 
-- input: SHOW INTERNAL TABLES from t
-  formatted_sql: SHOW INTERNAL TABLES from t
+- input: SHOW INTERNAL TABLES FROM t
+  formatted_sql: SHOW INTERNAL TABLES FROM t
   formatted_ast: |
-    ShowObjects(MaterializedView { schema: None })
+    ShowObjects(InternalTable { schema: Some(Ident { value: "t", quote_style: None }) })
 
 - input: SHOW MATERIALIZED VIEWS FROM t
   formatted_sql: SHOW MATERIALIZED VIEWS FROM t
