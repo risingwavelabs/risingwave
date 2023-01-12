@@ -137,4 +137,5 @@ matviewname Varchar
 matviewowner Int32
 definition Varchar
 matviewid Int32
+matviewtimezone Varchar
 matviewgraph Varchar
