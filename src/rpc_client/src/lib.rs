@@ -194,13 +194,19 @@ macro_rules! meta_rpc_client_method_impl {
                     }
                     Err(_) => {
                         tracing::warn!("Meta node down. Getting leader info from different node");
+
+                        // TODO: We do not need to sleep here. Just retry the connection below (recursion?)
+                        // At some point we will get the up to date leader and connect against it
+                        // Introduce some short async sleep to during retries
+
+
                         // We need to give time to all meta nodes to know who the new leader is
                         // How can we make this more resilient?
                         tokio::time::sleep(std::time::Duration::from_secs(20)).await;
 
                         // TODO: this have to be the actual addresses from the cmd line arg
                         // TODO: order this again
-                        let node_addresses = vec![15690, 5690, 25690];
+                        let node_addresses = vec![5690, 15690, 25690];
                         let meta_channel = util(&node_addresses).await.unwrap_or_else(|| {
                             panic!("All meta nodes are down. Tried to connect against nodes at these addresses: {:?}",
                                 node_addresses)
