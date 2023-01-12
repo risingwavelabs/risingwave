@@ -28,11 +28,6 @@ use crate::sql_gen::SqlGenerator;
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(super) fn gen_simple_scalar(&mut self, typ: &DataType) -> Expr {
         use DataType as T;
-        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
-        let typ = match typ {
-            T::Timestamptz => &T::Timestamp,
-            _ => typ,
-        };
         // NOTE(kwannoel): Since this generates many invalid queries,
         // its probability should be set to low, e.g. 0.02.
         // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7327
@@ -82,6 +77,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             },
             T::Timestamp => Expr::TypedString {
                 data_type: AstDataType::Timestamp(false),
+                value: self.gen_temporal_scalar(typ),
+            },
+            T::Timestamptz => Expr::TypedString {
+                data_type: AstDataType::Timestamp(true),
                 value: self.gen_temporal_scalar(typ),
             },
             T::Interval => Expr::TypedString {

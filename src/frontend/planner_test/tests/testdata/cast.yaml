@@ -36,6 +36,9 @@
 - name: current_schemas (current_schemas(NULL))
   sql: |
     select current_schemas(NULL);
+  batch_plan: |
+    BatchProject { exprs: [null:List { datatype: Varchar }] }
+    └─BatchValues { rows: [[]] }
 - name: FILTER (FILTER NULL)
   sql: |
     create table t(v1 int);
@@ -45,7 +48,7 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchSimpleAgg { aggs: [count filter(null:Boolean)] }
         └─BatchScan { table: t, columns: [], distribution: SomeShard }
-- name: implicit cast boolean (HAVING VARCHAR)
+- name: implicit cast boolean (HAVING with literal 'y' of unknown type)
   sql: |
     select 1 having 'y';
   batch_plan: |
@@ -53,20 +56,20 @@
     └─BatchFilter { predicate: 'y':Varchar::Boolean }
       └─BatchSimpleAgg { aggs: [] }
         └─BatchValues { rows: [[]] }
-- name: implicit cast boolean (WHERE VARCHAR)
+- name: implicit cast boolean (WHERE with literal 'y' of unknown type)
   sql: |
     select 1 where 'y';
   batch_plan: |
     BatchProject { exprs: [1:Int32] }
     └─BatchFilter { predicate: 'y':Varchar::Boolean }
       └─BatchValues { rows: [[]] }
-- name: implicit cast boolean (CASE VARCHAR)
+- name: implicit cast boolean (CASE with literal 'y' of unknown type)
   sql: |
     select case when 'y' then 1 end;
   batch_plan: |
     BatchProject { exprs: [Case('y':Varchar::Boolean, 1:Int32)] }
     └─BatchValues { rows: [[]] }
-- name: implicit cast boolean (JOIN ON VARCHAR)
+- name: implicit cast boolean (JOIN ON with literal 'y' of unknown type)
   sql: |
     create table t1(v1 int);
     create table t2(v1 int);
@@ -79,13 +82,13 @@
     └─BatchExchange { order: [], dist: Single }
       └─BatchFilter { predicate: 'y':Varchar::Boolean }
         └─BatchScan { table: t2, columns: [], distribution: SomeShard }
-- name: current_schemas (current_schemas(VARCHAR))
+- name: current_schemas (CURRENT_SCHEMAS with literal 'y' of unknown type)
   sql: |
     select current_schemas('y');
   binder_error: |-
     Feature is not yet implemented: Only boolean literals are supported in `current_schemas`.
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- name: FILTER (FILTER VARCHAR)
+- name: FILTER (FILTER with literal 'y' of unknown type)
   sql: |
     create table t(v1 int);
     select count(*) FILTER(WHERE 'y') from t;
