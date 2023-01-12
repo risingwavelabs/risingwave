@@ -5,7 +5,7 @@
     insert into t values (22, 33), (44, 55);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchInsert { table: t }, { returning: false }
+    └─BatchInsert { table: t  }
       └─BatchValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]] }
 - name: insert values on assign-castable types
   sql: |
@@ -13,7 +13,7 @@
     insert into t values (22.33, '33'), (44, 55.0);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchInsert { table: t }, { returning: false }
+    └─BatchInsert { table: t  }
       └─BatchValues { rows: [[22.33:Decimal::Float32, '33':Varchar::Int32], [44:Int32::Float32, 55.0:Decimal::Int32]] }
 - name: insert values on non-assign-castable types
   sql: |
@@ -26,7 +26,7 @@
     insert into t values (1, 2);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchInsert { table: t }, { returning: false }
+    └─BatchInsert { table: t  }
       └─BatchValues { rows: [[1:Int32, 2:Int32]] }
 - name: Invalid column name
   sql: |
@@ -64,7 +64,7 @@
     insert into t values(NULL);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchInsert { table: t }, { returning: false }
+    └─BatchInsert { table: t  }
       └─BatchValues { rows: [[null:Int32]] }
 - name: insert values cast each expr rather than whole `VALUES` (compare with below)
   sql: |
@@ -72,7 +72,7 @@
     insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchInsert { table: t }, { returning: false }
+    └─BatchInsert { table: t  }
       └─BatchValues { rows: [['2020-01-01 01:02:03':Varchar::Timestamp::Time], ['03:04:05':Varchar::Time]] }
 - name: a `VALUES` without insert context may be invalid on its own (compare with above)
   sql: |
@@ -104,7 +104,7 @@
     insert into t select v1 from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchInsert { table: t }, { returning: false }
+    └─BatchInsert { table: t  }
       └─BatchExchange { order: [], dist: Single }
         └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
 - name: insert into select with cast
@@ -113,7 +113,7 @@
     insert into t select timestamp '2020-01-01 01:02:03', 11, 4.5 from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchInsert { table: t }, { returning: false }
+    └─BatchInsert { table: t  }
       └─BatchExchange { order: [], dist: Single }
         └─BatchProject { exprs: ['2020-01-01 01:02:03':Varchar::Timestamp::Time, 11:Int32, 4.5:Decimal::Float32] }
           └─BatchScan { table: t, columns: [], distribution: SomeShard }
@@ -135,7 +135,7 @@
     insert into t1 select c, e from t2 join t3 on t2.d = t3.f
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchInsert { table: t1 }, { returning: false }
+    └─BatchInsert { table: t1  }
       └─BatchExchange { order: [], dist: Single }
         └─BatchHashJoin { type: Inner, predicate: t2.d = t3.f, output: [t2.c, t3.e] }
           ├─BatchExchange { order: [], dist: HashShard(t2.d) }
@@ -148,12 +148,12 @@
     insert into t values (0,1), (1,2) returning *, a, a+b;
   logical_plan: |
     LogicalProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1)] }
-    └─LogicalInsert { table: t }, { returning: true }
+    └─LogicalInsert { table: t , returning: true }
       └─LogicalValues { rows: [[0:Int32, 1:Int32], [1:Int32, 2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32] } }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1)] }
-      └─BatchInsert { table: t }, { returning: true }
+      └─BatchInsert { table: t , returning: true }
         └─BatchValues { rows: [[0:Int32, 1:Int32], [1:Int32, 2:Int32]] }
 - name: insert with select and returning
   sql: |
@@ -161,14 +161,14 @@
     insert into t select distinct * from t returning *, a, a+b;
   logical_plan: |
     LogicalProject { exprs: [t.a, t.b, t.a, (t.a + t.b)] }
-    └─LogicalInsert { table: t }, { returning: true }
+    └─LogicalInsert { table: t , returning: true }
       └─LogicalAgg { group_key: [t.a, t.b], aggs: [] }
         └─LogicalProject { exprs: [t.a, t.b] }
           └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.a, t.b, t.a, (t.a + t.b)] }
-      └─BatchInsert { table: t }, { returning: true }
+      └─BatchInsert { table: t , returning: true }
         └─BatchExchange { order: [], dist: Single }
           └─BatchHashAgg { group_key: [t.a, t.b], aggs: [] }
             └─BatchExchange { order: [], dist: HashShard(t.a, t.b) }

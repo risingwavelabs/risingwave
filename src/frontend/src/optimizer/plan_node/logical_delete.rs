@@ -75,7 +75,13 @@ impl LogicalDelete {
         write!(
             f,
             "{} {{ table: {}{} }}",
-            name, self.table_name, if self.returning { ", returning: true" } else { "" }
+            name,
+            self.table_name,
+            if self.returning {
+                ", returning: true"
+            } else {
+                ""
+            }
         )
     }
 

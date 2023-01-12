@@ -111,7 +111,7 @@
     delete from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchDelete { table: t }, { returning: false }
+    └─BatchDelete { table: t }
       └─BatchExchange { order: [], dist: Single }
         └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
 - sql: |
@@ -119,7 +119,7 @@
     delete from t where v1 = 1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchDelete { table: t }, { returning: false }
+    └─BatchDelete { table: t }
       └─BatchExchange { order: [], dist: Single }
         └─BatchFilter { predicate: (t.v1 = 1:Int32) }
           └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }

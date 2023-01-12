@@ -96,7 +96,13 @@ impl LogicalInsert {
         write!(
             f,
             "{} {{ table: {} {} }}",
-            name, self.table_source_name, if self.returning { ", returning: true" } else { "" }
+            name,
+            self.table_source_name,
+            if self.returning {
+                ", returning: true"
+            } else {
+                ""
+            }
         )
     }
 

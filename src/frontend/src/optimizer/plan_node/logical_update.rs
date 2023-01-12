@@ -92,7 +92,14 @@ impl LogicalUpdate {
         write!(
             f,
             "{} {{ table: {}, exprs: {:?} {} }}",
-            name, self.table_name, self.exprs, if self.returning { ", returning: true" } else { "" }
+            name,
+            self.table_name,
+            self.exprs,
+            if self.returning {
+                ", returning: true"
+            } else {
+                ""
+            }
         )
     }
 
