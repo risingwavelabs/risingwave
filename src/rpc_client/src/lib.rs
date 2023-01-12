@@ -200,7 +200,7 @@ macro_rules! meta_rpc_client_method_impl {
 
                 // Hold locks on all sub-clients, to update atomically
                 {
-                    // TODO: either update channel, or also update LeaderServiceClient
+                    let mut leader_c = self.leader_client.as_ref().lock().await;
                     let mut cluster_c = self.cluster_client.as_ref().lock().await;
                     let mut heartbeat_c = self.heartbeat_client.as_ref().lock().await;
                     let mut ddl_c = self.ddl_client.as_ref().lock().await;
@@ -211,6 +211,7 @@ macro_rules! meta_rpc_client_method_impl {
                     let mut scale_c = self.scale_client.as_ref().lock().await;
                     let mut backup_c = self.backup_client.as_ref().lock().await;
 
+                    *leader_c = LeaderServiceClient::new(leader_channel.clone());
                     *cluster_c = ClusterServiceClient::new(leader_channel.clone());
                     *heartbeat_c = HeartbeatServiceClient::new(leader_channel.clone());
                     *ddl_c = DdlServiceClient::new(leader_channel.clone());
