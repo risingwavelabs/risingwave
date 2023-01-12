@@ -37,6 +37,7 @@ pub use order_by_expr::{OrderBy, OrderByExpr};
 mod expr_mutator;
 mod expr_rewriter;
 mod expr_visitor;
+mod session_timezone;
 mod type_inference;
 mod utils;
 
@@ -49,6 +50,7 @@ pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
+pub use session_timezone::SessionTimezone;
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{

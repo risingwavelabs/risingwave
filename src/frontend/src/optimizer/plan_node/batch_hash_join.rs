@@ -20,6 +20,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashJoinNode;
 use risingwave_pb::plan_common::JoinType;
 
+use super::generic::GenericPlanRef;
 use super::{
     EqJoinPredicate, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
     ToDistributedBatch,
@@ -235,7 +236,12 @@ impl ToBatchProst for BatchHashJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| x.to_expr_proto()),
+                .map(|x| {
+                    self.base
+                        .ctx()
+                        .expr_with_session_timezone(x)
+                        .to_expr_proto()
+                }),
             output_indices: self
                 .logical
                 .output_indices()
