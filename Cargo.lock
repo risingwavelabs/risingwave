@@ -6215,6 +6215,7 @@ dependencies = [
  "lz4",
  "madsim-tokio",
  "madsim-tonic",
+ "memcomparable",
  "minitrace",
  "minstant",
  "moka",
