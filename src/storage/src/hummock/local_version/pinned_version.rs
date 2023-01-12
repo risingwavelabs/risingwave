@@ -133,8 +133,17 @@ impl PinnedVersion {
     ) -> Vec<&Level> {
         let mut ret = vec![];
         let group = self.version.groups.get(&compaction_group_id).unwrap();
-        ret.extend(group.levels.l0.as_ref().unwrap().sub_levels.iter().rev());
-        ret.extend(group.levels.levels.iter());
+        ret.extend(
+            group
+                .raw_group_meta
+                .l0
+                .as_ref()
+                .unwrap()
+                .sub_levels
+                .iter()
+                .rev(),
+        );
+        ret.extend(group.raw_group_meta.levels.iter());
         ret
     }
 
@@ -151,7 +160,7 @@ impl PinnedVersion {
                 let mut ret = vec![];
                 let group = self.version.groups.get(compaction_group_id).unwrap();
                 for (idx, sub_level) in group
-                    .levels
+                    .raw_group_meta
                     .l0
                     .as_ref()
                     .unwrap()
@@ -160,9 +169,9 @@ impl PinnedVersion {
                     .enumerate()
                     .rev()
                 {
-                    ret.push((sub_level, &group.sub_level_cache[idx]));
+                    ret.push((sub_level, &group.sub_level_cache[idx].data));
                 }
-                for (idx, level) in group.levels.levels.iter().enumerate() {
+                for (idx, level) in group.raw_group_meta.levels.iter().enumerate() {
                     ret.push((level, &group.base_level_cache[idx]));
                 }
                 ret

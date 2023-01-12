@@ -235,13 +235,13 @@ async fn compaction_test(
     );
     for (group_id, group) in &version.groups {
         let sz = group
-            .levels
+            .raw_group_meta
             .levels
             .iter()
             .map(|level| level.total_file_size)
             .sum::<u64>();
         let count = group
-            .levels
+            .raw_group_meta
             .levels
             .iter()
             .map(|level| level.table_infos.len())
@@ -251,9 +251,9 @@ async fn compaction_test(
             group_id,
             sz,
             count,
-            group.levels.l0.as_ref().unwrap().total_file_size,
+            group.raw_group_meta.l0.as_ref().unwrap().total_file_size,
             group
-                .levels
+                .raw_group_meta
                 .l0
                 .as_ref()
                 .unwrap()

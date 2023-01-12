@@ -30,15 +30,15 @@ use risingwave_pb::hummock::{
 use crate::hummock::Sstable;
 
 #[derive(Clone, Debug)]
-pub struct LevelCache {
-    pub level_type: LevelType,
+pub struct SubLevelCache {
+    pub sub_level_id: u64,
     pub data: Vec<Arc<Sstable>>,
 }
 
-impl Default for LevelCache {
-    fn default() -> Self {
-        LevelCache {
-            level_type: LevelType::Overlapping,
+impl SubLevelCache {
+    pub fn new(sub_level_id: u64) -> Self {
+        Self {
+            sub_level_id,
             data: vec![],
         }
     }
@@ -46,28 +46,37 @@ impl Default for LevelCache {
 
 #[derive(Clone, Debug)]
 pub struct LocalGroup {
-    pub levels: Levels,
+    pub raw_group_meta: Levels,
     pub base_level_cache: Vec<Vec<Arc<Sstable>>>,
-    pub sub_level_cache: Vec<Vec<Arc<Sstable>>>,
+    pub sub_level_cache: Vec<SubLevelCache>,
 }
 
 impl PartialEq for LocalGroup {
     fn eq(&self, other: &LocalGroup) -> bool {
-        self.levels.eq(&other.levels)
+        self.raw_group_meta.eq(&other.raw_group_meta)
     }
 }
 
 impl LocalGroup {
     pub fn new(config: &CompactionConfig) -> Self {
         Self {
-            levels: Levels::build_initial_levels(config),
+            raw_group_meta: Levels::build_initial_levels(config),
             base_level_cache: vec![vec![]; config.max_level as usize],
             sub_level_cache: vec![],
         }
     }
 
     fn apply_compact_ssts(&mut self, summary: GroupDeltasSummary) {
-        self.levels.apply_compact_ssts(summary)
+        self.raw_group_meta.apply_compact_ssts(summary);
+        self.sub_level_cache.retain(|sub_level| {
+            self.raw_group_meta
+                .l0
+                .as_ref()
+                .unwrap()
+                .sub_levels
+                .iter()
+                .any(|level| level.sub_level_id == sub_level.sub_level_id)
+        });
     }
 
     pub fn add_new_sub_level(
@@ -77,11 +86,13 @@ impl LocalGroup {
         insert_table_infos: Vec<SstableInfo>,
     ) {
         add_new_sub_level(
-            self.levels.l0.as_mut().unwrap(),
+            self.raw_group_meta.l0.as_mut().unwrap(),
             insert_sub_level_id,
             level_type,
             insert_table_infos,
         );
+        self.sub_level_cache
+            .push(SubLevelCache::new(insert_sub_level_id));
     }
 
     fn init_with_parent_group(
@@ -89,10 +100,10 @@ impl LocalGroup {
         parent_group: &mut LocalGroup,
         member_table_ids: &HashSet<StateTableId>,
     ) {
-        self.levels
-            .init_with_parent_group(&mut parent_group.levels, member_table_ids);
+        self.raw_group_meta
+            .init_with_parent_group(&mut parent_group.raw_group_meta, member_table_ids);
         for (idx, sub_level) in self
-            .levels
+            .raw_group_meta
             .l0
             .as_ref()
             .unwrap()
@@ -101,17 +112,22 @@ impl LocalGroup {
             .enumerate()
         {
             if sub_level.table_infos.is_empty() {
-                self.sub_level_cache.push(vec![]);
+                self.sub_level_cache
+                    .push(SubLevelCache::new(sub_level.sub_level_id));
                 continue;
             }
             let data = parent_group.sub_level_cache[idx]
+                .data
                 .iter()
                 .filter(|sst| sub_level.table_infos.iter().any(|info| info.id == sst.id))
                 .cloned()
                 .collect_vec();
-            self.sub_level_cache.push(data);
+            self.sub_level_cache.push(SubLevelCache {
+                data,
+                sub_level_id: sub_level.sub_level_id,
+            });
         }
-        for (idx, level) in self.levels.levels.iter().enumerate() {
+        for (idx, level) in self.raw_group_meta.levels.iter().enumerate() {
             if level.table_infos.is_empty() {
                 continue;
             }
@@ -196,7 +212,7 @@ impl LocalHummockVersion {
         let mut ret = HashMap::new();
         for (compaction_group_id, levels) in &self.groups {
             levels
-                .levels
+                .raw_group_meta
                 .build_compaction_group_info(*compaction_group_id, &mut ret);
         }
         ret
@@ -215,7 +231,7 @@ impl LocalHummockVersion {
                 );
             }
             let has_destroy = summary.group_destroy.is_some();
-            let levels = self
+            let group = self
                 .groups
                 .get_mut(compaction_group_id)
                 .expect("compaction group should exist");
@@ -246,15 +262,19 @@ impl LocalHummockVersion {
                     delete_sst_levels.is_empty() && delete_sst_ids_set.is_empty() || has_destroy,
                     "no sst should be deleted when committing an epoch"
                 );
-                levels.add_new_sub_level(
+                group.add_new_sub_level(
                     insert_sub_level_id,
                     LevelType::Overlapping,
                     insert_table_infos,
                 );
             } else {
                 // `max_committed_epoch` is not changed. The delta is caused by compaction.
-                levels.apply_compact_ssts(summary);
+                group.apply_compact_ssts(summary);
             }
+            debug_assert_eq!(
+                group.sub_level_cache.len(),
+                group.raw_group_meta.l0.as_ref().unwrap().sub_levels.len()
+            );
             if has_destroy {
                 self.groups.remove(compaction_group_id);
             }
@@ -269,12 +289,16 @@ impl From<HummockVersion> for LocalHummockVersion {
     fn from(version: HummockVersion) -> LocalHummockVersion {
         let mut groups = HashMap::with_capacity(version.levels.len());
         for (group_id, levels) in version.levels {
+            let mut sub_level_cache = vec![];
+            for sub_level in &levels.l0.as_ref().unwrap().sub_levels {
+                sub_level_cache.push(SubLevelCache::new(sub_level.sub_level_id));
+            }
             groups.insert(
                 group_id,
                 LocalGroup {
-                    levels,
-                    base_level_cache: vec![],
-                    sub_level_cache: vec![],
+                    base_level_cache: vec![vec![]; levels.levels.len()],
+                    sub_level_cache,
+                    raw_group_meta: levels,
                 },
             );
         }
@@ -291,7 +315,7 @@ impl From<&LocalHummockVersion> for HummockVersion {
     fn from(version: &LocalHummockVersion) -> Self {
         let mut levels = HashMap::default();
         for (group_id, group) in &version.groups {
-            levels.insert(*group_id, group.levels.clone());
+            levels.insert(*group_id, group.raw_group_meta.clone());
         }
         Self {
             id: version.id,

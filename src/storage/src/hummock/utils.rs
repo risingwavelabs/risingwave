@@ -67,7 +67,7 @@ pub fn validate_epoch(safe_epoch: u64, epoch: u64) -> HummockResult<()> {
 pub fn validate_table_key_range(version: &LocalHummockVersion) {
     version.groups.values().for_each(|group| {
         group
-            .levels
+            .raw_group_meta
             .l0
             .as_ref()
             .unwrap()
@@ -82,7 +82,7 @@ pub fn validate_table_key_range(version: &LocalHummockVersion) {
                     );
                 }
             });
-        group.levels.levels.iter().for_each(|level| {
+        group.raw_group_meta.levels.iter().for_each(|level| {
             for t in &level.table_infos {
                 assert!(
                     t.key_range.is_some(),

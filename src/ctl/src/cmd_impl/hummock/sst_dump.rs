@@ -77,13 +77,13 @@ pub async fn sst_dump(context: &CtlContext) -> anyhow::Result<()> {
         print_blocks(id, table_data, sstable_store, sstable_meta).await
     }
     for group in version.get_compaction_levels() {
-        for level in &group.levels.l0.as_ref().unwrap().sub_levels {
+        for level in &group.raw_group_meta.l0.as_ref().unwrap().sub_levels {
             println!("Level: {}", level.level_type);
             for sst in &level.table_infos {
                 print_sstable(sst, sstable_store, &table_data).await?;
             }
         }
-        for level in &group.levels.levels {
+        for level in &group.raw_group_meta.levels {
             println!("Level: {}", level.level_type);
             for sstable_info in &level.table_infos {
                 print_sstable(sstable_info, sstable_store, &table_data).await?;
