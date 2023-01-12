@@ -217,7 +217,7 @@ pub(crate) async fn resolve_source_schema(
 }
 
 // Add a hidden column `_rw_kafka_timestamp` to each message from Kafka source.
-pub(crate) fn check_and_add_timestamp_column(
+fn check_and_add_timestamp_column(
     with_properties: &HashMap<String, String>,
     column_descs: &mut Vec<ColumnDesc>,
     col_id_gen: &mut ColumnIdGenerator,

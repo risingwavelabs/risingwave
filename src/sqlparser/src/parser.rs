@@ -1866,7 +1866,9 @@ impl Parser {
                 }
             } else {
                 // non-cdc connectors
-                self.expect_keywords(&[Keyword::ROW, Keyword::FORMAT])?;
+                self
+                    .expect_keywords(&[Keyword::ROW, Keyword::FORMAT])
+                    .map_err(|_| ParserError::ParserError("Please specify 'connector' in WITH clause to create a table with a connector".to_string()))?;
                 Some(SourceSchema::parse_to(self)?)
             }
         } else {

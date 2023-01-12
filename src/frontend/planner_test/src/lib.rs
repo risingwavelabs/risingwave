@@ -262,7 +262,7 @@ impl TestCase {
                 if let Some(content) = source.file {
                     let sql = format!(
                         r#"CREATE {} {}
-    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
     ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
                         object_to_create, source.name, source.row_format
                     );

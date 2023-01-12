@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -37,13 +37,9 @@ pub async fn handle_drop_source(
     let (source, schema_name) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
 
-        if catalog_reader
-            .get_table_by_name(db_name, schema_path, &source_name)
-            .is_ok()
+        if let Ok((table, _)) = catalog_reader.get_table_by_name(db_name, schema_path, &source_name)
         {
-            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP TABLE` to drop a table.".to_owned(),
-            )));
+            return Err(table.bad_drop_error());
         }
 
         match catalog_reader.get_source_by_name(db_name, schema_path, &source_name) {

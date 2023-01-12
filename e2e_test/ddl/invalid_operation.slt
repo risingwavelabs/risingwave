@@ -91,8 +91,7 @@ drop table mv;
 statement error Use `DROP MATERIALIZED VIEW`
 drop index mv;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP MATERIALIZED VIEW`
 drop source mv;
 
 # FIXME: improve the error message
@@ -113,8 +112,7 @@ drop table idx;
 statement error Use `DROP INDEX`
 drop materialized view idx;
 
-# FIXME: improve the error message
-statement error not found
+statement error Use `DROP INDEX`
 drop source idx;
 
 # FIXME: improve the error message
