@@ -166,11 +166,6 @@ export interface HummockSnapshot {
   currentEpoch: number;
 }
 
-export interface PinVersionRequest {
-  contextId: number;
-  lastPinned: number;
-}
-
 export interface PinVersionResponse {
   status: Status | undefined;
   payload?: { $case: "versionDeltas"; versionDeltas: HummockVersionDeltas } | {
@@ -692,6 +687,14 @@ export interface SetCompactorRuntimeConfigRequest {
 }
 
 export interface SetCompactorRuntimeConfigResponse {
+}
+
+export interface JavaPinVersionRequest {
+  contextId: number;
+}
+
+export interface JavaPinVersionResponse {
+  pinnedVersion: HummockVersion | undefined;
 }
 
 export interface CompactionConfig {
@@ -1415,33 +1418,6 @@ export const HummockSnapshot = {
     const message = createBaseHummockSnapshot();
     message.committedEpoch = object.committedEpoch ?? 0;
     message.currentEpoch = object.currentEpoch ?? 0;
-    return message;
-  },
-};
-
-function createBasePinVersionRequest(): PinVersionRequest {
-  return { contextId: 0, lastPinned: 0 };
-}
-
-export const PinVersionRequest = {
-  fromJSON(object: any): PinVersionRequest {
-    return {
-      contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
-      lastPinned: isSet(object.lastPinned) ? Number(object.lastPinned) : 0,
-    };
-  },
-
-  toJSON(message: PinVersionRequest): unknown {
-    const obj: any = {};
-    message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
-    message.lastPinned !== undefined && (obj.lastPinned = Math.round(message.lastPinned));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<PinVersionRequest>, I>>(object: I): PinVersionRequest {
-    const message = createBasePinVersionRequest();
-    message.contextId = object.contextId ?? 0;
-    message.lastPinned = object.lastPinned ?? 0;
     return message;
   },
 };
@@ -4119,6 +4095,53 @@ export const SetCompactorRuntimeConfigResponse = {
     _: I,
   ): SetCompactorRuntimeConfigResponse {
     const message = createBaseSetCompactorRuntimeConfigResponse();
+    return message;
+  },
+};
+
+function createBaseJavaPinVersionRequest(): JavaPinVersionRequest {
+  return { contextId: 0 };
+}
+
+export const JavaPinVersionRequest = {
+  fromJSON(object: any): JavaPinVersionRequest {
+    return { contextId: isSet(object.contextId) ? Number(object.contextId) : 0 };
+  },
+
+  toJSON(message: JavaPinVersionRequest): unknown {
+    const obj: any = {};
+    message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<JavaPinVersionRequest>, I>>(object: I): JavaPinVersionRequest {
+    const message = createBaseJavaPinVersionRequest();
+    message.contextId = object.contextId ?? 0;
+    return message;
+  },
+};
+
+function createBaseJavaPinVersionResponse(): JavaPinVersionResponse {
+  return { pinnedVersion: undefined };
+}
+
+export const JavaPinVersionResponse = {
+  fromJSON(object: any): JavaPinVersionResponse {
+    return { pinnedVersion: isSet(object.pinnedVersion) ? HummockVersion.fromJSON(object.pinnedVersion) : undefined };
+  },
+
+  toJSON(message: JavaPinVersionResponse): unknown {
+    const obj: any = {};
+    message.pinnedVersion !== undefined &&
+      (obj.pinnedVersion = message.pinnedVersion ? HummockVersion.toJSON(message.pinnedVersion) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<JavaPinVersionResponse>, I>>(object: I): JavaPinVersionResponse {
+    const message = createBaseJavaPinVersionResponse();
+    message.pinnedVersion = (object.pinnedVersion !== undefined && object.pinnedVersion !== null)
+      ? HummockVersion.fromPartial(object.pinnedVersion)
+      : undefined;
     return message;
   },
 };
