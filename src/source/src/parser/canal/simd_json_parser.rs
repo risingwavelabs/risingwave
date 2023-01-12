@@ -20,7 +20,9 @@ use itertools::Itertools;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
-use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp, str_to_timestamptz};
+use risingwave_expr::vector_op::cast::{
+    str_to_date, str_to_timestamp, str_with_time_zone_to_timestamptz,
+};
 use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use super::util::at_least_one_ok;
@@ -221,7 +223,9 @@ fn cannal_do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> R
         DataType::Date => str_to_date(ensure_str!(v, "date"))?.into(),
         DataType::Time => str_to_date(ensure_str!(v, "time"))?.into(),
         DataType::Timestamp => str_to_timestamp(ensure_str!(v, "string"))?.into(),
-        DataType::Timestamptz => str_to_timestamptz(ensure_str!(v, "string"))?.into(),
+        DataType::Timestamptz => {
+            str_with_time_zone_to_timestamptz(ensure_str!(v, "string"))?.into()
+        }
         _ => {
             return Err(RwError::from(InternalError(format!(
                 "cannal data source not support type {}",

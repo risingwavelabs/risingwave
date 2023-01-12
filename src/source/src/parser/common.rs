@@ -19,7 +19,7 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_expr::vector_op::cast::{
     i64_to_timestamp, i64_to_timestamptz, str_to_date, str_to_time, str_to_timestamp,
-    str_to_timestamptz,
+    str_with_time_zone_to_timestamptz,
 };
 use simd_json::value::StaticNode;
 use simd_json::{BorrowedValue, ValueAccess};
@@ -58,7 +58,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
             _ => anyhow::bail!("expect timestamp, but found {v}"),
         },
         DataType::Timestamptz => match v {
-            BorrowedValue::String(s) => str_to_timestamptz(s)?.into(),
+            BorrowedValue::String(s) => str_with_time_zone_to_timestamptz(s)?.into(),
             BorrowedValue::Static(_) => i64_to_timestamptz(ensure_int!(v, i64))?.into(),
             _ => anyhow::bail!("expect timestamptz, but found {v}"),
         },
