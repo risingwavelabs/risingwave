@@ -878,9 +878,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     if append_only_optimize && let Some(row) = append_only_matched_row {
                         side_match.ht.delete(key, row);
                     } else if side_update.need_degree_table {
-                        side_update.ht.insert(key, JoinRow::new(row, degree));
+                        side_update.ht.insert(key, JoinRow::new(row, degree)).await?;
                     } else {
-                        side_update.ht.insert_row(key, row);
+                        side_update.ht.insert_row(key, row).await?;
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {

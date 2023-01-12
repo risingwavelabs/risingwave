@@ -390,31 +390,47 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a join row
-    pub fn insert(&mut self, key: &K, value: JoinRow<impl Row>) {
+    pub async fn insert(&mut self, key: &K, value: JoinRow<impl Row>) -> StreamExecutorResult<()> {
+        let pk = (&value.row)
+            .project(&self.state.pk_indices)
+            .memcmp_serialize(&self.pk_serializer);
         if let Some(entry) = self.inner.get_mut(key) {
-            let pk = (&value.row)
-                .project(&self.state.pk_indices)
-                .memcmp_serialize(&self.pk_serializer);
+            // Update cache
             entry.insert(pk, value.encode());
+        } else {
+            // Refill cache when cache miss
+            let mut state = self.fetch_cached_state(key).await?;
+            state.insert(pk, value.encode());
+            self.update_state(key, state.into());
         }
-        // If no cache maintained, only update the flush buffer.
+
+        // Update the flush buffer.
         let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
         self.state.table.insert(row);
         self.degree_state.table.insert(degree);
+        Ok(())
     }
 
     /// Insert a row.
     /// Used when the side does not need to update degree.
-    pub fn insert_row(&mut self, key: &K, value: impl Row) {
+    pub async fn insert_row(&mut self, key: &K, value: impl Row) -> StreamExecutorResult<()> {
+        let join_row = JoinRow::new(&value, 0);
+        let pk = (&value)
+            .project(&self.state.pk_indices)
+            .memcmp_serialize(&self.pk_serializer);
         if let Some(entry) = self.inner.get_mut(key) {
-            let join_row = JoinRow::new(&value, 0);
-            let pk = (&value)
-                .project(&self.state.pk_indices)
-                .memcmp_serialize(&self.pk_serializer);
+            // Update cache
             entry.insert(pk, join_row.encode());
+        } else {
+            // Refill cache when cache miss
+            let mut state = self.fetch_cached_state(key).await?;
+            state.insert(pk, join_row.encode());
+            self.update_state(key, state.into());
         }
-        // If no cache maintained, only update the state table.
+
+        // Update the flush buffer.
         self.state.table.insert(value);
+        Ok(())
     }
 
     /// Delete a join row
