@@ -38,7 +38,12 @@ fn not_unique_error(db_error: &str) -> bool {
 
 fn is_window_error(db_error: &str) -> bool {
     db_error.contains("Bind error: The size arg of window table function should be an interval literal")
-    || db_error.contains("Bind error: The 2st arg of window table function should be a column name but not complex expression. Consider using an intermediate CTE or view as workaround")
+        || db_error.contains("Bind error: The 2st arg of window table function should be a column name but not complex expression. Consider using an intermediate CTE or view as workaround")
+}
+
+// Do not support streaming nested-loop join, it is expensive.
+fn is_nested_loop_join_error(db_error: &str) -> bool {
+    db_error.contains("Not supported: streaming nested-loop join")
 }
 
 // FIXME: <https://github.com/risingwavelabs/risingwave/issues/7218#issuecomment-1386462219>
@@ -57,4 +62,5 @@ pub fn is_permissible_error(db_error: &str) -> bool {
         || not_unique_error(db_error)
         || is_window_error(db_error)
         || is_hash_shuffle_error(db_error)
+        || is_nested_loop_join_error(db_error)
 }

@@ -37,7 +37,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             0..=7 => self.gen_simple_table(),
             8..=8 => self.gen_time_window_func(),
             // TODO: Enable after resolving: <https://github.com/risingwavelabs/risingwave/issues/2771>.
-            9..=9 => self.gen_equijoin_clause(),
+            9..=9 => self.gen_join_clause(),
             10..=10 => self.gen_table_subquery(),
             _ => unreachable!(),
         }
@@ -84,7 +84,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.gen_simple_table_factor()
     }
 
-    fn gen_equijoin_clause(&mut self) -> (TableWithJoins, Vec<Table>) {
+    fn gen_join_clause(&mut self) -> (TableWithJoins, Vec<Table>) {
         let (left_factor, left_columns, mut left_table) = self.gen_table_factor();
         let (right_factor, right_columns, mut right_table) = self.gen_table_factor();
 
@@ -107,9 +107,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let join_on_expr =
             create_join_on_clause(left_column.name.clone(), right_column.name.clone());
 
+        let join_constraint = JoinConstraint::On(join_on_expr);
+        // NOTE: INNER JOIN works fine, usually does not encounter `StreamNestedLoopJoin` much.
+        // If many failures due to `StreamNestedLoopJoin`, try disable the others.
+        let join_operator = match self.rng.gen_range(0..=4) {
+            0 => JoinOperator::Inner(join_constraint),
+            1 => JoinOperator::LeftOuter(join_constraint),
+            2 => JoinOperator::RightOuter(join_constraint),
+            3 => JoinOperator::FullOuter(join_constraint),
+            _ => JoinOperator::CrossJoin,
+        };
+
         let right_factor_with_join = Join {
             relation: right_factor,
-            join_operator: JoinOperator::Inner(JoinConstraint::On(join_on_expr)),
+            join_operator,
         };
         left_table.append(&mut right_table);
         (
