@@ -481,8 +481,7 @@ impl KafkaTransactionConductor {
     }
 
     async fn flush(&self) -> KafkaResult<()> {
-        self.inner.flush(self.properties.timeout).await;
-        Ok(())
+        self.inner.flush(self.properties.timeout).await
     }
 
     #[expect(clippy::unused_async)]

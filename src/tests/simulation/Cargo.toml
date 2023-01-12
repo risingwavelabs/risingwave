@@ -16,7 +16,7 @@ itertools = "0.10"
 madsim = "0.2.13"
 paste = "1"
 rand = "0.8"
-rdkafka = { package = "madsim-rdkafka", version = "=0.2.8-alpha", features = ["cmake-build"] }
+rdkafka = { package = "madsim-rdkafka", version = "=0.2.13-alpha", features = ["cmake-build"] }
 risingwave_common = { path = "../../common" }
 risingwave_compactor = { path = "../../storage/compactor" }
 risingwave_compute = { path = "../../compute" }
