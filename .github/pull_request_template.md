@@ -15,6 +15,7 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 
 - [ ] I have written necessary rustdoc comments
 - [ ] I have added necessary unit tests and integration tests
+- [ ] I have added fuzzing tests or opened an issue to track them. (Optional, recommended for new SQL features).
 - [ ] All checks passed in `./risedev check` (or alias, `./risedev c`)
 
 ## Documentation
