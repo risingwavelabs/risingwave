@@ -4,8 +4,8 @@ package user;
 
 import "common.proto";
 
-option optimize_for = SPEED;
 option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
 
 // AuthInfo is the information required to login to a server.
 message AuthInfo {

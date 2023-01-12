@@ -10,8 +10,8 @@ import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
 
-option optimize_for = SPEED;
 option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
 
 message HeartbeatRequest {
   message ExtraInfo {

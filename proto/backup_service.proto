@@ -2,8 +2,8 @@ syntax = "proto3";
 
 package backup_service;
 
-option optimize_for = SPEED;
 option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
 
 message MetaBackupManifestId {
   uint64 id = 1;

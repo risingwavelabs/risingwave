@@ -8,8 +8,8 @@ import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
 
-option optimize_for = SPEED;
 option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
 
 message RowSeqScanNode {
   plan_common.StorageTableDesc table_desc = 1;

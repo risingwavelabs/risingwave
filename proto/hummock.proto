@@ -6,8 +6,8 @@ import "catalog.proto";
 import "common.proto";
 import "compactor.proto";
 
-option optimize_for = SPEED;
 option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
 
 message SstableInfo {
   uint64 id = 1;

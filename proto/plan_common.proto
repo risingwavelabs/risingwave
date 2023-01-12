@@ -4,8 +4,8 @@ package plan_common;
 
 import "data.proto";
 
-option optimize_for = SPEED;
 option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
 
 // Field is a column in the streaming or batch plan.
 message Field {

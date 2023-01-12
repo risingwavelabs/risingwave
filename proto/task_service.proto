@@ -7,8 +7,8 @@ import "common.proto";
 import "data.proto";
 import "stream_plan.proto";
 
-option optimize_for = SPEED;
 option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
 
 // Task is a running instance of Stage.
 message TaskId {
