@@ -137,8 +137,8 @@ pub struct StagingVersion {
     // imm of smaller batch id may be added later than one with greater batch id
     pub imm: VecDeque<ImmutableMemtableImpl>,
 
-    // Separate queue for merged imm to ease the management of imm and merged imm
-    // newer merged imm comes first
+    // Separate queue for merged imm to ease the management of imm and merged imm.
+    // Newer merged imm comes first
     pub merged_imm: VecDeque<ImmutableMemtableImpl>,
 
     // newer data comes first
@@ -316,17 +316,20 @@ impl HummockReadVersion {
                             }
 
                             // TODO(siyuan): confirm the correctness of this logic
-                            if let Some(ImmutableMemtableImpl::MergedImm(m)) =
+                            if let Some(ImmutableMemtableImpl::MergedImm(merged_imm)) =
                                 self.staging.merged_imm.back()
                             {
-                                let imm_ids = m.get_merged_imm_ids();
-                                let (head, tail) =
+                                // The imm ids should be a suffix of intersect_imm_ids
+                                // Here we compare the first and last to check whether
+                                // the merged imm should be removed.
+                                let imm_ids = merged_imm.get_merged_imm_ids();
+                                let (first, last) =
                                     (imm_ids.first().unwrap(), imm_ids.last().unwrap());
                                 let right_idx = idx + imm_ids.len() - 1;
 
                                 assert!(right_idx < intersect_imm_ids.len());
 
-                                if clear_imm_id == head && intersect_imm_ids[right_idx] == *tail {
+                                if clear_imm_id == first && intersect_imm_ids[right_idx] == *last {
                                     let skip_count = if idx > 0 { idx - 1 } else { 0 };
                                     debug_assert!(check_subset_preserve_order(
                                         intersect_imm_ids.iter().skip(skip_count),
@@ -371,7 +374,6 @@ impl HummockReadVersion {
     pub fn get_imms_to_merge(&mut self) -> Option<Vec<ImmutableMemtable>> {
         // check the number of imms in staging,
         // if the number is greater than the threshold, we need to merge them to a large imm
-
         if !self.onging_merge_task && self.staging.imm.len() >= IMM_MERGE_THRESHOLD {
             // We should preserve the original order of imms in the staging
             let imms_to_merge = self

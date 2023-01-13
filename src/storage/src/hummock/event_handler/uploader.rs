@@ -749,7 +749,13 @@ impl HummockUploader {
                         read_version: t.unwrap().read_version,
                     }))
                 }
-                Err(e) => Poll::Ready(None),
+                Err(e) => {
+                    error!(
+                        "poll imm merge task failed. table_id: {},  {}",
+                        task.table_id, e
+                    );
+                    Poll::Ready(None)
+                }
             }
         } else {
             Poll::Ready(None)

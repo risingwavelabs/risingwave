@@ -8,11 +8,10 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchId;
 use crate::hummock::store::immutable_memtable::MergedImmutableMemtable;
 use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::value::HummockValue;
-use crate::hummock::DeleteRangeTombstone;
 use crate::monitor::StoreLocalStatistic;
 
 /// Abstraction of the immutable memtable used in the read path of `HummockReadVersion`.
-/// Only provide interfaces needed in the read path.
+/// Only provide limited interfaces needed in the read path.
 #[derive(Clone, PartialEq)]
 pub enum ImmutableMemtableImpl {
     Imm(ImmutableMemtable),
@@ -20,17 +19,6 @@ pub enum ImmutableMemtableImpl {
 }
 
 impl ImmutableMemtableImpl {
-    pub fn get(
-        &self,
-        table_key: TableKey<&[u8]>,
-        epoch: HummockEpoch,
-    ) -> Option<HummockValue<Bytes>> {
-        match self {
-            ImmutableMemtableImpl::Imm(batch) => batch.get(table_key),
-            ImmutableMemtableImpl::MergedImm(m) => m.get(table_key, epoch),
-        }
-    }
-
     pub fn start_table_key(&self) -> TableKey<&[u8]> {
         match self {
             ImmutableMemtableImpl::Imm(batch) => batch.start_table_key(),
@@ -85,21 +73,6 @@ impl ImmutableMemtableImpl {
         }
     }
 
-    // methods for delete range
-    pub fn get_delete_range_tombstones(&self) -> Vec<DeleteRangeTombstone> {
-        match self {
-            ImmutableMemtableImpl::Imm(batch) => batch.get_delete_range_tombstones(),
-            ImmutableMemtableImpl::MergedImm(m) => m.get_delete_range_tombstones(),
-        }
-    }
-
-    pub fn check_delete_by_range(&self, table_key: TableKey<&[u8]>, epoch: HummockEpoch) -> bool {
-        match self {
-            ImmutableMemtableImpl::Imm(batch) => batch.check_delete_by_range(table_key),
-            ImmutableMemtableImpl::MergedImm(m) => m.check_delete_by_range(table_key, epoch),
-        }
-    }
-
     pub fn has_range_tombstone(&self) -> bool {
         match self {
             ImmutableMemtableImpl::Imm(batch) => batch.has_range_tombstone(),
@@ -112,14 +85,21 @@ impl ImmutableMemtableImpl {
 pub fn get_from_imm(
     imm: &ImmutableMemtableImpl,
     table_key: TableKey<&[u8]>,
-    epoch: HummockEpoch,
+    read_epoch: HummockEpoch,
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<HummockValue<Bytes>> {
-    if imm.check_delete_by_range(table_key, epoch) {
-        return Some(HummockValue::Delete);
+    match imm {
+        ImmutableMemtableImpl::Imm(imm) => {
+            if imm.check_delete_by_range(table_key) {
+                return Some(HummockValue::Delete);
+            }
+            imm.get(table_key).map(|v| {
+                local_stats.get_shared_buffer_hit_counts += 1;
+                v
+            })
+        }
+        ImmutableMemtableImpl::MergedImm(merged_imm) => {
+            merged_imm.get_from_merged_imm(table_key, read_epoch)
+        }
     }
-    imm.get(table_key, epoch).map(|v| {
-        local_stats.get_shared_buffer_hit_counts += 1;
-        v
-    })
 }

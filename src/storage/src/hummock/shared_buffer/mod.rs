@@ -35,7 +35,6 @@ use crate::hummock::iterator::{
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
 use crate::hummock::shared_buffer::shared_buffer_uploader::UploadTaskPayload;
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::store::immutable_memtable::MergedImmutableMemtable;
 use crate::hummock::utils::filter_single_sst;
 use crate::hummock::{HummockIteratorType, HummockResult, SstableIteratorType, SstableStore};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -47,7 +46,6 @@ pub static SHARED_BUFFER_BATCH_ID_GENERATOR: LazyLock<AtomicU64> =
 pub enum UncommittedData {
     Sst(LocalSstableInfo),
     Batch(SharedBufferBatch),
-    // MergedBatch, // todo
 }
 
 pub fn get_sst_key_range(info: &SstableInfo) -> &KeyRange {
@@ -66,7 +64,6 @@ impl UncommittedData {
                 UserKey::decode(user_key(key_range.left.as_slice()))
             }
             UncommittedData::Batch(batch) => batch.start_user_key(),
-            // UncommittedData::MergedBatch => {}
         }
     }
 
@@ -77,9 +74,6 @@ impl UncommittedData {
                 UserKey::decode(user_key(key_range.right.as_slice()))
             }
             UncommittedData::Batch(batch) => batch.start_user_key(),
-            // UncommittedData::MergedBatch => {
-            //     // todo
-            // }
         }
     }
 }
