@@ -635,6 +635,18 @@ cargo nextest archive \
   "$@"
 """
 
+[tasks.scheck]
+category = "RiseDev - Deterministic Simulation End-to-end Test"
+description = "Run cargo check in deterministic simulation mode"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo check -p risingwave_simulation "$@"
+"""
+
 [tasks.sslt]
 category = "RiseDev - Deterministic Simulation End-to-end Test"
 description = "Run e2e tests in deterministic simulation mode"

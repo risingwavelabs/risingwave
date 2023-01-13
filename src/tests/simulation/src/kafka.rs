@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
+use rdkafka::consumer::StreamConsumer;
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::producer::{BaseProducer, BaseRecord};
 use rdkafka::ClientConfig;
@@ -55,7 +58,7 @@ pub async fn producer(broker_addr: &str, datadir: String) {
                 match producer.send(record) {
                     Ok(_) => break,
                     Err((KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull), _)) => {
-                        producer.flush(None).await;
+                        producer.flush(None).await.expect("failed to flush");
                     }
                     Err((e, _)) => panic!("failed to send message: {}", e),
                 }
@@ -67,13 +70,13 @@ pub async fn producer(broker_addr: &str, datadir: String) {
                     match producer.send(record) {
                         Ok(_) => break,
                         Err((KafkaError::MessageProduction(RDKafkaErrorCode::QueueFull), _)) => {
-                            producer.flush(None).await;
+                            producer.flush(None).await.expect("failed to flush");
                         }
                         Err((e, _)) => panic!("failed to send message: {}", e),
                     }
                 }
             }
         }
-        producer.flush(None).await;
+        producer.flush(None).await.expect("failed to flush");
     }
 }

@@ -19,6 +19,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -92,7 +93,7 @@ impl StreamNode for StreamGlobalSimpleAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(PlanAggCall::to_protobuf)
+                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
                 .collect(),
             distribution_key: self
                 .base
