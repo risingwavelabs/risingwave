@@ -23,7 +23,6 @@ use crate::optimizer::rule::{BoxedRule, Rule};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
-
 /// Convert `LogicalFilter` with now in predicate to left-semi `LogicalJoin`
 pub struct FilterWithNowToJoinRule {}
 impl Rule for FilterWithNowToJoinRule {

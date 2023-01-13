@@ -14,20 +14,18 @@
 
 use std::fmt;
 
-
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::utils::{IndicesDisplay};
+use super::utils::IndicesDisplay;
 use super::{
     ColPrunable, ColumnPruningContext, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
     RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
 };
-use crate::optimizer::property::{FunctionalDependencySet};
-
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMapping;
 use crate::OptimizerContextRef;
 

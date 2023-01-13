@@ -25,9 +25,9 @@ use super::{
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
-
 use crate::optimizer::plan_node::{
-    BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamFilter, ToStreamContext,
+    BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
+    StreamFilter, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -204,7 +204,9 @@ impl ToStream for LogicalFilter {
             .iter()
             .any(|cond| cond.count_nows() > 0);
         if has_now {
-            bail!("Now should have been pushed down into left semi join, RHS being a `Now` operator");
+            bail!(
+                "Now should have been pushed down into left semi join, RHS being a `Now` operator"
+            );
         }
         let new_logical = self.clone_with_input(new_input);
         Ok(StreamFilter::new(new_logical).into())
