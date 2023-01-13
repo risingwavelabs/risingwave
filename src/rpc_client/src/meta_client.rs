@@ -882,6 +882,7 @@ async fn util(addresses: &Vec<i32>) -> Option<Channel> {
             // Should the parameter we pass into the image hold the info if this is http or https?
             // -> Yes!
             let addr = format!("http://127.0.0.1:{}", *meta_addr);
+            tracing::info!("trying to establish channel against {}", addr);
             let meta_channel = get_channel_no_retry(addr.as_str()).await;
             if meta_channel.is_ok() {
                 return Some(meta_channel.unwrap());
@@ -896,15 +897,7 @@ async fn util(addresses: &Vec<i32>) -> Option<Channel> {
 pub async fn get_channel_no_retry(
     addr: &str,
 ) -> std::result::Result<Channel, tonic::transport::Error> {
-    get_channel(
-        addr,
-        GRPC_CONN_RETRY_MAX_INTERVAL_MS,
-        GRPC_CONN_RETRY_BASE_INTERVAL_MS,
-        GRPC_ENDPOINT_KEEP_ALIVE_INTERVAL_SEC,
-        GRPC_ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC,
-        false,
-    )
-    .await
+    get_channel(addr, 0, 0, 0, 0, false).await
 }
 
 /// wrapper for `get_channel`
@@ -949,11 +942,7 @@ async fn get_channel(
             .connect()
             .await
             .inspect_err(|e| {
-                let wait_msg = if retry {
-                    format!(", wait for online")
-                } else {
-                    "".to_owned()
-                };
+                let wait_msg = if retry { ", wait for online" } else { "" };
                 tracing::warn!(
                     "Failed to connect to meta server {}{}:{}",
                     addr,

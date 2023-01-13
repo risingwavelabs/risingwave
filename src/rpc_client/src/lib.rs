@@ -24,7 +24,6 @@
 
 use std::iter::repeat;
 use std::sync::Arc;
-use std::{thread, time};
 
 #[cfg(not(madsim))]
 use anyhow::anyhow;
@@ -45,13 +44,19 @@ mod meta_client;
 // mod sink_client;
 mod stream_client;
 
+#[allow(unused_imports)]
+use std::time::Duration;
+
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::ConnectorClient;
 pub use hummock_meta_client::{CompactTaskItem, HummockMetaClient};
 pub use meta_client::MetaClient;
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
-use tonic::transport::Channel;
 
+// TODO: Can I remove this import?
+#[allow(unused_imports)]
+use crate::meta_client::get_channel_no_retry;
+// TODO: Can I remove this import?
 #[allow(unused_imports)]
 use crate::meta_client::get_channel_with_defaults;
 
@@ -173,14 +178,44 @@ macro_rules! meta_rpc_client_method_impl {
                         .as_ref()
                         .lock()
                         .await
-                        .$fn_name(request)
+                        .$fn_name(request.clone())
                         .await;
 
                     // meta server is leader. Connection is correct
                     if response.is_ok() {
                         return Ok(response.unwrap().into_inner());
                     }
+
+                    // Use heartbeat request to check if we are connected against leader
+                    let mut hc = self.heartbeat_client.as_ref().lock().await;
+                    let h_response = hc.heartbeat(HeartbeatRequest {
+                        node_id: u32::MAX,
+                        info: vec![]
+                    }).await;
+                    let correct_connection = if h_response.is_ok() {
+                        true
+                    } else {
+                        let err_code = h_response.err().unwrap().code();
+                        err_code != tonic::Code::Unavailable && err_code != tonic::Code::Unimplemented
+                    };
+                    if correct_connection {
+                        response?;
+                    }
+
                 } // release MutexGuard on $client
+
+                tracing::info!("handle incorrect connection");
+
+                // TODO: The entire approach is incorrect:
+                // Response may also be error, even if connecting against live leader
+
+
+                // On failover, we potentially have to wait for the election process
+                // FIXME: reduce retry time after PR is merged
+                // https://github.com/risingwavelabs/risingwave/pull/7179
+                let sleep_duration = Duration::from_millis(1000);
+                for _ in 0..25 {
+                    // TODO: add indentation for loop
 
                 // Invalid connection. Meta service is follower or down
                 let resp = self.leader_client.as_ref().lock().await
@@ -202,7 +237,7 @@ macro_rules! meta_rpc_client_method_impl {
 
                         // We need to give time to all meta nodes to know who the new leader is
                         // How can we make this more resilient?
-                        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+                        // tokio::time::sleep(std::time::Duration::from_secs(20)).await;
 
                         // TODO: this have to be the actual addresses from the cmd line arg
                         // TODO: order this again
@@ -221,14 +256,26 @@ macro_rules! meta_rpc_client_method_impl {
                     .leader_addr
                     .expect("Expect that leader service always knows who leader is");
 
-                // TODO: Also try with https?
+                // TODO: If http or https should be decided by param that we pass to the image
                 let addr = format!(
                     "http://{}:{}",
                     leader_addr.get_host(),
                     leader_addr.get_port()
                 );
                 tracing::info!("Connecting against meta leader node {}", addr);
-                let leader_channel = get_channel_with_defaults(addr.as_str()).await?;
+                let leader_channel = get_channel_no_retry(addr.as_str()).await;
+                if leader_channel.is_err() {
+                    // This is never reached: WHY? TODO
+                    tracing::warn!("Leader info seems to be outdated. Connection against {} failed. Try again...", addr);
+                    tokio::time::sleep(sleep_duration).await;
+                    continue;
+                } else {
+                    // TODO: maybe we can establish the channel?
+                    tracing::info!("established channel against {}",  addr);
+                }
+                // Probe node using heartbeat client?
+
+                let leader_channel = leader_channel?;
 
                 // Hold locks on all sub-clients, to update atomically
                 {
@@ -265,8 +312,9 @@ macro_rules! meta_rpc_client_method_impl {
                     .await
                     .$fn_name(req_clone)
                     .await?;
-                Ok(response.into_inner())
-
+                return Ok(response.into_inner());
+            }
+            panic!("unreachable code");
             }
         )*
     }
