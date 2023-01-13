@@ -85,6 +85,7 @@ export interface DropSinkResponse {
 export interface CreateMaterializedViewRequest {
   materializedView: Table | undefined;
   fragmentGraph: StreamFragmentGraph | undefined;
+  parallelism: number;
 }
 
 export interface CreateMaterializedViewResponse {
@@ -129,6 +130,7 @@ export interface CreateTableRequest {
   source: Source | undefined;
   materializedView: Table | undefined;
   fragmentGraph: StreamFragmentGraph | undefined;
+  parallelism: number;
 }
 
 export interface CreateTableResponse {
@@ -179,6 +181,7 @@ export interface CreateIndexRequest {
   index: Index | undefined;
   indexTable: Table | undefined;
   fragmentGraph: StreamFragmentGraph | undefined;
+  parallelism: number;
 }
 
 export interface CreateIndexResponse {
@@ -650,7 +653,7 @@ export const DropSinkResponse = {
 };
 
 function createBaseCreateMaterializedViewRequest(): CreateMaterializedViewRequest {
-  return { materializedView: undefined, fragmentGraph: undefined };
+  return { materializedView: undefined, fragmentGraph: undefined, parallelism: 0 };
 }
 
 export const CreateMaterializedViewRequest = {
@@ -658,6 +661,7 @@ export const CreateMaterializedViewRequest = {
     return {
       materializedView: isSet(object.materializedView) ? Table.fromJSON(object.materializedView) : undefined,
       fragmentGraph: isSet(object.fragmentGraph) ? StreamFragmentGraph.fromJSON(object.fragmentGraph) : undefined,
+      parallelism: isSet(object.parallelism) ? Number(object.parallelism) : 0,
     };
   },
 
@@ -667,6 +671,7 @@ export const CreateMaterializedViewRequest = {
       (obj.materializedView = message.materializedView ? Table.toJSON(message.materializedView) : undefined);
     message.fragmentGraph !== undefined &&
       (obj.fragmentGraph = message.fragmentGraph ? StreamFragmentGraph.toJSON(message.fragmentGraph) : undefined);
+    message.parallelism !== undefined && (obj.parallelism = Math.round(message.parallelism));
     return obj;
   },
 
@@ -680,6 +685,7 @@ export const CreateMaterializedViewRequest = {
     message.fragmentGraph = (object.fragmentGraph !== undefined && object.fragmentGraph !== null)
       ? StreamFragmentGraph.fromPartial(object.fragmentGraph)
       : undefined;
+    message.parallelism = object.parallelism ?? 0;
     return message;
   },
 };
@@ -875,7 +881,7 @@ export const DropViewResponse = {
 };
 
 function createBaseCreateTableRequest(): CreateTableRequest {
-  return { source: undefined, materializedView: undefined, fragmentGraph: undefined };
+  return { source: undefined, materializedView: undefined, fragmentGraph: undefined, parallelism: 0 };
 }
 
 export const CreateTableRequest = {
@@ -884,6 +890,7 @@ export const CreateTableRequest = {
       source: isSet(object.source) ? Source.fromJSON(object.source) : undefined,
       materializedView: isSet(object.materializedView) ? Table.fromJSON(object.materializedView) : undefined,
       fragmentGraph: isSet(object.fragmentGraph) ? StreamFragmentGraph.fromJSON(object.fragmentGraph) : undefined,
+      parallelism: isSet(object.parallelism) ? Number(object.parallelism) : 0,
     };
   },
 
@@ -894,6 +901,7 @@ export const CreateTableRequest = {
       (obj.materializedView = message.materializedView ? Table.toJSON(message.materializedView) : undefined);
     message.fragmentGraph !== undefined &&
       (obj.fragmentGraph = message.fragmentGraph ? StreamFragmentGraph.toJSON(message.fragmentGraph) : undefined);
+    message.parallelism !== undefined && (obj.parallelism = Math.round(message.parallelism));
     return obj;
   },
 
@@ -908,6 +916,7 @@ export const CreateTableRequest = {
     message.fragmentGraph = (object.fragmentGraph !== undefined && object.fragmentGraph !== null)
       ? StreamFragmentGraph.fromPartial(object.fragmentGraph)
       : undefined;
+    message.parallelism = object.parallelism ?? 0;
     return message;
   },
 };
@@ -1158,7 +1167,7 @@ export const RisectlListStateTablesResponse = {
 };
 
 function createBaseCreateIndexRequest(): CreateIndexRequest {
-  return { index: undefined, indexTable: undefined, fragmentGraph: undefined };
+  return { index: undefined, indexTable: undefined, fragmentGraph: undefined, parallelism: 0 };
 }
 
 export const CreateIndexRequest = {
@@ -1167,6 +1176,7 @@ export const CreateIndexRequest = {
       index: isSet(object.index) ? Index.fromJSON(object.index) : undefined,
       indexTable: isSet(object.indexTable) ? Table.fromJSON(object.indexTable) : undefined,
       fragmentGraph: isSet(object.fragmentGraph) ? StreamFragmentGraph.fromJSON(object.fragmentGraph) : undefined,
+      parallelism: isSet(object.parallelism) ? Number(object.parallelism) : 0,
     };
   },
 
@@ -1177,6 +1187,7 @@ export const CreateIndexRequest = {
       (obj.indexTable = message.indexTable ? Table.toJSON(message.indexTable) : undefined);
     message.fragmentGraph !== undefined &&
       (obj.fragmentGraph = message.fragmentGraph ? StreamFragmentGraph.toJSON(message.fragmentGraph) : undefined);
+    message.parallelism !== undefined && (obj.parallelism = Math.round(message.parallelism));
     return obj;
   },
 
@@ -1189,6 +1200,7 @@ export const CreateIndexRequest = {
     message.fragmentGraph = (object.fragmentGraph !== undefined && object.fragmentGraph !== null)
       ? StreamFragmentGraph.fromPartial(object.fragmentGraph)
       : undefined;
+    message.parallelism = object.parallelism ?? 0;
     return message;
   },
 };
