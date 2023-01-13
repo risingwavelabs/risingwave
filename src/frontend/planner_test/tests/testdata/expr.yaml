@@ -3,13 +3,13 @@
   sql: |
     select int '1';
   logical_plan: |
-    LogicalProject { exprs: ['1':Varchar::Int32] }
+    LogicalProject { exprs: [1:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: bind typed literal - bool
   sql: |
     SELECT bool 't'
   logical_plan: |
-    LogicalProject { exprs: ['t':Varchar::Boolean] }
+    LogicalProject { exprs: [true:Boolean] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     values(must_be_unimplemented_func(1));
@@ -146,11 +146,11 @@
     -- When it is invalid, PostgreSQL reports error during explain, but we have to wait until execution as of now.
     -- values(round('abc'));
   batch_plan: |
-    BatchValues { rows: [[Round('123':Varchar::Float64)]] }
+    BatchValues { rows: [[Round(123:Float64)]] }
 - sql: |
     values(extract(hour from timestamp '2001-02-16 20:38:40'));
   batch_plan: |
-    BatchValues { rows: [[Extract('HOUR':Varchar, '2001-02-16 20:38:40':Varchar::Timestamp)]] }
+    BatchValues { rows: [[Extract('HOUR':Varchar, '2001-02-16 20:38:40':Timestamp)]] }
 - sql: |
     values('Postgres' not like 'Post%');
   batch_plan: |
