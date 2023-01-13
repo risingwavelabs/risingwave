@@ -92,7 +92,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         *secs
     }
 
-    fn u64_to_interval_expr(i: u64) -> Expr {
+    fn secs_to_interval_expr(i: u64) -> Expr {
         Expr::TypedString {
             data_type: AstDataType::Interval,
             value: i.to_string(),
@@ -101,13 +101,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_slide(&mut self) -> (u64, Expr) {
         let secs = self.gen_secs();
-        let expr = Self::u64_to_interval_expr(secs);
+        let expr = Self::secs_to_interval_expr(secs);
         (secs, expr)
     }
 
     fn gen_size(&mut self, denominator: u64) -> Expr {
         let secs = self.gen_secs() * denominator;
-        Self::u64_to_interval_expr(secs)
+        Self::secs_to_interval_expr(secs)
     }
 }
 
