@@ -231,10 +231,18 @@ impl RpcNotificationClient {
 impl NotificationClient for RpcNotificationClient {
     type Channel = Streaming<SubscribeResponse>;
 
+    // TODO: also handle failover here?
+    // Should meta client have a failover thing?
     async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel> {
-        self.meta_client
+        let res = self
+            .meta_client
             .subscribe(subscribe_type)
             .await
-            .map_err(RpcError::into)
+            .map_err(RpcError::into);
+        // TODO: When exactly do we need do failover here?
+        if true {
+            self.meta_client.failover().await;
+        }
+        res
     }
 }

@@ -81,6 +81,76 @@ pub struct MetaClient {
 }
 
 impl MetaClient {
+    // TODO: So far this is only a test func. Do not use in prod
+    pub async fn failover(&self) {
+        let sleep_duration = Duration::from_millis(1000);
+        for _ in 0..25 {
+            let node_addresses = vec![5690, 15690, 25690];
+            let meta_channel = util(&node_addresses).await.unwrap_or_else(|| {
+                panic!(
+                "All meta nodes are down. Tried to connect against nodes at these addresses: {:?}",
+                node_addresses
+            )
+            });
+            let mut leader_client = LeaderServiceClient::new(meta_channel);
+            let leader_addr = leader_client
+                .leader(LeaderRequest {})
+                .await
+                .unwrap()
+                .into_inner()
+                .leader_addr
+                .expect("Expect that leader service always knows who leader is");
+            let addr = format!(
+                "http://{}:{}",
+                leader_addr.get_host(),
+                leader_addr.get_port()
+            );
+            tracing::info!("Connecting against meta leader node {}", addr);
+            // TODO: remove comments
+            // If I use get_channel_with_defaults, then I have no more spam
+            let leader_channel = get_channel_no_retry(addr.as_str()).await;
+            if leader_channel.is_err() {
+                tracing::warn!(
+                    "Leader info seems to be outdated. Connection against {} failed. Try again...",
+                    addr
+                );
+                tokio::time::sleep(sleep_duration).await;
+                continue;
+            } else {
+                // TODO: Delete else branch. Debugging only
+                tracing::info!("established channel against {}", addr);
+            }
+            // Probe node using heartbeat client?
+
+            let leader_channel = leader_channel.unwrap();
+
+            // Hold locks on all sub-clients, to update atomically
+            {
+                let mut leader_c = self.inner.leader_client.as_ref().lock().await;
+                let mut cluster_c = self.inner.cluster_client.as_ref().lock().await;
+                let mut heartbeat_c = self.inner.heartbeat_client.as_ref().lock().await;
+                let mut ddl_c = self.inner.ddl_client.as_ref().lock().await;
+                let mut hummock_c = self.inner.hummock_client.as_ref().lock().await;
+                let mut notification_c = self.inner.notification_client.as_ref().lock().await;
+                let mut stream_c = self.inner.stream_client.as_ref().lock().await;
+                let mut user_c = self.inner.user_client.as_ref().lock().await;
+                let mut scale_c = self.inner.scale_client.as_ref().lock().await;
+                let mut backup_c = self.inner.backup_client.as_ref().lock().await;
+
+                *leader_c = LeaderServiceClient::new(leader_channel.clone());
+                *cluster_c = ClusterServiceClient::new(leader_channel.clone());
+                *heartbeat_c = HeartbeatServiceClient::new(leader_channel.clone());
+                *ddl_c = DdlServiceClient::new(leader_channel.clone());
+                *hummock_c = HummockManagerServiceClient::new(leader_channel.clone());
+                *notification_c = NotificationServiceClient::new(leader_channel.clone());
+                *stream_c = StreamManagerServiceClient::new(leader_channel.clone());
+                *user_c = UserServiceClient::new(leader_channel.clone());
+                *scale_c = ScaleServiceClient::new(leader_channel.clone());
+                *backup_c = BackupServiceClient::new(leader_channel);
+            } // release MutexGuards on all clients
+        }
+    }
+
     pub fn worker_id(&self) -> u32 {
         self.worker_id
     }

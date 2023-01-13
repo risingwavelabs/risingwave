@@ -170,6 +170,9 @@ macro_rules! rpc_client_method_impl {
 macro_rules! meta_rpc_client_method_impl {
     ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
         $(
+            // TODO: what is the difference between this and d97842031?
+            // Why is the current version so spammy?
+            // Cannot be only because I am using a request without a retry
             pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
                 let req_clone = request.clone();
                 {
@@ -186,6 +189,7 @@ macro_rules! meta_rpc_client_method_impl {
                         return Ok(response.unwrap().into_inner());
                     }
 
+                    // It is not the below part that causes the spam: TODO: delete comment
                     // Use heartbeat request to check if we are connected against leader
                     let mut hc = self.heartbeat_client.as_ref().lock().await;
                     let h_response = hc.heartbeat(HeartbeatRequest {
@@ -195,20 +199,20 @@ macro_rules! meta_rpc_client_method_impl {
                     let correct_connection = if h_response.is_ok() {
                         true
                     } else {
+                        // { code: Unknown, message: "error reading a body from connection: broken pipe", source: Some(hyper::Error(Body, Error { kind: Io(Kind(BrokenPipe)) })) }
+                        // TODO if unknown, then check if it is broken pipe
                         let err_code = h_response.err().unwrap().code();
                         err_code != tonic::Code::Unavailable && err_code != tonic::Code::Unimplemented
                     };
                     if correct_connection {
                         response?;
                     }
-
                 } // release MutexGuard on $client
 
                 tracing::info!("handle incorrect connection");
 
                 // TODO: The entire approach is incorrect:
                 // Response may also be error, even if connecting against live leader
-
 
                 // On failover, we potentially have to wait for the election process
                 // FIXME: reduce retry time after PR is merged
@@ -263,14 +267,15 @@ macro_rules! meta_rpc_client_method_impl {
                     leader_addr.get_port()
                 );
                 tracing::info!("Connecting against meta leader node {}", addr);
+                // TODO: remove comments
+                // If I use get_channel_with_defaults, then I have no more spam
                 let leader_channel = get_channel_no_retry(addr.as_str()).await;
                 if leader_channel.is_err() {
-                    // This is never reached: WHY? TODO
                     tracing::warn!("Leader info seems to be outdated. Connection against {} failed. Try again...", addr);
                     tokio::time::sleep(sleep_duration).await;
                     continue;
                 } else {
-                    // TODO: maybe we can establish the channel?
+                    // TODO: Delete else branch. Debugging only
                     tracing::info!("established channel against {}",  addr);
                 }
                 // Probe node using heartbeat client?
@@ -305,6 +310,8 @@ macro_rules! meta_rpc_client_method_impl {
                 // TODO: Recursive in case we have another faulty connection?
                 // self.$fn_name(req_clone).await
 
+                tracing::info!("updated client to new connection");
+
                 let response = self
                     .$client
                     .as_ref()
@@ -312,6 +319,8 @@ macro_rules! meta_rpc_client_method_impl {
                     .await
                     .$fn_name(req_clone)
                     .await?;
+                tracing::info!("Response send again and response succeeded");
+
                 return Ok(response.into_inner());
             }
             panic!("unreachable code");
