@@ -257,10 +257,8 @@
     select * from t1 join t2 where v1 = v2 and v1 > now() + '1 hr';
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
-    ├─LogicalJoin { type: LeftSemi, on: (t1.v1 > (now + '1 hr':Varchar::Interval)), output: all }
-    | ├─LogicalScan { table: t1, columns: [t1.v1] }
-    | └─LogicalProject { exprs: [(now + '1 hr':Varchar::Interval)] }
-    |   └─LogicalNow { output: [now] }
+    ├─LogicalFilter { predicate: (t1.v1 > (Now + '1 hr':Varchar::Interval)) }
+    | └─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, v1, v2] }
@@ -279,11 +277,10 @@
     create table t2(v2 timestamp with time zone, v3 interval);
     select * from t1, t2 where v1 = v2 and v1 > now() + v3;
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, on: (t1.v1 > (now + t2.v3)), output: all }
-    ├─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
-    | ├─LogicalScan { table: t1, columns: [t1.v1] }
-    | └─LogicalScan { table: t2, columns: [t2.v2, t2.v3] }
-    └─LogicalNow { output: [now] }
+    LogicalFilter { predicate: (t1.v1 > (Now + t2.v3)) }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
+      ├─LogicalScan { table: t1, columns: [t1.v1] }
+      └─LogicalScan { table: t2, columns: [t2.v2, t2.v3] }
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
@@ -294,11 +291,10 @@
     create table t2(v2 timestamp with time zone, v3 interval);
     select * from t1 join t2 where v1 = v2 and v1 > now() + v3;
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, on: (t1.v1 > (now + t2.v3)), output: all }
-    ├─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
-    | ├─LogicalScan { table: t1, columns: [t1.v1] }
-    | └─LogicalScan { table: t2, columns: [t2.v2, t2.v3] }
-    └─LogicalNow { output: [now] }
+    LogicalFilter { predicate: (t1.v1 > (Now + t2.v3)) }
+    └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
+      ├─LogicalScan { table: t1, columns: [t1.v1] }
+      └─LogicalScan { table: t2, columns: [t2.v2, t2.v3] }
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
@@ -308,10 +304,8 @@
     create table t1(v1 timestamp with time zone, v2 int);
     select * from t1 where v1 > now() + '30 min' and v2 > 5;
   optimized_logical_plan: |
-    LogicalJoin { type: LeftSemi, on: (t1.v1 > (now + '30 min':Varchar::Interval)), output: all }
-    ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (t1.v2 > 5:Int32) }
-    └─LogicalProject { exprs: [(now + '30 min':Varchar::Interval)] }
-      └─LogicalNow { output: [now] }
+    LogicalFilter { predicate: (t1.v1 > (Now + '30 min':Varchar::Interval)) }
+    └─LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (t1.v2 > 5:Int32) }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden)], pk_columns: [t1._row_id] }
     └─StreamDynamicFilter { predicate: (t1.v1 > (now + '30 min':Varchar::Interval)), output: [t1.v1, t1.v2, t1._row_id] }
@@ -355,9 +349,8 @@
     select * from t1 join t2 where v1 = v2 and v1 > now();
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
-    ├─LogicalJoin { type: LeftSemi, on: (t1.v1 > now), output: all }
-    | ├─LogicalScan { table: t1, columns: [t1.v1] }
-    | └─LogicalNow { output: [now] }
+    ├─LogicalFilter { predicate: (t1.v1 > Now) }
+    | └─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, v1, v2] }
