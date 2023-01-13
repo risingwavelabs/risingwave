@@ -254,11 +254,6 @@ message HashJoinNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 12;
-  // Those two fields can are used to represent
-  // mapping from watermark indices in join key
-  // to those in output.
-  repeated uint32 watermark_jk_indices = 13;
-  repeated uint32 watermark_output_indices = 14;
 }
 
 message DynamicFilterNode {
