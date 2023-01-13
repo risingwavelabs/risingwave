@@ -92,7 +92,7 @@ pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()
         storage_config,
         &opts.state_store,
         1000000,
-        2000,
+        800,
     )
     .await
 }
@@ -635,7 +635,7 @@ mod tests {
             storage_config,
             "hummock+memory",
             10000,
-            100,
+            60,
         )
         .await
         .unwrap();

@@ -219,6 +219,10 @@ impl TableCatalog {
         self.table_type == TableType::Table
     }
 
+    pub fn is_internal_table(&self) -> bool {
+        self.table_type == TableType::Internal
+    }
+
     pub fn is_mview(&self) -> bool {
         self.table_type == TableType::MaterializedView
     }

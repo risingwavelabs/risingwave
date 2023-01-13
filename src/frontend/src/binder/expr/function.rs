@@ -201,16 +201,19 @@ impl Binder {
                     .unwrap_or_else(|_| ExprImpl::literal_null(DataType::Varchar)));
             }
             "current_schemas" => {
-                if inputs.len() != 1
-                    || (!inputs[0].is_null() && inputs[0].return_type() != DataType::Boolean)
-                {
-                    return Err(ErrorCode::ExprError(
+                let no_match_err = ErrorCode::ExprError(
                         "No function matches the given name and argument types. You might need to add explicit type casts.".into()
-                    )
-                    .into());
+                    );
+                if inputs.len() != 1 {
+                    return Err(no_match_err.into());
                 }
+                let input = inputs
+                    .pop()
+                    .unwrap()
+                    .enforce_bool_clause("current_schemas")
+                    .map_err(|_| no_match_err)?;
 
-                let ExprImpl::Literal(literal) = &inputs[0] else {
+                let ExprImpl::Literal(literal) = &input else {
                     return Err(ErrorCode::NotImplemented(
                         "Only boolean literals are supported in `current_schemas`.".to_string(), None.into()
                     )
@@ -397,16 +400,10 @@ impl Binder {
             Some(filter) => {
                 let mut clause = Some(Clause::Filter);
                 std::mem::swap(&mut self.context.clause, &mut clause);
-                let expr = self.bind_expr(*filter)?;
+                let expr = self
+                    .bind_expr(*filter)
+                    .and_then(|expr| expr.enforce_bool_clause("FILTER"))?;
                 self.context.clause = clause;
-
-                if expr.return_type() != DataType::Boolean {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "the type of filter clause should be boolean, but found {:?}",
-                        expr.return_type()
-                    ))
-                    .into());
-                }
                 if expr.has_subquery() {
                     return Err(ErrorCode::NotImplemented(
                         "subquery in filter clause".to_string(),
