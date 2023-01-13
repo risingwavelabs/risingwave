@@ -143,23 +143,23 @@ impl<'a> Deserializer<'a> {
                 .enumerate()
                 .map(|(i, c)| (c.get_id(), i))
                 .collect::<HashMap<_, _>>(),
-            schema: schema,
+            schema,
         }
     }
 
-    pub fn decode(&self, mut encoded_bytes: &[u8]) -> Vec<Option<Datum>> {
+    pub fn decode(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         let flag = encoded_bytes.get_u8();
         let nums_bytes = match flag & 0b1100 {
             0b0100 => 1,
             0b1000 => 2,
             0b1100 => 4,
-            _ => unreachable!("flag's WW bits corrupted"),
+            _ => return Err(ValueEncodingError::InvalidFlag(flag)),
         };
         let offset_bytes = match flag & 0b11 {
             0b01 => 1,
             0b10 => 2,
             0b11 => 4,
-            _ => unreachable!("flag's BB bits corrupted"),
+            _ => return Err(ValueEncodingError::InvalidFlag(flag)),
         };
         let datum_num = deserialize_width(nums_bytes, &mut encoded_bytes);
         let offsets_start_idx = 4 * datum_num;
@@ -179,33 +179,27 @@ impl<'a> Deserializer<'a> {
                         ..(this_offset_start_idx + 2 * offset_bytes)];
                     let next_offset = deserialize_width(offset_bytes, &mut next_offset_slice);
                     if this_offset == next_offset {
-                        Some(None)
+                        None
                     } else {
                         let mut data_slice = &data[this_offset..next_offset];
-                        if let Ok(v) = deserialize_value(&self.schema[decoded_idx], &mut data_slice)
-                        {
-                            Some(Some(v))
-                        } else {
-                            Some(None)
-                        }
+                        Some(deserialize_value(
+                            &self.schema[decoded_idx],
+                            &mut data_slice,
+                        )?)
                     }
+                } else if this_offset == data.len() {
+                    None
                 } else {
-                    if this_offset == data.len() {
-                        Some(None)
-                    } else {
-                        let mut data_slice = &data[this_offset..];
-                        if let Ok(v) = deserialize_value(&self.schema[decoded_idx], &mut data_slice)
-                        {
-                            Some(Some(v))
-                        } else {
-                            Some(None)
-                        }
-                    }
+                    let mut data_slice = &data[this_offset..];
+                    Some(deserialize_value(
+                        &self.schema[decoded_idx],
+                        &mut data_slice,
+                    )?)
                 };
                 datums[decoded_idx] = data;
             }
         }
-        datums
+        Ok(datums)
     }
 }
 

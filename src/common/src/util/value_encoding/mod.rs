@@ -297,8 +297,8 @@ mod tests {
         let deserializer = row_encoding::Deserializer::new(&column_ids[..], &data_types[..]);
         let decoded = deserializer.decode(&row_bytes[..]);
         assert_eq!(
-            decoded,
-            vec![Some(Some(Int16(5))), Some(Some(Utf8("abc".into())))]
+            decoded.unwrap(),
+            vec![Some(Int16(5)), Some(Utf8("abc".into()))]
         );
         // let data_types1 = vec![DataType::Varchar, DataType::Int16, DataType::Date];
         // let decoded1 = decode(
