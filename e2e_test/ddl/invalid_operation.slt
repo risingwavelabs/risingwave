@@ -141,7 +141,7 @@ statement error Use `DROP TABLE`
 drop index msrc;
 
 statement error Use `DROP TABLE`
-drop source t;
+drop source msrc;
 
 # FIXME: improve the error message
 statement error not found
