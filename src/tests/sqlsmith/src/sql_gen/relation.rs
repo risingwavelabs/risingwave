@@ -14,9 +14,10 @@
 
 use rand::prelude::SliceRandom;
 use rand::Rng;
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor, TableWithJoins};
 
-use crate::sql_gen::{Column, SqlGenerator};
+use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
 
 fn create_join_on_clause(left: String, right: String) -> Expr {
@@ -84,6 +85,22 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.gen_simple_table_factor()
     }
 
+    fn gen_join_constraint(&mut self, available_join_on_columns: Vec<(&Column, &Column)>) -> JoinConstraint {
+        match self.rng.gen_range(0..=5) {
+            0..=3 => {
+                let i = self.rng.gen_range(0..available_join_on_columns.len());
+                let (left_column, right_column) = available_join_on_columns[i];
+                let join_on_expr = match self.rng.gen_bool(0.9) {
+                    true => create_join_on_clause(left_column.name.clone(), right_column.name.clone()),
+                    false => self.gen_simple_scalar(&DataType::Boolean),
+                };
+                JoinConstraint::On(join_on_expr)
+            },
+            4 => JoinConstraint::Natural,
+            _ => JoinConstraint::None,
+        }
+    }
+
     fn gen_join_clause(&mut self) -> (TableWithJoins, Vec<Table>) {
         let (left_factor, left_columns, mut left_table) = self.gen_table_factor();
         let (right_factor, right_columns, mut right_table) = self.gen_table_factor();
@@ -91,9 +108,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let mut available_join_on_columns = vec![];
         for left_column in &left_columns {
             for right_column in &right_columns {
-                // NOTE: We can support some composite types if we wish to in the future.
-                // see: https://www.postgresql.org/docs/14/functions-comparison.html.
-                // For simplicity only support scalar types for now.
                 if left_column.data_type == right_column.data_type {
                     available_join_on_columns.push((left_column, right_column))
                 }
@@ -102,12 +116,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         if available_join_on_columns.is_empty() {
             return self.gen_simple_table();
         }
-        let i = self.rng.gen_range(0..available_join_on_columns.len());
-        let (left_column, right_column) = available_join_on_columns[i];
-        let join_on_expr =
-            create_join_on_clause(left_column.name.clone(), right_column.name.clone());
+        let join_constraint = self.gen_join_constraint(available_join_on_columns);
 
-        let join_constraint = JoinConstraint::On(join_on_expr);
         // NOTE: INNER JOIN works fine, usually does not encounter `StreamNestedLoopJoin` much.
         // If many failures due to `StreamNestedLoopJoin`, try disable the others.
         let join_operator = match self.rng.gen_range(0..=4) {
