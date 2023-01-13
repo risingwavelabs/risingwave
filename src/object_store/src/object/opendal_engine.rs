@@ -14,14 +14,15 @@
 
 use std::io::Cursor;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use fail::fail_point;
 use futures::future::try_join_all;
+use futures::io::{AsyncSeekExt, AsyncWriteExt, Cursor as FuturesCursor};
 use futures::StreamExt;
 use itertools::Itertools;
 use opendal::services::{hdfs, memory};
 use opendal::{ObjectReader, Operator};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, SeekFrom};
+use tokio::io::{AsyncRead, AsyncReadExt, SeekFrom};
 
 use super::{
     BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
@@ -214,32 +215,44 @@ impl ObjectStore for OpendalObjectStore {
 pub struct HdfsStreamingUploader {
     op: Operator,
     path: String,
-    buf: BytesMut,
+    buffer: FuturesCursor<Vec<u8>>,
+    length: u64,
 }
 impl HdfsStreamingUploader {
     pub fn new(op: Operator, path: String) -> Self {
         Self {
             op,
             path,
-            buf: BytesMut::new(),
+            buffer: FuturesCursor::new(vec![]),
+            length: 0,
         }
     }
 }
 #[async_trait::async_trait]
 impl StreamingUploader for HdfsStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        self.buf.put(data);
+        self.buffer.seek(SeekFrom::Start(self.length)).await?;
+        let data = data.to_vec();
+
+        self.length += data.len() as u64;
+        let _ = self.buffer.write(&data).await?;
         Ok(())
     }
 
-    async fn finish(self: Box<Self>) -> ObjectResult<()> {
-        self.op.object(&self.path).write(self.buf).await?;
+    async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
+        self.buffer.flush().await?;
+        let buffer = self.buffer.get_mut().to_vec();
+        let r = FuturesCursor::new(buffer);
+        self.op
+            .object(&self.path)
+            .write_from(self.length, r)
+            .await?;
 
         Ok(())
     }
 
     fn get_memory_usage(&self) -> u64 {
-        self.buf.capacity() as u64
+        self.length
     }
 }
 
