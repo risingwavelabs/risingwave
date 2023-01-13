@@ -398,6 +398,8 @@ fn make_stream_graph() -> StreamFragmentGraph {
 // TODO: enable this test with madsim
 #[tokio::test]
 async fn test_fragmenter() -> MetaResult<()> {
+    use risingwave_pb::stream_plan::StreamEnvironment;
+
     let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
     let mut ctx = CreateStreamingJobContext::default();
@@ -410,7 +412,8 @@ async fn test_fragmenter() -> MetaResult<()> {
         .generate_graph(env.id_gen_manager_ref(), &mut ctx)
         .await?;
 
-    let table_fragments = TableFragments::new(TableId::default(), graph);
+    let table_fragments =
+        TableFragments::new(TableId::default(), graph, StreamEnvironment::default());
     let actors = table_fragments.actors();
     let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
     let sink_actor_ids = table_fragments.mview_actor_ids();

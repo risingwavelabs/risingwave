@@ -1065,7 +1065,8 @@ mod tests {
                 ..Default::default()
             },
         );
-        let table_fragments = TableFragments::new(table_id, fragments);
+        let table_fragments =
+            TableFragments::new(table_id, fragments, StreamEnvironment::default());
         services.create_materialized_view(table_fragments).await?;
 
         for actor in actors {

@@ -552,11 +552,8 @@ where
         let dependent_relations = get_dependent_relations(&fragment_graph)?;
         stream_job.set_dependent_relations(dependent_relations);
 
-        // 3. Get the timezones for relevant streaming jobs (currently just mview)
-        let timezone = match stream_job {
-            StreamingJob::MaterializedView(_) => Some(fragment_graph.get_timezone().clone()),
-            _ => None,
-        };
+        // 3. Get the env for streaming jobs
+        let env = fragment_graph.get_env().unwrap().clone();
 
         // 4. Mark current relation as "creating" and add reference count to dependent relations.
         self.catalog_manager
@@ -645,7 +642,7 @@ where
             .mark_creating_tables(&creating_tables)
             .await;
 
-        Ok((ctx, TableFragments::new_with_timezone(id.into(), graph, timezone)))
+        Ok((ctx, TableFragments::new(id.into(), graph, env)))
     }
 
     /// `cancel_stream_job` cancels a stream job and clean some states.
