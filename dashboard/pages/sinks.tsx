@@ -15,18 +15,13 @@
  *
  */
 
-import { Column, Relations } from "../components/Relations"
-import { Sink } from "../proto/gen/catalog"
+import {
+  connectorColumn,
+  streamingJobColumns,
+  Relations,
+} from "../components/Relations"
 import { getSinks } from "./api/streaming"
 
 export default function Sinks() {
-  const columns: Column<Sink>[] = [
-    {
-      name: "Connector",
-      width: 3,
-      content: (r) => r.properties.connector ?? "unknown",
-    },
-  ]
-
-  return Relations("Sinks", getSinks, columns)
+  return Relations("Sinks", getSinks, [connectorColumn, ...streamingJobColumns])
 }

@@ -42,7 +42,8 @@ import Link from "next/link"
 import { Fragment, useEffect, useState } from "react"
 import Title from "../components/Title"
 import extractColumnInfo from "../lib/extractInfo"
-import { Relation } from "../pages/api/streaming"
+import { Relation, StreamingJob } from "../pages/api/streaming"
+import { Table as RwTable } from "../proto/gen/catalog"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -52,11 +53,63 @@ export type Column<R> = {
   content: (r: R) => React.ReactNode
 }
 
+export const dependentsColumn: Column<Relation> = {
+  name: "Depends",
+  width: 1,
+  content: (r) => (
+    <Link href={`/streaming_graph/?id=${r.id}`}>
+      <Button
+        size="sm"
+        aria-label="view dependents"
+        colorScheme="teal"
+        variant="link"
+      >
+        D
+      </Button>
+    </Link>
+  ),
+}
+
+export const fragmentsColumn: Column<StreamingJob> = {
+  name: "Fragments",
+  width: 1,
+  content: (r) => (
+    <Link href={`/streaming_plan/?id=${r.id}`}>
+      <Button
+        size="sm"
+        aria-label="view fragments"
+        colorScheme="teal"
+        variant="link"
+      >
+        F
+      </Button>
+    </Link>
+  ),
+}
+
+export const primaryKeyColumn: Column<RwTable> = {
+  name: "Primary Key",
+  width: 1,
+  content: (r) =>
+    r.pk
+      .map((order) => order.index)
+      .map((i) => r.columns[i])
+      .map((col) => extractColumnInfo(col))
+      .join(", "),
+}
+
+export const connectorColumn: Column<Relation> = {
+  name: "Connector",
+  width: 3,
+  content: (r) => r.properties.connector ?? "unknown",
+}
+
+export const streamingJobColumns = [dependentsColumn, fragmentsColumn]
+
 export function Relations<R extends Relation>(
   title: string,
   getRelations: () => Promise<R[]>,
-  extraColumns: Column<R>[] = [],
-  isStreamingJob: boolean = true // only show metrics and graphs for streaming jobs
+  extraColumns: Column<R>[]
 ) {
   const toast = useToast()
   const [relationList, setRelationList] = useState<R[]>([])
@@ -132,13 +185,6 @@ export function Relations<R extends Relation>(
                   {c.name}
                 </Th>
               ))}
-              {isStreamingJob && (
-                <>
-                  <Th width={1}>Metrics</Th>
-                  <Th width={1}>Depends</Th>
-                  <Th width={1}>Fragments</Th>
-                </>
-              )}
               <Th>Visible Columns</Th>
             </Tr>
           </Thead>
@@ -161,44 +207,6 @@ export function Relations<R extends Relation>(
                 {extraColumns.map((c) => (
                   <Td key={c.name}>{c.content(r)}</Td>
                 ))}
-                {isStreamingJob && (
-                  <>
-                    <Td>
-                      <Button
-                        size="sm"
-                        aria-label="view metrics"
-                        colorScheme="teal"
-                        variant="link"
-                      >
-                        M
-                      </Button>
-                    </Td>
-                    <Td>
-                      <Link href={`/streaming_graph/?id=${r.id}`}>
-                        <Button
-                          size="sm"
-                          aria-label="view dependents"
-                          colorScheme="teal"
-                          variant="link"
-                        >
-                          D
-                        </Button>
-                      </Link>
-                    </Td>
-                    <Td>
-                      <Link href={`/streaming_plan/?id=${r.id}`}>
-                        <Button
-                          size="sm"
-                          aria-label="view fragments"
-                          colorScheme="teal"
-                          variant="link"
-                        >
-                          F
-                        </Button>
-                      </Link>
-                    </Td>
-                  </>
-                )}
                 <Td overflowWrap="normal">
                   {r.columns
                     .filter((col) => !col.isHidden)

@@ -108,6 +108,8 @@ function Layout({ children }: { children: React.ReactNode }) {
             <NavButton href="/materialized_views/">
               Materialized Views
             </NavButton>
+            <NavButton href="/tables/">Tables</NavButton>
+            <NavButton href="/internal_tables/">Internal Tables</NavButton>
             <NavButton href="/sinks/">Sinks</NavButton>
           </VStack>
           <VStack width="full" alignItems="flex-start" px={3}>
