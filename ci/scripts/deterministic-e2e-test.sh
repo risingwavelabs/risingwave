@@ -42,4 +42,4 @@ echo "--- deterministic simulation e2e, ci-3cn-1fe, fuzzing"
 seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata > $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
 
 echo "--- deterministic simulation e2e, issue 7218"
-parallel MADSIM_TEST_SEED=16 './risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata > $LOGDIR/fuzzing.log && rm $LOGDIR/fuzzing.log'
+MADSIM_TEST_SEED=16 './risingwave_simulation --sqlsmith 100 ./src/tests/sqlsmith/tests/testdata > $LOGDIR/fuzzing.log && rm $LOGDIR/fuzzing.log'
