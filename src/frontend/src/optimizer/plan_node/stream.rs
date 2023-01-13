@@ -628,8 +628,7 @@ pub fn to_stream_prost_body(
                 is_append_only: me.is_append_only,
                 // TODO: derive watermark
                 watermark_jk_indices: vec![],
-                watermark_output_indices_l: vec![],
-                watermark_output_indices_r: vec![],
+                watermark_output_indices: vec![],
             })
         }
         Node::HopWindow(me) => {

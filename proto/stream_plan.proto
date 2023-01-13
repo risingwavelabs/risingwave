@@ -258,8 +258,7 @@ message HashJoinNode {
   // mapping from watermark indices in join key
   // to those in output.
   repeated uint32 watermark_jk_indices = 13;
-  repeated uint32 watermark_output_indices_l = 14;
-  repeated uint32 watermark_output_indices_r = 15;
+  repeated uint32 watermark_output_indices = 14;
 }
 
 message DynamicFilterNode {

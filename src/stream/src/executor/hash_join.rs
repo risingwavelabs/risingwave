@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::anyhow;
 use async_stack_trace::StackTrace;
 use fixedbitset::FixedBitSet;
 use futures::{pin_mut, StreamExt};
@@ -167,10 +166,9 @@ struct JoinSide<K: HashKey, S: StateStore> {
     start_pos: usize,
     /// The mapping from input indices of a side to output columes.
     i2o_mapping: Vec<(usize, usize)>,
+    i2o_mapping_indexed: MultiMap<usize, usize>,
     /// Whether degree table is needed for this side.
     need_degree_table: bool,
-    /// Mapping from watermark indices in join key to output indices.
-    wm_in_jk_to_output: MultiMap<usize, usize>,
 }
 
 impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
@@ -182,7 +180,6 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
             .field("start_pos", &self.start_pos)
             .field("i2o_mapping", &self.i2o_mapping)
             .field("need_degree_table", &self.need_degree_table)
-            .field("wm_in_jk_to_output", &self.wm_in_jk_to_output)
             .finish()
     }
 }
@@ -247,8 +244,6 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
 
     /// watermark column index -> `BufferedWatermarks`
     watermark_buffers: BTreeMap<usize, BufferedWatermarks<SideTypePrimitive>>,
-    /// Watermark indices in join key.
-    wm_indices_in_jk: HashSet<usize>,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
@@ -264,7 +259,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
             .field("pk_indices", &self.pk_indices)
             .field("schema", &self.schema)
             .field("actual_output_data_types", &self.actual_output_data_types)
-            .field("wm_in_jk_to_output", &self.wm_indices_in_jk)
             .finish()
     }
 }
@@ -428,8 +422,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         is_append_only: bool,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
-        wm_in_jk_to_output_l: MultiMap<usize, usize>,
-        wm_in_jk_to_output_r: MultiMap<usize, usize>,
     ) -> Self {
         let side_l_column_n = input_l.schema().len();
 
@@ -540,18 +532,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             StreamChunkBuilder::get_i2o_mapping(output_indices.iter().cloned(), left_len, right_len)
         };
 
-        let wm_indices_in_jk: HashSet<_> = wm_in_jk_to_output_l.keys().copied().collect();
-        assert_eq!(
-            wm_in_jk_to_output_r.keys().copied().collect::<HashSet<_>>(),
-            wm_indices_in_jk
-        );
+        let l2o_indexed_l = MultiMap::from_iter(left_to_output.iter().copied());
+        let l2o_indexed_r = MultiMap::from_iter(right_to_output.iter().copied());
 
-        let watermark_buffers = BTreeMap::from_iter(wm_indices_in_jk.iter().map(|idx| {
-            (
-                *idx,
-                BufferedWatermarks::with_ids(vec![SideType::Left, SideType::Right]),
-            )
-        }));
+        let watermark_buffers = BTreeMap::new();
 
         Self {
             ctx: ctx.clone(),
@@ -578,10 +562,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 join_key_indices: join_key_indices_l,
                 all_data_types: state_all_data_types_l,
                 i2o_mapping: left_to_output,
+                i2o_mapping_indexed: l2o_indexed_l,
                 pk_indices: state_pk_indices_l,
                 start_pos: 0,
                 need_degree_table: need_degree_table_l,
-                wm_in_jk_to_output: wm_in_jk_to_output_l,
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
@@ -604,8 +588,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 pk_indices: state_pk_indices_r,
                 start_pos: side_l_column_n,
                 i2o_mapping: right_to_output,
+                i2o_mapping_indexed: l2o_indexed_r,
                 need_degree_table: need_degree_table_r,
-                wm_in_jk_to_output: wm_in_jk_to_output_r,
             },
             pk_indices,
             cond,
@@ -615,7 +599,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             metrics,
             chunk_size,
             watermark_buffers,
-            wm_indices_in_jk,
         }
     }
 
@@ -780,9 +763,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         };
 
         // State cleaning
-        if self.wm_indices_in_jk.contains(&watermark.col_idx)
-            && watermark.col_idx == side_update.join_key_indices[0]
-        {
+        if side_update.join_key_indices[0] == watermark.col_idx {
             side_match.ht.update_watermark(watermark.val.clone());
         }
 
@@ -794,18 +775,24 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
         let mut watermarks_to_emit = vec![];
         for idx in wm_in_jk {
-            let buffers = self
-                .watermark_buffers
-                .get_mut(&idx)
-                .ok_or_else(|| anyhow!("Should not receive a watermark on column {}", idx))?;
-            if let Some((selected_watermark, selected_side)) =
-                buffers.handle_watermark(side, watermark.clone())
-            {
-                let output_idices = if selected_side == side {
-                    side_update.wm_in_jk_to_output.get_vec(&idx).unwrap()
-                } else {
-                    side_match.wm_in_jk_to_output.get_vec(&idx).unwrap()
-                };
+            let buffers = self.watermark_buffers.entry(idx).or_insert_with(|| {
+                BufferedWatermarks::with_ids(vec![SideType::Left, SideType::Right])
+            });
+
+            if let Some(selected_watermark) = buffers.handle_watermark(side, watermark.clone()) {
+                let empty_indices = vec![];
+                let output_idices = side_update
+                    .i2o_mapping_indexed
+                    .get_vec(&side_update.join_key_indices[idx])
+                    .unwrap_or(&empty_indices)
+                    .iter()
+                    .chain(
+                        side_match
+                            .i2o_mapping_indexed
+                            .get_vec(&side_match.join_key_indices[idx])
+                            .unwrap_or(&empty_indices),
+                    );
+
                 for output_idx in output_idices {
                     watermarks_to_emit.push(selected_watermark.clone().with_idx(*output_idx));
                 }
@@ -1075,8 +1062,6 @@ mod tests {
         (state_table, degree_state_table)
     }
 
-    fn create_watermark_map() -> (MultiMap<usize, usize>, MultiMap<usize, usize>) {}
-
     fn create_cond() -> BoxedExpression {
         let left_expr = InputRefExpression::new(DataType::Int64, 1);
         let right_expr = InputRefExpression::new(DataType::Int64, 3);
@@ -1124,11 +1109,13 @@ mod tests {
             2,
         )
         .await;
+
         let schema_len = match T {
             JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
             JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
             _ => source_l.schema().len() + source_r.schema().len(),
         };
+
         let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
             ActorContext::create(123),
             Box::new(source_l),
@@ -1201,6 +1188,7 @@ mod tests {
             JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
             _ => source_l.schema().len() + source_r.schema().len(),
         };
+
         let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(
             ActorContext::create(123),
             Box::new(source_l),
@@ -2999,4 +2987,8 @@ mod tests {
 
         Ok(())
     }
+
+    
 }
+
+

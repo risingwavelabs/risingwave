@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::ops::BitAnd;
+use std::{fmt, vec};
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
@@ -262,8 +262,7 @@ impl StreamNode for StreamHashJoin {
             is_append_only: self.is_append_only,
             // TODO: derive watermark
             watermark_jk_indices: vec![],
-            watermark_output_indices_l: vec![],
-            watermark_output_indices_r: vec![],
+            watermark_output_indices: vec![],
         })
     }
 }

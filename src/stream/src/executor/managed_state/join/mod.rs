@@ -312,7 +312,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     pub fn update_watermark(&mut self, watermark: ScalarImpl) {
         // TODO: remove data in cache.
-        self.state.table.update_watermark(watermark);
+        self.state.table.update_watermark(watermark.clone());
         self.degree_state.table.update_watermark(watermark);
     }
 
