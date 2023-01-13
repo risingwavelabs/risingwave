@@ -29,8 +29,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFr
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     agg_call_state, AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode,
-    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph,
-    StreamNode, StreamSource,
+    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamEnvironment,
+    StreamFragmentGraph, StreamNode, StreamSource,
 };
 
 use crate::manager::MetaSrvEnv;
@@ -390,6 +390,7 @@ fn make_stream_graph() -> StreamFragmentGraph {
     StreamFragmentGraph {
         fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
         edges: make_fragment_edges(),
+        env: Some(StreamEnvironment::default()),
         dependent_table_ids: vec![],
         table_ids_cnt: 4,
     }
@@ -398,8 +399,6 @@ fn make_stream_graph() -> StreamFragmentGraph {
 // TODO: enable this test with madsim
 #[tokio::test]
 async fn test_fragmenter() -> MetaResult<()> {
-    use risingwave_pb::stream_plan::StreamEnvironment;
-
     let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
     let mut ctx = CreateStreamingJobContext::default();
