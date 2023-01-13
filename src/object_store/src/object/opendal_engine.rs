@@ -20,8 +20,8 @@ use futures::future::try_join_all;
 use futures::StreamExt;
 use itertools::Itertools;
 use opendal::services::{hdfs, memory};
-use opendal::Operator;
-use tokio::io::AsyncRead;
+use opendal::{ObjectReader, Operator};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncSeekExt, SeekFrom};
 
 use super::{
     BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
@@ -130,12 +130,20 @@ impl ObjectStore for OpendalObjectStore {
             ObjectError::internal("opendal streaming read error")
         ));
 
+        let mut reader: ObjectReader = self.op.object(path).reader().await?;
         let bytes = match start_pos {
             Some(strat_position) => {
-                let range = strat_position as u64..;
-                Bytes::from(self.op.object(path).range_read(range).await?)
+                let mut buf = Vec::new();
+
+                reader.seek(SeekFrom::Start(strat_position as u64)).await?;
+                reader.read_to_end(&mut buf).await?;
+                Bytes::from(buf)
             }
-            None => Bytes::from(self.op.object(path).read().await?),
+            None => {
+                let mut buf = Vec::new();
+                reader.read_to_end(&mut buf).await?;
+                Bytes::from(buf)
+            }
         };
 
         Ok(Box::new(Cursor::new(bytes)))

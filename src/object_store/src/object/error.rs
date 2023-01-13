@@ -99,4 +99,10 @@ impl From<opendal::Error> for ObjectError {
     }
 }
 
+impl From<io::Error> for ObjectError {
+    fn from(e: io::Error) -> Self {
+        ObjectErrorInner::Opendal(e.into()).into()
+    }
+}
+
 pub type ObjectResult<T> = std::result::Result<T, ObjectError>;

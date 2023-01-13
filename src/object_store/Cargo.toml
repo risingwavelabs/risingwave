@@ -23,7 +23,7 @@ fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.10"
-opendal = { version = "0.23", features = ["services-hdfs"] }
+opendal = { version = "0.24.6", features = ["services-hdfs"] }
 prometheus = { version = "0.13", features = ["process"] }
 risingwave_common = { path = "../common" }
 spin = "0.9"
