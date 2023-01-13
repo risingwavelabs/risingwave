@@ -19,7 +19,6 @@ use std::sync::Arc;
 use bytes::Bytes;
 use parking_lot::{RwLock, RwLockWriteGuard};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::pin_version_response;
@@ -98,7 +97,6 @@ impl LocalVersionManager {
         }
 
         let newly_pinned_version = match pin_resp_payload {
-
             Payload::VersionDeltas(mut version_deltas) => {
                 old_version.filter_local_sst(&mut version_deltas);
                 let mut version_to_apply = old_version.pinned_version().version();

@@ -25,7 +25,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::group_delta::DeltaType;
-use risingwave_pb::hummock::{HummockVersion, HummockVersionDeltas};
+use risingwave_pb::hummock::HummockVersionDeltas;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{
