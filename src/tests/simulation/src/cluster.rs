@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
 use std::path::PathBuf;
@@ -294,12 +295,12 @@ impl Cluster {
     }
 
     /// Run a future on the client node.
-    pub async fn run_on_client<F>(&self, future: F)
+    pub async fn run_on_client<F>(&self, future: F) -> F::Output
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        self.client.spawn(future).await.unwrap();
+        self.client.spawn(future).await.unwrap()
     }
 
     /// Run a SQL query from the client and wait until the condition is met.
@@ -407,6 +408,16 @@ impl Cluster {
                 "192.168.11.1:29092",
                 datadir.to_string(),
             ));
+    }
+
+    /// Create a kafka topic.
+    pub fn create_kafka_topics(&self, topics: HashMap<String, i32>) {
+        self.handle
+            .create_node()
+            .name("kafka-topic-create")
+            .ip("192.168.11.3".parse().unwrap())
+            .build()
+            .spawn(crate::kafka::create_topics("192.168.11.1:29092", topics));
     }
 
     /// Return the IP of a random frontend node.
