@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
 use auto_enums::auto_enum;
+use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
@@ -289,10 +290,15 @@ impl<S: StateStore> StorageTable<S> {
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
         assert!(pk.len() <= self.pk_indices.len());
 
+        let prefix_hint = if self.read_prefix_len_hint != 0 && self.read_prefix_len_hint == pk.len()
+        {
+            Some(serialized_pk.slice(VirtualNode::SIZE..))
+        } else {
+            None
+        };
+
         let read_options = ReadOptions {
-            prefix_hint: None,
-            check_bloom_filter: self.read_prefix_len_hint != 0
-                && self.read_prefix_len_hint == pk.len(),
+            prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
@@ -358,7 +364,7 @@ impl<S: StateStore> StorageTable<S> {
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
-        prefix_hint: Option<Vec<u8>>,
+        prefix_hint: Option<Bytes>,
         encoded_key_range: R,
         wait_epoch: HummockReadEpoch,
         vnode_hint: Option<VirtualNode>,
@@ -404,10 +410,8 @@ impl<S: StateStore> StorageTable<S> {
             let wait_epoch = wait_epoch.clone();
             let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
             async move {
-                let check_bloom_filter = prefix_hint.is_some();
                 let read_options = ReadOptions {
                     prefix_hint,
-                    check_bloom_filter,
                     ignore_range_tombstone: false,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
@@ -539,7 +543,7 @@ impl<S: StateStore> StorageTable<S> {
             let prefix_len = self
                 .pk_serializer
                 .deserialize_prefix_len(encoded_prefix, self.read_prefix_len_hint)?;
-            Some(encoded_prefix[..prefix_len].to_vec())
+            Some(Bytes::from(encoded_prefix[..prefix_len].to_vec()))
         } else {
             trace!(
                     "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
