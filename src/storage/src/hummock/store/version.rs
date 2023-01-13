@@ -410,9 +410,16 @@ impl HummockReadVersion {
     }
 
     fn add_merged_imm(&mut self, merged_imm: MergedImmutableMemtable) {
-        // When we add a new merged imm, we should remove those small imms from staging.imm
         let staging_imm_count = self.staging.imm.len();
         let merged_imm_ids = merged_imm.get_merged_imm_ids();
+
+        // The imms have been flushed, so the merged imm is useless
+        if staging_imm_count == 0 {
+            tracing::warn!("staging imms have been flushed");
+            self.onging_merge_task = false;
+            return;
+        }
+
         #[cfg(debug_assertions)]
         {
             // check the suffix `merged_imm_ids.len()` imms in staging.imm are the same as
@@ -429,10 +436,10 @@ impl HummockReadVersion {
             .imm
             .truncate(staging_imm_count - merged_imm_ids.len());
 
-        // add the merged imm into staging
+        // add the newly merged imm into front
         self.staging
             .merged_imm
-            .push_back(ImmutableMemtableImpl::MergedImm(merged_imm));
+            .push_front(ImmutableMemtableImpl::MergedImm(merged_imm));
         // clear flag
         self.onging_merge_task = false;
     }

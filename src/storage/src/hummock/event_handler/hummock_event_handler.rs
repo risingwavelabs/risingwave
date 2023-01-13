@@ -426,11 +426,12 @@ impl HummockEventHandler {
                     UploaderEvent::DataSpilled(staging_sstable_info) => {
                         self.handle_data_spilled(staging_sstable_info);
                     }
-                    UploaderEvent::ImmMerged(merge_result) => {
-                        let mut write_guard = merge_result.read_version.write();
-                        write_guard.update(VersionUpdate::Staging(StagingData::MergedImmMem(
-                            merge_result.merged_imm,
-                        )));
+                    UploaderEvent::ImmMerged(_merge_result) => {
+                        unimplemented!("didn't implemented");
+                        // let mut write_guard = merge_result.read_version.write();
+                        // write_guard.update(VersionUpdate::Staging(StagingData::MergedImmMem(
+                        //     merge_result.merged_imm,
+                        // )));
                     }
                 },
                 Either::Right(event) => {
