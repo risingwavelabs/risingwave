@@ -457,7 +457,8 @@ impl TestCase {
         };
 
         if self.optimized_logical_plan.is_some() || self.optimizer_error.is_some() {
-            let optimized_logical_plan = match logical_plan.gen_optimized_logical_plan() {
+            let optimized_logical_plan = match logical_plan.gen_optimized_logical_plan_for_stream()
+            {
                 Ok(optimized_logical_plan) => optimized_logical_plan,
                 Err(err) => {
                     ret.optimizer_error = Some(err.to_string());

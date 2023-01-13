@@ -16,7 +16,9 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::NowNode;
@@ -24,43 +26,37 @@ use risingwave_pb::stream_plan::NowNode;
 use super::generic::GenericPlanRef;
 use super::stream::StreamPlanRef;
 use super::utils::{IndicesDisplay, TableCatalogBuilder};
-use super::{LogicalNow, PlanBase, StreamNode};
-use crate::optimizer::property::{Distribution, FunctionalDependencySet};
+use super::{
+    ColPrunable, ColumnPruningContext, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
+    RewriteStreamContext, StreamNode, StreamNow, ToBatch, ToStream, ToStreamContext,
+};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMapping;
 use crate::OptimizerContextRef;
 
 #[derive(Clone, Debug)]
-pub struct StreamNow {
+pub struct LogicalNow {
     pub base: PlanBase,
 }
 
-impl StreamNow {
-    pub fn new(_logical: LogicalNow, ctx: OptimizerContextRef) -> Self {
+impl LogicalNow {
+    pub fn new(ctx: OptimizerContextRef) -> Self {
         let schema = Schema::new(vec![Field {
             data_type: DataType::Timestamptz,
             name: String::from("now"),
             sub_fields: vec![],
             type_name: String::default(),
         }]);
-        let mut watermark_cols = FixedBitSet::with_capacity(1);
-        watermark_cols.set(0, true);
-        let base = PlanBase::new_stream(
-            ctx,
-            schema,
-            vec![],
-            FunctionalDependencySet::default(),
-            Distribution::Single,
-            false,
-            watermark_cols,
-        );
+        let base = PlanBase::new_logical(ctx, schema, vec![], FunctionalDependencySet::default());
         Self { base }
     }
 }
 
-impl fmt::Display for StreamNow {
+impl fmt::Display for LogicalNow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("StreamNow");
+        let mut builder = f.debug_struct("LogicalNow");
 
         if verbose {
             // For now, output all columns from the left side. Make it explicit here.
@@ -77,23 +73,41 @@ impl fmt::Display for StreamNow {
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamNow }
+impl_plan_tree_node_for_leaf! { LogicalNow }
 
-impl StreamNode for StreamNow {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
-        let schema = self.base.schema();
-        let dist_keys = self.base.distribution().dist_column_indices().to_vec();
-        let mut internal_table_catalog_builder =
-            TableCatalogBuilder::new(self.base.ctx().with_options().internal_table_subset());
-        schema.fields().iter().for_each(|field| {
-            internal_table_catalog_builder.add_column(field);
-        });
+impl PredicatePushdown for LogicalNow {
+    fn predicate_pushdown(
+        &self,
+        predicate: crate::utils::Condition,
+        _ctx: &mut super::PredicatePushdownContext,
+    ) -> crate::PlanRef {
+        LogicalFilter::create(self.clone().into(), predicate)
+    }
+}
 
-        let table_catalog = internal_table_catalog_builder
-            .build(dist_keys)
-            .with_id(state.gen_table_id_wrapped());
-        NodeBody::Now(NowNode {
-            state_table: Some(table_catalog.to_internal_table_prost()),
-        })
+impl ToStream for LogicalNow {
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        Ok((self.clone().into(), ColIndexMapping::new(vec![Some(0)])))
+    }
+
+    /// `to_stream` is equivalent to `to_stream_with_dist_required(RequiredDist::Any)`
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        Ok(StreamNow::new(self.clone(), self.ctx()).into())
+    }
+}
+
+impl ToBatch for LogicalNow {
+    fn to_batch(&self) -> Result<PlanRef> {
+        bail!("`LogicalNow` can only be converted to stream")
+    }
+}
+
+/// The trait for column pruning, only logical plan node will use it, though all plan node impl it.
+impl ColPrunable for LogicalNow {
+    fn prune_col(&self, _required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
+        self.clone().into()
     }
 }
