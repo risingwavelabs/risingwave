@@ -15,15 +15,11 @@
 //! Value encoding is an encoding format which converts the data into a binary form (not
 //! memcomparable).
 
-use std::collections::HashMap;
-
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
 use crate::array::{ListRef, ListValue, StructRef, StructValue};
-use crate::catalog::ColumnId;
-use crate::row::Row;
 use crate::types::struct_type::StructType;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
@@ -242,11 +238,12 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
 
 #[cfg(test)]
 mod tests {
+    use row_encoding;
+
     use super::*;
     use crate::catalog::ColumnId;
     use crate::row::OwnedRow;
     use crate::types::ScalarImpl::*;
-    use row_encoding;
 
     #[test]
     fn test_row_encoding() {
@@ -290,20 +287,25 @@ mod tests {
             ]
         );
     }
-    // #[test]
-    // fn test_row_decoding() {
-    //     let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
-    //     let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
-    //     let row_bytes = serialize_row_column_aware(column_ids.clone(), row1.clone());
-    //     let data_types = vec![DataType::Int16, DataType::Varchar];
-    //     let decoded = decode(&column_ids[..], &data_types[..], &row_bytes[..]);
-    //     assert_eq!(decoded, vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
-    //     let data_types1 = vec![DataType::Varchar, DataType::Int16, DataType::Date];
-    //     let decoded1 = decode(
-    //         &[ColumnId::new(1), ColumnId::new(5), ColumnId::new(6)],
-    //         &data_types1[..],
-    //         &row_bytes[..],
-    //     );
-    //     assert_eq!(decoded1, vec![Some(Utf8("abc".into())), None, None]);
-    // }
+    #[test]
+    fn test_row_decoding() {
+        let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
+        let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
+        let serializer = row_encoding::Serializer::new(&column_ids);
+        let row_bytes = serializer.serialize_row_column_aware(row1);
+        let data_types = vec![DataType::Int16, DataType::Varchar];
+        let deserializer = row_encoding::Deserializer::new(&column_ids[..], &data_types[..]);
+        let decoded = deserializer.decode(&row_bytes[..]);
+        assert_eq!(
+            decoded,
+            vec![Some(Some(Int16(5))), Some(Some(Utf8("abc".into())))]
+        );
+        // let data_types1 = vec![DataType::Varchar, DataType::Int16, DataType::Date];
+        // let decoded1 = decode(
+        //     &[ColumnId::new(1), ColumnId::new(5), ColumnId::new(6)],
+        //     &data_types1[..],
+        //     &row_bytes[..],
+        // );
+        // assert_eq!(decoded1, vec![Some(Utf8("abc".into())), None, None]);
+    }
 }
