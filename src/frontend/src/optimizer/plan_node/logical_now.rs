@@ -14,24 +14,20 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
+
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::NowNode;
 
-use super::generic::GenericPlanRef;
-use super::stream::StreamPlanRef;
-use super::utils::{IndicesDisplay, TableCatalogBuilder};
+use super::utils::{IndicesDisplay};
 use super::{
     ColPrunable, ColumnPruningContext, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
-    RewriteStreamContext, StreamNode, StreamNow, ToBatch, ToStream, ToStreamContext,
+    RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
 };
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
-use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::optimizer::property::{FunctionalDependencySet};
+
 use crate::utils::ColIndexMapping;
 use crate::OptimizerContextRef;
 
@@ -88,13 +84,13 @@ impl PredicatePushdown for LogicalNow {
 impl ToStream for LogicalNow {
     fn logical_rewrite_for_stream(
         &self,
-        ctx: &mut RewriteStreamContext,
+        _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
         Ok((self.clone().into(), ColIndexMapping::new(vec![Some(0)])))
     }
 
     /// `to_stream` is equivalent to `to_stream_with_dist_required(RequiredDist::Any)`
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         Ok(StreamNow::new(self.clone(), self.ctx()).into())
     }
 }

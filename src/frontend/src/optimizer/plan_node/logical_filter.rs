@@ -24,11 +24,10 @@ use super::{
     ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{assert_input_ref, ExprImpl, InputRef};
-use crate::optimizer::plan_node::stream_now::StreamNow;
+use crate::expr::{assert_input_ref, ExprImpl};
+
 use crate::optimizer::plan_node::{
-    BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
-    StreamDynamicFilter, StreamFilter, StreamProject, ToStreamContext,
+    BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamFilter, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
