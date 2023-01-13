@@ -17,7 +17,6 @@ use std::borrow::Cow;
 use bytes::BufMut;
 use itertools::Itertools;
 
-use crate::error::Result;
 use crate::row::{OwnedRow, Row};
 use crate::types::{
     memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, ToDatumRef,
@@ -72,7 +71,7 @@ impl OrderedRowSerde {
         }
     }
 
-    pub fn deserialize(&self, data: &[u8]) -> Result<OwnedRow> {
+    pub fn deserialize(&self, data: &[u8]) -> memcomparable::Result<OwnedRow> {
         let mut values = Vec::with_capacity(self.schema.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
         for (data_type, order_type) in self.schema.iter().zip_eq(self.order_types.iter()) {

@@ -716,8 +716,10 @@ impl fmt::Display for AddDropSync {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ShowObject {
     Table { schema: Option<Ident> },
+    InternalTable { schema: Option<Ident> },
     Database,
     Schema,
+    View { schema: Option<Ident> },
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
     Sink { schema: Option<Ident> },
@@ -740,6 +742,12 @@ impl fmt::Display for ShowObject {
             ShowObject::Schema => f.write_str("SCHEMAS"),
             ShowObject::Table { schema } => {
                 write!(f, "TABLES{}", fmt_schema(schema))
+            }
+            ShowObject::InternalTable { schema } => {
+                write!(f, "INTERNAL TABLES{}", fmt_schema(schema))
+            }
+            ShowObject::View { schema } => {
+                write!(f, "VIEWS{}", fmt_schema(schema))
             }
             ShowObject::MaterializedView { schema } => {
                 write!(f, "MATERIALIZED VIEWS{}", fmt_schema(schema))

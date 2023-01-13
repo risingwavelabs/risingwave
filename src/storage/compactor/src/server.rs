@@ -30,7 +30,7 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext, Context};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
-    CompactorMemoryCollector, CompactorSstableStore, MemoryLimiter, SstableIdManager, SstableStore,
+    CompactorMemoryCollector, MemoryLimiter, SstableIdManager, SstableStore,
 };
 use risingwave_storage::monitor::{
     monitor_cache, CompactorMetrics, HummockMetrics, ObjectStoreMetrics,
@@ -105,13 +105,10 @@ pub async fn compactor_serve(
     let output_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
     let memory_limiter = Arc::new(MemoryLimiter::new(output_limit_mb << 20));
     let input_limit_mb = storage_config.compactor_memory_limit_mb as u64 / 2;
-    let compact_sstable_store = Arc::new(CompactorSstableStore::new(
-        sstable_store.clone(),
-        Arc::new(MemoryLimiter::new(input_limit_mb << 20)),
-    ));
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         memory_limiter.clone(),
-        compact_sstable_store.clone(),
+        sstable_store.clone(),
+        Arc::new(MemoryLimiter::new(input_limit_mb << 20)),
     ));
     monitor_cache(memory_collector, &registry).unwrap();
     let sstable_id_manager = Arc::new(SstableIdManager::new(
@@ -134,7 +131,6 @@ pub async fn compactor_serve(
     });
     let compactor_context = Arc::new(CompactorContext::with_config(
         context,
-        compact_sstable_store,
         CompactorRuntimeConfig {
             max_concurrent_task_number: opts.max_concurrent_task_number,
         },

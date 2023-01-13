@@ -660,7 +660,7 @@
   sql: |
     create table t(a int, b int);
     select avg(a) FILTER (WHERE abs(a)) AS avga from t;
-  binder_error: 'Invalid input syntax: the type of filter clause should be boolean, but found Int32'
+  binder_error: 'internal error: argument of FILTER must be boolean, not type Int32'
 - name: filter clause + subquery
   sql: |
     create table t(a int, b int);
