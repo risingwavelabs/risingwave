@@ -609,7 +609,6 @@ message StreamFragmentGraph {
     uint32 upstream_id = 4;
     uint32 downstream_id = 5;
   }
-  
   // all the fragments in the graph.
   map<uint32, StreamFragment> fragments = 1;
   // edges between fragments.
