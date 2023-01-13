@@ -216,7 +216,7 @@ impl<S: StateStore> StateTable<S> {
 
         let no_shuffle_value_indices = (0..table_columns.len()).collect_vec();
 
-        // if value_indices is the no shuffle full columns and
+        // if value_indices is the no shuffle full columns.
         let value_indices = match input_value_indices.len() == table_columns.len()
             && input_value_indices == no_shuffle_value_indices
         {
@@ -262,6 +262,27 @@ impl<S: StateStore> StateTable<S> {
             pk_indices,
             Distribution::fallback(),
             None,
+        )
+        .await
+    }
+
+    /// Create a state table without distribution, used for unit tests.
+    pub async fn new_with_value_indices_without_distribution(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        value_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_with_distribution(
+            store,
+            table_id,
+            columns,
+            order_types,
+            pk_indices,
+            Distribution::fallback(),
+            Some(value_indices),
         )
         .await
     }
@@ -524,10 +545,14 @@ impl<S: StateStore> StateTable<S> {
                     debug_assert_eq!(self.prefix_hint_len, pk.len());
                 }
 
+                let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
+                    Some(serialized_pk.slice(VirtualNode::SIZE..))
+                } else {
+                    None
+                };
+
                 let read_options = ReadOptions {
-                    prefix_hint: None,
-                    check_bloom_filter: self.prefix_hint_len != 0
-                        && self.prefix_hint_len == pk.len(),
+                    prefix_hint,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     ignore_range_tombstone: false,
@@ -831,7 +856,6 @@ impl<S: StateStore> StateTable<S> {
     ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
             prefix_hint: None,
-            check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             ignore_range_tombstone: false,
@@ -864,7 +888,6 @@ impl<S: StateStore> StateTable<S> {
     ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
             prefix_hint: None,
-            check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             ignore_range_tombstone: false,
@@ -900,7 +923,6 @@ impl<S: StateStore> StateTable<S> {
         let read_options = ReadOptions {
             prefix_hint: None,
             ignore_range_tombstone: false,
-            check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             read_version_from_backup: false,
@@ -1059,7 +1081,7 @@ impl<S: StateStore> StateTable<S> {
                     .pk_serde
                     .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
 
-                Some(encoded_prefix[..encoded_prefix_len].to_vec())
+                Some(Bytes::from(encoded_prefix[..encoded_prefix_len].to_vec()))
             }
         };
 
@@ -1077,19 +1099,15 @@ impl<S: StateStore> StateTable<S> {
     async fn iter_inner(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        prefix_hint: Option<Vec<u8>>,
+        prefix_hint: Option<Bytes>,
         epoch: u64,
     ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
         let (l, r) = key_range.clone();
         let bytes_key_range = (l.map(Bytes::from), r.map(Bytes::from));
         // Mem table iterator.
         let mem_table_iter = self.mem_table.iter(bytes_key_range);
-
-        let check_bloom_filter = prefix_hint.is_some();
-
         let read_options = ReadOptions {
             prefix_hint,
-            check_bloom_filter,
             ignore_range_tombstone: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,

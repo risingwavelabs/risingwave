@@ -23,6 +23,7 @@ use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode};
 use crate::expr::Expr;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
@@ -248,7 +249,12 @@ impl StreamNode for StreamHashJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| x.to_expr_proto()),
+                .map(|x| {
+                    self.base
+                        .ctx()
+                        .expr_with_session_timezone(x)
+                        .to_expr_proto()
+                }),
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
             left_degree_table: Some(left_degree_table.to_internal_table_prost()),
