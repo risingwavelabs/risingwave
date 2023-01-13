@@ -189,6 +189,8 @@ macro_rules! meta_rpc_client_method_impl {
                         return Ok(response.unwrap().into_inner());
                     }
 
+                    // TODO: use MetaClient::failover function
+
                     // It is not the below part that causes the spam: TODO: delete comment
                     // Use heartbeat request to check if we are connected against leader
                     let mut hc = self.heartbeat_client.as_ref().lock().await;
@@ -202,8 +204,10 @@ macro_rules! meta_rpc_client_method_impl {
                         // { code: Unknown, message: "error reading a body from connection: broken pipe", source: Some(hyper::Error(Body, Error { kind: Io(Kind(BrokenPipe)) })) }
                         // TODO if unknown, then check if it is broken pipe
                         let err_code = h_response.err().unwrap().code();
-                        err_code != tonic::Code::Unavailable && err_code != tonic::Code::Unimplemented
-                    };
+                        err_code != tonic::Code::Unavailable
+                            && err_code != tonic::Code::Unimplemented
+                            && err_code != tonic::Code::Unknown
+                   };
                     if correct_connection {
                         response?;
                     }

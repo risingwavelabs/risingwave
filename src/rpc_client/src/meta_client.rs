@@ -83,12 +83,38 @@ pub struct MetaClient {
 impl MetaClient {
     // TODO: So far this is only a test func. Do not use in prod
     pub async fn failover(&self) {
+        {
+            let mut hc = self.inner.heartbeat_client.as_ref().lock().await;
+            let h_response = hc
+                .heartbeat(HeartbeatRequest {
+                    node_id: u32::MAX,
+                    info: vec![],
+                })
+                .await;
+            let correct_connection = if h_response.is_ok() {
+                true
+            } else {
+                // { code: Unknown, message: "error reading a body from connection: broken pipe",
+                // source: Some(hyper::Error(Body, Error { kind: Io(Kind(BrokenPipe)) })) }
+                // TODO if unknown, then check if it is broken pipe
+                let err_code = h_response.err().unwrap().code();
+                err_code != tonic::Code::Unavailable
+                    && err_code != tonic::Code::Unimplemented
+                    && err_code != tonic::Code::Unknown
+            };
+            if correct_connection {
+                return;
+            }
+        } // release lock on heartbeat client again, so we can update it later
+
+        tracing::info!("failover: updating client via failover");
+
         let sleep_duration = Duration::from_millis(1000);
         for _ in 0..25 {
             let node_addresses = vec![5690, 15690, 25690];
             let meta_channel = util(&node_addresses).await.unwrap_or_else(|| {
                 panic!(
-                "All meta nodes are down. Tried to connect against nodes at these addresses: {:?}",
+                "failover: All meta nodes are down. Tried to connect against nodes at these addresses: {:?}",
                 node_addresses
             )
             });
@@ -99,26 +125,26 @@ impl MetaClient {
                 .unwrap()
                 .into_inner()
                 .leader_addr
-                .expect("Expect that leader service always knows who leader is");
+                .expect("failover: Expect that leader service always knows who leader is");
             let addr = format!(
                 "http://{}:{}",
                 leader_addr.get_host(),
                 leader_addr.get_port()
             );
-            tracing::info!("Connecting against meta leader node {}", addr);
+            tracing::info!("failover: Connecting against meta leader node {}", addr);
             // TODO: remove comments
             // If I use get_channel_with_defaults, then I have no more spam
             let leader_channel = get_channel_no_retry(addr.as_str()).await;
             if leader_channel.is_err() {
                 tracing::warn!(
-                    "Leader info seems to be outdated. Connection against {} failed. Try again...",
+                    "failover: Leader info seems to be outdated. Connection against {} failed. Try again...",
                     addr
                 );
                 tokio::time::sleep(sleep_duration).await;
                 continue;
             } else {
                 // TODO: Delete else branch. Debugging only
-                tracing::info!("established channel against {}", addr);
+                tracing::info!("failover: established channel against {}", addr);
             }
             // Probe node using heartbeat client?
 
@@ -148,6 +174,7 @@ impl MetaClient {
                 *scale_c = ScaleServiceClient::new(leader_channel.clone());
                 *backup_c = BackupServiceClient::new(leader_channel);
             } // release MutexGuards on all clients
+            tracing::info!("failover: updated client successfully");
         }
     }
 
