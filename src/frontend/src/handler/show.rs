@@ -67,6 +67,11 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
             .iter_table()
             .map(|t| t.name.clone())
             .collect(),
+        ShowObject::InternalTable { schema } => catalog_reader
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .iter_internal_table()
+            .map(|t| t.name.clone())
+            .collect(),
         ShowObject::Database => catalog_reader.get_all_database_names(),
         ShowObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
         ShowObject::View { schema } => catalog_reader
