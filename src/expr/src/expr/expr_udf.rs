@@ -66,8 +66,8 @@ impl Expression for UdfExpression {
 
     fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let chunk = DataChunk::from_rows(std::slice::from_ref(input), &self.arg_types);
-        let output_chunk = self.eval(&chunk)?;
-        Ok(output_chunk.to_datum())
+        let output_array = self.eval(&chunk)?;
+        Ok(output_array.to_datum())
     }
 }
 
