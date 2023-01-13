@@ -18,6 +18,13 @@
 import {
   Box,
   Button,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
   Table,
   TableContainer,
   Tbody,
@@ -25,8 +32,10 @@ import {
   Th,
   Thead,
   Tr,
+  useDisclosure,
   useToast,
 } from "@chakra-ui/react"
+import loadable from "@loadable/component"
 import Head from "next/head"
 
 import Link from "next/link"
@@ -34,6 +43,8 @@ import { Fragment, useEffect, useState } from "react"
 import Title from "../components/Title"
 import extractColumnInfo from "../lib/extractInfo"
 import { Relation } from "../pages/api/streaming"
+
+const ReactJson = loadable(() => import("react-json-view"))
 
 export type Column<R> = {
   name: string
@@ -69,7 +80,44 @@ export function Relations<R extends Relation>(
     return () => {}
   }, [toast, getRelations])
 
-  const retVal = (
+  const { isOpen, onOpen, onClose } = useDisclosure()
+  const [currentRelation, setCurrentRelation] = useState<R>()
+  const openRelationCatalog = (relation: R) => {
+    if (relation) {
+      setCurrentRelation(relation)
+      onOpen()
+    }
+  }
+
+  const catalogModal = (
+    <Modal isOpen={isOpen} onClose={onClose} size="3xl">
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader>
+          Catalog of {currentRelation?.id} - {currentRelation?.name}
+        </ModalHeader>
+        <ModalCloseButton />
+        <ModalBody>
+          {isOpen && currentRelation && (
+            <ReactJson
+              src={currentRelation}
+              collapsed={1}
+              name={null}
+              displayDataTypes={false}
+            />
+          )}
+        </ModalBody>
+
+        <ModalFooter>
+          <Button colorScheme="blue" mr={3} onClick={onClose}>
+            Close
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
+  )
+
+  const table = (
     <Box p={3}>
       <Title>{title}</Title>
       <TableContainer>
@@ -97,7 +145,17 @@ export function Relations<R extends Relation>(
           <Tbody>
             {relationList.map((r) => (
               <Tr key={r.id}>
-                <Td>{r.id}</Td>
+                <Td>
+                  <Button
+                    size="sm"
+                    aria-label="view catalog"
+                    colorScheme="teal"
+                    variant="link"
+                    onClick={() => openRelationCatalog(r)}
+                  >
+                    {r.id}
+                  </Button>
+                </Td>
                 <Td>{r.name}</Td>
                 <Td>{r.owner}</Td>
                 {extraColumns.map((c) => (
@@ -160,7 +218,8 @@ export function Relations<R extends Relation>(
       <Head>
         <title>{title}</title>
       </Head>
-      {retVal}
+      {catalogModal}
+      {table}
     </Fragment>
   )
 }
