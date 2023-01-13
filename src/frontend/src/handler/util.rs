@@ -48,7 +48,7 @@ pin_project! {
         chunk_stream: VS,
         column_types: Vec<DataType>,
         format: bool,
-        session: StaticSessionData,
+        session_data: StaticSessionData,
     }
 }
 
@@ -67,14 +67,14 @@ where
         format: bool,
         session: Arc<SessionImpl>,
     ) -> Self {
-        let static_session = StaticSessionData {
+        let session_data = StaticSessionData {
             timezone: session.config().get_timezone().into(),
         };
         Self {
             chunk_stream,
             column_types,
             format,
-            session: static_session,
+            session_data,
         }
     }
 }
@@ -92,7 +92,7 @@ where
             Poll::Ready(chunk) => match chunk {
                 Some(chunk_result) => match chunk_result {
                     Ok(chunk) => Poll::Ready(Some(
-                        to_pg_rows(this.column_types, chunk, *this.format, this.session)
+                        to_pg_rows(this.column_types, chunk, *this.format, this.session_data)
                             .map_err(|err| err.into()),
                     )),
                     Err(err) => Poll::Ready(Some(Err(err))),
@@ -108,13 +108,13 @@ fn pg_value_format(
     data_type: &DataType,
     d: ScalarRefImpl<'_>,
     format: bool,
-    session: &StaticSessionData,
+    session_data: &StaticSessionData,
 ) -> RwResult<Bytes> {
     // format == false means TEXT format
     // format == true means BINARY format
     if !format {
         if *data_type == DataType::Timestamptz {
-            Ok(timestamptz_to_string_with_session(d, session))
+            Ok(timestamptz_to_string_with_session_data(d, session_data))
         } else {
             Ok(d.text_format(data_type).into())
         }
@@ -123,11 +123,11 @@ fn pg_value_format(
     }
 }
 
-fn timestamptz_to_string_with_session(d: ScalarRefImpl<'_>, session: &StaticSessionData) -> Bytes {
+fn timestamptz_to_string_with_session_data(d: ScalarRefImpl<'_>, session_data: &StaticSessionData) -> Bytes {
     let mut buf = String::new();
     match d {
         ScalarRefImpl::<'_>::Int64(d) => {
-            timestamptz_to_string(d, &session.timezone, &mut buf).unwrap()
+            timestamptz_to_string(d, &session_data.timezone, &mut buf).unwrap()
         }
         _ => unreachable!(),
     };
@@ -138,7 +138,7 @@ fn to_pg_rows(
     column_types: &[DataType],
     chunk: DataChunk,
     format: bool,
-    session: &StaticSessionData,
+    session_data: &StaticSessionData,
 ) -> RwResult<Vec<Row>> {
     chunk
         .rows()
@@ -147,7 +147,7 @@ fn to_pg_rows(
                 .iter()
                 .zip_eq(column_types)
                 .map(|(data, t)| match data {
-                    Some(data) => Some(pg_value_format(t, data, format, session)).transpose(),
+                    Some(data) => Some(pg_value_format(t, data, format, session_data)).transpose(),
                     None => Ok(None),
                 })
                 .try_collect()?;
