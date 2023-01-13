@@ -189,12 +189,10 @@ impl MetaClient {
         &self,
         table: ProstTable,
         graph: StreamFragmentGraph,
-        parallelism: Option<u64>,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
-            parallelism: parallelism.unwrap_or(0),
         };
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -249,13 +247,11 @@ impl MetaClient {
         source: Option<ProstSource>,
         table: ProstTable,
         graph: StreamFragmentGraph,
-        parallelism: Option<u64>,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateTableRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
             source,
-            parallelism: parallelism.unwrap_or(0),
         };
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
@@ -274,13 +270,11 @@ impl MetaClient {
         index: ProstIndex,
         table: ProstTable,
         graph: StreamFragmentGraph,
-        parallelism: Option<u64>,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateIndexRequest {
             index: Some(index),
             index_table: Some(table),
             fragment_graph: Some(graph),
-            parallelism: parallelism.unwrap_or(0),
         };
         let resp = self.inner.create_index(request).await?;
         // TODO: handle error in `resp.status` here

@@ -360,8 +360,9 @@ pub async fn handle_create_index(
             include,
             distributed_by,
         )?;
-        let graph = build_graph(plan);
-
+        let mut graph = build_graph(plan);
+        let streaming_parallelism = session.config().get_streaming_parallelism();
+        graph.parallelism = streaming_parallelism.unwrap_or(0);
         (graph, index_table, index)
     };
 
@@ -372,9 +373,8 @@ pub async fn handle_create_index(
     );
 
     let catalog_writer = session.env().catalog_writer();
-    let streaming_parallelism = session.config().get_streaming_parallelism();
     catalog_writer
-        .create_index(index, index_table, graph, streaming_parallelism)
+        .create_index(index, index_table, graph)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_INDEX))

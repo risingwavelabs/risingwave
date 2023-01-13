@@ -104,8 +104,9 @@ pub async fn handle_add_column(
             ))?
         }
 
-        let graph = build_graph(plan);
-
+        let mut graph = build_graph(plan);
+        let streaming_parallelism = session.config().get_streaming_parallelism();
+        graph.parallelism = streaming_parallelism.unwrap_or(0);
         (graph, source, table)
     };
 
@@ -117,10 +118,7 @@ pub async fn handle_add_column(
         catalog_writer
             .drop_table(None, original_catalog.id())
             .await?;
-        let streaming_parallelism = session.config().get_streaming_parallelism();
-        catalog_writer
-            .create_table(source, table, graph, streaming_parallelism)
-            .await?;
+        catalog_writer.create_table(source, table, graph).await?;
 
         Ok(PgResponse::empty_result_with_notice(
             StatementType::ALTER_TABLE,

@@ -138,8 +138,10 @@ pub async fn handle_create_sink(
     let (sink, graph) = {
         let context = OptimizerContext::from_handler_args(handle_args);
         let (plan, sink) = gen_sink_plan(&session, context.into(), stmt)?;
-
-        (sink, build_graph(plan))
+        let mut graph = build_graph(plan);
+        let streaming_parallelism = session.config().get_streaming_parallelism();
+        graph.parallelism = streaming_parallelism.unwrap_or(0);
+        (sink, graph)
     };
 
     let catalog_writer = session.env().catalog_writer();

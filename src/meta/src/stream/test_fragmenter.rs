@@ -392,6 +392,7 @@ fn make_stream_graph() -> StreamFragmentGraph {
         edges: make_fragment_edges(),
         dependent_table_ids: vec![],
         table_ids_cnt: 4,
+        parallelism: 0,
     }
 }
 

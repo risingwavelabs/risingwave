@@ -103,8 +103,9 @@ pub async fn handle_create_as(
             "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
             None,          // TODO: support `ALTER TABLE` for `CREATE TABLE AS`
         )?;
-        let graph = build_graph(plan);
-
+        let mut graph = build_graph(plan);
+        let streaming_parallelism = session.config().get_streaming_parallelism();
+        graph.parallelism = streaming_parallelism.unwrap_or(0);
         (graph, source, table)
     };
 
@@ -118,10 +119,7 @@ pub async fn handle_create_as(
 
     // TODO(Yuanxin): `source` will contain either an external source or nothing. Rewrite
     // `create_table` accordingly.
-    let streaming_parallelism = session.config().get_streaming_parallelism();
-    catalog_writer
-        .create_table(source, table, graph, streaming_parallelism)
-        .await?;
+    catalog_writer.create_table(source, table, graph).await?;
 
     // Generate insert
     let insert = Statement::Insert {

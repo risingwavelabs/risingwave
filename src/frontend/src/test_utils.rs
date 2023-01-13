@@ -220,7 +220,6 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         mut table: ProstTable,
         _graph: StreamFragmentGraph,
-        _parallelism: Option<u64>,
     ) -> Result<()> {
         table.id = self.gen_id();
         self.catalog.write().create_table(&table);
@@ -237,14 +236,13 @@ impl CatalogWriter for MockCatalogWriter {
         source: Option<ProstSource>,
         mut table: ProstTable,
         graph: StreamFragmentGraph,
-        _parallelism: Option<u64>,
     ) -> Result<()> {
         if let Some(source) = source {
             let source_id = self.create_source_inner(source)?;
             table.optional_associated_source_id =
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
-        self.create_materialized_view(table, graph, None).await?; // TODO: read from req
+        self.create_materialized_view(table, graph).await?; // TODO: read from req
         Ok(())
     }
 
@@ -261,7 +259,6 @@ impl CatalogWriter for MockCatalogWriter {
         mut index: ProstIndex,
         mut index_table: ProstTable,
         _graph: StreamFragmentGraph,
-        _parallelism: Option<u64>,
     ) -> Result<()> {
         index_table.id = self.gen_id();
         self.catalog.write().create_table(&index_table);

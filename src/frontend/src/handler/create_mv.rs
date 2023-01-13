@@ -131,17 +131,17 @@ pub async fn handle_create_mv(
         let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
         let context = plan.plan_base().ctx.clone();
-        let graph = build_graph(plan);
-
+        let mut graph = build_graph(plan);
+        let streaming_parallelism = session.config().get_streaming_parallelism();
+        graph.parallelism = streaming_parallelism.unwrap_or(0);
         context.append_notice(&mut notice);
 
         (table, graph)
     };
 
     let catalog_writer = session.env().catalog_writer();
-    let streaming_parallelism = session.config().get_streaming_parallelism();
     catalog_writer
-        .create_materialized_view(table, graph, streaming_parallelism)
+        .create_materialized_view(table, graph)
         .await?;
 
     if has_order_by {

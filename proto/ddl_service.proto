@@ -88,7 +88,6 @@ message DropSinkResponse {
 message CreateMaterializedViewRequest {
   catalog.Table materialized_view = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
-  uint64 parallelism = 3;
 }
 
 message CreateMaterializedViewResponse {
@@ -131,7 +130,6 @@ message CreateTableRequest {
   catalog.Source source = 1;
   catalog.Table materialized_view = 2;
   stream_plan.StreamFragmentGraph fragment_graph = 3;
-  uint64 parallelism = 4;
 }
 
 message CreateTableResponse {
@@ -183,7 +181,6 @@ message CreateIndexRequest {
   catalog.Index index = 1;
   catalog.Table index_table = 2;
   stream_plan.StreamFragmentGraph fragment_graph = 3;
-  uint64 parallelism = 4;
 }
 
 message CreateIndexResponse {

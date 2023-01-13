@@ -329,13 +329,13 @@ pub async fn handle_create_source(
             let context = OptimizerContext::from_handler_args(handler_args);
             let (plan, table) =
                 gen_materialize_plan(context.into(), source.clone(), session.user_id())?;
-            let graph = build_graph(plan);
-
+            let mut graph = build_graph(plan);
+            let streaming_parallelism = session.config().get_streaming_parallelism();
+            graph.parallelism = streaming_parallelism.unwrap_or(0);
             (graph, table)
         };
-        let streaming_parallelism = session.config().get_streaming_parallelism();
         catalog_writer
-            .create_table(Some(source), table, graph, streaming_parallelism)
+            .create_table(Some(source), table, graph)
             .await?;
     } else {
         catalog_writer.create_source(source).await?;

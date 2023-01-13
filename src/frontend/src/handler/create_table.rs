@@ -575,8 +575,10 @@ pub async fn handle_create_table(
                 col_id_gen,
             )?,
         };
-
-        (build_graph(plan), source, table)
+        let mut graph = build_graph(plan);
+        let streaming_parallelism = session.config().get_streaming_parallelism();
+        graph.parallelism = streaming_parallelism.unwrap_or(0);
+        (graph, source, table)
     };
 
     tracing::trace!(
@@ -586,10 +588,7 @@ pub async fn handle_create_table(
     );
 
     let catalog_writer = session.env().catalog_writer();
-    let streaming_parallelism = session.config().get_streaming_parallelism();
-    catalog_writer
-        .create_table(source, table, graph, streaming_parallelism)
-        .await?;
+    catalog_writer.create_table(source, table, graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }
