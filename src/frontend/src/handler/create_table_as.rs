@@ -118,7 +118,10 @@ pub async fn handle_create_as(
 
     // TODO(Yuanxin): `source` will contain either an external source or nothing. Rewrite
     // `create_table` accordingly.
-    catalog_writer.create_table(source, table, graph).await?;
+    let streaming_parallelism = session.config().get_streaming_parallelism();
+    catalog_writer
+        .create_table(source, table, graph, streaming_parallelism)
+        .await?;
 
     // Generate insert
     let insert = Statement::Insert {

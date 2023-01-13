@@ -214,7 +214,7 @@ where
 
         let mut stream_job = StreamingJob::Sink(sink);
         let version = self
-            .create_stream_job(&mut stream_job, fragment_graph)
+            .create_stream_job(&mut stream_job, fragment_graph, None)
             .await?;
 
         Ok(Response::new(CreateSinkResponse {
@@ -253,10 +253,15 @@ where
         let req = request.into_inner();
         let mview = req.get_materialized_view()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
+        let parallelism = if req.parallelism == 0 {
+            None
+        } else {
+            Some(req.parallelism)
+        };
 
         let mut stream_job = StreamingJob::MaterializedView(mview);
         let version = self
-            .create_stream_job(&mut stream_job, fragment_graph)
+            .create_stream_job(&mut stream_job, fragment_graph, parallelism)
             .await?;
 
         Ok(Response::new(CreateMaterializedViewResponse {
@@ -305,10 +310,15 @@ where
         let index = req.get_index()?.clone();
         let index_table = req.get_index_table()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
+        let parallelism = if req.parallelism == 0 {
+            None
+        } else {
+            Some(req.parallelism)
+        };
 
         let mut stream_job = StreamingJob::Index(index, index_table);
         let version = self
-            .create_stream_job(&mut stream_job, fragment_graph)
+            .create_stream_job(&mut stream_job, fragment_graph, parallelism)
             .await?;
 
         Ok(Response::new(CreateIndexResponse {
@@ -387,6 +397,11 @@ where
         let mut source = request.source;
         let mut mview = request.materialized_view.unwrap();
         let mut fragment_graph = request.fragment_graph.unwrap();
+        let parallelism = if request.parallelism == 0 {
+            None
+        } else {
+            Some(request.parallelism)
+        };
 
         // If we're creating a table with connector, we should additionally fill its ID first.
         if let Some(source) = &mut source {
@@ -416,7 +431,7 @@ where
 
         let mut stream_job = StreamingJob::Table(source, mview);
         let version = self
-            .create_stream_job(&mut stream_job, fragment_graph)
+            .create_stream_job(&mut stream_job, fragment_graph, parallelism)
             .await?;
 
         Ok(Response::new(CreateTableResponse {
@@ -514,11 +529,13 @@ where
         &self,
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraph,
+        parallelism: Option<u64>,
     ) -> MetaResult<NotificationVersion> {
         self.check_barrier_manager_status().await?;
 
-        let (mut ctx, table_fragments) =
-            self.prepare_stream_job(stream_job, fragment_graph).await?;
+        let (mut ctx, table_fragments) = self
+            .prepare_stream_job(stream_job, fragment_graph, parallelism)
+            .await?;
 
         let result = try {
             if let Some(source) = stream_job.source() {
@@ -543,6 +560,7 @@ where
         &self,
         stream_job: &mut StreamingJob,
         fragment_graph: StreamFragmentGraph,
+        parallelism: Option<u64>,
     ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
         // 1. assign a new id to the stream job.
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
@@ -581,7 +599,9 @@ where
         };
 
         let table_ids_cnt = fragment_graph.table_ids_cnt;
-        let default_parallelism = if self.env.opts.minimal_scheduling {
+        let default_parallelism = if let Some(parallelism) = parallelism {
+            parallelism as usize
+        } else if self.env.opts.minimal_scheduling {
             self.cluster_manager
                 .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
                 .await

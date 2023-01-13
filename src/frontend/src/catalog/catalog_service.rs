@@ -69,6 +69,7 @@ pub trait CatalogWriter: Send + Sync {
         &self,
         table: ProstTable,
         graph: StreamFragmentGraph,
+        parallelism: Option<u64>,
     ) -> Result<()>;
 
     async fn create_table(
@@ -76,6 +77,7 @@ pub trait CatalogWriter: Send + Sync {
         source: Option<ProstSource>,
         table: ProstTable,
         graph: StreamFragmentGraph,
+        parallelism: Option<u64>,
     ) -> Result<()>;
 
     async fn create_index(
@@ -83,6 +85,7 @@ pub trait CatalogWriter: Send + Sync {
         index: ProstIndex,
         table: ProstTable,
         graph: StreamFragmentGraph,
+        parallelism: Option<u64>,
     ) -> Result<()>;
 
     async fn create_source(&self, source: ProstSource) -> Result<()>;
@@ -153,10 +156,11 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         table: ProstTable,
         graph: StreamFragmentGraph,
+        parallelism: Option<u64>,
     ) -> Result<()> {
         let (_, version) = self
             .meta_client
-            .create_materialized_view(table, graph)
+            .create_materialized_view(table, graph, parallelism)
             .await?;
         self.wait_version(version).await
     }
@@ -171,8 +175,12 @@ impl CatalogWriter for CatalogWriterImpl {
         index: ProstIndex,
         table: ProstTable,
         graph: StreamFragmentGraph,
+        parallelism: Option<u64>,
     ) -> Result<()> {
-        let (_, version) = self.meta_client.create_index(index, table, graph).await?;
+        let (_, version) = self
+            .meta_client
+            .create_index(index, table, graph, parallelism)
+            .await?;
         self.wait_version(version).await
     }
 
@@ -181,8 +189,12 @@ impl CatalogWriter for CatalogWriterImpl {
         source: Option<ProstSource>,
         table: ProstTable,
         graph: StreamFragmentGraph,
+        parallelism: Option<u64>,
     ) -> Result<()> {
-        let (_, version) = self.meta_client.create_table(source, table, graph).await?;
+        let (_, version) = self
+            .meta_client
+            .create_table(source, table, graph, parallelism)
+            .await?;
         self.wait_version(version).await
     }
 

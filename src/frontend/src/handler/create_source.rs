@@ -333,9 +333,9 @@ pub async fn handle_create_source(
 
             (graph, table)
         };
-
+        let streaming_parallelism = session.config().get_streaming_parallelism();
         catalog_writer
-            .create_table(Some(source), table, graph)
+            .create_table(Some(source), table, graph, streaming_parallelism)
             .await?;
     } else {
         catalog_writer.create_source(source).await?;

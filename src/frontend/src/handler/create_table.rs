@@ -586,8 +586,10 @@ pub async fn handle_create_table(
     );
 
     let catalog_writer = session.env().catalog_writer();
-
-    catalog_writer.create_table(source, table, graph).await?;
+    let streaming_parallelism = session.config().get_streaming_parallelism();
+    catalog_writer
+        .create_table(source, table, graph, streaming_parallelism)
+        .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }

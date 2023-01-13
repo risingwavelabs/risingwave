@@ -117,7 +117,10 @@ pub async fn handle_add_column(
         catalog_writer
             .drop_table(None, original_catalog.id())
             .await?;
-        catalog_writer.create_table(source, table, graph).await?;
+        let streaming_parallelism = session.config().get_streaming_parallelism();
+        catalog_writer
+            .create_table(source, table, graph, streaming_parallelism)
+            .await?;
 
         Ok(PgResponse::empty_result_with_notice(
             StatementType::ALTER_TABLE,

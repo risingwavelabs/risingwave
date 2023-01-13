@@ -372,8 +372,9 @@ pub async fn handle_create_index(
     );
 
     let catalog_writer = session.env().catalog_writer();
+    let streaming_parallelism = session.config().get_streaming_parallelism();
     catalog_writer
-        .create_index(index, index_table, graph)
+        .create_index(index, index_table, graph, streaming_parallelism)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_INDEX))

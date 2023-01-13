@@ -139,8 +139,9 @@ pub async fn handle_create_mv(
     };
 
     let catalog_writer = session.env().catalog_writer();
+    let streaming_parallelism = session.config().get_streaming_parallelism();
     catalog_writer
-        .create_materialized_view(table, graph)
+        .create_materialized_view(table, graph, streaming_parallelism)
         .await?;
 
     if has_order_by {
