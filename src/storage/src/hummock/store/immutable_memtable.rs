@@ -206,14 +206,6 @@ impl MergedImmutableMemtable {
             merged_payload.push((pivot, versions));
         }
 
-        // for (k, v) in merged_payload.iter() {
-        //     println!(
-        //         "key: {:?}, versions: {:?}",
-        //         String::from_utf8(k.clone().0),
-        //         v
-        //     );
-        // }
-
         MergedImmutableMemtable {
             inner: Arc::new(MergedImmutableMemtableInner::new(
                 merged_payload,
@@ -478,8 +470,48 @@ impl<D: HummockIteratorDirection> HummockIterator for MergedImmIterator<D> {
         }
     }
 
-    fn seek<'a>(&'a mut self, _key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async move { unimplemented!("MergedImmIterator::seek") }
+    fn seek<'a>(&'a mut self, full_key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
+        async move {
+            debug_assert_eq!(full_key.user_key.table_id, self.table_id);
+            // Perform binary search on table key because the items is ordered by table key.
+            let partition_point = self
+                .inner
+                .binary_search_by(|probe| probe.0[..].cmp(*full_key.user_key.table_key));
+
+            let seek_key_epoch = full_key.epoch;
+            match D::direction() {
+                DirectionEnum::Forward => match partition_point {
+                    Ok(i) => {
+                        self.current_idx = i;
+                        // The user key part must be the same if we reach here.
+                        if self.epoch > seek_key_epoch {
+                            // Move onto the next key for forward iteration if the current key
+                            // has a larger epoch
+                            self.current_idx += 1;
+                        }
+                    }
+                    Err(i) => self.current_idx = i,
+                },
+                DirectionEnum::Backward => {
+                    match partition_point {
+                        Ok(i) => {
+                            self.current_idx = self.inner.len() - i - 1;
+                            // The user key part must be the same if we reach here.
+                            if self.epoch < seek_key_epoch {
+                                // Move onto the prev key for backward iteration if the current key
+                                // has a smaller epoch
+                                self.current_idx += 1;
+                            }
+                        }
+                        // Seek to one item before the seek partition_point:
+                        // If i == 0, the iterator will be invalidated with self.current_idx ==
+                        // self.inner.len().
+                        Err(i) => self.current_idx = self.inner.len() - i,
+                    }
+                }
+            }
+            Ok(())
+        }
     }
 
     fn collect_local_statistic(&self, _stats: &mut StoreLocalStatistic) {}

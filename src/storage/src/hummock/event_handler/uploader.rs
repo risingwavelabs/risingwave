@@ -38,7 +38,6 @@ use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo};
 use crate::hummock::{HummockError, HummockResult};
 
-// todo: payload should be changed to imm and merged imm
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
 
 pub type UploadTaskOutput = Vec<LocalSstableInfo>;
@@ -784,8 +783,6 @@ impl<'a> Future for NextUploaderEvent<'a> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let uploader = &mut self.deref_mut().uploader;
-
-        // poll merge task event
 
         if let Some((epoch, newly_uploaded_sstables)) = ready!(uploader.poll_syncing_task(cx)) {
             return Poll::Ready(UploaderEvent::SyncFinish(epoch, newly_uploaded_sstables));
