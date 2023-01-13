@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::mem::swap;
 use std::ops::RangeBounds;
 use std::sync::atomic::AtomicUsize;
@@ -24,6 +24,8 @@ use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_pb::hummock::group_delta::DeltaType;
+use risingwave_pb::hummock::{HummockVersion, HummockVersionDeltas};
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::{
@@ -408,6 +410,41 @@ impl LocalVersion {
     pub fn clear_shared_buffer(&mut self) {
         self.sync_uncommitted_data.clear();
         self.shared_buffer.clear();
+    }
+
+    pub fn filter_local_sst(&self, version_deltas: &mut HummockVersionDeltas) {
+        let mut max_committed_epoch = self.pinned_version.max_committed_epoch();
+        for delta in &mut version_deltas.version_deltas {
+            if delta.max_committed_epoch <= max_committed_epoch {
+                continue;
+            }
+            let mut local_sst_ids = HashSet::new();
+            for (epoch, data) in &self.sync_uncommitted_data {
+                if *epoch <= delta.max_committed_epoch {
+                    if let SyncUncommittedDataStage::Synced(ssts, _) = &data.stage {
+                        for sst in ssts {
+                            local_sst_ids.insert(sst.sst_info.id);
+                        }
+                    }
+                }
+            }
+            for group_deltas in delta.group_deltas.values_mut() {
+                for group_delta in &mut group_deltas.group_deltas {
+                    if let Some(DeltaType::IntraLevel(level_delta)) = &mut group_delta.delta_type {
+                        if level_delta.level_idx > 0
+                            || level_delta.inserted_table_infos.is_empty()
+                            || !level_delta.removed_table_ids.is_empty()
+                        {
+                            continue;
+                        }
+                        level_delta
+                            .inserted_table_infos
+                            .retain(|sst| local_sst_ids.contains(&sst.id));
+                    }
+                }
+            }
+            max_committed_epoch = delta.max_committed_epoch;
+        }
     }
 
     pub fn clear_committed_data(
