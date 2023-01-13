@@ -17,8 +17,8 @@
 
 import {
   connectorColumn,
-  streamingJobColumns,
   Relations,
+  streamingJobColumns,
 } from "../components/Relations"
 import { getSinks } from "./api/streaming"
 

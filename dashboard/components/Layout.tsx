@@ -105,10 +105,11 @@ function Layout({ children }: { children: React.ReactNode }) {
           <VStack width="full" alignItems="flex-start" px={3}>
             <NavTitle>Catalog</NavTitle>
             <NavButton href="/data_sources/">Data Sources</NavButton>
+            <NavButton href="/tables/">Tables</NavButton>
             <NavButton href="/materialized_views/">
               Materialized Views
             </NavButton>
-            <NavButton href="/tables/">Tables</NavButton>
+            <NavButton href="/indexes/">Indexes</NavButton>
             <NavButton href="/internal_tables/">Internal Tables</NavButton>
             <NavButton href="/sinks/">Sinks</NavButton>
           </VStack>

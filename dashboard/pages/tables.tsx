@@ -16,16 +16,23 @@
  */
 
 import {
-  connectorColumn,
-  streamingJobColumns,
+  Column,
   primaryKeyColumn,
   Relations,
+  streamingJobColumns,
 } from "../components/Relations"
+import { Table } from "../proto/gen/catalog"
 import { getTables } from "./api/streaming"
 
 export default function Tables() {
+  const associatedSourceColumn: Column<Table> = {
+    name: "Source",
+    width: 3,
+    content: (t) => t.optionalAssociatedSourceId?.associatedSourceId ?? "-",
+  }
+
   return Relations("Tables", getTables, [
-    connectorColumn,
+    associatedSourceColumn,
     ...streamingJobColumns,
     primaryKeyColumn,
   ])
