@@ -270,17 +270,14 @@ impl SealedData {
         // the newly added data are at the front
         self.imms.push_front((epoch, unseal_epoch_data.imms));
         self.epochs.push_front(epoch);
-
         unseal_epoch_data
             .spilled_data
             .uploading_tasks
             .append(&mut self.spilled_data.uploading_tasks);
-
         unseal_epoch_data
             .spilled_data
             .uploaded_data
             .append(&mut self.spilled_data.uploaded_data);
-
         self.spilled_data.uploading_tasks = unseal_epoch_data.spilled_data.uploading_tasks;
         self.spilled_data.uploaded_data = unseal_epoch_data.spilled_data.uploaded_data;
     }

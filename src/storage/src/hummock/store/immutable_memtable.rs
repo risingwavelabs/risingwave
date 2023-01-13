@@ -46,10 +46,7 @@ pub(crate) type MergedImmItem = (TableKey<Vec<u8>>, Vec<(HummockEpoch, HummockVa
 
 pub(crate) struct MergedImmutableMemtableInner {
     payload: Vec<MergedImmItem>,
-    // range_tombstone_map: BTreeMap<HummockEpoch, Vec<DeleteRangeTombstone>>,
     range_tombstone_list: Vec<DeleteRangeTombstone>,
-    // Used for point-get to filter out deleted key
-    // delete_range_agg: SpinMutex<DeleteRangeAggregator<SingleDeleteRangeIterator>>,
     size: usize,
     /// The minimum epoch of all merged imm
     min_epoch: HummockEpoch,
@@ -71,9 +68,6 @@ impl MergedImmutableMemtableInner {
         min_epoch: HummockEpoch,
         merged_imm_ids: Vec<ImmId>,
     ) -> Self {
-        // let mut builder = DeleteRangeAggregatorBuilder::default();
-        // builder.add_tombstone(range_tombstone_list.clone());
-        // let del_range_agg = builder.build(range_tombstone_watermark, false);
         Self {
             payload,
             range_tombstone_list,
@@ -183,13 +177,12 @@ impl MergedImmutableMemtable {
         }
 
         size += items.len() * EPOCH_LEN;
+        // different versions of a key will be put to a vector
         let mut merged_payload = Vec::new();
-        // map items in payload to merged imm key
         let mut pivot = items
             .first()
             .map(|((k, _), _)| TableKey(k.to_vec()))
             .unwrap();
-
         let mut versions = Vec::new();
         for ((k, v), epoch) in items {
             let key = TableKey(k.to_vec());

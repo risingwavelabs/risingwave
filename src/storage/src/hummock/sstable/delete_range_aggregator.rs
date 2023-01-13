@@ -474,9 +474,6 @@ mod tests {
         assert_eq!(test_user_key(b"eeee"), split_ranges[1].end_user_key);
     }
 
-    // delete_range的sequence表示它被创建时的epoch，所以对于一个fullkey而言，
-    // 只有当delete_range.epoch < fullkey.epoch时，这个range_tombestore对它才是生效的
-
     #[tokio::test]
     async fn test_delete_range_get() {
         let sstable_store = mock_sstable_store();
@@ -493,43 +490,36 @@ mod tests {
             &iterator_test_key_of_epoch(0, 200).to_ref(),
         );
         assert!(ret.is_none());
-
         let ret = get_delete_range_epoch_from_sstable(
             &sstable,
             &iterator_test_key_of_epoch(1, 100).to_ref(),
         );
         assert!(ret.is_none());
-
         let ret = get_delete_range_epoch_from_sstable(
             &sstable,
             &iterator_test_key_of_epoch(1, 200).to_ref(),
         );
         assert_eq!(ret, Some(150));
-
         let ret = get_delete_range_epoch_from_sstable(
             &sstable,
             &iterator_test_key_of_epoch(1, 300).to_ref(),
         );
         assert_eq!(ret, Some(300));
-
         let ret = get_delete_range_epoch_from_sstable(
             &sstable,
             &iterator_test_key_of_epoch(3, 100).to_ref(),
         );
         assert_eq!(ret, Some(50));
-
         let ret = get_delete_range_epoch_from_sstable(
             &sstable,
             &iterator_test_key_of_epoch(6, 100).to_ref(),
         );
         assert!(ret.is_none());
-
         let ret = get_delete_range_epoch_from_sstable(
             &sstable,
             &iterator_test_key_of_epoch(6, 200).to_ref(),
         );
         assert_eq!(ret, Some(150));
-
         let ret = get_delete_range_epoch_from_sstable(
             &sstable,
             &iterator_test_key_of_epoch(8, 200).to_ref(),
