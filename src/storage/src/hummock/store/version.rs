@@ -326,10 +326,10 @@ impl HummockReadVersion {
                                 let (first, last) =
                                     (imm_ids.first().unwrap(), imm_ids.last().unwrap());
                                 let right_idx = idx + imm_ids.len() - 1;
-
-                                assert!(right_idx < intersect_imm_ids.len());
-
-                                if clear_imm_id == first && intersect_imm_ids[right_idx] == *last {
+                                if right_idx < intersect_imm_ids.len()
+                                    && clear_imm_id == first
+                                    && intersect_imm_ids[right_idx] == *last
+                                {
                                     let skip_count = if idx > 0 { idx - 1 } else { 0 };
                                     debug_assert!(check_subset_preserve_order(
                                         intersect_imm_ids.iter().skip(skip_count),
