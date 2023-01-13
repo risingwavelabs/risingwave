@@ -53,6 +53,9 @@ pub struct TableFragments {
 
     /// The splits of actors
     pub(crate) actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+
+    /// The timezone used to interpret timestamps and dates for conversion
+    pub (crate) timezone: Option<String>,
 }
 
 impl MetadataModel for TableFragments {
@@ -70,6 +73,7 @@ impl MetadataModel for TableFragments {
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
             actor_splits: build_actor_connector_splits(&self.actor_splits),
+            timezone: self.timezone.clone()
         }
     }
 
@@ -80,6 +84,7 @@ impl MetadataModel for TableFragments {
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
+            timezone: prost.timezone(),
         }
     }
 
@@ -89,14 +94,19 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    /// Create a new `TableFragments` with state of `Initialized`.
+    /// Create a new `TableFragments` with state of `Initialized` and default timezone.
     pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
+        Self::new_with_timezone(table_id, fragments, None)
+    }
+
+    pub fn new_with_timezone(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>, timezone: Option<String>) -> Self {
         Self {
             table_id,
             state: State::Initial,
             fragments,
             actor_status: BTreeMap::default(),
             actor_splits: HashMap::default(),
+            timezone,
         }
     }
 
@@ -121,6 +131,11 @@ impl TableFragments {
     /// Returns the state of the table fragments.
     pub fn state(&self) -> State {
         self.state
+    }
+
+    /// Returns the timezone of the table
+    pub fn timezone(&self) -> Option<String> {
+        self.timezone.clone()
     }
 
     /// Returns whether the table fragments is in `Created` state.

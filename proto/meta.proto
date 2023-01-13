@@ -84,6 +84,7 @@ message TableFragments {
   map<uint32, Fragment> fragments = 3;
   map<uint32, ActorStatus> actor_status = 4;
   map<uint32, source.ConnectorSplits> actor_splits = 5;
+  string timezone = 6;
 }
 
 // TODO: remove this when dashboard refactored.

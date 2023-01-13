@@ -610,4 +610,6 @@ message StreamFragmentGraph {
 
   repeated uint32 dependent_table_ids = 3;
   uint32 table_ids_cnt = 4;
+  // The timezone associated with the streaming plan. Only applies to MV for now.
+  string timezone = 5;
 }
