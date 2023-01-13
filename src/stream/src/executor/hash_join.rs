@@ -532,8 +532,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             StreamChunkBuilder::get_i2o_mapping(output_indices.iter().cloned(), left_len, right_len)
         };
 
-        let l2o_indexed_l = MultiMap::from_iter(left_to_output.iter().copied());
-        let l2o_indexed_r = MultiMap::from_iter(right_to_output.iter().copied());
+        let l2o_indexed = MultiMap::from_iter(left_to_output.iter().copied());
+        let r2o_indexed = MultiMap::from_iter(right_to_output.iter().copied());
 
         let watermark_buffers = BTreeMap::new();
 
@@ -562,7 +562,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 join_key_indices: join_key_indices_l,
                 all_data_types: state_all_data_types_l,
                 i2o_mapping: left_to_output,
-                i2o_mapping_indexed: l2o_indexed_l,
+                i2o_mapping_indexed: l2o_indexed,
                 pk_indices: state_pk_indices_l,
                 start_pos: 0,
                 need_degree_table: need_degree_table_l,
@@ -588,7 +588,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 pk_indices: state_pk_indices_r,
                 start_pos: side_l_column_n,
                 i2o_mapping: right_to_output,
-                i2o_mapping_indexed: l2o_indexed_r,
+                i2o_mapping_indexed: r2o_indexed,
                 need_degree_table: need_degree_table_r,
             },
             pk_indices,
@@ -772,16 +772,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .join_key_indices
             .iter()
             .positions(|idx| *idx == watermark.col_idx);
-
         let mut watermarks_to_emit = vec![];
         for idx in wm_in_jk {
             let buffers = self.watermark_buffers.entry(idx).or_insert_with(|| {
                 BufferedWatermarks::with_ids(vec![SideType::Left, SideType::Right])
             });
-
             if let Some(selected_watermark) = buffers.handle_watermark(side, watermark.clone()) {
                 let empty_indices = vec![];
-                let output_idices = side_update
+                let output_indices = side_update
                     .i2o_mapping_indexed
                     .get_vec(&side_update.join_key_indices[idx])
                     .unwrap_or(&empty_indices)
@@ -792,8 +790,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             .get_vec(&side_match.join_key_indices[idx])
                             .unwrap_or(&empty_indices),
                     );
-
-                for output_idx in output_idices {
+                for output_idx in output_indices {
                     watermarks_to_emit.push(selected_watermark.clone().with_idx(*output_idx));
                 }
             };
@@ -1007,6 +1004,7 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::hash::{Key128, Key64};
+    use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
     use risingwave_expr::expr::InputRefExpression;
@@ -2988,7 +2986,76 @@ mod tests {
         Ok(())
     }
 
-    
+    #[tokio::test]
+    async fn test_streaming_hash_join_watermark() -> StreamExecutorResult<()> {
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor::<{ JoinType::Inner }>(true, false).await;
+
+        // push the init barrier for left and right
+        tx_l.push_barrier(1, false);
+        tx_r.push_barrier(1, false);
+        hash_join.next_unwrap_ready_barrier()?;
+
+        tx_l.push_int64_watermark(0, 100);
+
+        tx_l.push_int64_watermark(0, 200);
+
+        tx_l.push_barrier(2, false);
+        tx_r.push_barrier(2, false);
+        hash_join.next_unwrap_ready_barrier()?;
+
+        tx_r.push_int64_watermark(0, 50);
+
+        let w1 = hash_join.next().await.unwrap().unwrap();
+        let w1 = w1.as_watermark().unwrap();
+
+        let w2 = hash_join.next().await.unwrap().unwrap();
+        let w2 = w2.as_watermark().unwrap();
+
+        tx_r.push_int64_watermark(0, 100);
+
+        let w3 = hash_join.next().await.unwrap().unwrap();
+        let w3 = w3.as_watermark().unwrap();
+
+        let w4 = hash_join.next().await.unwrap().unwrap();
+        let w4 = w4.as_watermark().unwrap();
+
+        assert_eq!(
+            w1,
+            &Watermark {
+                col_idx: 2,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(50)
+            }
+        );
+
+        assert_eq!(
+            w2,
+            &Watermark {
+                col_idx: 0,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(50)
+            }
+        );
+
+        assert_eq!(
+            w3,
+            &Watermark {
+                col_idx: 2,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+
+        assert_eq!(
+            w4,
+            &Watermark {
+                col_idx: 0,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+
+        Ok(())
+    }
 }
-
-
