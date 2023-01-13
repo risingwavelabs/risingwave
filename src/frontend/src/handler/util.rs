@@ -123,7 +123,10 @@ fn pg_value_format(
     }
 }
 
-fn timestamptz_to_string_with_session_data(d: ScalarRefImpl<'_>, session_data: &StaticSessionData) -> Bytes {
+fn timestamptz_to_string_with_session_data(
+    d: ScalarRefImpl<'_>,
+    session_data: &StaticSessionData,
+) -> Bytes {
     let mut buf = String::new();
     match d {
         ScalarRefImpl::<'_>::Int64(d) => {
