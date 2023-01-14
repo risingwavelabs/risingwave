@@ -131,8 +131,11 @@ pub async fn handle_create_mv(
         let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name, columns)?;
         let context = plan.plan_base().ctx.clone();
-        let graph = build_graph(plan);
+        let mut graph = build_graph(plan);
 
+        // Set the timezone for the stream environment
+        let env = graph.env.as_mut().unwrap();
+        env.timezone = context.get_session_timezone();
         context.append_notice(&mut notice);
 
         (table, graph)

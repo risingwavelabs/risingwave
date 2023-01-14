@@ -275,9 +275,8 @@ pub struct ReadOptions {
     /// A hint for prefix key to check bloom filter.
     /// If the `prefix_hint` is not None, it should be included in
     /// `key` or `key_range` in the read API.
-    pub prefix_hint: Option<Vec<u8>>,
+    pub prefix_hint: Option<Bytes>,
     pub ignore_range_tombstone: bool,
-    pub check_bloom_filter: bool,
 
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,
