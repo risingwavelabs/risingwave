@@ -42,4 +42,6 @@ rustflags = [
     "-Wfuture_incompatible",
     "-Wnonstandard_style",
     "-Wrust_2018_idioms",
+    "-C",
+    "target-cpu=native"
 ]
