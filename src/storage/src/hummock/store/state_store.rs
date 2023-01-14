@@ -107,7 +107,6 @@ impl HummockStorageCore {
                 merged_imm,
             )));
 
-            write_guard.set_onging_merge_task(true);
             // self.event_sender
             //     .send(HummockEvent::ImmToMerge {
             //         table_id: self.instance_guard.table_id,
@@ -115,6 +114,7 @@ impl HummockStorageCore {
             //         imms,
             //     })
             //     .expect("send event failed");
+            // write_guard.set_onging_merge_task(true);
         }
     }
 

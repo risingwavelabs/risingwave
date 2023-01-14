@@ -101,7 +101,6 @@ async fn test_read_version_basic() {
             read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
         }
 
-        // 总共注入了6个imm
         for epoch in 1..epoch {
             let key = iterator_test_table_key_of(epoch as usize);
             let key_range =

@@ -326,9 +326,9 @@ impl HummockReadVersion {
                             if let Some(ImmutableMemtableImpl::MergedImm(merged_imm)) =
                                 self.staging.merged_imm.back()
                             {
-                                // The imm ids should be a suffix of intersect_imm_ids
-                                // Here we compare the first and last to check whether
-                                // the merged imm should be removed.
+                                // The reversed imm_ids (old to new) should be a prefix of
+                                // intersect_imm_ids. Here we compare the oldest and newest to check
+                                // whether the merged imm should be removed.
                                 let imm_ids = merged_imm.get_merged_imm_ids();
                                 let (newest, oldest) =
                                     (imm_ids.first().unwrap(), imm_ids.last().unwrap());
@@ -337,11 +337,15 @@ impl HummockReadVersion {
                                     && clear_imm_id == oldest
                                     && intersect_imm_ids[right_idx] == *newest
                                 {
-                                    let skip_count = if idx > 0 { idx - 1 } else { 0 };
-                                    debug_assert!(check_subset_preserve_order(
-                                        intersect_imm_ids.iter().skip(skip_count),
-                                        imm_ids.iter().rev()
-                                    ));
+                                    debug_assert!(
+                                        check_subset_preserve_order(
+                                            imm_ids.iter().rev(),
+                                            intersect_imm_ids.iter(),
+                                        ),
+                                        "intersect_imm_ids: {:?}, imm_ids: {:?}",
+                                        intersect_imm_ids,
+                                        imm_ids
+                                    );
                                     self.staging.merged_imm.pop_back();
                                 }
                             }
