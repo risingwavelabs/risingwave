@@ -242,7 +242,7 @@ impl CatalogWriter for MockCatalogWriter {
             table.optional_associated_source_id =
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
-        self.create_materialized_view(table, graph).await?; // TODO: read from req
+        self.create_materialized_view(table, graph).await?;
         Ok(())
     }
 
