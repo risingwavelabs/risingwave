@@ -86,5 +86,9 @@ name = "bench_encoding"
 harness = false
 
 [[bench]]
+name = "bench_row"
+harness = false
+
+[[bench]]
 name = "bitmap"
 harness = false
