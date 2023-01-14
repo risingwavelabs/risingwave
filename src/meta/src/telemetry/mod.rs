@@ -12,5 +12,53 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod hardware;
 mod telemetry;
+
+use sysinfo::{NetworkExt, NetworksExt, ProcessExt, System, SystemExt};
+
+#[derive(Debug)]
+struct SystemData {
+    memory: Memory,
+    os: OS,
+}
+
+#[derive(Debug)]
+struct Memory {
+    total_mem: u64,
+    available_mem: u64,
+}
+
+#[derive(Debug)]
+struct OS {
+    name: String,
+    kernel_version: String,
+    version: String,
+}
+
+impl SystemData {
+    fn new() -> Self {
+        let sys = System::new_all();
+        SystemData {
+            memory: Memory {
+                available_mem: sys.available_memory(),
+                total_mem: sys.total_memory(),
+            },
+            os: OS {
+                name: sys.name().unwrap_or_default(),
+                kernel_version: sys.kernel_version().unwrap_or_default(),
+                version: sys.os_version().unwrap_or_default(),
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_system_data() {
+        let sys = SystemData::new();
+        println!("{:?}", sys);
+    }
+}

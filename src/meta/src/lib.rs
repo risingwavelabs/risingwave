@@ -45,6 +45,7 @@ mod model;
 mod rpc;
 pub mod storage;
 mod stream;
+pub(crate) mod telemetry;
 
 use std::time::Duration;
 
