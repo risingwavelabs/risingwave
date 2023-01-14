@@ -583,11 +583,6 @@ where
         let table_ids_cnt = fragment_graph.table_ids_cnt;
         let default_parallelism = if fragment_graph.parallelism > 0 {
             fragment_graph.parallelism as usize
-        } else if self.env.opts.minimal_scheduling {
-            self.cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
-                .await
-                .len()
         } else {
             self.cluster_manager.get_active_parallel_unit_count().await
         };

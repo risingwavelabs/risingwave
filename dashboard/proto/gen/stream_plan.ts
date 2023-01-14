@@ -842,6 +842,8 @@ export interface StreamFragmentGraph {
   edges: StreamFragmentGraph_StreamFragmentEdge[];
   dependentTableIds: number[];
   tableIdsCnt: number;
+  /** 0 means use default value. */
+  parallelism: number;
 }
 
 export interface StreamFragmentGraph_StreamFragment {
@@ -876,6 +878,10 @@ export interface StreamFragmentGraph_StreamFragmentEdge {
   linkId: number;
   upstreamId: number;
   downstreamId: number;
+}
+
+export interface StreamFragmentGraph_Parallelism {
+  parallelism: number;
 }
 
 export interface StreamFragmentGraph_FragmentsEntry {
@@ -3745,7 +3751,7 @@ export const StreamActor = {
 };
 
 function createBaseStreamFragmentGraph(): StreamFragmentGraph {
-  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0 };
+  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0, parallelism: 0 };
 }
 
 export const StreamFragmentGraph = {
@@ -3767,6 +3773,7 @@ export const StreamFragmentGraph = {
         ? object.dependentTableIds.map((e: any) => Number(e))
         : [],
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
+      parallelism: isSet(object.parallelism) ? Number(object.parallelism) : 0,
     };
   },
 
@@ -3789,6 +3796,7 @@ export const StreamFragmentGraph = {
       obj.dependentTableIds = [];
     }
     message.tableIdsCnt !== undefined && (obj.tableIdsCnt = Math.round(message.tableIdsCnt));
+    message.parallelism !== undefined && (obj.parallelism = Math.round(message.parallelism));
     return obj;
   },
 
@@ -3805,6 +3813,7 @@ export const StreamFragmentGraph = {
     message.edges = object.edges?.map((e) => StreamFragmentGraph_StreamFragmentEdge.fromPartial(e)) || [];
     message.dependentTableIds = object.dependentTableIds?.map((e) => e) || [];
     message.tableIdsCnt = object.tableIdsCnt ?? 0;
+    message.parallelism = object.parallelism ?? 0;
     return message;
   },
 };
@@ -3902,6 +3911,30 @@ export const StreamFragmentGraph_StreamFragmentEdge = {
     message.linkId = object.linkId ?? 0;
     message.upstreamId = object.upstreamId ?? 0;
     message.downstreamId = object.downstreamId ?? 0;
+    return message;
+  },
+};
+
+function createBaseStreamFragmentGraph_Parallelism(): StreamFragmentGraph_Parallelism {
+  return { parallelism: 0 };
+}
+
+export const StreamFragmentGraph_Parallelism = {
+  fromJSON(object: any): StreamFragmentGraph_Parallelism {
+    return { parallelism: isSet(object.parallelism) ? Number(object.parallelism) : 0 };
+  },
+
+  toJSON(message: StreamFragmentGraph_Parallelism): unknown {
+    const obj: any = {};
+    message.parallelism !== undefined && (obj.parallelism = Math.round(message.parallelism));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<StreamFragmentGraph_Parallelism>, I>>(
+    object: I,
+  ): StreamFragmentGraph_Parallelism {
+    const message = createBaseStreamFragmentGraph_Parallelism();
+    message.parallelism = object.parallelism ?? 0;
     return message;
   },
 };
