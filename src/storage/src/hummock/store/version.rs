@@ -63,7 +63,7 @@ pub type CommittedVersion = PinnedVersion;
 
 /// The value of threshold should be related to the number of in-flight barriers
 /// and the frequency of checkpoint. We may tune this value later.
-const IMM_MERGE_THRESHOLD: usize = 5;
+pub const IMM_MERGE_THRESHOLD: usize = 5;
 
 /// Data not committed to Hummock. There are two types of staging data:
 /// - Immutable memtable: data that has been written into local state store but not persisted.
@@ -278,13 +278,19 @@ impl HummockReadVersion {
                         .imm
                         .iter()
                         .chain(self.staging.merged_imm.iter())
-                        .map(|imm| imm.batch_id())
+                        .flat_map(|imm| match imm {
+                            ImmutableMemtableImpl::Imm(imm) => {
+                                vec![imm.batch_id()]
+                            }
+                            ImmutableMemtableImpl::MergedImm(m) => m.get_merged_imm_ids().clone(),
+                        })
                         .collect();
 
-                    // batch_id order from newest to old
+                    // intersected batch_id order from oldest to newest
                     let intersect_imm_ids = staging_sst
                         .imm_ids
                         .iter()
+                        .rev()
                         .copied()
                         .filter(|id| staging_imm_ids_from_imms.contains(id))
                         .collect_vec();
@@ -304,11 +310,12 @@ impl HummockReadVersion {
                                     ImmutableMemtableImpl::MergedImm(m) => {
                                         m.get_merged_imm_ids().clone()
                                     }
-                                }),
+                                })
+                                .rev(),
                         ));
 
                         // Check 3) and replace imms with a staging sst
-                        for (idx, clear_imm_id) in intersect_imm_ids.iter().rev().enumerate() {
+                        for (idx, clear_imm_id) in intersect_imm_ids.iter().enumerate() {
                             if let Some(imm) = self.staging.imm.back() {
                                 if *clear_imm_id == imm.batch_id() {
                                     self.staging.imm.pop_back();
@@ -323,17 +330,17 @@ impl HummockReadVersion {
                                 // Here we compare the first and last to check whether
                                 // the merged imm should be removed.
                                 let imm_ids = merged_imm.get_merged_imm_ids();
-                                let (first, last) =
+                                let (newest, oldest) =
                                     (imm_ids.first().unwrap(), imm_ids.last().unwrap());
                                 let right_idx = idx + imm_ids.len() - 1;
                                 if right_idx < intersect_imm_ids.len()
-                                    && clear_imm_id == first
-                                    && intersect_imm_ids[right_idx] == *last
+                                    && clear_imm_id == oldest
+                                    && intersect_imm_ids[right_idx] == *newest
                                 {
                                     let skip_count = if idx > 0 { idx - 1 } else { 0 };
                                     debug_assert!(check_subset_preserve_order(
                                         intersect_imm_ids.iter().skip(skip_count),
-                                        imm_ids.iter()
+                                        imm_ids.iter().rev()
                                     ));
                                     self.staging.merged_imm.pop_back();
                                 }
@@ -371,7 +378,7 @@ impl HummockReadVersion {
         }
     }
 
-    pub fn get_imms_to_merge(&mut self) -> Option<Vec<ImmutableMemtable>> {
+    pub fn get_imms_to_merge(&self) -> Option<Vec<ImmutableMemtable>> {
         // check the number of imms in staging,
         // if the number is greater than the threshold, we need to merge them to a large imm
         if !self.onging_merge_task && self.staging.imm.len() >= IMM_MERGE_THRESHOLD {
@@ -388,11 +395,15 @@ impl HummockReadVersion {
                     }
                 })
                 .collect_vec();
-            self.onging_merge_task = true;
+            // self.onging_merge_task = true;
             Some(imms_to_merge)
         } else {
             None
         }
+    }
+
+    pub fn set_onging_merge_task(&mut self, value: bool) {
+        self.onging_merge_task = value;
     }
 
     pub fn staging(&self) -> &StagingVersion {

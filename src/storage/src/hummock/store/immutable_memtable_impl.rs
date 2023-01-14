@@ -12,7 +12,7 @@ use crate::monitor::StoreLocalStatistic;
 
 /// Abstraction of the immutable memtable used in the read path of `HummockReadVersion`.
 /// Only provide limited interfaces needed in the read path.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ImmutableMemtableImpl {
     Imm(ImmutableMemtable),
     MergedImm(MergedImmutableMemtable),

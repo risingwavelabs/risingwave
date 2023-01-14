@@ -44,6 +44,7 @@ use crate::monitor::StoreLocalStatistic;
 // sort them in descending order, aka newest to oldest.
 pub(crate) type MergedImmItem = (TableKey<Vec<u8>>, Vec<(HummockEpoch, HummockValue<Bytes>)>);
 
+#[derive(Debug)]
 pub(crate) struct MergedImmutableMemtableInner {
     payload: Vec<MergedImmItem>,
     range_tombstone_list: Vec<DeleteRangeTombstone>,
@@ -121,7 +122,7 @@ impl Deref for MergedImmutableMemtableInner {
 
 /// Merge of multiple imms, which will contain data from multiple epochs.
 /// To be notice, there will be no new imms added into the merged imm after it has built.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MergedImmutableMemtable {
     inner: Arc<MergedImmutableMemtableInner>,
     table_id: TableId,

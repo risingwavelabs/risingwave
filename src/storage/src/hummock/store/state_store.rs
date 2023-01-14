@@ -106,6 +106,8 @@ impl HummockStorageCore {
             write_guard.update(VersionUpdate::Staging(StagingData::MergedImmMem(
                 merged_imm,
             )));
+
+            write_guard.set_onging_merge_task(true);
             // self.event_sender
             //     .send(HummockEvent::ImmToMerge {
             //         table_id: self.instance_guard.table_id,
