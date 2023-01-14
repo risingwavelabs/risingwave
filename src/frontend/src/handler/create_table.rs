@@ -437,11 +437,11 @@ fn gen_table_plan_inner(
         out_names,
     );
 
-    // The materialize executor need not handle primary key conflict if the primary key is row id.
-    let handle_pk_conflict = row_id_index.is_none();
-    let dml_flag = match context.with_options().append_only() {
-        true => DmlFlag::AppendOnly,
-        false => DmlFlag::All,
+    // Handle pk conflict in materialize executor only when the table is not append-only.
+    let (handle_pk_conflict, dml_flag) = if context.with_options().append_only() {
+        (false, DmlFlag::AppendOnly)
+    } else {
+        (true, DmlFlag::All)
     };
 
     let materialize = plan_root.gen_table_plan(

@@ -134,6 +134,9 @@ pub async fn handle_create_mv(
         let mut graph = build_graph(plan);
         let streaming_parallelism = session.config().get_streaming_parallelism();
         graph.parallelism = streaming_parallelism.unwrap_or(0);
+        // Set the timezone for the stream environment
+        let env = graph.env.as_mut().unwrap();
+        env.timezone = context.get_session_timezone();
         context.append_notice(&mut notice);
 
         (table, graph)

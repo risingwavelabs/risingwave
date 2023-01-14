@@ -23,7 +23,10 @@ use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{FragmentTypeFlag, SourceNode, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{
+    FragmentTypeFlag, SourceNode, StreamActor, StreamEnvironment as ProstStreamEnvironment,
+    StreamNode,
+};
 
 use super::{ActorId, FragmentId};
 use crate::manager::{SourceId, WorkerId};
@@ -53,6 +56,33 @@ pub struct TableFragments {
 
     /// The splits of actors
     pub(crate) actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+
+    /// The environment associated with this stream plan and its fragments
+    pub(crate) env: StreamEnvironment,
+}
+
+#[derive(Debug, Clone)]
+pub struct StreamEnvironment {
+    /// The timezone used to interpret timestamps and dates for conversion
+    pub(crate) timezone: Option<String>,
+}
+
+impl StreamEnvironment {
+    pub fn to_protobuf(&self) -> ProstStreamEnvironment {
+        ProstStreamEnvironment {
+            timezone: self.timezone.clone().unwrap_or("".into()),
+        }
+    }
+
+    fn from_protobuf(prost: ProstStreamEnvironment) -> Self {
+        Self {
+            timezone: if prost.get_timezone().is_empty() {
+                None
+            } else {
+                Some(prost.get_timezone().clone())
+            },
+        }
+    }
 }
 
 impl MetadataModel for TableFragments {
@@ -70,16 +100,19 @@ impl MetadataModel for TableFragments {
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
             actor_splits: build_actor_connector_splits(&self.actor_splits),
+            env: Some(self.env.to_protobuf()),
         }
     }
 
     fn from_protobuf(prost: Self::ProstType) -> Self {
+        let env = StreamEnvironment::from_protobuf(prost.get_env().unwrap().clone());
         Self {
             table_id: TableId::new(prost.table_id),
             state: prost.state(),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
             actor_splits: build_actor_split_impls(&prost.actor_splits),
+            env,
         }
     }
 
@@ -89,14 +122,19 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    /// Create a new `TableFragments` with state of `Initialized`.
-    pub fn new(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
+    /// Create a new `TableFragments` with state of `Initialized` with env.
+    pub fn new(
+        table_id: TableId,
+        fragments: BTreeMap<FragmentId, Fragment>,
+        env: ProstStreamEnvironment,
+    ) -> Self {
         Self {
             table_id,
             state: State::Initial,
             fragments,
             actor_status: BTreeMap::default(),
             actor_splits: HashMap::default(),
+            env: StreamEnvironment::from_protobuf(env),
         }
     }
 
@@ -121,6 +159,11 @@ impl TableFragments {
     /// Returns the state of the table fragments.
     pub fn state(&self) -> State {
         self.state
+    }
+
+    /// Returns the timezone of the table
+    pub fn timezone(&self) -> Option<String> {
+        self.env.timezone.clone()
     }
 
     /// Returns whether the table fragments is in `Created` state.
