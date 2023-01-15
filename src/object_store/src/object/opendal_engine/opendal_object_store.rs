@@ -20,46 +20,28 @@ use futures::future::try_join_all;
 use futures::io::{AsyncSeekExt, AsyncWriteExt, Cursor as FuturesCursor};
 use futures::StreamExt;
 use itertools::Itertools;
-use opendal::services::{hdfs, memory};
+use opendal::services::memory;
 use opendal::{ObjectReader, Operator};
 use tokio::io::{AsyncRead, AsyncReadExt, SeekFrom};
 
-use super::{
+use crate::object::{
     BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
     StreamingUploader,
 };
+
 /// Opendal object storage.
 #[derive(Clone)]
 pub struct OpendalObjectStore {
-    op: Operator,
-    engine_type: EngineType,
+    pub(crate) op: Operator,
+    pub(crate) engine_type: EngineType,
 }
 #[derive(Clone)]
-enum EngineType {
+pub enum EngineType {
     Memory,
     Hdfs,
 }
 
 impl OpendalObjectStore {
-    /// create opendal hdfs engine.
-    pub fn new_hdfs_engine(namenode: String, root: String) -> Self {
-        // Create fs backend builder.
-        let mut builder = hdfs::Builder::default();
-        // Set the name node for hdfs.
-        builder.name_node(&namenode);
-        // Set the root for hdfs, all operations will happen under this root.
-        //
-        // NOTE: the root must be absolute path.
-        builder.root(&root);
-
-        // `Accessor` provides the low level APIs, we will use `Operator` normally.
-        let op: Operator = Operator::new(builder.build().unwrap());
-        Self {
-            op,
-            engine_type: EngineType::Hdfs,
-        }
-    }
-
     /// create opendal memory engine, used for unit tests.
     pub fn new_memory_engine() -> Self {
         // Create fs backend builder.
