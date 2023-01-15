@@ -239,20 +239,18 @@ impl Parser {
     }
 
     /// Check is enter array expression.
-    pub fn is_array_expr_entered (&mut self) -> bool {
+    pub fn is_array_expr_entered(&mut self) -> bool {
         return self.is_in_array_expr;
     }
 
     /// When enter specify ARRAY prefix expression.
-    pub fn  enter_array_expr (&mut self) {
+    pub fn enter_array_expr(&mut self) {
         self.is_in_array_expr = true;
-        return;
     }
 
     /// When exit specify ARRAY prefix expression.
-    pub fn  exit_array_expr(&mut self) {
+    pub fn exit_array_expr(&mut self) {
         self.is_in_array_expr = false;
-        return;
     }
 
     /// Tries to parse a wildcard expression. If it is not a wildcard, parses an expression.

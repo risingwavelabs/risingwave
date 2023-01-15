@@ -17,8 +17,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, Expr, Function, ObjectName, Query, StructField,
-    TrimWhereField, UnaryOperator, Array,
+    Array, BinaryOperator, DataType as AstDataType, Expr, Function, ObjectName, Query, StructField,
+    TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::Binder;
@@ -64,7 +64,7 @@ impl Binder {
             Expr::UnaryOp { op, expr } => self.bind_unary_expr(op, *expr),
             Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
             Expr::Nested(expr) => self.bind_expr(*expr),
-            Expr::Array(Array{elem: exprs, ..}) => self.bind_array(exprs),
+            Expr::Array(Array { elem: exprs, .. }) => self.bind_array(exprs),
             Expr::ArrayIndex { obj, index } => self.bind_array_index(*obj, *index),
             Expr::Function(f) => self.bind_function(f),
             // subquery
