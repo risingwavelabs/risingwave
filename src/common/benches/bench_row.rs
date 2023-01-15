@@ -215,7 +215,7 @@ fn bench_row(c: &mut Criterion) {
     for case in &cases {
         let encode_result = memcmp_encode(&case);
         c.bench_function(
-            format!("memcmp encoding on {}", case.name).as_str(),
+            format!("memcmp decoding on {}", case.name).as_str(),
             |bencher| bencher.iter(|| memcmp_decode(case, &encode_result)),
         );
         let encode_result = basic_encode(&case);
@@ -225,7 +225,7 @@ fn bench_row(c: &mut Criterion) {
         );
         let encode_result = column_aware_encode(&case);
         c.bench_function(
-            format!("column aware encoding on {}", case.name).as_str(),
+            format!("column aware decoding on {}", case.name).as_str(),
             |bencher| bencher.iter(|| column_aware_decode(case, &encode_result)),
         );
     }
