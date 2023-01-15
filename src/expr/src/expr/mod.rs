@@ -30,9 +30,11 @@ mod expr_literal;
 mod expr_nested_construct;
 mod expr_quaternary_bytes;
 pub mod expr_regexp;
+mod expr_some_all;
 mod expr_ternary_bytes;
 mod expr_to_char_const_tmpl;
 mod expr_to_timestamp_const_tmpl;
+mod expr_udf;
 pub mod expr_unary;
 mod expr_vnode;
 mod template;
@@ -59,6 +61,7 @@ use crate::expr::expr_field::FieldExpression;
 use crate::expr::expr_in::InExpression;
 use crate::expr::expr_nested_construct::NestedConstructExpression;
 use crate::expr::expr_regexp::RegexpMatchExpression;
+use crate::expr::expr_udf::UdfExpression;
 use crate::expr::expr_vnode::VnodeExpression;
 use crate::ExprError;
 
@@ -109,7 +112,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
         | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | TumbleStart
         | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
-        | ConcatOp | AtTimeZone => build_binary_expr_prost(prost),
+        | ConcatOp | AtTimeZone | CastWithTimeZone => build_binary_expr_prost(prost),
         And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess => {
             build_nullable_binary_expr_prost(prost)
         }
@@ -131,6 +134,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         DateTrunc => build_date_trunc_expr(prost),
 
         // Dedicated types
+        All | Some => build_some_all_expr_prost(prost),
         In => InExpression::try_from(prost).map(Expression::boxed),
         Case => CaseExpression::try_from(prost).map(Expression::boxed),
         Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
@@ -148,6 +152,8 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             ArrayConcatExpression::try_from(prost).map(Expression::boxed)
         }
         Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
+        Now => build_now_expr(prost),
+        Udf => UdfExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",
             prost.get_expr_type()

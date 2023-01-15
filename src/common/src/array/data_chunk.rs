@@ -16,6 +16,7 @@ use std::fmt;
 use std::hash::BuildHasher;
 use std::sync::Arc;
 
+use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_pb::data::DataChunk as ProstDataChunk;
 
@@ -383,11 +384,11 @@ impl DataChunk {
     ///
     /// the returned vector's size is self.capacity() and for the invisible row will give a empty
     /// vec<u8>
-    pub fn serialize(&self) -> Vec<Vec<u8>> {
+    pub fn serialize(&self) -> Vec<Bytes> {
         match &self.vis2 {
             Vis::Bitmap(vis) => {
                 let rows_num = vis.len();
-                let mut buffers = vec![vec![]; rows_num];
+                let mut buffers = vec![BytesMut::new(); rows_num];
                 for c in &self.columns {
                     let c = c.array_ref();
                     assert_eq!(c.len(), rows_num);
@@ -400,10 +401,10 @@ impl DataChunk {
                         }
                     }
                 }
-                buffers
+                buffers.into_iter().map(BytesMut::freeze).collect_vec()
             }
             Vis::Compact(rows_num) => {
-                let mut buffers = vec![vec![]; *rows_num];
+                let mut buffers = vec![BytesMut::new(); *rows_num];
                 for c in &self.columns {
                     let c = c.array_ref();
                     assert_eq!(c.len(), *rows_num);
@@ -414,7 +415,7 @@ impl DataChunk {
                         }
                     }
                 }
-                buffers
+                buffers.into_iter().map(BytesMut::freeze).collect_vec()
             }
         }
     }
@@ -484,6 +485,7 @@ impl DataChunkTestExt for DataChunk {
                 "F" => DataType::Float64,
                 "f" => DataType::Float32,
                 "TS" => DataType::Timestamp,
+                "TSZ" => DataType::Timestamptz,
                 "T" => DataType::Varchar,
                 array if array.starts_with('{') && array.ends_with('}') => {
                     DataType::Struct(Arc::new(StructType {

@@ -140,6 +140,7 @@ pub mod IdCategory {
     pub const Sink: IdCategoryType = 13;
     pub const Index: IdCategoryType = 14;
     pub const CompactionGroup: IdCategoryType = 15;
+    pub const Function: IdCategoryType = 16;
 }
 
 pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;
@@ -152,6 +153,7 @@ pub struct IdGeneratorManager<S> {
     database: Arc<StoredIdGenerator<S>>,
     schema: Arc<StoredIdGenerator<S>>,
     table: Arc<StoredIdGenerator<S>>,
+    function: Arc<StoredIdGenerator<S>>,
     worker: Arc<StoredIdGenerator<S>>,
     fragment: Arc<StoredIdGenerator<S>>,
     actor: Arc<StoredIdGenerator<S>>,
@@ -181,6 +183,7 @@ where
                 )
                 .await,
             ),
+            function: Arc::new(StoredIdGenerator::new(meta_store.clone(), "function", None).await),
             worker: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "worker", Some(META_NODE_ID as u64 + 1))
                     .await,
@@ -226,6 +229,7 @@ where
             IdCategory::Database => &self.database,
             IdCategory::Schema => &self.schema,
             IdCategory::Table => &self.table,
+            IdCategory::Function => &self.function,
             IdCategory::Fragment => &self.fragment,
             IdCategory::Actor => &self.actor,
             IdCategory::User => &self.user,

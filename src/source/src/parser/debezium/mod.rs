@@ -12,35 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-pub use json_parser::*;
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 pub use simd_json_parser::*;
 
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-mod json_parser;
 mod operators;
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 mod simd_json_parser;
 
 #[cfg(test)]
@@ -62,28 +36,32 @@ mod test {
                 name: "id".to_string(),
                 data_type: DataType::Int32,
                 column_id: ColumnId::from(0),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "name".to_string(),
                 data_type: DataType::Varchar,
                 column_id: ColumnId::from(1),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "description".to_string(),
                 data_type: DataType::Varchar,
                 column_id: ColumnId::from(2),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "weight".to_string(),
                 data_type: DataType::Float64,
                 column_id: ColumnId::from(3),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
         ];

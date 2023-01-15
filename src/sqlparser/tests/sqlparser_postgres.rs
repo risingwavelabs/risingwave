@@ -48,7 +48,7 @@ fn parse_create_table_with_defaults() {
                 vec![
                     ColumnDef::new(
                         "customer_id".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -59,7 +59,7 @@ fn parse_create_table_with_defaults() {
                     ),
                     ColumnDef::new(
                         "store_id".into(),
-                        DataType::SmallInt(None),
+                        DataType::SmallInt,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -87,7 +87,7 @@ fn parse_create_table_with_defaults() {
                     ColumnDef::new("email".into(), DataType::Varchar, None, vec![],),
                     ColumnDef::new(
                         "address_id".into(),
-                        DataType::SmallInt(None),
+                        DataType::SmallInt,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -141,7 +141,7 @@ fn parse_create_table_with_defaults() {
                     ),
                     ColumnDef::new(
                         "active".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -593,7 +593,7 @@ fn parse_prepare() {
             ..
         } => {
             assert_eq!(name, "a".into());
-            assert_eq!(data_types, vec![DataType::Int(None), DataType::Text]);
+            assert_eq!(data_types, vec![DataType::Int, DataType::Text]);
 
             statement
         }
@@ -758,22 +758,26 @@ fn parse_comments() {
 #[test]
 fn parse_create_function() {
     let sql =
-        "CREATE FUNCTION add(INT, INT) RETURNS INT AS 'select $1 + $2;' LANGUAGE SQL IMMUTABLE";
+        "CREATE FUNCTION add(INT, INT) RETURNS INT LANGUAGE SQL IMMUTABLE AS 'select $1 + $2;'";
     assert_eq!(
         verified_stmt(sql),
         Statement::CreateFunction {
             or_replace: false,
+            temporary: false,
             name: ObjectName(vec![Ident::new("add")]),
             args: Some(vec![
-                CreateFunctionArg::unnamed(DataType::Int(None)),
-                CreateFunctionArg::unnamed(DataType::Int(None)),
+                OperateFunctionArg::unnamed(DataType::Int),
+                OperateFunctionArg::unnamed(DataType::Int),
             ]),
-            return_type: Some(DataType::Int(None)),
-            bodies: vec![
-                CreateFunctionBody::As("select $1 + $2;".into()),
-                CreateFunctionBody::Language("SQL".into()),
-                CreateFunctionBody::Behavior(FunctionBehavior::Immutable),
-            ],
+            return_type: Some(DataType::Int),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                behavior: Some(FunctionBehavior::Immutable),
+                as_: Some(FunctionDefinition::SingleQuotedDef(
+                    "select $1 + $2;".into()
+                )),
+                ..Default::default()
+            },
         }
     );
 
@@ -782,26 +786,100 @@ fn parse_create_function() {
         verified_stmt(sql),
         Statement::CreateFunction {
             or_replace: true,
+            temporary: false,
             name: ObjectName(vec![Ident::new("add")]),
             args: Some(vec![
-                CreateFunctionArg::with_name("a", DataType::Int(None)),
-                CreateFunctionArg {
+                OperateFunctionArg::with_name("a", DataType::Int),
+                OperateFunctionArg {
                     mode: Some(ArgMode::In),
                     name: Some("b".into()),
-                    data_type: DataType::Int(None),
+                    data_type: DataType::Int,
                     default_expr: Some(Expr::Value(Value::Number("1".into()))),
                 }
             ]),
-            return_type: Some(DataType::Int(None)),
-            bodies: vec![
-                CreateFunctionBody::Language("SQL".into()),
-                CreateFunctionBody::Behavior(FunctionBehavior::Immutable),
-                CreateFunctionBody::Return(Expr::BinaryOp {
+            return_type: Some(DataType::Int),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                behavior: Some(FunctionBehavior::Immutable),
+                return_: Some(Expr::BinaryOp {
                     left: Box::new(Expr::Identifier("a".into())),
                     op: BinaryOperator::Plus,
                     right: Box::new(Expr::Identifier("b".into())),
                 }),
+                ..Default::default()
+            },
+        }
+    );
+}
+
+#[test]
+fn parse_drop_function() {
+    let sql = "DROP FUNCTION IF EXISTS test_func";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::DropFunction {
+            if_exists: true,
+            func_desc: vec![DropFunctionDesc {
+                name: ObjectName(vec![Ident::new("test_func")]),
+                args: None
+            }],
+            option: None
+        }
+    );
+
+    let sql = "DROP FUNCTION IF EXISTS test_func(a INT, IN b INT = 1)";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::DropFunction {
+            if_exists: true,
+            func_desc: vec![DropFunctionDesc {
+                name: ObjectName(vec![Ident::new("test_func")]),
+                args: Some(vec![
+                    OperateFunctionArg::with_name("a", DataType::Int),
+                    OperateFunctionArg {
+                        mode: Some(ArgMode::In),
+                        name: Some("b".into()),
+                        data_type: DataType::Int,
+                        default_expr: Some(Expr::Value(Value::Number("1".into()))),
+                    }
+                ]),
+            }],
+            option: None
+        }
+    );
+
+    let sql = "DROP FUNCTION IF EXISTS test_func1(a INT, IN b INT = 1), test_func2(a CHARACTER VARYING, IN b INT = 1)";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::DropFunction {
+            if_exists: true,
+            func_desc: vec![
+                DropFunctionDesc {
+                    name: ObjectName(vec![Ident::new("test_func1")]),
+                    args: Some(vec![
+                        OperateFunctionArg::with_name("a", DataType::Int),
+                        OperateFunctionArg {
+                            mode: Some(ArgMode::In),
+                            name: Some("b".into()),
+                            data_type: DataType::Int,
+                            default_expr: Some(Expr::Value(Value::Number("1".into()))),
+                        }
+                    ]),
+                },
+                DropFunctionDesc {
+                    name: ObjectName(vec![Ident::new("test_func2")]),
+                    args: Some(vec![
+                        OperateFunctionArg::with_name("a", DataType::Varchar),
+                        OperateFunctionArg {
+                            mode: Some(ArgMode::In),
+                            name: Some("b".into()),
+                            data_type: DataType::Int,
+                            default_expr: Some(Expr::Value(Value::Number("1".into()))),
+                        }
+                    ]),
+                }
             ],
+            option: None
         }
     );
 }

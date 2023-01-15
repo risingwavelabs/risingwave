@@ -38,17 +38,18 @@ use self::plan_node::{
     BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamRowIdGen,
     StreamSink,
 };
+#[cfg(debug_assertions)]
+use self::plan_visitor::InputRefValidator;
 use self::plan_visitor::{
-    has_batch_exchange, has_batch_seq_scan, has_batch_seq_scan_where, has_batch_source,
-    has_logical_apply, has_logical_over_agg, HasMaxOneRowApply,
+    has_batch_exchange, has_logical_apply, has_logical_over_agg, HasMaxOneRowApply,
 };
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::table_catalog::TableType;
+use crate::catalog::table_catalog::{TableType, TableVersion};
 use crate::handler::create_table::DmlFlag;
 use crate::optimizer::plan_node::{
-    BatchExchange, ColumnPruningContext, PlanNodeType, PredicatePushdownContext,
+    BatchExchange, ColumnPruningContext, PlanNodeType, PlanTreeNode, PredicatePushdownContext,
 };
 use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
@@ -412,6 +413,9 @@ impl PlanRoot {
             ApplyOrder::TopDown,
         );
 
+        #[cfg(debug_assertions)]
+        InputRefValidator.validate(plan.clone());
+
         ctx.store_logical(plan.explain_to_string().unwrap());
 
         Ok(plan)
@@ -433,6 +437,8 @@ impl PlanRoot {
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
+        #[cfg(debug_assertions)]
+        InputRefValidator.validate(plan.clone());
         assert!(*plan.distribution() == Distribution::Single, "{}", plan);
         assert!(!has_batch_exchange(plan.clone()), "{}", plan);
 
@@ -448,12 +454,25 @@ impl PlanRoot {
     /// As we always run the root stage locally, we should ensure that singleton table scan is not
     /// the root stage. Returns `true` if we must insert an additional exchange to ensure this.
     fn require_additional_exchange_on_root(plan: PlanRef) -> bool {
-        assert_eq!(plan.distribution(), &Distribution::Single);
+        fn is_candidate_table_scan(plan: &PlanRef) -> bool {
+            if let Some(node) = plan.as_batch_seq_scan()
+            && !node.logical().is_sys_table() {
+                true
+            } else {
+                plan.node_type() == PlanNodeType::BatchSource
+            }
+        }
 
-        !has_batch_exchange(plan.clone()) // there's no (single) exchange
-            && ((has_batch_seq_scan(plan.clone()) // but there's a seq scan (which must be single)
-            && !has_batch_seq_scan_where(plan.clone(), |s| s.logical().is_sys_table())) // and it's not a system table
-            || has_batch_source(plan)) // or there's a source
+        fn no_exchange_before_table_scan(plan: PlanRef) -> bool {
+            if plan.node_type() == PlanNodeType::BatchExchange {
+                return false;
+            }
+            is_candidate_table_scan(&plan)
+                || plan.inputs().into_iter().any(no_exchange_before_table_scan)
+        }
+
+        assert_eq!(plan.distribution(), &Distribution::Single);
+        no_exchange_before_table_scan(plan)
 
         // TODO: join between a normal table and a system table is not supported yet
     }
@@ -568,10 +587,14 @@ impl PlanRoot {
         //     ApplyOrder::BottomUp,
         // );
 
+        #[cfg(debug_assertions)]
+        InputRefValidator.validate(plan.clone());
+
         Ok(plan)
     }
 
     /// Optimize and generate a create table plan.
+    #[allow(clippy::too_many_arguments)]
     pub fn gen_table_plan(
         &mut self,
         table_name: String,
@@ -580,6 +603,7 @@ impl PlanRoot {
         handle_pk_conflict: bool,
         row_id_index: Option<usize>,
         dml_flag: DmlFlag,
+        version: Option<TableVersion>,
     ) -> Result<StreamMaterialize> {
         let mut stream_plan = self.gen_stream_plan()?;
 
@@ -612,6 +636,7 @@ impl PlanRoot {
             definition,
             handle_pk_conflict,
             row_id_index,
+            version,
         )
     }
 

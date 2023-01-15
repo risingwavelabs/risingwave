@@ -54,6 +54,47 @@ pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<Dat
     Ok(sig.ret_type.into())
 }
 
+pub fn infer_some_all(
+    mut func_types: Vec<ExprType>,
+    inputs: &mut Vec<ExprImpl>,
+) -> Result<DataType> {
+    let element_type = if inputs[1].is_unknown() {
+        None
+    } else if let DataType::List { datatype } = inputs[1].return_type() {
+        Some(DataTypeName::from(*datatype))
+    } else {
+        return Err(ErrorCode::BindError(
+            "op ANY/ALL (array) requires array on right side".to_string(),
+        )
+        .into());
+    };
+
+    let final_type = func_types.pop().unwrap();
+    let actuals = vec![
+        (!inputs[0].is_unknown()).then_some(inputs[0].return_type().into()),
+        element_type,
+    ];
+    let sig = infer_type_name(&FUNC_SIG_MAP, final_type, &actuals)?;
+    if DataTypeName::from(inputs[0].return_type()) != sig.inputs_type[0] {
+        inputs[0] = inputs[0].clone().cast_implicit(sig.inputs_type[0].into())?;
+    }
+    if element_type != Some(sig.inputs_type[1]) {
+        inputs[1] = inputs[1].clone().cast_implicit(DataType::List {
+            datatype: Box::new(sig.inputs_type[1].into()),
+        })?;
+    }
+
+    let inputs_owned = std::mem::take(inputs);
+    let mut func_call =
+        FunctionCall::new_unchecked(final_type, inputs_owned, sig.ret_type.into()).into();
+    while let Some(func_type) = func_types.pop() {
+        func_call = FunctionCall::new(func_type, vec![func_call])?.into();
+    }
+    let return_type = func_call.return_type();
+    *inputs = vec![func_call];
+    Ok(return_type)
+}
+
 macro_rules! ensure_arity {
     ($func:literal, $lower:literal <= | $inputs:ident | <= $upper:literal) => {
         if !($lower <= $inputs.len() && $inputs.len() <= $upper) {
@@ -84,6 +125,17 @@ macro_rules! ensure_arity {
                 "Function `{}` takes {} arguments ({} given)",
                 $func,
                 $num,
+                $inputs.len(),
+            ))
+            .into());
+        }
+    };
+    ($func:literal, | $inputs:ident | <= $upper:literal) => {
+        if !($inputs.len() <= $upper) {
+            return Err(ErrorCode::BindError(format!(
+                "Function `{}` takes at most {} arguments ({} given)",
+                $func,
+                $upper,
                 $inputs.len(),
             ))
             .into());
@@ -467,8 +519,8 @@ fn infer_type_for_special(
             Ok(Some(DataType::Int16))
         }
         ExprType::Now => {
-            ensure_arity!("now", | inputs | == 0);
-            Ok(Some(DataType::Timestamp))
+            ensure_arity!("now", | inputs | <= 1);
+            Ok(Some(DataType::Timestamptz))
         }
         _ => Ok(None),
     }

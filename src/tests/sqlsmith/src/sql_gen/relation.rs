@@ -94,9 +94,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 // NOTE: We can support some composite types if we wish to in the future.
                 // see: https://www.postgresql.org/docs/14/functions-comparison.html.
                 // For simplicity only support scalar types for now.
-                let left_ty = left_column.data_type;
-                let right_ty = right_column.data_type;
-                if left_ty.is_scalar() && right_ty.is_scalar() && (left_ty == right_ty) {
+                if left_column.data_type == right_column.data_type {
                     available_join_on_columns.push((left_column, right_column))
                 }
             }

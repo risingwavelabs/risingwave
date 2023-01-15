@@ -364,3 +364,9 @@
     CREATE TABLE a (c STRUCT<i STRUCT<a INTEGER>, j INTEGER>);
     INSERT INTO a VALUES (1);
   binder_error: 'Bind error: cannot cast type "integer" to "struct<i struct<a integer>,j integer>" in Assign context'
+- name: test struct type alignment in CASE expression
+  sql: |
+    select CASE WHEN false THEN ROW(0, INTERVAL '1') WHEN true THEN ROW(1.1, INTERVAL '1') ELSE ROW(1, INTERVAL '1') END;
+  logical_plan: |
+    LogicalProject { exprs: [Case(false:Boolean, Row(0:Int32::Decimal, '00:00:01':Interval), true:Boolean, Row(1.1:Decimal, '00:00:01':Interval), Row(1:Int32::Decimal, '00:00:01':Interval))] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }

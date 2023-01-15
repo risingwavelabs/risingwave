@@ -14,9 +14,14 @@
 
 use std::ops;
 
+use itertools::Itertools;
+
 use super::Row;
 use crate::collection::estimate_size::EstimateSize;
-use crate::types::{DataType, Datum, DatumRef, ToDatumRef};
+use crate::types::{
+    DataType, Datum, DatumRef, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
+    NaiveTimeWrapper, ScalarImpl, ToDatumRef,
+};
 use crate::util::value_encoding;
 use crate::util::value_encoding::deserialize_datum;
 
@@ -35,22 +40,31 @@ impl ops::Index<usize> for OwnedRow {
 
 impl PartialOrd for OwnedRow {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if self.0.len() != other.0.len() {
-            return None;
-        }
         self.0.partial_cmp(&other.0)
     }
 }
 
 impl Ord for OwnedRow {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap_or_else(|| {
-            panic!("cannot compare rows with different lengths:\n left: {self:?}\nright: {other:?}")
-        })
+        self.partial_cmp(other)
+            .unwrap_or_else(|| panic!("cannot compare rows with different types"))
+    }
+}
+
+impl AsRef<OwnedRow> for OwnedRow {
+    fn as_ref(&self) -> &OwnedRow {
+        self
     }
 }
 
 impl OwnedRow {
+    /// Returns an empty row.
+    ///
+    /// Note: use [`empty`](super::empty) if possible.
+    pub const fn empty() -> Self {
+        Self(vec![])
+    }
+
     pub const fn new(values: Vec<Datum>) -> Self {
         Self(values)
     }
@@ -60,12 +74,31 @@ impl OwnedRow {
         self.0
     }
 
-    /// Returns a reference to an empty row.
-    ///
-    /// Note: use [`empty`](super::empty) if possible.
-    pub fn empty<'a>() -> &'a Self {
-        static EMPTY_ROW: OwnedRow = OwnedRow(Vec::new());
-        &EMPTY_ROW
+    /// Parse an [`OwnedRow`] from a pretty string, only used in tests.
+    pub fn from_pretty_with_tys(tys: &[DataType], s: impl AsRef<str>) -> Self {
+        let datums: Vec<_> = tys
+            .iter()
+            .zip_eq(s.as_ref().split_ascii_whitespace())
+            .map(|(ty, x)| {
+                let scalar: ScalarImpl = match ty {
+                    DataType::Int16 => x.parse::<i16>().unwrap().into(),
+                    DataType::Int32 => x.parse::<i32>().unwrap().into(),
+                    DataType::Int64 => x.parse::<i64>().unwrap().into(),
+                    DataType::Float32 => x.parse::<f32>().unwrap().into(),
+                    DataType::Float64 => x.parse::<f64>().unwrap().into(),
+                    DataType::Varchar => x.to_string().into(),
+                    DataType::Boolean => x.parse::<bool>().unwrap().into(),
+                    DataType::Date => x.parse::<NaiveDateWrapper>().unwrap().into(),
+                    DataType::Time => x.parse::<NaiveTimeWrapper>().unwrap().into(),
+                    DataType::Timestamp => x.parse::<NaiveDateTimeWrapper>().unwrap().into(),
+                    DataType::Interval => x.parse::<IntervalUnit>().unwrap().into(),
+                    DataType::Decimal => x.parse::<Decimal>().unwrap().into(),
+                    _ => todo!(),
+                };
+                Some(scalar)
+            })
+            .collect();
+        Self::new(datums)
     }
 }
 
@@ -140,6 +173,8 @@ impl<D: AsRef<[DataType]>> RowDeserializer<D> {
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
+
     use itertools::Itertools;
 
     use super::*;
@@ -208,5 +243,21 @@ mod tests {
 
         let row_default = OwnedRow::default();
         assert_eq!(row_default.hash(hash_builder).0, 0);
+    }
+
+    #[test]
+    fn test_cmp() {
+        let tys = [Ty::Int64, Ty::Int64];
+
+        for ((s1, tys1), (s2, tys2), expected) in [
+            (("1 2", &tys[..]), ("1 2", &tys[..]), Ordering::Equal),
+            (("1 2", &tys[..]), ("1", &tys[..1]), Ordering::Greater),
+            (("1 2", &tys[..]), ("2 1", &tys[..]), Ordering::Less),
+            (("1 2", &tys[..]), ("2", &tys[..1]), Ordering::Less),
+        ] {
+            let r1 = OwnedRow::from_pretty_with_tys(tys1, s1);
+            let r2 = OwnedRow::from_pretty_with_tys(tys2, s2);
+            assert_eq!(r1.cmp(&r2), expected);
+        }
     }
 }
