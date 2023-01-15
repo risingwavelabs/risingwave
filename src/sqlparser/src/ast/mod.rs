@@ -191,6 +191,7 @@ impl From<Vec<Ident>> for ObjectName {
     }
 }
 
+/// For array type `ARRAY[..]` or `[..]`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Array {
