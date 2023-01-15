@@ -240,7 +240,7 @@ impl Parser {
 
     /// Check is enter array expression.
     pub fn is_array_expr_entered(&mut self) -> bool {
-        return self.is_in_array_expr;
+        self.is_in_array_expr
     }
 
     /// When enter specify ARRAY prefix expression.
