@@ -121,6 +121,7 @@ pub struct Parser {
     /// Since we cannot distinguish `>>` and double `>`, so use `angle_brackets_num` to store the
     /// number of `<` to match `>` in sql like `struct<v1 struct<v2 int>>`.
     angle_brackets_num: i32,
+    is_in_array_expr: bool,
 }
 
 impl Parser {
@@ -135,6 +136,7 @@ impl Parser {
             tokens,
             index: 0,
             angle_brackets_num: 0,
+            is_in_array_expr: false,
         }
     }
 
@@ -234,6 +236,23 @@ impl Parser {
         let table_name = self.parse_object_name()?;
 
         Ok(Statement::Analyze { table_name })
+    }
+
+    /// Check is enter array expression.
+    pub fn is_array_expr_entered (&mut self) -> bool {
+        return self.is_in_array_expr;
+    }
+
+    /// When enter specify ARRAY prefix expression.
+    pub fn  enter_array_expr (&mut self) {
+        self.is_in_array_expr = true;
+        return;
+    }
+
+    /// When exit specify ARRAY prefix expression.
+    pub fn  exit_array_expr(&mut self) {
+        self.is_in_array_expr = false;
+        return;
     }
 
     /// Tries to parse a wildcard expression. If it is not a wildcard, parses an expression.
@@ -440,9 +459,10 @@ impl Parser {
                     expr: Box::new(self.parse_subexpr(Self::UNARY_NOT_PREC)?),
                 }),
                 Keyword::ROW => self.parse_row_expr(),
-                Keyword::ARRAY => Ok(Expr::Array(
-                    self.parse_token_wrapped_exprs(&Token::LBracket, &Token::RBracket)?,
-                )),
+                Keyword::ARRAY if self.peek_token() == Token::LBracket => {
+                    self.expect_token(&Token::LBracket)?;
+                    self.parse_array_expr(true)
+                }
                 k if keywords::RESERVED_FOR_COLUMN_OR_TABLE_NAME.contains(&k) => {
                     parser_err!(format!("syntax error at or near \"{w}\""))
                 }
@@ -471,6 +491,9 @@ impl Parser {
                     _ => Ok(Expr::Identifier(w.to_ident())),
                 },
             }, // End of Token::Word
+
+            Token::LBracket if self.is_array_expr_entered() => self.parse_array_expr(false),
+
             tok @ Token::Minus | tok @ Token::Plus => {
                 let op = if tok == Token::Plus {
                     UnaryOperator::Plus
@@ -919,6 +942,28 @@ impl Parser {
                 _ => self.expected("trim_where field", Token::Word(w))?,
             },
             unexpected => self.expected("trim_where field", unexpected),
+        }
+    }
+
+    /// Parses an array expression `[ex1, ex2, ..]`
+    /// if `named` is `true`, came from an expression like  `ARRAY[ex1, ex2]`
+    pub fn parse_array_expr(&mut self, named: bool) -> Result<Expr, ParserError> {
+        if self.peek_token() == Token::RBracket {
+            let _ = self.next_token(); // consume ]
+            Ok(Expr::Array(Array {
+                elem: vec![],
+                named,
+            }))
+        } else {
+            if named {
+                self.enter_array_expr();
+            }
+            let exprs = self.parse_comma_separated(Parser::parse_expr)?;
+            self.expect_token(&Token::RBracket)?;
+            if named {
+                self.exit_array_expr();
+            }
+            Ok(Expr::Array(Array { elem: exprs, named }))
         }
     }
 

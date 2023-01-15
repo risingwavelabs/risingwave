@@ -883,3 +883,90 @@ fn parse_drop_function() {
         }
     );
 }
+
+#[test]
+fn parse_array() {
+    let sql = "SELECT ARRAY[ARRAY[1, 2], ARRAY[3, 4]]";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::Query(Box::new(Query {
+            with: None,
+            body: SetExpr::Select(Box::new(Select {
+                distinct: Distinct::All,
+                projection: vec![SelectItem::UnnamedExpr(Expr::Array(Array {
+                    elem: vec![
+                        Expr::Array(Array {
+                            elem: vec![
+                                Expr::Value(Value::Number(String::from("1"))),
+                                Expr::Value(Value::Number(String::from("2")))
+                            ],
+                            named: true
+                        }),
+                        Expr::Array(Array {
+                            elem: vec![
+                                Expr::Value(Value::Number(String::from("3"))),
+                                Expr::Value(Value::Number(String::from("4"))),
+                            ],
+                            named: true
+                        }),
+                    ],
+                    named: true
+                }))],
+                from: vec![],
+                lateral_views: vec![],
+                selection: None,
+                group_by: vec![],
+                having: None
+            })),
+            order_by: vec![],
+            limit: None,
+            offset: None,
+            fetch: None
+        }))
+    );
+    let sql = "SELECT ARRAY[[1, 2], [3, 4]]";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::Query(Box::new(Query {
+            with: None,
+            body: SetExpr::Select(Box::new(Select {
+                distinct: Distinct::All,
+                projection: vec![SelectItem::UnnamedExpr(Expr::Array(Array {
+                    elem: vec![
+                        Expr::Array(Array {
+                            elem: vec![
+                                Expr::Value(Value::Number(String::from("1"))),
+                                Expr::Value(Value::Number(String::from("2")))
+                            ],
+                            named: false
+                        }),
+                        Expr::Array(Array {
+                            elem: vec![
+                                Expr::Value(Value::Number(String::from("3"))),
+                                Expr::Value(Value::Number(String::from("4"))),
+                            ],
+                            named: false
+                        }),
+                    ],
+                    named: true
+                }))],
+                from: vec![],
+                lateral_views: vec![],
+                selection: None,
+                group_by: vec![],
+                having: None
+            })),
+            order_by: vec![],
+            limit: None,
+            offset: None,
+            fetch: None
+        }))
+    );
+    let sql = "SELECT [[1, 2], [3, 4]]";
+    assert_eq!(
+        parse_sql_statements(sql),
+        Err(ParserError::ParserError(
+            "Expected an expression:, found: [".to_string()
+        )),
+    );
+}

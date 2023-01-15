@@ -19,7 +19,7 @@ use rand::distributions::Alphanumeric;
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
+use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value, Array};
 
 use crate::sql_gen::expr::sql_null;
 use crate::sql_gen::types::data_type_to_ast_data_type;
@@ -89,7 +89,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             },
             T::List { datatype: ref ty } => {
                 let n = self.rng.gen_range(1..=100); // Avoid ambiguous type
-                Expr::Array(self.gen_simple_scalar_list(ty, n))
+                Expr::Array(Array {elem: self.gen_simple_scalar_list(ty, n), named: true})
             }
             // ENABLE: https://github.com/risingwavelabs/risingwave/issues/6934
             // T::Struct(ref inner) => Expr::Row(
