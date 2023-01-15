@@ -115,10 +115,10 @@ impl ObjectStore for OpendalObjectStore {
 
         let mut reader: ObjectReader = self.op.object(path).reader().await?;
         let bytes = match start_pos {
-            Some(strat_position) => {
+            Some(start_position) => {
                 let mut buf = Vec::new();
 
-                reader.seek(SeekFrom::Start(strat_position as u64)).await?;
+                reader.seek(SeekFrom::Start(start_position as u64)).await?;
                 reader.read_to_end(&mut buf).await?;
                 Bytes::from(buf)
             }
@@ -165,7 +165,7 @@ impl ObjectStore for OpendalObjectStore {
 
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
         let mut object_lister = self.op.object(prefix).list().await?;
-        let mut matadata_list = vec![];
+        let mut metadata_list = vec![];
         while let Some(obj) = object_lister.next().await {
             let object = obj?;
             let key = prefix.to_string();
@@ -180,9 +180,9 @@ impl ObjectStore for OpendalObjectStore {
                 last_modified,
                 total_size,
             };
-            matadata_list.push(metadata);
+            metadata_list.push(metadata);
         }
-        Ok(matadata_list)
+        Ok(metadata_list)
     }
 
     fn store_media_type(&self) -> &'static str {
