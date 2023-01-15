@@ -69,9 +69,9 @@ impl GlobalMemoryManager {
         watermark_epoch.store(epoch, Ordering::Relaxed);
     }
 
-    /// Jemalloc is not supported on non-Linux OSs, because tikv-jemalloc is not available.
-    /// See the comments for the macro enable_jemalloc_on_linux!();
     // FIXME: remove such limitation after #7180
+    /// Jemalloc is not supported on Windows, because of tikv-jemalloc's own reasons.
+    /// See the comments for the macro `enable_jemalloc_on_linux!()`
     #[cfg(not(target_os = "linux"))]
     pub async fn run(self: Arc<Self>, _: Arc<BatchManager>, _: Arc<LocalStreamManager>) {}
 
