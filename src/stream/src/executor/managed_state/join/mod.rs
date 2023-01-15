@@ -158,6 +158,8 @@ pub struct JoinHashMapMetrics {
     /// How many times have we hit the cache of join executor
     lookup_miss_count: usize,
     total_lookup_count: usize,
+    /// How many times have we miss the cache when insert row
+    insert_cache_miss_count: usize,
 }
 
 impl JoinHashMapMetrics {
@@ -168,6 +170,7 @@ impl JoinHashMapMetrics {
             side,
             lookup_miss_count: 0,
             total_lookup_count: 0,
+            insert_cache_miss_count: 0,
         }
     }
 
@@ -180,8 +183,13 @@ impl JoinHashMapMetrics {
             .join_total_lookup_count
             .with_label_values(&[&self.actor_id, self.side])
             .inc_by(self.total_lookup_count as u64);
+        self.metrics
+            .join_insert_cache_miss_count
+            .with_label_values(&[&self.actor_id, self.side])
+            .inc_by(self.insert_cache_miss_count as u64);
         self.total_lookup_count = 0;
         self.lookup_miss_count = 0;
+        self.insert_cache_miss_count = 0;
     }
 }
 
@@ -399,6 +407,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             entry.insert(pk, value.encode());
         } else {
             // Refill cache when cache miss
+            self.metrics.insert_cache_miss_count += 1;
             let mut state = self.fetch_cached_state(key).await?;
             state.insert(pk, value.encode());
             self.update_state(key, state.into());
@@ -423,6 +432,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             entry.insert(pk, join_row.encode());
         } else {
             // Refill cache when cache miss
+            self.metrics.insert_cache_miss_count += 1;
             let mut state = self.fetch_cached_state(key).await?;
             state.insert(pk, join_row.encode());
             self.update_state(key, state.into());
