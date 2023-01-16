@@ -15,16 +15,9 @@
  *
  */
 
-import {
-  primaryKeyColumn,
-  Relations,
-  streamingJobColumns,
-} from "../components/Relations"
-import { getMaterializedViews } from "./api/streaming"
+import { primaryKeyColumn, Relations } from "../components/Relations"
+import { getInternalTables } from "./api/streaming"
 
-export default function MaterializedViews() {
-  return Relations("Materialized Views", getMaterializedViews, [
-    ...streamingJobColumns,
-    primaryKeyColumn,
-  ])
+export default function InternalTables() {
+  return Relations("Internal Tables", getInternalTables, [primaryKeyColumn])
 }
