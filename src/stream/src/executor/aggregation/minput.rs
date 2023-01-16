@@ -32,7 +32,7 @@ use smallvec::SmallVec;
 use super::state_cache::array_agg::ArrayAgg;
 use super::state_cache::extreme::ExtremeAgg;
 use super::state_cache::string_agg::StringAgg;
-use super::state_cache::{BoundedStateCache, CacheKey, StateCache, UnboundedStateCache};
+use super::state_cache::{CacheKey, SortedStateCache, StateCache, TopNStateCache};
 use super::AggCall;
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
@@ -125,10 +125,10 @@ impl<S: StateStore> MaterializedInputState<S> {
 
         let cache: Box<dyn StateCache> = match agg_call.kind {
             AggKind::Min | AggKind::Max | AggKind::FirstValue => {
-                Box::new(BoundedStateCache::new(ExtremeAgg, extreme_cache_size))
+                Box::new(TopNStateCache::new(ExtremeAgg, extreme_cache_size))
             }
-            AggKind::StringAgg => Box::new(UnboundedStateCache::new(StringAgg)),
-            AggKind::ArrayAgg => Box::new(UnboundedStateCache::new(ArrayAgg)),
+            AggKind::StringAgg => Box::new(SortedStateCache::new(StringAgg)),
+            AggKind::ArrayAgg => Box::new(SortedStateCache::new(ArrayAgg)),
             _ => panic!(
                 "Agg kind `{}` is not expected to have materialized input state",
                 agg_call.kind

@@ -92,8 +92,8 @@ pub trait StateCacheAggregator {
     fn aggregate<'a>(&'a self, values: impl Iterator<Item = &'a Self::Value>) -> Datum;
 }
 
-/// A [`StateCache`] implementation that uses [`OrderedCache`] as the cache.
-pub struct BoundedStateCache<Agg>
+/// A sorted [`StateCache`] implementation with capacity limit.
+pub struct TopNStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
@@ -107,7 +107,7 @@ where
     synced: bool,
 }
 
-impl<Agg> BoundedStateCache<Agg>
+impl<Agg> TopNStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
@@ -120,7 +120,7 @@ where
     }
 }
 
-impl<Agg> StateCache for BoundedStateCache<Agg>
+impl<Agg> StateCache for TopNStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
@@ -174,7 +174,7 @@ where
     }
 }
 
-impl<Agg> StateCacheMaintain for BoundedStateCache<Agg>
+impl<Agg> StateCacheMaintain for TopNStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
@@ -188,10 +188,9 @@ where
     }
 }
 
-/// A [`StateCache`] implementation that uses [`BTreeMap`] as the cache,
-/// without capacity limit. In other words, this cache is a fully synced
-/// cache.
-pub struct UnboundedStateCache<Agg>
+/// A sorted [`StateCache`] implementation without capacity limit.
+/// In other words, this cache is a fully synced cache.
+pub struct SortedStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
@@ -206,7 +205,7 @@ where
     synced: bool,
 }
 
-impl<Agg> UnboundedStateCache<Agg>
+impl<Agg> SortedStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
@@ -219,7 +218,7 @@ where
     }
 }
 
-impl<Agg> StateCache for UnboundedStateCache<Agg>
+impl<Agg> StateCache for SortedStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
@@ -259,7 +258,7 @@ where
     }
 }
 
-impl<Agg> StateCacheMaintain for UnboundedStateCache<Agg>
+impl<Agg> StateCacheMaintain for SortedStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
