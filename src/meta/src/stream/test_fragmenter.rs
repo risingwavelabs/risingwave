@@ -255,7 +255,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             distribution_key: Default::default(),
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
-            result_table: Some(make_empty_table(1)),
+            result_table: Some(make_empty_table(2)),
         })),
         input: vec![filter_node],
         fields: vec![], // TODO: fill this later
@@ -297,7 +297,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             distribution_key: Default::default(),
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
-            result_table: Some(make_empty_table(2)),
+            result_table: Some(make_empty_table(3)),
         })),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],
@@ -342,7 +342,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         stream_key: vec![],
         node_body: Some(NodeBody::Materialize(MaterializeNode {
             table_id: 1,
-            table: Some(make_materialize_table(1)),
+            table: Some(make_materialize_table(888)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
             handle_pk_conflict: false,
         })),
@@ -396,7 +396,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         edges: make_fragment_edges(),
         env: Some(StreamEnvironment::default()),
         dependent_table_ids: vec![],
-        table_ids_cnt: 4,
+        table_ids_cnt: 3,
     }
 }
 
@@ -405,12 +405,15 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
 async fn test_fragmenter() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
-    let mut ctx = CreateStreamingJobContext::default();
-    let mut job = StreamingJob::Table(None, make_materialize_table(1));
-    let graph = make_stream_graph();
+    let mut job = StreamingJob::Table(None, make_materialize_table(888));
 
+    let graph = make_stream_graph();
     let fragment_graph =
         StreamFragmentGraph::create(graph, env.id_gen_manager_ref(), &mut job).await?;
+
+    let mut ctx = CreateStreamingJobContext::default();
+    ctx.internal_tables = fragment_graph.internal_tables();
+
     let actor_graph_builder = ActorGraphBuilder::new(fragment_graph, parallel_degree);
 
     let graph = actor_graph_builder
@@ -426,7 +429,7 @@ async fn test_fragmenter() -> MetaResult<()> {
     assert_eq!(actors.len(), 9);
     assert_eq!(barrier_inject_actor_ids, vec![6, 7, 8, 9]);
     assert_eq!(sink_actor_ids, vec![1]);
-    assert_eq!(2, internal_table_ids.len());
+    assert_eq!(internal_table_ids.len(), 3);
 
     let fragment_upstreams: HashMap<_, _> = table_fragments
         .fragments
