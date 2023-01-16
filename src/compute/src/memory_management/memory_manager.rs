@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 #[cfg(target_os = "linux")]
 use std::time::Duration;
 
 use risingwave_batch::task::BatchManager;
+#[cfg(target_os = "linux")]
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
@@ -70,6 +71,8 @@ impl GlobalMemoryManager {
 
     #[cfg(target_os = "linux")]
     fn set_watermark_time_ms(&self, time_ms: u64) {
+        use std::sync::atomic::Ordering;
+
         let epoch = Epoch::from_physical_time(time_ms).0;
         let watermark_epoch = self.watermark_epoch.as_ref();
         watermark_epoch.store(epoch, Ordering::Relaxed);
