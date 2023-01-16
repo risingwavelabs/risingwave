@@ -62,7 +62,7 @@ insert into t2 values (1), (null);
 statement ok
 flush;
 
-query II
+query II rowsort
 select * from v;
 ----
 1 1
