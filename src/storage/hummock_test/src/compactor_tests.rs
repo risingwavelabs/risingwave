@@ -59,7 +59,8 @@ pub(crate) mod tests {
 
     use crate::get_test_notification_client;
     use crate::test_utils::{
-        register_test_tables, HummockV2MixedStateStore, HummockV2MixedStateStore as HummockStorage,
+        register_test_tables_with_id, HummockV2MixedStateStore,
+        HummockV2MixedStateStore as HummockStorage,
     };
 
     pub(crate) async fn get_hummock_storage<S: MetaStore>(
@@ -88,7 +89,7 @@ pub(crate) mod tests {
         .await
         .unwrap();
 
-        register_test_tables(
+        register_test_tables_with_id(
             hummock.filter_key_extractor_manager(),
             hummock_manager_ref,
             &[table_id.table_id()],
