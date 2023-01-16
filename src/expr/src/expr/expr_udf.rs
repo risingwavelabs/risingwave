@@ -16,7 +16,7 @@ use std::convert::TryFrom;
 use std::sync::Arc;
 
 use arrow_schema::{Field, Schema};
-use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -47,6 +47,7 @@ impl Expression for UdfExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let vis = input.vis().to_bitmap();
         let columns: Vec<_> = self
             .children
             .iter()
@@ -57,11 +58,13 @@ impl Expression for UdfExpression {
         let output = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(self.client.call(&self.function_id, input))
         })?;
-        let array = output
+        let arrow_array = output
             .columns()
             .get(0)
             .ok_or(risingwave_udf::Error::NoColumn)?;
-        Ok(Arc::new(array.into()))
+        let mut array = ArrayImpl::from(arrow_array);
+        array.set_bitmap(array.null_bitmap() & vis);
+        Ok(Arc::new(array))
     }
 
     fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
