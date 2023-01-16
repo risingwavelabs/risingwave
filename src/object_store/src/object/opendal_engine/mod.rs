@@ -15,7 +15,5 @@
 pub mod opendal_object_store;
 pub use opendal_object_store::*;
 
-#[cfg(feature = "services-hdfs")]
 pub mod hdfs;
-#[cfg(feature = "services-hdfs")]
 pub use hdfs::*;

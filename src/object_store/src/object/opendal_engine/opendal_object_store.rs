@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use fail::fail_point;
 use futures::future::try_join_all;
-use futures::io::{AsyncSeekExt, AsyncWriteExt, Cursor as FuturesCursor};
 use futures::StreamExt;
 use itertools::Itertools;
 use opendal::services::memory;
 use opendal::Operator;
-use tokio::io::{AsyncRead, SeekFrom};
+use tokio::io::AsyncRead;
 
 use crate::object::{
     BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
@@ -189,44 +188,32 @@ impl ObjectStore for OpendalObjectStore {
 pub struct OpenDalStreamingUploader {
     op: Operator,
     path: String,
-    buffer: FuturesCursor<Vec<u8>>,
-    length: u64,
+    buffer: BytesMut,
 }
 impl OpenDalStreamingUploader {
     pub fn new(op: Operator, path: String) -> Self {
         Self {
             op,
             path,
-            buffer: FuturesCursor::new(vec![]),
-            length: 0,
+            buffer: BytesMut::new(),
         }
     }
 }
 #[async_trait::async_trait]
 impl StreamingUploader for OpenDalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
-        self.buffer.seek(SeekFrom::Start(self.length)).await?;
-        let data = data.to_vec();
-
-        self.length += data.len() as u64;
-        let _ = self.buffer.write(&data).await?;
+        self.buffer.put(data);
         Ok(())
     }
 
     async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
-        self.buffer.flush().await?;
-        let buffer = self.buffer.get_mut().to_vec();
-        let r = FuturesCursor::new(buffer);
-        self.op
-            .object(&self.path)
-            .write_from(self.length, r)
-            .await?;
+        self.op.object(&self.path).write(self.buffer).await?;
 
         Ok(())
     }
 
     fn get_memory_usage(&self) -> u64 {
-        self.length
+        self.buffer.capacity() as u64
     }
 }
 

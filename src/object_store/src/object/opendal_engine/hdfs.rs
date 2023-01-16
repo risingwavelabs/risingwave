@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use opendal::services::hdfs;
-use opendal::{ObjectReader, Operator};
+use opendal::Operator;
 
 use super::{EngineType, OpendalObjectStore};
 impl OpendalObjectStore {
