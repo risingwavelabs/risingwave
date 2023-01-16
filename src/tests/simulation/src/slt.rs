@@ -52,6 +52,10 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             // Simply ignore the read uncommitted test cases when enable kill nodes.
             continue;
         }
+        if kill && path.ends_with("session_timezone.slt") {
+            // Ignore the session timezone test cases that depends on session config
+            continue;
+        }
 
         // XXX: hack for kafka source test
         let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));
@@ -87,8 +91,11 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                         match tester.run_async(record.clone()).await {
                             Ok(_) => break,
                             // cluster could be still under recovering if killed before, retry if
-                            // meets `Get source table id not exists`.
-                            Err(e) if !e.to_string().contains("not exists") || i >= 5 => {
+                            // meets `no reader for dml in table with id {}`.
+                            Err(e)
+                                if !e.to_string().contains("no reader for dml in table")
+                                    || i >= 5 =>
+                            {
                                 panic!("failed to run test after retry {i} times: {e}")
                             }
                             Err(e) => {

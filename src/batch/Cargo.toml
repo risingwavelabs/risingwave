@@ -71,6 +71,8 @@ workspace-hack = { path = "../workspace-hack" }
 criterion = { version = "0.4", features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 tikv-jemallocator = "0.5"
 
 [[bench]]
@@ -79,10 +81,6 @@ harness = false
 
 [[bench]]
 name = "nested_loop_join"
-harness = false
-
-[[bench]]
-name = "sort_merge_join"
 harness = false
 
 [[bench]]

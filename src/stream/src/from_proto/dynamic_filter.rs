@@ -14,7 +14,9 @@
 use std::sync::Arc;
 
 use risingwave_common::bail;
-use risingwave_pb::expr::expr_node::Type::*;
+use risingwave_pb::expr::expr_node::Type::{
+    GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
+};
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::*;

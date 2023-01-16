@@ -614,7 +614,6 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             shards,
             shard_usages,
             shard_lru_usages,
-
             listener,
         }
     }

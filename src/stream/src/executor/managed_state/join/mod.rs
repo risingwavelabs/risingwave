@@ -15,7 +15,6 @@
 mod join_entry_state;
 
 use std::alloc::Global;
-use std::borrow::Cow;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
@@ -107,7 +106,7 @@ impl EncodedJoinRow {
 
 impl EstimateSize for EncodedJoinRow {
     fn estimated_heap_size(&self) -> usize {
-        self.compacted_row.row.estimated_heap_size()
+        self.compacted_row.row.len()
     }
 }
 
@@ -311,6 +310,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         }
     }
 
+    pub fn update_watermark(&mut self, watermark: ScalarImpl) {
+        // TODO: remove data in cache.
+        self.state.table.update_watermark(watermark.clone());
+        self.degree_state.table.update_watermark(watermark);
+    }
+
     /// Take the state for the given `key` out of the hash table and return it. One **MUST** call
     /// `update_state` after some operations to put the state back.
     ///
@@ -371,7 +376,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
             #[for_await]
             for row in table_iter {
-                let row: Cow<'_, OwnedRow> = row?;
+                let row: OwnedRow = row?;
                 let pk = row
                     .as_ref()
                     .project(&self.state.pk_indices)

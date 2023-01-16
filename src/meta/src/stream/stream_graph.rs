@@ -807,59 +807,37 @@ impl ActorGraphBuilder {
         schema_id: SchemaId,
         table_id: TableId,
     ) -> FragmentId {
-        // Fill in the correct mview id for stream node.
-        struct FillIdContext {
-            database_id: DatabaseId,
-            schema_id: SchemaId,
-            table_id: TableId,
-            fragment_id: FragmentId,
-        }
-        fn fill_database_object_id_inner(
-            stream_node: &mut StreamNode,
-            ctx: &FillIdContext,
-        ) -> usize {
-            let mut mview_count = 0;
-            let node_body = stream_node.node_body.as_mut().unwrap();
-            match node_body {
+        let mut mview_count = 0;
+        let mut mview_fragment_id = None;
+
+        for fragment in self.fragment_graph.fragments_mut().values_mut() {
+            let fragment_id = fragment.fragment_id;
+            let mut mview_count_in_fragment = 0;
+
+            visit_fragment(fragment, |node_body| match node_body {
                 NodeBody::Materialize(materialize_node) => {
-                    materialize_node.table_id = ctx.table_id.table_id;
-                    materialize_node.table.as_mut().unwrap().id = ctx.table_id.table_id;
-                    materialize_node.table.as_mut().unwrap().database_id = ctx.database_id;
-                    materialize_node.table.as_mut().unwrap().schema_id = ctx.schema_id;
-                    materialize_node.table.as_mut().unwrap().fragment_id = ctx.fragment_id;
-                    mview_count += 1;
+                    materialize_node.table_id = table_id.table_id;
+                    materialize_node.table.as_mut().unwrap().id = table_id.table_id;
+                    materialize_node.table.as_mut().unwrap().database_id = database_id;
+                    materialize_node.table.as_mut().unwrap().schema_id = schema_id;
+                    materialize_node.table.as_mut().unwrap().fragment_id = fragment_id;
+                    mview_count_in_fragment += 1;
                 }
                 NodeBody::Sink(sink_node) => {
-                    sink_node.table_id = ctx.table_id.table_id;
-                    mview_count += 1;
+                    sink_node.table_id = table_id.table_id;
+                    mview_count_in_fragment += 1;
                 }
                 NodeBody::Dml(dml_node) => {
-                    dml_node.table_id = ctx.table_id.table_id;
+                    dml_node.table_id = table_id.table_id;
                 }
                 _ => {}
-            }
-            for input in &mut stream_node.input {
-                mview_count += fill_database_object_id_inner(input, ctx);
-            }
-            mview_count
-        }
+            });
 
-        let mut mview_count = 0;
-        let mut fragment_id = 0;
-        for fragment in self.fragment_graph.fragments_mut().values_mut() {
-            let delta = fill_database_object_id_inner(
-                fragment.node.as_mut().unwrap(),
-                &FillIdContext {
-                    database_id,
-                    schema_id,
-                    table_id,
-                    fragment_id: fragment.fragment_id,
-                },
-            );
-            mview_count += delta;
-            if delta != 0 {
-                fragment_id = fragment.fragment_id
+            if mview_count_in_fragment != 0 {
+                let old = mview_fragment_id.replace(fragment.fragment_id);
+                assert!(old.is_none());
             }
+            mview_count += mview_count_in_fragment;
         }
 
         assert_eq!(
@@ -867,7 +845,7 @@ impl ActorGraphBuilder {
             "require exactly 1 materialize node when creating materialized view"
         );
 
-        fragment_id
+        mview_fragment_id.unwrap()
     }
 
     pub async fn generate_graph<S>(
@@ -1157,6 +1135,9 @@ impl ActorGraphBuilder {
             NodeBody::TopN(node) => {
                 vec![node.table.as_ref().unwrap().id]
             }
+            NodeBody::Now(node) => {
+                vec![node.state_table.as_ref().unwrap().id]
+            }
             _ => {
                 vec![]
             }
@@ -1258,3 +1239,22 @@ impl StreamFragmentGraph {
 
 static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
     LazyLock::new(HashMap::new);
+
+/// A utility for visiting the [`NodeBody`] of the [`StreamNode`]s in a [`StreamFragment`]
+/// recursively.
+pub fn visit_fragment<F>(fragment: &mut StreamFragment, mut f: F)
+where
+    F: FnMut(&mut NodeBody),
+{
+    fn visit_inner<F>(stream_node: &mut StreamNode, f: &mut F)
+    where
+        F: FnMut(&mut NodeBody),
+    {
+        f(stream_node.node_body.as_mut().unwrap());
+        for input in &mut stream_node.input {
+            visit_inner(input, f);
+        }
+    }
+
+    visit_inner(fragment.node.as_mut().unwrap(), &mut f)
+}

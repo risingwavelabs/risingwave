@@ -450,12 +450,6 @@ message RiseCtlGetPinnedSnapshotsSummaryResponse {
   PinnedSnapshotsSummary summary = 1;
 }
 
-message ResetCurrentVersionRequest {}
-
-message ResetCurrentVersionResponse {
-  HummockVersion old_version = 1;
-}
-
 message InitMetadataForReplayRequest {
   repeated catalog.Table tables = 1;
   repeated CompactionGroup compaction_groups = 2;
@@ -523,7 +517,6 @@ message SetCompactorRuntimeConfigResponse {}
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
-  rpc ResetCurrentVersion(ResetCurrentVersionRequest) returns (ResetCurrentVersionResponse);
   rpc ListVersionDeltas(ListVersionDeltasRequest) returns (ListVersionDeltasResponse);
   rpc ReplayVersionDelta(ReplayVersionDeltaRequest) returns (ReplayVersionDeltaResponse);
   rpc GetAssignedCompactTaskNum(GetAssignedCompactTaskNumRequest) returns (GetAssignedCompactTaskNumResponse);

@@ -2402,6 +2402,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "gen-iter"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33ab36ccf1ed3d9c719f4c8725b34482c530f6d569c084ea762490b5e19f77bf"
+
+[[package]]
 name = "generator"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2465,15 +2471,6 @@ name = "glob"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b919933a397b79c37e33b77bb2aa3dc8eb6e165ad809e58ff75bc7db2e34574"
-
-[[package]]
-name = "global_stats_alloc"
-version = "0.2.0-alpha"
-dependencies = [
- "stats_alloc",
- "tikv-jemallocator",
- "workspace-hack",
-]
 
 [[package]]
 name = "globset"
@@ -3357,9 +3354,9 @@ dependencies = [
 
 [[package]]
 name = "madsim"
-version = "0.2.12"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19a97146650b9d03128eb9a1101f45c7dadb1f867ef7b10e58d878432e47de00"
+checksum = "a1d2469ca5362ee2674302c477af49577be8d08f2922e4005e83a63661d7ceb5"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3416,13 +3413,13 @@ dependencies = [
 
 [[package]]
 name = "madsim-rdkafka"
-version = "0.2.8-alpha"
+version = "0.2.13-alpha"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ed71583c1f7ea964e5dd0c1ea4ae1133ff9092775772b22cc9c0fa0151a6441"
+checksum = "934e420610a054eed044d02780a3f9c472ccd5f478a30054c5231dd66193cfec"
 dependencies = [
  "async-channel",
  "async-trait",
- "futures",
+ "futures-channel",
  "futures-util",
  "libc",
  "log",
@@ -3685,6 +3682,9 @@ name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "mysql_async"
@@ -3781,9 +3781,9 @@ dependencies = [
 
 [[package]]
 name = "nexmark"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3de99e4067a851c593a5731569f7a13f0bce1da9f5effcf017b9435ed46eb67"
+checksum = "45fc401175963954a7046238c51799a99eaa4d8be7dd7a0c52dbf00813e52f92"
 dependencies = [
  "lazy_static",
  "rand 0.8.5",
@@ -5394,9 +5394,9 @@ version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "clap 3.2.23",
- "global_stats_alloc",
  "log",
  "madsim-tokio",
+ "risingwave_common",
  "risingwave_compaction_test",
  "risingwave_compactor",
  "risingwave_compute",
@@ -5418,7 +5418,6 @@ dependencies = [
  "anyhow",
  "clap 3.2.23",
  "console",
- "global_stats_alloc",
  "log",
  "madsim-tokio",
  "risedev",
@@ -5431,6 +5430,7 @@ dependencies = [
  "risingwave_rt",
  "sync-point",
  "task_stats_alloc",
+ "tempfile",
  "tikv-jemallocator",
  "tracing",
  "workspace-config",
@@ -5451,10 +5451,12 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
+ "chrono-tz",
  "comfy-table",
  "crc32fast",
  "criterion",
  "darwin-libproc",
+ "derivative",
  "either",
  "enum-as-inner",
  "fixedbitset",
@@ -6116,6 +6118,9 @@ dependencies = [
  "risingwave_meta",
  "risingwave_pb",
  "risingwave_sqlsmith",
+ "serde",
+ "serde_derive",
+ "serde_json",
  "sqllogictest",
  "tempfile",
  "tokio-postgres",
@@ -6164,11 +6169,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_storage",
  "serde",
- "serde-value",
- "serde_derive",
- "serde_json",
  "simd-json",
- "simd-json-derive",
  "smallvec",
  "static_assertions",
  "tempfile",
@@ -6260,6 +6261,7 @@ dependencies = [
  "lz4",
  "madsim-tokio",
  "madsim-tonic",
+ "memcomparable",
  "minitrace",
  "minstant",
  "moka",
@@ -6321,7 +6323,7 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
- "global_stats_alloc",
+ "gen-iter",
  "hyper",
  "iter-chunks",
  "itertools",
@@ -6333,6 +6335,7 @@ dependencies = [
  "memcomparable",
  "minitrace",
  "minstant",
+ "multimap",
  "num-traits",
  "parking_lot 0.12.1",
  "paste",
@@ -6611,9 +6614,9 @@ checksum = "388a1df253eca08550bef6c72392cfe7c30914bf41df5269b68cbd6ff8f570a3"
 
 [[package]]
 name = "serde"
-version = "1.0.147"
+version = "1.0.152"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d193d69bae983fc11a79df82342761dfbf28a99fc8d203dca4c3c1b590948965"
+checksum = "bb7d1f0d3021d347a83e556fc4683dea2ea09d87bccdf88ff5c12545d89d5efb"
 dependencies = [
  "serde_derive",
 ]
@@ -6630,9 +6633,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.147"
+version = "1.0.152"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f1d362ca8fc9c3e3a7484440752472d68a6caa98f1ab81d99b5dfe517cec852"
+checksum = "af487d118eecd09402d70a5d72551860e788df87b464af30e5ea6a38c75c541e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6641,9 +6644,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.87"
+version = "1.0.91"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ce777b7b150d76b9cf60d28b55f5847135a003f7d7350c6be7a773508ce7d45"
+checksum = "877c235533714907a8c2464236f5c4b2a17262ef1bd71f38f35ea592c8da6883"
 dependencies = [
  "itoa",
  "ryu",
@@ -6846,8 +6849,7 @@ dependencies = [
 [[package]]
 name = "simd-json"
 version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e3375b6c3d8c048ba09c8b4b6c3f1d3f35e06b71db07d231c323943a949e1b8"
+source = "git+https://github.com/tabVersion/simd-json.git?branch=main#fe89a0d1d2bb5749acc72a515db39c36d16d267d"
 dependencies = [
  "halfbrown",
  "lexical-core",
@@ -6855,32 +6857,6 @@ dependencies = [
  "serde_json",
  "simdutf8",
  "value-trait",
-]
-
-[[package]]
-name = "simd-json-derive"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e436a97551c1fcaf32577f3e0ce4fe09ca555ad85bd21e1d3bdab4dfc21fea19"
-dependencies = [
- "chrono",
- "itoa",
- "ryu",
- "simd-json",
- "simd-json-derive-int",
- "value-trait",
-]
-
-[[package]]
-name = "simd-json-derive-int"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c399b07ea91f9e228c7910c56b2be63115b0a4256a68f5a321fcce83bbcbba89"
-dependencies = [
- "proc-macro2",
- "quote",
- "simd-json",
- "syn",
 ]
 
 [[package]]
@@ -7054,12 +7030,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
-name = "stats_alloc"
-version = "0.1.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c0e04424e733e69714ca1bbb9204c1a57f09f5493439520f9f68c132ad25eec"
-
-[[package]]
 name = "str_stack"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7167,9 +7137,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "1.0.103"
+version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a864042229133ada95abf3b54fdc62ef5ccabe9515b64717bcb9a1919e59445d"
+checksum = "1f4064b5b16e03ae50984a5a8ed5d4f8803e6bc1fd170a3cda91a1be4b18e3f5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8411,6 +8381,7 @@ dependencies = [
  "madsim-tokio",
  "memchr",
  "minimal-lexical",
+ "multimap",
  "nom 7.1.1",
  "num-bigint",
  "num-integer",
@@ -8437,8 +8408,6 @@ dependencies = [
  "stable_deref_trait",
  "strum",
  "syn",
- "tikv-jemalloc-sys",
- "tikv-jemallocator",
  "time 0.3.15",
  "tokio",
  "tokio-stream",

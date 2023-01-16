@@ -103,6 +103,7 @@ where
                                     .collect_vec(),
                             })
                             .collect_vec(),
+                        env: Some(tf.env.to_protobuf()),
                     },
                 )
             })

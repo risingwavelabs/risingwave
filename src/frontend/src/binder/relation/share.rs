@@ -12,4 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod mem_table;
+use crate::binder::{Relation, ShareId};
+
+/// Share a relation during binding and planning.
+/// It could be used to share a CTE, a source, a view and so on.
+#[derive(Debug, Clone)]
+pub struct BoundShare {
+    pub(crate) share_id: ShareId,
+    pub(crate) input: Relation,
+}

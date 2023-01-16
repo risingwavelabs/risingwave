@@ -31,15 +31,15 @@ use super::create_source::{check_and_add_timestamp_column, resolve_source_schema
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::{check_valid_column_name, ColumnId};
+use crate::catalog::table_catalog::TableVersion;
+use crate::catalog::{check_valid_column_name, ColumnId, USER_COLUMN_ID_OFFSET};
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
-use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
-use crate::{Binder, WithOptions};
+use crate::{Binder, TableCatalog, WithOptions};
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum DmlFlag {
@@ -51,75 +51,143 @@ pub enum DmlFlag {
     AppendOnly,
 }
 
+/// Column ID generator for a new table or a new version of an existing table to alter.
+#[derive(Debug)]
+pub struct ColumnIdGenerator {
+    /// Existing column names and their IDs.
+    ///
+    /// This is used for aligning column IDs between versions (`ALTER`s). If a column already
+    /// exists, its ID is reused. Otherwise, a new ID is generated.
+    ///
+    /// For a new table, this is empty.
+    pub existing: HashMap<String, ColumnId>,
+
+    /// The next column ID to generate, used for new columns that do not exist in `existing`.
+    pub next_column_id: ColumnId,
+
+    /// The version ID of the table to be created or altered.
+    ///
+    /// For a new table, this is 0. For altering an existing table, this is the **next** version ID
+    /// of the `version_id` field in the original table catalog.
+    pub version_id: u64,
+}
+
+impl ColumnIdGenerator {
+    /// Creates a new [`ColumnIdGenerator`] for altering an existing table.
+    pub fn new_alter(original: &TableCatalog) -> Self {
+        let existing = original
+            .columns()
+            .iter()
+            .map(|col| (col.name().to_owned(), col.column_id()))
+            .collect();
+
+        let version = original.version().expect("version field not set");
+
+        Self {
+            existing,
+            next_column_id: version.next_column_id,
+            version_id: version.version_id + 1,
+        }
+    }
+
+    /// Creates a new [`ColumnIdGenerator`] for a new table.
+    pub fn new_initial() -> Self {
+        Self {
+            existing: HashMap::new(),
+            next_column_id: ColumnId::from(USER_COLUMN_ID_OFFSET),
+            version_id: 0,
+        }
+    }
+
+    /// Generates a new [`ColumnId`] for a column with the given name.
+    pub fn generate(&mut self, name: &str) -> ColumnId {
+        if let Some(id) = self.existing.get(name) {
+            *id
+        } else {
+            let id = self.next_column_id;
+            self.next_column_id = self.next_column_id.next();
+            id
+        }
+    }
+
+    /// Consume this generator and return a [`TableVersion`] for the table to be created or altered.
+    pub fn into_version(self) -> TableVersion {
+        TableVersion {
+            version_id: self.version_id,
+            next_column_id: self.next_column_id,
+        }
+    }
+}
+
 /// Binds the column schemas declared in CREATE statement into `ColumnDesc`.
 /// If a column is marked as `primary key`, its `ColumnId` is also returned.
 /// This primary key is not combined with table constraints yet.
-pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<(Vec<ColumnDesc>, Option<ColumnId>)> {
+pub fn bind_sql_columns(
+    columns: Vec<ColumnDef>,
+    col_id_gen: &mut ColumnIdGenerator,
+) -> Result<(Vec<ColumnDesc>, Option<ColumnId>)> {
     // In `ColumnDef`, pk can contain only one column. So we use `Option` rather than `Vec`.
     let mut pk_column_id = None;
+    let mut column_descs = Vec::with_capacity(columns.len());
 
-    let column_descs = {
-        let mut column_descs = Vec::with_capacity(columns.len());
-        for (i, column) in columns.into_iter().enumerate() {
-            let column_id = ColumnId::new(i as i32);
-            // Destruct to make sure all fields are properly handled rather than ignored.
-            // Do NOT use `..` to ignore fields you do not want to deal with.
-            // Reject them with a clear NotImplemented error.
-            let ColumnDef {
-                name,
-                data_type,
-                collation,
-                options,
-            } = column;
-            let data_type = data_type.ok_or(ErrorCode::InvalidInputSyntax(
-                "data type is not specified".into(),
-            ))?;
-            if let Some(collation) = collation {
-                return Err(ErrorCode::NotImplemented(
-                    format!("collation \"{}\"", collation),
-                    None.into(),
-                )
-                .into());
-            }
-            for option_def in options {
-                match option_def.option {
-                    ColumnOption::Unique { is_primary: true } => {
-                        if pk_column_id.is_some() {
-                            return Err(ErrorCode::BindError(
-                                "multiple primary keys are not allowed".into(),
-                            )
-                            .into());
-                        }
-                        pk_column_id = Some(column_id);
-                    }
-                    _ => {
-                        return Err(ErrorCode::NotImplemented(
-                            format!("column constraints \"{}\"", option_def),
-                            None.into(),
+    for column in columns {
+        let column_id = col_id_gen.generate(&column.name.real_value());
+        // Destruct to make sure all fields are properly handled rather than ignored.
+        // Do NOT use `..` to ignore fields you do not want to deal with.
+        // Reject them with a clear NotImplemented error.
+        let ColumnDef {
+            name,
+            data_type,
+            collation,
+            options,
+        } = column;
+        let data_type = data_type.ok_or(ErrorCode::InvalidInputSyntax(
+            "data type is not specified".into(),
+        ))?;
+        if let Some(collation) = collation {
+            return Err(ErrorCode::NotImplemented(
+                format!("collation \"{}\"", collation),
+                None.into(),
+            )
+            .into());
+        }
+        for option_def in options {
+            match option_def.option {
+                ColumnOption::Unique { is_primary: true } => {
+                    if pk_column_id.is_some() {
+                        return Err(ErrorCode::BindError(
+                            "multiple primary keys are not allowed".into(),
                         )
-                        .into())
+                        .into());
                     }
+                    pk_column_id = Some(column_id);
+                }
+                _ => {
+                    return Err(ErrorCode::NotImplemented(
+                        format!("column constraints \"{}\"", option_def),
+                        None.into(),
+                    )
+                    .into())
                 }
             }
-            check_valid_column_name(&name.real_value())?;
-            let field_descs = if let AstDataType::Struct(fields) = &data_type {
-                fields
-                    .iter()
-                    .map(bind_struct_field)
-                    .collect::<Result<Vec<_>>>()?
-            } else {
-                vec![]
-            };
-            column_descs.push(ColumnDesc {
-                data_type: bind_data_type(&data_type)?,
-                column_id,
-                name: name.real_value(),
-                field_descs,
-                type_name: "".to_string(),
-            });
         }
-        column_descs
-    };
+        check_valid_column_name(&name.real_value())?;
+        let field_descs = if let AstDataType::Struct(fields) = &data_type {
+            fields
+                .iter()
+                .map(bind_struct_field)
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            vec![]
+        };
+        column_descs.push(ColumnDesc {
+            data_type: bind_data_type(&data_type)?,
+            column_id,
+            name: name.real_value(),
+            field_descs,
+            type_name: "".to_string(),
+        });
+    }
 
     Ok((column_descs, pk_column_id))
 }
@@ -200,11 +268,11 @@ pub fn bind_sql_table_constraints(
 
     // Add `_row_id` column if `pk_column_ids` is empty.
     let row_id_index = pk_column_ids.is_empty().then(|| {
-        let row_id_index = columns_catalog.len();
-        let row_id_column_id = ColumnId::new(row_id_index as i32);
-        columns_catalog.push(ColumnCatalog::row_id_column(row_id_column_id));
-        pk_column_ids.push(row_id_column_id);
-        row_id_index
+        let column = ColumnCatalog::row_id_column();
+        let index = columns_catalog.len();
+        pk_column_ids = vec![column.column_id()];
+        columns_catalog.push(column);
+        index
     });
 
     if let Some(col) = columns_catalog.iter().map(|c| c.name()).duplicates().next() {
@@ -219,35 +287,34 @@ pub fn bind_sql_table_constraints(
 /// `gen_create_table_plan_with_source` generates the plan for creating a table with an external
 /// stream source.
 pub(crate) async fn gen_create_table_plan_with_source(
-    handler_args: HandlerArgs,
+    context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     source_schema: SourceSchema,
+    mut col_id_gen: ColumnIdGenerator,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
-    let (mut column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
-    let properties = handler_args.with_options.inner().clone();
+    let (mut column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
+    let properties = context.with_options().inner();
 
-    check_and_add_timestamp_column(&properties, &mut column_descs, true);
+    check_and_add_timestamp_column(properties, &mut column_descs, true, &mut col_id_gen);
 
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
 
-    let session = handler_args.session.clone();
-    let context = OptimizerContext::from_handler_args(handler_args);
     let definition = context.normalized_sql().to_owned();
 
     let source_info = resolve_source_schema(
         source_schema,
         &mut columns,
-        &properties,
+        properties,
         row_id_index,
         &pk_column_ids,
+        true,
     )
     .await?;
 
     gen_table_plan_inner(
-        &session,
         context.into(),
         table_name,
         columns,
@@ -255,58 +322,59 @@ pub(crate) async fn gen_create_table_plan_with_source(
         row_id_index,
         Some(source_info),
         definition,
+        Some(col_id_gen.into_version()),
     )
 }
 
 /// `gen_create_table_plan` generates the plan for creating a table without an external stream
 /// source.
 pub(crate) fn gen_create_table_plan(
-    session: &SessionImpl,
-    context: OptimizerContextRef,
+    context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
+    mut col_id_gen: ColumnIdGenerator,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let definition = context.normalized_sql().to_owned();
-    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
+    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
     gen_create_table_plan_without_bind(
-        session,
         context,
         table_name,
         column_descs,
         pk_column_id_from_columns,
         constraints,
         definition,
+        Some(col_id_gen.into_version()),
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_create_table_plan_without_bind(
-    session: &SessionImpl,
-    context: OptimizerContextRef,
+    context: OptimizerContext,
     table_name: ObjectName,
     column_descs: Vec<ColumnDesc>,
     pk_column_id_from_columns: Option<ColumnId>,
     constraints: Vec<TableConstraint>,
     definition: String,
+    version: Option<TableVersion>,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
 
     gen_table_plan_inner(
-        session,
-        context,
+        context.into(),
         table_name,
         columns,
         pk_column_ids,
         row_id_index,
         None,
         definition,
+        version,
     )
 }
 
 #[allow(clippy::too_many_arguments)]
 fn gen_table_plan_inner(
-    session: &SessionImpl,
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
@@ -314,7 +382,10 @@ fn gen_table_plan_inner(
     row_id_index: Option<usize>,
     source_info: Option<StreamSourceInfo>,
     definition: String,
+    version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
+                                    * TABLE` for `CREATE TABLE AS`. */
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
+    let session = context.session_ctx();
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
@@ -366,11 +437,11 @@ fn gen_table_plan_inner(
         out_names,
     );
 
-    // The materialize executor need not handle primary key conflict if the primary key is row id.
-    let handle_pk_conflict = row_id_index.is_none();
-    let dml_flag = match context.with_options().append_only() {
-        true => DmlFlag::AppendOnly,
-        false => DmlFlag::All,
+    // Handle pk conflict in materialize executor only when the table is not append-only.
+    let (handle_pk_conflict, dml_flag) = if context.with_options().append_only() {
+        (false, DmlFlag::AppendOnly)
+    } else {
+        (true, DmlFlag::All)
     };
 
     let materialize = plan_root.gen_table_plan(
@@ -380,6 +451,7 @@ fn gen_table_plan_inner(
         handle_pk_conflict,
         row_id_index,
         dml_flag,
+        version,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -447,6 +519,7 @@ pub(crate) fn gen_materialize_plan(
             handle_pk_conflict,
             row_id_index,
             DmlFlag::Disable,
+            None,
         )?
     };
     let mut table = materialize
@@ -478,33 +551,32 @@ pub async fn handle_create_table(
     }
 
     let (graph, source, table) = {
-        let (plan, source, table) =
-            match check_create_table_with_source(&handler_args.with_options, source_schema)? {
-                Some(source_schema) => {
-                    gen_create_table_plan_with_source(
-                        handler_args,
-                        table_name.clone(),
-                        columns,
-                        constraints,
-                        source_schema,
-                    )
-                    .await?
-                }
-                None => {
-                    let context = OptimizerContext::from_handler_args(handler_args);
-                    gen_create_table_plan(
-                        &session,
-                        context.into(),
-                        table_name.clone(),
-                        columns,
-                        constraints,
-                    )?
-                }
-            };
+        let context = OptimizerContext::from_handler_args(handler_args);
+        let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
+        let col_id_gen = ColumnIdGenerator::new_initial();
 
-        let graph = build_graph(plan);
+        let (plan, source, table) = match source_schema {
+            Some(source_schema) => {
+                gen_create_table_plan_with_source(
+                    context,
+                    table_name.clone(),
+                    columns,
+                    constraints,
+                    source_schema,
+                    col_id_gen,
+                )
+                .await?
+            }
+            None => gen_create_table_plan(
+                context,
+                table_name.clone(),
+                columns,
+                constraints,
+                col_id_gen,
+            )?,
+        };
 
-        (graph, source, table)
+        (build_graph(plan), source, table)
     };
 
     tracing::trace!(
@@ -538,13 +610,47 @@ pub fn check_create_table_with_source(
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::catalog::{Field, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
     use super::*;
     use crate::catalog::root_catalog::SchemaPath;
     use crate::catalog::row_id_column_name;
     use crate::test_utils::LocalFrontend;
+
+    #[test]
+    fn test_col_id_gen() {
+        let mut gen = ColumnIdGenerator::new_initial();
+        assert_eq!(gen.generate("v1"), ColumnId::new(1));
+        assert_eq!(gen.generate("v2"), ColumnId::new(2));
+
+        let mut gen = ColumnIdGenerator::new_alter(&TableCatalog {
+            columns: vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field::with_name(DataType::Float32, "f32"),
+                        1,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field::with_name(DataType::Float64, "f64"),
+                        2,
+                    ),
+                    is_hidden: false,
+                },
+            ],
+            version: Some(TableVersion::new_initial_for_test(ColumnId::new(2))),
+            ..Default::default()
+        });
+
+        assert_eq!(gen.generate("v1"), ColumnId::new(3));
+        assert_eq!(gen.generate("v2"), ColumnId::new(4));
+        assert_eq!(gen.generate("f32"), ColumnId::new(1));
+        assert_eq!(gen.generate("f64"), ColumnId::new(2));
+        assert_eq!(gen.generate("v3"), ColumnId::new(5));
+    }
 
     #[tokio::test]
     async fn test_create_table_handler() {
@@ -583,10 +689,12 @@ mod tests {
 
     #[test]
     fn test_bind_primary_key() {
+        // Note: Column ID 0 is reserved for row ID column.
+
         for (sql, expected) in [
-            ("create table t (v1 int, v2 int)", Ok(&[2] as &[_])),
-            ("create table t (v1 int primary key, v2 int)", Ok(&[0])),
-            ("create table t (v1 int, v2 int primary key)", Ok(&[1])),
+            ("create table t (v1 int, v2 int)", Ok(&[0] as &[_])),
+            ("create table t (v1 int primary key, v2 int)", Ok(&[1])),
+            ("create table t (v1 int, v2 int primary key)", Ok(&[2])),
             (
                 "create table t (v1 int primary key, v2 int primary key)",
                 Err("multiple primary keys are not allowed"),
@@ -597,15 +705,15 @@ mod tests {
             ),
             (
                 "create table t (v1 int, v2 int, primary key (v1))",
-                Ok(&[0]),
-            ),
-            (
-                "create table t (v1 int, primary key (v2), v2 int)",
                 Ok(&[1]),
             ),
             (
+                "create table t (v1 int, primary key (v2), v2 int)",
+                Ok(&[2]),
+            ),
+            (
                 "create table t (primary key (v2, v1), v1 int, v2 int)",
-                Ok(&[1, 0]),
+                Ok(&[2, 1]),
             ),
             (
                 "create table t (v1 int, primary key (v1), v2 int, primary key (v1))",
@@ -627,7 +735,8 @@ mod tests {
                     ..
                 } = ast.remove(0) else { panic!("test case should be create table") };
             let actual: Result<_> = (|| {
-                let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns)?;
+                let (column_descs, pk_column_id_from_columns) =
+                    bind_sql_columns(columns, &mut ColumnIdGenerator::new_initial())?;
                 let (_, pk_column_ids, _) = bind_sql_table_constraints(
                     column_descs,
                     pk_column_id_from_columns,
