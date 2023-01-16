@@ -18,7 +18,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
 #![feature(result_option_inspect)]
-#![feature(allocator_api)]
+#![feature(lint_reasons)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
