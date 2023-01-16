@@ -160,10 +160,15 @@ impl OptimizerContext {
         session_timezone.rewrite_expr(expr)
     }
 
+    /// Appends any information that the optimizer needs to alert the user about to the PG NOTICE
     pub fn append_notice(&self, notice: &mut String) {
         if let Some(warning) = self.session_timezone.borrow().warning() {
             notice.push_str(&warning);
         }
+    }
+
+    pub fn get_session_timezone(&self) -> String {
+        self.session_timezone.borrow().timezone()
     }
 }
 

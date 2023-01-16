@@ -70,7 +70,7 @@ impl<'a> Bloom<'a> {
     /// Gets Bloom filter bits per key from entries count and FPR
     pub fn bloom_bits_per_key(entries: usize, false_positive_rate: f64) -> usize {
         let size = -1.0 * (entries as f64) * false_positive_rate.ln() / f64::consts::LN_2.powi(2);
-        let locs = (f64::consts::LN_2 * size / (entries as f64)).ceil();
+        let locs = (size / (entries as f64)).ceil();
         locs as usize
     }
 
@@ -128,13 +128,16 @@ impl<'a> Bloom<'a> {
 
 #[cfg(test)]
 mod tests {
+    use bytes::Bytes;
+    use xxhash_rust::xxh32;
+
     use super::*;
 
     #[test]
     fn test_small_bloom_filter() {
         let hash: Vec<u32> = vec![b"hello".to_vec(), b"world".to_vec()]
             .into_iter()
-            .map(|x| farmhash::fingerprint32(&x))
+            .map(|x| xxh32::xxh32(&x, 0))
             .collect();
         let buf = Bloom::build_from_key_hashes(&hash, 10);
 
@@ -145,7 +148,7 @@ mod tests {
             b"fool".to_vec(),
         ]
         .into_iter()
-        .map(|x| farmhash::fingerprint32(&x))
+        .map(|x| xxh32::xxh32(&x, 0))
         .collect();
 
         let f = Bloom::new(&buf);
@@ -155,5 +158,45 @@ mod tests {
         assert!(!f.surely_not_have_hash(check_hash[1]));
         assert!(f.surely_not_have_hash(check_hash[2]));
         assert!(f.surely_not_have_hash(check_hash[3]));
+    }
+
+    fn false_positive_rate_case(
+        preset_key_count: usize,
+        test_key_count: usize,
+        expected_false_positive_rate: f64,
+    ) {
+        let mut key_list = vec![];
+
+        for i in 0..preset_key_count {
+            let k = Bytes::from(format!("{:032}", i));
+            let h = xxh32::xxh32(&k, 0);
+            key_list.push(h);
+        }
+
+        let bits_per_key = Bloom::bloom_bits_per_key(key_list.len(), expected_false_positive_rate);
+        let vec = Bloom::build_from_key_hashes(&key_list, bits_per_key);
+        let filter = Bloom::new(&vec);
+
+        let mut true_count = 0;
+        for i in preset_key_count..preset_key_count + test_key_count {
+            let k = Bytes::from(format!("{:032}", i));
+            let h = xxh32::xxh32(&k, 0);
+            if filter.surely_not_have_hash(h) {
+                true_count += 1;
+            }
+        }
+
+        let false_positive_rate = 1_f64 - true_count as f64 / test_key_count as f64;
+        assert!(false_positive_rate < 3_f64 * expected_false_positive_rate);
+    }
+
+    #[test]
+    #[ignore]
+    fn test_false_positive_rate() {
+        const KEY_COUNT: usize = 1300000;
+        const TEST_KEY_COUNT: usize = 100000;
+        false_positive_rate_case(KEY_COUNT, TEST_KEY_COUNT, 0.1);
+        false_positive_rate_case(KEY_COUNT, TEST_KEY_COUNT, 0.01);
+        false_positive_rate_case(KEY_COUNT, TEST_KEY_COUNT, 0.001);
     }
 }
