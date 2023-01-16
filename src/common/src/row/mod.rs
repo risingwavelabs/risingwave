@@ -135,29 +135,6 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     fn eq(this: &Self, other: impl Row) -> bool {
         this.iter().eq(other.iter())
     }
-
-    /// Lexicographically compares the datums of this row with those of another with the same
-    /// length.
-    ///
-    /// # Panics
-    /// Panics if the lengths of the two rows are not equal. For this case, use
-    /// [`Row::cmp_ignore_len`] instead.
-    #[inline]
-    fn cmp(this: &Self, other: impl Row) -> Ordering {
-        assert_eq!(
-            this.len(),
-            other.len(),
-            "cannot compare rows of different lengths, use `cmp_ignore_len` instead"
-        );
-        Self::cmp_ignore_len(this, other)
-    }
-
-    /// Lexicographically compares the datums of this row with those of another, without checking
-    /// the equality of the lengths.
-    #[inline]
-    fn cmp_ignore_len(this: &Self, other: impl Row) -> Ordering {
-        this.iter().cmp(other.iter())
-    }
 }
 
 const fn assert_row<R: Row>(r: R) -> R {
@@ -239,9 +216,9 @@ macro_rules! deref_forward_row {
             Row::eq(&(**this), other)
         }
 
-        fn cmp(this: &Self, other: impl Row) -> Ordering {
-            Row::cmp(&(**this), other)
-        }
+        // fn cmp(this: &Self, other: impl Row) -> Ordering {
+        //     Row::cmp(&(**this), other)
+        // }
     };
 }
 
