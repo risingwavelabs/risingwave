@@ -28,6 +28,7 @@ mod input_ref;
 mod literal;
 mod subquery;
 mod table_function;
+mod user_defined_function;
 mod window_function;
 
 mod order_by_expr;
@@ -36,28 +37,29 @@ pub use order_by_expr::{OrderBy, OrderByExpr};
 mod expr_mutator;
 mod expr_rewriter;
 mod expr_visitor;
+mod session_timezone;
 mod type_inference;
 mod utils;
 
 pub use agg_call::AggCall;
 pub use correlated_input_ref::{CorrelatedId, CorrelatedInputRef, Depth};
-pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
-pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
-pub use literal::Literal;
-pub use subquery::{Subquery, SubqueryKind};
-pub use table_function::{TableFunction, TableFunctionType};
-pub use window_function::{WindowFunction, WindowFunctionType};
-
-pub type ExprType = risingwave_pb::expr::expr_node::Type;
-
 pub use expr_mutator::ExprMutator;
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
+pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
+pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
+pub use literal::Literal;
+pub use risingwave_pb::expr::expr_node::Type as ExprType;
+pub use session_timezone::SessionTimezone;
+pub use subquery::{Subquery, SubqueryKind};
+pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{
-    agg_func_sigs, align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_type,
-    least_restrictive, AggFuncSig, CastContext, CastSig, FuncSign,
+    agg_func_sigs, align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_some_all,
+    infer_type, least_restrictive, AggFuncSig, CastContext, CastSig, FuncSign,
 };
+pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
+pub use window_function::{WindowFunction, WindowFunctionType};
 
 /// the trait of bound expressions
 pub trait Expr: Into<ExprImpl> {
@@ -92,7 +94,8 @@ impl_expr_impl!(
     AggCall,
     Subquery,
     TableFunction,
-    WindowFunction
+    WindowFunction,
+    UserDefinedFunction
 );
 
 impl ExprImpl {
@@ -187,6 +190,23 @@ impl ExprImpl {
         FunctionCall::new_cast(self, target, CastContext::Explicit)
     }
 
+    /// Shorthand to enforce implicit cast to boolean
+    pub fn enforce_bool_clause(self, clause: &str) -> Result<ExprImpl> {
+        if self.is_unknown() {
+            let inner = self.cast_implicit(DataType::Boolean)?;
+            return Ok(inner);
+        }
+        let return_type = self.return_type();
+        if return_type != DataType::Boolean {
+            bail!(
+                "argument of {} must be boolean, not type {:?}",
+                clause,
+                return_type
+            )
+        }
+        Ok(self)
+    }
+
     /// Create "cast" expr to string (`varchar`) type. This is different from a real cast, as
     /// boolean is converted to a single char rather than full word.
     ///
@@ -218,7 +238,7 @@ impl ExprImpl {
     /// Evaluate a constant expression.
     pub fn eval_row_const(&self) -> Result<Datum> {
         assert!(self.is_const());
-        self.eval_row(OwnedRow::empty())
+        self.eval_row(&OwnedRow::empty())
     }
 }
 
@@ -664,6 +684,7 @@ impl Expr for ExprImpl {
             ExprImpl::CorrelatedInputRef(expr) => expr.return_type(),
             ExprImpl::TableFunction(expr) => expr.return_type(),
             ExprImpl::WindowFunction(expr) => expr.return_type(),
+            ExprImpl::UserDefinedFunction(expr) => expr.return_type(),
         }
     }
 
@@ -681,6 +702,7 @@ impl Expr for ExprImpl {
             ExprImpl::WindowFunction(_e) => {
                 unreachable!("Window function should not be converted to ExprNode")
             }
+            ExprImpl::UserDefinedFunction(e) => e.to_expr_proto(),
         }
     }
 }
@@ -712,6 +734,9 @@ impl std::fmt::Debug for ExprImpl {
                 }
                 Self::TableFunction(arg0) => f.debug_tuple("TableFunction").field(arg0).finish(),
                 Self::WindowFunction(arg0) => f.debug_tuple("WindowFunction").field(arg0).finish(),
+                Self::UserDefinedFunction(arg0) => {
+                    f.debug_tuple("UserDefinedFunction").field(arg0).finish()
+                }
             };
         }
         match self {
@@ -723,6 +748,7 @@ impl std::fmt::Debug for ExprImpl {
             Self::CorrelatedInputRef(x) => write!(f, "{:?}", x),
             Self::TableFunction(x) => write!(f, "{:?}", x),
             Self::WindowFunction(x) => write!(f, "{:?}", x),
+            Self::UserDefinedFunction(x) => write!(f, "{:?}", x),
         }
     }
 }
@@ -764,6 +790,7 @@ impl std::fmt::Debug for ExprDisplay<'_> {
                 // TODO: WindowFunctionCallVerboseDisplay
                 write!(f, "{:?}", x)
             }
+            ExprImpl::UserDefinedFunction(x) => write!(f, "{:?}", x),
         }
     }
 }
@@ -787,6 +814,7 @@ macro_rules! assert_eq_input_ref {
 
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
+use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
 

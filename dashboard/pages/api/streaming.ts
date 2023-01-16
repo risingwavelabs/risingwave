@@ -15,6 +15,7 @@
  *
  */
 
+import _ from "lodash"
 import sortBy from "lodash/sortBy"
 import { Sink, Source, Table } from "../../proto/gen/catalog"
 import { ActorLocation, TableFragments } from "../../proto/gen/meta"
@@ -37,25 +38,69 @@ export interface Relation {
   id: number
   name: string
   owner: number
-  dependentRelations: number[]
   columns: ColumnCatalog[]
+  properties: { [key: string]: string }
 }
 
-export async function getRelations(): Promise<Relation[]> {
-  const materialized_views: Relation[] = await getMaterializedViews()
-  const sinks: Relation[] = await getSinks()
-  let relations = materialized_views.concat(sinks)
+export interface StreamingJob extends Relation {
+  dependentRelations: number[]
+}
+
+export function relationIsStreamingJob(x: Relation): x is StreamingJob {
+  return (x as StreamingJob).dependentRelations !== undefined
+}
+
+export async function getStreamingJobs() {
+  let jobs = _.concat<StreamingJob>(
+    await getMaterializedViews(),
+    await getTables(),
+    await getIndexes(),
+    await getSinks()
+  )
+  jobs = sortBy(jobs, (x) => x.id)
+  return jobs
+}
+
+export async function getRelations() {
+  let relations = _.concat<Relation>(
+    await getMaterializedViews(),
+    await getTables(),
+    await getIndexes(),
+    await getSinks(),
+    await getDataSources()
+  )
   relations = sortBy(relations, (x) => x.id)
   return relations
 }
 
-export async function getMaterializedViews(withInternal: boolean = false) {
-  let mvList: Table[] = (await api.get("/api/materialized_views")).map(
-    Table.fromJSON
-  )
-  mvList = mvList.filter((mv) => withInternal || !mv.name.startsWith("__"))
-  mvList = sortBy(mvList, (x) => x.id)
-  return mvList
+async function getTableCatalogsInner(
+  path: "tables" | "materialized_views" | "indexes" | "internal_tables"
+) {
+  let list: Table[] = (await api.get(`/api/${path}`)).map(Table.fromJSON)
+  list = sortBy(list, (x) => x.id)
+  return list
+}
+
+export async function getMaterializedViews() {
+  return await getTableCatalogsInner("materialized_views")
+}
+
+export async function getTables() {
+  return await getTableCatalogsInner("tables")
+}
+
+export async function getIndexes() {
+  return await getTableCatalogsInner("indexes")
+}
+
+export async function getInternalTables() {
+  return await getTableCatalogsInner("internal_tables")
+}
+
+export async function getSinks() {
+  let sinkList: Sink[] = (await api.get("/api/sinks")).map(Sink.fromJSON)
+  sinkList = sortBy(sinkList, (x) => x.id)
+  return sinkList
 }
 
 export async function getDataSources() {
@@ -64,10 +109,4 @@ export async function getDataSources() {
   )
   sourceList = sortBy(sourceList, (x) => x.id)
   return sourceList
-}
-
-export async function getSinks() {
-  let sinkList: Sink[] = (await api.get("/api/sinks")).map(Sink.fromJSON)
-  sinkList = sortBy(sinkList, (x) => x.id)
-  return sinkList
 }

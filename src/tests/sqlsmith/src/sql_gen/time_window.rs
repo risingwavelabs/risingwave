@@ -15,9 +15,9 @@
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::DataTypeName;
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    DataType, FunctionArg, ObjectName, TableAlias, TableFactor, TableWithJoins,
+    DataType as AstDataType, FunctionArg, ObjectName, TableAlias, TableFactor, TableWithJoins,
 };
 
 use crate::sql_gen::utils::{create_args, create_table_alias};
@@ -43,9 +43,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let alias = create_table_alias(&table_name);
 
         let name = Expr::Identifier(source_table_name.as_str().into());
-        // TODO: Currently only literal size expr supported.
-        // Tracked in: <https://github.com/risingwavelabs/risingwave/issues/3896>
-        let size = self.gen_simple_scalar(DataTypeName::Interval);
+        let size = self.gen_size(1);
         let time_col = time_cols.choose(&mut self.rng).unwrap();
         let time_col = Expr::Identifier(time_col.name.as_str().into());
         let args = create_args(vec![name, time_col, size]);
@@ -69,14 +67,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let time_col = time_cols.choose(&mut self.rng).unwrap();
 
         let name = Expr::Identifier(source_table_name.as_str().into());
-        // TODO: Currently only literal slide/size expr supported.
-        // Tracked in: <https://github.com/risingwavelabs/risingwave/issues/3896>.
         // We fix slide to "1" here, as slide needs to be divisible by size.
-        let slide = Expr::TypedString {
-            data_type: DataType::Interval,
-            value: "1".to_string(),
-        };
-        let size = self.gen_simple_scalar(DataTypeName::Interval);
+        let (slide_secs, slide) = self.gen_slide();
+        let size = self.gen_size(slide_secs);
         let time_col = Expr::Identifier(time_col.name.as_str().into());
         let args = create_args(vec![name, time_col, slide, size]);
 
@@ -85,6 +78,36 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let table = Table::new(table_name, schema.clone());
 
         (relation, vec![table])
+    }
+
+    /// Both window slide, window size must be positive.
+    fn gen_secs(&mut self) -> u64 {
+        let rand_secs = self.rng.gen_range(1..1000000) as u64;
+        let minute = 60;
+        let hour = 60 * minute;
+        let day = 24 * hour;
+        let week = 7 * day;
+        let choices = [1, minute, hour, day, week, rand_secs];
+        let secs = choices.choose(&mut self.rng).unwrap();
+        *secs
+    }
+
+    fn secs_to_interval_expr(i: u64) -> Expr {
+        Expr::TypedString {
+            data_type: AstDataType::Interval,
+            value: i.to_string(),
+        }
+    }
+
+    fn gen_slide(&mut self) -> (u64, Expr) {
+        let secs = self.gen_secs();
+        let expr = Self::secs_to_interval_expr(secs);
+        (secs, expr)
+    }
+
+    fn gen_size(&mut self, denominator: u64) -> Expr {
+        let secs = self.gen_secs() * denominator;
+        Self::secs_to_interval_expr(secs)
     }
 }
 
@@ -102,7 +125,7 @@ fn create_tvf(name: &str, alias: TableAlias, args: Vec<FunctionArg>) -> TableWit
 }
 
 fn is_timestamp_col(c: &Column) -> bool {
-    c.data_type == DataTypeName::Timestamp || c.data_type == DataTypeName::Timestamptz
+    c.data_type == DataType::Timestamp || c.data_type == DataType::Timestamptz
 }
 
 fn get_table_name_and_cols_with_timestamp(table: Table) -> (String, Vec<Column>, Vec<Column>) {

@@ -76,6 +76,9 @@ pub enum ErrorCode {
     ConnectorError(BoxedError),
     #[error("Feature is not yet implemented: {0}\n{1}")]
     NotImplemented(String, TrackingIssue),
+    // Tips: Use this only if it's intended to reject the query
+    #[error("Not supported: {0}\nHINT: {1}")]
+    NotSupported(String, String),
     #[error(transparent)]
     IoError(IoError),
     #[error("Storage error: {0}")]

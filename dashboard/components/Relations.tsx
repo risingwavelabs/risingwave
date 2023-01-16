@@ -18,6 +18,13 @@
 import {
   Box,
   Button,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
   Table,
   TableContainer,
   Tbody,
@@ -25,15 +32,20 @@ import {
   Th,
   Thead,
   Tr,
+  useDisclosure,
   useToast,
 } from "@chakra-ui/react"
+import loadable from "@loadable/component"
 import Head from "next/head"
 
 import Link from "next/link"
 import { Fragment, useEffect, useState } from "react"
 import Title from "../components/Title"
 import extractColumnInfo from "../lib/extractInfo"
-import { Relation } from "../pages/api/streaming"
+import { Relation, StreamingJob } from "../pages/api/streaming"
+import { Table as RwTable } from "../proto/gen/catalog"
+
+const ReactJson = loadable(() => import("react-json-view"))
 
 export type Column<R> = {
   name: string
@@ -41,10 +53,63 @@ export type Column<R> = {
   content: (r: R) => React.ReactNode
 }
 
+export const dependentsColumn: Column<Relation> = {
+  name: "Depends",
+  width: 1,
+  content: (r) => (
+    <Link href={`/streaming_graph/?id=${r.id}`}>
+      <Button
+        size="sm"
+        aria-label="view dependents"
+        colorScheme="teal"
+        variant="link"
+      >
+        D
+      </Button>
+    </Link>
+  ),
+}
+
+export const fragmentsColumn: Column<StreamingJob> = {
+  name: "Fragments",
+  width: 1,
+  content: (r) => (
+    <Link href={`/streaming_plan/?id=${r.id}`}>
+      <Button
+        size="sm"
+        aria-label="view fragments"
+        colorScheme="teal"
+        variant="link"
+      >
+        F
+      </Button>
+    </Link>
+  ),
+}
+
+export const primaryKeyColumn: Column<RwTable> = {
+  name: "Primary Key",
+  width: 1,
+  content: (r) =>
+    r.pk
+      .map((order) => order.index)
+      .map((i) => r.columns[i])
+      .map((col) => extractColumnInfo(col))
+      .join(", "),
+}
+
+export const connectorColumn: Column<Relation> = {
+  name: "Connector",
+  width: 3,
+  content: (r) => r.properties.connector ?? "unknown",
+}
+
+export const streamingJobColumns = [dependentsColumn, fragmentsColumn]
+
 export function Relations<R extends Relation>(
   title: string,
   getRelations: () => Promise<R[]>,
-  extraColumns: Column<R>[] = []
+  extraColumns: Column<R>[]
 ) {
   const toast = useToast()
   const [relationList, setRelationList] = useState<R[]>([])
@@ -68,7 +133,44 @@ export function Relations<R extends Relation>(
     return () => {}
   }, [toast, getRelations])
 
-  const retVal = (
+  const { isOpen, onOpen, onClose } = useDisclosure()
+  const [currentRelation, setCurrentRelation] = useState<R>()
+  const openRelationCatalog = (relation: R) => {
+    if (relation) {
+      setCurrentRelation(relation)
+      onOpen()
+    }
+  }
+
+  const catalogModal = (
+    <Modal isOpen={isOpen} onClose={onClose} size="3xl">
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader>
+          Catalog of {currentRelation?.id} - {currentRelation?.name}
+        </ModalHeader>
+        <ModalCloseButton />
+        <ModalBody>
+          {isOpen && currentRelation && (
+            <ReactJson
+              src={currentRelation}
+              collapsed={1}
+              name={null}
+              displayDataTypes={false}
+            />
+          )}
+        </ModalBody>
+
+        <ModalFooter>
+          <Button colorScheme="blue" mr={3} onClick={onClose}>
+            Close
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
+  )
+
+  const table = (
     <Box p={3}>
       <Title>{title}</Title>
       <TableContainer>
@@ -83,55 +185,28 @@ export function Relations<R extends Relation>(
                   {c.name}
                 </Th>
               ))}
-              <Th width={1}>Metrics</Th>
-              <Th width={1}>Depends</Th>
-              <Th width={1}>Fragments</Th>
               <Th>Visible Columns</Th>
             </Tr>
           </Thead>
           <Tbody>
             {relationList.map((r) => (
               <Tr key={r.id}>
-                <Td>{r.id}</Td>
+                <Td>
+                  <Button
+                    size="sm"
+                    aria-label="view catalog"
+                    colorScheme="teal"
+                    variant="link"
+                    onClick={() => openRelationCatalog(r)}
+                  >
+                    {r.id}
+                  </Button>
+                </Td>
                 <Td>{r.name}</Td>
                 <Td>{r.owner}</Td>
                 {extraColumns.map((c) => (
                   <Td key={c.name}>{c.content(r)}</Td>
                 ))}
-                <Td>
-                  <Button
-                    size="sm"
-                    aria-label="view metrics"
-                    colorScheme="teal"
-                    variant="link"
-                  >
-                    M
-                  </Button>
-                </Td>
-                <Td>
-                  <Link href={`/streaming_graph/?id=${r.id}`}>
-                    <Button
-                      size="sm"
-                      aria-label="view metrics"
-                      colorScheme="teal"
-                      variant="link"
-                    >
-                      D
-                    </Button>
-                  </Link>
-                </Td>
-                <Td>
-                  <Link href={`/streaming_plan/?id=${r.id}`}>
-                    <Button
-                      size="sm"
-                      aria-label="view metrics"
-                      colorScheme="teal"
-                      variant="link"
-                    >
-                      F
-                    </Button>
-                  </Link>
-                </Td>
                 <Td overflowWrap="normal">
                   {r.columns
                     .filter((col) => !col.isHidden)
@@ -151,7 +226,8 @@ export function Relations<R extends Relation>(
       <Head>
         <title>{title}</title>
       </Head>
-      {retVal}
+      {catalogModal}
+      {table}
     </Fragment>
   )
 }

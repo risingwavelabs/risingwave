@@ -49,6 +49,7 @@ pub struct StreamingMetrics {
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub join_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub join_actor_input_waiting_duration_ns: GenericCounterVec<AtomicU64>,
+    pub join_match_duration_ns: GenericCounterVec<AtomicU64>,
     pub join_barrier_align_duration: HistogramVec,
     pub join_cached_entries: GenericGaugeVec<AtomicI64>,
     pub join_cached_rows: GenericGaugeVec<AtomicI64>,
@@ -58,6 +59,8 @@ pub struct StreamingMetrics {
     pub agg_lookup_miss_count: GenericCounterVec<AtomicU64>,
     pub agg_total_lookup_count: GenericCounterVec<AtomicU64>,
     pub agg_cached_keys: GenericGaugeVec<AtomicI64>,
+    pub agg_chunk_lookup_miss_count: GenericCounterVec<AtomicU64>,
+    pub agg_chunk_total_lookup_count: GenericCounterVec<AtomicU64>,
 
     /// The duration from receipt of barrier to all actors collection.
     /// And the max of all node `barrier_inflight_latency` is the latency for a barrier
@@ -271,6 +274,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let join_match_duration_ns = register_int_counter_vec_with_registry!(
+            "stream_join_match_duration_ns",
+            "Matching duration for each side",
+            &["actor_id", "side"],
+            registry
+        )
+        .unwrap();
+
         let opts = histogram_opts!(
             "stream_join_barrier_align_duration",
             "Duration of join align barrier",
@@ -323,6 +334,22 @@ impl StreamingMetrics {
         let agg_cached_keys = register_int_gauge_vec_with_registry!(
             "stream_agg_cached_keys",
             "Number of cached keys in streaming aggregation operators",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_chunk_lookup_miss_count = register_int_counter_vec_with_registry!(
+            "stream_agg_chunk_lookup_miss_count",
+            "Aggregation executor chunk-level lookup miss duration",
+            &["actor_id"],
+            registry
+        )
+        .unwrap();
+
+        let agg_chunk_total_lookup_count = register_int_counter_vec_with_registry!(
+            "stream_agg_chunk_lookup_total_count",
+            "Aggregation executor chunk-level lookup total operation",
             &["actor_id"],
             registry
         )
@@ -410,6 +437,7 @@ impl StreamingMetrics {
             join_lookup_miss_count,
             join_total_lookup_count,
             join_actor_input_waiting_duration_ns,
+            join_match_duration_ns,
             join_barrier_align_duration,
             join_cached_entries,
             join_cached_rows,
@@ -417,6 +445,8 @@ impl StreamingMetrics {
             agg_lookup_miss_count,
             agg_total_lookup_count,
             agg_cached_keys,
+            agg_chunk_lookup_miss_count,
+            agg_chunk_total_lookup_count,
             barrier_inflight_latency,
             barrier_sync_latency,
             sink_commit_duration,

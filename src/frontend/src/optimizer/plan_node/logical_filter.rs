@@ -27,7 +27,7 @@ use super::{
     ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{assert_input_ref, ExprImpl, FunctionCall, InputRef};
+use crate::expr::{assert_input_ref, ExprImpl, InputRef};
 use crate::optimizer::plan_node::stream_now::StreamNow;
 use crate::optimizer::plan_node::{
     BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
@@ -297,7 +297,7 @@ impl ToStream for LogicalFilter {
                         Type::Now => PlanRef::from(StreamNow::new(self.ctx())),
                         Type::Add | Type::Subtract => {
                             let mut now_delta_expr = function_call.clone();
-                            now_delta_expr.inputs_mut()[0] = ExprImpl::from(InputRef::new(0, DataType::Timestamp));
+                            now_delta_expr.inputs_mut()[0] = ExprImpl::from(InputRef::new(0, DataType::Timestamptz));
                             // We cannot call `LogicalProject::to_stream()` here, because its input is already a stream.
                             StreamProject::new(LogicalProject::new(StreamNow::new(self.ctx()).into(), vec![ExprImpl::from(now_delta_expr)])).into()
                         },
@@ -307,21 +307,7 @@ impl ToStream for LogicalFilter {
                 });
                 cur_streaming = StreamDynamicFilter::new(
                     left_index,
-                    Condition {
-                        conjunctions: vec![ExprImpl::from(FunctionCall::new(
-                            now_cond.get_expr_type(),
-                            vec![
-                                ExprImpl::from(InputRef::new(
-                                    left_index,
-                                    self.schema().fields()[left_index].data_type(),
-                                )),
-                                ExprImpl::from(InputRef::new(
-                                    self.schema().len(),
-                                    rht.schema().fields()[0].data_type(),
-                                )),
-                            ],
-                        )?)],
-                    },
+                    now_cond.get_expr_type(),
                     cur_streaming,
                     rht,
                 )

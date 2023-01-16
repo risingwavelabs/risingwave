@@ -40,10 +40,11 @@ use risingwave_storage::hummock::compactor::{
 };
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
-    CompactorSstableStore, HummockMemoryCollector, MemoryLimiter, TieredCacheMetricsBuilder,
+    HummockMemoryCollector, MemoryLimiter, TieredCacheMetricsBuilder,
 };
 use risingwave_storage::monitor::{
-    monitor_cache, HummockMetrics, ObjectStoreMetrics, StateStoreMetrics,
+    monitor_cache, CompactorMetrics, HummockMetrics, HummockStateStoreMetrics,
+    MonitoredStorageMetrics, ObjectStoreMetrics,
 };
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
@@ -104,8 +105,11 @@ pub async fn compute_node_serve(
     let exchange_srv_metrics = Arc::new(ExchangeServiceMetrics::new(registry.clone()));
 
     // Initialize state store.
-    let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
+    let state_store_metrics = Arc::new(HummockStateStoreMetrics::new(registry.clone()));
     let object_store_metrics = Arc::new(ObjectStoreMetrics::new(registry.clone()));
+    let storage_metrics = Arc::new(MonitoredStorageMetrics::new(registry.clone()));
+    let compactor_metrics = Arc::new(CompactorMetrics::new(registry.clone()));
+
     let hummock_meta_client = Arc::new(MonitoredHummockMetaClient::new(
         meta_client.clone(),
         hummock_metrics.clone(),
@@ -131,6 +135,8 @@ pub async fn compute_node_serve(
         } else {
             Arc::new(risingwave_tracing::RwTracingService::disabled())
         },
+        storage_metrics.clone(),
+        compactor_metrics.clone(),
     )
     .await
     .unwrap();
@@ -148,14 +154,11 @@ pub async fn compute_node_serve(
             let read_memory_limiter = Arc::new(MemoryLimiter::new(
                 storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
-            // todo: set shutdown_sender in HummockStorage.
-            let write_memory_limit =
-                storage_config.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2;
             let context = Arc::new(Context {
                 options: storage_config,
                 hummock_meta_client: hummock_meta_client.clone(),
                 sstable_store: storage.sstable_store(),
-                stats: state_store_metrics.clone(),
+                compactor_metrics: compactor_metrics.clone(),
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
@@ -163,14 +166,8 @@ pub async fn compute_node_serve(
                 sstable_id_manager: storage.sstable_id_manager().clone(),
                 task_progress_manager: Default::default(),
             });
-            // TODO: use normal sstable store for single-process mode.
-            let compactor_sstable_store = CompactorSstableStore::new(
-                storage.sstable_store(),
-                Arc::new(MemoryLimiter::new(write_memory_limit)),
-            );
             let compactor_context = Arc::new(CompactorContext::with_config(
                 context,
-                Arc::new(compactor_sstable_store),
                 CompactorRuntimeConfig {
                     max_concurrent_task_number: 1,
                 },

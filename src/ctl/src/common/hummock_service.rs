@@ -22,26 +22,27 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
-    HummockMetrics, MonitoredStateStore, ObjectStoreMetrics, StateStoreMetrics,
+    CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
+    MonitoredStorageMetrics, ObjectStoreMetrics,
 };
 use risingwave_storage::{StateStore, StateStoreImpl};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
-use super::MetaServiceOpts;
-
 pub struct HummockServiceOpts {
-    pub meta_opts: MetaServiceOpts,
     pub hummock_url: String,
 
     heartbeat_handle: Option<JoinHandle<()>>,
     heartbeat_shutdown_sender: Option<Sender<()>>,
 }
 
+#[derive(Clone)]
 pub struct Metrics {
     pub hummock_metrics: Arc<HummockMetrics>,
-    pub state_store_metrics: Arc<StateStoreMetrics>,
+    pub state_store_metrics: Arc<HummockStateStoreMetrics>,
     pub object_store_metrics: Arc<ObjectStoreMetrics>,
+    pub storage_metrics: Arc<MonitoredStorageMetrics>,
+    pub compactor_metrics: Arc<CompactorMetrics>,
 }
 
 impl HummockServiceOpts {
@@ -49,10 +50,8 @@ impl HummockServiceOpts {
     ///
     /// Currently, we will read these variables for meta:
     ///
-    /// * `RW_HUMMOCK_URL`: meta service address
+    /// * `RW_HUMMOCK_URL`: hummock store address
     pub fn from_env() -> Result<Self> {
-        let meta_opts = MetaServiceOpts::from_env()?;
-
         let hummock_url = match env::var("RW_HUMMOCK_URL") {
             Ok(url) => {
                 tracing::info!("using Hummock URL from `RW_HUMMOCK_URL`: {}", url);
@@ -74,7 +73,6 @@ For `./risedev apply-compose-deploy` users,
             }
         };
         Ok(Self {
-            meta_opts,
             hummock_url,
             heartbeat_handle: None,
             heartbeat_shutdown_sender: None,
@@ -83,9 +81,8 @@ For `./risedev apply-compose-deploy` users,
 
     pub async fn create_hummock_store_with_metrics(
         &mut self,
-    ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>, Metrics)> {
-        let meta_client = self.meta_opts.create_meta_client().await?;
-
+        meta_client: &MetaClient,
+    ) -> Result<(MonitoredStateStore<HummockStorage>, Metrics)> {
         let (heartbeat_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(1000),
@@ -109,8 +106,10 @@ For `./risedev apply-compose-deploy` users,
 
         let metrics = Metrics {
             hummock_metrics: Arc::new(HummockMetrics::unused()),
-            state_store_metrics: Arc::new(StateStoreMetrics::unused()),
+            state_store_metrics: Arc::new(HummockStateStoreMetrics::unused()),
             object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
+            storage_metrics: Arc::new(MonitoredStorageMetrics::unused()),
+            compactor_metrics: Arc::new(CompactorMetrics::unused()),
         };
 
         let state_store_impl = StateStoreImpl::new(
@@ -125,40 +124,20 @@ For `./risedev apply-compose-deploy` users,
             metrics.object_store_metrics.clone(),
             TieredCacheMetricsBuilder::unused(),
             Arc::new(risingwave_tracing::RwTracingService::disabled()),
+            metrics.storage_metrics.clone(),
+            metrics.compactor_metrics.clone(),
         )
         .await?;
 
         if let Some(hummock_state_store) = state_store_impl.as_hummock() {
             Ok((
-                meta_client,
                 hummock_state_store
                     .clone()
-                    .monitored(metrics.state_store_metrics.clone()),
+                    .monitored(metrics.storage_metrics.clone()),
                 metrics,
             ))
         } else {
             Err(anyhow!("only Hummock state store is supported in risectl"))
-        }
-    }
-
-    pub async fn create_hummock_store(
-        &mut self,
-    ) -> Result<(MetaClient, MonitoredStateStore<HummockStorage>)> {
-        let (meta_client, hummock_client, _) = self.create_hummock_store_with_metrics().await?;
-        Ok((meta_client, hummock_client))
-    }
-
-    pub async fn shutdown(&mut self) {
-        if let (Some(sender), Some(handle)) = (
-            self.heartbeat_shutdown_sender.take(),
-            self.heartbeat_handle.take(),
-        ) {
-            if let Err(err) = sender.send(()) {
-                tracing::warn!("Failed to send shutdown: {:?}", err);
-            }
-            if let Err(err) = handle.await {
-                tracing::warn!("Failed to join shutdown: {:?}", err);
-            }
         }
     }
 }

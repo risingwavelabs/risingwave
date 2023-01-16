@@ -28,7 +28,7 @@ use risingwave_sqlparser::ast::Statement;
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
 use crate::handler::flush::do_flush;
-use crate::handler::privilege::{check_privileges, resolve_privileges};
+use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef};
@@ -54,7 +54,7 @@ pub fn gen_batch_query_plan(
     };
 
     let check_items = resolve_privileges(&bound);
-    check_privileges(session, &check_items)?;
+    session.check_privileges(&check_items)?;
 
     let mut planner = Planner::new(context);
 
@@ -99,12 +99,14 @@ pub async fn handle_query(
     let session = handler_args.session.clone();
     let query_start_time = Instant::now();
     let only_checkpoint_visible = handler_args.session.config().only_checkpoint_visible();
+    let mut notice = String::new();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, query_mode, output_schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
 
+        let context = plan.plan_base().ctx.clone();
         tracing::trace!(
             "Generated query plan: {:?}, query_mode:{:?}",
             plan.explain_to_string()?,
@@ -114,7 +116,9 @@ pub async fn handle_query(
             session.env().worker_node_manager_ref(),
             session.env().catalog_reader().clone(),
         );
-        (plan_fragmenter.split(plan)?, query_mode, schema)
+        let query = plan_fragmenter.split(plan)?;
+        context.append_notice(&mut notice);
+        (query, query_mode, schema)
     };
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
@@ -146,6 +150,7 @@ pub async fn handle_query(
                 local_execute(session.clone(), query, query_snapshot).await?,
                 column_types,
                 format,
+                session.clone(),
             )),
             // Local mode do not support cancel tasks.
             QueryMode::Distributed => {
@@ -153,6 +158,7 @@ pub async fn handle_query(
                     distribute_execute(session.clone(), query, query_snapshot).await?,
                     column_types,
                     format,
+                    session.clone(),
                 ))
             }
         }
@@ -209,8 +215,8 @@ pub async fn handle_query(
             .inc();
     }
 
-    Ok(PgResponse::new_for_stream(
-        stmt_type, rows_count, row_stream, pg_descs,
+    Ok(PgResponse::new_for_stream_with_notice(
+        stmt_type, rows_count, row_stream, pg_descs, notice,
     ))
 }
 

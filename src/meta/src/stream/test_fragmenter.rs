@@ -29,8 +29,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFr
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     agg_call_state, AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode,
-    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamFragmentGraph,
-    StreamNode, StreamSource,
+    FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamEnvironment,
+    StreamFragmentGraph, StreamNode, StreamSource,
 };
 
 use crate::manager::MetaSrvEnv;
@@ -321,6 +321,8 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
                 make_inputref(0),
                 make_inputref(1),
             ],
+            watermark_input_key: vec![],
+            watermark_output_key: vec![],
         })),
         fields: vec![], // TODO: fill this later
         input: vec![simple_agg_node_1],
@@ -388,6 +390,7 @@ fn make_stream_graph() -> StreamFragmentGraph {
     StreamFragmentGraph {
         fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
         edges: make_fragment_edges(),
+        env: Some(StreamEnvironment::default()),
         dependent_table_ids: vec![],
         table_ids_cnt: 4,
     }
@@ -408,7 +411,8 @@ async fn test_fragmenter() -> MetaResult<()> {
         .generate_graph(env.id_gen_manager_ref(), &mut ctx)
         .await?;
 
-    let table_fragments = TableFragments::new(TableId::default(), graph);
+    let table_fragments =
+        TableFragments::new(TableId::default(), graph, StreamEnvironment::default());
     let actors = table_fragments.actors();
     let barrier_inject_actor_ids = table_fragments.barrier_inject_actor_ids();
     let sink_actor_ids = table_fragments.mview_actor_ids();

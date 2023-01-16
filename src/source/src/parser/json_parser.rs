@@ -22,66 +22,6 @@ use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 #[derive(Debug)]
 pub struct JsonParser;
 
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-impl JsonParser {
-    fn parse_inner(
-        &self,
-        payload: &[u8],
-        mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        use serde_json::Value;
-
-        use crate::parser::common::json_parse_value;
-
-        let value: Value = serde_json::from_slice(payload)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
-        writer.insert(|desc| {
-            json_parse_value(&desc.data_type, value.get(&desc.name)).map_err(|e| {
-                tracing::error!(
-                    "failed to process value ({}): {}",
-                    String::from_utf8_lossy(payload),
-                    e
-                );
-                e.into()
-            })
-        })
-    }
-}
-
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-impl SourceParser for JsonParser {
-    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
-
-    fn parse<'a, 'b, 'c>(
-        &'a self,
-        payload: &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        ready(self.parse_inner(payload, writer))
-    }
-}
-
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 impl JsonParser {
     fn parse_inner(
         &self,
@@ -98,7 +38,11 @@ impl JsonParser {
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         writer.insert(|desc| {
-            simd_json_parse_value(&desc.data_type, value.get(desc.name.as_str())).map_err(|e| {
+            simd_json_parse_value(
+                &desc.data_type,
+                value.get(desc.name.to_ascii_lowercase().as_str()),
+            )
+            .map_err(|e| {
                 tracing::error!(
                     "failed to process value ({}): {}",
                     String::from_utf8_lossy(payload),
@@ -110,12 +54,6 @@ impl JsonParser {
     }
 }
 
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 impl SourceParser for JsonParser {
     type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
 

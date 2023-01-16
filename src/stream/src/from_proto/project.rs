@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use multimap::MultiMap;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::stream_plan::ProjectNode;
 
@@ -37,12 +38,24 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
             .map(build_from_prost)
             .try_collect()?;
 
+        let watermark_derivations = MultiMap::from_iter(
+            node.get_watermark_input_key()
+                .iter()
+                .map(|key| *key as usize)
+                .zip_eq(
+                    node.get_watermark_output_key()
+                        .iter()
+                        .map(|key| *key as usize),
+                ),
+        );
+
         Ok(ProjectExecutor::new(
             params.actor_context,
             input,
             params.pk_indices,
             project_exprs,
             params.executor_id,
+            watermark_derivations,
         )
         .boxed())
     }
