@@ -14,6 +14,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
 use risingwave_batch::task::BatchManager;
@@ -22,10 +23,12 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
 #[cfg(target_os = "linux")]
 use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
+#[cfg(target_os = "linux")]
 use tracing;
 
 /// When `enable_managed_cache` is set, compute node will launch a [`GlobalMemoryManager`] to limit
 /// the memory usage.
+#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
 pub struct GlobalMemoryManager {
     /// All cached data before the watermark should be evicted.
     watermark_epoch: Arc<AtomicU64>,
@@ -39,7 +42,9 @@ pub struct GlobalMemoryManager {
 pub type GlobalMemoryManagerRef = Arc<GlobalMemoryManager>;
 
 impl GlobalMemoryManager {
+    #[cfg(target_os = "linux")]
     const EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
+    #[cfg(target_os = "linux")]
     const EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
 
     pub fn new(
@@ -63,6 +68,7 @@ impl GlobalMemoryManager {
         self.watermark_epoch.clone()
     }
 
+    #[cfg(target_os = "linux")]
     fn set_watermark_time_ms(&self, time_ms: u64) {
         let epoch = Epoch::from_physical_time(time_ms).0;
         let watermark_epoch = self.watermark_epoch.as_ref();
