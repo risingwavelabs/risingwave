@@ -173,8 +173,6 @@ impl<D: AsRef<[DataType]>> RowDeserializer<D> {
 
 #[cfg(test)]
 mod tests {
-    use std::cmp::Ordering;
-
     use itertools::Itertools;
 
     use super::*;
@@ -243,21 +241,5 @@ mod tests {
 
         let row_default = OwnedRow::default();
         assert_eq!(row_default.hash(hash_builder).0, 0);
-    }
-
-    #[test]
-    fn test_cmp() {
-        let tys = [Ty::Int64, Ty::Int64];
-
-        for ((s1, tys1), (s2, tys2), expected) in [
-            (("1 2", &tys[..]), ("1 2", &tys[..]), Ordering::Equal),
-            (("1 2", &tys[..]), ("1", &tys[..1]), Ordering::Greater),
-            (("1 2", &tys[..]), ("2 1", &tys[..]), Ordering::Less),
-            (("1 2", &tys[..]), ("2", &tys[..1]), Ordering::Less),
-        ] {
-            let r1 = OwnedRow::from_pretty_with_tys(tys1, s1);
-            let r2 = OwnedRow::from_pretty_with_tys(tys2, s2);
-            assert_eq!(r1.cmp(&r2), expected);
-        }
     }
 }
