@@ -12,17 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(warnings)] // unfinished
-
 use std::convert::TryFrom;
 use std::sync::Arc;
 
 use arrow_schema::{Field, Schema};
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
-use risingwave_common::for_all_variants;
+use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{literal_type_match, DataType, Datum, Scalar, ScalarImpl};
+use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 use risingwave_udf::{ArrowFlightUdfClient, FunctionId};
@@ -34,7 +30,7 @@ use crate::{bail, ensure, ExprError, Result};
 #[derive(Debug)]
 pub struct UdfExpression {
     children: Vec<BoxedExpression>,
-    name: String,
+    // name: String,
     arg_types: Vec<DataType>,
     return_type: DataType,
     client: ArrowFlightUdfClient,
@@ -99,7 +95,7 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
         })?;
         Ok(Self {
             children: udf.children.iter().map(build_from_prost).try_collect()?,
-            name: udf.name.clone(),
+            // name: udf.name.clone(),
             arg_types: udf.arg_types.iter().map(|t| t.into()).collect(),
             return_type,
             client,
