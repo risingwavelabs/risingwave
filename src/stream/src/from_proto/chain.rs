@@ -52,15 +52,10 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         let schema = snapshot.schema().clone();
 
         let executor = match node.chain_type() {
-            ChainType::Chain => ChainExecutor::new(
-                snapshot,
-                mview,
-                upstream_indices,
-                progress,
-                schema,
-                params.pk_indices,
-            )
-            .boxed(),
+            ChainType::Chain => {
+                ChainExecutor::new(mview, upstream_indices, progress, schema, params.pk_indices)
+                    .boxed()
+            }
             ChainType::Rearrange => RearrangedChainExecutor::new(
                 snapshot,
                 mview,

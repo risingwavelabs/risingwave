@@ -26,12 +26,11 @@ use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::agg_call_state::{MaterializedInputState, TableState};
-use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    agg_call_state, DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor,
-    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    agg_call_state, ColocatedActorId, DispatchStrategy, Dispatcher, DispatcherType, MergeNode,
+    StreamActor, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
 use super::CreateStreamingJobContext;
@@ -140,6 +139,7 @@ struct StreamActorDownstream {
     same_worker_node: bool,
 }
 
+#[derive(Debug)]
 struct StreamActorUpstream {
     /// Upstream actors
     actors: OrderedActorLink,
@@ -321,8 +321,42 @@ impl StreamActorBuilder {
                 .flat_map(|(_, StreamActorUpstream { actors, .. })| actors.0.iter().copied())
                 .map(|x| x.as_global_id())
                 .collect(), // TODO: store each upstream separately
-            same_worker_node_as_upstream: self.chain_same_worker_node
-                || self.upstreams.values().any(|u| u.same_worker_node),
+            colocated_upstream_actor_id: if self.chain_same_worker_node {
+                if self.upstreams.is_empty() {
+                    None
+                } else {
+                    Some(ColocatedActorId {
+                        id: self
+                            .upstreams
+                            .values()
+                            .into_iter()
+                            .exactly_one()
+                            .unwrap()
+                            .actors
+                            .as_global_ids()
+                            .into_iter()
+                            .exactly_one()
+                            .unwrap(),
+                    })
+                }
+            } else if self.upstreams.values().any(|u| u.same_worker_node) {
+                Some(ColocatedActorId {
+                    id: self
+                        .upstreams
+                        .values()
+                        .into_iter()
+                        .filter(|x| x.same_worker_node)
+                        .exactly_one()
+                        .unwrap()
+                        .actors
+                        .as_global_ids()
+                        .into_iter()
+                        .exactly_one()
+                        .unwrap(),
+                })
+            } else {
+                None
+            },
             vnode_bitmap: None,
             // To be filled by `StreamGraphBuilder::build`
             mview_definition: "".to_owned(),
@@ -579,17 +613,6 @@ impl StreamGraphBuilder {
                             if let Some(table) = &mut source.state_table {
                                 update_table(table, "SourceInternalTable");
                             }
-                        }
-                    }
-
-                    NodeBody::Lookup(node) => {
-                        if let Some(ArrangementTableId::TableId(table_id)) =
-                            &mut node.arrangement_table_id
-                        {
-                            *table_id += table_id_offset;
-                            node.arrangement_table.as_mut().unwrap().id = *table_id;
-                            // We do not need check and fill internal table for Lookup, cuz it's
-                            // already been set by ArrangeNode.
                         }
                     }
 

@@ -538,7 +538,7 @@ impl PlanRoot {
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
-        let plan = match self.plan.convention() {
+        let mut plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan()?;
 
@@ -566,14 +566,14 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
-        // TODO: enable delta join
-        // // Rewrite joins with index to delta join
-        // plan = self.optimize_by_rules(
-        //     plan,
-        //     "To IndexDeltaJoin".to_string(),
-        //     vec![IndexDeltaJoinRule::create()],
-        //     ApplyOrder::BottomUp,
-        // );
+        // TODO: make it a logical optimization.
+        // Rewrite joins with index to delta join
+        plan = self.optimize_by_rules(
+            plan,
+            "To IndexDeltaJoin".to_string(),
+            vec![IndexDeltaJoinRule::create()],
+            ApplyOrder::BottomUp,
+        );
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

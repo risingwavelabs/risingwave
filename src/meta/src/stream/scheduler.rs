@@ -179,17 +179,18 @@ impl Scheduler {
                 panic!("singleton fragment should only have one actor")
             };
 
-            let parallel_unit =
-                if actor.same_worker_node_as_upstream && !actor.upstream_actor_id.is_empty() {
-                    // Schedule the fragment to the same parallel unit as upstream.
-                    locations.schedule_colocate_with(&actor.upstream_actor_id)?
-                } else {
-                    // Randomly choose one parallel unit to schedule from all parallel units.
-                    self.all_parallel_units
-                        .choose(&mut rand::thread_rng())
-                        .cloned()
-                        .context("no parallel unit to schedule")?
-                };
+            let parallel_unit = if let Some(colocated_actor_id) = &actor.colocated_upstream_actor_id
+                && !actor.upstream_actor_id.is_empty()
+            {
+                // Schedule the fragment to the same parallel unit as upstream.
+                locations.schedule_colocate_with(&[colocated_actor_id.id])?
+            } else {
+                // Randomly choose one parallel unit to schedule from all parallel units.
+                self.all_parallel_units
+                    .choose(&mut rand::thread_rng())
+                    .cloned()
+                    .context("no parallel unit to schedule")?
+            };
 
             // Build vnode mapping. However, we'll leave vnode field of actors unset for singletons.
             let _vnode_mapping =
@@ -222,12 +223,14 @@ impl Scheduler {
 
             // Record actor locations and set vnodes into the actors.
             for (actor, parallel_unit) in fragment.actors.iter_mut().zip_eq(parallel_units) {
-                let parallel_unit =
-                    if actor.same_worker_node_as_upstream && !actor.upstream_actor_id.is_empty() {
-                        locations.schedule_colocate_with(&actor.upstream_actor_id)?
-                    } else {
-                        parallel_unit.clone()
-                    };
+                let parallel_unit = if let Some(colocated_actor_id) = &actor.colocated_upstream_actor_id
+                    && !actor.upstream_actor_id.is_empty()
+                {
+                    locations
+                        .schedule_colocate_with(&[colocated_actor_id.id])?
+                } else {
+                    parallel_unit.clone()
+                };
 
                 actor.vnode_bitmap =
                     Some(vnode_bitmaps.get(&parallel_unit.id).unwrap().to_protobuf());
@@ -324,7 +327,7 @@ mod test {
                         }),
                         dispatcher: vec![],
                         upstream_actor_id: vec![],
-                        same_worker_node_as_upstream: false,
+                        colocated_upstream_actor_id: None,
                         vnode_bitmap: None,
                         mview_definition: "".to_owned(),
                     }],
@@ -351,7 +354,7 @@ mod test {
                         }),
                         dispatcher: vec![],
                         upstream_actor_id: vec![],
-                        same_worker_node_as_upstream: false,
+                        colocated_upstream_actor_id: None,
                         vnode_bitmap: None,
                         mview_definition: "".to_owned(),
                     })

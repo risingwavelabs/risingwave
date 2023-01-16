@@ -16,6 +16,7 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
+use risingwave_pb::stream_plan::ChainType;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
@@ -51,7 +52,11 @@ impl Rule for IndexDeltaJoinRule {
         let left_indices = join.eq_join_predicate().left_eq_indexes();
         let right_indices = join.eq_join_predicate().right_eq_indexes();
 
-        fn match_indexes(join_indices: &[usize], table_scan: &StreamTableScan) -> Option<PlanRef> {
+        fn match_indexes(
+            join_indices: &[usize],
+            table_scan: &StreamTableScan,
+            chain_type: ChainType,
+        ) -> Option<PlanRef> {
             if table_scan.logical().indexes().is_empty() {
                 return None;
             }
@@ -97,6 +102,7 @@ impl Rule for IndexDeltaJoinRule {
                             index.index_table.name.as_str(),
                             index.index_table.table_desc().into(),
                             p2s_mapping,
+                            chain_type,
                         )
                         .into(),
                 );
@@ -105,8 +111,10 @@ impl Rule for IndexDeltaJoinRule {
             None
         }
 
-        if let Some(left) = match_indexes(&left_indices, input_left) {
-            if let Some(right) = match_indexes(&right_indices, input_right) {
+        // Delta join only needs to backfill one stream flow.
+        // Here we choose the left one to backfill and right one to pure chain.
+        if let Some(left) = match_indexes(&left_indices, input_left, ChainType::Backfill) {
+            if let Some(right) = match_indexes(&right_indices, input_right, ChainType::Chain) {
                 // We already ensured that index and join use the same distribution, so we directly
                 // replace the children with stream index scan without inserting any exchanges.
 
@@ -137,7 +145,6 @@ impl Rule for IndexDeltaJoinRule {
 }
 
 impl IndexDeltaJoinRule {
-    #[expect(dead_code)]
     pub fn create() -> BoxedRule {
         Box::new(Self {})
     }

@@ -59,6 +59,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
     }
 }
 
+/// TODO: remove it
 pub struct ArrangeExecutorBuilder;
 
 #[async_trait::async_trait]

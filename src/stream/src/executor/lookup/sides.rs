@@ -20,9 +20,9 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
-use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{Barrier, Executor, Message, MessageStream};
 
@@ -72,7 +72,7 @@ pub(crate) struct ArrangeJoinSide<S: StateStore> {
     /// Whether to join with the arrangement of the current epoch
     pub use_current_epoch: bool,
 
-    pub state_table: StateTable<S>,
+    pub storage_table: StorageTable<S>,
 }
 
 /// Message from the `arrange_join_stream`.
