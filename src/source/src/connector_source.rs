@@ -25,11 +25,14 @@ use risingwave_common::error::ErrorCode::{ConnectorError, ProtocolError};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
 use risingwave_common::types::Datum;
 use risingwave_common::util::select_all;
+use risingwave_connector::parser::{
+    SourceParserImpl, SourceStreamChunkBuilder, SpecificParserConfig,
+};
 use risingwave_connector::source::{
     Column, ConnectorProperties, ConnectorState, SourceMessage, SourceMeta, SplitId, SplitMetaData,
     SplitReaderImpl,
 };
-use risingwave_connector::ConnectorParams;
+use risingwave_connector::{ConnectorParams, SourceColumnDesc, SourceFormat, StreamChunkWithState};
 use risingwave_expr::vector_op::cast::i64_to_timestamptz;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, StreamSourceInfo as ProstStreamSourceInfo,
@@ -40,10 +43,6 @@ use risingwave_pb::plan_common::{
 
 use crate::fs_connector_source::FsConnectorSource;
 use crate::monitor::SourceMetrics;
-use crate::{
-    ParserConfig, SourceColumnDesc, SourceFormat, SourceParserImpl, SourceStreamChunkBuilder,
-    StreamChunkWithState,
-};
 
 pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 
@@ -426,15 +425,19 @@ impl SourceDescBuilderV2 {
             ProstRowFormatType::Csv => SourceFormat::Csv,
             _ => unreachable!(),
         };
-        let parser_config = ParserConfig::new(&format, &self.source_info);
+
         let mut columns: Vec<_> = self
             .columns
             .iter()
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
+
         if let Some(row_id_index) = self.row_id_index.as_ref() {
             columns[row_id_index.index as usize].is_row_id = true;
         }
+
+        let parser_config = SpecificParserConfig::new(&format, &self.source_info);
+
         FsConnectorSource::new(
             format,
             self.properties.clone(),

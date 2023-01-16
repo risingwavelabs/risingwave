@@ -31,12 +31,11 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use super::datagen::DatagenMeta;
-use super::filesystem::{
-    FsSplit, FsSplitReader, S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR,
-};
+use super::filesystem::{FsSplit, S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR};
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::nexmark::source::message::NexmarkMeta;
+use crate::parser::ParserConfig;
 use crate::source::cdc::{
     CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, MYSQL_CDC_CONNECTOR,
     POSTGRES_CDC_CONNECTOR,
@@ -64,7 +63,10 @@ use crate::source::pulsar::source::reader::PulsarSplitReader;
 use crate::source::pulsar::{
     PulsarProperties, PulsarSplit, PulsarSplitEnumerator, PULSAR_CONNECTOR,
 };
-use crate::{impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader};
+use crate::{
+    impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader,
+    BoxSourceWithStateStream,
+};
 
 /// [`SplitEnumerator`] fetches the split metadata from the external source service.
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
@@ -94,8 +96,24 @@ pub trait SplitReader: Sized {
     fn into_stream(self) -> BoxSourceStream;
 }
 
+/// [`FsSplitReader`] is an abstraction of the external fs connector read interface,
+/// used to read messages from the outside and transform them into source-oriented
+/// [`FsSourceMessage`], in order to improve throughput, it is recommended to return a batch of
+/// messages at a time.
+#[async_trait]
+pub trait SplitReaderV2: Sized {
+    type Properties;
+
+    async fn new(
+        properties: Self::Properties,
+        splits: Vec<FsSplit>,
+        parser_config: ParserConfig,
+    ) -> Result<Self>;
+
+    fn into_stream(self) -> BoxSourceWithStateStream;
+}
+
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
-pub type BoxFsSourceStream = BoxStream<'static, Result<Vec<FsSourceMessage>>>;
 
 /// The max size of a chunk yielded by source stream.
 pub const MAX_CHUNK_SIZE: usize = 1024;
@@ -187,12 +205,12 @@ pub enum SplitReaderImpl {
     GooglePubsub(Box<PubsubSplitReader>),
 }
 
-pub enum FsSplitReaderImpl {
+pub enum SplitReaderV2Impl {
     S3(Box<S3FileReader>),
 }
 
-impl FsSplitReaderImpl {
-    pub fn into_stream(self) -> BoxFsSourceStream {
+impl SplitReaderV2Impl {
+    pub fn into_stream(self) -> BoxSourceWithStateStream {
         match self {
             Self::S3(s3_reader) => s3_reader.into_stream(),
         }
@@ -201,12 +219,13 @@ impl FsSplitReaderImpl {
     pub async fn create(
         config: ConnectorProperties,
         state: Vec<FsSplit>,
+        parser_config: ParserConfig,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         let reader = match config {
-            ConnectorProperties::S3(s3_props) => {
-                Self::S3(Box::new(S3FileReader::new(*s3_props, state).await?))
-            }
+            ConnectorProperties::S3(s3_props) => Self::S3(Box::new(
+                S3FileReader::new(*s3_props, state, parser_config).await?,
+            )),
             _ => todo!(),
         };
         Ok(reader)

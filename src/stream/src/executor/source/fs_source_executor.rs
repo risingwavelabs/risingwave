@@ -22,10 +22,10 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_connector::source::filesystem::FsSplit;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
+use risingwave_connector::{BoxSourceWithStateStream, StreamChunkWithState};
 use risingwave_source::connector_source::{SourceContext, SourceDescBuilderV2};
 use risingwave_source::fs_connector_source::FsConnectorSource;
 use risingwave_source::monitor::SourceMetrics;
-use risingwave_source::*;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
@@ -195,7 +195,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         fs_source: &FsConnectorSource,
         source_metrics: Arc<SourceMetrics>,
         splits: Vec<FsSplit>,
-    ) -> StreamExecutorResult<BoxSourceWithStateStream<FsStreamChunkWithState>> {
+    ) -> StreamExecutorResult<BoxSourceWithStateStream> {
         let steam_reader = fs_source
             .stream_reader(
                 splits,
@@ -341,7 +341,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     yield Message::Barrier(barrier);
                 }
 
-                Either::Right(FsStreamChunkWithState {
+                Either::Right(StreamChunkWithState {
                     chunk,
                     split_offset_mapping,
                 }) => {
@@ -359,8 +359,9 @@ impl<S: StateStore> FsSourceExecutor<S> {
                             .flat_map(|(id, offset)| {
                                 let origin_split = self.stream_source_splits.get(id);
 
-                                origin_split
-                                    .map(|split| (id.clone(), split.clone_with_offset(*offset)))
+                                origin_split.map(|split| {
+                                    (id.clone(), split.copy_with_offset(offset.clone()))
+                                })
                             })
                             .collect_vec();
 
@@ -390,7 +391,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         &mut self,
         fs_source: &FsConnectorSource,
         source_metrics: Arc<SourceMetrics>,
-        stream: &mut SourceReaderStream<FsStreamChunkWithState>,
+        stream: &mut SourceReaderStream,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
@@ -418,7 +419,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         &mut self,
         fs_source: &FsConnectorSource,
         source_metrics: Arc<SourceMetrics>,
-        stream: &mut SourceReaderStream<FsStreamChunkWithState>,
+        stream: &mut SourceReaderStream,
         target_state: Vec<FsSplit>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(

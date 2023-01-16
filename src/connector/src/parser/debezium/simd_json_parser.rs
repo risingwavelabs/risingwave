@@ -21,7 +21,7 @@ use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use super::operators::*;
 use crate::parser::common::simd_json_parse_value;
-use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";

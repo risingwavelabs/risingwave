@@ -15,5 +15,5 @@
 pub use s3::{S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR};
 
 mod file_common;
-pub use file_common::{FsSplit, FsSplitReader};
+pub use file_common::FsSplit;
 mod s3;

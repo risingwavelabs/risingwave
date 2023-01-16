@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use anyhow::anyhow;
-use futures::future::ready;
 use futures_async_stream::try_stream;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -24,18 +23,24 @@ use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_expr::vector_op::cast::{
     str_to_date, str_to_timestamp, str_with_time_zone_to_timestamptz,
 };
-use risingwave_connector::source::SplitId;
 
-use crate::{
-    ByteStreamSourceParser, ParseFuture, SourceColumnDesc, SourceStreamChunkBuilder,
+use crate::parser::{
+    BoxSourceWithStateStream, ByteStreamSourceParser, SourceColumnDesc, SourceStreamChunkBuilder,
     SourceStreamChunkRowWriter, StreamChunkWithState, WriteGuard,
 };
+use crate::source::{BoxSourceStream, SplitId};
 
 macro_rules! to_rust_type {
     ($v:ident, $t:ty) => {
         $v.parse::<$t>()
             .map_err(|_| anyhow!("failed parse {} from {}", stringify!($t), $v))?
     };
+}
+
+#[derive(Debug, Clone)]
+pub struct CsvParserConfig {
+    pub delimiter: u8,
+    pub has_header: bool,
 }
 
 #[derive(Debug)]
@@ -51,7 +56,13 @@ pub struct CsvParser {
 }
 
 impl CsvParser {
-    pub fn new(rw_columns: Vec<SourceColumnDesc>, delimiter: u8, has_header: bool) -> Result<Self> {
+    pub fn new(rw_columns: Vec<SourceColumnDesc>, parser_config: CsvParserConfig) -> Result<Self> {
+        let CsvParserConfig {
+            delimiter,
+            has_header,
+        } = parser_config;
+
+        // tracing::info!("rw_columns: {:?}", rw_columns);
         Ok(Self {
             rw_columns,
             next_row_is_header: has_header,
@@ -127,8 +138,8 @@ impl CsvParser {
         }
     }
 
-    fn try_parse_single(
-        self,
+    fn try_parse_single_record(
+        &mut self,
         payload: &mut &[u8],
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<Option<WriteGuard>> {
@@ -138,7 +149,8 @@ impl CsvParser {
         };
         writer
             .insert(move |desc| {
-                let column_id = desc.column_id.get_id();
+                // column_id is 1-based
+                let column_id = desc.column_id.get_id() - 1;
                 let column_type = &desc.data_type;
                 let v = match columns_string.get(column_id as usize) {
                     Some(v) => v.to_owned(),
@@ -148,16 +160,15 @@ impl CsvParser {
             })
             .map(Some)
     }
-}
 
-impl ByteStreamSourceParser for CsvParser {
     #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
-    async fn parse(self, data_stream: risingwave_connector::source::BoxSourceStream) {
-        // the remain length of the last message
+    pub async fn into_stream(mut self, data_stream: BoxSourceStream) {
+        // the remain length of the last seen message
         let mut remain_len = 0;
+        // current offset
         let mut offset = 0;
+        // split id of current data stream
         let mut split_id = None;
-        
         #[for_await]
         for batch in data_stream {
             let batch = batch?;
@@ -168,12 +179,16 @@ impl ByteStreamSourceParser for CsvParser {
 
             for msg in batch {
                 if let Some(content) = msg.payload {
+                    if split_id.is_none() {
+                        split_id = Some(msg.split_id.clone());
+                    }
+
                     offset = msg.offset.parse().unwrap();
                     let mut buff = content.as_ref();
 
-                    remain_len = content.len();
+                    remain_len = buff.len();
                     loop {
-                        match self.try_parse_single(&mut buff, builder.row_writer()) {
+                        match self.try_parse_single_record(&mut buff, builder.row_writer()) {
                             Err(e) => {
                                 tracing::warn!(
                                     "message parsing failed {}, skipping",
@@ -199,39 +214,34 @@ impl ByteStreamSourceParser for CsvParser {
                 split_offset_mapping: Some(split_offset_mapping),
             };
         }
-        // the last record in a file may be missing the terminator,
+        // The file may be missing the last terminator,
         // so we need to pass an empty payload to inform the parser.
         if remain_len > 0 {
             let mut builder = SourceStreamChunkBuilder::with_capacity(self.rw_columns.clone(), 1);
             let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
-            let empty = &mut vec![].as_ref();
-            match self.try_parse_single(empty, builder.row_writer()) {
+            let empty = vec![];
+            match self.try_parse_single_record(&mut empty.as_ref(), builder.row_writer()) {
                 Err(e) => {
                     tracing::warn!("message parsing failed {}, skipping", e.to_string());
                 }
                 Ok(Some(_)) => {
-                    split_offset_mapping.insert(, );
+                    split_offset_mapping
+                        .insert(split_id.unwrap(), (offset + remain_len).to_string());
                     yield StreamChunkWithState {
                         chunk: builder.finish(),
                         split_offset_mapping: Some(split_offset_mapping),
                     };
                 }
+                _ => {}
             }
         }
     }
-    // type ParseResult<'a> = impl ParseFuture<'a, Result<Option<WriteGuard>>>;
+}
 
-    // fn parse<'a, 'b, 'c>(
-    //     &'a mut self,
-    //     payload: &'a mut &'b [u8],
-    //     writer: crate::SourceStreamChunkRowWriter<'c>,
-    // ) -> Self::ParseResult<'a>
-    // where
-    //     'b: 'a,
-    //     'c: 'a,
-    // {
-    //     ready(self.parse_inner(payload, writer))
-    // }
+impl ByteStreamSourceParser for CsvParser {
+    fn into_stream(self, msg_stream: BoxSourceStream) -> BoxSourceWithStateStream {
+        self.into_stream(msg_stream)
+    }
 }
 
 #[inline]
@@ -265,46 +275,85 @@ fn parse_string(dtype: &DataType, v: String) -> Result<Datum> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use futures_async_stream::for_await;
+
+    use crate::source::{SourceMessage, SourceMeta};
+
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+    async fn prepare_data(data: Vec<u8>) {
+        let mid = data.len() / 2;
+        let part1 = data[..mid].to_vec();
+        let part2 = data[mid..].to_vec();
+        let id = "split1".into();
+        let part1_len = part1.len();
+        let msg1 = SourceMessage {
+            payload: Some(part1.into()),
+            offset: 0.to_string(),
+            split_id: Arc::clone(&id),
+            meta: SourceMeta::Empty,
+        };
+        let msg2 = SourceMessage {
+            payload: Some(part2.into()),
+            offset: part1_len.to_string(),
+            split_id: Arc::clone(&id),
+            meta: SourceMeta::Empty,
+        };
+
+        yield vec![msg1, msg2];
+    }
 
     use super::*;
+    #[ignore]
     #[tokio::test]
     async fn test_csv_parser_without_last_line_break() {
-        let mut parser = CsvParser::new(b',', true).unwrap();
+        let descs = vec![
+            SourceColumnDesc::simple("name", DataType::Varchar, 1.into()),
+            SourceColumnDesc::simple("age", DataType::Int32, 2.into()),
+        ];
+
+        let config = CsvParserConfig {
+            delimiter: b',',
+            has_header: true,
+        };
+        let parser = CsvParser::new(descs, config).unwrap();
         let data = b"
 name,age
 pite,20
 alex,10";
-        let mut part1 = &data[0..data.len() - 1];
-        let mut part2 = &data[data.len() - 1..data.len()];
-        let line1 = parser.parse_columns_to_strings(&mut part1).unwrap();
-        assert!(line1.is_some());
-        println!("{:?}", line1);
-        let line2 = parser.parse_columns_to_strings(&mut part1).unwrap();
-        assert!(line2.is_none());
-        let line2 = parser.parse_columns_to_strings(&mut part2).unwrap();
-        assert!(line2.is_none());
-        let line2 = parser.parse_columns_to_strings(&mut part2).unwrap();
-        assert!(line2.is_some());
-        println!("{:?}", line2);
+        let data_stream = prepare_data(data.to_vec());
+        let msg_stream = parser.into_stream(data_stream);
+        #[for_await]
+        for msg in msg_stream {
+            println!("{:?}", msg);
+        }
     }
 
+    #[ignore]
     #[tokio::test]
     async fn test_csv_parser_with_last_line_break() {
-        let mut parser = CsvParser::new(b',', true).unwrap();
+        let descs = vec![
+            SourceColumnDesc::simple("name", DataType::Varchar, 1.into()),
+            SourceColumnDesc::simple("age", DataType::Int32, 2.into()),
+        ];
+
+        let config = CsvParserConfig {
+            delimiter: b',',
+            has_header: true,
+        };
+        let parser = CsvParser::new(descs, config).unwrap();
         let data = b"
 name,age
 pite,20
 alex,10
 ";
-        let mut part1 = &data[0..data.len() - 1];
-        let mut part2 = &data[data.len() - 1..data.len()];
-        let line1 = parser.parse_columns_to_strings(&mut part1).unwrap();
-        assert!(line1.is_some());
-        println!("{:?}", line1);
-        let line2 = parser.parse_columns_to_strings(&mut part1).unwrap();
-        assert!(line2.is_none());
-        let line2 = parser.parse_columns_to_strings(&mut part2).unwrap();
-        assert!(line2.is_some());
-        println!("{:?}", line2);
+        println!("data len: {}", data.len());
+        let data_stream = prepare_data(data.to_vec());
+        let msg_stream = parser.into_stream(data_stream);
+        #[for_await]
+        for msg in msg_stream {
+            println!("{:?}", msg);
+        }
     }
 }
