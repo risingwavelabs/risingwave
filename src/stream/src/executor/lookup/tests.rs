@@ -280,6 +280,8 @@ async fn test_lookup_this_epoch() {
 }
 
 #[tokio::test]
+#[ignore]
+// Deprecated because the ability to read from prev epoch has been deprecated.
 async fn test_lookup_last_epoch() {
     let store = MemoryStateStore::new();
     let table_id = TableId::new(1);
