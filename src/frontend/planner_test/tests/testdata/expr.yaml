@@ -143,10 +143,13 @@
 - sql: |
     -- Single quoted literal can be treated as number without error.
     values(round('123'));
-    -- When it is invalid, PostgreSQL reports error during explain, but we have to wait until execution as of now.
-    -- values(round('abc'));
   batch_plan: |
     BatchValues { rows: [[Round(123:Float64)]] }
+- sql: |
+    -- When it is invalid, PostgreSQL reports error during explain, but we have to wait until execution as of now. #4235
+    values(round('abc'));
+  batch_plan: |
+    BatchValues { rows: [[Round('abc':Varchar::Float64)]] }
 - sql: |
     values(extract(hour from timestamp '2001-02-16 20:38:40'));
   batch_plan: |
