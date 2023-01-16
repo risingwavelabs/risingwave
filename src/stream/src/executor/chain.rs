@@ -71,6 +71,7 @@ impl ChainExecutor {
 
         // 1. Poll the upstream to get the first barrier.
         let barrier = expect_first_barrier(&mut upstream).await?;
+        self.progress.finish(barrier.epoch.curr);
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
@@ -87,7 +88,6 @@ impl ChainExecutor {
                     yield Message::Chunk(mapping(&self.upstream_indices, chunk));
                 }
                 Message::Barrier(barrier) => {
-                    self.progress.finish(barrier.epoch.curr);
                     yield Message::Barrier(barrier);
                 }
             }
