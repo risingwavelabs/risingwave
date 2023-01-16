@@ -268,26 +268,26 @@ fn from_avro_value(value: Value) -> Result<Datum> {
                 millis / 1_000,
                 (millis % 1_000) as u32 * 1_000_000,
             )
-                .map_err(|e| {
-                    let err_msg = format!(
-                        "avro parse error.wrong timestamp millis value {}, err {:?}",
-                        millis, e
-                    );
-                    RwError::from(InternalError(err_msg))
-                })?,
+            .map_err(|e| {
+                let err_msg = format!(
+                    "avro parse error.wrong timestamp millis value {}, err {:?}",
+                    millis, e
+                );
+                RwError::from(InternalError(err_msg))
+            })?,
         ),
         Value::TimestampMicros(micros) => ScalarImpl::NaiveDateTime(
             NaiveDateTimeWrapper::with_secs_nsecs(
                 micros / 1_000_000,
                 (micros % 1_000_000) as u32 * 1_000,
             )
-                .map_err(|e| {
-                    let err_msg = format!(
-                        "avro parse error.wrong timestamp micros value {}, err {:?}",
-                        micros, e
-                    );
-                    RwError::from(InternalError(err_msg))
-                })?,
+            .map_err(|e| {
+                let err_msg = format!(
+                    "avro parse error.wrong timestamp micros value {}, err {:?}",
+                    micros, e
+                );
+                RwError::from(InternalError(err_msg))
+            })?,
         ),
         Value::Duration(duration) => {
             let months = u32::from(duration.months()) as i32;
@@ -328,9 +328,9 @@ impl SourceParser for AvroParser {
         payload: &'b [u8],
         writer: SourceStreamChunkRowWriter<'c>,
     ) -> Self::ParseResult<'a>
-        where
-            'b: 'a,
-            'c: 'a,
+    where
+        'b: 'a,
+        'c: 'a,
     {
         self.parse_inner(payload, writer)
     }
@@ -343,7 +343,7 @@ mod test {
     use std::ops::Sub;
 
     use apache_avro::types::{Record, Value};
-    use apache_avro::{Codec, Days, Duration, Millis, Months, Schema, Writer};
+    use apache_avro::{Codec, Days, Duration, Millis, Months, Reader, Schema, Writer};
     use itertools::Itertools;
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
@@ -470,7 +470,7 @@ mod test {
                             millis / 1000,
                             (millis % 1000) as u32 * 1_000_000,
                         )
-                            .unwrap(),
+                        .unwrap(),
                     ));
                     assert_eq!(row[i], datetime);
                 }
@@ -480,7 +480,7 @@ mod test {
                             micros / 1_000_000,
                             (micros % 1_000_000) as u32 * 1_000,
                         )
-                            .unwrap(),
+                        .unwrap(),
                     ));
                     assert_eq!(row[i], datetime);
                 }
@@ -585,6 +585,58 @@ mod test {
         ]
     }
 
+    fn build_field(schema: &Schema) -> Option<Value> {
+        match schema {
+            Schema::String => Some(Value::String("str_value".to_string())),
+            Schema::Int => Some(Value::Int(32_i32)),
+            Schema::Long => Some(Value::Long(64_i64)),
+            Schema::Float => Some(Value::Float(32_f32)),
+            Schema::Double => Some(Value::Double(64_f64)),
+            Schema::Boolean => Some(Value::Boolean(true)),
+
+            Schema::Date => {
+                let original_date =
+                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                let naive_date =
+                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                let num_days = naive_date.0.sub(original_date.0).num_days() as i32;
+                Some(Value::Date(num_days))
+            }
+            Schema::TimestampMillis => {
+                let datetime =
+                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                let timestamp_mills = Value::TimestampMillis(datetime.0.timestamp() * 1_000);
+                Some(timestamp_mills)
+            }
+            Schema::TimestampMicros => {
+                let datetime =
+                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                let timestamp_micros = Value::TimestampMicros(datetime.0.timestamp() * 1_000_000);
+                Some(timestamp_micros)
+            }
+            Schema::Duration => {
+                let months = Months::new(1);
+                let days = Days::new(1);
+                let millis = Millis::new(1000);
+                Some(Value::Duration(Duration::new(months, days, millis)))
+            }
+
+            Schema::Union(union_schema) if union_schema.is_nullable() => {
+                let inner_schema = union_schema
+                    .variants()
+                    .iter()
+                    .find_or_first(|s| s != &&Schema::Null)
+                    .unwrap();
+
+                match build_field(inner_schema) {
+                    None => Some(Value::Union(0, Box::new(Value::Null))),
+                    Some(value) => Some(Value::Union(1, Box::new(value))),
+                }
+            }
+            _ => None,
+        }
+    }
+
     fn build_avro_data(schema: &Schema) -> Record<'_> {
         let mut record = Record::new(schema).unwrap();
         if let Schema::Record {
@@ -592,83 +644,8 @@ mod test {
         } = schema.clone()
         {
             for field in &fields {
-                match &field.schema {
-                    Schema::String => {
-                        record.put(field.name.as_str(), "str_value".to_string());
-                    }
-                    Schema::Int => {
-                        record.put(field.name.as_str(), 32_i32);
-                    }
-                    Schema::Long => {
-                        record.put(field.name.as_str(), 64_i64);
-                    }
-                    Schema::Float => {
-                        record.put(field.name.as_str(), 32_f32);
-                    }
-                    Schema::Double => {
-                        record.put(field.name.as_str(), 64_f64);
-                    }
-                    Schema::Boolean => {
-                        record.put(field.name.as_str(), true);
-                    }
-                    Schema::Date => {
-                        let original_date =
-                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                        let naive_date =
-                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                        let num_days = naive_date.0.sub(original_date.0).num_days() as i32;
-                        record.put(field.name.as_str(), Value::Date(num_days));
-                    }
-                    Schema::TimestampMillis => {
-                        let datetime =
-                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                        let timestamp_mills =
-                            Value::TimestampMillis(datetime.0.timestamp() * 1_000);
-                        record.put(field.name.as_str(), timestamp_mills);
-                    }
-                    Schema::TimestampMicros => {
-                        let datetime =
-                            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                        let timestamp_micros =
-                            Value::TimestampMicros(datetime.0.timestamp() * 1_000_000);
-                        record.put(field.name.as_str(), timestamp_micros);
-                    }
-                    Schema::Duration => {
-                        let months = Months::new(1);
-                        let days = Days::new(1);
-                        let millis = Millis::new(1000);
-                        record.put(
-                            field.name.as_str(),
-                            Value::Duration(Duration::new(months, days, millis)),
-                        );
-                    }
-
-                    Schema::Union(union_schema) if union_schema.is_nullable() => {
-                        let inner_schema = union_schema
-                            .variants()
-                            .iter()
-                            .find_or_first(|s| s != &&Schema::Null)
-                            .unwrap();
-                        match inner_schema {
-                            Schema::Boolean => {
-                                record.put(
-                                    field.name.as_str(),
-                                    Value::Union(1, Box::new(Value::Boolean(true))),
-                                );
-                            }
-                            Schema::String => {
-                                record.put(
-                                    field.name.as_str(),
-                                    Value::Union(1, Box::new(Value::String("test".to_string()))),
-                                );
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
-                    _ => {
-                        unreachable!()
-                    }
-                }
+                let value = build_field(&field.schema).expect("No value defined for field");
+                record.put(field.name.as_str(), value)
             }
         }
         record
@@ -694,12 +671,33 @@ mod test {
 
     #[tokio::test]
     async fn test_avro_union_type() {
-        let avro_parser_rs = new_avro_parser_from_local("simple-schema.avsc").await;
-        // assert!(avro_parser_rs.is_ok());
-        let avro_parser = avro_parser_rs.unwrap();
+        let avro_parser = new_avro_parser_from_local("union-schema.avsc")
+            .await
+            .unwrap();
         let schema = &avro_parser.schema;
-        let mut record = Record::new(schema).unwrap();
-        record.put("name", Value::Null);
-        assert_eq!(record.fields.len(), 10)
+        let mut null_record = Record::new(schema).unwrap();
+        null_record.put("id", Value::Int(5));
+        null_record.put("age", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("sequence_id", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("name", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("score", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("avg_score", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("is_lasted", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("entrance_date", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("birthday", Value::Union(0, Box::new(Value::Null)));
+        null_record.put("anniversary", Value::Union(0, Box::new(Value::Null)));
+
+        let mut writer = Writer::new(schema, Vec::new());
+        writer.append(null_record).unwrap();
+        writer.flush().unwrap();
+
+        let record = build_avro_data(schema);
+        writer.append(record).unwrap();
+        writer.flush().unwrap();
+
+        let records = writer.into_inner().unwrap();
+
+        let reader: Vec<_> = Reader::with_schema(schema, &records[..]).unwrap().collect();
+        assert_eq!(2, reader.len())
     }
 }
