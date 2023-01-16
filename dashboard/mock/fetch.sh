@@ -9,6 +9,9 @@ curl http://localhost:5691/api/clusters/2 > cluster_2.json
 curl http://localhost:5691/api/fragments > fragments.json
 curl http://localhost:5691/api/fragments2 > fragments2.json
 curl http://localhost:5691/api/materialized_views > materialized_views.json
+curl http://localhost:5691/api/tables > tables.json
+curl http://localhost:5691/api/indexes > indexes.json
+curl http://localhost:5691/api/internal_tables > internal_tables.json
 curl http://localhost:5691/api/sinks > sinks.json
 curl http://localhost:5691/api/sources > sources.json
 curl http://localhost:5691/api/metrics/cluster > metrics_cluster.json

@@ -47,6 +47,7 @@ hdrhistogram = { version = "7", features = ["base64", "crossbeam-channel", "flat
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 isahc = { version = "1", default-features = false, features = ["encoding_rs", "mime", "text-decoding"] }
+itertools = { version = "0.10", features = ["use_alloc", "use_std"] }
 lexical-core = { version = "0.8", features = ["floats", "format", "integers", "lexical-parse-float", "lexical-parse-integer", "lexical-write-float", "lexical-write-integer", "parse", "parse-floats", "parse-integers", "std", "write", "write-floats", "write-integers"] }
 lexical-parse-float = { version = "0.8", default-features = false, features = ["format", "std"] }
 lexical-parse-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
@@ -130,6 +131,7 @@ hdrhistogram = { version = "7", features = ["base64", "crossbeam-channel", "flat
 hyper = { version = "0.14", features = ["client", "full", "h2", "http1", "http2", "runtime", "server", "socket2", "stream", "tcp"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
 isahc = { version = "1", default-features = false, features = ["encoding_rs", "mime", "text-decoding"] }
+itertools = { version = "0.10", features = ["use_alloc", "use_std"] }
 lexical-core = { version = "0.8", features = ["floats", "format", "integers", "lexical-parse-float", "lexical-parse-integer", "lexical-write-float", "lexical-write-integer", "parse", "parse-floats", "parse-integers", "std", "write", "write-floats", "write-integers"] }
 lexical-parse-float = { version = "0.8", default-features = false, features = ["format", "std"] }
 lexical-parse-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
@@ -175,6 +177,7 @@ tokio = { version = "1", features = ["bytes", "fs", "io-std", "io-util", "libc",
 tokio-stream = { version = "0.1", features = ["net", "time"] }
 tokio-util = { version = "0.7", features = ["codec", "io", "tracing"] }
 tonic = { version = "0.8", features = ["async-trait", "axum", "channel", "codegen", "flate2", "gzip", "h2", "hyper", "hyper-timeout", "prost", "prost-derive", "prost1", "rustls-pemfile", "tls", "tls-roots-common", "tls-webpki-roots", "tokio", "tokio-rustls", "tower", "tracing-futures", "transport", "webpki-roots"] }
+tonic-build = { version = "0.8", features = ["prost", "prost-build", "transport"] }
 tower = { version = "0.4", features = ["__common", "balance", "buffer", "discover", "filter", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project", "pin-project-lite", "rand", "ready-cache", "retry", "slab", "timeout", "tokio", "tokio-util", "tracing", "util"] }
 tower-http = { version = "0.3", features = ["add-extension", "cors", "map-response-body", "tower", "util"] }
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_trace", "std", "tracing-attributes"] }

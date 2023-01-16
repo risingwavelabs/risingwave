@@ -33,42 +33,42 @@ JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_iteratorClose
 
 /*
  * Class:     com_risingwave_java_binding_Binding
- * Method:    recordGetKey
+ * Method:    rowGetKey
  * Signature: (J)[B
  */
-JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_recordGetKey
+JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_rowGetKey
   (JNIEnv *, jclass, jlong);
 
 /*
  * Class:     com_risingwave_java_binding_Binding
- * Method:    recordIsNull
+ * Method:    rowIsNull
  * Signature: (JI)Z
  */
-JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_recordIsNull
+JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_rowIsNull
   (JNIEnv *, jclass, jlong, jint);
 
 /*
  * Class:     com_risingwave_java_binding_Binding
- * Method:    recordGetInt64Value
+ * Method:    rowGetInt64Value
  * Signature: (JI)J
  */
-JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_recordGetInt64Value
+JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_rowGetInt64Value
   (JNIEnv *, jclass, jlong, jint);
 
 /*
  * Class:     com_risingwave_java_binding_Binding
- * Method:    recordGetStringValue
+ * Method:    rowGetStringValue
  * Signature: (JI)Ljava/lang/String;
  */
-JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_recordGetStringValue
+JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_rowGetStringValue
   (JNIEnv *, jclass, jlong, jint);
 
 /*
  * Class:     com_risingwave_java_binding_Binding
- * Method:    recordClose
+ * Method:    rowClose
  * Signature: (J)V
  */
-JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_recordClose
+JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_rowClose
   (JNIEnv *, jclass, jlong);
 
 #ifdef __cplusplus

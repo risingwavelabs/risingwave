@@ -38,12 +38,12 @@ pub struct Iterator {
     stream: Pin<Box<StreamTypeOfIter<HummockStorageIterator>>>,
 }
 
-pub struct Record {
+pub struct KeyedRow {
     key: Bytes,
     row: OwnedRow,
 }
 
-impl Record {
+impl KeyedRow {
     pub fn key(&self) -> &[u8] {
         self.key.as_ref()
     }
@@ -98,7 +98,6 @@ impl Iterator {
                     ReadOptions {
                         prefix_hint: None,
                         ignore_range_tombstone: false,
-                        check_bloom_filter: false,
                         retention_seconds: None,
                         table_id: read_plan.table_id.into(),
                         read_version_from_backup: false,
@@ -129,10 +128,10 @@ impl Iterator {
         })
     }
 
-    pub async fn next(&mut self) -> StorageResult<Option<Record>> {
+    pub async fn next(&mut self) -> StorageResult<Option<KeyedRow>> {
         let item = self.stream.try_next().await?;
         Ok(match item {
-            Some((key, value)) => Some(Record {
+            Some((key, value)) => Some(KeyedRow {
                 key: key.user_key.table_key.0,
                 row: self.row_serializer.deserialize(value)?,
             }),

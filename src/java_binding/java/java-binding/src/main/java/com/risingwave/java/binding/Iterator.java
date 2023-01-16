@@ -4,17 +4,16 @@ import com.risingwave.java.binding.rpc.MetaClient;
 import com.risingwave.proto.Catalog.Table;
 import com.risingwave.proto.Hummock.HummockVersion;
 import com.risingwave.proto.JavaBinding.ReadPlan;
-import java.time.Duration;
 
 public class Iterator implements AutoCloseable {
     final long pointer;
     final MetaClient metaClient;
     final Table catalog;
     final long versionId;
+
     boolean isClosed;
 
     public Iterator(MetaClient metaClient, String stateStore, String dbName, String tableName) {
-        metaClient.startHeartbeatLoop(Duration.ofMillis(1000), Duration.ofSeconds(600));
         // Reply on context invalidation to unpin the version.
         HummockVersion version = metaClient.pinVersion();
         Table tableCatalog = metaClient.getTable(dbName, tableName);
@@ -32,12 +31,12 @@ public class Iterator implements AutoCloseable {
         this.isClosed = false;
     }
 
-    public Record next() {
+    public KeyedRow next() {
         long pointer = Binding.iteratorNext(this.pointer);
         if (pointer == 0) {
             return null;
         }
-        return new Record(pointer);
+        return new KeyedRow(pointer);
     }
 
     @Override

@@ -12,16 +12,20 @@ public class Binding {
     // return a pointer to the next record
     static native long iteratorNext(long pointer);
 
+    // Since the underlying rust does not have garbage collection, we will have to manually call
+    // close on the iterator to release the iterator instance pointed by the pointer.
     static native void iteratorClose(long pointer);
 
-    // record method
-    static native byte[] recordGetKey(long pointer);
+    // row method
+    static native byte[] rowGetKey(long pointer);
 
-    static native boolean recordIsNull(long pointer, int index);
+    static native boolean rowIsNull(long pointer, int index);
 
-    static native long recordGetInt64Value(long pointer, int index);
+    static native long rowGetInt64Value(long pointer, int index);
 
-    static native String recordGetStringValue(long pointer, int index);
+    static native String rowGetStringValue(long pointer, int index);
 
-    static native void recordClose(long pointer);
+    // Since the underlying rust does not have garbage collection, we will have to manually call
+    // close on the row to release the row instance pointed by the pointer.
+    static native void rowClose(long pointer);
 }
