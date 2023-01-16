@@ -79,6 +79,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
+httpmock = "0.6.7"
 maplit = "1.0.2"
 rand = "0.8"
 risingwave_test_runner = { path = "../test_runner" }

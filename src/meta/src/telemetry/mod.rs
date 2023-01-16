@@ -14,21 +14,22 @@
 
 pub mod telemetry;
 
+use serde::{Deserialize, Serialize};
 use sysinfo::{NetworkExt, NetworksExt, ProcessExt, System, SystemExt};
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct SystemData {
     memory: Memory,
     os: OS,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Memory {
     total_mem: u64,
     available_mem: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct OS {
     name: String,
     kernel_version: String,
