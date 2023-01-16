@@ -47,27 +47,6 @@ use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::{PinnedHummockSnapshot, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
-// pub struct LocalQueryStream {
-//     data_stream: BoxedDataChunkStream,
-// }
-//
-// impl Stream for LocalQueryStream {
-//     type Item = Result<DataChunk, BoxedError>;
-//
-//     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-//         match self.data_stream.as_mut().poll_next(cx) {
-//             Poll::Pending => Poll::Pending,
-//             Poll::Ready(chunk) => match chunk {
-//                 Some(chunk_result) => match chunk_result {
-//                     Ok(chunk) => Poll::Ready(Some(Ok(chunk))),
-//                     Err(err) => Poll::Ready(Some(Err(Box::new(err)))),
-//                 },
-//                 None => Poll::Ready(None),
-//             },
-//         }
-//     }
-// }
-
 pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
 
 pub struct LocalQueryExecution {
