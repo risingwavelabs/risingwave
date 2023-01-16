@@ -42,7 +42,11 @@ impl Rule for FilterWithNowToJoinRule {
         filter.predicate().conjunctions.iter().for_each(|expr| {
             if let Some((input_expr, cmp, now_expr)) = expr.as_now_comparison_cond() {
                 let now_expr = rewriter.rewrite_expr(now_expr);
-                now_filters.push(FunctionCall::new(cmp, vec![input_expr, now_expr]).unwrap().into());
+                now_filters.push(
+                    FunctionCall::new(cmp, vec![input_expr, now_expr])
+                        .unwrap()
+                        .into(),
+                );
             } else {
                 remainder.push(expr.clone());
             }
@@ -96,13 +100,11 @@ impl ExprRewriter for NowAsInputRef {
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         match func_type {
-            Type::Now => {
-                InputRef {
-                    index: self.index,
-                    data_type: DataType::Timestamptz,
-                }
-                .into()
+            Type::Now => InputRef {
+                index: self.index,
+                data_type: DataType::Timestamptz,
             }
+            .into(),
             _ => FunctionCall::new_unchecked(func_type, inputs, ret).into(),
         }
     }
@@ -110,8 +112,6 @@ impl ExprRewriter for NowAsInputRef {
 
 impl NowAsInputRef {
     fn new(lhs_len: usize) -> Self {
-        Self {
-            index: lhs_len,
-        }
+        Self { index: lhs_len }
     }
 }

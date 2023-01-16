@@ -574,9 +574,17 @@ impl ExprImpl {
                 | ExprType::GreaterThan
                 | ExprType::GreaterThanOrEqual) => {
                     let (_, op1, op2) = function_call.clone().decompose_as_binary();
-                    if op1.count_nows() == 0 && op1.has_input_ref() && op2.count_nows() > 0 && op2.is_now_offset() {
+                    if op1.count_nows() == 0
+                        && op1.has_input_ref()
+                        && op2.count_nows() > 0
+                        && op2.is_now_offset()
+                    {
                         Some((op1, ty, op2))
-                    } else if op2.count_nows() == 0 && op2.has_input_ref() && op1.count_nows() > 0 && op1.is_now_offset() {
+                    } else if op2.count_nows() == 0
+                        && op2.has_input_ref()
+                        && op1.count_nows() > 0
+                        && op1.is_now_offset()
+                    {
                         Some((op2, Self::reverse_comparison(ty), op1))
                     } else {
                         None
@@ -596,13 +604,14 @@ impl ExprImpl {
                 ExprType::Now => true,
                 ExprType::Add | ExprType::Subtract => {
                     let (_, lhs, rhs) = f.clone().decompose_as_binary();
-                    lhs.as_function_call().map(|f| f.get_expr_type() == ExprType::Now).unwrap_or(false) &&
-                    rhs.is_const()
+                    lhs.as_function_call()
+                        .map(|f| f.get_expr_type() == ExprType::Now)
+                        .unwrap_or(false)
+                        && rhs.is_const()
                 }
                 _ => false,
             }
         } else {
-
             false
         }
     }
