@@ -5,6 +5,9 @@ import os
 # We use DASHBOARD_NAMESPACE_ENABLED env variable to indicate whether to add
 # a filter for the namespace field in the prometheus metric.
 NAMESPACE_FILTER_ENABLED = "DASHBOARD_NAMESPACE_FILTER_ENABLED"
+# We use RISINGWAVE_NAME_FILTER_ENABLED env variable to indicate whether to add
+# a filter for the namespace_filter field in the prometheus metric.
+RISINGWAVE_NAME_FILTER_ENABLED = "DASHBOARD_RISINGWAVE_NAME_FILTER_ENABLED"
 # We use DASHBOARD_SOURCE_UID env variable to pass custom source uid
 SOURCE_UID = "DASHBOARD_SOURCE_UID"
 # We use DASHBOARD_UID env variable to pass custom dashboard uid
@@ -16,6 +19,10 @@ namespace_filter_enabled = os.environ.get(
     NAMESPACE_FILTER_ENABLED, "") == "true"
 if namespace_filter_enabled:
     print("Enable filter for namespace field in the generated prometheus query")
+risingwave_name_filter_enabled = os.environ.get(
+    RISINGWAVE_NAME_FILTER_ENABLED, "") == "true"
+if risingwave_name_filter_enabled:
+    print("Enable filter for namespace_filter field in the generated prometheus query")
 source_uid = os.environ.get(SOURCE_UID, "risedev-prometheus")
 dashboard_uid = os.environ.get(DASHBOARD_UID, "Ecy3uV1nz")
 dashboard_version = int(os.environ.get(DASHBOARD_VERSION, "0"))
@@ -463,6 +470,8 @@ def metric(name, filter=None):
     filters = [filter] if filter else []
     if namespace_filter_enabled:
         filters.append("namespace=~\"$namespace\"")
+    if risingwave_name_filter_enabled:
+        filters.append("risingwave_name=~\"$instance\"")
     if filters:
         return f"{name}{{{','.join(filters)}}}"
     else:

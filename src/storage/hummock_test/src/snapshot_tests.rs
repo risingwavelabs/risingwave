@@ -48,7 +48,6 @@ macro_rules! assert_count_range_scan {
                 $epoch,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: false,
                     prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,

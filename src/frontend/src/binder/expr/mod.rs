@@ -356,7 +356,10 @@ impl Binder {
                 },
                 None => condition,
             };
-            inputs.push(self.bind_expr(condition)?);
+            inputs.push(
+                self.bind_expr(condition)
+                    .and_then(|expr| expr.enforce_bool_clause("CASE WHEN"))?,
+            );
             inputs.push(result);
         }
         if let Some(expr) = else_result_expr {

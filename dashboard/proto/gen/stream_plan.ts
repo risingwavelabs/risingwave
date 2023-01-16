@@ -835,6 +835,12 @@ export interface StreamActor {
   mviewDefinition: string;
 }
 
+/** The environment associated with a stream plan */
+export interface StreamEnvironment {
+  /** The timezone associated with the streaming plan. Only applies to MV for now. */
+  timezone: string;
+}
+
 export interface StreamFragmentGraph {
   /** all the fragments in the graph. */
   fragments: { [key: number]: StreamFragmentGraph_StreamFragment };
@@ -842,6 +848,7 @@ export interface StreamFragmentGraph {
   edges: StreamFragmentGraph_StreamFragmentEdge[];
   dependentTableIds: number[];
   tableIdsCnt: number;
+  env: StreamEnvironment | undefined;
 }
 
 export interface StreamFragmentGraph_StreamFragment {
@@ -3744,8 +3751,30 @@ export const StreamActor = {
   },
 };
 
+function createBaseStreamEnvironment(): StreamEnvironment {
+  return { timezone: "" };
+}
+
+export const StreamEnvironment = {
+  fromJSON(object: any): StreamEnvironment {
+    return { timezone: isSet(object.timezone) ? String(object.timezone) : "" };
+  },
+
+  toJSON(message: StreamEnvironment): unknown {
+    const obj: any = {};
+    message.timezone !== undefined && (obj.timezone = message.timezone);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<StreamEnvironment>, I>>(object: I): StreamEnvironment {
+    const message = createBaseStreamEnvironment();
+    message.timezone = object.timezone ?? "";
+    return message;
+  },
+};
+
 function createBaseStreamFragmentGraph(): StreamFragmentGraph {
-  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0 };
+  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0, env: undefined };
 }
 
 export const StreamFragmentGraph = {
@@ -3767,6 +3796,7 @@ export const StreamFragmentGraph = {
         ? object.dependentTableIds.map((e: any) => Number(e))
         : [],
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
+      env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
     };
   },
 
@@ -3789,6 +3819,7 @@ export const StreamFragmentGraph = {
       obj.dependentTableIds = [];
     }
     message.tableIdsCnt !== undefined && (obj.tableIdsCnt = Math.round(message.tableIdsCnt));
+    message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
     return obj;
   },
 
@@ -3805,6 +3836,9 @@ export const StreamFragmentGraph = {
     message.edges = object.edges?.map((e) => StreamFragmentGraph_StreamFragmentEdge.fromPartial(e)) || [];
     message.dependentTableIds = object.dependentTableIds?.map((e) => e) || [];
     message.tableIdsCnt = object.tableIdsCnt ?? 0;
+    message.env = (object.env !== undefined && object.env !== null)
+      ? StreamEnvironment.fromPartial(object.env)
+      : undefined;
     return message;
   },
 };

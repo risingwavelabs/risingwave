@@ -105,7 +105,7 @@ impl LogicalSource {
     }
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
-        generic::Source::infer_internal_table_catalog(&self.base)
+        generic::Source::infer_internal_table_catalog()
     }
 
     pub fn kafka_timestamp_range(&self) -> &(Bound<i64>, Bound<i64>) {
