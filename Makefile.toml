@@ -12,6 +12,7 @@ extend = [
   { path = "src/frontend/planner_test/planner_test.toml" },
   { path = "src/tests/compaction_test/Makefile.toml" },
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
+  { path = "src/java_binding/make-java-binding.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
