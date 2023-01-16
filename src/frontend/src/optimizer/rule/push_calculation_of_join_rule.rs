@@ -46,7 +46,7 @@ impl Rule for PushCalculationOfJoinRule {
             .iter()
             .filter(|e| e.as_input_ref().is_none())
             .cloned()
-            .collect();  
+            .collect();
 
         // used to shift indices of input_refs pointing the right side of `join` with
         // `left_exprs.len`.
