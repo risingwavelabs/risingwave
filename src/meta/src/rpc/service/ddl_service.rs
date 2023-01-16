@@ -19,6 +19,7 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
 use risingwave_pb::ddl_service::*;
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tonic::{Request, Response, Status};
@@ -582,11 +583,12 @@ where
         };
 
         let table_ids_cnt = fragment_graph.table_ids_cnt;
-        let default_parallelism = if fragment_graph.parallelism > 0 {
-            fragment_graph.parallelism as usize
-        } else {
-            self.cluster_manager.get_active_parallel_unit_count().await
-        };
+        let default_parallelism =
+            if let Some(Parallelism { parallelism }) = fragment_graph.parallelism {
+                parallelism as usize
+            } else {
+                self.cluster_manager.get_active_parallel_unit_count().await
+            };
         let mut actor_graph_builder = ActorGraphBuilder::new(
             self.env.id_gen_manager_ref(),
             fragment_graph,

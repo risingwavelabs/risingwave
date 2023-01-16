@@ -15,6 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
@@ -104,8 +105,10 @@ pub async fn handle_create_as(
             None,          // TODO: support `ALTER TABLE` for `CREATE TABLE AS`
         )?;
         let mut graph = build_graph(plan);
-        let streaming_parallelism = session.config().get_streaming_parallelism();
-        graph.parallelism = streaming_parallelism.unwrap_or(0);
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
         (graph, source, table)
     };
 

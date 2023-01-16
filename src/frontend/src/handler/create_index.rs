@@ -21,6 +21,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
@@ -373,8 +374,10 @@ pub async fn handle_create_index(
             distributed_by,
         )?;
         let mut graph = build_graph(plan);
-        let streaming_parallelism = session.config().get_streaming_parallelism();
-        graph.parallelism = streaming_parallelism.unwrap_or(0);
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
         (graph, index_table, index)
     };
 

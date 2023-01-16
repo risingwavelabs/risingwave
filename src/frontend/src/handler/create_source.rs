@@ -25,6 +25,7 @@ use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
 };
 use risingwave_pb::plan_common::RowFormatType;
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_source::{AvroParser, ProtobufParser};
 use risingwave_sqlparser::ast::{AvroSchema, CreateSourceStatement, ProtobufSchema, SourceSchema};
 
@@ -330,8 +331,10 @@ pub async fn handle_create_source(
             let (plan, table) =
                 gen_materialize_plan(context.into(), source.clone(), session.user_id())?;
             let mut graph = build_graph(plan);
-            let streaming_parallelism = session.config().get_streaming_parallelism();
-            graph.parallelism = streaming_parallelism.unwrap_or(0);
+            graph.parallelism = session
+                .config()
+                .get_streaming_parallelism()
+                .map(|parallelism| Parallelism { parallelism });
             (graph, table)
         };
         catalog_writer

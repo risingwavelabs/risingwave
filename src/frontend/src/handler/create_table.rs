@@ -23,6 +23,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
 };
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, TableConstraint,
 };
@@ -576,8 +577,10 @@ pub async fn handle_create_table(
             )?,
         };
         let mut graph = build_graph(plan);
-        let streaming_parallelism = session.config().get_streaming_parallelism();
-        graph.parallelism = streaming_parallelism.unwrap_or(0);
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
         (graph, source, table)
     };
 

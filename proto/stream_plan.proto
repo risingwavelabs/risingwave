@@ -622,6 +622,5 @@ message StreamFragmentGraph {
   repeated uint32 dependent_table_ids = 3;
   uint32 table_ids_cnt = 4;
   StreamEnvironment env = 5;
-  // 0 means use default value.
-  uint64 parallelism = 6;
+  Parallelism parallelism = 6;
 }
