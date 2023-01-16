@@ -59,6 +59,8 @@ pub(crate) struct MergedImmutableMemtableInner {
     /// after we finished a sync/spill task
     merged_imm_ids: Vec<ImmId>,
 
+    /// Used for compact_shared_buffer logic
+    // imms: Vec<ImmutableMemtable>,
     _tracker: Option<MemoryTracker>,
 }
 
@@ -68,6 +70,7 @@ impl MergedImmutableMemtableInner {
         range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
         epochs: Vec<HummockEpoch>,
+        // imms: Vec<ImmutableMemtable>,
         min_epoch: HummockEpoch,
         merged_imm_ids: Vec<ImmId>,
     ) -> Self {
@@ -79,6 +82,7 @@ impl MergedImmutableMemtableInner {
             epochs,
             batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
             merged_imm_ids,
+            // imms,
             _tracker: None,
         }
     }
@@ -154,10 +158,10 @@ impl MergedImmutableMemtable {
                 "should only merge data belonging to the same table"
             );
             merged_imm_ids.push(imm.batch_id());
+            epochs.push(imm.epoch());
             num_keys += imm.count();
             size += imm.size();
             min_epoch = std::cmp::min(min_epoch, imm.epoch());
-            epochs.push(imm.epoch());
             range_tombstone_list.extend(imm.get_delete_range_tombstones());
             heap.push(Node {
                 iter: imm.into_forward_iter(),
@@ -209,6 +213,7 @@ impl MergedImmutableMemtable {
                 range_tombstone_list,
                 size,
                 epochs,
+                // imms,
                 min_epoch,
                 merged_imm_ids,
             )),
@@ -346,6 +351,10 @@ impl MergedImmutableMemtable {
     pub fn epochs(&self) -> &Vec<HummockEpoch> {
         &self.inner.epochs
     }
+
+    // pub fn imms(&self) -> &Vec<ImmutableMemtable> {
+    //     &self.inner.imms
+    // }
 
     pub fn size(&self) -> usize {
         self.inner.size

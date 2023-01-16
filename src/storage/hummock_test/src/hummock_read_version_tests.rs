@@ -327,7 +327,7 @@ async fn test_read_version_merge_imms() {
             );
 
             // expect merged_imm_ids is a suffix of staging_imm_ids
-            for (id1, id2) in staging_imm_ids.iter().zip(merged_imm_ids.iter()) {
+            for (id1, id2) in staging_imm_ids.iter().zip_eq(merged_imm_ids.iter()) {
                 assert_eq!(id1, id2);
             }
             Some(merged_imm)

@@ -33,7 +33,7 @@ use crate::hummock::iterator::{
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
 };
-use crate::hummock::store::immutable_memtable::{MergedImmIterator, MergedImmutableMemtable};
+use crate::hummock::store::immutable_memtable::MergedImmIterator;
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::{MemoryLimiter, SstableIterator};
 use crate::monitor::{StateStoreMetrics, StoreLocalStatistic};
@@ -97,25 +97,25 @@ impl HummockStorageCore {
     pub fn update(&self, info: VersionUpdate) {
         let mut write_guard = self.read_version.write();
         write_guard.update(info);
-
+        // TODO(siyuan): move the merge logic into Uploader
         // check whether we need to merge some immutable memtables
-        if let Some(imms) = write_guard.get_imms_to_merge() {
-            let merged_imm =
-                MergedImmutableMemtable::build_merged_imm(self.instance_guard.table_id, imms, None);
-            // TODO(siyuan): try sync merge to see how much performance gain can get
-            write_guard.update(VersionUpdate::Staging(StagingData::MergedImmMem(
-                merged_imm,
-            )));
+        // if let Some(imms) = write_guard.get_imms_to_merge() {
+        //     let merged_imm =
+        //         MergedImmutableMemtable::build_merged_imm(self.instance_guard.table_id, imms,
+        // None);     // TODO(siyuan): try sync merge to see how much performance gain can
+        // get     write_guard.update(VersionUpdate::Staging(StagingData::MergedImmMem(
+        //         merged_imm,
+        //     )));
 
-            // self.event_sender
-            //     .send(HummockEvent::ImmToMerge {
-            //         table_id: self.instance_guard.table_id,
-            //         read_version: self.read_version.clone(),
-            //         imms,
-            //     })
-            //     .expect("send event failed");
-            // write_guard.set_onging_merge_task(true);
-        }
+        // self.event_sender
+        //     .send(HummockEvent::ImmToMerge {
+        //         table_id: self.instance_guard.table_id,
+        //         read_version: self.read_version.clone(),
+        //         imms,
+        //     })
+        //     .expect("send event failed");
+        // write_guard.set_onging_merge_task(true);
+        // }
     }
 
     pub async fn get_inner<'a>(
@@ -242,7 +242,7 @@ impl StateStoreWrite for LocalHummockStorage {
             // insert imm to uploader
             self.core
                 .event_sender
-                .send(HummockEvent::ImmToUploader(imm))
+                .send(HummockEvent::ImmToUploader(imm, self.instance_id()))
                 .unwrap();
 
             Ok(imm_size)

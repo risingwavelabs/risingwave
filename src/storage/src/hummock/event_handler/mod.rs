@@ -59,7 +59,7 @@ pub enum HummockEvent {
 
     VersionUpdate(pin_version_response::Payload),
 
-    ImmToUploader(ImmutableMemtable),
+    ImmToUploader(ImmutableMemtable, LocalInstanceId),
 
     ImmToMerge {
         table_id: TableId,
@@ -107,7 +107,9 @@ impl HummockEvent {
                 format!("VersionUpdate {:?}", pin_version_response)
             }
 
-            HummockEvent::ImmToUploader(imm) => format!("ImmToUploader {:?}", imm),
+            HummockEvent::ImmToUploader(imm, instance_id) => {
+                format!("ImmToUploader {:?}, shard_id: {}", imm, instance_id)
+            }
 
             HummockEvent::SealEpoch {
                 epoch,

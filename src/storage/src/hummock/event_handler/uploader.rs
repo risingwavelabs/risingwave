@@ -32,10 +32,11 @@ use tokio::task::JoinHandle;
 use tracing::{error, warn};
 
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
+use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::store::immutable_memtable::MergedImmutableMemtable;
 use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
-use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo};
+use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo, IMM_MERGE_THRESHOLD};
 use crate::hummock::{HummockError, HummockResult};
 
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
@@ -416,6 +417,11 @@ pub struct HummockUploader {
     /// Data that are not sealed yet. `epoch` satisfies `epoch > max_sealed_epoch`.
     unsealed_data: BTreeMap<HummockEpoch, UnsealedEpochData>,
 
+    // An index for unsealed data of multiple epochs, used for merge imms.
+    // On each SealEpoch event, we will scan the map to check if there are imms <= sealed_epoch
+    // that can be merged.
+    unsealed_data_by_table_shard: HashMap<(TableId, LocalInstanceId), VecDeque<ImmutableMemtable>>,
+
     /// Data that are sealed but not synced yet. `epoch` satisfies
     /// `max_syncing_epoch < epoch <= max_sealed_epoch`.
     sealed_data: SealedData,
@@ -448,6 +454,7 @@ impl HummockUploader {
             max_syncing_epoch: initial_epoch,
             max_synced_epoch: initial_epoch,
             unsealed_data: Default::default(),
+            unsealed_data_by_table_shard: Default::default(),
             sealed_data: Default::default(),
             syncing_data: Default::default(),
             imm_merging_tasks: Default::default(),
@@ -473,7 +480,7 @@ impl HummockUploader {
         self.synced_data.get(&epoch)
     }
 
-    pub(crate) fn add_imm(&mut self, imm: ImmutableMemtable) {
+    pub(crate) fn add_imm(&mut self, imm: ImmutableMemtable, instance_id: Option<LocalInstanceId>) {
         let epoch = imm.epoch();
         assert!(
             epoch > self.max_sealed_epoch,
@@ -485,7 +492,14 @@ impl HummockUploader {
             .entry(epoch)
             .or_default()
             .imms
-            .push_front(imm);
+            .push_front(imm.clone());
+
+        if let Some(instance_id) = instance_id {
+            self.unsealed_data_by_table_shard
+                .entry((imm.table_id(), instance_id))
+                .or_default()
+                .push_front(imm);
+        }
     }
 
     pub(crate) fn start_merge_imms(
@@ -522,6 +536,51 @@ impl HummockUploader {
             } else {
                 warn!("epoch {} to seal has no data", epoch);
             }
+        }
+    }
+
+    pub(crate) async fn try_merge_imms(
+        &mut self,
+        sealed_epoch: HummockEpoch,
+        is_checkpoint: bool,
+    ) -> HummockResult<Vec<(TableId, LocalInstanceId, MergedImmutableMemtable)>> {
+        // We need to filter imms <= sealed_epoch for each local hummock instance.
+        let task_handles = self
+            .unsealed_data_by_table_shard
+            .iter_mut()
+            .flat_map(|((table_id, instance_id), imms)| {
+                // imms is order by epoch in desc order
+                let first_sealed_idx = imms.partition_point(|imm| imm.epoch() > sealed_epoch);
+                let num_sealed_imms = imms.len() - first_sealed_idx;
+                if num_sealed_imms >= IMM_MERGE_THRESHOLD {
+                    let sealed_imms = imms.drain(first_sealed_idx..).collect_vec();
+                    Some((*table_id, *instance_id, sealed_imms))
+                } else {
+                    // If the sealed_epoch is a checkpoint epoch, we should truncate those sealed
+                    // imms since they will be flushed soon
+                    if is_checkpoint {
+                        imms.truncate(imms.len() - num_sealed_imms);
+                    }
+                    None
+                }
+            })
+            .map(|(table_id, shard_id, imms)| {
+                tokio::spawn(async move {
+                    (
+                        table_id,
+                        shard_id,
+                        MergedImmutableMemtable::build_merged_imm(table_id, imms, None),
+                    )
+                })
+            })
+            .collect_vec();
+
+        match try_join_all(task_handles).await {
+            Ok(output) => Ok(output),
+            Err(err) => Err(HummockError::other(format!(
+                "fail to join imm merge task handle: {:?}",
+                err
+            ))),
         }
     }
 
@@ -1016,7 +1075,7 @@ mod tests {
         let mut uploader = test_uploader(dummy_success_upload_future);
         let epoch1 = INITIAL_EPOCH + 1;
         let imm = gen_imm(epoch1).await;
-        uploader.add_imm(imm.clone());
+        uploader.add_imm(imm.clone(), None);
         assert_eq!(1, uploader.unsealed_data.len());
         assert_eq!(
             epoch1 as HummockEpoch,
@@ -1083,7 +1142,7 @@ mod tests {
         let epoch2 = INITIAL_EPOCH + 2;
         let imm = gen_imm(epoch2).await;
         // epoch1 is empty while epoch2 is not. Going to seal empty epoch1.
-        uploader.add_imm(imm);
+        uploader.add_imm(imm, None);
         uploader.seal_epoch(epoch1);
         assert_eq!(epoch1, uploader.max_sealed_epoch);
 
@@ -1139,7 +1198,7 @@ mod tests {
         assert_eq!(epoch1, uploader.max_syncing_epoch);
         assert_eq!(epoch1, uploader.max_sealed_epoch);
 
-        uploader.add_imm(gen_imm(epoch6).await);
+        uploader.add_imm(gen_imm(epoch6).await, None);
         uploader.update_pinned_version(version2);
         assert_eq!(epoch2, uploader.max_synced_epoch);
         assert_eq!(epoch2, uploader.max_syncing_epoch);
@@ -1245,11 +1304,11 @@ mod tests {
 
         // imm2 contains data in newer epoch, but added first
         let imm2 = gen_imm_with_limiter(epoch2, memory_limiter).await;
-        uploader.add_imm(imm2.clone());
+        uploader.add_imm(imm2.clone(), None);
         let imm1_1 = gen_imm_with_limiter(epoch1, memory_limiter).await;
-        uploader.add_imm(imm1_1.clone());
+        uploader.add_imm(imm1_1.clone(), None);
         let imm1_2 = gen_imm_with_limiter(epoch1, memory_limiter).await;
-        uploader.add_imm(imm1_2.clone());
+        uploader.add_imm(imm1_2.clone(), None);
 
         // imm1 will be spilled first
         let (await_start1, finish_tx1) =
@@ -1280,12 +1339,12 @@ mod tests {
         }
 
         let imm1_3 = gen_imm_with_limiter(epoch1, memory_limiter).await;
-        uploader.add_imm(imm1_3.clone());
+        uploader.add_imm(imm1_3.clone(), None);
         let (await_start1_3, finish_tx1_3) = new_task_notifier(vec![imm1_3.batch_id()]);
         uploader.may_flush();
         await_start1_3.await;
         let imm1_4 = gen_imm_with_limiter(epoch1, memory_limiter).await;
-        uploader.add_imm(imm1_4.clone());
+        uploader.add_imm(imm1_4.clone(), None);
         let (await_start1_4, finish_tx1_4) = new_task_notifier(vec![imm1_4.batch_id()]);
         uploader.seal_epoch(epoch1);
         uploader.start_sync_epoch(epoch1);
@@ -1300,17 +1359,17 @@ mod tests {
 
         let epoch3 = INITIAL_EPOCH + 3;
         let imm3_1 = gen_imm_with_limiter(epoch3, memory_limiter).await;
-        uploader.add_imm(imm3_1.clone());
+        uploader.add_imm(imm3_1.clone(), None);
         let (await_start3_1, finish_tx3_1) = new_task_notifier(vec![imm3_1.batch_id()]);
         uploader.may_flush();
         await_start3_1.await;
         let imm3_2 = gen_imm_with_limiter(epoch3, memory_limiter).await;
-        uploader.add_imm(imm3_2.clone());
+        uploader.add_imm(imm3_2.clone(), None);
         let (await_start3_2, finish_tx3_2) = new_task_notifier(vec![imm3_2.batch_id()]);
         uploader.may_flush();
         await_start3_2.await;
         let imm3_3 = gen_imm_with_limiter(epoch3, memory_limiter).await;
-        uploader.add_imm(imm3_3.clone());
+        uploader.add_imm(imm3_3.clone(), None);
 
         // current uploader state:
         // unsealed: epoch3: imm: imm3_3, uploading: [imm3_2], [imm3_1]
@@ -1319,7 +1378,7 @@ mod tests {
 
         let epoch4 = INITIAL_EPOCH + 4;
         let imm4 = gen_imm_with_limiter(epoch4, memory_limiter).await;
-        uploader.add_imm(imm4.clone());
+        uploader.add_imm(imm4.clone(), None);
         assert_uploader_pending(&mut uploader).await;
 
         // current uploader state:

@@ -216,8 +216,6 @@ impl HummockEventHandler {
         newly_uploaded_sstables: Vec<StagingSstableInfo>,
     ) {
         if !newly_uploaded_sstables.is_empty() {
-            let num_ssts = newly_uploaded_sstables.len();
-            info!("epoch synced. num SSTs {}", num_ssts);
             newly_uploaded_sstables
                 .into_iter()
                 // Take rev because newer data come first in `newly_uploaded_sstables` but we apply
@@ -225,7 +223,6 @@ impl HummockEventHandler {
                 .rev()
                 .for_each(|staging_sstable_info| {
                     Self::for_each_read_version(&self.read_version_mapping, |read_version| {
-                        info!("epoch synced. SST size {}", staging_sstable_info.imm_size());
                         read_version.update(VersionUpdate::Staging(StagingData::Sst(
                             staging_sstable_info.clone(),
                         )))
@@ -461,8 +458,8 @@ impl HummockEventHandler {
                             self.handle_version_update(version_payload);
                         }
 
-                        HummockEvent::ImmToUploader(imm) => {
-                            self.uploader.add_imm(imm);
+                        HummockEvent::ImmToUploader(imm, instance_id) => {
+                            self.uploader.add_imm(imm, Some(instance_id));
                             self.uploader.may_flush();
                         }
 
@@ -478,7 +475,26 @@ impl HummockEventHandler {
                             epoch,
                             is_checkpoint,
                         } => {
+                            // merge sealed imms and then update each read version
                             self.uploader.seal_epoch(epoch);
+                            let merge_output = self
+                                .uploader
+                                .try_merge_imms(epoch, is_checkpoint)
+                                .await
+                                .unwrap();
+                            let read_guard = self.read_version_mapping.read();
+                            merge_output.into_iter().for_each(
+                                |(table_id, instance_id, merged_imm)| {
+                                    read_guard.get(&table_id).map_or((), |shards| {
+                                        shards.get(&instance_id).map_or((), |read_version| {
+                                            read_version.write().update(VersionUpdate::Staging(
+                                                StagingData::MergedImmMem(merged_imm),
+                                            ));
+                                        })
+                                    })
+                                },
+                            );
+
                             if is_checkpoint {
                                 self.uploader.start_sync_epoch(epoch);
                             }

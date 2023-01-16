@@ -315,13 +315,12 @@ impl HummockReadVersion {
                         ));
 
                         // Check 3) and replace imms with a staging sst
-                        for (idx, clear_imm_id) in intersect_imm_ids.iter().enumerate() {
-                            if let Some(imm) = self.staging.imm.back() {
-                                if *clear_imm_id == imm.batch_id() {
-                                    self.staging.imm.pop_back();
-                                }
+                        let mut idx = 0;
+                        loop {
+                            if idx >= intersect_imm_ids.len() {
+                                break;
                             }
-
+                            let clear_imm_id = &intersect_imm_ids[idx];
                             // TODO(siyuan): confirm the correctness of this logic
                             if let Some(ImmutableMemtableImpl::MergedImm(merged_imm)) =
                                 self.staging.merged_imm.back()
@@ -347,7 +346,31 @@ impl HummockReadVersion {
                                         imm_ids
                                     );
                                     self.staging.merged_imm.pop_back();
+                                    idx = right_idx + 1;
+                                    continue;
+                                } else {
+                                    unreachable!(
+                                        "should not reach here staging_sst.size {},
+                                    staging_sst.imm_ids {:?},
+                                    staging_sst.epochs {:?},
+                                    intersect_imm_ids {:?},
+                                    merged_imm_ids {:?},
+                                    merged_epochs {:?}",
+                                        staging_sst.imm_size,
+                                        staging_sst.imm_ids,
+                                        staging_sst.epochs,
+                                        intersect_imm_ids,
+                                        imm_ids,
+                                        merged_imm.epochs(),
+                                    )
                                 }
+                            }
+
+                            if let Some(imm) = self.staging.imm.back() {
+                                if *clear_imm_id == imm.batch_id() {
+                                    self.staging.imm.pop_back();
+                                }
+                                idx += 1;
                             }
                         }
 
@@ -372,17 +395,6 @@ impl HummockReadVersion {
                     self.staging.sst.retain(|sst| {
                         sst.epochs.first().expect("epochs not empty") > &max_committed_epoch
                     });
-
-                    assert!(self.staging.imm.iter().all(|imm| {
-                        match imm {
-                            ImmutableMemtableImpl::Imm(batch) => batch.epoch > max_committed_epoch,
-                            // MCE would not fall in the middle of epochs
-                            // because imms must be newer than committed version
-                            ImmutableMemtableImpl::MergedImm(m) => {
-                                m.epochs().iter().all(|e| e > &max_committed_epoch)
-                            }
-                        }
-                    }));
 
                     // check epochs.last() > MCE
                     assert!(self.staging.sst.iter().all(|sst| {
@@ -435,16 +447,9 @@ impl HummockReadVersion {
         self.staging.sst.clear();
     }
 
-    fn add_merged_imm(&mut self, merged_imm: MergedImmutableMemtable) {
+    pub fn add_merged_imm(&mut self, merged_imm: MergedImmutableMemtable) {
         let staging_imm_count = self.staging.imm.len();
         let merged_imm_ids = merged_imm.get_merged_imm_ids();
-
-        // The imms have been flushed, so the merged imm is useless
-        if staging_imm_count == 0 {
-            tracing::warn!("staging imms have been flushed");
-            self.onging_merge_task = false;
-            return;
-        }
 
         #[cfg(debug_assertions)]
         {
@@ -454,7 +459,12 @@ impl HummockReadVersion {
             let mut count: usize = 0;
             for (i, imm) in self.staging.imm.iter().skip(diff).enumerate() {
                 count += 1;
-                assert_eq!(imm.batch_id(), merged_imm_ids[i]);
+                assert_eq!(
+                    imm.batch_id(),
+                    merged_imm_ids[i],
+                    "merged_imm_ids: {:?}",
+                    merged_imm_ids
+                );
             }
             assert_eq!(count, merged_imm_ids.len());
         }
