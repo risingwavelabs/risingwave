@@ -12,12 +12,6 @@ select * from t;
 ----
 3
 
-# currently returning tests are blocked by https://github.com/risingwavelabs/risingwave/issues/7277
-# query I
-# insert into t values (2+2) returning *;
-# ----
-# 4
-
 statement ok
 insert into t values (2+2);
 
@@ -72,15 +66,15 @@ select * from t;
 8
 9
 
-# query I
-# update t set v1=v1+2 where v1=3 returning *;
-# ----
-# 5
+query I
+update t set v1=v1+2 where v1=3 returning *;
+----
+5
 
-# query II
-# delete from t where v1=5 returning *,2*v1;
-# ----
-# 5 10
+query II
+delete from t where v1=5 returning *, 2*v1;
+----
+5 10
 
 statement ok
 drop table t;

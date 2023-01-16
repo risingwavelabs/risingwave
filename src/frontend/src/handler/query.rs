@@ -192,6 +192,8 @@ pub async fn handle_query(
     };
 
     // Implicitly flush the writes.
+    // FIXME(bugen): the DMLs with `RETURNING` clause is done only after the `row_stream` is fully
+    // consumed, so implicitly flushing here doesn't work.
     if session.config().get_implicit_flush() {
         flush_for_write(&session, stmt_type).await?;
     }
