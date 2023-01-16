@@ -32,7 +32,7 @@ use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBuffe
 use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::{SstableStore, TieredCache};
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::monitor::HummockStateStoreMetrics;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StreamTypeOfIter};
 use tokio::runtime::Runtime;
@@ -45,13 +45,13 @@ pub struct Iterator {
 }
 
 pub struct KeyedRow {
-    key: Vec<u8>,
+    key: Bytes,
     row: OwnedRow,
 }
 
 impl KeyedRow {
     pub fn key(&self) -> &[u8] {
-        self.key.as_slice()
+        self.key.as_ref()
     }
 
     pub fn is_null(&self, idx: usize) -> bool {
@@ -132,7 +132,7 @@ impl Iterator {
             TieredCache::none(),
         ));
         let reader =
-            HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
+            HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
 
         let runtime = tokio::runtime::Runtime::new().unwrap();
 
@@ -144,7 +144,6 @@ impl Iterator {
                     ReadOptions {
                         prefix_hint: None,
                         ignore_range_tombstone: false,
-                        check_bloom_filter: false,
                         retention_seconds: None,
                         table_id: TEST_TABLE_ID,
                         read_version_from_backup: false,
