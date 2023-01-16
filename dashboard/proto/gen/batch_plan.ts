@@ -308,7 +308,6 @@ export interface PlanNode {
     | { $case: "values"; values: ValuesNode }
     | { $case: "hashJoin"; hashJoin: HashJoinNode }
     | { $case: "mergeSortExchange"; mergeSortExchange: MergeSortExchangeNode }
-    | { $case: "sortMergeJoin"; sortMergeJoin: SortMergeJoinNode }
     | { $case: "hopWindow"; hopWindow: HopWindowNode }
     | { $case: "tableFunction"; tableFunction: TableFunctionNode }
     | { $case: "sysRowSeqScan"; sysRowSeqScan: SysRowSeqScanNode }
@@ -1839,8 +1838,6 @@ export const PlanNode = {
         ? { $case: "hashJoin", hashJoin: HashJoinNode.fromJSON(object.hashJoin) }
         : isSet(object.mergeSortExchange)
         ? { $case: "mergeSortExchange", mergeSortExchange: MergeSortExchangeNode.fromJSON(object.mergeSortExchange) }
-        : isSet(object.sortMergeJoin)
-        ? { $case: "sortMergeJoin", sortMergeJoin: SortMergeJoinNode.fromJSON(object.sortMergeJoin) }
         : isSet(object.hopWindow)
         ? { $case: "hopWindow", hopWindow: HopWindowNode.fromJSON(object.hopWindow) }
         : isSet(object.tableFunction)
@@ -1910,9 +1907,6 @@ export const PlanNode = {
     message.nodeBody?.$case === "mergeSortExchange" && (obj.mergeSortExchange = message.nodeBody?.mergeSortExchange
       ? MergeSortExchangeNode.toJSON(message.nodeBody?.mergeSortExchange)
       : undefined);
-    message.nodeBody?.$case === "sortMergeJoin" && (obj.sortMergeJoin = message.nodeBody?.sortMergeJoin
-      ? SortMergeJoinNode.toJSON(message.nodeBody?.sortMergeJoin)
-      : undefined);
     message.nodeBody?.$case === "hopWindow" &&
       (obj.hopWindow = message.nodeBody?.hopWindow ? HopWindowNode.toJSON(message.nodeBody?.hopWindow) : undefined);
     message.nodeBody?.$case === "tableFunction" && (obj.tableFunction = message.nodeBody?.tableFunction
@@ -1944,9 +1938,7 @@ export const PlanNode = {
 
   fromPartial<I extends Exact<DeepPartial<PlanNode>, I>>(object: I): PlanNode {
     const message = createBasePlanNode();
-    message.children = object.children?.map((e) =>
-      PlanNode.fromPartial(e)
-    ) || [];
+    message.children = object.children?.map((e) => PlanNode.fromPartial(e)) || [];
     if (
       object.nodeBody?.$case === "insert" && object.nodeBody?.insert !== undefined && object.nodeBody?.insert !== null
     ) {
@@ -2041,16 +2033,6 @@ export const PlanNode = {
       message.nodeBody = {
         $case: "mergeSortExchange",
         mergeSortExchange: MergeSortExchangeNode.fromPartial(object.nodeBody.mergeSortExchange),
-      };
-    }
-    if (
-      object.nodeBody?.$case === "sortMergeJoin" &&
-      object.nodeBody?.sortMergeJoin !== undefined &&
-      object.nodeBody?.sortMergeJoin !== null
-    ) {
-      message.nodeBody = {
-        $case: "sortMergeJoin",
-        sortMergeJoin: SortMergeJoinNode.fromPartial(object.nodeBody.sortMergeJoin),
       };
     }
     if (
