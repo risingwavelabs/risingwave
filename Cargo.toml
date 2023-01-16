@@ -13,6 +13,7 @@ members = [
   "src/expr",
   "src/frontend",
   "src/frontend/planner_test",
+  "src/java_binding",
   "src/meta",
   "src/object_store",
   "src/prost",

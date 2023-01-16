@@ -1187,6 +1187,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cesu8"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d43a04d8753f35258c91f8ec639f792891f748a1edbd759cf1dcea3382ad83c"
+
+[[package]]
 name = "cexpr"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3063,6 +3069,26 @@ name = "itoa"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4217ad341ebadf8d8e724e264f13e593e0648f5b3e94b3896a5df283be015ecc"
+
+[[package]]
+name = "jni"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "039022cdf4d7b1cf548d31f60ae783138e5fd42013f6271049d7df7afadef96c"
+dependencies = [
+ "cesu8",
+ "combine",
+ "jni-sys",
+ "log",
+ "thiserror",
+ "walkdir",
+]
+
+[[package]]
+name = "jni-sys"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eaf4bc02d17cbdd7ff4c7438cafcdf7fb9a4613313ad11b4f8fefe7d3fa0130"
 
 [[package]]
 name = "jobserver"
@@ -5940,6 +5966,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_java_binding"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures",
+ "itertools",
+ "jni",
+ "madsim-tokio",
+ "risingwave_common",
+ "risingwave_object_store",
+ "risingwave_pb",
+ "risingwave_storage",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "risingwave_meta"
 version = "0.2.0-alpha"
 dependencies = [
@@ -8392,6 +8435,7 @@ dependencies = [
  "cc",
  "chrono",
  "clap 3.2.23",
+ "combine",
  "criterion",
  "crossbeam-channel",
  "crossbeam-deque",
