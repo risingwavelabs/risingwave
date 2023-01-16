@@ -90,7 +90,7 @@ struct NowAsInputRef {
 impl ExprRewriter for NowAsInputRef {
     fn rewrite_function_call(
         &mut self,
-        func_call: crate::expr::FunctionCall,
+        func_call: FunctionCall,
     ) -> crate::expr::ExprImpl {
         let (func_type, inputs, ret) = func_call.decompose();
         let inputs = inputs
