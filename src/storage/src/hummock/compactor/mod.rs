@@ -18,7 +18,6 @@ mod compactor_runner;
 mod context;
 mod iterator;
 mod shared_buffer_compact;
-mod sstable_store;
 pub(super) mod task_progress;
 
 use std::collections::{HashMap, HashSet};
@@ -52,9 +51,6 @@ use risingwave_pb::hummock::{
 };
 use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::compact;
-pub use sstable_store::{
-    CompactorMemoryCollector, CompactorSstableStore, CompactorSstableStoreRef,
-};
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
@@ -240,7 +236,7 @@ impl Compactor {
             TaskProgressGuard::new(compact_task.task_id, context.task_progress_manager.clone());
         let delete_range_agg = match CompactorRunner::build_delete_range_iter(
             &compact_task,
-            &compactor_context.sstable_store,
+            &compactor_context.context.sstable_store,
             &mut multi_filter,
         )
         .await

@@ -88,7 +88,7 @@ pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> St
         table.pk().iter().map(|x| x.index).collect(),
         Distribution::all_vnodes(table.distribution_key().to_vec()),
         TableOption::build_table_option(&HashMap::new()),
-        (0..table.columns().len()).collect(),
+        table.value_indices.clone(),
         table.read_prefix_len_hint,
     )
 }

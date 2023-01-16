@@ -13,7 +13,7 @@ import {
 } from "./common";
 import { HummockSnapshot, HummockVersion, HummockVersionDeltas } from "./hummock";
 import { ConnectorSplits } from "./source";
-import { Dispatcher, StreamActor, StreamNode } from "./stream_plan";
+import { Dispatcher, StreamActor, StreamEnvironment, StreamNode } from "./stream_plan";
 import { UserInfo } from "./user";
 
 export const protobufPackage = "meta";
@@ -86,6 +86,7 @@ export interface TableFragments {
   fragments: { [key: number]: TableFragments_Fragment };
   actorStatus: { [key: number]: TableFragments_ActorStatus };
   actorSplits: { [key: number]: ConnectorSplits };
+  env: StreamEnvironment | undefined;
 }
 
 /** The state of the fragments of this table */
@@ -314,6 +315,7 @@ export interface ListTableFragmentsResponse_FragmentInfo {
 
 export interface ListTableFragmentsResponse_TableFragmentInfo {
   fragments: ListTableFragmentsResponse_FragmentInfo[];
+  env: StreamEnvironment | undefined;
 }
 
 export interface ListTableFragmentsResponse_TableFragmentsEntry {
@@ -616,7 +618,14 @@ export const HeartbeatResponse = {
 };
 
 function createBaseTableFragments(): TableFragments {
-  return { tableId: 0, state: TableFragments_State.UNSPECIFIED, fragments: {}, actorStatus: {}, actorSplits: {} };
+  return {
+    tableId: 0,
+    state: TableFragments_State.UNSPECIFIED,
+    fragments: {},
+    actorStatus: {},
+    actorSplits: {},
+    env: undefined,
+  };
 }
 
 export const TableFragments = {
@@ -645,6 +654,7 @@ export const TableFragments = {
           return acc;
         }, {})
         : {},
+      env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
     };
   },
 
@@ -670,6 +680,7 @@ export const TableFragments = {
         obj.actorSplits[k] = ConnectorSplits.toJSON(v);
       });
     }
+    message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
     return obj;
   },
 
@@ -703,6 +714,9 @@ export const TableFragments = {
       },
       {},
     );
+    message.env = (object.env !== undefined && object.env !== null)
+      ? StreamEnvironment.fromPartial(object.env)
+      : undefined;
     return message;
   },
 };
@@ -1135,7 +1149,7 @@ export const ListTableFragmentsResponse_FragmentInfo = {
 };
 
 function createBaseListTableFragmentsResponse_TableFragmentInfo(): ListTableFragmentsResponse_TableFragmentInfo {
-  return { fragments: [] };
+  return { fragments: [], env: undefined };
 }
 
 export const ListTableFragmentsResponse_TableFragmentInfo = {
@@ -1144,6 +1158,7 @@ export const ListTableFragmentsResponse_TableFragmentInfo = {
       fragments: Array.isArray(object?.fragments)
         ? object.fragments.map((e: any) => ListTableFragmentsResponse_FragmentInfo.fromJSON(e))
         : [],
+      env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
     };
   },
 
@@ -1154,6 +1169,7 @@ export const ListTableFragmentsResponse_TableFragmentInfo = {
     } else {
       obj.fragments = [];
     }
+    message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
     return obj;
   },
 
@@ -1162,6 +1178,9 @@ export const ListTableFragmentsResponse_TableFragmentInfo = {
   ): ListTableFragmentsResponse_TableFragmentInfo {
     const message = createBaseListTableFragmentsResponse_TableFragmentInfo();
     message.fragments = object.fragments?.map((e) => ListTableFragmentsResponse_FragmentInfo.fromPartial(e)) || [];
+    message.env = (object.env !== undefined && object.env !== null)
+      ? StreamEnvironment.fromPartial(object.env)
+      : undefined;
     return message;
   },
 };

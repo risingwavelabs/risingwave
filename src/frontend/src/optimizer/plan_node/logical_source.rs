@@ -22,7 +22,7 @@ use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
 
-use super::generic::GenericPlanNode;
+use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
     generic, BatchSource, ColPrunable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
     PredicatePushdown, StreamRowIdGen, StreamSource, ToBatch, ToStream,
@@ -105,7 +105,7 @@ impl LogicalSource {
     }
 
     pub fn infer_internal_table_catalog(&self) -> TableCatalog {
-        generic::Source::infer_internal_table_catalog(&self.base)
+        generic::Source::infer_internal_table_catalog()
     }
 
     pub fn kafka_timestamp_range(&self) -> &(Bound<i64>, Bound<i64>) {
@@ -321,9 +321,9 @@ impl PredicatePushdown for LogicalSource {
     ) -> PlanRef {
         let mut range = self.kafka_timestamp_range;
 
-        // println!("Before predicate: {:?}", predicate);
         let mut new_conjunctions = Vec::with_capacity(predicate.conjunctions.len());
         for expr in predicate.conjunctions {
+            let expr = self.base.ctx().expr_with_session_timezone(expr);
             if let Some(e) = expr_to_kafka_timestamp_range(expr, &mut range, &self.base.schema) {
                 // Not recognized, so push back
                 new_conjunctions.push(e);
@@ -332,7 +332,6 @@ impl PredicatePushdown for LogicalSource {
 
         let new_source = self.clone_with_kafka_timestamp_range(range).into();
 
-        // println!("After predicate: {:?}", new_conjunctions);
         if new_conjunctions.is_empty() {
             new_source
         } else {

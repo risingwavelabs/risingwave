@@ -18,6 +18,7 @@ use std::ops::{Bound, Deref};
 use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
 use risingwave_common::catalog::{DatabaseId, SchemaId};
+use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
@@ -47,6 +48,11 @@ pub struct SourceStateTableHandler<S: StateStore> {
 
 impl<S: StateStore> SourceStateTableHandler<S> {
     pub async fn from_table_catalog(table_catalog: &ProstTable, store: S) -> Self {
+        // The state of source should not be cleaned up by retention_seconds
+        assert!(!table_catalog
+            .properties
+            .contains_key(&String::from(PROPERTIES_RETENTION_SECOND_KEY)));
+
         Self {
             state_store: StateTable::from_table_catalog(table_catalog, store, None).await,
         }

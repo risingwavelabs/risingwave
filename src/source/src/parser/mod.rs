@@ -84,6 +84,10 @@ impl SourceStreamChunkBuilder {
             None,
         )
     }
+
+    pub fn op_num(&self) -> usize {
+        self.op_builder.len()
+    }
 }
 
 /// `SourceStreamChunkRowWriter` is responsible to write one row (Insert/Delete) or two rows
@@ -189,31 +193,31 @@ impl SourceStreamChunkRowWriter<'_> {
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> Result<A::Output>,
     ) -> Result<WriteGuard> {
-        // The closure `f` may fail so that a part of builders were appended incompletely.
-        // Loop invariant: `builders[0..appended_idx)` has been appended on every iter ended or loop
-        // exited.
-        let mut appended_idx = 0;
+        let mut modify_col = vec![];
 
         self.descs
             .iter()
             .zip_eq(self.builders.iter_mut())
             .enumerate()
             .try_for_each(|(idx, (desc, builder))| -> Result<()> {
-                let output = if desc.skip_parse {
+                if desc.is_meta {
+                    return Ok(());
+                }
+                let output = if desc.is_row_id {
                     A::DEFAULT_OUTPUT
                 } else {
                     f(desc)?
                 };
                 A::apply(builder, output);
-                appended_idx = idx + 1;
+                modify_col.push(idx);
 
                 Ok(())
             })
             .inspect_err(|e| {
                 tracing::warn!("failed to parse source data: {}", e);
-                self.builders[..appended_idx]
-                    .iter_mut()
-                    .for_each(A::rollback);
+                modify_col.iter().for_each(|idx| {
+                    A::rollback(&mut self.builders[*idx]);
+                });
             })?;
 
         A::finish(self);
@@ -232,6 +236,29 @@ impl SourceStreamChunkRowWriter<'_> {
         f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
     ) -> Result<WriteGuard> {
         self.do_action::<OpActionInsert>(f)
+    }
+
+    /// For other op like 'insert', 'update', 'delete', we will leave the hollow for the meta column
+    /// builder. e.g after insert
+    /// `data_budiler` = [1], `meta_column_builder` = [], `op` = [insert]
+    ///
+    /// This function is used to fulfill this hollow in `meta_column_builder`.
+    /// e.g after fulfill
+    /// `data_budiler` = [1], `meta_column_builder` = [1], `op` = [insert]
+    pub fn fulfill_meta_column(
+        &mut self,
+        mut f: impl FnMut(&SourceColumnDesc) -> Option<Datum>,
+    ) -> Result<WriteGuard> {
+        self.descs
+            .iter()
+            .zip_eq(self.builders.iter_mut())
+            .for_each(|(desc, builder)| {
+                if let Some(output) = f(desc) {
+                    builder.append_datum(output);
+                }
+            });
+
+        Ok(WriteGuard(()))
     }
 
     /// Write a `Delete` record to the [`StreamChunk`].
