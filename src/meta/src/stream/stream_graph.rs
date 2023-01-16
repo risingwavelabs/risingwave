@@ -870,6 +870,9 @@ pub struct StreamFragmentGraph {
 
     /// stores edges between fragments: downstream -> upstream.
     upstreams: HashMap<GlobalFragmentId, HashMap<GlobalFragmentId, StreamFragmentEdge>>,
+
+    /// Dependent relations of this job.
+    dependent_relations: HashSet<TableId>,
 }
 
 impl StreamFragmentGraph {
@@ -903,7 +906,7 @@ impl StreamFragmentGraph {
             let fragment_id = fragment.fragment_id;
             let fragment_table_id = &mut fragment.table_id;
 
-            visit_fragment_mut(&mut fragment.inner, |node_body| match node_body {
+            visit_fragment(&mut fragment.inner, |node_body| match node_body {
                 NodeBody::Materialize(materialize_node) => {
                     materialize_node.table_id = table_id;
 
@@ -1044,10 +1047,18 @@ impl StreamFragmentGraph {
                 .unwrap();
         }
 
+        // TODO: note here
+        let dependent_relations = proto
+            .dependent_table_ids
+            .iter()
+            .map(TableId::from)
+            .collect();
+
         Self {
             fragments,
             downstreams,
             upstreams,
+            dependent_relations,
         }
     }
 
@@ -1072,24 +1083,8 @@ impl StreamFragmentGraph {
             .expect("require exactly 1 materialize/sink node when creating the streaming job")
     }
 
-    pub fn dependent_relations(&self) -> HashSet<TableId> {
-        let mut set = HashSet::new();
-
-        for fragment in self.fragments.values() {
-            visit_fragment(fragment, |body| match body {
-                NodeBody::Source(source_node) => {
-                    if let Some(source) = &source_node.source_inner {
-                        set.insert(source.source_id.into());
-                    }
-                }
-                NodeBody::Chain(chain_node) => {
-                    set.insert(chain_node.table_id.into());
-                }
-                _ => {}
-            })
-        }
-
-        set
+    pub fn dependent_relations(&self) -> &HashSet<TableId> {
+        &self.dependent_relations
     }
 
     fn get_fragment(&self, fragment_id: GlobalFragmentId) -> Option<&StreamFragment> {
@@ -1116,7 +1111,7 @@ static EMPTY_HASHMAP: LazyLock<HashMap<GlobalFragmentId, StreamFragmentEdge>> =
 
 /// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s in a
 /// [`StreamFragment`] recursively.
-pub fn visit_fragment_mut<F>(fragment: &mut StreamFragment, mut f: F)
+pub fn visit_fragment<F>(fragment: &mut StreamFragment, mut f: F)
 where
     F: FnMut(&mut NodeBody),
 {
@@ -1131,25 +1126,6 @@ where
     }
 
     visit_inner(fragment.node.as_mut().unwrap(), &mut f)
-}
-
-/// A utility for visiting the [`NodeBody`] of the [`StreamNode`]s in a [`StreamFragment`]
-/// recursively.
-pub fn visit_fragment<F>(fragment: &StreamFragment, mut f: F)
-where
-    F: FnMut(&NodeBody),
-{
-    fn visit_inner<F>(stream_node: &StreamNode, f: &mut F)
-    where
-        F: FnMut(&NodeBody),
-    {
-        f(stream_node.node_body.as_ref().unwrap());
-        for input in &stream_node.input {
-            visit_inner(input, f);
-        }
-    }
-
-    visit_inner(fragment.node.as_ref().unwrap(), &mut f)
 }
 
 /// Visit the internal tables of a [`StreamFragment`].
@@ -1175,7 +1151,7 @@ where
         };
     }
 
-    visit_fragment_mut(fragment, |body| {
+    visit_fragment(fragment, |body| {
         match body {
             // Join
             NodeBody::HashJoin(node) => {

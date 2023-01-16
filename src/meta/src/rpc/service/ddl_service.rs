@@ -32,7 +32,7 @@ use crate::manager::{
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    visit_fragment_mut, ActorGraphBuilder, CreateStreamingJobContext, GlobalStreamManagerRef,
+    visit_fragment, ActorGraphBuilder, CreateStreamingJobContext, GlobalStreamManagerRef,
     SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
@@ -395,7 +395,7 @@ where
 
             let mut source_count = 0;
             for fragment in fragment_graph.fragments.values_mut() {
-                visit_fragment_mut(fragment, |node_body| {
+                visit_fragment(fragment, |node_body| {
                     if let NodeBody::Source(source_node) = node_body {
                         // TODO: Refactor using source id.
                         source_node.source_inner.as_mut().unwrap().source_id = source_id;
@@ -578,10 +578,10 @@ where
             table_properties: stream_job.properties(),
             table_mview_map: self
                 .fragment_manager
-                .get_build_graph_info(&dependent_relations)
+                .get_build_graph_info(dependent_relations)
                 .await?
                 .table_mview_actor_ids,
-            dependent_table_ids: dependent_relations,
+            dependent_table_ids: dependent_relations.clone(),
             internal_tables,
             ..Default::default()
         };

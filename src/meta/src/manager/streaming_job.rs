@@ -84,10 +84,10 @@ impl StreamingJob {
             Self::Sink(sink) => sink.dependent_relations = dependent_relations,
             Self::Index(_, index_table) => index_table.dependent_relations = dependent_relations,
 
-            // NOTE(Yuanxin): We intentionally do not set dependent relations for tables, as the
-            // only possible dependent is the associated source (connector), which is also in the
+            // NOTE: We intentionally do not set dependent relations for tables, as the only
+            // possible dependent is the associated source (connector), which is also in the
             // creating procedure.
-            Self::Table(_, _) => {}
+            Self::Table(_, _) => assert!(dependent_relations.is_empty()),
         }
     }
 
