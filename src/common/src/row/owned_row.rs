@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops;
+use std::ops::{self, Deref};
 
 use itertools::Itertools;
 
@@ -38,19 +38,6 @@ impl ops::Index<usize> for OwnedRow {
     }
 }
 
-impl PartialOrd for OwnedRow {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(&other.0)
-    }
-}
-
-impl Ord for OwnedRow {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other)
-            .unwrap_or_else(|| panic!("cannot compare rows with different types"))
-    }
-}
-
 impl AsRef<OwnedRow> for OwnedRow {
     fn as_ref(&self) -> &OwnedRow {
         self
@@ -72,6 +59,10 @@ impl OwnedRow {
     /// Retrieve the underlying [`Vec<Datum>`].
     pub fn into_inner(self) -> Vec<Datum> {
         self.0
+    }
+
+    pub fn as_inner(&self) -> &[Datum] {
+        &self.0
     }
 
     /// Parse an [`OwnedRow`] from a pretty string, only used in tests.
@@ -168,6 +159,52 @@ impl<D: AsRef<[DataType]>> RowDeserializer<D> {
 
     pub fn data_types(&self) -> &[DataType] {
         self.data_types.as_ref()
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct AscentOwnedRow(OwnedRow);
+
+impl AscentOwnedRow {
+    pub fn into_inner(self) -> OwnedRow {
+        self.0
+    }
+}
+
+impl Deref for AscentOwnedRow {
+    type Target = OwnedRow;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Row for AscentOwnedRow {
+    type Iter<'a> = <OwnedRow as Row>::Iter<'a>;
+
+    deref_forward_row! {}
+
+    fn into_owned_row(self) -> OwnedRow {
+        self.into_inner()
+    }
+}
+
+impl PartialOrd for AscentOwnedRow {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.0.as_inner().partial_cmp(other.0.as_inner())
+    }
+}
+
+impl Ord for AscentOwnedRow {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other)
+            .unwrap_or_else(|| panic!("cannot compare rows with different types"))
+    }
+}
+
+impl From<OwnedRow> for AscentOwnedRow {
+    fn from(row: OwnedRow) -> Self {
+        Self(row)
     }
 }
 
