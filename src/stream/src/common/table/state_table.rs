@@ -741,14 +741,6 @@ impl<S: StateStore> StateTable<S> {
         Ok(())
     }
 
-    /// used for unit test, and do not need to assert epoch.
-    pub async fn commit_for_test(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.batch_write_rows(mem_table, new_epoch.prev).await?;
-        self.update_epoch(new_epoch);
-        Ok(())
-    }
-
     // TODO(st1page): maybe we should extract a pub struct to do it
     /// just specially used by those state table read-only and after the call the data
     /// in the epoch will be visible
