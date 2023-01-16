@@ -1211,7 +1211,7 @@ where
                 always!(node.state_table, "Now");
             }
 
-            // Shared arragement
+            // Shared arrangement
             NodeBody::Arrange(node) => {
                 always!(node.table, "Arrange");
             }
