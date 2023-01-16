@@ -10,26 +10,26 @@ public class Record implements AutoCloseable {
     }
 
     public byte[] getKey() {
-        return Binding.recordGetKey(pointer);
+        return Binding.rowGetKey(pointer);
     }
 
     public boolean isNull(int index) {
-        return Binding.recordIsNull(pointer, index);
+        return Binding.rowIsNull(pointer, index);
     }
 
     public long getLong(int index) {
-        return Binding.recordGetInt64Value(pointer, index);
+        return Binding.rowGetInt64Value(pointer, index);
     }
 
     public String getString(int index) {
-        return Binding.recordGetStringValue(pointer, index);
+        return Binding.rowGetStringValue(pointer, index);
     }
 
     @Override
     public void close() {
         if (!isClosed) {
             isClosed = true;
-            Binding.recordClose(pointer);
+            Binding.rowClose(pointer);
         }
     }
 }

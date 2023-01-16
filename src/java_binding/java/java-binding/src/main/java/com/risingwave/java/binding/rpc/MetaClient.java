@@ -25,6 +25,7 @@ import io.grpc.ManagedChannel;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
@@ -42,6 +43,9 @@ public class MetaClient implements AutoCloseable {
     final HeartbeatServiceBlockingStub heartbeatStub;
     final HummockManagerServiceBlockingStub hummockStub;
 
+    boolean isClosed;
+
+    // A heart beat task that sends a heartbeat to the meta service when run.
     private class HeartbeatTask implements Runnable {
         Instant lastHeartbeatSent;
         Duration timeout;
@@ -82,6 +86,8 @@ public class MetaClient implements AutoCloseable {
         this.hummockStub = HummockManagerServiceGrpc.newBlockingStub(channel);
         this.heartbeatStub = HeartbeatServiceGrpc.newBlockingStub(channel);
 
+        this.isClosed = false;
+
         AddWorkerNodeRequest req =
                 AddWorkerNodeRequest.newBuilder()
                         .setWorkerType(WorkerType.RISE_CTL)
@@ -111,14 +117,20 @@ public class MetaClient implements AutoCloseable {
         return resp.getTable();
     }
 
-    public void startHeartbeatLoop(Duration minInterval, Duration maxInterval) {
+    public ScheduledFuture<?> startHeartbeatLoop(Duration minInterval, Duration maxInterval) {
         Runnable heartbeatTask = new HeartbeatTask(maxInterval);
-        scheduler.scheduleWithFixedDelay(
-                heartbeatTask, 0, minInterval.toMillis(), TimeUnit.MILLISECONDS);
+        return scheduler.scheduleWithFixedDelay(
+                heartbeatTask,
+                minInterval.toMillis(),
+                minInterval.toMillis(),
+                TimeUnit.MILLISECONDS);
     }
 
     @Override
     public void close() {
-        this.channel.shutdown();
+        if (!isClosed) {
+            isClosed = true;
+            this.channel.shutdown();
+        }
     }
 }

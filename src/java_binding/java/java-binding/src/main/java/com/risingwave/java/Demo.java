@@ -5,7 +5,7 @@ import com.risingwave.java.binding.KeyedRow;
 import com.risingwave.java.binding.rpc.MetaClient;
 import java.time.Duration;
 import java.util.Arrays;
-import java.util.concurrent.RunnableScheduledFuture;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 /** Hello world! */
@@ -20,10 +20,8 @@ public class Demo {
 
         try (MetaClient metaClient = new MetaClient(metaAddr, scheduledThreadPool);
                 Iterator iter = new Iterator(metaClient, stateStore, dbName, tableName)) {
-            RunnableScheduledFuture<?> heartbeatFuture =
-                    (RunnableScheduledFuture<?>)
-                            metaClient.startHeartbeatLoop(
-                                    Duration.ofMillis(1000), Duration.ofSeconds(600));
+            ScheduledFuture<?> heartbeatFuture =
+                    metaClient.startHeartbeatLoop(Duration.ofMillis(1000), Duration.ofSeconds(600));
 
             while (true) {
                 try (KeyedRow row = iter.next()) {
@@ -39,7 +37,7 @@ public class Demo {
                 }
             }
 
-            scheduledThreadPool.remove(heartbeatFuture);
+            heartbeatFuture.cancel(false);
         }
 
         scheduledThreadPool.shutdown();
