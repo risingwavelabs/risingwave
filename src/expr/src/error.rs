@@ -55,6 +55,9 @@ pub enum ExprError {
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
+
+    #[error("UDF error: {0}")]
+    Udf(#[from] risingwave_udf::Error),
 }
 
 impl From<ExprError> for RwError {
