@@ -6,7 +6,7 @@ use risingwave_hummock_sdk::HummockEpoch;
 use crate::hummock::iterator::RangeIteratorTyped;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchId;
 use crate::hummock::store::immutable_memtable::MergedImmutableMemtable;
-use crate::hummock::store::memtable::ImmutableMemtable;
+use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::value::HummockValue;
 use crate::monitor::StoreLocalStatistic;
 
@@ -59,6 +59,13 @@ impl ImmutableMemtableImpl {
         match self {
             ImmutableMemtableImpl::Imm(batch) => batch.batch_id(),
             ImmutableMemtableImpl::MergedImm(m) => m.batch_id(),
+        }
+    }
+
+    pub fn imm_ids(&self) -> Vec<ImmId> {
+        match self {
+            ImmutableMemtableImpl::Imm(batch) => vec![batch.batch_id()],
+            ImmutableMemtableImpl::MergedImm(m) => m.get_merged_imm_ids().clone(),
         }
     }
 

@@ -373,6 +373,17 @@ impl HummockReadVersion {
                         sst.epochs.first().expect("epochs not empty") > &max_committed_epoch
                     });
 
+                    assert!(self.staging.imm.iter().all(|imm| {
+                        match imm {
+                            ImmutableMemtableImpl::Imm(batch) => batch.epoch > max_committed_epoch,
+                            // MCE would not fall in the middle of epochs
+                            // because imms must be newer than committed version
+                            ImmutableMemtableImpl::MergedImm(m) => {
+                                m.epochs().iter().all(|e| e > &max_committed_epoch)
+                            }
+                        }
+                    }));
+
                     // check epochs.last() > MCE
                     assert!(self.staging.sst.iter().all(|sst| {
                         sst.epochs.last().expect("epochs not empty") > &max_committed_epoch

@@ -51,6 +51,7 @@ pub(crate) struct MergedImmutableMemtableInner {
     size: usize,
     /// The minimum epoch of all merged imm
     min_epoch: HummockEpoch,
+    epochs: Vec<HummockEpoch>,
     batch_id: ImmId,
 
     /// This should be used to remove imms in the `StagingVersion` when
@@ -66,6 +67,7 @@ impl MergedImmutableMemtableInner {
         payload: Vec<MergedImmItem>,
         range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
+        epochs: Vec<HummockEpoch>,
         min_epoch: HummockEpoch,
         merged_imm_ids: Vec<ImmId>,
     ) -> Self {
@@ -74,6 +76,7 @@ impl MergedImmutableMemtableInner {
             range_tombstone_list,
             size,
             min_epoch,
+            epochs,
             batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
             merged_imm_ids,
             _tracker: None,
@@ -139,7 +142,7 @@ impl MergedImmutableMemtable {
         let mut range_tombstone_list = Vec::new();
         let mut num_keys = 0;
         let mut min_epoch = HummockEpoch::MAX;
-        let mut max_epoch = HummockEpoch::MIN;
+        let mut epochs = vec![];
         let mut size = 0;
         let mut merged_imm_ids = Vec::with_capacity(imms.len());
 
@@ -154,7 +157,7 @@ impl MergedImmutableMemtable {
             num_keys += imm.count();
             size += imm.size();
             min_epoch = std::cmp::min(min_epoch, imm.epoch());
-            max_epoch = std::cmp::max(max_epoch, imm.epoch());
+            epochs.push(imm.epoch());
             range_tombstone_list.extend(imm.get_delete_range_tombstones());
             heap.push(Node {
                 iter: imm.into_forward_iter(),
@@ -205,6 +208,7 @@ impl MergedImmutableMemtable {
                 merged_payload,
                 range_tombstone_list,
                 size,
+                epochs,
                 min_epoch,
                 merged_imm_ids,
             )),
@@ -337,6 +341,10 @@ impl MergedImmutableMemtable {
 
     pub fn epoch(&self) -> u64 {
         self.inner.min_epoch
+    }
+
+    pub fn epochs(&self) -> &Vec<HummockEpoch> {
+        &self.inner.epochs
     }
 
     pub fn size(&self) -> usize {

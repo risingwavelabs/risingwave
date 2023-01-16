@@ -216,6 +216,8 @@ impl HummockEventHandler {
         newly_uploaded_sstables: Vec<StagingSstableInfo>,
     ) {
         if !newly_uploaded_sstables.is_empty() {
+            let num_ssts = newly_uploaded_sstables.len();
+            info!("epoch synced. num SSTs {}", num_ssts);
             newly_uploaded_sstables
                 .into_iter()
                 // Take rev because newer data come first in `newly_uploaded_sstables` but we apply
@@ -223,6 +225,7 @@ impl HummockEventHandler {
                 .rev()
                 .for_each(|staging_sstable_info| {
                     Self::for_each_read_version(&self.read_version_mapping, |read_version| {
+                        info!("epoch synced. SST size {}", staging_sstable_info.imm_size());
                         read_version.update(VersionUpdate::Staging(StagingData::Sst(
                             staging_sstable_info.clone(),
                         )))
@@ -275,6 +278,7 @@ impl HummockEventHandler {
     fn handle_data_spilled(&mut self, staging_sstable_info: StagingSstableInfo) {
         // todo: do some prune for version update
         Self::for_each_read_version(&self.read_version_mapping, |read_version| {
+            info!("data_spilled. SST size {}", staging_sstable_info.imm_size());
             read_version.update(VersionUpdate::Staging(StagingData::Sst(
                 staging_sstable_info.clone(),
             )))
