@@ -102,7 +102,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                     ReadOptions {
                         prefix_hint: None,
                         ignore_range_tombstone: true,
-                        check_bloom_filter: false,
                         retention_seconds: None,
                         table_id: Default::default(),
                         read_version_from_backup: false,

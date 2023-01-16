@@ -575,6 +575,12 @@ enum FragmentTypeFlag {
   CHAIN_NODE = 16;
 }
 
+// The environment associated with a stream plan
+message StreamEnvironment {
+  // The timezone associated with the streaming plan. Only applies to MV for now.
+  string timezone = 1;
+}
+
 message StreamFragmentGraph {
   message StreamFragment {
     // 0-based on frontend, and will be rewritten to global id on meta.
@@ -610,4 +616,5 @@ message StreamFragmentGraph {
 
   repeated uint32 dependent_table_ids = 3;
   uint32 table_ids_cnt = 4;
+  StreamEnvironment env = 5;
 }

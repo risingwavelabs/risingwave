@@ -395,7 +395,6 @@ impl NormalState {
                 ReadOptions {
                     prefix_hint: None,
                     ignore_range_tombstone,
-                    check_bloom_filter: false,
                     retention_seconds: None,
                     table_id: self.table_id,
                     read_version_from_backup: false,
@@ -421,7 +420,6 @@ impl NormalState {
                     ReadOptions {
                         prefix_hint: None,
                         ignore_range_tombstone,
-                        check_bloom_filter: false,
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
@@ -453,7 +451,6 @@ impl CheckState for NormalState {
                     ReadOptions {
                         prefix_hint: None,
                         ignore_range_tombstone: true,
-                        check_bloom_filter: false,
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,

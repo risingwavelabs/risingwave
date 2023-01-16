@@ -295,7 +295,7 @@ pub(crate) mod tests {
                 (32 * 1000) << 16,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: false,
+
                     prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
@@ -314,8 +314,7 @@ pub(crate) mod tests {
                 (31 * 1000) << 16,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: true,
-                    prefix_hint: None,
+                    prefix_hint: Some(key.clone()),
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
@@ -426,7 +425,7 @@ pub(crate) mod tests {
                 129,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: false,
+
                     prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
@@ -795,7 +794,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: false,
+
                     prefix_hint: None,
                     table_id: TableId::from(existing_table_ids),
                     retention_seconds: None,
@@ -979,7 +978,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: false,
+
                     prefix_hint: None,
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
@@ -1160,8 +1159,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: true,
-                    prefix_hint: Some(bloom_filter_key),
+                    prefix_hint: Some(Bytes::from(bloom_filter_key)),
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                     read_version_from_backup: false,

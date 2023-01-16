@@ -366,7 +366,6 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
     async fn do_insert_sanity_check(&self, key: &[u8], value: &[u8]) -> StorageResult<()> {
         let read_options = ReadOptions {
             prefix_hint: None,
-            check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             ignore_range_tombstone: false,
@@ -389,7 +388,6 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
     async fn do_delete_sanity_check(&self, key: &[u8], old_value: &[u8]) -> StorageResult<()> {
         let read_options = ReadOptions {
             prefix_hint: None,
-            check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             ignore_range_tombstone: false,
@@ -418,7 +416,6 @@ impl<S: StateStoreWrite + StateStoreRead> MemtableLocalStateStore<S> {
         let read_options = ReadOptions {
             prefix_hint: None,
             ignore_range_tombstone: false,
-            check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             read_version_from_backup: false,

@@ -33,6 +33,9 @@ pub enum StorageError {
     #[error("Deserialize row error {0}.")]
     DeserializeRow(ValueEncodingError),
 
+    #[error("Serialize/deserialize error: {0}")]
+    SerdeError(memcomparable::Error),
+
     #[error("Sled error: {0}")]
     Sled(
         #[backtrace]
@@ -53,6 +56,12 @@ pub type StorageResult<T> = std::result::Result<T, StorageError>;
 impl From<ValueEncodingError> for StorageError {
     fn from(error: ValueEncodingError) -> Self {
         StorageError::DeserializeRow(error)
+    }
+}
+
+impl From<memcomparable::Error> for StorageError {
+    fn from(m: memcomparable::Error) -> Self {
+        StorageError::SerdeError(m)
     }
 }
 
