@@ -162,7 +162,7 @@ impl<D: AsRef<[DataType]>> RowDeserializer<D> {
     }
 }
 
-/// A simple wrapper for `OwnedRow`, which assumes that all fields are defined as `ASC` order.
+/// A simple wrapper for [`OwnedRow`], which assumes that all fields are defined as `ASC` order.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct AscentOwnedRow(OwnedRow);
 
