@@ -196,44 +196,48 @@ impl StoreLocalStatistic {
         metrics: &HummockStateStoreMetrics,
         oper_type: &str,
         table_id_label: &str,
-        is_non_exist_key: bool,
+        is_non_existent_key: bool,
     ) {
+        if self.bloom_filter_check_counts == 0 {
+            return;
+        }
+
+        // checks SST bloom filters
+        metrics
+            .bloom_filter_check_counts
+            .with_label_values(&[table_id_label, oper_type])
+            .inc_by(self.bloom_filter_check_counts);
+
+        metrics
+            .read_req_check_bloom_filter_counts
+            .with_label_values(&[table_id_label, oper_type])
+            .inc();
+
         if self.bloom_filter_true_negative_count > 0 {
+            // true negative
             metrics
                 .bloom_filter_true_negative_counts
                 .with_label_values(&[table_id_label, oper_type])
                 .inc_by(self.bloom_filter_true_negative_count);
         }
 
-        if self.bloom_filter_check_counts > 0 {
-            // checks SST bloom filters
-            metrics
-                .bloom_filter_check_counts
-                .with_label_values(&[table_id_label, oper_type])
-                .inc_by(self.bloom_filter_check_counts);
-
-            metrics
-                .read_req_check_bloom_filter_counts
-                .with_label_values(&[table_id_label, oper_type])
-                .inc();
-        }
-
-        if is_non_exist_key
-            && self.bloom_filter_check_counts > self.bloom_filter_true_negative_count
-        {
-            // checks SST bloom filters (at least one bloom filter) but returns nothing
-            metrics
-                .read_req_positive_but_non_exist_counts
-                .with_label_values(&[table_id_label, oper_type])
-                .inc();
-        }
-
         if self.bloom_filter_check_counts > self.bloom_filter_true_negative_count {
-            // checks SST bloom filters and at least one bloom filter returns true
-            metrics
-                .read_req_bloom_filter_positive_counts
-                .with_label_values(&[table_id_label, oper_type])
-                .inc();
+            if is_non_existent_key {
+                // false positive
+                // checks SST bloom filters (at least one bloom filter return true) but returns
+                // nothing
+                metrics
+                    .read_req_positive_but_non_exist_counts
+                    .with_label_values(&[table_id_label, oper_type])
+                    .inc();
+            } else {
+                // true positive
+                // checks SST bloom filters and at least one bloom filter returns true
+                metrics
+                    .read_req_bloom_filter_positive_counts
+                    .with_label_values(&[table_id_label, oper_type])
+                    .inc();
+            }
         }
     }
 

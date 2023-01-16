@@ -1591,7 +1591,7 @@ def section_hummock(panels):
                 ),
                 panels.target(
                     f"sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
-                    "read_req positive but non-exist  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                    "read_req bloom filter true positive  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
                     f"sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
