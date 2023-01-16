@@ -155,6 +155,10 @@ impl<S: StateStore> StorageTable<S> {
             0,
         )
     }
+
+    pub fn pk_serializer(&self) -> &OrderedRowSerde {
+        &self.pk_serializer
+    }
 }
 
 impl<S: StateStore> StorageTable<S> {
