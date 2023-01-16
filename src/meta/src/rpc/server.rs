@@ -30,7 +30,8 @@ use super::follower_svc::start_follower_srv;
 use super::leader_svc::{start_leader_srv, ElectionCoordination};
 use crate::manager::MetaOpts;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
-use crate::MetaResult;
+use crate::telemetry::telemetry::start_telemetry_reporting;
+use crate::{telemetry, MetaResult};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -83,6 +84,10 @@ pub async fn rpc_serve(
                 .await
                 .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
+
+            // report telemetry only when it is etcd
+            start_telemetry_reporting(meta_store.clone());
+
             rpc_serve_with_store(
                 meta_store,
                 address_info,
