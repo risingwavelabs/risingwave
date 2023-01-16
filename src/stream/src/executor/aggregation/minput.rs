@@ -71,7 +71,6 @@ impl<S: StateStore> MaterializedInputState<S> {
         agg_call: &AggCall,
         pk_indices: &PkIndices,
         col_mapping: &StateTableColumnMapping,
-        row_count: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> Self {
@@ -376,7 +375,6 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
@@ -384,8 +382,6 @@ mod tests {
         let epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
         epoch.inc();
-
-        let mut row_count = 0;
 
         {
             let chunk = create_chunk(
@@ -397,7 +393,6 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -423,7 +418,6 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -446,7 +440,6 @@ mod tests {
                 &agg_call,
                 &input_pk_indices,
                 &mapping,
-                row_count,
                 usize::MAX,
                 &input_schema,
             );
@@ -491,7 +484,6 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
@@ -499,8 +491,6 @@ mod tests {
         let epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
         epoch.inc();
-
-        let mut row_count = 0;
 
         {
             let chunk = create_chunk(
@@ -512,7 +502,6 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -538,7 +527,6 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -561,7 +549,6 @@ mod tests {
                 &agg_call,
                 &input_pk_indices,
                 &mapping,
-                row_count,
                 usize::MAX,
                 &input_schema,
             );
@@ -621,7 +608,6 @@ mod tests {
             &agg_call_1,
             &input_pk_indices,
             &mapping_1,
-            0,
             usize::MAX,
             &input_schema,
         );
@@ -629,7 +615,6 @@ mod tests {
             &agg_call_2,
             &input_pk_indices,
             &mapping_2,
-            0,
             usize::MAX,
             &input_schema,
         );
@@ -719,7 +704,6 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
@@ -727,8 +711,6 @@ mod tests {
         let epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
         epoch.inc();
-
-        let mut row_count = 0;
 
         {
             let chunk = create_chunk(
@@ -739,7 +721,6 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -765,7 +746,6 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 1;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -788,7 +768,6 @@ mod tests {
                 &agg_call,
                 &input_pk_indices,
                 &mapping,
-                row_count,
                 usize::MAX,
                 &input_schema,
             );
@@ -835,7 +814,6 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             1024,
             &input_schema,
         );
@@ -946,7 +924,6 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             3, // cache capacity = 3 for easy testing
             &input_schema,
         );
@@ -1080,7 +1057,6 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
@@ -1182,7 +1158,6 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
