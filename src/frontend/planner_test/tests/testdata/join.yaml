@@ -577,8 +577,8 @@
       └─LogicalScan { table: t2, columns: [t2.x, t2.y] }
 - name: Lookup join with no eq keys after pulling up predicate will revert to hash join
   sql: |
-    create table t2 (v1 int, v2 int);
     create table t1 (v1 int, v2 int);
+    create table t2 (v1 int, v2 int);
     create materialized view t3 as select v1, count(v2) as v2 from t2 group by v1;
     select * from (select * from t1 where false) as t1_s join (select * from t3 where false) as t3_s on t1_s.v2 = t3_s.v1;
   batch_plan: |
