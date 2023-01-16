@@ -15,5 +15,7 @@
 pub mod opendal_object_store;
 pub use opendal_object_store::*;
 
+#[cfg(feature = "hdfs-backend")]
 pub mod hdfs;
+#[cfg(feature = "hdfs-backend")]
 pub use hdfs::*;
