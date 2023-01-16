@@ -124,7 +124,7 @@ async fn test_failpoints_state_store_read_upload() {
         .await
         .unwrap();
 
-    local.seal_current_epoch(3);
+    local.seal_current_epoch(u64::MAX);
 
     // sync epoch1 test the read_error
     let ssts = hummock_storage

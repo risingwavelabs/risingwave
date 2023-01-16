@@ -27,12 +27,8 @@ use super::MonitoredStorageMetrics;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
-use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::{
-    define_state_store_associated_type, define_state_store_read_associated_type,
-    define_state_store_write_associated_type,
-};
+use crate::{define_state_store_associated_type, define_state_store_read_associated_type};
 
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
@@ -103,6 +99,38 @@ impl<S> MonitoredStateStore<S> {
     pub fn inner(&self) -> &S {
         &self.inner
     }
+
+    async fn monitored_get(
+        &self,
+        get_future: impl Future<Output = StorageResult<Option<Bytes>>>,
+        table_id: TableId,
+        key_len: usize,
+    ) -> StorageResult<Option<Bytes>> {
+        let table_id_label = table_id.to_string();
+        let timer = self
+            .storage_metrics
+            .get_duration
+            .with_label_values(&[table_id_label.as_str()])
+            .start_timer();
+        let value = get_future
+            .verbose_stack_trace("store_get")
+            .await
+            .inspect_err(|e| error!("Failed in get: {:?}", e))?;
+        timer.observe_duration();
+
+        self.storage_metrics
+            .get_key_size
+            .with_label_values(&[table_id_label.as_str()])
+            .observe(key_len as _);
+        if let Some(value) = value.as_ref() {
+            self.storage_metrics
+                .get_value_size
+                .with_label_values(&[table_id_label.as_str()])
+                .observe(value.len() as _);
+        }
+
+        Ok(value)
+    }
 }
 
 impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
@@ -116,34 +144,9 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
-        async move {
-            let table_id_label = read_options.table_id.to_string();
-            let timer = self
-                .storage_metrics
-                .get_duration
-                .with_label_values(&[table_id_label.as_str()])
-                .start_timer();
-            let value = self
-                .inner
-                .get(key, epoch, read_options)
-                .verbose_stack_trace("store_get")
-                .await
-                .inspect_err(|e| error!("Failed in get: {:?}", e))?;
-            timer.observe_duration();
-
-            self.storage_metrics
-                .get_key_size
-                .with_label_values(&[table_id_label.as_str()])
-                .observe(key.len() as _);
-            if let Some(value) = value.as_ref() {
-                self.storage_metrics
-                    .get_value_size
-                    .with_label_values(&[table_id_label.as_str()])
-                    .observe(value.len() as _);
-            }
-
-            Ok(value)
-        }
+        let table_id = read_options.table_id;
+        let key_len = key.len();
+        self.monitored_get(self.inner.get(key, epoch, read_options), table_id, key_len)
     }
 
     fn iter(
@@ -160,43 +163,6 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
     }
 }
 
-impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
-    define_state_store_write_associated_type!();
-
-    fn ingest_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bytes, Bytes)>,
-        write_options: WriteOptions,
-    ) -> Self::IngestBatchFuture<'_> {
-        async move {
-            let table_id_label = write_options.table_id.to_string();
-            self.storage_metrics
-                .write_batch_tuple_counts
-                .with_label_values(&[table_id_label.as_str()])
-                .inc_by(kv_pairs.len() as _);
-            let timer = self
-                .storage_metrics
-                .write_batch_duration
-                .with_label_values(&[table_id_label.as_str()])
-                .start_timer();
-            let batch_size = self
-                .inner
-                .ingest_batch(kv_pairs, delete_ranges, write_options)
-                .verbose_stack_trace("store_ingest_batch")
-                .await
-                .inspect_err(|e| error!("Failed in ingest_batch: {:?}", e))?;
-            timer.observe_duration();
-
-            self.storage_metrics
-                .write_batch_size
-                .with_label_values(&[table_id_label.as_str()])
-                .observe(batch_size as _);
-            Ok(batch_size)
-        }
-    }
-}
-
 impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     type FlushFuture<'a> = impl Future<Output = StorageResult<usize>> + 'a;
     type GetFuture<'a> = impl GetFutureTrait<'a>;
@@ -204,8 +170,10 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
     type IterStream<'a> = impl StateStoreIterItemStream + 'a;
 
     fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
-        // TODO: collect metrics
-        self.inner.get(key, read_options)
+        let table_id = read_options.table_id;
+        let key_len = key.len();
+        // TODO: may collect the metrics as local
+        self.monitored_get(self.inner.get(key, read_options), table_id, key_len)
     }
 
     fn iter(

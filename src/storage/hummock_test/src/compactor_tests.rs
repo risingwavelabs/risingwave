@@ -130,8 +130,7 @@ pub(crate) mod tests {
         // 1. add sstables
         let val = b"0"[..].repeat(value_size);
         local.init(epochs[0]);
-        for i in 0..epochs.len() {
-            let epoch = epochs[i];
+        for (i, &epoch) in epochs.iter().enumerate() {
             let mut new_val = val.clone();
             new_val.extend_from_slice(&epoch.to_be_bytes());
             local

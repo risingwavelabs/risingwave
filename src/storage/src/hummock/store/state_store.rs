@@ -15,6 +15,7 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
+use async_stack_trace::StackTrace;
 use bytes::Bytes;
 use minitrace::future::FutureExt;
 use parking_lot::RwLock;
@@ -60,19 +61,9 @@ pub struct HummockStorageCore {
 }
 
 pub struct LocalHummockStorage {
+    stats: Arc<HummockStateStoreMetrics>,
     core: Arc<HummockStorageCore>,
     tracing: Arc<risingwave_tracing::RwTracingService>,
-}
-
-// Clone is only used for unit test
-#[cfg(any(test, feature = "test"))]
-impl Clone for LocalHummockStorage {
-    fn clone(&self) -> Self {
-        Self {
-            core: self.core.clone(),
-            tracing: self.tracing.clone(),
-        }
-    }
 }
 
 impl HummockStorageCore {
@@ -182,6 +173,17 @@ impl StateStoreWrite for LocalHummockStorage {
             let epoch = write_options.epoch;
             let table_id = write_options.table_id;
 
+            let table_id_label = table_id.to_string();
+            self.stats
+                .write_batch_tuple_counts
+                .with_label_values(&[table_id_label.as_str()])
+                .inc_by(kv_pairs.len() as _);
+            let timer = self
+                .stats
+                .write_batch_duration
+                .with_label_values(&[table_id_label.as_str()])
+                .start_timer();
+
             let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
             let size = SharedBufferBatch::measure_batch_size(&sorted_items);
             let limiter = self.core.memory_limiter.as_ref();
@@ -197,7 +199,10 @@ impl StateStoreWrite for LocalHummockStorage {
                     .event_sender
                     .send(HummockEvent::BufferMayFlush)
                     .expect("should be able to send");
-                let tracker = limiter.require_memory(size as u64).await;
+                let tracker = limiter
+                    .require_memory(size as u64)
+                    .verbose_stack_trace("hummock_require_memory")
+                    .await;
                 warn!(
                     "successfully requiring memory: {}, current {}",
                     size,
@@ -224,6 +229,12 @@ impl StateStoreWrite for LocalHummockStorage {
                 .send(HummockEvent::ImmToUploader(imm))
                 .unwrap();
 
+            timer.observe_duration();
+
+            self.stats
+                .write_batch_size
+                .with_label_values(&[table_id_label.as_str()])
+                .observe(imm_size as _);
             Ok(imm_size)
         }
     }
@@ -238,6 +249,7 @@ impl LocalHummockStorage {
         memory_limiter: Arc<MemoryLimiter>,
         tracing: Arc<risingwave_tracing::RwTracingService>,
     ) -> Self {
+        let stats = hummock_version_reader.stats().clone();
         let storage_core = HummockStorageCore::new(
             instance_guard,
             read_version,
@@ -247,6 +259,7 @@ impl LocalHummockStorage {
         );
 
         Self {
+            stats,
             core: Arc::new(storage_core),
             tracing,
         }

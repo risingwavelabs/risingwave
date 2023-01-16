@@ -82,6 +82,7 @@ impl GlobalMemoryManager {
     /// Jemalloc is not supported on Windows, because of tikv-jemalloc's own reasons.
     /// See the comments for the macro `enable_jemalloc_on_linux!()`
     #[cfg(not(target_os = "linux"))]
+    #[allow(clippy::unused_async)]
     pub async fn run(self: Arc<Self>, _: Arc<BatchManager>, _: Arc<LocalStreamManager>) {}
 
     /// Memory manager will get memory usage from batch and streaming, and do some actions.
