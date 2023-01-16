@@ -58,6 +58,7 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManager, SourceManager};
+use crate::telemetry::telemetry::start_telemetry_reporting;
 use crate::{hummock, MetaResult};
 
 // simple wrapper containing election sync related objects
@@ -231,7 +232,7 @@ pub async fn start_leader_srv<S: MetaStore>(
         barrier_scheduler.clone(),
         fragment_manager.clone(),
         cluster_manager.clone(),
-        source_manager,
+        source_manager.clone(),
         catalog_manager.clone(),
         stream_manager.clone(),
     );
@@ -311,6 +312,9 @@ pub async fn start_leader_srv<S: MetaStore>(
             }
         }
     };
+
+    // report telemetry only when it is etcd
+    start_telemetry_reporting(meta_store.clone(), source_manager);
 
     let leader_srv = LeaderServiceImpl::new(election_coordination.leader_rx);
 

@@ -85,9 +85,6 @@ pub async fn rpc_serve(
                 .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
 
-            // report telemetry only when it is etcd
-            start_telemetry_reporting(meta_store.clone());
-
             rpc_serve_with_store(
                 meta_store,
                 address_info,

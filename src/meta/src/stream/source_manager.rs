@@ -621,6 +621,11 @@ where
         core.actor_splits.clone()
     }
 
+    pub async fn source_count(&self) -> usize {
+        let core = self.core.lock().await;
+        core.managed_sources.len()
+    }
+
     async fn tick(&self) -> MetaResult<()> {
         let diff = {
             let core_guard = self.core.lock().await;
