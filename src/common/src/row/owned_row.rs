@@ -173,8 +173,6 @@ impl<D: AsRef<[DataType]>> RowDeserializer<D> {
 
 #[cfg(test)]
 mod tests {
-    use std::cmp::Ordering;
-
     use itertools::Itertools;
 
     use super::*;

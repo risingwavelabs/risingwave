@@ -21,7 +21,6 @@ mod project;
 mod repeat_n;
 
 use std::borrow::Cow;
-use std::cmp::Ordering;
 use std::hash::{BuildHasher, Hasher};
 
 use bytes::{BufMut, Bytes, BytesMut};
