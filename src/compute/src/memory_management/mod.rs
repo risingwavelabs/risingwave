@@ -12,4 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod memory_manager;
+#[cfg(target_os = "linux")]
+mod memory_manager;
+
+// FIXME: remove such limitation after #7180
+/// Jemalloc is not supported on Windows, because of tikv-jemalloc's own reasons.
+/// See the comments for the macro `enable_jemalloc_on_linux!()`
+#[cfg(not(target_os = "linux"))]
+mod fake_global_memory_manager;
+#[cfg(not(target_os = "linux"))]
+pub use fake_global_memory_manager::GlobalMemoryManager;
+#[cfg(target_os = "linux")]
+use memory_manager::{GlobalMemoryManager, GlobalMemoryManagerRef};
