@@ -280,26 +280,22 @@ export default function Streaming() {
             ></Input>
             <datalist id="relationList">
               {relationList &&
-                relationList
-                  .filter((r) => !r.name.startsWith("__"))
-                  .map((r) => (
-                    <option value={r.name} key={r.id}>
-                      ({r.id}) {r.name}
-                    </option>
-                  ))}
+                relationList.map((r) => (
+                  <option value={r.name} key={r.id}>
+                    ({r.id}) {r.name}
+                  </option>
+                ))}
             </datalist>
             <Select
               value={router.query.id}
               onChange={(event) => setRelationId(parseInt(event.target.value))}
             >
               {relationList &&
-                relationList
-                  .filter((r) => !r.name.startsWith("__"))
-                  .map((r) => (
-                    <option value={r.id} key={r.name}>
-                      ({r.id}) {r.name}
-                    </option>
-                  ))}
+                relationList.map((r) => (
+                  <option value={r.id} key={r.name}>
+                    ({r.id}) {r.name}
+                  </option>
+                ))}
             </Select>
           </FormControl>
           <FormControl>
