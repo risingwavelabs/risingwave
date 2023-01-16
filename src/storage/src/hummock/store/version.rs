@@ -415,16 +415,25 @@ impl HummockVersionReader {
         let table_id_string = read_options.table_id.to_string();
         let table_id_label = table_id_string.as_str();
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
+        let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
 
         // 1. read staging data
         for imm in &imms {
+            if imm.epoch() <= min_epoch {
+                continue;
+            }
+
             if let Some(data) = get_from_batch(imm, table_key, &mut local_stats) {
                 return Ok(data.into_user_value());
             }
         }
 
         // 2. order guarantee: imm -> sst
-        let dist_key_hash = Sstable::hash_for_bloom_filter(table_key.dist_key());
+        let dist_key_hash = read_options
+            .prefix_hint
+            .as_ref()
+            .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref()));
+
         let full_key = FullKey::new(read_options.table_id, table_key, epoch);
         for local_sst in &uncommitted_ssts {
             table_counts += 1;
@@ -451,6 +460,7 @@ impl HummockVersionReader {
             if level.table_infos.is_empty() {
                 continue;
             }
+
             match level.level_type() {
                 LevelType::Overlapping | LevelType::Unspecified => {
                     let sstable_infos = prune_ssts(
