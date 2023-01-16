@@ -14,11 +14,10 @@
 
 //! Local execution for batch query.
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
-use futures::Stream;
+use futures::executor::block_on;
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
@@ -35,6 +34,9 @@ use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeSource, LocalExecutePlan, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as ProstTaskId, TaskOutputId,
 };
+use tokio::sync::mpsc;
+use tokio::task::spawn_blocking;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 use uuid::Uuid;
 
@@ -45,26 +47,28 @@ use crate::scheduler::task_context::FrontendBatchTaskContext;
 use crate::scheduler::{PinnedHummockSnapshot, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
-pub struct LocalQueryStream {
-    data_stream: BoxedDataChunkStream,
-}
+// pub struct LocalQueryStream {
+//     data_stream: BoxedDataChunkStream,
+// }
+//
+// impl Stream for LocalQueryStream {
+//     type Item = Result<DataChunk, BoxedError>;
+//
+//     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+//         match self.data_stream.as_mut().poll_next(cx) {
+//             Poll::Pending => Poll::Pending,
+//             Poll::Ready(chunk) => match chunk {
+//                 Some(chunk_result) => match chunk_result {
+//                     Ok(chunk) => Poll::Ready(Some(Ok(chunk))),
+//                     Err(err) => Poll::Ready(Some(Err(Box::new(err)))),
+//                 },
+//                 None => Poll::Ready(None),
+//             },
+//         }
+//     }
+// }
 
-impl Stream for LocalQueryStream {
-    type Item = Result<DataChunk, BoxedError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.data_stream.as_mut().poll_next(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(chunk) => match chunk {
-                Some(chunk_result) => match chunk_result {
-                    Ok(chunk) => Poll::Ready(Some(Ok(chunk))),
-                    Err(err) => Poll::Ready(Some(Err(Box::new(err)))),
-                },
-                None => Poll::Ready(None),
-            },
-        }
-    }
-}
+pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
 
 pub struct LocalQueryExecution {
     sql: String,
@@ -129,9 +133,20 @@ impl LocalQueryExecution {
     }
 
     pub fn stream_rows(self) -> LocalQueryStream {
-        LocalQueryStream {
-            data_stream: self.run(),
-        }
+        let (sender, receiver) = mpsc::channel(10);
+        let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
+
+        spawn_blocking(move || {
+            block_on(async {
+                while let Some(r) = data_stream.next().await {
+                    if (sender.send(r).await).is_err() {
+                        tracing::info!("Receiver closed.");
+                    }
+                }
+            })
+        });
+
+        ReceiverStream::new(receiver)
     }
 
     /// Convert query to plan fragment.
