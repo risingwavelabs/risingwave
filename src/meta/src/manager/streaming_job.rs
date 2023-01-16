@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::{Index, Sink, Source, Table};
 
 use crate::model::FragmentId;
@@ -75,9 +76,15 @@ impl StreamingJob {
         }
     }
 
-    pub fn set_dependent_relations(&mut self, dependent_relations: Vec<u32>) {
+    pub fn set_dependent_relations(
+        &mut self,
+        dependent_relations: impl IntoIterator<Item = TableId>,
+    ) {
         if let Some(table) = self.table_mut() {
-            table.dependent_relations = dependent_relations;
+            table.dependent_relations = dependent_relations
+                .into_iter()
+                .map(|t| t.table_id())
+                .collect();
         }
     }
 

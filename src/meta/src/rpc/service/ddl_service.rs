@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
 use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -23,7 +21,7 @@ use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamFragmentGraph as StreamFragmentGraphProto, StreamNode};
+use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
@@ -34,7 +32,7 @@ use crate::manager::{
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    visit_fragment, ActorGraphBuilder, CreateStreamingJobContext, GlobalStreamManagerRef,
+    visit_fragment_mut, ActorGraphBuilder, CreateStreamingJobContext, GlobalStreamManagerRef,
     SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
@@ -397,7 +395,7 @@ where
 
             let mut source_count = 0;
             for fragment in fragment_graph.fragments.values_mut() {
-                visit_fragment(fragment, |node_body| {
+                visit_fragment_mut(fragment, |node_body| {
                     if let NodeBody::Source(source_node) = node_body {
                         // TODO: Refactor using source id.
                         source_node.source_inner.as_mut().unwrap().source_id = source_id;
@@ -549,44 +547,41 @@ where
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         stream_job.set_id(id);
 
-        // 2. Resolve the dependent relations.
-        let dependent_relations = get_dependent_relations(&fragment_graph)?;
-        stream_job.set_dependent_relations(dependent_relations);
-
-        // 3. Get the env for streaming jobs
+        // 2. Get the env for streaming jobs
         let env = fragment_graph.get_env().unwrap().clone();
 
-        // 4. Mark current relation as "creating" and add reference count to dependent relations.
+        // 3. Build fragment graph.
+        let fragment_graph = StreamFragmentGraph::create(
+            fragment_graph,
+            self.env.id_gen_manager_ref(),
+            &*stream_job,
+        )
+        .await?;
+        let internal_tables = fragment_graph.internal_tables();
+
+        // 4. Set the graph-related fields and freeze the `stream_job`.
+        stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
+        let dependent_relations = fragment_graph.dependent_relations();
+        stream_job.set_dependent_relations(dependent_relations.clone());
+
+        let stream_job = &*stream_job;
+
+        // 5. Mark current relation as "creating" and add reference count to dependent relations.
         self.catalog_manager
-            .start_create_stream_job_procedure(&*stream_job)
+            .start_create_stream_job_procedure(stream_job)
             .await?;
 
-        // 5. Build fragment graph.
-        use risingwave_common::catalog::TableId;
-        let dependent_table_ids = fragment_graph
-            .dependent_table_ids
-            .iter()
-            .map(|table_id| TableId::new(*table_id))
-            .collect();
-
-        let table_ids_cnt = fragment_graph.table_ids_cnt;
-
-        let fragment_graph =
-            StreamFragmentGraph::create(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
-                .await?;
-        let internal_tables = fragment_graph.internal_tables();
-        assert_eq!(table_ids_cnt, internal_tables.len() as u32);
-
         // 6. Build actor graph from the fragment graph.
+        // TODO: directly store the freezed `stream_job`.
         let mut ctx = CreateStreamingJobContext {
             streaming_definition: stream_job.mview_definition(),
             table_properties: stream_job.properties(),
             table_mview_map: self
                 .fragment_manager
-                .get_build_graph_info(&dependent_table_ids)
+                .get_build_graph_info(&dependent_relations)
                 .await?
                 .table_mview_actor_ids,
-            dependent_table_ids,
+            dependent_table_ids: dependent_relations,
             internal_tables,
             ..Default::default()
         };
@@ -766,34 +761,4 @@ where
         let id = self.env.id_gen_manager().generate::<C>().await? as u32;
         Ok(id)
     }
-}
-
-fn get_dependent_relations(fragment_graph: &StreamFragmentGraphProto) -> MetaResult<Vec<TableId>> {
-    // TODO: distinguish SourceId and TableId
-    fn resolve_dependent_relations(
-        stream_node: &StreamNode,
-        dependent_relations: &mut HashSet<TableId>,
-    ) -> MetaResult<()> {
-        match stream_node.node_body.as_ref().unwrap() {
-            NodeBody::Source(source_node) => {
-                if let Some(source) = &source_node.source_inner {
-                    dependent_relations.insert(source.get_source_id());
-                }
-            }
-            NodeBody::Chain(chain_node) => {
-                dependent_relations.insert(chain_node.get_table_id());
-            }
-            _ => {}
-        }
-        for child in &stream_node.input {
-            resolve_dependent_relations(child, dependent_relations)?;
-        }
-        Ok(())
-    }
-
-    let mut dependent_relations = Default::default();
-    for fragment in fragment_graph.fragments.values() {
-        resolve_dependent_relations(fragment.node.as_ref().unwrap(), &mut dependent_relations)?;
-    }
-    Ok(dependent_relations.into_iter().collect())
 }
