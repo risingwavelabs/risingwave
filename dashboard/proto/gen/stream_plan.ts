@@ -851,8 +851,8 @@ export interface StreamFragmentGraph {
   env:
     | StreamEnvironment
     | undefined;
-  /** 0 means use default value. */
-  parallelism: number;
+  /** If none, default parallelism will be applied. */
+  parallelism: StreamFragmentGraph_Parallelism | undefined;
 }
 
 export interface StreamFragmentGraph_StreamFragment {
@@ -3782,7 +3782,7 @@ export const StreamEnvironment = {
 };
 
 function createBaseStreamFragmentGraph(): StreamFragmentGraph {
-  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0, env: undefined, parallelism: 0 };
+  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0, env: undefined, parallelism: undefined };
 }
 
 export const StreamFragmentGraph = {
@@ -3805,7 +3805,7 @@ export const StreamFragmentGraph = {
         : [],
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
       env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
-      parallelism: isSet(object.parallelism) ? Number(object.parallelism) : 0,
+      parallelism: isSet(object.parallelism) ? StreamFragmentGraph_Parallelism.fromJSON(object.parallelism) : undefined,
     };
   },
 
@@ -3829,7 +3829,8 @@ export const StreamFragmentGraph = {
     }
     message.tableIdsCnt !== undefined && (obj.tableIdsCnt = Math.round(message.tableIdsCnt));
     message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
-    message.parallelism !== undefined && (obj.parallelism = Math.round(message.parallelism));
+    message.parallelism !== undefined &&
+      (obj.parallelism = message.parallelism ? StreamFragmentGraph_Parallelism.toJSON(message.parallelism) : undefined);
     return obj;
   },
 
@@ -3849,7 +3850,9 @@ export const StreamFragmentGraph = {
     message.env = (object.env !== undefined && object.env !== null)
       ? StreamEnvironment.fromPartial(object.env)
       : undefined;
-    message.parallelism = object.parallelism ?? 0;
+    message.parallelism = (object.parallelism !== undefined && object.parallelism !== null)
+      ? StreamFragmentGraph_Parallelism.fromPartial(object.parallelism)
+      : undefined;
     return message;
   },
 };
