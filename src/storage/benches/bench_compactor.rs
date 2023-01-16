@@ -83,7 +83,7 @@ async fn build_table(
         capacity: 32 * 1024 * 1024,
         block_capacity: 16 * 1024,
         restart_interval: 16,
-        bloom_false_positive: 0.01,
+        bloom_false_positive: 0.001,
         compression_algorithm: CompressionAlgorithm::None,
     };
     let writer = sstable_store.create_sst_writer(
@@ -167,7 +167,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         capacity: 32 * 1024 * 1024,
         block_capacity: 64 * 1024,
         restart_interval: 16,
-        bloom_false_positive: 0.01,
+        bloom_false_positive: 0.001,
         compression_algorithm: CompressionAlgorithm::None,
     };
     let mut builder =
