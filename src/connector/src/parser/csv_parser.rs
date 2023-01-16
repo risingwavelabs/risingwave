@@ -62,7 +62,6 @@ impl CsvParser {
             has_header,
         } = parser_config;
 
-        // tracing::info!("rw_columns: {:?}", rw_columns);
         Ok(Self {
             rw_columns,
             next_row_is_header: has_header,

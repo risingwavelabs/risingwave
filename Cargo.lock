@@ -2693,11 +2693,11 @@ dependencies = [
 
 [[package]]
 name = "halfbrown"
-version = "0.1.18"
+version = "0.1.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e2a3c70a9c00cc1ee87b54e89f9505f73bb17d63f1b25c9a462ba8ef885444f"
+checksum = "ff8ba437813c5a31783dd9a21ce4f555583dc9b048af6bd2b12217394ed9c199"
 dependencies = [
- "hashbrown 0.13.1",
+ "hashbrown 0.12.3",
  "serde",
 ]
 
@@ -2715,9 +2715,6 @@ name = "hashbrown"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33ff8ae62cd3a9102e5637afc8452c55acf3844001bd5374e0b0bd7b6616c038"
-dependencies = [
- "ahash 0.8.2",
-]
 
 [[package]]
 name = "hdrhistogram"
@@ -6230,7 +6227,6 @@ name = "risingwave_source"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
- "apache-avro",
  "assert_matches",
  "async-stream",
  "async-trait",
@@ -6249,16 +6245,11 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
- "moka",
  "num-traits",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
- "prost 0.11.6",
- "prost-reflect",
- "protobuf-native",
  "rand 0.8.5",
- "reqwest",
  "risingwave_common",
  "risingwave_connector",
  "risingwave_expr",
@@ -8474,7 +8465,6 @@ dependencies = [
  "futures-task",
  "futures-util",
  "hashbrown 0.12.3",
- "hashbrown 0.13.1",
  "hdrhistogram",
  "hyper",
  "indexmap",
