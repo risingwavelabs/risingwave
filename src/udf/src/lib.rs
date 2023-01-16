@@ -28,6 +28,7 @@ pub struct ArrowFlightUdfClient {
     client: FlightServiceClient<Channel>,
 }
 
+#[cfg(not(madsim))]
 impl ArrowFlightUdfClient {
     /// Connect to a UDF service.
     pub async fn connect(addr: &str) -> Result<Self> {
@@ -92,6 +93,40 @@ impl ArrowFlightUdfClient {
             stream.map_err(|e| e.into()),
         );
         Ok(record_batch_stream.map_err(|e| e.into()))
+    }
+}
+
+// TODO: support UDF in simulation
+#[cfg(madsim)]
+impl ArrowFlightUdfClient {
+    /// Connect to a UDF service.
+    pub async fn connect(_addr: &str) -> Result<Self> {
+        panic!("UDF is not supported in simulation yet")
+    }
+
+    /// Check if the function is available and return the function ID.
+    pub async fn check(
+        &self,
+        _name: &str,
+        _args: &Schema,
+        _returns: &Schema,
+    ) -> Result<FunctionId> {
+        panic!("UDF is not supported in simulation yet")
+    }
+
+    /// Call a function.
+    pub async fn call(&self, _id: &FunctionId, _input: RecordBatch) -> Result<RecordBatch> {
+        panic!("UDF is not supported in simulation yet")
+    }
+
+    /// Call a function with streaming input and output.
+    pub async fn call_stream(
+        &self,
+        _id: &FunctionId,
+        _inputs: impl Stream<Item = RecordBatch> + Send + 'static,
+    ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + 'static> {
+        panic!("UDF is not supported in simulation yet");
+        Ok(stream::empty())
     }
 }
 

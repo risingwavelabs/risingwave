@@ -37,6 +37,10 @@ pub struct UdfExpression {
     function_id: FunctionId,
 }
 
+// TODO: make evaluation functions async
+// At present, we use `block_in_place` + `block_on` as a workaround to run
+// async functions in sync context.
+#[cfg(not(madsim))]
 impl Expression for UdfExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
@@ -69,6 +73,7 @@ impl Expression for UdfExpression {
 
 impl UdfExpression {}
 
+#[cfg(not(madsim))]
 impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
     type Error = ExprError;
 
@@ -101,5 +106,29 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
             client,
             function_id,
         })
+    }
+}
+
+#[cfg(madsim)]
+impl Expression for UdfExpression {
+    fn return_type(&self) -> DataType {
+        self.return_type.clone()
+    }
+
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        panic!("UDF is not supported in simulation yet");
+    }
+
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        panic!("UDF is not supported in simulation yet");
+    }
+}
+
+#[cfg(madsim)]
+impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
+    type Error = ExprError;
+
+    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+        panic!("UDF is not supported in simulation yet");
     }
 }
