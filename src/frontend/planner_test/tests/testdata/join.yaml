@@ -577,8 +577,8 @@
       └─LogicalScan { table: t2, columns: [t2.x, t2.y] }
 - name: Lookup join with no eq keys after pulling up predicate will revert to hash join
   sql: |
-    create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
+    create table t1 (v1 int, v2 int);
     create materialized view t3 as select v1, count(v2) as v2 from t2 group by v1;
     select * from (select * from t1 where false) as t1_s join (select * from t3 where false) as t3_s on t1_s.v2 = t3_s.v1;
   batch_plan: |
@@ -595,15 +595,19 @@
     select * from t1 join t2 on v1 IS NOT DISTINCT FROM v2;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: t1.v1 IS NOT DISTINCT FROM t2.v2, output: all }
-      ├─BatchExchange { order: [], dist: HashShard(t1.v1) }
-      | └─BatchScan { table: t1, columns: [t1.v1], distribution: SomeShard }
+    └─BatchHashJoin { type: Inner, predicate: t1.v1::Int64 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2] }
+      ├─BatchExchange { order: [], dist: HashShard(t1.v1::Int64) }
+      | └─BatchProject { exprs: [t1.v1, t1.v1::Int64] }
+      |   └─BatchScan { table: t1, columns: [t1.v1], distribution: SomeShard }
       └─BatchExchange { order: [], dist: HashShard(t2.v2) }
-        └─BatchScan { table: t2, columns: [t2.v2], distribution: SomeShard }
+        └─BatchProject { exprs: [t2.v2, t2.v2] }
+          └─BatchScan { table: t2, columns: [t2.v2], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, v1, v2] }
-    └─StreamHashJoin { type: Inner, predicate: t1.v1 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
-      ├─StreamExchange { dist: HashShard(t1.v1) }
-      | └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t1.v1::Int64(hidden), t2._row_id(hidden), t2.v2(hidden)], pk_columns: [t1._row_id, t2._row_id, t1.v1::Int64, t2.v2] }
+    └─StreamHashJoin { type: Inner, predicate: t1.v1::Int64 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2, t1._row_id, t1.v1::Int64, t2._row_id, t2.v2] }
+      ├─StreamExchange { dist: HashShard(t1.v1::Int64) }
+      | └─StreamProject { exprs: [t1.v1, t1.v1::Int64, t1._row_id] }
+      |   └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: HashShard(t2.v2) }
-        └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+        └─StreamProject { exprs: [t2.v2, t2.v2, t2._row_id] }
+          └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
