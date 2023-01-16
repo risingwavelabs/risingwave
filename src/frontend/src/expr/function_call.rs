@@ -16,8 +16,9 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_expr::vector_op::cast::literal_parsing;
 
-use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
+use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::{ExprDisplay, ExprType};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -114,10 +115,25 @@ impl FunctionCall {
             // types, they will be handled in `cast_ok`.
             return Self::cast_nested(child, target, allows);
         }
+        if child.is_unknown() {
+            // `is_unknown` makes sure `as_literal` and `as_utf8` will never panic.
+            let literal = child.as_literal().unwrap();
+            let datum = literal
+                .get_data()
+                .as_ref()
+                .map(|scalar| {
+                    let s = scalar.as_utf8();
+                    literal_parsing(&target, s)
+                })
+                .transpose();
+            if let Ok(datum) = datum {
+                return Ok(Literal::new(datum, target).into());
+            }
+            // else when eager parsing fails, just proceed as normal.
+            // Some callers are not ready to handle `'a'::int` error here.
+        }
         let source = child.return_type();
-        if child.is_null() {
-            Ok(Literal::new(None, target).into())
-        } else if source == target {
+        if source == target {
             Ok(child)
         // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
         // in frontend.
@@ -182,6 +198,37 @@ impl FunctionCall {
             func_type,
             return_type,
             inputs,
+        }
+    }
+
+    pub fn new_binary_op_func(
+        mut func_types: Vec<ExprType>,
+        mut inputs: Vec<ExprImpl>,
+    ) -> Result<ExprImpl> {
+        let expr_type = func_types.remove(0);
+        match expr_type {
+            ExprType::Some | ExprType::All => {
+                let ensure_return_boolean = |return_type: &DataType| {
+                    if &DataType::Boolean == return_type {
+                        Ok(())
+                    } else {
+                        Err(ErrorCode::BindError(
+                            "op ANY/ALL (array) requires operator to yield boolean".to_string(),
+                        ))
+                    }
+                };
+
+                let return_type = infer_some_all(func_types, &mut inputs)?;
+                ensure_return_boolean(&return_type)?;
+
+                Ok(FunctionCall::new_unchecked(expr_type, inputs, return_type).into())
+            }
+            ExprType::Not | ExprType::IsNotNull | ExprType::IsNull => Ok(FunctionCall::new(
+                expr_type,
+                vec![Self::new_binary_op_func(func_types, inputs)?],
+            )?
+            .into()),
+            _ => Ok(FunctionCall::new(expr_type, inputs)?.into()),
         }
     }
 

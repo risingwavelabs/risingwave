@@ -40,7 +40,7 @@
   stream_plan: |
     StreamMaterialize { columns: [cnt], pk_columns: [] }
     └─StreamProject { exprs: [sum0(count)] }
-      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), sum0(count)] }
+      └─StreamAppendOnlyGlobalSimpleAgg { aggs: [count, sum0(count)] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count, count] }
             └─StreamAppendOnlyHashJoin { type: Inner, predicate: id = id, output: [_row_id, id, _row_id, id] }

@@ -20,6 +20,7 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
+use super::generic::GenericPlanRef;
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
@@ -178,7 +179,12 @@ impl StreamNode for StreamDeltaJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| x.to_expr_proto()),
+                .map(|x| {
+                    self.base
+                        .ctx()
+                        .expr_with_session_timezone(x)
+                        .to_expr_proto()
+                }),
             left_table_id: left_table_desc.table_id.table_id(),
             right_table_id: right_table_desc.table_id.table_id(),
             left_info: Some(ArrangementInfo {

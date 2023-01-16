@@ -35,7 +35,8 @@ use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
-    HummockMetrics, MonitoredStateStore, ObjectStoreMetrics, StateStoreMetrics,
+    CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
+    MonitoredStorageMetrics, ObjectStoreMetrics,
 };
 use risingwave_storage::store::{ReadOptions, StateStoreRead};
 use risingwave_storage::{StateStore, StateStoreImpl};
@@ -611,7 +612,6 @@ async fn open_hummock_iters(
                     prefix_hint: None,
                     table_id: TableId { table_id },
                     retention_seconds: None,
-                    check_bloom_filter: false,
                     ignore_range_tombstone: false,
                     read_version_from_backup: false,
                 },
@@ -661,8 +661,10 @@ pub async fn check_compaction_results(
 
 struct StorageMetrics {
     pub hummock_metrics: Arc<HummockMetrics>,
-    pub state_store_metrics: Arc<StateStoreMetrics>,
+    pub state_store_metrics: Arc<HummockStateStoreMetrics>,
     pub object_store_metrics: Arc<ObjectStoreMetrics>,
+    pub storage_metrics: Arc<MonitoredStorageMetrics>,
+    pub compactor_metrics: Arc<CompactorMetrics>,
 }
 
 pub async fn create_hummock_store_with_metrics(
@@ -672,8 +674,10 @@ pub async fn create_hummock_store_with_metrics(
 ) -> anyhow::Result<MonitoredStateStore<HummockStorage>> {
     let metrics = StorageMetrics {
         hummock_metrics: Arc::new(HummockMetrics::unused()),
-        state_store_metrics: Arc::new(StateStoreMetrics::unused()),
+        state_store_metrics: Arc::new(HummockStateStoreMetrics::unused()),
         object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
+        storage_metrics: Arc::new(MonitoredStorageMetrics::unused()),
+        compactor_metrics: Arc::new(CompactorMetrics::unused()),
     };
     let rw_config = RwConfig {
         storage: storage_config.deref().clone(),
@@ -692,13 +696,15 @@ pub async fn create_hummock_store_with_metrics(
         metrics.object_store_metrics.clone(),
         TieredCacheMetricsBuilder::unused(),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
+        metrics.storage_metrics.clone(),
+        metrics.compactor_metrics.clone(),
     )
     .await?;
 
     if let Some(hummock_state_store) = state_store_impl.as_hummock() {
         Ok(hummock_state_store
             .clone()
-            .monitored(metrics.state_store_metrics))
+            .monitored(metrics.storage_metrics))
     } else {
         Err(anyhow!("only Hummock state store is supported!"))
     }

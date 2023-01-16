@@ -2,9 +2,11 @@ syntax = "proto3";
 
 package catalog;
 
+import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 // The rust prost library always treats uint64 as required and message as
@@ -75,6 +77,18 @@ message Index {
   repeated int32 original_columns = 9;
 }
 
+message Function {
+  uint32 id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  string name = 4;
+  repeated data.DataType arg_types = 5;
+  data.DataType return_type = 6;
+  string language = 7;
+  string path = 8;
+  uint32 owner = 9;
+}
+
 // See `TableCatalog` struct in frontend crate for more information.
 message Table {
   enum TableType {
@@ -84,6 +98,15 @@ message Table {
     INDEX = 3;
     INTERNAL = 4;
   }
+  message TableVersion {
+    // The version number, which will be 0 by default and be increased by 1 for
+    // each schema change in the frontend.
+    uint64 version = 1;
+    // The ID of the next column to be added, which is used to make all columns
+    // in the table have unique IDs, even if some columns have been dropped.
+    int32 next_column_id = 2;
+  }
+
   uint32 id = 1;
   uint32 schema_id = 2;
   uint32 database_id = 3;
@@ -115,6 +138,10 @@ message Table {
   string definition = 21;
   bool handle_pk_conflict = 22;
   uint32 read_prefix_len_hint = 23;
+
+  // Per-table catalog version, used by schema change. `None` for internal tables and tests.
+  // Not to be confused with the global catalog version for notification service.
+  TableVersion version = 100;
 }
 
 message View {

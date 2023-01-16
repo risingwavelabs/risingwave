@@ -22,7 +22,8 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
-    HummockMetrics, MonitoredStateStore, ObjectStoreMetrics, StateStoreMetrics,
+    CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
+    MonitoredStorageMetrics, ObjectStoreMetrics,
 };
 use risingwave_storage::{StateStore, StateStoreImpl};
 use tokio::sync::oneshot::Sender;
@@ -38,8 +39,10 @@ pub struct HummockServiceOpts {
 #[derive(Clone)]
 pub struct Metrics {
     pub hummock_metrics: Arc<HummockMetrics>,
-    pub state_store_metrics: Arc<StateStoreMetrics>,
+    pub state_store_metrics: Arc<HummockStateStoreMetrics>,
     pub object_store_metrics: Arc<ObjectStoreMetrics>,
+    pub storage_metrics: Arc<MonitoredStorageMetrics>,
+    pub compactor_metrics: Arc<CompactorMetrics>,
 }
 
 impl HummockServiceOpts {
@@ -103,8 +106,10 @@ For `./risedev apply-compose-deploy` users,
 
         let metrics = Metrics {
             hummock_metrics: Arc::new(HummockMetrics::unused()),
-            state_store_metrics: Arc::new(StateStoreMetrics::unused()),
+            state_store_metrics: Arc::new(HummockStateStoreMetrics::unused()),
             object_store_metrics: Arc::new(ObjectStoreMetrics::unused()),
+            storage_metrics: Arc::new(MonitoredStorageMetrics::unused()),
+            compactor_metrics: Arc::new(CompactorMetrics::unused()),
         };
 
         let state_store_impl = StateStoreImpl::new(
@@ -119,6 +124,8 @@ For `./risedev apply-compose-deploy` users,
             metrics.object_store_metrics.clone(),
             TieredCacheMetricsBuilder::unused(),
             Arc::new(risingwave_tracing::RwTracingService::disabled()),
+            metrics.storage_metrics.clone(),
+            metrics.compactor_metrics.clone(),
         )
         .await?;
 
@@ -126,7 +133,7 @@ For `./risedev apply-compose-deploy` users,
             Ok((
                 hummock_state_store
                     .clone()
-                    .monitored(metrics.state_store_metrics.clone()),
+                    .monitored(metrics.storage_metrics.clone()),
                 metrics,
             ))
         } else {

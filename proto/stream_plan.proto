@@ -9,6 +9,7 @@ import "expr.proto";
 import "plan_common.proto";
 import "source.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message AddMutation {
@@ -143,6 +144,11 @@ message SinkNode {
 
 message ProjectNode {
   repeated expr.ExprNode select_list = 1;
+  // this two field is expressing a list of usize pair, which means when project receives a
+  // watermark with `watermark_input_key[i]` column index, it should derive a new watermark
+  // with `watermark_output_key[i]`th expression
+  repeated uint32 watermark_input_key = 2;
+  repeated uint32 watermark_output_key = 3;
 }
 
 message FilterNode {
@@ -575,6 +581,12 @@ enum FragmentTypeFlag {
   CHAIN_NODE = 16;
 }
 
+// The environment associated with a stream plan
+message StreamEnvironment {
+  // The timezone associated with the streaming plan. Only applies to MV for now.
+  string timezone = 1;
+}
+
 message StreamFragmentGraph {
   message StreamFragment {
     // 0-based on frontend, and will be rewritten to global id on meta.
@@ -610,4 +622,5 @@ message StreamFragmentGraph {
 
   repeated uint32 dependent_table_ids = 3;
   uint32 table_ids_cnt = 4;
+  StreamEnvironment env = 5;
 }

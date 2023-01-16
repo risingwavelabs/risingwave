@@ -32,6 +32,9 @@ pub use crate::constants::hummock;
 use crate::error::Result;
 use crate::row::OwnedRow;
 
+/// The global version of the catalog.
+pub type CatalogVersion = u64;
+
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
 pub const PG_CATALOG_SCHEMA_NAME: &str = "pg_catalog";
@@ -60,8 +63,6 @@ pub trait SysCatalogReader: Sync + Send + 'static {
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
-
-pub type CatalogVersion = u64;
 
 #[derive(Clone, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct DatabaseId {
@@ -215,5 +216,40 @@ impl From<u32> for IndexId {
 impl From<IndexId> for u32 {
     fn from(id: IndexId) -> Self {
         id.index_id
+    }
+}
+
+#[derive(Clone, Copy, Debug, Display, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
+pub struct FunctionId(pub u32);
+
+impl FunctionId {
+    pub const fn new(id: u32) -> Self {
+        FunctionId(id)
+    }
+
+    pub const fn placeholder() -> Self {
+        FunctionId(u32::MAX - 1)
+    }
+
+    pub fn function_id(&self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u32> for FunctionId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
+impl From<&u32> for FunctionId {
+    fn from(id: &u32) -> Self {
+        Self::new(*id)
+    }
+}
+
+impl From<FunctionId> for u32 {
+    fn from(id: FunctionId) -> Self {
+        id.0
     }
 }

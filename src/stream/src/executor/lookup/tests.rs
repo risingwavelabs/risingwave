@@ -242,6 +242,7 @@ async fn test_lookup_this_epoch() {
                 .map(|x| x.order_type)
                 .collect_vec(),
             vec![1, 0],
+            vec![0, 1],
         ),
         watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,
@@ -312,6 +313,7 @@ async fn test_lookup_last_epoch() {
                 .map(|x| x.order_type)
                 .collect_vec(),
             vec![1, 0],
+            vec![0, 1],
         ),
         watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,

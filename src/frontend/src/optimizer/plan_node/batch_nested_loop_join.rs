@@ -19,6 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::NestedLoopJoinNode;
 
+use super::generic::GenericPlanRef;
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -127,7 +128,12 @@ impl ToBatchProst for BatchNestedLoopJoin {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::NestedLoopJoin(NestedLoopJoinNode {
             join_type: self.logical.join_type() as i32,
-            join_cond: Some(ExprImpl::from(self.logical.on().clone()).to_expr_proto()),
+            join_cond: Some(
+                self.base
+                    .ctx()
+                    .expr_with_session_timezone(ExprImpl::from(self.logical.on().clone()))
+                    .to_expr_proto(),
+            ),
             output_indices: self
                 .logical
                 .output_indices()

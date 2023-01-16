@@ -1246,6 +1246,12 @@ impl ToBatch for LogicalJoin {
         let config = self.base.ctx.session_ctx().config();
 
         if predicate.has_eq() {
+            if !predicate.eq_keys_are_type_aligned() {
+                return Err(ErrorCode::InternalError(format!(
+                    "Join eq keys are not aligned for predicate: {predicate:?}"
+                ))
+                .into());
+            }
             if config.get_batch_enable_lookup_join() {
                 if let Some(lookup_join) = self.to_batch_lookup_join_with_index_selection(
                     predicate.clone(),
@@ -1272,15 +1278,24 @@ impl ToStream for LogicalJoin {
         );
 
         if predicate.has_eq() {
+            if !predicate.eq_keys_are_type_aligned() {
+                return Err(ErrorCode::InternalError(format!(
+                    "Join eq keys are not aligned for predicate: {predicate:?}"
+                ))
+                .into());
+            }
             self.to_stream_hash_join(predicate, ctx)
         } else if let Some(dynamic_filter) =
             self.to_stream_dynamic_filter(self.on().clone(), ctx)?
         {
             Ok(dynamic_filter)
         } else {
-            Err(RwError::from(ErrorCode::NotImplemented(
-                "stream nested-loop join".to_string(),
-                None.into(),
+            Err(RwError::from(ErrorCode::NotSupported(
+                "streaming nested-loop join".to_string(),
+                // TODO: replace the link with user doc
+                "The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. \
+                 Consider rewriting the query to use dynamic filter as a substitute if possible.\n\
+                 See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md".to_owned(),
             )))
         }
     }

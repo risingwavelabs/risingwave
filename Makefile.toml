@@ -12,6 +12,7 @@ extend = [
   { path = "src/frontend/planner_test/planner_test.toml" },
   { path = "src/tests/compaction_test/Makefile.toml" },
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
+  { path = "src/java_binding/make-java-binding.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -586,7 +587,7 @@ cargo build \
 category = "RiseDev - Deterministic Simulation Test"
 description = "Run unit tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
-env = { RUSTFLAGS = "--cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
 script = """
 #!/bin/bash
 set -e
@@ -633,6 +634,18 @@ cargo nextest archive \
   -p risingwave_simulation \
   --archive-file scale-test.tar.zst \
   "$@"
+"""
+
+[tasks.scheck]
+category = "RiseDev - Deterministic Simulation End-to-end Test"
+description = "Run cargo check in deterministic simulation mode"
+dependencies = ["warn-on-missing-tools"]
+env = { RUSTFLAGS = "-Ctarget-cpu=native --cfg tokio_unstable --cfg madsim", RUSTDOCFLAGS = "--cfg madsim", CARGO_TARGET_DIR = "target/sim" }
+script = """
+#!/bin/bash
+set -e
+
+cargo check -p risingwave_simulation "$@"
 """
 
 [tasks.sslt]

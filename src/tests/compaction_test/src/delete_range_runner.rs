@@ -44,10 +44,9 @@ use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContex
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::{
-    CompactorSstableStore, HummockStorage, MemoryLimiter, SstableIdManager, SstableStore,
-    TieredCache,
+    HummockStorage, MemoryLimiter, SstableIdManager, SstableStore, TieredCache,
 };
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
@@ -93,7 +92,7 @@ pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()
         storage_config,
         &opts.state_store,
         1000000,
-        2000,
+        800,
     )
     .await
 }
@@ -134,6 +133,7 @@ async fn compaction_test(
         table_type: 0,
         append_only: false,
         row_id_index: None,
+        version: None,
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -173,7 +173,8 @@ async fn compaction_test(
 
     let config = Arc::new(storage_config);
 
-    let state_store_metrics = Arc::new(StateStoreMetrics::unused());
+    let state_store_metrics = Arc::new(HummockStateStoreMetrics::unused());
+    let compactor_metrics = Arc::new(CompactorMetrics::unused());
     let object_store_metrics = Arc::new(ObjectStoreMetrics::unused());
     let remote_object_store = parse_remote_object_store(
         state_store_type.strip_prefix("hummock+").unwrap(),
@@ -198,6 +199,7 @@ async fn compaction_test(
         get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
         state_store_metrics.clone(),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
+        compactor_metrics.clone(),
     )
     .await?;
     let sstable_id_manager = store.sstable_id_manager().clone();
@@ -221,7 +223,7 @@ async fn compaction_test(
         meta_client.clone(),
         filter_key_extractor_manager,
         sstable_id_manager,
-        state_store_metrics,
+        compactor_metrics,
     );
     run_compare_result(&store, meta_client.clone(), test_range, test_count)
         .await
@@ -340,7 +342,7 @@ async fn run_compare_result(
 
 struct NormalState {
     storage: LocalHummockStorage,
-    cache: BTreeMap<Vec<u8>, StorageValue>,
+    cache: BTreeMap<Bytes, StorageValue>,
     table_id: TableId,
     epoch: u64,
 }
@@ -387,7 +389,7 @@ impl NormalState {
     ) -> Result<(), String> {
         let data = std::mem::take(&mut self.cache)
             .into_iter()
-            .map(|(key, val)| (Bytes::from(key), val))
+            .map(|(key, val)| (key, val))
             .collect_vec();
         self.storage
             .ingest_batch(
@@ -412,7 +414,6 @@ impl NormalState {
                 ReadOptions {
                     prefix_hint: None,
                     ignore_range_tombstone,
-                    check_bloom_filter: false,
                     retention_seconds: None,
                     table_id: self.table_id,
                     read_version_from_backup: false,
@@ -446,7 +447,6 @@ impl NormalState {
                     ReadOptions {
                         prefix_hint: None,
                         ignore_range_tombstone,
-                        check_bloom_filter: false,
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
@@ -461,20 +461,20 @@ impl NormalState {
             let tkey = full_key.user_key.table_key.0.clone();
             if let Some(cache_val) = self.cache.get(&tkey) {
                 if cache_val.user_value.is_some() {
-                    ret.push((Bytes::from(tkey), cache_val.user_value.clone().unwrap()));
+                    ret.push((tkey, cache_val.user_value.clone().unwrap()));
                 } else {
                     continue;
                 }
             } else {
-                ret.push((Bytes::from(tkey), val));
+                ret.push((tkey, val));
             }
         }
         for (key, val) in self.cache.range((
-            Bound::Included(left.to_vec()),
-            Bound::Excluded(right.to_vec()),
+            Bound::Included(Bytes::from(left.to_vec())),
+            Bound::Excluded(Bytes::from(right.to_vec())),
         )) {
             if let Some(uval) = val.user_value.as_ref() {
-                ret.push((Bytes::from(key.clone()), uval.clone()));
+                ret.push((key.clone(), uval.clone()));
             }
         }
         ret.sort_by(|a, b| a.0.cmp(&b.0));
@@ -486,7 +486,7 @@ impl NormalState {
 impl CheckState for NormalState {
     async fn delete_range(&mut self, left: &[u8], right: &[u8]) {
         self.cache
-            .retain(|key, _| key.as_slice().lt(left) || key.as_slice().ge(right));
+            .retain(|key: &Bytes, _| key.as_ref().lt(left) || key.as_ref().ge(right));
         let mut iter = Box::pin(
             self.storage
                 .iter(
@@ -498,7 +498,6 @@ impl CheckState for NormalState {
                     ReadOptions {
                         prefix_hint: None,
                         ignore_range_tombstone: true,
-                        check_bloom_filter: false,
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
@@ -515,8 +514,10 @@ impl CheckState for NormalState {
     }
 
     fn insert(&mut self, key: &[u8], val: &[u8]) {
-        self.cache
-            .insert(key.to_vec(), StorageValue::new_put(val.to_vec()));
+        self.cache.insert(
+            Bytes::from(key.to_vec()),
+            StorageValue::new_put(val.to_vec()),
+        );
     }
 
     async fn get(&self, key: &[u8]) -> Option<Bytes> {
@@ -577,21 +578,16 @@ fn run_compactor_thread(
     meta_client: Arc<MockHummockMetaClient>,
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
     sstable_id_manager: Arc<SstableIdManager>,
-    state_store_metrics: Arc<StateStoreMetrics>,
+    compactor_metrics: Arc<CompactorMetrics>,
 ) -> (
     tokio::task::JoinHandle<()>,
     tokio::sync::oneshot::Sender<()>,
 ) {
-    let compact_sstable_store = Arc::new(CompactorSstableStore::new(
-        sstable_store.clone(),
-        MemoryLimiter::unlimit(),
-    ));
-
     let context = Arc::new(Context {
         options: config,
         hummock_meta_client: meta_client.clone(),
         sstable_store,
-        stats: state_store_metrics,
+        compactor_metrics,
         is_share_buffer_compact: false,
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
         filter_key_extractor_manager,
@@ -601,7 +597,6 @@ fn run_compactor_thread(
     });
     let context = CompactorContext::with_config(
         context,
-        compact_sstable_store,
         CompactorRuntimeConfig {
             max_concurrent_task_number: 4,
         },
@@ -637,7 +632,7 @@ mod tests {
             storage_config,
             "hummock+memory",
             10000,
-            100,
+            60,
         )
         .await
         .unwrap();

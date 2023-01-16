@@ -442,7 +442,7 @@ mod default {
         }
 
         pub fn bloom_false_positive() -> f64 {
-            0.01
+            0.001
         }
 
         pub fn share_buffers_sync_parallelism() -> u32 {

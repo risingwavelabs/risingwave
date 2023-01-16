@@ -26,6 +26,7 @@ pub(crate) mod catalog_service;
 
 pub(crate) mod column_catalog;
 pub(crate) mod database_catalog;
+pub(crate) mod function_catalog;
 pub(crate) mod index_catalog;
 pub(crate) mod root_catalog;
 pub(crate) mod schema_catalog;
@@ -84,12 +85,19 @@ pub fn is_row_id_column_name(name: &str) -> bool {
     name.starts_with(ROWID_PREFIX)
 }
 
-/// Creates a row ID column (for implicit primary key).
-pub fn row_id_column_desc(column_id: ColumnId) -> ColumnDesc {
+/// The column ID preserved for the row ID column.
+pub const ROW_ID_COLUMN_ID: ColumnId = ColumnId::new(0);
+
+/// The column ID offset for user-defined columns.
+///
+/// All IDs of user-defined columns must be greater or equal to this value.
+pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
+
+/// Creates a row ID column (for implicit primary key). It'll always have the ID `0` for now.
+pub fn row_id_column_desc() -> ColumnDesc {
     ColumnDesc {
         data_type: DataType::Int64,
-        // We should not assume the first column (i.e., column_id == 0) is `_row_id`.
-        column_id,
+        column_id: ROW_ID_COLUMN_ID,
         name: row_id_column_name(),
         field_descs: vec![],
         type_name: "".to_string(),

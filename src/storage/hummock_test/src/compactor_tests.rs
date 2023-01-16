@@ -49,10 +49,9 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::{
-        CompactorSstableStore, HummockStorage as GlobalHummockStorage, MemoryLimiter,
-        SstableIdManager,
+        HummockStorage as GlobalHummockStorage, MemoryLimiter, SstableIdManager,
     };
-    use risingwave_storage::monitor::{StateStoreMetrics, StoreLocalStatistic};
+    use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
     use risingwave_storage::storage_value::StorageValue;
     use risingwave_storage::store::{
         ReadOptions, StateStoreReadExt, StateStoreWrite, WriteOptions,
@@ -179,7 +178,7 @@ pub(crate) mod tests {
             options: options.clone(),
             sstable_store,
             hummock_meta_client: hummock_meta_client.clone(),
-            stats: Arc::new(StateStoreMetrics::unused()),
+            compactor_metrics: Arc::new(CompactorMetrics::unused()),
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
             read_memory_limiter: MemoryLimiter::unlimit(),
@@ -190,13 +189,7 @@ pub(crate) mod tests {
             )),
             task_progress_manager: Default::default(),
         });
-        CompactorContext::new(
-            context.clone(),
-            Arc::new(CompactorSstableStore::new(
-                context.sstable_store.clone(),
-                context.read_memory_limiter.clone(),
-            )),
-        )
+        CompactorContext::new(context)
     }
 
     #[tokio::test]
@@ -298,7 +291,7 @@ pub(crate) mod tests {
                 (32 * 1000) << 16,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: false,
+
                     prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
@@ -317,8 +310,7 @@ pub(crate) mod tests {
                 (31 * 1000) << 16,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: true,
-                    prefix_hint: None,
+                    prefix_hint: Some(key.clone()),
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
@@ -429,7 +421,7 @@ pub(crate) mod tests {
                 129,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: false,
+
                     prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
@@ -782,7 +774,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: false,
+
                     prefix_hint: None,
                     table_id: TableId::from(existing_table_ids),
                     retention_seconds: None,
@@ -955,7 +947,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: false,
+
                     prefix_hint: None,
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
@@ -1129,8 +1121,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: true,
-                    prefix_hint: Some(bloom_filter_key),
+                    prefix_hint: Some(Bytes::from(bloom_filter_key)),
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                     read_version_from_backup: false,
