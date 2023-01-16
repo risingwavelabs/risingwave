@@ -32,7 +32,7 @@ use smallvec::SmallVec;
 use super::state_cache::array_agg::ArrayAgg;
 use super::state_cache::extreme::ExtremeAgg;
 use super::state_cache::string_agg::StringAgg;
-use super::state_cache::{CacheKey, GenericStateCache, StateCache};
+use super::state_cache::{BoundedStateCache, CacheKey, StateCache, UnboundedStateCache};
 use super::AggCall;
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
@@ -124,28 +124,17 @@ impl<S: StateStore> MaterializedInputState<S> {
             .collect_vec();
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
 
-        let cache_capacity = if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
-            extreme_cache_size
-        } else {
-            usize::MAX
+        let cache: Box<dyn StateCache> = match agg_call.kind {
+            AggKind::Min | AggKind::Max | AggKind::FirstValue => {
+                Box::new(BoundedStateCache::new(ExtremeAgg, extreme_cache_size))
+            }
+            AggKind::StringAgg => Box::new(UnboundedStateCache::new(StringAgg)),
+            AggKind::ArrayAgg => Box::new(UnboundedStateCache::new(ArrayAgg)),
+            _ => panic!(
+                "Agg kind `{}` is not expected to have materialized input state",
+                agg_call.kind
+            ),
         };
-
-        let cache: Box<dyn StateCache> =
-            match agg_call.kind {
-                AggKind::Min | AggKind::Max | AggKind::FirstValue => Box::new(
-                    GenericStateCache::new(ExtremeAgg, cache_capacity, row_count),
-                ),
-                AggKind::StringAgg => {
-                    Box::new(GenericStateCache::new(StringAgg, cache_capacity, row_count))
-                }
-                AggKind::ArrayAgg => {
-                    Box::new(GenericStateCache::new(ArrayAgg, cache_capacity, row_count))
-                }
-                _ => panic!(
-                    "Agg kind `{}` is not expected to have materialized input state",
-                    agg_call.kind
-                ),
-            };
 
         Self {
             arg_col_indices,
@@ -1080,9 +1069,9 @@ mod tests {
             &input_schema,
             vec![2, 0, 4, 1],
             vec![
-                OrderType::Ascending,  // _row_id ASC
-                OrderType::Descending, // a DESC
                 OrderType::Ascending,  // b ASC
+                OrderType::Descending, // a DESC
+                OrderType::Ascending,  // _row_id ASC
             ],
         )
         .await;
