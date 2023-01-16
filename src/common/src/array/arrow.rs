@@ -17,8 +17,36 @@ use arrow_schema::Field;
 use chrono::{NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 
+use super::column::Column;
 use super::*;
 use crate::types::struct_type::StructType;
+
+// Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
+
+impl From<&DataChunk> for arrow_array::RecordBatch {
+    fn from(chunk: &DataChunk) -> Self {
+        arrow_array::RecordBatch::try_from_iter(
+            chunk
+                .columns()
+                .iter()
+                .map(|column| ("", column.array_ref().into())),
+        )
+        .unwrap()
+    }
+}
+
+impl From<&arrow_array::RecordBatch> for DataChunk {
+    fn from(batch: &arrow_array::RecordBatch) -> Self {
+        DataChunk::new(
+            batch
+                .columns()
+                .iter()
+                .map(|array| Column::new(Arc::new(array.into())))
+                .collect(),
+            batch.num_rows(),
+        )
+    }
+}
 
 /// Implement bi-directional `From` between `ArrayImpl` and `arrow_array::ArrayRef`.
 macro_rules! converts_generic {
@@ -100,6 +128,12 @@ impl From<&arrow_schema::DataType> for DataType {
     }
 }
 
+impl From<arrow_schema::DataType> for DataType {
+    fn from(value: arrow_schema::DataType) -> Self {
+        (&value).into()
+    }
+}
+
 impl From<&DataType> for arrow_schema::DataType {
     fn from(value: &DataType) -> Self {
         match value {
@@ -124,6 +158,12 @@ impl From<&DataType> for arrow_schema::DataType {
             }
             _ => todo!("Unsupported arrow data type: {value:?}"),
         }
+    }
+}
+
+impl From<DataType> for arrow_schema::DataType {
+    fn from(value: DataType) -> Self {
+        (&value).into()
     }
 }
 
