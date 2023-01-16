@@ -44,8 +44,11 @@ impl StreamingJob {
     }
 
     pub fn set_table_fragment_id(&mut self, id: FragmentId) {
-        if let Some(table) = self.table_mut() {
-            table.fragment_id = id;
+        match self {
+            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table) => {
+                table.fragment_id = id;
+            }
+            Self::Sink(_) => {}
         }
     }
 
@@ -67,24 +70,24 @@ impl StreamingJob {
         }
     }
 
-    pub fn table_mut(&mut self) -> Option<&mut Table> {
-        match self {
-            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table) => {
-                Some(table)
-            }
-            Self::Sink(_) => None,
-        }
-    }
-
     pub fn set_dependent_relations(
         &mut self,
         dependent_relations: impl IntoIterator<Item = TableId>,
     ) {
-        if let Some(table) = self.table_mut() {
-            table.dependent_relations = dependent_relations
-                .into_iter()
-                .map(|t| t.table_id())
-                .collect();
+        let dependent_relations = dependent_relations
+            .into_iter()
+            .map(|t| t.table_id())
+            .collect();
+
+        match self {
+            Self::MaterializedView(table) => table.dependent_relations = dependent_relations,
+            Self::Sink(sink) => sink.dependent_relations = dependent_relations,
+            Self::Index(_, index_table) => index_table.dependent_relations = dependent_relations,
+
+            // NOTE(Yuanxin): We intentionally do not set dependent relations for tables, as the
+            // only possible dependent is the associated source (connector), which is also in the
+            // creating procedure.
+            Self::Table(_, _) => {}
         }
     }
 

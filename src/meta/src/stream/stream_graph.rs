@@ -527,25 +527,6 @@ impl StreamGraphBuilder {
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
         upstream_fragment_id: &mut HashMap<u64, GlobalFragmentId>,
     ) -> MetaResult<StreamNode> {
-        // let table_id_offset = ctx.table_id_offset;
-        // let mut check_and_fill_internal_table = |table_id: u32, table: Table| {
-        //     ctx.internal_table_id_map.entry(table_id).or_insert(table);
-        // };
-
-        // let mut update_table = |table: &mut Table, table_type_name: &str| {
-        //     table.id += table_id_offset;
-        //     table.schema_id = ctx.schema_id;
-        //     table.database_id = ctx.database_id;
-        //     table.name = generate_internal_table_name_with_type(
-        //         &ctx.streaming_job_name,
-        //         fragment_id.as_global_id(),
-        //         table.id,
-        //         table_type_name,
-        //     );
-        //     table.fragment_id = fragment_id.as_global_id();
-        //     check_and_fill_internal_table(table.id, table.clone());
-        // };
-
         match stream_node.get_node_body()? {
             NodeBody::Exchange(_) => {
                 panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors: {:#?}", stream_node)
