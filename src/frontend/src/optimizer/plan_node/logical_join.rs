@@ -1247,7 +1247,10 @@ impl ToBatch for LogicalJoin {
 
         if predicate.has_eq() {
             if !predicate.eq_keys_are_type_aligned() {
-                return Err(ErrorCode::InternalError(format!("Join eq keys are not aligned for predicate: {predicate:?}")).into());
+                return Err(ErrorCode::InternalError(format!(
+                    "Join eq keys are not aligned for predicate: {predicate:?}"
+                ))
+                .into());
             }
             if config.get_batch_enable_lookup_join() {
                 if let Some(lookup_join) = self.to_batch_lookup_join_with_index_selection(
@@ -1276,7 +1279,10 @@ impl ToStream for LogicalJoin {
 
         if predicate.has_eq() {
             if !predicate.eq_keys_are_type_aligned() {
-                return Err(ErrorCode::InternalError(format!("Join eq keys are not aligned for predicate: {predicate:?}")).into());
+                return Err(ErrorCode::InternalError(format!(
+                    "Join eq keys are not aligned for predicate: {predicate:?}"
+                ))
+                .into());
             }
             self.to_stream_hash_join(predicate, ctx)
         } else if let Some(dynamic_filter) =
