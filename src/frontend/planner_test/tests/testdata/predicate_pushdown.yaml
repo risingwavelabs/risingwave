@@ -264,10 +264,13 @@
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, v1, v2] }
     └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
       ├─StreamExchange { dist: HashShard(t1.v1) }
-      | └─StreamDynamicFilter { predicate: (t1.v1 > (now + '01:00:00':Interval)), output: [t1.v1, t1._row_id] }
-      |   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      |   └─StreamProject { exprs: [(now + '01:00:00':Interval)], watermark_columns: [(now + '01:00:00':Interval)] }
-      |     └─StreamNow { output: [now] }
+      | └─StreamProject { exprs: [t1.v1, t1._row_id] }
+      |   └─StreamDynamicFilter { predicate: (t1.v1 > (now + '01:00:00':Interval)), output: [t1.v1, t1.v1, t1._row_id] }
+      |     ├─StreamProject { exprs: [t1.v1, t1.v1, t1._row_id] }
+      |     | └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      |     └─StreamExchange { dist: Broadcast }
+      |       └─StreamProject { exprs: [(now + '01:00:00':Interval)], watermark_columns: [(now + '01:00:00':Interval)] }
+      |         └─StreamNow { output: [now] }
       └─StreamExchange { dist: HashShard(t2.v2) }
         └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: now() in a complex cmp expr does not get pushed down
@@ -280,10 +283,7 @@
     └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
       ├─LogicalScan { table: t1, columns: [t1.v1] }
       └─LogicalScan { table: t2, columns: [t2.v2, t2.v3] }
-  stream_error: |-
-    Not supported: streaming nested-loop join
-    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
-    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
+  stream_error: 'internal error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.'
 - name: now() in complex cmp expr pushed onto join ON clause results in dynamic filter
   sql: |
     create table t1(v1 timestamp with time zone);
@@ -294,10 +294,7 @@
     └─LogicalJoin { type: Inner, on: (t1.v1 = t2.v2), output: all }
       ├─LogicalScan { table: t1, columns: [t1.v1] }
       └─LogicalScan { table: t2, columns: [t2.v2, t2.v3] }
-  stream_error: |-
-    Not supported: streaming nested-loop join
-    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
-    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
+  stream_error: 'internal error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.'
 - name: now() does not get pushed to scan, but others do
   sql: |
     create table t1(v1 timestamp with time zone, v2 int);
@@ -307,11 +304,14 @@
     └─LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (t1.v2 > 5:Int32) }
   stream_plan: |
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden)], pk_columns: [t1._row_id] }
-    └─StreamDynamicFilter { predicate: (t1.v1 > (now + '00:30:00':Interval)), output: [t1.v1, t1.v2, t1._row_id] }
-      ├─StreamFilter { predicate: (t1.v2 > 5:Int32) }
-      | └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamProject { exprs: [(now + '00:30:00':Interval)], watermark_columns: [(now + '00:30:00':Interval)] }
-        └─StreamNow { output: [now] }
+    └─StreamProject { exprs: [t1.v1, t1.v2, t1._row_id] }
+      └─StreamDynamicFilter { predicate: (t1.v1 > (now + '00:30:00':Interval)), output: [t1.v1, t1.v2, t1.v1, t1._row_id] }
+        ├─StreamProject { exprs: [t1.v1, t1.v2, t1.v1, t1._row_id] }
+        | └─StreamFilter { predicate: (t1.v2 > 5:Int32) }
+        |   └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: Broadcast }
+          └─StreamProject { exprs: [(now + '00:30:00':Interval)], watermark_columns: [(now + '00:30:00':Interval)] }
+            └─StreamNow { output: [now] }
 - name: eq-predicate derived condition other side pushdown in inner join
   sql: |
     create table t1(v1 int, v2 int);

@@ -24,6 +24,7 @@ use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
 /// Convert `LogicalFilter` with now in predicate to left-semi `LogicalJoin`
+/// Only applies to stream.
 pub struct FilterWithNowToJoinRule {}
 impl Rule for FilterWithNowToJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -35,14 +36,15 @@ impl Rule for FilterWithNowToJoinRule {
         let mut now_filters = vec![];
         let mut remainder = vec![];
 
+        let mut rewriter = NowAsInputRef::new(lhs_len);
+
         // If the `now` is not a valid dynamic filter expression,
         filter.predicate().conjunctions.iter().for_each(|expr| {
-            let mut rewriter = NowAsInputRef::new(lhs_len);
-            let expr = rewriter.rewrite_expr(expr.clone());
-            if rewriter.rewritten {
-                now_filters.push(expr);
+            if let Some((input_expr, cmp, now_expr)) = expr.as_now_comparison_cond() {
+                let now_expr = rewriter.rewrite_expr(now_expr);
+                now_filters.push(FunctionCall::new(cmp, vec![input_expr, now_expr]).unwrap().into());
             } else {
-                remainder.push(expr);
+                remainder.push(expr.clone());
             }
         });
 
@@ -85,7 +87,6 @@ impl FilterWithNowToJoinRule {
 
 struct NowAsInputRef {
     index: usize,
-    rewritten: bool,
 }
 impl ExprRewriter for NowAsInputRef {
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> crate::expr::ExprImpl {
@@ -96,7 +97,6 @@ impl ExprRewriter for NowAsInputRef {
             .collect();
         match func_type {
             Type::Now => {
-                self.rewritten = true;
                 InputRef {
                     index: self.index,
                     data_type: DataType::Timestamptz,
@@ -112,7 +112,6 @@ impl NowAsInputRef {
     fn new(lhs_len: usize) -> Self {
         Self {
             index: lhs_len,
-            rewritten: false,
         }
     }
 }

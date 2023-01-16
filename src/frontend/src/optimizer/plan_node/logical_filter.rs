@@ -204,8 +204,15 @@ impl ToStream for LogicalFilter {
             .iter()
             .any(|cond| cond.count_nows() > 0);
         if has_now {
+            if predicate.conjunctions.iter().any(|expr| expr.as_now_comparison_cond().is_none()) {
+                bail!(
+                    "Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or \
+                    `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column \
+                    and contains no `now()`."
+                );
+            }
             bail!(
-                "Now should have been pushed down into left semi join, RHS being a `Now` operator"
+                "Valid now exprs should have been pushed down into left semi join a `Now` operator as the RHS input"
             );
         }
         let new_logical = self.clone_with_input(new_input);
