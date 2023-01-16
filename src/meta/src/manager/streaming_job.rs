@@ -16,6 +16,8 @@ use std::collections::HashMap;
 
 use risingwave_pb::catalog::{Index, Sink, Source, Table};
 
+use crate::model::FragmentId;
+
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
 #[derive(Debug)]
@@ -40,6 +42,12 @@ impl StreamingJob {
         }
     }
 
+    pub fn set_table_fragment_id(&mut self, id: FragmentId) {
+        if let Some(table) = self.table_mut() {
+            table.fragment_id = id;
+        }
+    }
+
     pub fn id(&self) -> u32 {
         match self {
             Self::MaterializedView(table) => table.id,
@@ -49,12 +57,27 @@ impl StreamingJob {
         }
     }
 
-    pub fn set_dependent_relations(&mut self, dependent_relations: Vec<u32>) {
+    pub fn table(&self) -> Option<&Table> {
         match self {
-            Self::MaterializedView(table) => table.dependent_relations = dependent_relations,
-            Self::Sink(sink) => sink.dependent_relations = dependent_relations,
-            Self::Index(_, index_table) => index_table.dependent_relations = dependent_relations,
-            _ => {}
+            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table) => {
+                Some(table)
+            }
+            Self::Sink(_) => None,
+        }
+    }
+
+    pub fn table_mut(&mut self) -> Option<&mut Table> {
+        match self {
+            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table) => {
+                Some(table)
+            }
+            Self::Sink(_) => None,
+        }
+    }
+
+    pub fn set_dependent_relations(&mut self, dependent_relations: Vec<u32>) {
+        if let Some(table) = self.table_mut() {
+            table.dependent_relations = dependent_relations;
         }
     }
 

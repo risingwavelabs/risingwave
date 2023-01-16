@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::common::worker_node::State;
@@ -22,7 +23,7 @@ use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
+use risingwave_pb::stream_plan::{StreamFragmentGraph as StreamFragmentGraphProto, StreamNode};
 use tonic::{Request, Response, Status};
 
 use crate::barrier::BarrierManagerRef;
@@ -34,7 +35,7 @@ use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
     visit_fragment, ActorGraphBuilder, CreateStreamingJobContext, GlobalStreamManagerRef,
-    SourceManagerRef,
+    SourceManagerRef, StreamFragmentGraph,
 };
 use crate::{MetaError, MetaResult};
 
@@ -513,7 +514,7 @@ where
     async fn create_stream_job(
         &self,
         stream_job: &mut StreamingJob,
-        fragment_graph: StreamFragmentGraph,
+        fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<NotificationVersion> {
         self.check_barrier_manager_status().await?;
 
@@ -542,13 +543,13 @@ where
     async fn prepare_stream_job(
         &self,
         stream_job: &mut StreamingJob,
-        fragment_graph: StreamFragmentGraph,
+        fragment_graph: StreamFragmentGraphProto,
     ) -> MetaResult<(CreateStreamingJobContext, TableFragments)> {
-        // 1. assign a new id to the stream job.
+        // 1. Assign a new id to the stream job.
         let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
         stream_job.set_id(id);
 
-        // 2. resolve the dependent relations.
+        // 2. Resolve the dependent relations.
         let dependent_relations = get_dependent_relations(&fragment_graph)?;
         stream_job.set_dependent_relations(dependent_relations);
 
@@ -557,10 +558,10 @@ where
 
         // 4. Mark current relation as "creating" and add reference count to dependent relations.
         self.catalog_manager
-            .start_create_stream_job_procedure(stream_job)
+            .start_create_stream_job_procedure(&*stream_job)
             .await?;
 
-        // 5. build fragment graph.
+        // 5. Build fragment graph.
         use risingwave_common::catalog::TableId;
         let dependent_table_ids = fragment_graph
             .dependent_table_ids
@@ -568,10 +569,16 @@ where
             .map(|table_id| TableId::new(*table_id))
             .collect();
 
+        let table_ids_cnt = fragment_graph.table_ids_cnt;
+
+        let fragment_graph =
+            StreamFragmentGraph::create(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
+                .await?;
+        let internal_tables = fragment_graph.internal_tables();
+        assert_eq!(table_ids_cnt, internal_tables.len() as u32);
+
+        // 6. Build actor graph from the fragment graph.
         let mut ctx = CreateStreamingJobContext {
-            schema_id: stream_job.schema_id(),
-            database_id: stream_job.database_id(),
-            streaming_job_name: stream_job.name(),
             streaming_definition: stream_job.mview_definition(),
             table_properties: stream_job.properties(),
             table_mview_map: self
@@ -580,10 +587,11 @@ where
                 .await?
                 .table_mview_actor_ids,
             dependent_table_ids,
+            internal_tables,
             ..Default::default()
         };
 
-        let table_ids_cnt = fragment_graph.table_ids_cnt;
+        // TODO(bugen): we should merge this step with the `Scheduler`.
         let default_parallelism = if self.env.opts.minimal_scheduling {
             self.cluster_manager
                 .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
@@ -591,52 +599,20 @@ where
                 .len()
         } else {
             self.cluster_manager.get_active_parallel_unit_count().await
-        };
-        let mut actor_graph_builder = ActorGraphBuilder::new(
-            self.env.id_gen_manager_ref(),
-            fragment_graph,
-            default_parallelism as u32,
-            &mut ctx,
-        )
-        .await?;
-
-        // fill correct table id in fragment graph and fill fragment id in table.
-        match stream_job {
-            StreamingJob::MaterializedView(table)
-            | StreamingJob::Index(_, table)
-            | StreamingJob::Table(_, table) => {
-                table.fragment_id = actor_graph_builder.fill_database_object_id(
-                    table.database_id,
-                    table.schema_id,
-                    table.id.into(),
-                );
-            }
-            StreamingJob::Sink(sink) => {
-                actor_graph_builder.fill_database_object_id(
-                    sink.database_id,
-                    sink.schema_id,
-                    sink.id.into(),
-                );
-            }
-        }
+        } as u32;
+        let actor_graph_builder = ActorGraphBuilder::new(fragment_graph, default_parallelism);
 
         let graph = actor_graph_builder
             .generate_graph(self.env.id_gen_manager_ref(), &mut ctx)
             .await?;
 
-        assert_eq!(table_ids_cnt, ctx.internal_table_ids().len() as u32);
-
-        // 6. mark creating tables.
-        let mut creating_tables = ctx.internal_tables();
-        match stream_job {
-            StreamingJob::MaterializedView(table)
-            | StreamingJob::Index(_, table)
-            | StreamingJob::Table(_, table) => creating_tables.push(table.clone()),
-
-            StreamingJob::Sink(_) => {
-                // No need to mark it as creating. Do nothing.
-            }
-        }
+        // 7. mark creating tables, including internal tables and the table of the stream job.
+        // Note(bugen): should we take `Sink` into account as well?
+        let creating_tables = ctx
+            .internal_tables()
+            .into_iter()
+            .chain(stream_job.table().cloned())
+            .collect_vec();
 
         self.catalog_manager
             .mark_creating_tables(&creating_tables)
@@ -792,7 +768,7 @@ where
     }
 }
 
-fn get_dependent_relations(fragment_graph: &StreamFragmentGraph) -> MetaResult<Vec<TableId>> {
+fn get_dependent_relations(fragment_graph: &StreamFragmentGraphProto) -> MetaResult<Vec<TableId>> {
     // TODO: distinguish SourceId and TableId
     fn resolve_dependent_relations(
         stream_node: &StreamNode,

@@ -30,13 +30,13 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     agg_call_state, AggCallState, DispatchStrategy, DispatcherType, ExchangeNode, FilterNode,
     FragmentTypeFlag, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode, StreamEnvironment,
-    StreamFragmentGraph, StreamNode, StreamSource,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode, StreamSource,
 };
 
-use crate::manager::MetaSrvEnv;
+use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::model::TableFragments;
 use crate::stream::stream_graph::ActorGraphBuilder;
-use crate::stream::CreateStreamingJobContext;
+use crate::stream::{CreateStreamingJobContext, StreamFragmentGraph};
 use crate::MetaResult;
 
 fn make_inputref(idx: i32) -> ExprNode {
@@ -159,6 +159,10 @@ fn make_empty_table(id: u32) -> ProstTable {
         stream_key: vec![],
         ..Default::default()
     }
+}
+
+fn make_materialize_table(id: u32) -> ProstTable {
+    make_internal_table(id, true)
 }
 
 /// [`make_stream_fragments`] build all stream fragments for SQL as follow:
@@ -338,7 +342,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         stream_key: vec![],
         node_body: Some(NodeBody::Materialize(MaterializeNode {
             table_id: 1,
-            table: Some(make_internal_table(4, true)),
+            table: Some(make_materialize_table(1)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
             handle_pk_conflict: false,
         })),
@@ -385,9 +389,9 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
     ]
 }
 
-fn make_stream_graph() -> StreamFragmentGraph {
+fn make_stream_graph() -> StreamFragmentGraphProto {
     let fragments = make_stream_fragments();
-    StreamFragmentGraph {
+    StreamFragmentGraphProto {
         fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
         edges: make_fragment_edges(),
         env: Some(StreamEnvironment::default()),
@@ -402,10 +406,12 @@ async fn test_fragmenter() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
     let mut ctx = CreateStreamingJobContext::default();
+    let mut job = StreamingJob::Table(None, make_materialize_table(1));
     let graph = make_stream_graph();
 
-    let actor_graph_builder =
-        ActorGraphBuilder::new(env.id_gen_manager_ref(), graph, parallel_degree, &mut ctx).await?;
+    let fragment_graph =
+        StreamFragmentGraph::create(graph, env.id_gen_manager_ref(), &mut job).await?;
+    let actor_graph_builder = ActorGraphBuilder::new(fragment_graph, parallel_degree);
 
     let graph = actor_graph_builder
         .generate_graph(env.id_gen_manager_ref(), &mut ctx)
