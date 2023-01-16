@@ -40,7 +40,7 @@ profile:
       - use: opendal
         engine: hdfs
         namenode: "127.0.0.1:9000"
-        root: risingwave
+        root: risingwave_001
 
       # If you want to create CDC source, uncomment the following line
       # - use: connector-node

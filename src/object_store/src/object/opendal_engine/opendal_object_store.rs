@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::Cursor;
-
 use bytes::Bytes;
 use fail::fail_point;
 use futures::future::try_join_all;
@@ -21,8 +19,8 @@ use futures::io::{AsyncSeekExt, AsyncWriteExt, Cursor as FuturesCursor};
 use futures::StreamExt;
 use itertools::Itertools;
 use opendal::services::memory;
-use opendal::{ObjectReader, Operator};
-use tokio::io::{AsyncRead, AsyncReadExt, SeekFrom};
+use opendal::Operator;
+use tokio::io::{AsyncRead, SeekFrom};
 
 use crate::object::{
     BlockLocation, BoxedStreamingUploader, ObjectError, ObjectMetadata, ObjectResult, ObjectStore,
@@ -71,7 +69,7 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
-        Ok(Box::new(HdfsStreamingUploader::new(
+        Ok(Box::new(OpenDalStreamingUploader::new(
             self.op.clone(),
             path.to_string(),
         )))
@@ -113,23 +111,17 @@ impl ObjectStore for OpendalObjectStore {
             ObjectError::internal("opendal streaming read error")
         ));
 
-        let mut reader: ObjectReader = self.op.object(path).reader().await?;
-        let bytes = match start_pos {
+        let reader = match start_pos {
             Some(start_position) => {
-                let mut buf = Vec::new();
-
-                reader.seek(SeekFrom::Start(start_position as u64)).await?;
-                reader.read_to_end(&mut buf).await?;
-                Bytes::from(buf)
+                self.op
+                    .object(path)
+                    .range_reader(start_position as u64..)
+                    .await?
             }
-            None => {
-                let mut buf = Vec::new();
-                reader.read_to_end(&mut buf).await?;
-                Bytes::from(buf)
-            }
+            None => self.op.object(path).reader().await?,
         };
 
-        Ok(Box::new(Cursor::new(bytes)))
+        Ok(Box::new(reader))
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
@@ -194,13 +186,13 @@ impl ObjectStore for OpendalObjectStore {
 }
 
 /// Store multiple parts in a map, and concatenate them on finish.
-pub struct HdfsStreamingUploader {
+pub struct OpenDalStreamingUploader {
     op: Operator,
     path: String,
     buffer: FuturesCursor<Vec<u8>>,
     length: u64,
 }
-impl HdfsStreamingUploader {
+impl OpenDalStreamingUploader {
     pub fn new(op: Operator, path: String) -> Self {
         Self {
             op,
@@ -211,7 +203,7 @@ impl HdfsStreamingUploader {
     }
 }
 #[async_trait::async_trait]
-impl StreamingUploader for HdfsStreamingUploader {
+impl StreamingUploader for OpenDalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         self.buffer.seek(SeekFrom::Start(self.length)).await?;
         let data = data.to_vec();
