@@ -208,7 +208,7 @@ impl<'a, C: BatchTaskContext> ExecutorBuilder<'a, C> {
             NodeBody::Values => ValuesExecutor,
             NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
             NodeBody::HashJoin => HashJoinExecutor<()>,
-            NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+            // NodeBody::SortMergeJoin => SortMergeJoinExecutor,
             NodeBody::HashAgg => HashAggExecutorBuilder,
             NodeBody::MergeSortExchange => MergeSortExchangeExecutorBuilder,
             NodeBody::TableFunction => TableFunctionExecutorBuilder,

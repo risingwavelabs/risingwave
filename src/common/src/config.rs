@@ -100,7 +100,8 @@ pub struct MetaConfig {
     pub dangerous_max_idle_secs: Option<u64>,
 
     /// Whether to enable deterministic compaction scheduling, which
-    /// will disable all auto scheduling of compaction tasks
+    /// will disable all auto scheduling of compaction tasks.
+    /// Should only be used in e2e tests.
     #[serde(default)]
     pub enable_compaction_deterministic: bool,
 
@@ -441,7 +442,7 @@ mod default {
         }
 
         pub fn bloom_false_positive() -> f64 {
-            0.01
+            0.001
         }
 
         pub fn share_buffers_sync_parallelism() -> u32 {

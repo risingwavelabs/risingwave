@@ -38,7 +38,7 @@ const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
 const ERROR_INT_TO_TIMESTAMP: &str = "Can't cast negative integer to timestamp";
-const PARSE_ERROR_STR_TO_TIMESTAMPTZ: &str = concat!(
+const PARSE_ERROR_STR_WITH_TIME_ZONE_TO_TIMESTAMPTZ: &str = concat!(
     "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)"
     , "\nFor example: '2021-04-01 00:00:00+00:00'"
 );
@@ -153,10 +153,10 @@ fn parse_naive_time(s: &str) -> Result<NaiveTime> {
 }
 
 #[inline(always)]
-pub fn str_to_timestamptz(elem: &str) -> Result<i64> {
+pub fn str_with_time_zone_to_timestamptz(elem: &str) -> Result<i64> {
     elem.parse::<DateTime<Utc>>()
         .map(|ret| ret.timestamp_micros())
-        .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPTZ.into()))
+        .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_WITH_TIME_ZONE_TO_TIMESTAMPTZ.into()))
 }
 
 /// Converts UNIX epoch time to timestamp in microseconds.
@@ -249,12 +249,6 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-pub fn timestamptz_to_utc_string(elem: i64, mut writer: &mut dyn Write) -> Result<()> {
-    elem.write_with_type(&DataType::Timestamptz, &mut writer)
-        .unwrap();
-    Ok(())
-}
-
 #[inline(always)]
 pub fn str_parse<T>(elem: &str) -> Result<T>
 where
@@ -343,14 +337,6 @@ pub fn interval_to_time(elem: IntervalUnit) -> NaiveTimeWrapper {
 }
 
 #[inline(always)]
-pub fn timestamptz_to_timestamp(elem: i64) -> NaiveDateTimeWrapper {
-    NaiveDateTimeWrapper::from_timestamp_uncheck(
-        elem / 1_000_000,
-        (elem % 1_000_000 * 1_000) as u32,
-    )
-}
-
-#[inline(always)]
 pub fn try_cast<T1, T2>(elem: T1) -> Result<T2>
 where
     T1: TryInto<T2> + std::fmt::Debug + Copy,
@@ -411,6 +397,40 @@ pub fn bool_out(input: bool, writer: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
+/// A lite version of casting from string to target type. Used by frontend to handle types that have
+/// to be created by casting.
+///
+/// For example, the user can input `1` or `true` directly, but they have to use
+/// `'2022-01-01'::date`.
+pub fn literal_parsing(
+    t: &DataType,
+    s: &str,
+) -> std::result::Result<ScalarImpl, Option<ExprError>> {
+    let scalar = match t {
+        DataType::Boolean => str_to_bool(s)?.into(),
+        DataType::Int16 => str_parse::<i16>(s)?.into(),
+        DataType::Int32 => str_parse::<i32>(s)?.into(),
+        DataType::Int64 => str_parse::<i64>(s)?.into(),
+        DataType::Decimal => str_parse::<Decimal>(s)?.into(),
+        DataType::Float32 => str_parse::<OrderedF32>(s)?.into(),
+        DataType::Float64 => str_parse::<OrderedF64>(s)?.into(),
+        DataType::Varchar => return Err(None),
+        DataType::Date => str_to_date(s)?.into(),
+        DataType::Timestamp => str_to_timestamp(s)?.into(),
+        // We only handle the case with timezone here, and leave the implicit session timezone case
+        // for later phase.
+        DataType::Timestamptz => str_with_time_zone_to_timestamptz(s)?.into(),
+        DataType::Time => str_to_time(s)?.into(),
+        DataType::Interval => str_parse::<IntervalUnit>(s)?.into(),
+        // Not processing list or struct literal right now. Leave it for later phase (normal backend
+        // evaluation).
+        DataType::List { .. } => return Err(None),
+        DataType::Struct(_) => return Err(None),
+        DataType::Bytea => str_to_bytea(s)?.into(),
+    };
+    Ok(scalar)
+}
+
 /// It accepts a macro whose input is `{ $input:ident, $cast:ident, $func:expr }` tuples
 ///
 /// * `$input`: input type
@@ -426,7 +446,6 @@ macro_rules! for_all_cast_variants {
             { varchar, time, str_to_time, false },
             { varchar, interval, str_parse, false },
             { varchar, timestamp, str_to_timestamp, false },
-            { varchar, timestamptz, str_to_timestamptz, false },
             { varchar, int16, str_parse, false },
             { varchar, int32, str_parse, false },
             { varchar, int64, str_parse, false },
@@ -448,7 +467,6 @@ macro_rules! for_all_cast_variants {
             { interval, varchar, general_to_text, false },
             { date, varchar, general_to_text, false },
             { timestamp, varchar, general_to_text, false },
-            { timestamptz, varchar, timestamptz_to_utc_string, false },
             { list, varchar, |x, w| general_to_text(x, w), false },
 
             { boolean, int32, try_cast, false },
@@ -491,8 +509,7 @@ macro_rules! for_all_cast_variants {
             { time, interval, cast::<NaiveTimeWrapper, IntervalUnit>, true },
             { timestamp, date, timestamp_to_date, true },
             { timestamp, time, timestamp_to_time, true },
-            { interval, time, interval_to_time, true },
-            { timestamptz, timestamp, timestamptz_to_timestamp, true }
+            { interval, time, interval_to_time, true }
         }
     };
 }
@@ -696,8 +713,8 @@ mod tests {
     #[test]
     fn parse_str() {
         assert_eq!(
-            str_to_timestamptz("2022-08-03 10:34:02Z").unwrap(),
-            str_to_timestamptz("2022-08-03 02:34:02-08:00").unwrap()
+            str_with_time_zone_to_timestamptz("2022-08-03 10:34:02Z").unwrap(),
+            str_with_time_zone_to_timestamptz("2022-08-03 02:34:02-08:00").unwrap()
         );
         str_to_timestamp("1999-01-08 04:02").unwrap();
         str_to_timestamp("1999-01-08 04:05:06").unwrap();
@@ -710,10 +727,10 @@ mod tests {
         str_to_time("04:05:06").unwrap();
 
         assert_eq!(
-            str_to_timestamptz("1999-01-08 04:05:06")
+            str_with_time_zone_to_timestamptz("1999-01-08 04:05:06")
                 .unwrap_err()
                 .to_string(),
-            ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMPTZ.into()).to_string()
+            ExprError::Parse(PARSE_ERROR_STR_WITH_TIME_ZONE_TO_TIMESTAMPTZ.into()).to_string()
         );
         assert_eq!(
             str_to_timestamp("1999-01-08 04:05:06AA")
@@ -1008,24 +1025,5 @@ mod tests {
         let str2 = "1969-12-31 23:59:59.999999";
         let timestamp2 = str_to_timestamp(str2).unwrap();
         assert_eq!(timestamp2.0.timestamp_micros(), -1);
-    }
-
-    #[test]
-    fn test_timestamptz() {
-        let str1 = "0001-11-15 15:35:40.999999+08:00";
-        let timestamptz1 = str_to_timestamptz(str1).unwrap();
-        assert_eq!(timestamptz1, -62108094259000001);
-
-        let mut writer = String::new();
-        timestamptz_to_utc_string(timestamptz1, &mut writer).unwrap();
-        assert_eq!(writer, "0001-11-15 07:35:40.999999+00:00");
-
-        let str2 = "1969-12-31 23:59:59.999999+00:00";
-        let timestamptz2 = str_to_timestamptz(str2).unwrap();
-        assert_eq!(timestamptz2, -1);
-
-        let mut writer = String::new();
-        timestamptz_to_utc_string(timestamptz2, &mut writer).unwrap();
-        assert_eq!(writer, str2);
     }
 }

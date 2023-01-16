@@ -23,7 +23,7 @@ use risingwave_expr::expr::BoxedExpression;
 
 use super::{
     ActorContextRef, Executor, ExecutorInfo, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
-    StreamExecutorResult,
+    StreamExecutorResult, Watermark,
 };
 use crate::common::InfallibleExpression;
 
@@ -172,6 +172,10 @@ impl SimpleExecutor for SimpleFilterExecutor {
         });
 
         Self::filter(chunk, pred_output)
+    }
+
+    fn handle_watermark(&self, watermark: Watermark) -> StreamExecutorResult<Vec<Watermark>> {
+        Ok(vec![watermark])
     }
 
     fn schema(&self) -> &Schema {

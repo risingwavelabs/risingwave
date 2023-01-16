@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { Database, Index, Schema, Sink, Source, Table, View } from "./catalog";
+import { Database, Function, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import { Status } from "./common";
 import { StreamFragmentGraph } from "./stream_plan";
 
@@ -137,6 +137,25 @@ export interface CreateTableResponse {
   version: number;
 }
 
+export interface CreateFunctionRequest {
+  function: Function | undefined;
+}
+
+export interface CreateFunctionResponse {
+  status: Status | undefined;
+  functionId: number;
+  version: number;
+}
+
+export interface DropFunctionRequest {
+  functionId: number;
+}
+
+export interface DropFunctionResponse {
+  status: Status | undefined;
+  version: number;
+}
+
 export interface DropTableRequest {
   sourceId?: { $case: "id"; id: number };
   tableId: number;
@@ -174,6 +193,27 @@ export interface DropIndexRequest {
 
 export interface DropIndexResponse {
   status: Status | undefined;
+  version: number;
+}
+
+export interface ReplaceTablePlanRequest {
+  /**
+   * The new table catalog, with the correct table ID and a new version.
+   * If the new version does not match the subsequent version in the meta service's
+   * catalog, this request will be rejected.
+   */
+  table:
+    | Table
+    | undefined;
+  /** The new materialization plan, where all schema are updated. */
+  fragmentGraph: StreamFragmentGraph | undefined;
+}
+
+export interface ReplaceTablePlanResponse {
+  status:
+    | Status
+    | undefined;
+  /** The new global catalog version. */
   version: number;
 }
 
@@ -904,6 +944,113 @@ export const CreateTableResponse = {
   },
 };
 
+function createBaseCreateFunctionRequest(): CreateFunctionRequest {
+  return { function: undefined };
+}
+
+export const CreateFunctionRequest = {
+  fromJSON(object: any): CreateFunctionRequest {
+    return { function: isSet(object.function) ? Function.fromJSON(object.function) : undefined };
+  },
+
+  toJSON(message: CreateFunctionRequest): unknown {
+    const obj: any = {};
+    message.function !== undefined && (obj.function = message.function ? Function.toJSON(message.function) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreateFunctionRequest>, I>>(object: I): CreateFunctionRequest {
+    const message = createBaseCreateFunctionRequest();
+    message.function = (object.function !== undefined && object.function !== null)
+      ? Function.fromPartial(object.function)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCreateFunctionResponse(): CreateFunctionResponse {
+  return { status: undefined, functionId: 0, version: 0 };
+}
+
+export const CreateFunctionResponse = {
+  fromJSON(object: any): CreateFunctionResponse {
+    return {
+      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
+      functionId: isSet(object.functionId) ? Number(object.functionId) : 0,
+      version: isSet(object.version) ? Number(object.version) : 0,
+    };
+  },
+
+  toJSON(message: CreateFunctionResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    message.functionId !== undefined && (obj.functionId = Math.round(message.functionId));
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreateFunctionResponse>, I>>(object: I): CreateFunctionResponse {
+    const message = createBaseCreateFunctionResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    message.functionId = object.functionId ?? 0;
+    message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseDropFunctionRequest(): DropFunctionRequest {
+  return { functionId: 0 };
+}
+
+export const DropFunctionRequest = {
+  fromJSON(object: any): DropFunctionRequest {
+    return { functionId: isSet(object.functionId) ? Number(object.functionId) : 0 };
+  },
+
+  toJSON(message: DropFunctionRequest): unknown {
+    const obj: any = {};
+    message.functionId !== undefined && (obj.functionId = Math.round(message.functionId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DropFunctionRequest>, I>>(object: I): DropFunctionRequest {
+    const message = createBaseDropFunctionRequest();
+    message.functionId = object.functionId ?? 0;
+    return message;
+  },
+};
+
+function createBaseDropFunctionResponse(): DropFunctionResponse {
+  return { status: undefined, version: 0 };
+}
+
+export const DropFunctionResponse = {
+  fromJSON(object: any): DropFunctionResponse {
+    return {
+      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
+      version: isSet(object.version) ? Number(object.version) : 0,
+    };
+  },
+
+  toJSON(message: DropFunctionResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DropFunctionResponse>, I>>(object: I): DropFunctionResponse {
+    const message = createBaseDropFunctionResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    message.version = object.version ?? 0;
+    return message;
+  },
+};
+
 function createBaseDropTableRequest(): DropTableRequest {
   return { sourceId: undefined, tableId: 0 };
 }
@@ -1121,6 +1268,65 @@ export const DropIndexResponse = {
 
   fromPartial<I extends Exact<DeepPartial<DropIndexResponse>, I>>(object: I): DropIndexResponse {
     const message = createBaseDropIndexResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseReplaceTablePlanRequest(): ReplaceTablePlanRequest {
+  return { table: undefined, fragmentGraph: undefined };
+}
+
+export const ReplaceTablePlanRequest = {
+  fromJSON(object: any): ReplaceTablePlanRequest {
+    return {
+      table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
+      fragmentGraph: isSet(object.fragmentGraph) ? StreamFragmentGraph.fromJSON(object.fragmentGraph) : undefined,
+    };
+  },
+
+  toJSON(message: ReplaceTablePlanRequest): unknown {
+    const obj: any = {};
+    message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
+    message.fragmentGraph !== undefined &&
+      (obj.fragmentGraph = message.fragmentGraph ? StreamFragmentGraph.toJSON(message.fragmentGraph) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ReplaceTablePlanRequest>, I>>(object: I): ReplaceTablePlanRequest {
+    const message = createBaseReplaceTablePlanRequest();
+    message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
+    message.fragmentGraph = (object.fragmentGraph !== undefined && object.fragmentGraph !== null)
+      ? StreamFragmentGraph.fromPartial(object.fragmentGraph)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseReplaceTablePlanResponse(): ReplaceTablePlanResponse {
+  return { status: undefined, version: 0 };
+}
+
+export const ReplaceTablePlanResponse = {
+  fromJSON(object: any): ReplaceTablePlanResponse {
+    return {
+      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
+      version: isSet(object.version) ? Number(object.version) : 0,
+    };
+  },
+
+  toJSON(message: ReplaceTablePlanResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ReplaceTablePlanResponse>, I>>(object: I): ReplaceTablePlanResponse {
+    const message = createBaseReplaceTablePlanResponse();
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;

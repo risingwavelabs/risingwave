@@ -30,6 +30,7 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(assert_matches)]
+#![feature(try_blocks)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 

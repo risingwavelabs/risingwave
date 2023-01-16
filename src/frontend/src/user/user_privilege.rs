@@ -34,6 +34,7 @@ static AVAILABLE_ACTION_ON_SOURCE: &[Action] = &[
 static AVAILABLE_ACTION_ON_MVIEW: &[Action] = &[Action::Select { columns: None }];
 static AVAILABLE_ACTION_ON_VIEW: &[Action] = AVAILABLE_ACTION_ON_MVIEW;
 static AVAILABLE_ACTION_ON_SINK: &[Action] = &[];
+static AVAILABLE_ACTION_ON_FUNCTION: &[Action] = &[];
 
 pub fn check_privilege_type(privilege: &Privileges, objects: &GrantObjects) -> Result<()> {
     match privilege {
@@ -113,6 +114,7 @@ pub fn available_prost_privilege(object: ProstObject) -> ProstPrivilege {
         }
         ProstObject::ViewId(_) => AVAILABLE_ACTION_ON_VIEW.to_vec(),
         ProstObject::SinkId(_) => AVAILABLE_ACTION_ON_SINK.to_vec(),
+        ProstObject::FunctionId(_) => AVAILABLE_ACTION_ON_FUNCTION.to_vec(),
     };
     let actions = actions
         .iter()
