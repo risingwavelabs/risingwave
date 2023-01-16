@@ -36,8 +36,8 @@ pub struct HummockStateStoreMetrics {
     pub remote_read_time: HistogramVec,
     pub iter_fetch_meta_duration: HistogramVec,
 
-    pub read_req_bloom_filter_hit_counts: GenericCounterVec<AtomicU64>,
-    pub read_req_not_exist_counts: GenericCounterVec<AtomicU64>,
+    pub read_req_bloom_filter_positive_counts: GenericCounterVec<AtomicU64>,
+    pub read_req_positive_but_non_exist_counts: GenericCounterVec<AtomicU64>,
     pub read_req_check_bloom_filter_counts: GenericCounterVec<AtomicU64>,
 }
 
@@ -46,7 +46,7 @@ impl HummockStateStoreMetrics {
         let bloom_filter_true_negative_counts = register_int_counter_vec_with_registry!(
             "state_store_bloom_filter_true_negative_counts",
             "Total number of sstables that have been considered true negative by bloom filters",
-            &["table_id"],
+            &["table_id", "type"],
             registry
         )
         .unwrap();
@@ -54,7 +54,7 @@ impl HummockStateStoreMetrics {
         let bloom_filter_check_counts = register_int_counter_vec_with_registry!(
             "state_bloom_filter_check_counts",
             "Total number of read request to check bloom filters",
-            &["table_id"],
+            &["table_id", "type"],
             registry
         )
         .unwrap();
@@ -109,17 +109,17 @@ impl HummockStateStoreMetrics {
         let iter_fetch_meta_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
 
-        let read_req_bloom_filter_hit_counts = register_int_counter_vec_with_registry!(
-            "state_store_read_req_bloom_filter_hit_counts",
+        let read_req_bloom_filter_positive_counts = register_int_counter_vec_with_registry!(
+            "state_store_read_req_bloom_filter_positive_counts",
             "Total number of read request that may false positive by bloom filters",
             &["table_id", "type"],
             registry
         )
         .unwrap();
 
-        let read_req_not_exist_counts = register_int_counter_vec_with_registry!(
-            "state_store_read_req_non_exist_counts",
-            "Total number of read request that results not exist",
+        let read_req_positive_but_non_exist_counts = register_int_counter_vec_with_registry!(
+            "state_store_read_req_positive_but_non_exist_counts",
+            "Total number of read request that bloom filter positive but results not exist",
             &["table_id", "type"],
             registry
         )
@@ -142,8 +142,8 @@ impl HummockStateStoreMetrics {
             get_shared_buffer_hit_counts,
             remote_read_time,
             iter_fetch_meta_duration,
-            read_req_bloom_filter_hit_counts,
-            read_req_not_exist_counts,
+            read_req_bloom_filter_positive_counts,
+            read_req_positive_but_non_exist_counts,
             read_req_check_bloom_filter_counts,
         }
     }

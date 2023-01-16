@@ -417,13 +417,6 @@ impl HummockVersionReader {
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
 
-        if read_options.prefix_hint.is_some() {
-            self.state_store_metrics
-                .read_req_check_bloom_filter_counts
-                .with_label_values(&[table_id_label, "get"])
-                .inc();
-        }
-
         // 1. read staging data
         for imm in &imms {
             if imm.epoch() <= min_epoch {
@@ -454,6 +447,12 @@ impl HummockVersionReader {
             )
             .await?
             {
+                local_stats.report_bloom_filter_metrics(
+                    self.state_store_metrics.as_ref(),
+                    "get",
+                    table_id_label,
+                    false,
+                );
                 return Ok(data.into_user_value());
             }
         }
@@ -487,14 +486,12 @@ impl HummockVersionReader {
                         )
                         .await?
                         {
-                            if local_stats.bloom_filter_check_counts
-                                > local_stats.bloom_filter_true_negative_count
-                            {
-                                self.state_store_metrics
-                                    .read_req_bloom_filter_hit_counts
-                                    .with_label_values(&[table_id_label, "get"])
-                                    .inc();
-                            }
+                            local_stats.report_bloom_filter_metrics(
+                                self.state_store_metrics.as_ref(),
+                                "get",
+                                table_id_label,
+                                false,
+                            );
                             // todo add global stat to report
                             local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                             return Ok(v.into_user_value());
@@ -533,14 +530,12 @@ impl HummockVersionReader {
                     )
                     .await?
                     {
-                        if local_stats.bloom_filter_check_counts
-                            > local_stats.bloom_filter_true_negative_count
-                        {
-                            self.state_store_metrics
-                                .read_req_bloom_filter_hit_counts
-                                .with_label_values(&[table_id_label, "get"])
-                                .inc();
-                        }
+                        local_stats.report_bloom_filter_metrics(
+                            self.state_store_metrics.as_ref(),
+                            "get",
+                            table_id_label,
+                            false,
+                        );
                         local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                         return Ok(v.into_user_value());
                     }
@@ -548,23 +543,17 @@ impl HummockVersionReader {
             }
         }
 
-        if local_stats.bloom_filter_check_counts > local_stats.bloom_filter_true_negative_count {
-            self.state_store_metrics
-                .read_req_bloom_filter_hit_counts
-                .with_label_values(&[table_id_label, "get"])
-                .inc();
-        }
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "get",
+            table_id_label,
+            true,
+        );
         local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
         self.state_store_metrics
             .iter_merge_sstable_counts
             .with_label_values(&[table_id_label, "sub-iter"])
             .observe(table_counts as f64);
-
-        // it means that all related ssts have been traversed, but the key does not exist
-        self.state_store_metrics
-            .read_req_not_exist_counts
-            .with_label_values(&[table_id_label, "get"])
-            .inc();
 
         Ok(None)
     }
@@ -579,13 +568,6 @@ impl HummockVersionReader {
         let table_id_string = read_options.table_id.to_string();
         let table_id_label = table_id_string.as_str();
         let (imms, uncommitted_ssts, committed) = read_version_tuple;
-
-        if read_options.prefix_hint.is_some() {
-            self.state_store_metrics
-                .read_req_check_bloom_filter_counts
-                .with_label_values(&[table_id_label, "iter"])
-                .inc();
-        }
 
         let mut local_stats = StoreLocalStatistic::default();
         let mut staging_iters = Vec::with_capacity(imms.len() + uncommitted_ssts.len());
@@ -821,19 +803,12 @@ impl HummockVersionReader {
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
 
-        if !user_iter.is_valid() {
-            self.state_store_metrics
-                .read_req_not_exist_counts
-                .with_label_values(&[table_id_label, "iter"])
-                .inc();
-        }
-
-        if local_stats.bloom_filter_check_counts > local_stats.bloom_filter_true_negative_count {
-            self.state_store_metrics
-                .read_req_bloom_filter_hit_counts
-                .with_label_values(&[table_id_label, "iter"])
-                .inc();
-        }
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "iter",
+            table_id_label,
+            user_iter.is_valid(),
+        );
 
         local_stats.report(self.state_store_metrics.deref(), table_id_label);
 
