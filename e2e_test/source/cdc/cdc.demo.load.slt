@@ -1,0 +1,40 @@
+# Here I just use a small table for demonstration purposes.
+# We should use a large table for longevity test.
+
+# create cdc source for mysql table
+statement ok
+create materialized source new_order_mysql (
+        no_o_id INT,
+        no_d_id INT,
+        no_w_id INT,
+        PRIMARY KEY(no_w_id, no_d_id, no_o_id)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'test',
+ table.name = 'new_order',
+ server.id = '5081'
+);
+
+
+# create cdc source for postgres table
+statement ok
+create materialized source new_order_pg (
+        no_o_id INT,
+        no_d_id INT,
+        no_w_id INT,
+        PRIMARY KEY(no_w_id, no_d_id, no_o_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'test',
+ schema.name = 'public',
+ table.name = 'new_order',
+ slot.name = 'new_order_slot'
+);

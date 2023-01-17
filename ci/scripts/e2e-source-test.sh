@@ -95,12 +95,57 @@ echo "--- Kill cluster"
 pkill -f connector-service.jar
 cargo make ci-kill
 
+echo "--- e2e, ci-1cn-1fe, mysql longevity demo"
+# install mysql client if needed
+# apt-get -y install mysql-client
+
+# install go for go-tpc tool
+apt-get -y install golang-1.18
+
+# start cdc connector node
+nohup java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-node.log 2>&1 &
+
+# start risingwave cluster
+cargo make ci-start ci-1cn-1fe-with-recovery
+
+# download and compile go-tpc
+git clone https://github.com/pingcap/go-tpc.git
+cd go-tpc
+make build
+
+# generate data to mysql
+# refer to `go-tpc tpcc --help` for details of those arguments
+./bin/go-tpc tpcc prepare --no-check true --warehouses 1 -H mysql -U root -p '123456' -D test -P 3306
+
+# generate data to postgres
+# ./bin/go-tpc tpcc prepare --no-check true --warehouses 1 -T 4 -d postgres -U postgres -p 'postgres' -H 127.0.0.1 -D test -P 5432 --conn-params sslmode=disable
+
+cd ..
+
+# load mysql data into risingwave
+# table schema definitions https://github.com/pingcap/go-tpc/blob/97009c9b58/tpcc/ddl.go
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.demo.load.slt'
+
+# wait for cdc loading
+# depends on the size of data, it may take a while to load it from mysql
+sleep 15
+
+# On first stage, we can just check if the number of rows are the same in mysql and risingwave.
+# We can also check the data correctness of tables in risingwave if the go-tpc can run on risingwave.
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.demo.check.slt'
+
+echo "--- Kill cluster"
+pkill -f connector-service.jar
+cargo make ci-kill
+
+
 echo "--- e2e, ci-1cn-1fe, nexmark endless"
 cargo make ci-start ci-1cn-1fe
 sqllogictest -p 4566 -d dev './e2e_test/source/nexmark_endless/*.slt'
 
 echo "--- Kill cluster"
 cargo make ci-kill
+
 
 echo "--- e2e, ci-kafka-plus-pubsub, kafka and pubsub source"
 cargo make ci-start ci-kafka-plus-pubsub

@@ -1,0 +1,11 @@
+
+query I
+select count(*) as cnt from new_order_mysql;
+----
+9000
+
+
+query II
+select count(*) as cnt from new_order_pg;
+----
+9000
