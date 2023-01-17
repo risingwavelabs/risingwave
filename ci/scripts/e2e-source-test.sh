@@ -61,11 +61,13 @@ export PGPASSWORD='postgres';
 createdb -h db -U postgres cdc_test
 psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc.sql
 
-# start cdc connector node
-nohup java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-node.log 2>&1 &
-# start risingwave cluster
-cargo make ci-start ci-1cn-1fe-with-recovery
-sleep 2
+java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-source.log 2>&1 &
+echo "waiting for connector node to start"
+while (! nc -z localhost 60061); do
+  sleep 0.1
+done
+nc -z localhost 60061 && echo "connector node failed to start" && exit 1
+
 
 echo "---- mysql & postgres cdc validate test"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.mysql.slt'

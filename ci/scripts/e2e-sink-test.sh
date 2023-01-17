@@ -60,10 +60,15 @@ createdb -h db -U postgres test
 psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int, v2 int);"
 psql -h db -U postgres -d test -c "CREATE TABLE t_remote (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
 
+java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-source.log 2>&1 &
+echo "waiting for connector node to start"
+while (! nc -z localhost 60061) && (eq $CONNECTOR_TIMEOUT 0) ; do
+  sleep 0.1
+done
+nc -z localhost 60061 && echo "connector node failed to start" && exit 1
+
 echo "--- starting risingwave cluster with connector node"
 cargo make ci-start ci-1cn-1fe
-java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-source.log 2>&1 &
-sleep 1
 
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/*.slt'
