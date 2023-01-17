@@ -107,6 +107,7 @@ mod tests {
             br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.as_slice(),
             br#"{"amount": "1111111111111111111160"}"#.as_slice(),
             br#"{"decimal": 11111111111111111111}"#.as_slice(),
+            br#"{"another_field": 11111111111111111111}"#.as_slice(),
             // FIXME: br#"{"decimal": 1111111111111111111160}"#.as_slice(),
         ] {
             let writer = builder.row_writer();
