@@ -8,6 +8,7 @@ import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message RowSeqScanNode {
@@ -252,6 +253,8 @@ message UnionNode {}
 
 message PlanNode {
   repeated PlanNode children = 1;
+  reserved 22;
+  reserved "sort_merge_join";
   oneof node_body {
     InsertNode insert = 2;
     DeleteNode delete = 3;
@@ -269,7 +272,6 @@ message PlanNode {
     ValuesNode values = 18;
     HashJoinNode hash_join = 19;
     MergeSortExchangeNode merge_sort_exchange = 21;
-    SortMergeJoinNode sort_merge_join = 22;
     HopWindowNode hop_window = 25;
     TableFunctionNode table_function = 26;
     SysRowSeqScanNode sys_row_seq_scan = 27;
