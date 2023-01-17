@@ -3,7 +3,7 @@
 description = "Update planner test data"
 private = true
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 cargo run --bin planner-test-apply
 '''
@@ -14,7 +14,7 @@ dependencies = [
   "update-planner-test"
 ]
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 cd src/frontend/planner_test/tests/testdata/
 
@@ -33,7 +33,7 @@ dependencies = [
   "update-planner-test"
 ]
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 cd src/frontend/planner_test/tests/testdata/
 
@@ -60,7 +60,7 @@ description = "Run planner test"
 category = "RiseDev - Test"
 dependencies = ["warn-on-missing-tools"]
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 cargo nextest run -p risingwave_planner_test --retries 0 "$@"
