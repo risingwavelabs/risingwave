@@ -95,7 +95,7 @@ echo "--- Kill cluster"
 pkill -f connector-service.jar
 cargo make ci-kill
 
-echo "--- e2e, ci-1cn-1fe, mysql longevity demo"
+echo "--- e2e, ci-1cn-1fe, mysql longevity demo (load snapshot)"
 # install mysql client if needed
 # apt-get -y install mysql-client
 
@@ -113,16 +113,17 @@ git clone https://github.com/pingcap/go-tpc.git
 cd go-tpc
 make build
 
-# generate data to mysql
+# generate data to mysql or pg
+# -H database host, -P database port, -D database name, -T number threads
 # refer to `go-tpc tpcc --help` for details of those arguments
-./bin/go-tpc tpcc prepare --no-check true --warehouses 1 -H mysql -U root -p '123456' -D test -P 3306
+./bin/go-tpc tpcc prepare --no-check true --warehouses 1 -T 4 -H mysql -U root -p '123456' -D test -P 3306
 
 # generate data to postgres
-# ./bin/go-tpc tpcc prepare --no-check true --warehouses 1 -T 4 -d postgres -U postgres -p 'postgres' -H 127.0.0.1 -D test -P 5432 --conn-params sslmode=disable
+./bin/go-tpc tpcc prepare --no-check true --warehouses 1 -T 4 -d postgres -U postgres -p 'postgres' -H db -D test -P 5432 --conn-params sslmode=disable
 
 cd ..
 
-# load mysql data into risingwave
+# load specified table data into risingwave
 # table schema definitions https://github.com/pingcap/go-tpc/blob/97009c9b58/tpcc/ddl.go
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.demo.load.slt'
 
