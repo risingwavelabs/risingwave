@@ -91,6 +91,7 @@ pub async fn start_telemetry_reporting(
     (join_handle, shutdown_tx)
 }
 
+/// post a telemetry reporting request
 async fn post_telemetry_report(url: &str, report: &TelemetryReport) -> Result<(), anyhow::Error> {
     let http_client = hyper::Client::new();
     let report_json = serde_json::to_string(report)?;
@@ -106,6 +107,7 @@ async fn post_telemetry_report(url: &str, report: &TelemetryReport) -> Result<()
     }
 }
 
+/// fetch `tracking_id` from etcd
 async fn fetch_tracking_id(meta_store: Arc<impl MetaStore>) -> Result<Uuid, anyhow::Error> {
     match meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
         Ok(id) => Uuid::from_slice_le(&id).map_err(|e| anyhow!("failed to parse uuid, {}", e)),
@@ -127,6 +129,7 @@ async fn fetch_tracking_id(meta_store: Arc<impl MetaStore>) -> Result<Uuid, anyh
     }
 }
 
+/// check whether telemetry is enabled
 fn telemetry_enabled() -> bool {
     // default to be true
     std::env::var(TELEMETRY_ENV_ENABLE)
@@ -173,6 +176,24 @@ mod tests {
             then.status(200);
         });
         post_telemetry_report(&url, &report).await.unwrap();
+        resp_mock.assert();
+    }
+
+    #[tokio::test]
+    async fn test_post_telemetry_report_fail() {
+        let mock_server = MockServer::start();
+        let url = mock_server.url("/report");
+
+        let report = TelemetryReport::for_test();
+        let report_json = serde_json::to_string(&report).unwrap();
+        let resp_mock = mock_server.mock(|when, then| {
+            when.method(POST)
+                .path("/report")
+                .header("Content-Type", "application/json")
+                .body(report_json);
+            then.status(404);
+        });
+        assert!(post_telemetry_report(&url, &report).await.is_err());
         resp_mock.assert();
     }
     #[test]
