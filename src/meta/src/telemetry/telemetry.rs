@@ -10,6 +10,8 @@ use super::SystemData;
 use crate::storage::MetaStore;
 use crate::stream::SourceManager;
 
+const TELEMETRY_ENV_ENABLE: &str = "ENABLE_TELEMETRY";
+
 const TELEMETRY_REPORT_URL: &str = "unreachable";
 /// interval in seconds
 const TELEMETRY_REPORT_INTERVAL: u64 = 24 * 60 * 60;
@@ -98,7 +100,13 @@ async fn fetch_tracking_id(meta_store: Arc<impl MetaStore>) -> Result<Uuid, anyh
 }
 
 fn telemetry_enabled() -> bool {
-    true
+    // default to be true
+    std::env::var(TELEMETRY_ENV_ENABLE)
+        .unwrap_or("true".to_string())
+        .trim()
+        .to_ascii_lowercase()
+        .parse()
+        .unwrap_or(true)
 }
 
 #[cfg(test)]
@@ -131,5 +139,15 @@ mod tests {
         });
         post_telemetry_report(&url, &report).await.unwrap();
         resp_mock.assert();
+    }
+    #[test]
+    fn test_telemetry_enabled() {
+        assert_eq!(true, telemetry_enabled());
+        std::env::set_var(TELEMETRY_ENV_ENABLE, "false");
+        assert_eq!(false, telemetry_enabled());
+        std::env::set_var(TELEMETRY_ENV_ENABLE, "wrong_str");
+        assert_eq!(true, telemetry_enabled());
+        std::env::set_var(TELEMETRY_ENV_ENABLE, "False");
+        assert_eq!(false, telemetry_enabled());
     }
 }

@@ -13,6 +13,10 @@ rustflags = [
     "-Clink-arg=-Wl,--no-rosegment", #4574
 ]
 
+# Remove this if your x86_64 macos does not support AVX2 vector extensions.
+[target.x86_64-apple-darwin]
+rustflags = ["-Ctarget-feature=+avx2"]
+
 [target.aarch64-apple-darwin]
 rustflags = [
     "-Clink-arg=-fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld"
@@ -41,7 +45,5 @@ rustflags = [
     "-Wrustdoc::broken_intra_doc_links",
     "-Wfuture_incompatible",
     "-Wnonstandard_style",
-    "-Wrust_2018_idioms",
-    "-C",
-    "target-cpu=native"
+    "-Wrust_2018_idioms"
 ]
