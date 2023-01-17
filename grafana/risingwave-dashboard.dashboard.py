@@ -1307,6 +1307,10 @@ def section_streaming_actors(outer_panels):
                             f"rate({metric('stream_join_lookup_total_count')}[$__rate_interval])",
                             "total lookups {{actor_id}} {{side}}",
                         ),
+                        panels.target(
+                            f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
+                            "total lookups {{actor_id}} {{side}}",
+                        ),
                     ],
                 ),
                 panels.timeseries_actor_latency(
