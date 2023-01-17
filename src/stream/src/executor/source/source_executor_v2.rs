@@ -391,15 +391,11 @@ impl<S: StateStore> SourceExecutorV2<S> {
                     self.metrics
                         .source_row_per_barrier
                         .with_label_values(&[
+                            self.ctx.id.to_string().as_str(),
                             self.stream_source_core
                                 .as_ref()
                                 .unwrap()
                                 .source_identify
-                                .as_str(),
-                            self.stream_source_core
-                                .as_ref()
-                                .unwrap()
-                                .source_name
                                 .as_ref(),
                         ])
                         .inc_by(metric_row_per_barrier);

@@ -957,7 +957,7 @@ def section_streaming(panels):
                 )
             ],
         ),
-        panels.timeseries_bytesps(
+        panels.timeseries_rowsps(
             "Source Throughput(rows) per barrier",
             "",
             [

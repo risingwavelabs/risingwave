@@ -450,6 +450,7 @@ impl StreamingMetrics {
             actor_out_record_cnt,
             actor_sampled_deserialize_duration_ns,
             source_output_row_count,
+            source_row_per_barrier,
             exchange_recv_size,
             exchange_frag_recv_size,
             join_lookup_miss_count,
