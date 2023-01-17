@@ -85,6 +85,7 @@ impl ToBatchProst for BatchInsert {
                 .logical
                 .row_id_index()
                 .map(|index| ColumnIndex { index: index as _ }),
+            returning: self.logical.has_returning(),
         })
     }
 }
