@@ -13,7 +13,7 @@
     insert into t values (22.33, '33'), (44, 55.0);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchInsert { table: t }
+    └─BatchInsert { table: t  }
       └─BatchValues { rows: [[22.33:Decimal::Float32, 33:Int32], [44:Int32::Float32, 55.0:Decimal::Int32]] }
 - name: insert values on non-assign-castable types
   sql: |
@@ -72,13 +72,8 @@
     insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-<<<<<<< HEAD
     └─BatchInsert { table: t  }
-      └─BatchValues { rows: [['2020-01-01 01:02:03':Varchar::Timestamp::Time], ['03:04:05':Varchar::Time]] }
-=======
-    └─BatchInsert { table: t }
       └─BatchValues { rows: [['2020-01-01 01:02:03':Timestamp::Time], ['03:04:05':Time]] }
->>>>>>> 1132ec8f9bdca732be94247081f4b1dcef98246a
 - name: a `VALUES` without insert context may be invalid on its own (compare with above)
   sql: |
     create table t (v1 time);
