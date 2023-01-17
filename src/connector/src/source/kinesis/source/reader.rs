@@ -142,6 +142,7 @@ impl KinesisSplitReader {
                 KinesisOffset::SequenceNumber(seq) => {
                     (Some(seq.clone()), ShardIteratorType::AfterSequenceNumber)
                 }
+                KinesisOffset::Latest => (None, ShardIteratorType::Latest),
                 _ => unreachable!(),
             }
         };
