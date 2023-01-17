@@ -16,14 +16,23 @@
  */
 
 import {
+  Column,
   primaryKeyColumn,
   Relations,
   streamingJobColumns,
 } from "../components/Relations"
-import { getMaterializedViews } from "./api/streaming"
+import { Table } from "../proto/gen/catalog"
+import { getTables } from "./api/streaming"
 
-export default function MaterializedViews() {
-  return Relations("Materialized Views", getMaterializedViews, [
+export default function Tables() {
+  const associatedSourceColumn: Column<Table> = {
+    name: "Source",
+    width: 3,
+    content: (t) => t.optionalAssociatedSourceId?.associatedSourceId ?? "-",
+  }
+
+  return Relations("Tables", getTables, [
+    associatedSourceColumn,
     ...streamingJobColumns,
     primaryKeyColumn,
   ])

@@ -176,11 +176,6 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::checkpoint_frequency")]
     pub checkpoint_frequency: usize,
 
-    /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
-    /// fragment on one parallel unit per compute node.
-    #[serde(default)]
-    pub minimal_scheduling: bool,
-
     /// The thread number of the streaming actor runtime in the compute node. The default value is
     /// decided by `tokio`.
     #[serde(default)]

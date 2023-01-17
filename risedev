@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 if [ -z "$(which cargo-make)" ]; then
     echo "Installing cargo-make..."
