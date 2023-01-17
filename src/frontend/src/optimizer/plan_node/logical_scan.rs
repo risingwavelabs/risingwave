@@ -580,7 +580,7 @@ impl ToBatch for LogicalScan {
                 .map(|expr| self.base.ctx().expr_with_session_timezone(expr.clone()))
                 .collect(),
         };
-        tracing::info!("NEW PREDICATE: {:?}", new_predicate);
+        tracing::debug!("NEW PREDICATE: {:?}", new_predicate);
         let new = self.clone_with_predicate(new_predicate);
 
         if !new.indexes().is_empty() {
