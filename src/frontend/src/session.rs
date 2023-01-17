@@ -66,9 +66,7 @@ use crate::optimizer::OptimizerContext;
 use crate::planner::Planner;
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::SchedulerError::QueryCancelError;
-use crate::scheduler::{
-    HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
-};
+use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};

@@ -12,17 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
-
-
-
-
-
-
-
-use futures::{Stream};
-
+use futures::Stream;
 
 /// Convert a list of streams into a [`Stream`] of results from the streams.
 pub fn select_all<S: Stream + Unpin>(

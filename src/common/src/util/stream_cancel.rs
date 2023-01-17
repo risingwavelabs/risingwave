@@ -17,7 +17,6 @@
 //! useful in several cases, for example when cancel query, it can be used to concat an cancel
 //! error to original stream.
 
-
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::task::Poll;
