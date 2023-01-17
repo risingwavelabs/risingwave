@@ -15,11 +15,10 @@
 use itertools::Itertools;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::common::worker_node::State;
-use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
 use risingwave_pb::ddl_service::*;
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tonic::{Request, Response, Status};
@@ -549,6 +548,12 @@ where
 
         // 2. Get the env for streaming jobs
         let env = fragment_graph.get_env().unwrap().clone();
+        let default_parallelism =
+            if let Some(Parallelism { parallelism }) = fragment_graph.parallelism {
+                parallelism as usize
+            } else {
+                self.cluster_manager.get_active_parallel_unit_count().await
+            } as u32;
 
         // 3. Build fragment graph.
         let fragment_graph =
@@ -584,14 +589,6 @@ where
         };
 
         // TODO(bugen): we should merge this step with the `Scheduler`.
-        let default_parallelism = if self.env.opts.minimal_scheduling {
-            self.cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
-                .await
-                .len()
-        } else {
-            self.cluster_manager.get_active_parallel_unit_count().await
-        } as u32;
         let actor_graph_builder = ActorGraphBuilder::new(fragment_graph, default_parallelism);
 
         let graph = actor_graph_builder

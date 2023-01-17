@@ -397,6 +397,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         env: Some(StreamEnvironment::default()),
         dependent_table_ids: vec![],
         table_ids_cnt: 3,
+        parallelism: None,
     }
 }
 

@@ -432,6 +432,10 @@ impl Cluster {
             .map(|i| format!("192.168.2.{i}"))
             .collect()
     }
+
+    pub fn config(&self) -> Configuration {
+        self.config.clone()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
