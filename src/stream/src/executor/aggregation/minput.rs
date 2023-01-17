@@ -379,9 +379,8 @@ mod tests {
             &input_schema,
         );
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-        epoch.inc();
 
         {
             let chunk = create_chunk(
@@ -398,8 +397,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -423,7 +422,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -488,9 +488,8 @@ mod tests {
             &input_schema,
         );
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-        epoch.inc();
 
         {
             let chunk = create_chunk(
@@ -507,8 +506,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -532,7 +531,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -599,10 +599,9 @@ mod tests {
         )
         .await;
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table_1.init_epoch(epoch);
         table_2.init_epoch(epoch);
-        epoch.inc();
 
         let mut state_1 = MaterializedInputState::new(
             &agg_call_1,
@@ -654,8 +653,9 @@ mod tests {
                     state.apply_chunk(&ops, visibility.as_ref(), &columns)
                 })?;
 
-            table_1.commit_for_test(epoch).await.unwrap();
-            table_2.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table_1.commit(epoch).await.unwrap();
+            table_2.commit(epoch).await.unwrap();
 
             match state_1.get_output(&table_1, group_key.as_ref()).await? {
                 Some(ScalarImpl::Utf8(s)) => {
@@ -708,9 +708,8 @@ mod tests {
             &input_schema,
         );
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-        epoch.inc();
 
         {
             let chunk = create_chunk(
@@ -726,8 +725,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -751,7 +750,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -806,9 +806,8 @@ mod tests {
         )
         .await;
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-        epoch.inc();
 
         let mut state = MaterializedInputState::new(
             &agg_call,
@@ -849,8 +848,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -883,7 +882,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -928,9 +928,8 @@ mod tests {
             &input_schema,
         );
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-        epoch.inc();
 
         {
             let chunk = create_chunk(
@@ -945,8 +944,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -972,8 +971,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -1001,7 +1000,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -1061,9 +1061,8 @@ mod tests {
             &input_schema,
         );
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-        epoch.inc();
 
         {
             let chunk = create_chunk(
@@ -1079,8 +1078,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -1103,7 +1102,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -1162,10 +1162,8 @@ mod tests {
             &input_schema,
         );
 
-        let epoch = EpochPair::new_test_epoch(1);
+        let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-        epoch.inc();
-
         {
             let chunk = create_chunk(
                 " T i i I
@@ -1180,8 +1178,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
             epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
@@ -1209,7 +1207,8 @@ mod tests {
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
             state.apply_chunk(&ops, visibility.as_ref(), &columns)?;
 
-            table.commit_for_test(epoch).await.unwrap();
+            epoch.inc();
+            table.commit(epoch).await.unwrap();
 
             let res = state.get_output(&table, group_key.as_ref()).await?;
             match res {
