@@ -15,7 +15,7 @@
 pub mod telemetry;
 
 use serde::{Deserialize, Serialize};
-use sysinfo::{NetworkExt, NetworksExt, ProcessExt, System, SystemExt};
+use sysinfo::{System, SystemExt};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct SystemData {

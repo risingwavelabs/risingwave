@@ -1,8 +1,11 @@
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use anyhow::anyhow;
 use hyper::StatusCode;
 use serde::{Deserialize, Serialize};
+use tokio::sync::oneshot::Sender;
+use tokio::task::JoinHandle;
 use tokio::time::{interval, Duration};
 use uuid::Uuid;
 
@@ -10,10 +13,11 @@ use super::SystemData;
 use crate::storage::MetaStore;
 use crate::stream::SourceManager;
 
+/// Environment Variable that is default to be true
 const TELEMETRY_ENV_ENABLE: &str = "ENABLE_TELEMETRY";
-
+/// Url of telemetry backend
 const TELEMETRY_REPORT_URL: &str = "unreachable";
-/// interval in seconds
+/// Telemetry reporting interval in seconds
 const TELEMETRY_REPORT_INTERVAL: u64 = 24 * 60 * 60;
 const TELEMETRY_CF: &str = "cf/telemetry";
 /// `telemetry` in bytes
@@ -26,41 +30,65 @@ struct TelemetryReport {
     /// session_id is reset every time Meta node restarts
     session_id: String,
     system: SystemData,
+
     // number of sources created
     source_count: usize,
+
+    up_time: u64,
+
+    time_stamp: u64,
 }
 
 /// spawn a new tokio task to report telemetry
-pub fn start_telemetry_reporting(
+pub async fn start_telemetry_reporting(
     meta_store: Arc<impl MetaStore>,
     source_manager: Arc<SourceManager<impl MetaStore>>,
-) {
-    tokio::spawn(async move {
+) -> (JoinHandle<()>, Sender<()>) {
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let join_handle = tokio::spawn(async move {
+        let begin_time = std::time::Instant::now();
         let session_id = Uuid::new_v4();
         let mut interval = interval(Duration::from_secs(TELEMETRY_REPORT_INTERVAL));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
-            interval.tick().await;
+            tokio::select! {
+                _ = interval.tick() => {},
+                _ = &mut shutdown_rx => {
+                    return;
+                }
+            }
 
             if !telemetry_enabled() {
+                tracing::info!("Meta Telemetry not enabled");
                 continue;
             }
 
-            if let Ok(tracking_id) = fetch_tracking_id(meta_store.clone()).await {
-                let report = TelemetryReport {
-                    tracking_id: tracking_id.to_string(),
-                    session_id: session_id.to_string(),
-                    system: SystemData::new(),
-                    source_count: source_manager.source_count().await,
-                };
+            match fetch_tracking_id(meta_store.clone()).await {
+                Ok(tracking_id) => {
+                    let report = TelemetryReport {
+                        tracking_id: tracking_id.to_string(),
+                        session_id: session_id.to_string(),
+                        system: SystemData::new(),
+                        source_count: source_manager.source_count().await,
+                        up_time: begin_time.elapsed().as_secs(),
+                        time_stamp: SystemTime::now()
+                            .duration_since(SystemTime::UNIX_EPOCH)
+                            .expect("Clock might go backward")
+                            .as_secs(),
+                    };
 
-                post_telemetry_report(TELEMETRY_REPORT_URL, &report)
-                    .await
-                    .unwrap();
+                    if let Err(e) = post_telemetry_report(TELEMETRY_REPORT_URL, &report).await {
+                        tracing::error!("Telemetry post error, {}", e);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Telemetry fetch tacking id error {}", e);
+                }
             }
         }
     });
+    (join_handle, shutdown_tx)
 }
 
 async fn post_telemetry_report(url: &str, report: &TelemetryReport) -> Result<(), anyhow::Error> {
@@ -109,26 +137,33 @@ fn telemetry_enabled() -> bool {
         .unwrap_or(true)
 }
 
+impl TelemetryReport {
+    #[cfg(test)]
+    fn for_test() -> Self {
+        Self {
+            tracking_id: Uuid::new_v4().to_string(),
+            session_id: Uuid::new_v4().to_string(),
+            system: SystemData::new(),
+            source_count: 10,
+            up_time: 123123,
+            time_stamp: 10,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use httpmock::Method::POST;
     use httpmock::MockServer;
-    use uuid::Uuid;
 
     use super::*;
-    use crate::telemetry::SystemData;
 
     #[tokio::test]
     async fn test_post_telemetry_report_success() {
         let mock_server = MockServer::start();
         let url = mock_server.url("/report");
 
-        let report = TelemetryReport {
-            tracking_id: Uuid::new_v4().to_string(),
-            session_id: Uuid::new_v4().to_string(),
-            system: SystemData::new(),
-            source_count: 10,
-        };
+        let report = TelemetryReport::for_test();
         let report_json = serde_json::to_string(&report).unwrap();
         let resp_mock = mock_server.mock(|when, then| {
             when.method(POST)

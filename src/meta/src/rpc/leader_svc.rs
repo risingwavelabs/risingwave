@@ -301,6 +301,9 @@ pub async fn start_leader_srv<S: MetaStore>(
             .await,
     );
 
+    // report telemetry only when it is etcd
+    sub_tasks.push(start_telemetry_reporting(meta_store.clone(), source_manager).await);
+
     let shutdown_all = async move {
         for (join_handle, shutdown_sender) in sub_tasks {
             if let Err(_err) = shutdown_sender.send(()) {
@@ -312,9 +315,6 @@ pub async fn start_leader_srv<S: MetaStore>(
             }
         }
     };
-
-    // report telemetry only when it is etcd
-    start_telemetry_reporting(meta_store.clone(), source_manager);
 
     let leader_srv = LeaderServiceImpl::new(election_coordination.leader_rx);
 
