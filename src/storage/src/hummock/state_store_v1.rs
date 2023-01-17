@@ -103,6 +103,12 @@ impl HummockStorageV1 {
             )
             .await?;
             if let Some(v) = value {
+                local_stats.report_bloom_filter_metrics(
+                    self.state_store_metrics.as_ref(),
+                    "get",
+                    table_id_label,
+                    false,
+                );
                 local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                 return Ok(v.into_user_value());
             }
@@ -118,6 +124,12 @@ impl HummockStorageV1 {
             )
             .await?;
             if let Some(v) = value {
+                local_stats.report_bloom_filter_metrics(
+                    self.state_store_metrics.as_ref(),
+                    "get",
+                    table_id_label,
+                    false,
+                );
                 local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                 return Ok(v.into_user_value());
             }
@@ -155,6 +167,12 @@ impl HummockStorageV1 {
                         )
                         .await?
                         {
+                            local_stats.report_bloom_filter_metrics(
+                                self.state_store_metrics.as_ref(),
+                                "get",
+                                table_id_label,
+                                false,
+                            );
                             local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                             return Ok(v.into_user_value());
                         }
@@ -191,6 +209,12 @@ impl HummockStorageV1 {
                     )
                     .await?
                     {
+                        local_stats.report_bloom_filter_metrics(
+                            self.state_store_metrics.as_ref(),
+                            "get",
+                            table_id_label,
+                            false,
+                        );
                         local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                         return Ok(v.into_user_value());
                     }
@@ -198,6 +222,12 @@ impl HummockStorageV1 {
             }
         }
 
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "get",
+            table_id_label,
+            true,
+        );
         local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
         self.state_store_metrics
             .iter_merge_sstable_counts
@@ -409,6 +439,15 @@ impl HummockStorageV1 {
             .rewind()
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
+
+        let table_id_string = read_options.table_id.to_string();
+        let table_id_label = table_id_string.as_str();
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "iter",
+            table_id_label,
+            user_iterator.is_valid(),
+        );
 
         local_stats.report(
             self.state_store_metrics.as_ref(),
