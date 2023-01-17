@@ -2052,6 +2052,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "env_logger"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a12e6657c4c97ebab115a42dcee77225f7f482cdd841cf7088c657a42e9e00e7"
+dependencies = [
+ "atty",
+ "humantime",
+ "log",
+ "regex",
+ "termcolor",
+]
+
+[[package]]
 name = "errno"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2285,6 +2298,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "fs-err"
+version = "2.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0845fa252299212f0389d64ba26f34fa32cfe41588355f21ed507c59a0f64541"
 
 [[package]]
 name = "fs2"
@@ -5028,6 +5047,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick-junit"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a434ae380664312ac1a70faa7e18df6bd67b6f6213ea52f9597074dd5973e678"
+dependencies = [
+ "chrono",
+ "indexmap",
+ "quick-xml",
+ "thiserror",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6200,6 +6231,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "sqllogictest",
+ "sqllogictest-engine",
  "tempfile",
  "tokio-postgres",
  "tracing",
@@ -7089,12 +7121,13 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a89f3be6c90ef2b67d55f999663b367ede63747a2311e480e7710f70c52fef65"
+version = "0.11.1"
+source = "git+https://github.com/BugenZhao/sqllogictest-rs.git?branch=bz/engine#e83536390ca391f3328f96c72b2eae45d6b25f87"
 dependencies = [
  "async-trait",
+ "derivative",
  "difference",
+ "fs-err",
  "futures",
  "glob",
  "humantime",
@@ -7106,6 +7139,41 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tracing",
+]
+
+[[package]]
+name = "sqllogictest-engine"
+version = "0.11.1"
+source = "git+https://github.com/BugenZhao/sqllogictest-rs.git?branch=bz/engine#e83536390ca391f3328f96c72b2eae45d6b25f87"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "chrono",
+ "clap 3.2.23",
+ "console",
+ "difference",
+ "env_logger",
+ "fs-err",
+ "futures",
+ "futures-lite",
+ "glob",
+ "humantime",
+ "itertools",
+ "log",
+ "pg_interval",
+ "postgres-types",
+ "quick-junit",
+ "rand 0.8.5",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sqllogictest",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-postgres",
+ "tokio-util",
 ]
 
 [[package]]
