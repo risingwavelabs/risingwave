@@ -184,6 +184,14 @@ impl EqJoinPredicate {
             .collect()
     }
 
+    pub fn eq_keys_are_type_aligned(&self) -> bool {
+        let mut aligned = true;
+        for (l, r, _) in &self.eq_keys {
+            aligned &= l.data_type == r.data_type;
+        }
+        aligned
+    }
+
     pub fn left_eq_indexes(&self) -> Vec<usize> {
         self.eq_keys
             .iter()

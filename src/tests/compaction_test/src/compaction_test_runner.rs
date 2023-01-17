@@ -612,7 +612,6 @@ async fn open_hummock_iters(
                     prefix_hint: None,
                     table_id: TableId { table_id },
                     retention_seconds: None,
-                    check_bloom_filter: false,
                     ignore_range_tombstone: false,
                     read_version_from_backup: false,
                 },

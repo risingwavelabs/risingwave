@@ -37,6 +37,7 @@
 #![feature(provide_any)]
 #![feature(btree_drain_filter)]
 #![feature(bound_map)]
+#![feature(iter_order_by)]
 
 #[macro_use]
 extern crate tracing;

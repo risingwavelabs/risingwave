@@ -38,6 +38,7 @@ impl<K: Ord, V> OrderedCache<K, V> {
     }
 
     /// Get the number of entries in the cache.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.entries.len()
     }

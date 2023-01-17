@@ -526,10 +526,10 @@ impl<S: StateStore> StateTable<S> {
     ) -> StreamExecutorResult<Option<CompactedRow>> {
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
-        let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
+        let mem_table_res = self.mem_table.get_key_op(&serialized_pk);
 
         match mem_table_res {
-            Some(row_op) => match row_op {
+            Some(key_op) => match key_op {
                 KeyOp::Insert(row_bytes) => Ok(Some(CompactedRow {
                     row: row_bytes.clone(),
                 })),
@@ -545,10 +545,14 @@ impl<S: StateStore> StateTable<S> {
                     debug_assert_eq!(self.prefix_hint_len, pk.len());
                 }
 
+                let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
+                    Some(serialized_pk.slice(VirtualNode::SIZE..))
+                } else {
+                    None
+                };
+
                 let read_options = ReadOptions {
-                    prefix_hint: None,
-                    check_bloom_filter: self.prefix_hint_len != 0
-                        && self.prefix_hint_len == pk.len(),
+                    prefix_hint,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     ignore_range_tombstone: false,
@@ -737,14 +741,6 @@ impl<S: StateStore> StateTable<S> {
         Ok(())
     }
 
-    /// used for unit test, and do not need to assert epoch.
-    pub async fn commit_for_test(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.batch_write_rows(mem_table, new_epoch.prev).await?;
-        self.update_epoch(new_epoch);
-        Ok(())
-    }
-
     // TODO(st1page): maybe we should extract a pub struct to do it
     /// just specially used by those state table read-only and after the call the data
     /// in the epoch will be visible
@@ -789,11 +785,11 @@ impl<S: StateStore> StateTable<S> {
                 prefix_serializer.as_ref().unwrap(),
             )
         });
-        for (pk, row_op) in buffer {
+        for (pk, key_op) in buffer {
             if let Some(ref range_end) = range_end_suffix && &pk[VirtualNode::SIZE..] < range_end.as_slice() {
                 continue;
             }
-            match row_op {
+            match key_op {
                 // Currently, some executors do not strictly comply with these semantics. As a
                 // workaround you may call disable the check by initializing the state store with
                 // `disable_sanity_check=true`.
@@ -852,7 +848,6 @@ impl<S: StateStore> StateTable<S> {
     ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
             prefix_hint: None,
-            check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             ignore_range_tombstone: false,
@@ -885,7 +880,6 @@ impl<S: StateStore> StateTable<S> {
     ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
             prefix_hint: None,
-            check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             ignore_range_tombstone: false,
@@ -921,7 +915,6 @@ impl<S: StateStore> StateTable<S> {
         let read_options = ReadOptions {
             prefix_hint: None,
             ignore_range_tombstone: false,
-            check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             read_version_from_backup: false,
@@ -1080,7 +1073,7 @@ impl<S: StateStore> StateTable<S> {
                     .pk_serde
                     .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
 
-                Some(encoded_prefix[..encoded_prefix_len].to_vec())
+                Some(Bytes::from(encoded_prefix[..encoded_prefix_len].to_vec()))
             }
         };
 
@@ -1098,19 +1091,15 @@ impl<S: StateStore> StateTable<S> {
     async fn iter_inner(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        prefix_hint: Option<Vec<u8>>,
+        prefix_hint: Option<Bytes>,
         epoch: u64,
     ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
         let (l, r) = key_range.clone();
         let bytes_key_range = (l.map(Bytes::from), r.map(Bytes::from));
         // Mem table iterator.
         let mem_table_iter = self.mem_table.iter(bytes_key_range);
-
-        let check_bloom_filter = prefix_hint.is_some();
-
         let read_options = ReadOptions {
             prefix_hint,
-            check_bloom_filter,
             ignore_range_tombstone: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
@@ -1182,8 +1171,8 @@ where
                 }
                 // The stream side has come to an end, return data from the mem table.
                 (None, Some(_)) => {
-                    let (pk, row_op) = mem_table_iter.next().unwrap();
-                    match row_op {
+                    let (pk, key_op) = mem_table_iter.next().unwrap();
+                    match key_op {
                         KeyOp::Insert(row_bytes) | KeyOp::Update((_, row_bytes)) => {
                             let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
@@ -1203,9 +1192,9 @@ where
                             // both memtable and storage contain the key, so we advance both
                             // iterators and return the data in memory.
 
-                            let (pk, row_op) = mem_table_iter.next().unwrap();
+                            let (pk, key_op) = mem_table_iter.next().unwrap();
                             let (_, old_row_in_storage) = storage_iter.next().await.unwrap()?;
-                            match row_op {
+                            match key_op {
                                 KeyOp::Insert(row_bytes) => {
                                     let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
@@ -1226,9 +1215,9 @@ where
                         }
                         Ordering::Greater => {
                             // yield data from mem table
-                            let (pk, row_op) = mem_table_iter.next().unwrap();
+                            let (pk, key_op) = mem_table_iter.next().unwrap();
 
-                            match row_op {
+                            match key_op {
                                 KeyOp::Insert(row_bytes) => {
                                     let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 

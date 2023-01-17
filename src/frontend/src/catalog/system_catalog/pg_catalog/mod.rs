@@ -439,7 +439,12 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(t.owner as i32)),
                             Some(ScalarImpl::Utf8(t.definition.clone().into())),
                             Some(ScalarImpl::Int32(t.id.table_id as i32)),
-                            Some(ScalarImpl::Utf8(json!(fragments).to_string().into())),
+                            Some(ScalarImpl::Utf8(
+                                fragments.get_env().unwrap().get_timezone().clone().into(),
+                            )),
+                            Some(ScalarImpl::Utf8(
+                                json!(fragments.get_fragments()).to_string().into(),
+                            )),
                         ]));
                     }
                 });
