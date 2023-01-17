@@ -171,6 +171,7 @@ impl ConnectorSourceReader {
             let mut split_offset_mapping: HashMap<SplitId, String> = HashMap::new();
 
             for msg in batch {
+                tracing::warn!("payload: {:?}", msg.payload);
                 if let Some(content) = msg.payload {
                     split_offset_mapping.insert(msg.split_id, msg.offset);
 
