@@ -69,6 +69,14 @@ impl Vis {
         }
     }
 
+    /// Returns a bitmap of this `Vis`.
+    pub fn to_bitmap(&self) -> Bitmap {
+        match self {
+            Vis::Bitmap(b) => b.clone(),
+            Vis::Compact(c) => Bitmap::ones(*c),
+        }
+    }
+
     /// Consumes this `Vis` and returns the inner `Bitmap` if not compact.
     pub fn into_visibility(self) -> Option<Bitmap> {
         match self {

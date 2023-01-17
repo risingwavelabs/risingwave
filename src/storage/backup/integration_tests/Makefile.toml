@@ -4,7 +4,7 @@ dependencies = ["pre-start-dev"]
 description = "Run meta backup/restore test"
 condition = { env_set = [ "PREFIX_BIN", "PREFIX_DATA" ] }
 script = """
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 BUILD_BIN="$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}"
 test_root="src/storage/backup/integration_tests"
