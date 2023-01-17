@@ -26,7 +26,7 @@ wget https://github.com/risingwavelabs/risingwave/releases/download/v0.1.15/risi
 # Unzip the binary
 tar xvf risingwave-v0.1.15-x86_64-unknown-linux.tar.gz
 # Start RisingWave in single-binary playground mode
-./risedev playground
+./risingwave playground
 ```
 
 **Use Docker (Linux, macOS)**
