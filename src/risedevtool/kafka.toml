@@ -13,7 +13,7 @@ dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_KAFKA" ] }
 description = "Download and extract Kafka"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 if [ -d "${PREFIX_BIN}/kafka" ]; then
     exit 0

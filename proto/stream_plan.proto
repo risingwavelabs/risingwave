@@ -618,6 +618,11 @@ message StreamFragmentGraph {
     uint32 upstream_id = 4;
     uint32 downstream_id = 5;
   }
+
+  message Parallelism {
+    uint64 parallelism = 1;
+  }
+
   // all the fragments in the graph.
   map<uint32, StreamFragment> fragments = 1;
   // edges between fragments.
@@ -626,4 +631,6 @@ message StreamFragmentGraph {
   repeated uint32 dependent_table_ids = 3;
   uint32 table_ids_cnt = 4;
   StreamEnvironment env = 5;
+  // If none, default parallelism will be applied.
+  Parallelism parallelism = 6;
 }
