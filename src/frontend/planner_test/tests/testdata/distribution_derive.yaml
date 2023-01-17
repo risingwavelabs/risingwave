@@ -19,8 +19,8 @@
     StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), bk1.b._row_id(hidden), bk1.k1(hidden)], pk_columns: [ak1.a._row_id, bk1.b._row_id, ak1.k1, bk1.k1] }
     └─StreamExchange { dist: HashShard(ak1.a._row_id, ak1.k1, bk1.b._row_id, bk1.k1) }
       └─StreamDeltaJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v, ak1.a._row_id, ak1.k1, bk1.b._row_id, bk1.k1] }
-        ├─StreamIndexScan { index: "ak1", columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: HashShard(ak1.k1) }
-        └─StreamIndexScan { index: "bk1", columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: HashShard(bk1.k1) }
+        ├─StreamIndexScan { index: "ak1", columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+        └─StreamIndexScan { index: "bk1", columns: [bk1.k1, bk1.v, bk1.b._row_id], pk: [bk1.b._row_id], dist: UpstreamHashShard(bk1.k1) }
 - id: Ak1_join_B_onk1
   before:
   - create_tables

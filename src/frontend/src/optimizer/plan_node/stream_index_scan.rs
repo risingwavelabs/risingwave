@@ -41,6 +41,18 @@ impl StreamIndexScan {
     pub fn new(logical: LogicalScan, chain_type: ChainType) -> Self {
         let ctx = logical.base.ctx.clone();
 
+        let distribution = {
+            let distribution_key = logical
+                .distribution_key()
+                .expect("distribution key of stream chain must exist in output columns");
+            if distribution_key.is_empty() {
+                Distribution::Single
+            } else {
+                // See also `BatchSeqScan::clone_with_dist`.
+                Distribution::UpstreamHashShard(distribution_key, logical.table_desc().table_id)
+            }
+        };
+
         let batch_plan_id = ctx.next_plan_node_id();
         // TODO: derive from input
         let base = PlanBase::new_stream(
@@ -48,7 +60,7 @@ impl StreamIndexScan {
             logical.schema().clone(),
             logical.base.logical_pk.clone(),
             logical.functional_dependency().clone(),
-            Distribution::HashShard(logical.distribution_key().unwrap()),
+            distribution,
             false, // TODO: determine the `append-only` field of table scan
             // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
             FixedBitSet::with_capacity(logical.schema().len()),
