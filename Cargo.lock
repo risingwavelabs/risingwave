@@ -3462,9 +3462,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.2.11"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f83388bf9b75da759e6ebc7470e8ab4911314504eb75e16946de66f56a5608ea"
+checksum = "a282949bceaf35a250b48d9c5dab411a3948d0155a0cccfbcb0db953f67cef65"
 dependencies = [
  "etcd-client",
  "futures-util",
@@ -3474,6 +3474,7 @@ dependencies = [
  "serde_with",
  "spin 0.9.4",
  "thiserror",
+ "tokio",
  "toml",
  "tonic",
  "tracing",
@@ -5918,6 +5919,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "thiserror",
+ "tokio-stream",
  "tracing",
  "uuid",
  "workspace-hack",
@@ -6035,6 +6037,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_test_runner",
+ "scopeguard",
  "serde",
  "serde_derive",
  "serde_json",
@@ -6945,7 +6948,7 @@ dependencies = [
 [[package]]
 name = "simd-json"
 version = "0.7.0"
-source = "git+https://github.com/tabVersion/simd-json.git?branch=main#fe89a0d1d2bb5749acc72a515db39c36d16d267d"
+source = "git+https://github.com/tabVersion/simd-json.git?branch=main#b52fef754645ecf07c059b42d1b995f3c9f96063"
 dependencies = [
  "halfbrown",
  "lexical-core",

@@ -85,7 +85,7 @@ function execute_sql() {
   local sql
   sql=$1
   echo "execute sql ${sql}"
-  echo "${sql}" | psql -h localhost -p 4566 -d dev -U root 2>&1
+  echo "SET QUERY_MODE=distributed;${sql}" | psql -h localhost -p 4566 -d dev -U root 2>&1
 }
 
 function get_max_committed_epoch() {
