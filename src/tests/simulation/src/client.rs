@@ -81,36 +81,28 @@ impl sqllogictest::AsyncDB for RisingWave {
 
         let mut output = vec![];
 
-        // TODO: regard DML with RETURNING as a query
-        let is_query_sql = {
-            let lower_sql = sql.trim_start().to_ascii_lowercase();
-            lower_sql.starts_with("select")
-                || lower_sql.starts_with("values")
-                || lower_sql.starts_with("show")
-                || lower_sql.starts_with("with")
-                || lower_sql.starts_with("describe")
-        };
-
         let rows = self.client.simple_query(sql).await?;
+        let mut cnt = 0;
         for row in rows {
             let mut row_vec = vec![];
-
             match row {
                 tokio_postgres::SimpleQueryMessage::Row(row) => {
                     for i in 0..row.len() {
                         match row.get(i) {
-                            Some(v) if v.is_empty() => row_vec.push("(empty)".to_string()),
-                            Some(v) => row_vec.push(v.to_string()),
+                            Some(v) => {
+                                if v.is_empty() {
+                                    row_vec.push("(empty)".to_string());
+                                } else {
+                                    row_vec.push(v.to_string());
+                                }
+                            }
                             None => row_vec.push("NULL".to_string()),
                         }
                     }
                 }
-                tokio_postgres::SimpleQueryMessage::CommandComplete(cnt) => {
-                    if is_query_sql {
-                        break;
-                    } else {
-                        return Ok(DBOutput::StatementComplete(cnt));
-                    }
+                tokio_postgres::SimpleQueryMessage::CommandComplete(cnt_) => {
+                    cnt = cnt_;
+                    break;
                 }
                 _ => unreachable!(),
             }
@@ -118,11 +110,7 @@ impl sqllogictest::AsyncDB for RisingWave {
         }
 
         if output.is_empty() {
-            let stmt = self.client.prepare(sql).await?;
-            Ok(DBOutput::Rows {
-                types: vec![ColumnType::Any; stmt.columns().len()],
-                rows: vec![],
-            })
+            Ok(DBOutput::StatementComplete(cnt))
         } else {
             Ok(DBOutput::Rows {
                 types: vec![ColumnType::Any; output[0].len()],
