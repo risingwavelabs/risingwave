@@ -409,7 +409,7 @@ async fn test_fragmenter() -> MetaResult<()> {
 
     let graph = make_stream_graph();
     let fragment_graph =
-        StreamFragmentGraph::create(graph, env.id_gen_manager_ref(), &mut job).await?;
+        StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &mut job).await?;
 
     let mut ctx = CreateStreamingJobContext::default();
     ctx.internal_tables = fragment_graph.internal_tables();

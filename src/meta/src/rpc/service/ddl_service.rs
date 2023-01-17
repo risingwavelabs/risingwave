@@ -551,12 +551,9 @@ where
         let env = fragment_graph.get_env().unwrap().clone();
 
         // 3. Build fragment graph.
-        let fragment_graph = StreamFragmentGraph::create(
-            fragment_graph,
-            self.env.id_gen_manager_ref(),
-            &*stream_job,
-        )
-        .await?;
+        let fragment_graph =
+            StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), &*stream_job)
+                .await?;
         let internal_tables = fragment_graph.internal_tables();
 
         // 4. Set the graph-related fields and freeze the `stream_job`.

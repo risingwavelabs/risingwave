@@ -43,6 +43,7 @@ impl StreamingJob {
         }
     }
 
+    /// Set the fragment id where the table is materialized.
     pub fn set_table_fragment_id(&mut self, id: FragmentId) {
         match self {
             Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table) => {
@@ -61,6 +62,7 @@ impl StreamingJob {
         }
     }
 
+    /// Returns the reference to the [`Table`] of the job if it exists.
     pub fn table(&self) -> Option<&Table> {
         match self {
             Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table) => {
@@ -70,6 +72,7 @@ impl StreamingJob {
         }
     }
 
+    /// Set the dependent relations of the job, not including the associated source being created.
     pub fn set_dependent_relations(
         &mut self,
         dependent_relations: impl IntoIterator<Item = TableId>,
@@ -84,9 +87,8 @@ impl StreamingJob {
             Self::Sink(sink) => sink.dependent_relations = dependent_relations,
             Self::Index(_, index_table) => index_table.dependent_relations = dependent_relations,
 
-            // NOTE: We intentionally do not set dependent relations for tables, as the only
-            // possible dependent is the associated source (connector), which is also in the
-            // creating procedure.
+            // Note: For creating tables with connectors, the associated source (connector) itself
+            // should not be in this list, as it's also in the creating procedure.
             Self::Table(_, _) => assert!(dependent_relations.is_empty()),
         }
     }
