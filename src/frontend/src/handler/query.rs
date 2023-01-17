@@ -262,6 +262,7 @@ pub async fn local_execute(
         "",
         pinned_snapshot,
         session.auth_context(),
+        session.reset_cancel_query_flag(),
     );
 
     Ok(execution.stream_rows())
