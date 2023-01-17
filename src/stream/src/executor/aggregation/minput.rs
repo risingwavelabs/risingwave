@@ -32,7 +32,7 @@ use smallvec::SmallVec;
 use super::state_cache::array_agg::ArrayAgg;
 use super::state_cache::extreme::ExtremeAgg;
 use super::state_cache::string_agg::StringAgg;
-use super::state_cache::{CacheKey, GenericStateCache, StateCache};
+use super::state_cache::{CacheKey, SortedStateCache, StateCache, TopNStateCache};
 use super::AggCall;
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
@@ -71,7 +71,6 @@ impl<S: StateStore> MaterializedInputState<S> {
         agg_call: &AggCall,
         pk_indices: &PkIndices,
         col_mapping: &StateTableColumnMapping,
-        row_count: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> Self {
@@ -124,28 +123,17 @@ impl<S: StateStore> MaterializedInputState<S> {
             .collect_vec();
         let cache_key_serializer = OrderedRowSerde::new(cache_key_data_types, order_types);
 
-        let cache_capacity = if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
-            extreme_cache_size
-        } else {
-            usize::MAX
+        let cache: Box<dyn StateCache> = match agg_call.kind {
+            AggKind::Min | AggKind::Max | AggKind::FirstValue => {
+                Box::new(TopNStateCache::new(ExtremeAgg, extreme_cache_size))
+            }
+            AggKind::StringAgg => Box::new(SortedStateCache::new(StringAgg)),
+            AggKind::ArrayAgg => Box::new(SortedStateCache::new(ArrayAgg)),
+            _ => panic!(
+                "Agg kind `{}` is not expected to have materialized input state",
+                agg_call.kind
+            ),
         };
-
-        let cache: Box<dyn StateCache> =
-            match agg_call.kind {
-                AggKind::Min | AggKind::Max | AggKind::FirstValue => Box::new(
-                    GenericStateCache::new(ExtremeAgg, cache_capacity, row_count),
-                ),
-                AggKind::StringAgg => {
-                    Box::new(GenericStateCache::new(StringAgg, cache_capacity, row_count))
-                }
-                AggKind::ArrayAgg => {
-                    Box::new(GenericStateCache::new(ArrayAgg, cache_capacity, row_count))
-                }
-                _ => panic!(
-                    "Agg kind `{}` is not expected to have materialized input state",
-                    agg_call.kind
-                ),
-            };
 
         Self {
             arg_col_indices,
@@ -387,15 +375,12 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
 
         let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-
-        let mut row_count = 0;
 
         {
             let chunk = create_chunk(
@@ -407,7 +392,6 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -433,7 +417,6 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -457,7 +440,6 @@ mod tests {
                 &agg_call,
                 &input_pk_indices,
                 &mapping,
-                row_count,
                 usize::MAX,
                 &input_schema,
             );
@@ -502,15 +484,12 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
 
         let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-
-        let mut row_count = 0;
 
         {
             let chunk = create_chunk(
@@ -522,7 +501,6 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -548,7 +526,6 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -572,7 +549,6 @@ mod tests {
                 &agg_call,
                 &input_pk_indices,
                 &mapping,
-                row_count,
                 usize::MAX,
                 &input_schema,
             );
@@ -631,7 +607,6 @@ mod tests {
             &agg_call_1,
             &input_pk_indices,
             &mapping_1,
-            0,
             usize::MAX,
             &input_schema,
         );
@@ -639,7 +614,6 @@ mod tests {
             &agg_call_2,
             &input_pk_indices,
             &mapping_2,
-            0,
             usize::MAX,
             &input_schema,
         );
@@ -730,15 +704,12 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
 
         let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
-
-        let mut row_count = 0;
 
         {
             let chunk = create_chunk(
@@ -749,7 +720,6 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 2;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -775,7 +745,6 @@ mod tests {
                 &mut table,
                 &mapping,
             );
-            row_count += 1;
 
             let (ops, columns, visibility) = chunk.into_inner();
             let columns: Vec<_> = columns.iter().map(|col| col.array_ref()).collect();
@@ -799,7 +768,6 @@ mod tests {
                 &agg_call,
                 &input_pk_indices,
                 &mapping,
-                row_count,
                 usize::MAX,
                 &input_schema,
             );
@@ -845,7 +813,6 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             1024,
             &input_schema,
         );
@@ -957,7 +924,6 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             3, // cache capacity = 3 for easy testing
             &input_schema,
         );
@@ -1080,9 +1046,9 @@ mod tests {
             &input_schema,
             vec![2, 0, 4, 1],
             vec![
-                OrderType::Ascending,  // _row_id ASC
-                OrderType::Descending, // a DESC
                 OrderType::Ascending,  // b ASC
+                OrderType::Descending, // a DESC
+                OrderType::Ascending,  // _row_id ASC
             ],
         )
         .await;
@@ -1091,7 +1057,6 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
@@ -1193,7 +1158,6 @@ mod tests {
             &agg_call,
             &input_pk_indices,
             &mapping,
-            0,
             usize::MAX,
             &input_schema,
         );
