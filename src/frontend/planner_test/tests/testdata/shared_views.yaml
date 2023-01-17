@@ -1,0 +1,21 @@
+- sql: |
+    create table t1 (x int, y int);
+    create view v1 as select x + y as z from t1 where y > 0;
+    create view v2 as select x * z as a, y * z as b from t1, v1 where z = x;
+    select * from v1, v2;
+  logical_plan: |
+    LogicalProject { exprs: [(t1.x + t1.y), (t1.x * (t1.x + t1.y)), (t1.y * (t1.x + t1.y))] }
+    └─LogicalJoin { type: Inner, on: true, output: all }
+      ├─LogicalShare { id = 4 }
+      | └─LogicalProject { exprs: [(t1.x + t1.y)] }
+      |   └─LogicalFilter { predicate: (t1.y > 0:Int32) }
+      |     └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+      └─LogicalShare { id = 9 }
+        └─LogicalProject { exprs: [(t1.x * (t1.x + t1.y)), (t1.y * (t1.x + t1.y))] }
+          └─LogicalFilter { predicate: ((t1.x + t1.y) = t1.x) }
+            └─LogicalJoin { type: Inner, on: true, output: all }
+              ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+              └─LogicalShare { id = 4 }
+                └─LogicalProject { exprs: [(t1.x + t1.y)] }
+                  └─LogicalFilter { predicate: (t1.y > 0:Int32) }
+                    └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
