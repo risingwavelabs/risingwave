@@ -405,14 +405,15 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
 async fn test_fragmenter() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
-    let mut job = StreamingJob::Table(None, make_materialize_table(888));
+    let job = StreamingJob::Table(None, make_materialize_table(888));
 
     let graph = make_stream_graph();
-    let fragment_graph =
-        StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &mut job).await?;
+    let fragment_graph = StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &job).await?;
 
-    let mut ctx = CreateStreamingJobContext::default();
-    ctx.internal_tables = fragment_graph.internal_tables();
+    let mut ctx = CreateStreamingJobContext {
+        internal_tables: fragment_graph.internal_tables(),
+        ..Default::default()
+    };
 
     let actor_graph_builder = ActorGraphBuilder::new(fragment_graph, parallel_degree);
 

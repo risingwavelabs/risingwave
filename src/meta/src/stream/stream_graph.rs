@@ -102,7 +102,7 @@ impl<const TYPE: IdCategoryType> GlobalIdGen<TYPE> {
     }
 
     /// Convert local id to global id. Panics if `id >= len`.
-    pub fn to_global_id(&self, local_id: u32) -> GlobalId<TYPE> {
+    pub fn to_global_id(self, local_id: u32) -> GlobalId<TYPE> {
         assert!(
             local_id < self.len,
             "id {} is out of range (len: {})",
@@ -485,7 +485,7 @@ impl StreamGraphBuilder {
     #[allow(clippy::type_complexity)]
     pub fn build(
         mut self,
-        ctx: &mut CreateStreamingJobContext,
+        ctx: &CreateStreamingJobContext,
         actor_id_offset: u32,
         actor_id_len: u32,
     ) -> MetaResult<HashMap<GlobalFragmentId, Vec<StreamActor>>> {
@@ -496,7 +496,6 @@ impl StreamGraphBuilder {
         }
 
         for builder in self.actor_builders.values() {
-            let fragment_id = builder.get_fragment_id();
             let mut actor = builder.build();
             let mut upstream_actors = builder
                 .upstreams
@@ -509,9 +508,7 @@ impl StreamGraphBuilder {
                 .map(|(id, StreamActorUpstream { fragment_id, .. })| (*id, *fragment_id))
                 .collect();
             let stream_node = self.build_inner(
-                ctx,
                 actor.get_nodes()?,
-                fragment_id,
                 &mut upstream_actors,
                 &mut upstream_fragments,
             )?;
@@ -535,9 +532,7 @@ impl StreamGraphBuilder {
     /// ids if it is a `ChainNode`.
     fn build_inner(
         &self,
-        ctx: &mut CreateStreamingJobContext,
         stream_node: &StreamNode,
-        fragment_id: GlobalFragmentId,
         upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
         upstream_fragment_id: &mut HashMap<u64, GlobalFragmentId>,
     ) -> MetaResult<StreamNode> {
@@ -575,13 +570,7 @@ impl StreamGraphBuilder {
                             }
                         }
                         NodeBody::Chain(_) => self.resolve_chain_node(input)?,
-                        _ => self.build_inner(
-                            ctx,
-                            input,
-                            fragment_id,
-                            upstream_actor_id,
-                            upstream_fragment_id,
-                        )?,
+                        _ => self.build_inner(input, upstream_actor_id, upstream_fragment_id)?,
                     }
                 }
                 Ok(new_stream_node)
@@ -701,7 +690,7 @@ impl ActorGraphBuilder {
                 (actor_len, start_actor_id)
             };
 
-            stream_graph_builder.build(ctx, start_actor_id, actor_len)?
+            stream_graph_builder.build(&*ctx, start_actor_id, actor_len)?
         };
 
         // Serialize the graph
