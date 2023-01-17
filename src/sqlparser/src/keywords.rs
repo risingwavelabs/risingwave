@@ -262,6 +262,7 @@ define_keywords!(
     INSERT,
     INT,
     INTEGER,
+    INTERNAL,
     INTERSECT,
     INTERSECTION,
     INTERVAL,

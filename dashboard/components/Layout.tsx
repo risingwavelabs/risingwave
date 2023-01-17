@@ -18,7 +18,7 @@
 import { Box, Button, HStack, Image, Text, VStack } from "@chakra-ui/react"
 import Link from "next/link"
 import { useRouter } from "next/router"
-import React, { Fragment } from "react"
+import React, { Fragment, useEffect, useState } from "react"
 import { UrlObject } from "url"
 import {
   IconArrowRightCircle,
@@ -40,7 +40,13 @@ function NavButton({
   leftIconActive?: React.ReactElement
 }) {
   const router = useRouter()
-  const match = router.asPath.startsWith(href.toString())
+  const [match, setMatch] = useState(false)
+
+  useEffect(() => {
+    setMatch(router.asPath.startsWith(href.toString()))
+    return () => {}
+  }, [href, router.asPath])
+
   return (
     <Link href={href}>
       <Button
@@ -105,9 +111,12 @@ function Layout({ children }: { children: React.ReactNode }) {
           <VStack width="full" alignItems="flex-start" px={3}>
             <NavTitle>Catalog</NavTitle>
             <NavButton href="/data_sources/">Data Sources</NavButton>
+            <NavButton href="/tables/">Tables</NavButton>
             <NavButton href="/materialized_views/">
               Materialized Views
             </NavButton>
+            <NavButton href="/indexes/">Indexes</NavButton>
+            <NavButton href="/internal_tables/">Internal Tables</NavButton>
             <NavButton href="/sinks/">Sinks</NavButton>
           </VStack>
           <VStack width="full" alignItems="flex-start" px={3}>

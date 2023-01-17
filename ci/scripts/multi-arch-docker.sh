@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Exits as soon as any line fails.
 set -euo pipefail
@@ -61,7 +61,6 @@ if [ "${BUILDKITE_SOURCE}" == "ui" ] && [[ -n "${IMAGE_TAG+x}" ]]; then
   # If this is a ui build, tag the image with the $imagetag.
   TAG="${IMAGE_TAG}"
   pushGchr ${TAG}
-  pushDockerhub ${TAG}
 fi
 
 if [[ -n "${BUILDKITE_TAG}" ]]; then

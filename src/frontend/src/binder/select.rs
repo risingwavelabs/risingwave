@@ -128,11 +128,12 @@ impl Binder {
         self.context.clause = Some(Clause::Where);
         let selection = select
             .selection
-            .map(|expr| self.bind_expr(expr))
+            .map(|expr| {
+                self.bind_expr(expr)
+                    .and_then(|expr| expr.enforce_bool_clause("WHERE"))
+            })
             .transpose()?;
         self.context.clause = None;
-
-        Self::require_bool_clause(&selection, "WHERE")?;
 
         // Bind GROUP BY clause.
         self.context.clause = Some(Clause::GroupBy);
@@ -145,8 +146,13 @@ impl Binder {
 
         // Bind HAVING clause.
         self.context.clause = Some(Clause::Having);
-        let having = select.having.map(|expr| self.bind_expr(expr)).transpose()?;
-        Self::require_bool_clause(&having, "HAVING")?;
+        let having = select
+            .having
+            .map(|expr| {
+                self.bind_expr(expr)
+                    .and_then(|expr| expr.enforce_bool_clause("HAVING"))
+            })
+            .transpose()?;
         self.context.clause = None;
 
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
@@ -372,20 +378,6 @@ impl Binder {
                 }
             })
             .unzip()
-    }
-
-    fn require_bool_clause(expr: &Option<ExprImpl>, clause: &str) -> Result<()> {
-        if let Some(expr) = expr {
-            let return_type = expr.return_type();
-            if return_type != DataType::Boolean {
-                return Err(ErrorCode::InternalError(format!(
-                    "argument of {} must be boolean, not type {:?}",
-                    clause, return_type
-                ))
-                .into());
-            }
-        }
-        Ok(())
     }
 
     fn bind_distinct_on(&mut self, distinct: Distinct) -> Result<BoundDistinct> {

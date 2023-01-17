@@ -3051,6 +3051,12 @@ impl Parser {
                         schema: self.parse_from_and_identifier()?,
                     }));
                 }
+                Keyword::INTERNAL => {
+                    self.expect_keyword(Keyword::TABLES)?;
+                    return Ok(Statement::ShowObjects(ShowObject::InternalTable {
+                        schema: self.parse_from_and_identifier()?,
+                    }));
+                }
                 Keyword::SOURCES => {
                     return Ok(Statement::ShowObjects(ShowObject::Source {
                         schema: self.parse_from_and_identifier()?,

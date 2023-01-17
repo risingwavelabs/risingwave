@@ -240,6 +240,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         Ok::<_, RwError>(())
     });
 
+    let value_indices = (0..column_descs.len()).collect_vec();
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let table = StorageTable::for_test(
         memory_state_store.clone(),
@@ -247,6 +248,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         column_descs.clone(),
         vec![OrderType::Ascending],
         vec![0],
+        value_indices,
     );
 
     let scan = Box::new(RowSeqScanExecutor::new(
@@ -438,6 +440,7 @@ async fn test_row_seq_scan() -> Result<()> {
         column_descs.clone(),
         vec![OrderType::Ascending],
         vec![0],
+        vec![0, 1, 2],
     );
 
     let epoch = EpochPair::new_test_epoch(1);

@@ -187,7 +187,11 @@ where
             row_cnt,
             values_stream: None,
             row_desc: vec![],
-            notice: Some(notice),
+            notice: if !notice.is_empty() {
+                Some(notice)
+            } else {
+                None
+            },
         }
     }
 
@@ -196,6 +200,36 @@ where
         row_cnt: Option<i32>,
         values_stream: VS,
         row_desc: Vec<PgFieldDescriptor>,
+    ) -> Self {
+        Self::new_for_stream_inner(stmt_type, row_cnt, values_stream, row_desc, None)
+    }
+
+    pub fn new_for_stream_with_notice(
+        stmt_type: StatementType,
+        row_cnt: Option<i32>,
+        values_stream: VS,
+        row_desc: Vec<PgFieldDescriptor>,
+        notice: String,
+    ) -> Self {
+        Self::new_for_stream_inner(
+            stmt_type,
+            row_cnt,
+            values_stream,
+            row_desc,
+            if !notice.is_empty() {
+                Some(notice)
+            } else {
+                None
+            },
+        )
+    }
+
+    fn new_for_stream_inner(
+        stmt_type: StatementType,
+        row_cnt: Option<i32>,
+        values_stream: VS,
+        row_desc: Vec<PgFieldDescriptor>,
+        notice: Option<String>,
     ) -> Self {
         assert!(
             stmt_type.is_query() ^ row_cnt.is_some(),
@@ -206,7 +240,7 @@ where
             row_cnt,
             values_stream: Some(values_stream),
             row_desc,
-            notice: None,
+            notice,
         }
     }
 

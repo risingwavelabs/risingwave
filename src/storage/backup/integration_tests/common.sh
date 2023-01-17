@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -eo pipefail
 [ -n "${BACKUP_TEST_BACKUP_RESTORE}" ]
 [ -n "${BACKUP_TEST_MCLI}" ]

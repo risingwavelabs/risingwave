@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 
-use super::generic::PlanAggCall;
+use super::generic::{GenericPlanRef, PlanAggCall};
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -110,7 +110,7 @@ impl ToBatchProst for BatchSimpleAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(PlanAggCall::to_protobuf)
+                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
                 .collect(),
             // We treat simple agg as a special sort agg without group key.
             group_key: vec![],

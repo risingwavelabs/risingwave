@@ -58,7 +58,6 @@ mod state_store_v1;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 pub mod utils;
-pub use compactor::{CompactorMemoryCollector, CompactorSstableStore};
 pub use utils::MemoryLimiter;
 pub mod backup_reader;
 pub mod event_handler;
@@ -100,7 +99,7 @@ use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::version::HummockVersionReader;
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
-use crate::store::ReadOptions;
+use crate::store::{gen_min_epoch, ReadOptions};
 
 struct HummockStorageShutdownGuard {
     shutdown_sender: UnboundedSender<HummockEvent>,
@@ -332,11 +331,11 @@ pub async fn get_from_sstable_info(
     sstable_info: &SstableInfo,
     full_key: FullKey<&[u8]>,
     read_options: &ReadOptions,
-    dist_key_hash: u32,
+    dist_key_hash: Option<u32>,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<HummockValue<Bytes>>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
-
+    let min_epoch = gen_min_epoch(full_key.epoch, read_options.retention_seconds.as_ref());
     let ukey = &full_key.user_key;
     let delete_epoch = if read_options.ignore_range_tombstone {
         None
@@ -346,14 +345,14 @@ pub async fn get_from_sstable_info(
 
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
-    if read_options.check_bloom_filter
-        && !hit_sstable_bloom_filter(sstable.value(), dist_key_hash, local_stats)
-    {
+    if let Some(hash) = dist_key_hash && !hit_sstable_bloom_filter(sstable.value(), hash, local_stats) {
         if delete_epoch.is_some() {
             return Ok(Some(HummockValue::Delete));
         }
+
         return Ok(None);
     }
+
     // TODO: now SstableIterator does not use prefetch through SstableIteratorReadOptions, so we
     // use default before refinement.
     let mut iter = SstableIterator::create(
@@ -373,7 +372,9 @@ pub async fn get_from_sstable_info(
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
     let value = if iter.key().user_key == *ukey {
-        if delete_epoch
+        if iter.key().epoch <= min_epoch {
+            None
+        } else if delete_epoch
             .map(|epoch| epoch >= iter.key().epoch)
             .unwrap_or(false)
         {
@@ -415,12 +416,23 @@ pub async fn get_from_order_sorted_uncommitted_data(
 ) -> StorageResult<(Option<HummockValue<Bytes>>, i32)> {
     let mut table_counts = 0;
     let epoch = full_key.epoch;
-    let dist_key_hash = Sstable::hash_for_bloom_filter(full_key.user_key.table_key.dist_key());
+    let dist_key_hash = read_options
+        .prefix_hint
+        .as_ref()
+        .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref()));
+
+    let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
+
     for data_list in order_sorted_uncommitted_data {
         for data in data_list {
             match data {
                 UncommittedData::Batch(batch) => {
                     assert!(batch.epoch() <= epoch, "batch'epoch greater than epoch");
+
+                    if batch.epoch() <= min_epoch {
+                        continue;
+                    }
+
                     if let Some(data) =
                         get_from_batch(&batch, full_key.user_key.table_key, local_stats)
                     {
