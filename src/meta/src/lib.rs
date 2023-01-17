@@ -173,7 +173,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 enable_recovery: !config.meta.disable_recovery,
                 barrier_interval,
                 in_flight_barrier_nums,
-                minimal_scheduling: config.streaming.minimal_scheduling,
                 max_idle_ms,
                 checkpoint_frequency,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
