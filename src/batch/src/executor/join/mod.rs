@@ -18,7 +18,6 @@ pub mod hash_join;
 pub mod local_lookup_join;
 mod lookup_join_base;
 pub mod nested_loop_join;
-mod sort_merge_join;
 
 pub use chunked_data::*;
 pub use distributed_lookup_join::*;
@@ -32,7 +31,6 @@ use risingwave_common::error::Result;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_pb::plan_common::JoinType as JoinTypeProst;
-pub use sort_merge_join::*;
 
 use crate::error::BatchError;
 use crate::executor::join::JoinType::Inner;
