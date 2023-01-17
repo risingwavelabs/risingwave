@@ -95,7 +95,7 @@ impl LogicalInsert {
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         write!(
             f,
-            "{} {{ table: {} {} }}",
+            "{} {{ table: {}{} }}",
             name,
             self.table_source_name,
             if self.returning {

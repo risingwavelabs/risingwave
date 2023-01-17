@@ -91,7 +91,7 @@ impl LogicalUpdate {
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         write!(
             f,
-            "{} {{ table: {}, exprs: {:?} {} }}",
+            "{} {{ table: {}, exprs: {:?}{} }}",
             name,
             self.table_name,
             self.exprs,
