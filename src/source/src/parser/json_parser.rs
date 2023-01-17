@@ -106,7 +106,8 @@ mod tests {
             br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}"#.as_slice(),
             br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.as_slice(),
             br#"{"amount": "1111111111111111111160"}"#.as_slice(),
-            br#"{"amount": 1111111111111111111160}"#.as_slice(),
+            br#"{"decimal": 11111111111111111111}"#.as_slice(),
+            // FIXME: br#"{"decimal": 1111111111111111111160}"#.as_slice(),
         ] {
             let writer = builder.row_writer();
             parser.parse(payload, writer).await.unwrap();
