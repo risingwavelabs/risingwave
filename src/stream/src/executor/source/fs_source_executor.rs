@@ -20,8 +20,7 @@ use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnId, Schema, TableId};
-use risingwave_connector::source::filesystem::FsSplit;
-use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
+use risingwave_connector::source::{ConnectorState, SplitId, SplitImpl, SplitMetaData};
 use risingwave_connector::{BoxSourceWithStateStream, StreamChunkWithState};
 use risingwave_source::connector_source::{SourceContext, SourceDescBuilderV2};
 use risingwave_source::fs_connector_source::FsConnectorSource;
@@ -63,11 +62,11 @@ pub struct FsSourceExecutor<S: StateStore> {
     split_state_store: SourceStateTableHandler<S>,
 
     // state_cache of current epoch
-    state_cache: HashMap<SplitId, FsSplit>,
+    state_cache: HashMap<SplitId, SplitImpl>,
 
     /// just store information about the split that is currently being read
     /// because state_cache will is cleared every epoch
-    stream_source_splits: HashMap<SplitId, FsSplit>,
+    stream_source_splits: HashMap<SplitId, SplitImpl>,
 
     /// Expected barrier latency
     expected_barrier_latency_ms: u64,
@@ -117,22 +116,22 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
 impl<S: StateStore> FsSourceExecutor<S> {
     // Note: get_diff will modify the state_cache
-    async fn get_diff(
-        &mut self,
-        rhs: Vec<SplitImpl>,
-    ) -> StreamExecutorResult<Option<Vec<FsSplit>>> {
+    async fn get_diff(&mut self, rhs: Vec<SplitImpl>) -> StreamExecutorResult<ConnectorState> {
         // rhs can not be None because we do not support split number reduction
 
         let all_completed: HashSet<SplitId> = self.split_state_store.get_all_completed().await?;
 
         tracing::debug!(actor = self.ctx.id, all_completed = ?all_completed , "get diff");
 
-        let mut target_state: Vec<FsSplit> = Vec::new();
+        let mut target_state: Vec<SplitImpl> = Vec::new();
         let mut no_change_flag = true;
         for sc in rhs {
             if let Some(s) = self.state_cache.get(&sc.id()) {
-                // incomplete this epoch
-                if s.offset < s.size {
+                let fs = s
+                    .as_fs()
+                    .unwrap_or_else(|| panic!("split {:?} is not fs", s));
+                // unfinished this epoch
+                if fs.offset < fs.size {
                     target_state.push(s.clone())
                 }
             } else if all_completed.contains(&sc.id()) {
@@ -153,8 +152,8 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
                 self.state_cache
                     .entry(state.id())
-                    .or_insert_with(|| state.clone().into_fs().unwrap());
-                target_state.push(state.into_fs().unwrap());
+                    .or_insert_with(|| state.clone());
+                target_state.push(state);
             }
         }
         Ok((!no_change_flag).then_some(target_state))
@@ -164,14 +163,24 @@ impl<S: StateStore> FsSourceExecutor<S> {
         let incompleted = self
             .state_cache
             .values()
-            .filter(|split| split.offset < split.size)
+            .filter(|split| {
+                let fs = split
+                    .as_fs()
+                    .unwrap_or_else(|| panic!("split {:?} is not fs", split));
+                fs.offset < fs.size
+            })
             .cloned()
             .collect_vec();
 
         let completed = self
             .state_cache
             .values()
-            .filter(|split| split.offset == split.size)
+            .filter(|split| {
+                let fs = split
+                    .as_fs()
+                    .unwrap_or_else(|| panic!("split {:?} is not fs", split));
+                fs.offset == fs.size
+            })
             .cloned()
             .collect_vec();
 
@@ -194,11 +203,11 @@ impl<S: StateStore> FsSourceExecutor<S> {
         &mut self,
         fs_source: &FsConnectorSource,
         source_metrics: Arc<SourceMetrics>,
-        splits: Vec<FsSplit>,
+        state: ConnectorState,
     ) -> StreamExecutorResult<BoxSourceWithStateStream> {
         let steam_reader = fs_source
             .stream_reader(
-                splits,
+                state,
                 self.column_ids.clone(),
                 source_metrics.clone(),
                 SourceContext::new(self.ctx.id, self.source_id),
@@ -259,6 +268,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .into_iter()
             .filter(|split| !all_completed.contains(&split.id()))
             .collect_vec();
+
         // restore the newest split info
         for ele in &mut boot_state {
             if let Some(recover_state) = self
@@ -270,17 +280,14 @@ impl<S: StateStore> FsSourceExecutor<S> {
             }
         }
 
-        let recover_state: Vec<FsSplit> = boot_state
-            .into_iter()
-            .map(|split| split.into_fs().unwrap())
-            .collect_vec();
-        tracing::info!(actor_id = self.ctx.id, state = ?recover_state, "start with state");
-
-        self.stream_source_splits = recover_state
+        self.stream_source_splits = boot_state
             .clone()
             .into_iter()
             .map(|split| (split.id(), split))
             .collect();
+
+        let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
+        tracing::info!(actor_id = self.ctx.id, state = ?recover_state, "start with state");
 
         let source_chunk_reader = self
             .build_stream_source_reader(&fs_source, source_metrics.clone(), recover_state)
@@ -354,14 +361,12 @@ impl<S: StateStore> FsSourceExecutor<S> {
                     }
                     // update split offset
                     if let Some(mapping) = split_offset_mapping {
-                        let state: Vec<(SplitId, FsSplit)> = mapping
+                        let state: Vec<(SplitId, SplitImpl)> = mapping
                             .iter()
                             .flat_map(|(id, offset)| {
                                 let origin_split = self.stream_source_splits.get(id);
 
-                                origin_split.map(|split| {
-                                    (id.clone(), split.copy_with_offset(offset.clone()))
-                                })
+                                origin_split.map(|split| (id.clone(), split.update(offset.clone())))
                             })
                             .collect_vec();
 
@@ -420,7 +425,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         fs_source: &FsConnectorSource,
         source_metrics: Arc<SourceMetrics>,
         stream: &mut SourceReaderStream,
-        target_state: Vec<FsSplit>,
+        target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
             "actor {:?} apply source split change to {:?}",
@@ -430,7 +435,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         // Replace the source reader with a new one of the new state.
         let reader = self
-            .build_stream_source_reader(fs_source, source_metrics, target_state.clone())
+            .build_stream_source_reader(fs_source, source_metrics, Some(target_state.clone()))
             .await?;
         stream.replace_source_stream(reader);
 

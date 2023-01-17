@@ -31,7 +31,7 @@ use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::{SplitMetaData, SplitReaderV2, MAX_CHUNK_SIZE};
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::{SourceMessage, SourceMeta};
+use crate::source::{SourceMessage, SourceMeta, SplitImpl};
 use crate::{BoxSourceWithStateStream, StreamChunkWithState};
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
@@ -121,7 +121,7 @@ impl SplitReaderV2 for S3FileReader {
 
     async fn new(
         props: S3Properties,
-        splits: Vec<FsSplit>,
+        state: Vec<SplitImpl>,
         parser_config: ParserConfig,
     ) -> Result<Self> {
         let config = AwsConfigV2::from(HashMap::from(props.clone()));
@@ -130,6 +130,10 @@ impl SplitReaderV2 for S3FileReader {
         let bucket_name = props.bucket_name;
         let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
 
+        let splits = state
+            .into_iter()
+            .map(|split| split.into_fs().expect("not a fs split"))
+            .collect();
         let s3_file_reader = S3FileReader {
             split_offset: HashMap::new(),
             bucket_name,
@@ -186,6 +190,8 @@ mod tests {
         let mut enumerator = S3SplitEnumerator::new(props.clone()).await.unwrap();
         let splits = enumerator.list_splits().await.unwrap();
         println!("splits {:?}", splits);
+
+        let splits = splits.into_iter().map(SplitImpl::S3).collect();
 
         let descs = vec![
             SourceColumnDesc::simple("id", DataType::Int64, 1.into()),

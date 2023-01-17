@@ -96,17 +96,16 @@ pub trait SplitReader: Sized {
     fn into_stream(self) -> BoxSourceStream;
 }
 
-/// [`FsSplitReader`] is an abstraction of the external fs connector read interface,
-/// used to read messages from the outside and transform them into source-oriented
-/// [`FsSourceMessage`], in order to improve throughput, it is recommended to return a batch of
-/// messages at a time.
+/// [`SplitReaderV2`] is a new abstraction of the external connector read interface which is
+/// responsible for parsing, it is used to read messages from the outside and transform them into a
+/// stream of parsed [`StreamChunk`]
 #[async_trait]
 pub trait SplitReaderV2: Sized {
     type Properties;
 
     async fn new(
         properties: Self::Properties,
-        splits: Vec<FsSplit>,
+        state: Vec<SplitImpl>,
         parser_config: ParserConfig,
     ) -> Result<Self>;
 
@@ -191,6 +190,13 @@ impl SplitImpl {
             _ => Err(()),
         }
     }
+
+    pub fn as_fs(&self) -> Option<&FsSplit> {
+        match self {
+            Self::S3(split) => Some(split),
+            _ => None,
+        }
+    }
 }
 
 pub enum SplitReaderImpl {
@@ -207,21 +213,27 @@ pub enum SplitReaderImpl {
 
 pub enum SplitReaderV2Impl {
     S3(Box<S3FileReader>),
+    Dummy(Box<DummySplitReader>),
 }
 
 impl SplitReaderV2Impl {
     pub fn into_stream(self) -> BoxSourceWithStateStream {
         match self {
-            Self::S3(s3_reader) => s3_reader.into_stream(),
+            Self::S3(s3_reader) => SplitReaderV2::into_stream(*s3_reader),
+            Self::Dummy(dummy_reader) => SplitReaderV2::into_stream(*dummy_reader),
         }
     }
 
     pub async fn create(
         config: ConnectorProperties,
-        state: Vec<FsSplit>,
+        state: ConnectorState,
         parser_config: ParserConfig,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
+        if state.is_none() {
+            return Ok(Self::Dummy(Box::new(DummySplitReader {})));
+        }
+        let state = state.unwrap();
         let reader = match config {
             ConnectorProperties::S3(s3_props) => Self::S3(Box::new(
                 S3FileReader::new(*s3_props, state, parser_config).await?,

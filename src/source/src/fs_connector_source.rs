@@ -19,8 +19,7 @@ use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
 use risingwave_common::error::{internal_error, Result, RwError};
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
-use risingwave_connector::source::filesystem::FsSplit;
-use risingwave_connector::source::{ConnectorProperties, SplitReaderV2Impl};
+use risingwave_connector::source::{ConnectorProperties, ConnectorState, SplitReaderV2Impl};
 use risingwave_connector::{SourceColumnDesc, SourceFormat};
 
 use crate::connector_source::SourceContext;
@@ -81,7 +80,7 @@ impl FsConnectorSource {
 
     pub async fn stream_reader(
         &self,
-        splits: Vec<FsSplit>,
+        state: ConnectorState,
         column_ids: Vec<ColumnId>,
         _metrics: Arc<SourceMetrics>,
         _context: SourceContext,
@@ -96,7 +95,7 @@ impl FsConnectorSource {
                 rw_columns: columns,
             },
         };
-        SplitReaderV2Impl::create(config, splits, parser_config, None)
+        SplitReaderV2Impl::create(config, state, parser_config, None)
             .await
             .map_err(RwError::from)
     }
