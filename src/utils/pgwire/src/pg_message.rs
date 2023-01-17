@@ -332,8 +332,14 @@ impl FeStartupMessage {
     pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
         let len = stream.read_i32().await?;
         let protocol_num = stream.read_i32().await?;
-        let payload_len = len - 8;
-        let mut payload = vec![0; payload_len as usize];
+        let payload_len = (len - 8) as usize;
+        if payload_len >= isize::MAX as usize {
+            return Err(std::io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("Payload length has exceed usize::MAX {:?}", payload_len),
+            ));
+        }
+        let mut payload = vec![0; payload_len];
         if payload_len > 0 {
             stream.read_exact(&mut payload).await?;
         }
