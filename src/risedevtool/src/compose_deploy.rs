@@ -61,7 +61,7 @@ pub fn compose_deploy(
         use std::fmt::Write;
         let ssh_extra_args = "-o \"UserKnownHostsFile=/dev/null\" -o \"StrictHostKeyChecking=no\" -o \"LogLevel=ERROR\"";
         let mut x = String::new();
-        writeln!(x, "#!/bin/bash -e")?;
+        writeln!(x, "#!/usr/bin/env bash -e")?;
         writeln!(x)?;
         writeln!(
             x,
@@ -117,7 +117,7 @@ fi
             let id = &instance.id;
             let base_folder = "~/risingwave-deploy";
             let mut y = String::new();
-            writeln!(y, "#!/bin/bash -e")?;
+            writeln!(y, "#!/usr/bin/env bash -e")?;
             writeln!(y)?;
             writeln!(
                 y,
@@ -152,7 +152,7 @@ fi
         for instance in ec2_instances {
             let id = &instance.id;
             let mut y = String::new();
-            writeln!(y, "#!/bin/bash -e")?;
+            writeln!(y, "#!/usr/bin/env bash -e")?;
             writeln!(
                 y,
                 r#"echo "{id}: $(tput setaf 2)stopping and pulling$(tput sgr0)""#,
@@ -226,7 +226,7 @@ fi
         for instance in ec2_instances {
             let id = &instance.id;
             let mut y = String::new();
-            writeln!(y, "#!/bin/bash -e")?;
+            writeln!(y, "#!/usr/bin/env bash -e")?;
             writeln!(y, r#"echo "{id}: $(tput setaf 2)check status$(tput sgr0)""#,)?;
             let public_ip = &instance.public_ip;
             let base_folder = "~/risingwave-deploy";

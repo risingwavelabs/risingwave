@@ -71,10 +71,6 @@ pub struct MetaOpts {
     pub barrier_interval: Duration,
     /// The maximum number of barriers in-flight in the compute nodes.
     pub in_flight_barrier_nums: usize,
-    /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
-    /// fragment on one parallel unit per compute node.
-    pub minimal_scheduling: bool,
-
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
@@ -116,7 +112,6 @@ impl MetaOpts {
             enable_recovery,
             barrier_interval: Duration::from_millis(250),
             in_flight_barrier_nums: 40,
-            minimal_scheduling: false,
             max_idle_ms: 0,
             checkpoint_frequency: 10,
             compaction_deterministic_test: false,
