@@ -22,11 +22,12 @@ use std::backtrace::Backtrace;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::panic::catch_unwind;
+use std::slice::from_raw_parts;
 use std::sync::LazyLock;
 
 use iterator::{Iterator, KeyedRow};
-use jni::objects::{JClass, JObject, JString};
-use jni::sys::{jboolean, jbyteArray, jint, jlong};
+use jni::objects::{AutoArray, JClass, JObject, JString, ReleaseMode};
+use jni::sys::{jboolean, jbyte, jbyteArray, jint, jlong};
 use jni::JNIEnv;
 use prost::{DecodeError, Message};
 use risingwave_rpc_client::error::RpcError;
@@ -69,14 +70,44 @@ enum BindingError {
 
 type Result<T> = std::result::Result<T, BindingError>;
 
+/// Wrapper around [`jbyteArray`] that adds a lifetime and provides utilities to manipulate the
+/// underlying array. It matches C's representation of a raw pointer, so it can be used in any of
+/// the extern function argument positions that would take a [`jbyteArray`].
+// Note: use `JObject` internally to conveniently derive `Default` so that it can be returned
+// instead of `jbyteArray` in `execute_and_catch`.
 #[repr(transparent)]
 #[derive(Default)]
-pub struct ByteArray<'a>(JObject<'a>);
+pub struct JByteArray<'a>(JObject<'a>);
 
-impl<'a> From<jbyteArray> for ByteArray<'a> {
+impl<'a> From<jbyteArray> for JByteArray<'a> {
     #[allow(clippy::not_unsafe_ptr_arg_deref)]
     fn from(inner: jbyteArray) -> Self {
         unsafe { Self(JObject::from_raw(inner)) }
+    }
+}
+
+impl<'a> JByteArray<'a> {
+    fn to_guarded_slice(&self, env: JNIEnv<'a>) -> Result<SliceGuard<'a>> {
+        let array = env.get_byte_array_elements(self.0.into_raw(), ReleaseMode::NoCopyBack)?;
+        let slice = unsafe { from_raw_parts(array.as_ptr() as *mut u8, array.size()? as usize) };
+        Ok(SliceGuard {
+            _array: array,
+            slice,
+        })
+    }
+}
+
+/// Wrapper around `&[u8]` derived from `jbyteArray` to prevent it from being auto-released.
+pub struct SliceGuard<'a> {
+    _array: AutoArray<'a, jbyte>,
+    slice: &'a [u8],
+}
+
+impl<'a> Deref for SliceGuard<'a> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.slice
     }
 }
 
@@ -187,12 +218,11 @@ where
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNew<'a>(
     env: EnvParam<'a>,
-    read_plan: jbyteArray,
+    read_plan: JByteArray<'a>,
     state_store: JString<'a>,
 ) -> Pointer<'static, Iterator> {
     execute_and_catch(env, move || {
-        let read_plan = env.convert_byte_array(read_plan)?;
-        let read_plan = Message::decode(&read_plan[..])?;
+        let read_plan = Message::decode(read_plan.to_guarded_slice(*env)?.deref())?;
         let state_store: String = env.get_string(state_store)?.into();
         RUNTIME.block_on(async { Ok(Iterator::new(&state_store, read_plan).await?.into()) })
     })
@@ -225,9 +255,9 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorClose(
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetKey<'a>(
     env: EnvParam<'a>,
     pointer: Pointer<'a, KeyedRow>,
-) -> ByteArray<'a> {
+) -> JByteArray<'a> {
     execute_and_catch(env, move || {
-        Ok(ByteArray::from(
+        Ok(JByteArray::from(
             env.byte_array_from_slice(pointer.as_ref().key())?,
         ))
     })

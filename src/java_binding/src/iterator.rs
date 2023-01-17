@@ -82,7 +82,7 @@ impl Iterator {
         );
         let sstable_store = Arc::new(SstableStore::new(
             object_store,
-            "hummock_java_binding_demo".to_string(),
+            "hummock_001".to_string(),
             1 << 10,
             1 << 10,
             TieredCache::none(),
