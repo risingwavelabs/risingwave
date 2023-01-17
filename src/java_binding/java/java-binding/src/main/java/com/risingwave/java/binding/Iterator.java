@@ -6,12 +6,8 @@ import com.risingwave.proto.Hummock.HummockVersion;
 import com.risingwave.proto.JavaBinding.ReadPlan;
 
 public class Iterator implements AutoCloseable {
-    final long pointer;
-    final MetaClient metaClient;
-    final Table catalog;
-    final long versionId;
-
-    boolean isClosed;
+    private final long pointer;
+    private boolean isClosed;
 
     public Iterator(MetaClient metaClient, String stateStore, String dbName, String tableName) {
         // Reply on context invalidation to unpin the version.
@@ -24,10 +20,7 @@ public class Iterator implements AutoCloseable {
                         .setTableCatalog(tableCatalog)
                         .build();
 
-        this.metaClient = metaClient;
         this.pointer = Binding.iteratorNew(readPlan.toByteArray(), stateStore);
-        this.catalog = tableCatalog;
-        this.versionId = version.getId();
         this.isClosed = false;
     }
 

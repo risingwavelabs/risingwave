@@ -30,20 +30,20 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
 public class MetaClient implements AutoCloseable {
-    final int workerId;
+    private final int workerId;
 
-    final ManagedChannel channel;
+    private final ManagedChannel channel;
 
     // Scheduler for background tasks.
-    final ScheduledExecutorService scheduler;
+    private final ScheduledExecutorService scheduler;
 
     // RPC stubs.
-    final ClusterServiceBlockingStub clusterStub;
-    final DdlServiceBlockingStub ddlStub;
-    final HeartbeatServiceBlockingStub heartbeatStub;
-    final HummockManagerServiceBlockingStub hummockStub;
+    private final ClusterServiceBlockingStub clusterStub;
+    private final DdlServiceBlockingStub ddlStub;
+    private final HeartbeatServiceBlockingStub heartbeatStub;
+    private final HummockManagerServiceBlockingStub hummockStub;
 
-    boolean isClosed;
+    private boolean isClosed;
 
     // A heart beat task that sends a heartbeat to the meta service when run.
     private class HeartbeatTask implements Runnable {
