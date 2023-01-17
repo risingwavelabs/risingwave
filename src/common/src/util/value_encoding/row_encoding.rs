@@ -4,12 +4,12 @@ use super::*;
 use crate::catalog::ColumnId;
 use crate::row::Row;
 
-#[derive(Clone, Copy)]
-enum Width {
-    Mid(u8),
-    Large(u16),
-    Extra(u32),
-}
+// #[derive(Clone, Copy)]
+// enum Width {
+//     Mid(u8),
+//     Large(u16),
+//     Extra(u32),
+// }
 
 struct RowEncoding {
     flag: u8,
@@ -43,19 +43,19 @@ impl RowEncoding {
     fn set_big(&mut self, maybe_offset: &[usize], max_offset: usize) {
         assert!(self.offsets.is_empty());
         match max_offset {
-            n if n <= u8::MAX as usize => {
+            _n @ ..= const {u8::MAX as usize} => {
                 self.flag |= 0b01;
                 maybe_offset
                     .iter()
                     .for_each(|m| self.offsets.put_u8(*m as u8));
             }
-            n if n <= u16::MAX as usize => {
+            _n @ ..= const {u16::MAX as usize} => {
                 self.flag |= 0b10;
                 maybe_offset
                     .iter()
                     .for_each(|m| self.offsets.put_u16(*m as u16));
             }
-            n if n <= u32::MAX as usize => {
+            _n @ ..= const {u32::MAX as usize} => {
                 self.flag |= 0b11;
                 maybe_offset
                     .iter()
