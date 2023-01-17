@@ -957,6 +957,16 @@ def section_streaming(panels):
                 )
             ],
         ),
+        panels.timeseries_rowsps(
+            "Source Throughput(rows) per barrier",
+            "",
+            [
+                panels.target(
+                    f"rate({metric('stream_source_rows_per_barrier_counts')}[$__rate_interval])",
+                    "actor={{actor_id}} source={{source_id}} @ {{instance}}"
+                )
+            ]
+        ),
         panels.timeseries_count(
             "Barrier Number",
             "",
