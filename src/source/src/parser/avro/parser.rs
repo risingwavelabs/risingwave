@@ -251,6 +251,7 @@ impl AvroParser {
 #[inline]
 fn from_avro_value(value: Value) -> Result<Datum> {
     let v = match value {
+        Value::Null => { return Ok(None);},
         Value::Boolean(b) => ScalarImpl::Bool(b),
         Value::String(s) => ScalarImpl::Utf8(s.into_boxed_str()),
         Value::Int(i) => ScalarImpl::Int32(i),
