@@ -14,11 +14,10 @@
 
 use anyhow::Result;
 
-use crate::common::MetaServiceOpts;
+use crate::CtlContext;
 
-pub async fn list() -> Result<()> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta = meta_opts.create_meta_client().await?;
+pub async fn list(context: &CtlContext) -> Result<()> {
+    let meta = context.meta_client().await?;
     let mvs = meta.risectl_list_state_tables().await?;
     for mv in mvs {
         println!("#{}: {}", mv.id, mv.name);

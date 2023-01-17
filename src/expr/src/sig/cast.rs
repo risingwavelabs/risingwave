@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 use parse_display::Display;
 use risingwave_common::types::DataTypeName;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CastSig {
     pub from_type: DataTypeName,
     pub to_type: DataTypeName,

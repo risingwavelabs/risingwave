@@ -798,6 +798,32 @@ fn parse_bitwise_ops() {
 }
 
 #[test]
+fn parse_binary_some() {
+    let select = verified_only_select("SELECT a = SOME(b)");
+    assert_eq!(
+        SelectItem::UnnamedExpr(Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new("a"))),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::SomeOp(Box::new(Expr::Identifier(Ident::new("b"))))),
+        }),
+        select.projection[0]
+    );
+}
+
+#[test]
+fn parse_binary_all() {
+    let select = verified_only_select("SELECT a = ALL(b)");
+    assert_eq!(
+        SelectItem::UnnamedExpr(Expr::BinaryOp {
+            left: Box::new(Expr::Identifier(Ident::new("a"))),
+            op: BinaryOperator::Eq,
+            right: Box::new(Expr::AllOp(Box::new(Expr::Identifier(Ident::new("b"))))),
+        }),
+        select.projection[0]
+    );
+}
+
+#[test]
 fn parse_logical_xor() {
     let sql = "SELECT true XOR true, false XOR false, true XOR false, false XOR true";
     let select = verified_only_select(sql);
@@ -1085,17 +1111,7 @@ fn parse_cast() {
     assert_eq!(
         &Expr::Cast {
             expr: Box::new(Expr::Identifier(Ident::new("id"))),
-            data_type: DataType::BigInt(None)
-        },
-        expr_from_projection(only(&select.projection))
-    );
-
-    let sql = "SELECT CAST(id AS TINYINT) FROM customer";
-    let select = verified_only_select(sql);
-    assert_eq!(
-        &Expr::Cast {
-            expr: Box::new(Expr::Identifier(Ident::new("id"))),
-            data_type: DataType::TinyInt(None)
+            data_type: DataType::BigInt
         },
         expr_from_projection(only(&select.projection))
     );
@@ -1125,7 +1141,7 @@ fn parse_try_cast() {
     assert_eq!(
         &Expr::TryCast {
             expr: Box::new(Expr::Identifier(Ident::new("id"))),
-            data_type: DataType::BigInt(None)
+            data_type: DataType::BigInt
         },
         expr_from_projection(only(&select.projection))
     );
@@ -1236,7 +1252,7 @@ fn parse_create_table() {
                     ColumnDef::new("lng".into(), DataType::Double, None, vec![],),
                     ColumnDef::new(
                         "constrained".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![
                             ColumnOptionDef {
@@ -1263,7 +1279,7 @@ fn parse_create_table() {
                     ),
                     ColumnDef::new(
                         "ref".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -1277,7 +1293,7 @@ fn parse_create_table() {
                     ),
                     ColumnDef::new(
                         "ref2".into(),
-                        DataType::Int(None),
+                        DataType::Int,
                         None,
                         vec![ColumnOptionDef {
                             name: None,
@@ -1968,9 +1984,9 @@ fn parse_literal_decimal() {
 
 #[test]
 fn parse_literal_string() {
-    let sql = "SELECT 'one', N'national string', X'deadBEEF'";
+    let sql = r"SELECT 'one', N'national string', X'deadBEEF', E'c style escape string \x3f'";
     let select = verified_only_select(sql);
-    assert_eq!(3, select.projection.len());
+    assert_eq!(4, select.projection.len());
     assert_eq!(
         &Expr::Value(Value::SingleQuotedString("one".to_string())),
         expr_from_projection(&select.projection[0])
@@ -1982,6 +1998,12 @@ fn parse_literal_string() {
     assert_eq!(
         &Expr::Value(Value::HexStringLiteral("deadBEEF".to_string())),
         expr_from_projection(&select.projection[2])
+    );
+    assert_eq!(
+        &Expr::Value(Value::CstyleEscapesString(
+            r"c style escape string \x3f".to_string()
+        )),
+        expr_from_projection(&select.projection[3])
     );
 
     one_statement_parses_to("SELECT x'deadBEEF'", "SELECT X'deadBEEF'");

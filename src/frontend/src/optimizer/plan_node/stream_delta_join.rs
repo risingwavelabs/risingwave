@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use std::fmt;
+use std::ops::BitAnd;
 
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
+use super::generic::GenericPlanRef;
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, StreamNode};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -54,6 +56,16 @@ impl StreamDeltaJoin {
             &logical,
         );
 
+        let watermark_columns = {
+            let from_left = logical
+                .l2i_col_mapping()
+                .rewrite_bitset(logical.left().watermark_columns());
+            let from_right = logical
+                .r2i_col_mapping()
+                .rewrite_bitset(logical.right().watermark_columns());
+            let watermark_columns = from_left.bitand(&from_right);
+            logical.i2o_col_mapping().rewrite_bitset(&watermark_columns)
+        };
         // TODO: derive from input
         let base = PlanBase::new_stream(
             ctx,
@@ -62,6 +74,7 @@ impl StreamDeltaJoin {
             logical.functional_dependency().clone(),
             dist,
             append_only,
+            watermark_columns,
         );
 
         Self {
@@ -166,7 +179,12 @@ impl StreamNode for StreamDeltaJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| x.to_expr_proto()),
+                .map(|x| {
+                    self.base
+                        .ctx()
+                        .expr_with_session_timezone(x)
+                        .to_expr_proto()
+                }),
             left_table_id: left_table_desc.table_id.table_id(),
             right_table_id: right_table_desc.table_id.table_id(),
             left_info: Some(ArrangementInfo {

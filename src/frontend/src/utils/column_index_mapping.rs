@@ -82,9 +82,9 @@ impl ColIndexMapping {
         Self::with_target_size(map, target_size)
     }
 
-    pub fn empty(size: usize) -> Self {
-        let map = vec![None; size];
-        Self::new(map)
+    pub fn empty(source_size: usize, target_size: usize) -> Self {
+        let map = vec![None; source_size];
+        Self::with_target_size(map, target_size)
     }
 
     /// Create a partial mapping which maps range `(0..source_num)` to range

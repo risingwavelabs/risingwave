@@ -533,7 +533,7 @@ impl PlanAggCall {
         });
     }
 
-    pub fn to_protobuf(&self) -> ProstAggCall {
+    pub fn to_protobuf(&self, ctx: OptimizerContextRef) -> ProstAggCall {
         ProstAggCall {
             r#type: self.agg_kind.to_prost().into(),
             return_type: Some(self.return_type.to_protobuf()),
@@ -547,11 +547,21 @@ impl PlanAggCall {
             filter: self
                 .filter
                 .as_expr_unless_true()
-                .map(|expr| expr.to_expr_proto()),
+                .map(|x| ctx.expr_with_session_timezone(x).to_expr_proto()),
         }
     }
 
-    pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
+    pub fn partial_to_total_agg_call(
+        &self,
+        partial_output_idx: usize,
+        is_stream_row_count: bool,
+    ) -> PlanAggCall {
+        if self.agg_kind == AggKind::Count && is_stream_row_count {
+            // For stream row count agg, should only count output rows of partial phase,
+            // but not all inputs of partial phase. Here we just generate exact the same
+            // agg call for global phase as partial phase, which should be `count(*)`.
+            return self.clone();
+        }
         let total_agg_kind = match &self.agg_kind {
             AggKind::Min | AggKind::Max | AggKind::StringAgg | AggKind::FirstValue => self.agg_kind,
             AggKind::Count | AggKind::ApproxCountDistinct | AggKind::Sum0 => AggKind::Sum0,

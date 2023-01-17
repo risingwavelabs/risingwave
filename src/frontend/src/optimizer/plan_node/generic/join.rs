@@ -173,7 +173,9 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             }
 
             JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
-            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
+            JoinType::RightSemi | JoinType::RightAnti => {
+                ColIndexMapping::empty(right_len, left_len)
+            }
             JoinType::Unspecified => unreachable!(),
         }
     }
@@ -187,7 +189,7 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
                 ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
             }
-            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len, right_len),
             JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
             JoinType::Unspecified => unreachable!(),
         }

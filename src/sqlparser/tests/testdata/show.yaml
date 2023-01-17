@@ -18,10 +18,30 @@
   formatted_ast: |
     ShowObjects(Table { schema: Some(Ident { value: "t", quote_style: None }) })
 
+- input: SHOW VIEWS
+  formatted_sql: SHOW VIEWS
+  formatted_ast: |
+    ShowObjects(View { schema: None })
+
+- input: SHOW VIEWS FROM t
+  formatted_sql: SHOW VIEWS FROM t
+  formatted_ast: |
+    ShowObjects(View { schema: Some(Ident { value: "t", quote_style: None }) })
+
 - input: SHOW MATERIALIZED VIEWS
   formatted_sql: SHOW MATERIALIZED VIEWS
   formatted_ast: |
     ShowObjects(MaterializedView { schema: None })
+
+- input: SHOW INTERNAL TABLES
+  formatted_sql: SHOW INTERNAL TABLES
+  formatted_ast: |
+    ShowObjects(InternalTable { schema: None })
+
+- input: SHOW INTERNAL TABLES FROM t
+  formatted_sql: SHOW INTERNAL TABLES FROM t
+  formatted_ast: |
+    ShowObjects(InternalTable { schema: Some(Ident { value: "t", quote_style: None }) })
 
 - input: SHOW MATERIALIZED VIEWS FROM t
   formatted_sql: SHOW MATERIALIZED VIEWS FROM t

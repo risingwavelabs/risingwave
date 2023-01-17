@@ -28,7 +28,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::expr::{Expr, ExprImpl, InputRef};
-use crate::handler::privilege::{check_privileges, ObjectCheckItem};
+use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
@@ -68,14 +68,11 @@ pub(crate) fn gen_create_index_plan(
         );
     }
 
-    check_privileges(
-        session,
-        &vec![ObjectCheckItem::new(
-            table.owner,
-            Action::Select,
-            Object::TableId(table.id.table_id),
-        )],
-    )?;
+    session.check_privileges(&[ObjectCheckItem::new(
+        table.owner,
+        Action::Select,
+        Object::TableId(table.id.table_id),
+    )])?;
 
     let table_desc = Rc::new(table.table_desc());
     let table_desc_map = table_desc
@@ -164,6 +161,18 @@ pub(crate) fn gen_create_index_plan(
 
     let index_table = materialize.table();
     let mut index_table_prost = index_table.to_prost(index_schema_id, index_database_id);
+    {
+        use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+        let retention_second_string_key = PROPERTIES_RETENTION_SECOND_KEY.to_string();
+
+        // Inherit table properties
+        table.properties.get(&retention_second_string_key).map(|v| {
+            index_table_prost
+                .properties
+                .insert(retention_second_string_key, v.clone())
+        });
+    }
+
     index_table_prost.owner = session.user_id();
 
     let index_prost = ProstIndex {

@@ -14,7 +14,7 @@
 
 use super::{
     AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery,
-    TableFunction, WindowFunction,
+    TableFunction, UserDefinedFunction, WindowFunction,
 };
 
 /// By default, `ExprRewriter` simply traverses the expression tree and leaves nodes unchanged.
@@ -31,6 +31,7 @@ pub trait ExprRewriter {
             ExprImpl::CorrelatedInputRef(inner) => self.rewrite_correlated_input_ref(*inner),
             ExprImpl::TableFunction(inner) => self.rewrite_table_function(*inner),
             ExprImpl::WindowFunction(inner) => self.rewrite_window_function(*inner),
+            ExprImpl::UserDefinedFunction(inner) => self.rewrite_user_defined_function(*inner),
         }
     }
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
@@ -102,5 +103,13 @@ pub trait ExprRewriter {
             order_by,
         }
         .into()
+    }
+    fn rewrite_user_defined_function(&mut self, udf: UserDefinedFunction) -> ExprImpl {
+        let UserDefinedFunction { args, catalog } = udf;
+        let args = args
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        UserDefinedFunction { args, catalog }.into()
     }
 }

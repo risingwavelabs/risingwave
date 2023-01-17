@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
@@ -145,7 +146,7 @@ async fn test_merger_sum_aggr() {
         merger.boxed(),
         vec![
             AggCall {
-                kind: AggKind::Sum,
+                kind: AggKind::Sum0,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 order_pairs: vec![],
@@ -175,6 +176,7 @@ async fn test_merger_sum_aggr() {
             Box::new(InputRefExpression::new(DataType::Int64, 1)),
         ],
         3,
+        MultiMap::new(),
     );
 
     let items = Arc::new(Mutex::new(vec![]));

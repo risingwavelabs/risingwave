@@ -14,10 +14,12 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -50,6 +52,8 @@ impl StreamHashAgg {
             logical.functional_dependency().clone(),
             dist,
             false,
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            FixedBitSet::with_capacity(logical.schema().len()),
         );
         StreamHashAgg {
             base,
@@ -99,7 +103,7 @@ impl StreamNode for StreamHashAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(PlanAggCall::to_protobuf)
+                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
                 .collect(),
 
             is_append_only: self.input().append_only(),

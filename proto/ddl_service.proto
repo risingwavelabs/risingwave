@@ -6,6 +6,7 @@ import "catalog.proto";
 import "common.proto";
 import "stream_plan.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message CreateDatabaseRequest {
@@ -138,6 +139,25 @@ message CreateTableResponse {
   uint64 version = 3;
 }
 
+message CreateFunctionRequest {
+  catalog.Function function = 1;
+}
+
+message CreateFunctionResponse {
+  common.Status status = 1;
+  uint32 function_id = 2;
+  uint64 version = 3;
+}
+
+message DropFunctionRequest {
+  uint32 function_id = 1;
+}
+
+message DropFunctionResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message DropTableRequest {
   oneof source_id {
     uint32 id = 1;
@@ -179,6 +199,21 @@ message DropIndexResponse {
   uint64 version = 2;
 }
 
+message ReplaceTablePlanRequest {
+  // The new table catalog, with the correct table ID and a new version.
+  // If the new version does not match the subsequent version in the meta service's
+  // catalog, this request will be rejected.
+  catalog.Table table = 1;
+  // The new materialization plan, where all schema are updated.
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
+}
+
+message ReplaceTablePlanResponse {
+  common.Status status = 1;
+  // The new global catalog version.
+  uint64 version = 2;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -197,4 +232,7 @@ service DdlService {
   rpc DropView(DropViewRequest) returns (DropViewResponse);
   rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);
   rpc DropIndex(DropIndexRequest) returns (DropIndexResponse);
+  rpc CreateFunction(CreateFunctionRequest) returns (CreateFunctionResponse);
+  rpc DropFunction(DropFunctionRequest) returns (DropFunctionResponse);
+  rpc ReplaceTablePlan(ReplaceTablePlanRequest) returns (ReplaceTablePlanResponse);
 }

@@ -48,6 +48,17 @@ impl Field {
     }
 }
 
+impl From<&ColumnDesc> for Field {
+    fn from(desc: &ColumnDesc) -> Self {
+        Self {
+            data_type: desc.data_type.clone(),
+            name: desc.name.clone(),
+            sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
+            type_name: desc.type_name.clone(),
+        }
+    }
+}
+
 impl From<ColumnDesc> for Field {
     fn from(column_desc: ColumnDesc) -> Self {
         Self {
@@ -204,17 +215,6 @@ impl From<&ProstField> for Field {
             name: prost_field.get_name().clone(),
             sub_fields: vec![],
             type_name: String::new(),
-        }
-    }
-}
-
-impl From<&ColumnDesc> for Field {
-    fn from(desc: &ColumnDesc) -> Self {
-        Self {
-            data_type: desc.data_type.clone(),
-            name: desc.name.clone(),
-            sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
-            type_name: desc.type_name.clone(),
         }
     }
 }
