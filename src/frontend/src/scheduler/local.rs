@@ -115,15 +115,17 @@ impl LocalQueryExecution {
         let (sender, receiver) = mpsc::channel(10);
         let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
 
-        spawn_blocking(move || {
-            block_on(async {
-                while let Some(r) = data_stream.next().await {
-                    if (sender.send(r).await).is_err() {
-                        tracing::info!("Receiver closed.");
-                    }
+        let future = async move {
+            while let Some(r) = data_stream.next().await {
+                if (sender.send(r).await).is_err() {
+                    tracing::info!("Receiver closed.");
                 }
-            })
-        });
+            }
+        };
+        #[cfg(madsim)]
+        spawn(future);
+        #[cfg(not(madsim))]
+        spawn_blocking(move || block_on(future));
 
         ReceiverStream::new(receiver)
     }
