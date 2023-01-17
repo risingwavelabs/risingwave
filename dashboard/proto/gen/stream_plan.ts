@@ -25,6 +25,8 @@ export const ChainType = {
   REARRANGE: "REARRANGE",
   /** BACKFILL - BACKFILL is corresponding to the backfill executor. */
   BACKFILL: "BACKFILL",
+  /** UPSTREAM_ONLY - UPSTREAM_ONLY is corresponding to the chain executor, but doesn't consume the snapshot. */
+  UPSTREAM_ONLY: "UPSTREAM_ONLY",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -44,6 +46,9 @@ export function chainTypeFromJSON(object: any): ChainType {
     case 3:
     case "BACKFILL":
       return ChainType.BACKFILL;
+    case 4:
+    case "UPSTREAM_ONLY":
+      return ChainType.UPSTREAM_ONLY;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -61,6 +66,8 @@ export function chainTypeToJSON(object: ChainType): string {
       return "REARRANGE";
     case ChainType.BACKFILL:
       return "BACKFILL";
+    case ChainType.UPSTREAM_ONLY:
+      return "UPSTREAM_ONLY";
     case ChainType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";

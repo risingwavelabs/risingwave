@@ -325,6 +325,9 @@ enum ChainType {
 
   // BACKFILL is corresponding to the backfill executor.
   BACKFILL = 3;
+
+  // UPSTREAM_ONLY is corresponding to the chain executor, but doesn't consume the snapshot.
+  UPSTREAM_ONLY = 4;
 }
 
 // ChainNode is used for mv on mv.

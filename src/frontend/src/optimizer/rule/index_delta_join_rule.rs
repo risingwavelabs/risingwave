@@ -110,10 +110,12 @@ impl Rule for IndexDeltaJoinRule {
             None
         }
 
-        // Delta join only needs to backfill one stream flow.
-        // Here we choose the left one to backfill and right one to pure chain.
+        // Delta join only needs to backfill one stream flow and others should be upstream only
+        // chain. Here we choose the left one to backfill and right one to upstream only
+        // chain.
         if let Some(left) = match_indexes(&left_indices, input_left, ChainType::Backfill) {
-            if let Some(right) = match_indexes(&right_indices, input_right, ChainType::Chain) {
+            if let Some(right) = match_indexes(&right_indices, input_right, ChainType::UpstreamOnly)
+            {
                 // We already ensured that index and join use the same distribution, so we directly
                 // replace the children with stream index scan without inserting any exchanges.
                 Some(

@@ -20,20 +20,27 @@ use risingwave_common::catalog::Schema;
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message};
 use crate::executor::PkIndices;
-use crate::task::CreateMviewProgress;
+use crate::task::{ActorId, CreateMviewProgress};
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
 /// newly appended executors. Currently, [`ChainExecutor`] is mainly used to implement MV on MV
 /// feature. It pipes new data of existing MVs to newly created MV only all of the old data in the
 /// existing MVs are dispatched.
 pub struct ChainExecutor {
+    snapshot: BoxedExecutor,
+
     upstream: BoxedExecutor,
 
     upstream_indices: Vec<usize>,
 
     progress: CreateMviewProgress,
 
+    actor_id: ActorId,
+
     info: ExecutorInfo,
+
+    /// Only consume upstream messages.
+    upstream_only: bool,
 }
 
 fn mapping(upstream_indices: &[usize], chunk: StreamChunk) -> StreamChunk {
@@ -47,11 +54,13 @@ fn mapping(upstream_indices: &[usize], chunk: StreamChunk) -> StreamChunk {
 
 impl ChainExecutor {
     pub fn new(
+        snapshot: BoxedExecutor,
         upstream: BoxedExecutor,
         upstream_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
         pk_indices: PkIndices,
+        upstream_only: bool,
     ) -> Self {
         Self {
             info: ExecutorInfo {
@@ -59,9 +68,12 @@ impl ChainExecutor {
                 pk_indices,
                 identity: "Chain".into(),
             },
+            snapshot,
             upstream,
             upstream_indices,
+            actor_id: progress.actor_id(),
             progress,
+            upstream_only,
         }
     }
 
@@ -71,12 +83,33 @@ impl ChainExecutor {
 
         // 1. Poll the upstream to get the first barrier.
         let barrier = expect_first_barrier(&mut upstream).await?;
-        self.progress.finish(barrier.epoch.curr);
+        let prev_epoch = barrier.epoch.prev;
+
+        // If the barrier is a conf change of creating this mview, init snapshot from its epoch
+        // and begin to consume the snapshot.
+        // Otherwise, it means we've recovered and the snapshot is already consumed.
+        let to_consume_snapshot = barrier.is_add_dispatcher(self.actor_id) && !self.upstream_only;
+
+        if self.upstream_only {
+            self.progress.finish(barrier.epoch.curr);
+        }
 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
 
-        // 2. Continuously consume the upstream. Report that we've finished the creation on the
+        // 2. Consume the snapshot if needed. Note that the snapshot is already projected, so
+        // there's no mapping required.
+        if to_consume_snapshot {
+            // Init the snapshot with reading epoch.
+            let snapshot = self.snapshot.execute_with_epoch(prev_epoch);
+
+            #[for_await]
+            for msg in snapshot {
+                yield msg?;
+            }
+        }
+
+        // 3. Continuously consume the upstream. Report that we've finished the creation on the
         // first barrier.
         #[for_await]
         for msg in upstream {
@@ -88,6 +121,7 @@ impl ChainExecutor {
                     yield Message::Chunk(mapping(&self.upstream_indices, chunk));
                 }
                 Message::Barrier(barrier) => {
+                    self.progress.finish(barrier.epoch.curr);
                     yield Message::Barrier(barrier);
                 }
             }
@@ -138,6 +172,17 @@ mod test {
         let actor_id = progress.actor_id();
 
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
+        let first = Box::new(
+            MockSource::with_chunks(
+                schema.clone(),
+                PkIndices::new(),
+                vec![
+                    StreamChunk::from_pretty("I\n + 1"),
+                    StreamChunk::from_pretty("I\n + 2"),
+                ],
+            )
+            .stop_on_finish(false),
+        );
 
         let second = Box::new(MockSource::with_messages(
             schema.clone(),
@@ -152,12 +197,20 @@ mod test {
                     },
                     splits: Default::default(),
                 })),
-                Message::Chunk(StreamChunk::from_pretty("I\n + 1")),
-                Message::Chunk(StreamChunk::from_pretty("I\n + 2")),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
+                Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
             ],
         ));
 
-        let chain = ChainExecutor::new(second, vec![0], progress, schema, PkIndices::new());
+        let chain = ChainExecutor::new(
+            first,
+            second,
+            vec![0],
+            progress,
+            schema,
+            PkIndices::new(),
+            false,
+        );
 
         let mut chain = Box::new(chain).execute();
         chain.next().await;
@@ -167,6 +220,6 @@ mod test {
             count += 1;
             assert_eq!(ck, StreamChunk::from_pretty(&format!("I\n + {count}")));
         }
-        assert_eq!(count, 2);
+        assert_eq!(count, 4);
     }
 }
