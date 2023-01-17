@@ -9,7 +9,7 @@ public class Binding {
     // Return a pointer to the iterator
     static native long iteratorNew(byte[] readPlan, String stateStore);
 
-    // return a pointer to the next record
+    // return a pointer to the next row
     static native long iteratorNext(long pointer);
 
     // Since the underlying rust does not have garbage collection, we will have to manually call
