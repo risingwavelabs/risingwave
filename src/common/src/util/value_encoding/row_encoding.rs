@@ -41,8 +41,9 @@ impl RowEncoding {
     }
 
     fn set_big(&mut self, maybe_offset: &[usize], max_offset: usize) {
+        assert!(self.offsets.is_empty());
         match max_offset {
-            n @ ..= (u8::MAX as usize) => {
+            n if n <= u8::MAX as usize => {
                 self.flag |= 0b01;
                 maybe_offset
                     .iter()
@@ -112,6 +113,7 @@ impl Serializer {
     }
 
     pub fn serialize_row_column_aware(&self, row: impl Row) -> Vec<u8> {
+        assert_eq!(row.len(), self.datum_num.into());
         let mut encoding = RowEncoding::new();
         encoding.encode(row.iter(), &self.datum_num);
         self.serialize(encoding)
@@ -136,6 +138,7 @@ pub struct Deserializer<'a> {
 
 impl<'a> Deserializer<'a> {
     pub fn new(column_ids: &'a [ColumnId], schema: &'a [DataType]) -> Self {
+        assert_eq!(column_ids.len(), schema.len());
         Self {
             needed_column_ids: column_ids
                 .iter()
