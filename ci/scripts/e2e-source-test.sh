@@ -95,7 +95,7 @@ echo "--- Kill cluster"
 pkill -f connector-service.jar
 cargo make ci-kill
 
-echo "--- e2e, ci-1cn-1fe, mysql longevity demo (load snapshot)"
+echo "--- e2e, ci-1cn-1fe, mysql & pg longevity demo (load snapshot)"
 # install mysql client if needed
 # apt-get -y install mysql-client
 
@@ -123,9 +123,56 @@ make build
 
 cd ..
 
-# load specified table data into risingwave
+# create cdc source to load specified table data into risingwave
 # table schema definitions https://github.com/pingcap/go-tpc/blob/97009c9b58/tpcc/ddl.go
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.demo.load.slt'
+
+# wait for cdc loading
+# depends on the size of data, it may take a while to load it from mysql
+sleep 15
+
+# On first stage, we can just check if the number of rows are the same in mysql and risingwave.
+# We can also check the data correctness of tables in risingwave if the go-tpc can run on risingwave.
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.demo.check.slt'
+
+echo "--- Kill cluster"
+pkill -f connector-service.jar
+cargo make ci-kill
+
+
+echo "--- e2e, ci-1cn-1fe, mysql & pg longevity demo (consume cdc events)"
+# install mysql client if needed
+# apt-get -y install mysql-client
+
+# install go for go-tpc tool
+# apt-get -y install golang-1.18
+
+# start cdc connector node
+nohup java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-node.log 2>&1 &
+
+# start risingwave cluster
+cargo make ci-start ci-1cn-1fe-with-recovery
+sleep 2
+
+# create cdc sources in risingwave first
+# Afterward, if there are new rows inserted into the source tables,
+# cdc events will push to risingwave.
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.demo.load.slt'
+
+# download and compile go-tpc
+# git clone https://github.com/pingcap/go-tpc.git
+# cd go-tpc
+# make build
+
+# ingest data to mysql or pg
+# -H database host, -P database port, -D database name, -T number threads
+# refer to `go-tpc tpcc --help` for details of those arguments
+./bin/go-tpc tpcc prepare --no-check true --warehouses 1 -T 4 -H mysql -U root -p '123456' -D test -P 3306
+
+# ingest data to postgres
+./bin/go-tpc tpcc prepare --no-check true --warehouses 1 -T 4 -d postgres -U postgres -p 'postgres' -H db -D test -P 5432 --conn-params sslmode=disable
+
+cd ..
 
 # wait for cdc loading
 # depends on the size of data, it may take a while to load it from mysql
