@@ -20,10 +20,10 @@ import {
   Relations,
   streamingJobColumns,
 } from "../components/Relations"
-import { getMaterializedViews } from "./api/streaming"
+import { getIndexes } from "./api/streaming"
 
-export default function MaterializedViews() {
-  return Relations("Materialized Views", getMaterializedViews, [
+export default function Indexes() {
+  return Relations("Indexes", getIndexes, [
     ...streamingJobColumns,
     primaryKeyColumn,
   ])
