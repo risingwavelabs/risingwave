@@ -40,32 +40,32 @@ impl RowEncoding {
         }
     }
 
-    fn set_big(&mut self, maybe_offset: Vec<usize>, max_offset: usize) {
-        self.offsets = vec![];
+    fn set_big(&mut self, maybe_offset: &[usize], max_offset: usize) {
         match max_offset {
-            n if n <= u8::MAX as usize => {
+            n @ ..= (u8::MAX as usize) => {
                 self.flag |= 0b01;
                 maybe_offset
-                    .into_iter()
-                    .for_each(|m| self.offsets.put_u8(m as u8));
+                    .iter()
+                    .for_each(|m| self.offsets.put_u8(*m as u8));
             }
             n if n <= u16::MAX as usize => {
                 self.flag |= 0b10;
                 maybe_offset
-                    .into_iter()
-                    .for_each(|m| self.offsets.put_u16_le(m as u16));
+                    .iter()
+                    .for_each(|m| self.offsets.put_u16(*m as u16));
             }
             n if n <= u32::MAX as usize => {
                 self.flag |= 0b11;
                 maybe_offset
-                    .into_iter()
-                    .for_each(|m| self.offsets.put_u32_le(m as u32));
+                    .iter()
+                    .for_each(|m| self.offsets.put_u32(*m as u32));
             }
             _ => unreachable!("encoding length exceeds u32"),
         }
     }
 
-    fn encode(&mut self, datum_refs: impl Iterator<Item = impl ToDatumRef>) {
+    fn encode(&mut self, datum_refs: impl Iterator<Item = impl ToDatumRef>, width: &Width) {
+        self.set_width(width);
         assert!(
             self.buf.is_empty(),
             "should not encode one RowEncoding object multiple times."
@@ -80,7 +80,7 @@ impl RowEncoding {
         let max_offset = *maybe_offset
             .last()
             .expect("should encode at least one column");
-        self.set_big(maybe_offset, max_offset);
+        self.set_big(&maybe_offset, max_offset);
     }
 }
 
@@ -113,13 +113,12 @@ impl Serializer {
 
     pub fn serialize_row_column_aware(&self, row: impl Row) -> Vec<u8> {
         let mut encoding = RowEncoding::new();
-        encoding.encode(row.iter());
+        encoding.encode(row.iter(), &self.datum_num);
         self.serialize(encoding)
     }
 
-    fn serialize(&self, mut encoding: RowEncoding) -> Vec<u8> {
+    fn serialize(&self, encoding: RowEncoding) -> Vec<u8> {
         let mut row_bytes = vec![];
-        encoding.set_width(&self.datum_num);
         row_bytes.put_u8(encoding.flag);
         row_bytes.extend(self.encoded_datum_num.iter());
         row_bytes.extend(self.encoded_column_ids.iter());
