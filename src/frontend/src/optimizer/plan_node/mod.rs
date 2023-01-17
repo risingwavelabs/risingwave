@@ -225,6 +225,11 @@ impl PlanTreeNode for PlanRef {
             // We can't clone `LogicalShare`, but only can replace input instead.
             logical_share.replace_input(inputs[0].clone());
             self.clone()
+        } else if let Some(stream_share) = self.clone().as_stream_share() {
+            assert_eq!(inputs.len(), 1);
+            // We can't clone `StreamShare`, but only can replace input instead.
+            stream_share.replace_input(inputs[0].clone());
+            self.clone()
         } else {
             // Dispatch to dyn PlanNode instead of PlanRef.
             let dyn_t = self.deref();

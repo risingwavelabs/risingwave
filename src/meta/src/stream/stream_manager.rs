@@ -396,7 +396,7 @@ where
     ) -> MetaResult<()> {
         // Schedule actors to parallel units. `locations` will record the parallel unit that an
         // actor is scheduled to, and the worker node this parallel unit is on.
-        // let mut locations = {
+
         // List all running worker nodes and the parallel units.
         //
         // It's possible that the cluster configuration has been changed after we resolve the
@@ -443,9 +443,6 @@ where
                 scheduler.schedule(fragment, &mut locations)?;
             }
         }
-
-        //     locations
-        // };
 
         // Record vnode to parallel unit mapping for actors.
         let actor_to_vnode_mapping = {
