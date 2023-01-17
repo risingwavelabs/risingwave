@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # This script must be executed from `cargo make run-java-binding-demo`.
 
