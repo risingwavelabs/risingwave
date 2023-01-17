@@ -172,8 +172,10 @@ impl ConnectorSourceReader {
 
             for msg in batch {
                 tracing::warn!("payload: {:?}", msg.payload);
-                let payload = Some(br#"{"amount": "1111111111111111111160", "sysTimestamp": 1673000000}"#.as_slice());
+                let payload = Some(br#"{"sysTimestamp": 1673000000}"#.as_slice());
+                tracing::warn!("payload stubbed: {:?}", msg.payload);
                 if let Some(content) = payload {
+                    tracing::warn!("content: {:?}", content);
                     split_offset_mapping.insert(msg.split_id, msg.offset);
 
                     let old_op_num = builder.op_num();
