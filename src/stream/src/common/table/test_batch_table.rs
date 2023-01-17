@@ -57,9 +57,8 @@ async fn test_storage_table_get_row() {
         pk_indices,
         vec![0, 1, 2],
     );
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch.inc();
 
     state.insert(OwnedRow::new(vec![Some(1_i32.into()), None, None]));
     state.insert(OwnedRow::new(vec![
@@ -74,9 +73,9 @@ async fn test_storage_table_get_row() {
         None,
         Some(222_i32.into()),
     ]));
-    state.commit_for_test(epoch).await.unwrap();
 
-    let epoch = EpochPair::new_test_epoch(2);
+    epoch.inc();
+    state.commit(epoch).await.unwrap();
 
     let get_row1_res = table
         .get_row(
@@ -159,9 +158,8 @@ async fn test_storage_table_value_indices() {
         pk_indices,
         value_indices,
     );
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch.inc();
 
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -192,9 +190,9 @@ async fn test_storage_table_value_indices() {
         Some(222_i32.into()),
         Some(2222_i32.into()),
     ]));
-    state.commit_for_test(epoch).await.unwrap();
 
-    let epoch = EpochPair::new_test_epoch(2);
+    epoch.inc();
+    state.commit(epoch).await.unwrap();
 
     let get_row1_res = table
         .get_row(
@@ -278,9 +276,8 @@ async fn test_storage_get_row_for_string() {
         pk_indices,
         vec![0, 1, 2],
     );
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch.inc();
 
     state.insert(OwnedRow::new(vec![
         Some("1".to_string().into()),
@@ -297,7 +294,9 @@ async fn test_storage_get_row_for_string() {
         Some("44".to_string().into()),
         Some("444".to_string().into()),
     ]));
-    state.commit_for_test(epoch).await.unwrap();
+
+    epoch.inc();
+    state.commit(epoch).await.unwrap();
 
     let get_row1_res = table
         .get_row(
@@ -351,9 +350,8 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         pk_indices.clone(),
     )
     .await;
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch.inc();
 
     let table: StorageTable<MemoryStateStore> = StorageTable::for_test(
         state_store.clone(),
@@ -377,7 +375,9 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
         None,
         Some(222_i32.into()),
     ]));
-    state.commit_for_test(epoch).await.unwrap();
+
+    epoch.inc();
+    state.commit(epoch).await.unwrap();
 
     let get_row1_res = table
         .get_row(
@@ -458,7 +458,6 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
     );
     let epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch.inc();
 
     state.insert(OwnedRow::new(vec![Some(1_i32.into()), None, None]));
     state.insert(OwnedRow::new(vec![
@@ -473,7 +472,8 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         None,
         Some(222_i32.into()),
     ]));
-    state.commit_for_test(epoch).await.unwrap();
+    let next_epoch = EpochPair::new_test_epoch(2);
+    state.commit(next_epoch).await.unwrap();
 
     let get_row1_res = table
         .get_row(
@@ -547,9 +547,8 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
         value_indices,
         0,
     );
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch.inc();
 
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -566,7 +565,9 @@ async fn test_row_based_storage_table_scan_in_batch_mode() {
         Some(22_i32.into()),
         Some(222_i32.into()),
     ]));
-    state.commit_for_test(epoch).await.unwrap();
+
+    epoch.inc();
+    state.commit(epoch).await.unwrap();
 
     let iter = table
         .batch_iter(HummockReadEpoch::Committed(epoch.curr), false)
@@ -627,9 +628,8 @@ async fn test_batch_scan_with_value_indices() {
         value_indices,
         0,
     );
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch.inc();
 
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -649,7 +649,9 @@ async fn test_batch_scan_with_value_indices() {
         Some(222_i32.into()),
         Some(2222_i32.into()),
     ]));
-    state.commit_for_test(epoch).await.unwrap();
+
+    epoch.inc();
+    state.commit(epoch).await.unwrap();
 
     let iter = table
         .batch_iter(HummockReadEpoch::Committed(epoch.curr), false)

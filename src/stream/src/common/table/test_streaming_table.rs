@@ -45,7 +45,7 @@ async fn test_state_table() {
     )
     .await;
 
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -104,7 +104,7 @@ async fn test_state_table() {
     assert_eq!(row2_delete, None);
 
     epoch.inc();
-    state_table.commit_for_test(epoch).await.unwrap();
+    state_table.commit(epoch).await.unwrap();
 
     let row2_delete_commit = state_table
         .get_row(&OwnedRow::new(vec![Some(2_i32.into())]))
@@ -137,7 +137,7 @@ async fn test_state_table() {
     state_table.delete(OwnedRow::new(vec![Some(4_i32.into()), None, None]));
 
     epoch.inc();
-    state_table.commit_for_test(epoch).await.unwrap();
+    state_table.commit(epoch).await.unwrap();
 
     let row3_delete = state_table
         .get_row(&OwnedRow::new(vec![Some(3_i32.into())]))
@@ -172,7 +172,7 @@ async fn test_state_table_update_insert() {
     )
     .await;
 
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
 
     state_table.insert(OwnedRow::new(vec![
@@ -190,7 +190,7 @@ async fn test_state_table_update_insert() {
     ]));
 
     epoch.inc();
-    state_table.commit_for_test(epoch).await.unwrap();
+    state_table.commit(epoch).await.unwrap();
 
     state_table.delete(OwnedRow::new(vec![
         Some(6_i32.into()),
@@ -246,7 +246,7 @@ async fn test_state_table_update_insert() {
     );
 
     epoch.inc();
-    state_table.commit_for_test(epoch).await.unwrap();
+    state_table.commit(epoch).await.unwrap();
 
     let row6_commit = state_table
         .get_row(&OwnedRow::new(vec![Some(6_i32.into())]))
@@ -283,7 +283,7 @@ async fn test_state_table_update_insert() {
     ]));
 
     epoch.inc();
-    state_table.commit_for_test(epoch).await.unwrap();
+    state_table.commit(epoch).await.unwrap();
 
     // one epoch: delete (1, 2, 3, 4), insert (5, 6, 7, None), delete(5, 6, 7, None)
     state_table.delete(OwnedRow::new(vec![
@@ -312,7 +312,7 @@ async fn test_state_table_update_insert() {
     assert_eq!(row1, None);
 
     epoch.inc();
-    state_table.commit_for_test(epoch).await.unwrap();
+    state_table.commit(epoch).await.unwrap();
 
     let row1_commit = state_table
         .get_row(&OwnedRow::new(vec![Some(1_i32.into())]))
@@ -341,7 +341,7 @@ async fn test_state_table_iter() {
     )
     .await;
 
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![
@@ -414,7 +414,7 @@ async fn test_state_table_iter() {
         );
     }
     epoch.inc();
-    state.commit_for_test(epoch).await.unwrap();
+    state.commit(epoch).await.unwrap();
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
     // [1, 11, 111], [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in
@@ -561,7 +561,7 @@ async fn test_state_table_iter_with_prefix() {
     )
     .await;
 
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![
@@ -588,7 +588,7 @@ async fn test_state_table_iter_with_prefix() {
     ]));
 
     epoch.inc();
-    state.commit_for_test(epoch).await.unwrap();
+    state.commit(epoch).await.unwrap();
 
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -679,7 +679,7 @@ async fn test_state_table_iter_with_pk_range() {
     )
     .await;
 
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![
@@ -706,7 +706,7 @@ async fn test_state_table_iter_with_pk_range() {
     ]));
 
     epoch.inc();
-    state.commit_for_test(epoch).await.unwrap();
+    state.commit(epoch).await.unwrap();
 
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -840,7 +840,7 @@ async fn test_state_table_iter_with_value_indices() {
         vec![2],
     )
     .await;
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![
@@ -893,7 +893,7 @@ async fn test_state_table_iter_with_value_indices() {
     }
 
     epoch.inc();
-    state.commit_for_test(epoch).await.unwrap();
+    state.commit(epoch).await.unwrap();
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
     // [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in
@@ -993,7 +993,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         vec![2, 1, 0],
     )
     .await;
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
 
     state.insert(OwnedRow::new(vec![
@@ -1067,7 +1067,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     }
 
     epoch.inc();
-    state.commit_for_test(epoch).await.unwrap();
+    state.commit(epoch).await.unwrap();
 
     // write [3, 33, 333], [4, 44, 444], [5, 55, 555], [7, 77, 777], [8, 88, 888]into mem_table,
     // [3, 33, 3333], [6, 66, 666], [9, 99, 999] exists in

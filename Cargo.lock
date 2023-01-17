@@ -6940,7 +6940,7 @@ dependencies = [
 [[package]]
 name = "simd-json"
 version = "0.7.0"
-source = "git+https://github.com/tabVersion/simd-json.git?branch=main#fe89a0d1d2bb5749acc72a515db39c36d16d267d"
+source = "git+https://github.com/tabVersion/simd-json.git?branch=main#b52fef754645ecf07c059b42d1b995f3c9f96063"
 dependencies = [
  "halfbrown",
  "lexical-core",
