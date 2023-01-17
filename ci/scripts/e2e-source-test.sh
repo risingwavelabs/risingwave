@@ -154,8 +154,13 @@ nohup java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector
 cargo make ci-start ci-1cn-1fe-with-recovery
 sleep 2
 
+# create empty tables in the source databsae
+mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/demo_mysql_cdc_create.sql
+createdb -h db -U postgres test
+psql -h db -U postgres -d test < ./e2e_test/source/cdc/demo_postgres_cdc_create.sql
+
 # create cdc sources in risingwave first
-# Afterward, if there are new rows inserted into the source tables,
+# Afterwards, if there are new rows inserted into the source tables,
 # cdc events will push to risingwave.
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.demo.load.slt'
 
