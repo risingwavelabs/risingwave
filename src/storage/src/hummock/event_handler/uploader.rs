@@ -36,7 +36,7 @@ use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::store::immutable_memtable::MergedImmutableMemtable;
 use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
-use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo, IMM_MERGE_THRESHOLD};
+use crate::hummock::store::version::{StagingSstableInfo, IMM_MERGE_THRESHOLD};
 use crate::hummock::{HummockError, HummockResult};
 
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
@@ -342,57 +342,6 @@ impl UploaderContext {
     }
 }
 
-/// Task to merge small imms in the staging version to a large one
-pub struct ImmMergeTask {
-    read_version: Arc<parking_lot::RwLock<HummockReadVersion>>,
-    table_id: TableId,
-    join_handle: JoinHandle<HummockResult<MergedImmutableMemtable>>,
-}
-
-impl ImmMergeTask {
-    fn new(
-        table_id: TableId,
-        read_version: Arc<parking_lot::RwLock<HummockReadVersion>>,
-        imms: Vec<ImmutableMemtable>,
-        context: &UploaderContext,
-    ) -> Self {
-        let memory_limiter = context.buffer_tracker.get_memory_limiter().clone();
-        ImmMergeTask {
-            read_version,
-            table_id,
-            join_handle: tokio::spawn(async move {
-                // merge imms to a large imm
-                let merged_imm =
-                    MergedImmutableMemtable::build_merged_imm(table_id, imms, Some(memory_limiter));
-
-                Ok(merged_imm)
-            }),
-        }
-    }
-
-    /// Poll the result of the merge task
-    fn poll_result(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<HummockResult<MergedImmutableMemtable>> {
-        Poll::Ready(match ready!(self.join_handle.poll_unpin(cx)) {
-            Ok(task_result) => task_result,
-            Err(err) => Err(HummockError::other(format!(
-                "fail to join imm merge join handle: {:?}",
-                err
-            ))),
-        })
-    }
-}
-
-impl Future for ImmMergeTask {
-    type Output = HummockResult<MergedImmutableMemtable>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        self.poll_result(cx)
-    }
-}
-
 /// An uploader for hummock data.
 ///
 /// Data have 4 sequential stages: unsealed, sealed, syncing, synced.
@@ -417,10 +366,10 @@ pub struct HummockUploader {
     /// Data that are not sealed yet. `epoch` satisfies `epoch > max_sealed_epoch`.
     unsealed_data: BTreeMap<HummockEpoch, UnsealedEpochData>,
 
-    // An index for unsealed data of multiple epochs, used for merge imms.
-    // On each SealEpoch event, we will scan the map to check if there are imms <= sealed_epoch
-    // that can be merged.
-    unsealed_data_by_table_shard: HashMap<(TableId, LocalInstanceId), VecDeque<ImmutableMemtable>>,
+    /// Group imms by table shard
+    /// On each SealEpoch event, we will scan the map to check if there are enough
+    /// imms <= sealed_epoch that can be merged.
+    imms_by_table_shard: HashMap<(TableId, LocalInstanceId), VecDeque<ImmutableMemtable>>,
 
     /// Data that are sealed but not synced yet. `epoch` satisfies
     /// `max_syncing_epoch < epoch <= max_sealed_epoch`.
@@ -430,10 +379,6 @@ pub struct HummockUploader {
     /// `max_synced_epoch < epoch <= max_syncing_epoch`.
     /// Newer epoch at the front
     syncing_data: VecDeque<SyncingData>,
-
-    /// Scheduled imm merge task for each local hummock instance
-    /// Each local hummock instance should only has one ongoing imm merge task at a time
-    imm_merging_tasks: VecDeque<ImmMergeTask>,
 
     /// Data that has been synced already. `epoch` satisfies
     /// `epoch <= max_synced_epoch`.
@@ -454,10 +399,9 @@ impl HummockUploader {
             max_syncing_epoch: initial_epoch,
             max_synced_epoch: initial_epoch,
             unsealed_data: Default::default(),
-            unsealed_data_by_table_shard: Default::default(),
+            imms_by_table_shard: Default::default(),
             sealed_data: Default::default(),
             syncing_data: Default::default(),
-            imm_merging_tasks: Default::default(),
             synced_data: Default::default(),
             context: UploaderContext::new(pinned_version, spawn_upload_task, buffer_tracker),
         }
@@ -495,21 +439,11 @@ impl HummockUploader {
             .push_front(imm.clone());
 
         if let Some(instance_id) = instance_id {
-            self.unsealed_data_by_table_shard
+            self.imms_by_table_shard
                 .entry((imm.table_id(), instance_id))
                 .or_default()
                 .push_front(imm);
         }
-    }
-
-    pub(crate) fn start_merge_imms(
-        &mut self,
-        table_id: TableId,
-        read_version: Arc<parking_lot::RwLock<HummockReadVersion>>,
-        imms: Vec<ImmutableMemtable>,
-    ) {
-        let merge_task = ImmMergeTask::new(table_id, read_version, imms, &self.context);
-        self.imm_merging_tasks.push_front(merge_task);
     }
 
     pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) {
@@ -546,7 +480,7 @@ impl HummockUploader {
     ) -> HummockResult<Vec<(TableId, LocalInstanceId, MergedImmutableMemtable)>> {
         // We need to filter imms <= sealed_epoch for each local hummock instance.
         let task_handles = self
-            .unsealed_data_by_table_shard
+            .imms_by_table_shard
             .iter_mut()
             .flat_map(|((table_id, instance_id), imms)| {
                 // imms is order by epoch in desc order
@@ -695,6 +629,7 @@ impl HummockUploader {
     }
 
     pub(crate) fn may_flush(&mut self) {
+        // TODO(siyuan): clear unmerge imms that will be flushed
         if self.context.buffer_tracker.need_more_flush() {
             self.sealed_data.flush(&self.context);
         }
@@ -788,50 +723,16 @@ impl HummockUploader {
         }
         Poll::Ready(None)
     }
-
-    /// Poll the success of imm merge  task
-    fn poll_imm_merge_task(&mut self, cx: &mut Context<'_>) -> Poll<Option<ImmMergeTaskResult>> {
-        // only poll the oldest merge task if there is any
-        if let Some(task) = self.imm_merging_tasks.back_mut() {
-            match ready!(task.poll_unpin(cx)) {
-                Ok(merged_imm) => {
-                    // pop the finished task
-                    // TODO: if we polled a finished task, we can continue to poll the next task and
-                    // return a batch of result to the event handler
-                    let t = self.imm_merging_tasks.pop_back();
-                    Poll::Ready(Some(ImmMergeTaskResult {
-                        merged_imm,
-                        read_version: t.unwrap().read_version,
-                    }))
-                }
-                Err(e) => {
-                    error!(
-                        "poll imm merge task failed. table_id: {},  {}",
-                        task.table_id, e
-                    );
-                    Poll::Ready(None)
-                }
-            }
-        } else {
-            Poll::Ready(None)
-        }
-    }
 }
 
 pub(crate) struct NextUploaderEvent<'a> {
     uploader: &'a mut HummockUploader,
 }
 
-pub struct ImmMergeTaskResult {
-    pub merged_imm: MergedImmutableMemtable,
-    pub read_version: Arc<parking_lot::RwLock<HummockReadVersion>>,
-}
-
 pub(crate) enum UploaderEvent {
     // staging sstable info of newer data comes first
     SyncFinish(HummockEpoch, Vec<StagingSstableInfo>),
     DataSpilled(StagingSstableInfo),
-    ImmMerged(ImmMergeTaskResult),
 }
 
 impl<'a> Future for NextUploaderEvent<'a> {
@@ -850,10 +751,6 @@ impl<'a> Future for NextUploaderEvent<'a> {
 
         if let Some(sstable_info) = ready!(uploader.poll_unsealed_spill_task(cx)) {
             return Poll::Ready(UploaderEvent::DataSpilled(sstable_info));
-        }
-
-        if let Some(merged_result) = ready!(uploader.poll_imm_merge_task(cx)) {
-            return Poll::Ready(UploaderEvent::ImmMerged(merged_result));
         }
 
         Poll::Pending
@@ -1223,7 +1120,6 @@ mod tests {
                 assert_eq!(epoch6, epoch);
             }
             UploaderEvent::DataSpilled(_) => unreachable!(),
-            UploaderEvent::ImmMerged(_) => unreachable!(),
         }
         uploader.update_pinned_version(version5);
         assert_eq!(epoch6, uploader.max_synced_epoch);

@@ -61,12 +61,6 @@ pub enum HummockEvent {
 
     ImmToUploader(ImmutableMemtable, LocalInstanceId),
 
-    ImmToMerge {
-        table_id: TableId,
-        read_version: Arc<RwLock<HummockReadVersion>>,
-        imms: Vec<ImmutableMemtable>,
-    },
-
     SealEpoch {
         epoch: HummockEpoch,
         is_checkpoint: bool,
@@ -130,13 +124,6 @@ impl HummockEvent {
                 "DestroyReadVersion table_id {:?} instance_id {:?}",
                 table_id, instance_id
             ),
-            HummockEvent::ImmToMerge {
-                table_id,
-                read_version: _,
-                imms,
-            } => {
-                format!("ImmToMerge table_id: {:?} imms {:?}", table_id, imms)
-            }
 
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(_) => "FlushEvent".to_string(),

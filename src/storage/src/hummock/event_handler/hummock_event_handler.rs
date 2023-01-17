@@ -427,13 +427,6 @@ impl HummockEventHandler {
                     UploaderEvent::DataSpilled(staging_sstable_info) => {
                         self.handle_data_spilled(staging_sstable_info);
                     }
-                    UploaderEvent::ImmMerged(_merge_result) => {
-                        unimplemented!("didn't implemented");
-                        // let mut write_guard = merge_result.read_version.write();
-                        // write_guard.update(VersionUpdate::Staging(StagingData::MergedImmMem(
-                        //     merge_result.merged_imm,
-                        // )));
-                    }
                 },
                 Either::Right(event) => {
                     match event {
@@ -461,14 +454,6 @@ impl HummockEventHandler {
                         HummockEvent::ImmToUploader(imm, instance_id) => {
                             self.uploader.add_imm(imm, Some(instance_id));
                             self.uploader.may_flush();
-                        }
-
-                        HummockEvent::ImmToMerge {
-                            table_id,
-                            read_version,
-                            imms,
-                        } => {
-                            self.uploader.start_merge_imms(table_id, read_version, imms);
                         }
 
                         HummockEvent::SealEpoch {
