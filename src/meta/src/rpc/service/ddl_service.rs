@@ -16,11 +16,10 @@ use std::collections::HashSet;
 
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::common::worker_node::State;
-use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
 use risingwave_pb::ddl_service::*;
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamFragmentGraph, StreamNode};
 use tonic::{Request, Response, Status};
@@ -552,12 +551,15 @@ where
         let dependent_relations = get_dependent_relations(&fragment_graph)?;
         stream_job.set_dependent_relations(dependent_relations);
 
-        // 3. Mark current relation as "creating" and add reference count to dependent relations.
+        // 3. Get the env for streaming jobs
+        let env = fragment_graph.get_env().unwrap().clone();
+
+        // 4. Mark current relation as "creating" and add reference count to dependent relations.
         self.catalog_manager
             .start_create_stream_job_procedure(stream_job)
             .await?;
 
-        // 4. build fragment graph.
+        // 5. build fragment graph.
         use risingwave_common::catalog::TableId;
         let dependent_table_ids = fragment_graph
             .dependent_table_ids
@@ -581,14 +583,12 @@ where
         };
 
         let table_ids_cnt = fragment_graph.table_ids_cnt;
-        let default_parallelism = if self.env.opts.minimal_scheduling {
-            self.cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
-                .await
-                .len()
-        } else {
-            self.cluster_manager.get_active_parallel_unit_count().await
-        };
+        let default_parallelism =
+            if let Some(Parallelism { parallelism }) = fragment_graph.parallelism {
+                parallelism as usize
+            } else {
+                self.cluster_manager.get_active_parallel_unit_count().await
+            };
         let mut actor_graph_builder = ActorGraphBuilder::new(
             self.env.id_gen_manager_ref(),
             fragment_graph,
@@ -623,7 +623,7 @@ where
 
         assert_eq!(table_ids_cnt, ctx.internal_table_ids().len() as u32);
 
-        // 5. mark creating tables.
+        // 6. mark creating tables.
         let mut creating_tables = ctx.internal_tables();
         match stream_job {
             StreamingJob::MaterializedView(table)
@@ -639,7 +639,7 @@ where
             .mark_creating_tables(&creating_tables)
             .await;
 
-        Ok((ctx, TableFragments::new(id.into(), graph)))
+        Ok((ctx, TableFragments::new(id.into(), graph, env)))
     }
 
     /// `cancel_stream_job` cancels a stream job and clean some states.

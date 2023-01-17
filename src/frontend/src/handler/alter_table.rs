@@ -15,6 +15,7 @@
 use anyhow::Context;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 
@@ -104,8 +105,11 @@ pub async fn handle_add_column(
             ))?
         }
 
-        let graph = build_graph(plan);
-
+        let mut graph = build_graph(plan);
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
         (graph, source, table)
     };
 

@@ -150,6 +150,7 @@ impl PushCalculationOfJoinRule {
                 Type::LessThan
                     | Type::LessThanOrEqual
                     | Type::Equal
+                    | Type::IsNotDistinctFrom
                     | Type::GreaterThan
                     | Type::GreaterThanOrEqual
             )

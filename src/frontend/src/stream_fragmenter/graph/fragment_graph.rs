@@ -19,7 +19,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::{
     StreamFragment as StreamFragmentProto, StreamFragmentEdge as StreamFragmentEdgeProto,
 };
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, FragmentTypeFlag, StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
+    DispatchStrategy, FragmentTypeFlag, StreamEnvironment,
+    StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
 pub type LocalFragmentId = u32;
@@ -94,6 +95,9 @@ pub struct StreamFragmentGraph {
 
     /// stores edges between fragments: (upstream, downstream) => edge.
     edges: HashMap<(LocalFragmentId, LocalFragmentId), StreamFragmentEdgeProto>,
+
+    /// Stores the environment for the streaming plan
+    env: StreamEnvironment,
 }
 
 impl StreamFragmentGraph {
@@ -105,9 +109,11 @@ impl StreamFragmentGraph {
                 .map(|(k, v)| (*k, v.to_protobuf()))
                 .collect(),
             edges: self.edges.values().cloned().collect(),
+            env: Some(self.env.clone()),
             // To be filled later
             dependent_table_ids: vec![],
             table_ids_cnt: 0,
+            parallelism: None,
         }
     }
 
