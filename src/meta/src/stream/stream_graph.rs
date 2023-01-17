@@ -85,6 +85,8 @@ impl<const TYPE: IdCategoryType> GlobalId<TYPE> {
 }
 
 /// Utility for converting local IDs into pre-allocated global IDs by adding an `offset`.
+///
+/// This requires the local IDs exactly a permutation of the range `[0, len)`.
 #[derive(Clone, Copy, Debug)]
 struct GlobalIdGen<const TYPE: IdCategoryType> {
     offset: u32,

@@ -188,7 +188,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         node_body: Some(NodeBody::Source(SourceNode {
             source_inner: Some(StreamSource {
                 source_id: 1,
-                state_table: Some(make_source_internal_table(1)),
+                state_table: Some(make_source_internal_table(0)),
                 columns,
                 ..Default::default()
             }),
@@ -255,7 +255,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             distribution_key: Default::default(),
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
-            result_table: Some(make_empty_table(2)),
+            result_table: Some(make_empty_table(1)),
         })),
         input: vec![filter_node],
         fields: vec![], // TODO: fill this later
@@ -297,7 +297,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             distribution_key: Default::default(),
             is_append_only: false,
             agg_call_states: vec![make_agg_call_result_state(), make_agg_call_result_state()],
-            result_table: Some(make_empty_table(3)),
+            result_table: Some(make_empty_table(2)),
         })),
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],
@@ -401,9 +401,8 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
     }
 }
 
-// TODO: enable this test with madsim
 #[tokio::test]
-async fn test_fragmenter() -> MetaResult<()> {
+async fn test_graph_builder() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
     let job = StreamingJob::Table(None, make_materialize_table(888));
