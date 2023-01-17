@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::row::{OwnedRow, Row, RowDeserializer};
@@ -60,7 +60,7 @@ fn memcmp_encode(c: &Case) -> Vec<Vec<u8>> {
     let mut array = vec![];
     for row in &c.rows {
         let mut row_bytes = vec![];
-        black_box(serde.serialize(row, &mut row_bytes));
+        serde.serialize(row, &mut row_bytes);
         array.push(row_bytes);
     }
     array
@@ -69,7 +69,7 @@ fn memcmp_encode(c: &Case) -> Vec<Vec<u8>> {
 fn basic_encode(c: &Case) -> Vec<Vec<u8>> {
     let mut array = vec![];
     for row in &c.rows {
-        let row_encoding = black_box(row.value_serialize());
+        let row_encoding = row.value_serialize();
         array.push(row_encoding);
     }
     array
@@ -79,7 +79,7 @@ fn column_aware_encode(c: &Case) -> Vec<Vec<u8>> {
     let seralizer = row_encoding::Serializer::new(&c.column_ids);
     let mut array = vec![];
     for row in &c.rows {
-        let row_bytes = black_box(seralizer.serialize_row_column_aware(row));
+        let row_bytes = seralizer.serialize_row_column_aware(row);
         array.push(row_bytes);
     }
     array
@@ -90,61 +90,78 @@ fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
         c.schema.clone(),
         vec![OrderType::Descending; c.schema.len()],
     );
-    let column_id_to_index = c
-        .column_ids
-        .iter()
-        .enumerate()
-        .map(|(v, k)| (k, v))
-        .collect::<HashMap<_, _>>();
-    let needed_to_row = c
-        .needed_ids
-        .iter()
-        .map(|id| (id, *column_id_to_index.get(id).unwrap_or(&65536)))
-        .collect::<HashMap<_, _>>();
     let mut res = vec![];
-    for byte in bytes.iter().enumerate() {
-        let row = black_box(serde.deserialize(&byte.1)?).into_inner();
-        let mut needed = vec![None; c.needed_ids.len()];
-        for (i, c) in c.needed_ids.iter().enumerate() {
-            let ri = *needed_to_row.get(c).unwrap();
-            if ri != 65536 {
-                if let Some(v) = &row[ri] {
-                    needed[i] = Some(v.clone());
+    if c.column_ids == c.needed_ids {
+        for byte in bytes {
+            let row = serde.deserialize(&byte)?.into_inner();
+            res.push(row);
+        }
+    } else {
+        let column_id_to_index = c
+            .column_ids
+            .iter()
+            .enumerate()
+            .map(|(v, k)| (k, v))
+            .collect::<HashMap<_, _>>();
+        let needed_to_row = c
+            .needed_ids
+            .iter()
+            .map(|id| (id, *column_id_to_index.get(id).unwrap_or(&65536)))
+            .collect::<HashMap<_, _>>();
+
+        for byte in bytes.iter().enumerate() {
+            let row = serde.deserialize(&byte.1)?.into_inner();
+            let mut needed = vec![None; c.needed_ids.len()];
+            for (i, c) in c.needed_ids.iter().enumerate() {
+                let ri = *needed_to_row.get(c).unwrap();
+                if ri != 65536 {
+                    if let Some(v) = &row[ri] {
+                        needed[i] = Some(v.clone());
+                    }
                 }
             }
+            res.push(needed);
         }
-        res.push(needed);
     }
+
     Ok(res)
 }
 
 fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
     let deserializer = RowDeserializer::new(c.schema.clone());
-    let column_id_to_index = c
-        .column_ids
-        .iter()
-        .enumerate()
-        .map(|(v, k)| (k, v))
-        .collect::<HashMap<_, _>>();
-    let needed_to_row = c
-        .needed_ids
-        .iter()
-        .map(|id| (id, *column_id_to_index.get(id).unwrap_or(&65536)))
-        .collect::<HashMap<_, _>>();
     let mut res = vec![];
-    for byte in bytes {
-        let row = black_box(deserializer.deserialize(&byte[..])?).into_inner();
-        let mut needed = vec![None; c.needed_ids.len()];
-        for (i, c) in c.needed_ids.iter().enumerate() {
-            let ri = *needed_to_row.get(c).unwrap();
-            if ri != 65536 {
-                if let Some(v) = &row[ri] {
-                    needed[i] = Some(v.clone());
+    if c.column_ids == c.needed_ids {
+        for byte in bytes {
+            let row = deserializer.deserialize(&byte[..])?.into_inner();
+            res.push(row);
+        }
+    } else {
+        let column_id_to_index = c
+            .column_ids
+            .iter()
+            .enumerate()
+            .map(|(v, k)| (k, v))
+            .collect::<HashMap<_, _>>();
+        let needed_to_row = c
+            .needed_ids
+            .iter()
+            .map(|id| (id, *column_id_to_index.get(id).unwrap_or(&65536)))
+            .collect::<HashMap<_, _>>();
+        for byte in bytes {
+            let row = deserializer.deserialize(&byte[..])?.into_inner();
+            let mut needed = vec![None; c.needed_ids.len()];
+            for (i, c) in c.needed_ids.iter().enumerate() {
+                let ri = *needed_to_row.get(c).unwrap();
+                if ri != 65536 {
+                    if let Some(v) = &row[ri] {
+                        needed[i] = Some(v.clone());
+                    }
                 }
             }
+            res.push(needed);
         }
-        res.push(needed);
     }
+
     Ok(res)
 }
 
@@ -152,7 +169,7 @@ fn column_aware_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>
     let deserializer = row_encoding::Deserializer::new(&c.needed_ids, &c.needed_schema);
     let mut res = vec![];
     for byte in bytes {
-        let row = black_box(deserializer.decode(byte)?);
+        let row = deserializer.decode(byte)?;
         res.push(row);
     }
     Ok(res)
@@ -164,7 +181,7 @@ fn bench_row(c: &mut Criterion) {
             "Int16",
             vec![DataType::INT16],
             vec![ColumnId::new(0)],
-            vec![OwnedRow::new(vec![Some(ScalarImpl::Int16(5))]); 1000],
+            vec![OwnedRow::new(vec![Some(ScalarImpl::Int16(5))]); 100000],
             None,
             None,
         ),
@@ -177,7 +194,7 @@ fn bench_row(c: &mut Criterion) {
                     Some(ScalarImpl::Int16(5)),
                     Some(ScalarImpl::Utf8("abc".into()))
                 ]);
-                1000
+                100000
             ],
             None,
             None,
@@ -191,7 +208,7 @@ fn bench_row(c: &mut Criterion) {
                     Some(ScalarImpl::Int16(5)),
                     Some(ScalarImpl::Utf8("abc".into()))
                 ]);
-                1000
+                100000
             ],
             Some(vec![DataType::Varchar]),
             Some(vec![ColumnId::new(1)]),

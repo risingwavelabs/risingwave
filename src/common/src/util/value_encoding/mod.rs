@@ -260,11 +260,15 @@ mod tests {
         }
         let zero_le_bytes = 0_i32.to_le_bytes();
         let one_le_bytes = 1_i32.to_le_bytes();
+        
         assert_eq!(
             array[0],
             [
-                0b10000101,       // flag mid WW mid BB
-                2,                // column nums
+                0b10000001,       // flag mid WW mid BB
+                2,
+                0,
+                0,
+                0,               // column nums
                 zero_le_bytes[0], // start id 0
                 zero_le_bytes[1],
                 zero_le_bytes[2],

@@ -26,19 +26,19 @@ impl RowEncoding {
         }
     }
 
-    fn set_width(&mut self, datum_num: &Width) {
-        match datum_num {
-            Width::Mid(_) => {
-                self.flag |= 0b0100;
-            }
-            Width::Large(_) => {
-                self.flag |= 0b1000;
-            }
-            Width::Extra(_) => {
-                self.flag |= 0b1100;
-            }
-        }
-    }
+    // fn set_width(&mut self, datum_num: &Width) {
+    //     match datum_num {
+    //         Width::Mid(_) => {
+    //             self.flag |= 0b0100;
+    //         }
+    //         Width::Large(_) => {
+    //             self.flag |= 0b1000;
+    //         }
+    //         Width::Extra(_) => {
+    //             self.flag |= 0b1100;
+    //         }
+    //     }
+    // }
 
     fn set_big(&mut self, maybe_offset: &[usize], max_offset: usize) {
         assert!(self.offsets.is_empty());
@@ -65,29 +65,29 @@ impl RowEncoding {
         }
     }
 
-    fn encode(&mut self, datum_refs: impl Iterator<Item = impl ToDatumRef>, width: &Width) {
-        self.set_width(width);
+    fn encode(&mut self, datum_refs: impl Iterator<Item = impl ToDatumRef>) {
+        // self.set_width(width);
         assert!(
             self.buf.is_empty(),
             "should not encode one RowEncoding object multiple times."
         );
-        let mut maybe_offset = vec![];
+        let mut offset_usize = vec![];
         for datum in datum_refs {
-            maybe_offset.push(self.buf.len());
+            offset_usize.push(self.buf.len());
             if let Some(v) = datum.to_datum_ref() {
                 serialize_scalar(v, &mut self.buf);
             }
         }
-        let max_offset = *maybe_offset
+        let max_offset = *offset_usize
             .last()
             .expect("should encode at least one column");
-        self.set_big(&maybe_offset, max_offset);
+        self.set_big(&offset_usize, max_offset);
     }
 }
 
 pub struct Serializer {
     encoded_column_ids: Vec<u8>,
-    datum_num: Width,
+    datum_num: usize,
     encoded_datum_num: Vec<u8>,
 }
 
@@ -97,14 +97,15 @@ impl Serializer {
         for id in column_ids {
             encoded_column_ids.put_i32_le(id.get_id());
         }
-        let datum_num = match column_ids.len() {
-            n if n <= u8::MAX as usize => Width::Mid(n as u8),
-            n if n <= u16::MAX as usize => Width::Large(n as u16),
-            n if n <= u32::MAX as usize => Width::Extra(n as u32),
-            _ => unreachable!("the number of columns exceeds u32"),
-        };
+        // let datum_num = match column_ids.len() {
+        //     n if n <= u8::MAX as usize => Width::Mid(n as u8),
+        //     n if n <= u16::MAX as usize => Width::Large(n as u16),
+        //     n if n <= u32::MAX as usize => Width::Extra(n as u32),
+        //     _ => unreachable!("the number of columns exceeds u32"),
+        // };
+        let datum_num = column_ids.len();
         let mut encoded_datum_num = vec![];
-        serialize_width(datum_num, &mut encoded_datum_num);
+        encoded_datum_num.put_u32_le(datum_num as u32);
         Self {
             encoded_column_ids,
             datum_num,
@@ -113,9 +114,9 @@ impl Serializer {
     }
 
     pub fn serialize_row_column_aware(&self, row: impl Row) -> Vec<u8> {
-        assert_eq!(row.len(), self.datum_num.into());
+        assert_eq!(row.len(), self.datum_num);
         let mut encoding = RowEncoding::new();
-        encoding.encode(row.iter(), &self.datum_num);
+        encoding.encode(row.iter());
         self.serialize(encoding)
     }
 
@@ -151,19 +152,19 @@ impl<'a> Deserializer<'a> {
 
     pub fn decode(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         let flag = encoded_bytes.get_u8();
-        let nums_bytes = match flag & 0b1100 {
-            0b0100 => 1,
-            0b1000 => 2,
-            0b1100 => 4,
-            _ => return Err(ValueEncodingError::InvalidFlag(flag)),
-        };
+        // let nums_bytes = match flag & 0b1100 {
+        //     0b0100 => 1,
+        //     0b1000 => 2,
+        //     0b1100 => 4,
+        //     _ => return Err(ValueEncodingError::InvalidFlag(flag)),
+        // };
         let offset_bytes = match flag & 0b11 {
             0b01 => 1,
             0b10 => 2,
             0b11 => 4,
             _ => return Err(ValueEncodingError::InvalidFlag(flag)),
         };
-        let datum_num = deserialize_width(nums_bytes, &mut encoded_bytes);
+        let datum_num = encoded_bytes.get_u32_le() as usize;
         let offsets_start_idx = 4 * datum_num;
         let data_start_idx = offsets_start_idx + datum_num * offset_bytes;
         let offsets = &encoded_bytes[offsets_start_idx..data_start_idx];
@@ -205,13 +206,13 @@ impl<'a> Deserializer<'a> {
     }
 }
 
-fn serialize_width(width: Width, buf: &mut impl BufMut) {
-    match width {
-        Width::Mid(w) => buf.put_u8(w),
-        Width::Large(w) => buf.put_u16_le(w),
-        Width::Extra(w) => buf.put_u32_le(w),
-    }
-}
+// fn serialize_width(width: Width, buf: &mut impl BufMut) {
+//     match width {
+//         Width::Mid(w) => buf.put_u8(w),
+//         Width::Large(w) => buf.put_u16_le(w),
+//         Width::Extra(w) => buf.put_u32_le(w),
+//     }
+// }
 
 fn deserialize_width(len: usize, data: &mut impl Buf) -> usize {
     match len {
