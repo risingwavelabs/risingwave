@@ -15,12 +15,15 @@
 use rand::prelude::SliceRandom;
 use rand::Rng;
 use risingwave_common::types::DataType;
+use risingwave_common::types::DataType::Boolean;
+use risingwave_sqlparser::ast::Expr::Function;
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor, TableWithJoins};
+use tracing_subscriber::registry::Data;
 
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
 
-fn create_join_on_clause(left: String, right: String) -> Expr {
+fn create_equi_expr(left: String, right: String) -> Expr {
     let left = Box::new(Expr::Identifier(Ident::new(left)));
     let right = Box::new(Expr::Identifier(Ident::new(right)));
     Expr::BinaryOp {
@@ -85,26 +88,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.gen_simple_table_factor()
     }
 
-    fn gen_join_constraint(&mut self, available_join_on_columns: Vec<(&Column, &Column)>) -> JoinConstraint {
-        match self.rng.gen_range(0..=5) {
-            0..=3 => {
-                let i = self.rng.gen_range(0..available_join_on_columns.len());
-                let (left_column, right_column) = available_join_on_columns[i];
-                let join_on_expr = match self.rng.gen_bool(0.9) {
-                    true => create_join_on_clause(left_column.name.clone(), right_column.name.clone()),
-                    false => self.gen_simple_scalar(&DataType::Boolean),
-                };
-                JoinConstraint::On(join_on_expr)
-            },
-            4 => JoinConstraint::Natural,
-            _ => JoinConstraint::None,
-        }
-    }
-
-    fn gen_join_clause(&mut self) -> (TableWithJoins, Vec<Table>) {
-        let (left_factor, left_columns, mut left_table) = self.gen_table_factor();
-        let (right_factor, right_columns, mut right_table) = self.gen_table_factor();
-
+    fn gen_equi_join_columns(
+        &mut self,
+        left_columns: Vec<Column>,
+        right_columns: Vec<Column>,
+    ) -> Option<(Column, Column)> {
         let mut available_join_on_columns = vec![];
         for left_column in &left_columns {
             for right_column in &right_columns {
@@ -114,9 +102,63 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             }
         }
         if available_join_on_columns.is_empty() {
-            return self.gen_simple_table();
+            return None;
         }
-        let join_constraint = self.gen_join_constraint(available_join_on_columns);
+        let i = self.rng.gen_range(0..available_join_on_columns.len());
+        let (left_column, right_column) = available_join_on_columns[i];
+        Some((left_column.clone(), right_column.clone()))
+    }
+
+    fn gen_join_on_expr(
+        &mut self,
+        left_columns: Vec<Column>,
+        left_table: Vec<Table>,
+        right_columns: Vec<Column>,
+        right_table: Vec<Table>,
+    ) -> Option<Expr> {
+        // Higher chance for equi join,
+        // since non_equi_join could generate lots of invalid queries,
+        // if it requires streaming nested loop join.
+        match self.rng.gen_bool(0.8) {
+            true if let Some((l, r)) = self.gen_equi_join_columns(left_columns, right_columns) => {
+                Some(create_equi_expr(l.name, r.name))
+            },
+            false => {
+                let old_context = self.new_local_context();
+                self.add_relations_to_context(left_table);
+                self.add_relations_to_context(right_table);
+                let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new_with_can_agg(false));
+                self.restore_context(old_context);
+                Some(expr)
+            }
+            _ => None,
+        }
+    }
+
+    fn gen_join_constraint(
+        &mut self,
+        left_columns: Vec<Column>,
+        left_table: Vec<Table>,
+        right_columns: Vec<Column>,
+        right_table: Vec<Table>,
+    ) -> Option<JoinConstraint> {
+        let expr = self.gen_join_on_expr(left_columns, left_table, right_columns, right_table)?;
+        Some(JoinConstraint::On(expr))
+    }
+
+    fn gen_join_clause(&mut self) -> (TableWithJoins, Vec<Table>) {
+        let (left_factor, left_columns, mut left_table) = self.gen_table_factor();
+        let (right_factor, right_columns, mut right_table) = self.gen_table_factor();
+
+        let join_constraint = self.gen_join_constraint(
+            left_columns,
+            left_table.clone(),
+            right_columns,
+            right_table.clone(),
+        );
+        let Some(join_constraint) = join_constraint else {
+            return self.gen_simple_table();
+        };
 
         // NOTE: INNER JOIN works fine, usually does not encounter `StreamNestedLoopJoin` much.
         // If many failures due to `StreamNestedLoopJoin`, try disable the others.
