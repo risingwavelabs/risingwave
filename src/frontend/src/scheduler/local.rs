@@ -122,10 +122,12 @@ impl LocalQueryExecution {
                 }
             }
         };
-        #[cfg(madsim)]
-        spawn(future);
-        #[cfg(not(madsim))]
-        spawn_blocking(move || block_on(future));
+
+        if cfg!(madsim) {
+            tokio::spawn(future);
+        } else {
+            spawn_blocking(move || block_on(future));
+        }
 
         ReceiverStream::new(receiver)
     }
