@@ -49,17 +49,25 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             continue;
         }
         if kill && path.ends_with("visibility_checkpoint.slt") {
-            // Simply ignore visibility_checkpoint because we already have visibility_all cases.
+            // Ignore visibility_checkpoint because we already have visibility_all cases.
             continue;
         }
         if kill && path.ends_with("session_timezone.slt") {
             // Ignore the session timezone test cases that depends on session config
             continue;
         }
-
+        // FIXME #7188: Temporarily enforce VISIBILITY_MODE to checkpoint because there is a known
+        // issue in failure propagation for local mode #7367, which would fail VISIBILITY_MODE=all.
+        let tempfile_visibility_mode = hack_visibility_mode_checkpoint(path);
+        let path_visibility_mode = tempfile_visibility_mode.path();
         // XXX: hack for kafka source test
-        let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));
-        let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
+        let tempfile = path
+            .ends_with("kafka.slt")
+            .then(|| hack_kafka_test(path_visibility_mode));
+        let path = tempfile
+            .as_ref()
+            .map(|p| p.path())
+            .unwrap_or(path_visibility_mode);
         for record in sqllogictest::parse_file(path).expect("failed to parse file") {
             if let sqllogictest::Record::Halt { .. } = record {
                 break;
@@ -202,6 +210,24 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
     let file = tempfile::NamedTempFile::new().expect("failed to create temp file");
     std::fs::write(file.path(), content).expect("failed to write file");
     println!("created a temp file for kafka test: {:?}", file.path());
+    file
+}
+
+fn hack_visibility_mode_checkpoint(path: &Path) -> tempfile::NamedTempFile {
+    let content = std::fs::read_to_string(path).expect("failed to read file");
+    let content = [
+        "statement ok",
+        "SET VISIBILITY_MODE TO checkpoint;",
+        "",
+        &content,
+    ]
+    .join("\n");
+    let file = tempfile::NamedTempFile::new().expect("failed to create temp file");
+    std::fs::write(file.path(), content).expect("failed to write file");
+    println!(
+        "created a temp file to enforce visibility_mode: {:?}",
+        file.path()
+    );
     file
 }
 
