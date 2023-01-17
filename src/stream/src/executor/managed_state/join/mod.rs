@@ -158,6 +158,8 @@ pub struct JoinHashMapMetrics {
     /// How many times have we hit the cache of join executor
     lookup_miss_count: usize,
     total_lookup_count: usize,
+    /// How many times have we miss the cache when insert row
+    insert_cache_miss_count: usize,
 }
 
 impl JoinHashMapMetrics {
@@ -168,6 +170,7 @@ impl JoinHashMapMetrics {
             side,
             lookup_miss_count: 0,
             total_lookup_count: 0,
+            insert_cache_miss_count: 0,
         }
     }
 
@@ -180,8 +183,13 @@ impl JoinHashMapMetrics {
             .join_total_lookup_count
             .with_label_values(&[&self.actor_id, self.side])
             .inc_by(self.total_lookup_count as u64);
+        self.metrics
+            .join_insert_cache_miss_count
+            .with_label_values(&[&self.actor_id, self.side])
+            .inc_by(self.insert_cache_miss_count as u64);
         self.total_lookup_count = 0;
         self.lookup_miss_count = 0;
+        self.insert_cache_miss_count = 0;
     }
 }
 
@@ -396,31 +404,49 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a join row
-    pub fn insert(&mut self, key: &K, value: JoinRow<impl Row>) {
+    pub async fn insert(&mut self, key: &K, value: JoinRow<impl Row>) -> StreamExecutorResult<()> {
+        let pk = (&value.row)
+            .project(&self.state.pk_indices)
+            .memcmp_serialize(&self.pk_serializer);
         if let Some(entry) = self.inner.get_mut(key) {
-            let pk = (&value.row)
-                .project(&self.state.pk_indices)
-                .memcmp_serialize(&self.pk_serializer);
+            // Update cache
             entry.insert(pk, value.encode());
+        } else {
+            // Refill cache when cache miss
+            self.metrics.insert_cache_miss_count += 1;
+            let mut state = self.fetch_cached_state(key).await?;
+            state.insert(pk, value.encode());
+            self.update_state(key, state.into());
         }
-        // If no cache maintained, only update the flush buffer.
+
+        // Update the flush buffer.
         let (row, degree) = value.to_table_rows(&self.state.order_key_indices);
         self.state.table.insert(row);
         self.degree_state.table.insert(degree);
+        Ok(())
     }
 
     /// Insert a row.
     /// Used when the side does not need to update degree.
-    pub fn insert_row(&mut self, key: &K, value: impl Row) {
+    pub async fn insert_row(&mut self, key: &K, value: impl Row) -> StreamExecutorResult<()> {
+        let join_row = JoinRow::new(&value, 0);
+        let pk = (&value)
+            .project(&self.state.pk_indices)
+            .memcmp_serialize(&self.pk_serializer);
         if let Some(entry) = self.inner.get_mut(key) {
-            let join_row = JoinRow::new(&value, 0);
-            let pk = (&value)
-                .project(&self.state.pk_indices)
-                .memcmp_serialize(&self.pk_serializer);
+            // Update cache
             entry.insert(pk, join_row.encode());
+        } else {
+            // Refill cache when cache miss
+            self.metrics.insert_cache_miss_count += 1;
+            let mut state = self.fetch_cached_state(key).await?;
+            state.insert(pk, join_row.encode());
+            self.update_state(key, state.into());
         }
-        // If no cache maintained, only update the state table.
+
+        // Update the flush buffer.
         self.state.table.insert(value);
+        Ok(())
     }
 
     /// Delete a join row

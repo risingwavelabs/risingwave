@@ -12,22 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::util::addr::leader_info_to_host_addr;
+use std::borrow::Borrow;
+
+use risingwave_common::util::addr::{leader_info_to_host_addr, HostAddr};
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::leader::leader_service_server::LeaderService;
-use risingwave_pb::leader::{LeaderRequest, LeaderResponse};
+use risingwave_pb::leader::{
+    LeaderRequest, LeaderResponse, Member, MembersRequest, MembersResponse,
+};
 use risingwave_pb::meta::MetaLeaderInfo;
-use tokio::sync::watch::Receiver;
 use tonic::{Request, Response, Status};
+
+use crate::rpc::server::ElectionClientRef;
 
 #[derive(Clone)]
 pub struct LeaderServiceImpl {
-    leader_rx: Receiver<(MetaLeaderInfo, bool)>,
+    election_client: Option<ElectionClientRef>,
+    current_leader: MetaLeaderInfo,
 }
 
 impl LeaderServiceImpl {
-    pub fn new(leader_rx: Receiver<(MetaLeaderInfo, bool)>) -> Self {
-        LeaderServiceImpl { leader_rx }
+    pub fn new(election_client: Option<ElectionClientRef>, current_leader: MetaLeaderInfo) -> Self {
+        LeaderServiceImpl {
+            election_client,
+            current_leader,
+        }
     }
 }
 
@@ -38,14 +47,52 @@ impl LeaderService for LeaderServiceImpl {
         &self,
         _request: Request<LeaderRequest>,
     ) -> Result<Response<LeaderResponse>, Status> {
-        let leader_info = self.leader_rx.borrow().0.clone();
-        let leader_addr = leader_info_to_host_addr(leader_info);
-        let leader_address = HostAddress {
-            host: leader_addr.host,
-            port: leader_addr.port.into(),
-        };
+        let leader = match self.election_client.borrow() {
+            None => Ok(Some(self.current_leader.clone())),
+            Some(client) => client.leader().await.map(|member| member.map(Into::into)),
+        }?;
+
+        let leader_address = leader
+            .map(leader_info_to_host_addr)
+            .map(|leader_addr| HostAddress {
+                host: leader_addr.host,
+                port: leader_addr.port.into(),
+            });
+
         Ok(Response::new(LeaderResponse {
-            leader_addr: Some(leader_address),
+            leader_addr: leader_address,
         }))
+    }
+
+    async fn members(
+        &self,
+        _request: Request<MembersRequest>,
+    ) -> Result<Response<MembersResponse>, Status> {
+        let members = if let Some(election_client) = self.election_client.borrow() {
+            let mut members = vec![];
+            for member in election_client.get_members().await? {
+                let host_addr = member.id.parse::<HostAddr>()?;
+                members.push(Member {
+                    member_addr: Some(HostAddress {
+                        host: host_addr.host,
+                        port: host_addr.port.into(),
+                    }),
+                    lease_id: member.lease,
+                })
+            }
+
+            members
+        } else {
+            let host_addr = self.current_leader.node_address.parse::<HostAddr>()?;
+            vec![Member {
+                member_addr: Some(HostAddress {
+                    host: host_addr.host,
+                    port: host_addr.port.into(),
+                }),
+                lease_id: self.current_leader.lease_id as i64,
+            }]
+        };
+
+        Ok(Response::new(MembersResponse { members }))
     }
 }
