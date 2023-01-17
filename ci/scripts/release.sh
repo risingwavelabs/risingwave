@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Exits as soon as any line fails.
 set -euo pipefail
@@ -15,7 +15,9 @@ source ci/scripts/common.env.sh
 
 echo "--- Install protoc3"
 curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip
-unzip -o protoc-3.15.8-linux-x86_64.zip -d /usr/local bin/protoc
+unzip -o protoc-3.15.8-linux-x86_64.zip -d protoc
+mv ./protoc/bin/protoc /usr/local/bin/
+mv ./protoc/include/* /usr/local/include/
 
 echo "--- Install lld"
 yum install -y centos-release-scl-rh

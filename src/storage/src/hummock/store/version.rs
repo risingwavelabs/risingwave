@@ -451,6 +451,12 @@ impl HummockVersionReader {
             )
             .await?
             {
+                local_stats.report_bloom_filter_metrics(
+                    self.state_store_metrics.as_ref(),
+                    "get",
+                    table_id_label,
+                    false,
+                );
                 return Ok(data.into_user_value());
             }
         }
@@ -484,6 +490,12 @@ impl HummockVersionReader {
                         )
                         .await?
                         {
+                            local_stats.report_bloom_filter_metrics(
+                                self.state_store_metrics.as_ref(),
+                                "get",
+                                table_id_label,
+                                false,
+                            );
                             // todo add global stat to report
                             local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                             return Ok(v.into_user_value());
@@ -522,6 +534,12 @@ impl HummockVersionReader {
                     )
                     .await?
                     {
+                        local_stats.report_bloom_filter_metrics(
+                            self.state_store_metrics.as_ref(),
+                            "get",
+                            table_id_label,
+                            false,
+                        );
                         local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                         return Ok(v.into_user_value());
                     }
@@ -529,6 +547,12 @@ impl HummockVersionReader {
             }
         }
 
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "get",
+            table_id_label,
+            true,
+        );
         local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
         self.state_store_metrics
             .iter_merge_sstable_counts
@@ -782,7 +806,16 @@ impl HummockVersionReader {
             .rewind()
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
+
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "iter",
+            table_id_label,
+            user_iter.is_valid(),
+        );
+
         local_stats.report(self.state_store_metrics.deref(), table_id_label);
+
         Ok(HummockStorageIterator::new(
             user_iter,
             self.state_store_metrics.clone(),

@@ -5912,6 +5912,7 @@ dependencies = [
  "smallvec",
  "tempfile",
  "thiserror",
+ "tokio-stream",
  "tracing",
  "uuid",
  "workspace-hack",
