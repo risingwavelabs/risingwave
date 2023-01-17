@@ -42,6 +42,7 @@ pub struct StreamingMetrics {
     pub actor_out_record_cnt: GenericCounterVec<AtomicU64>,
     pub actor_sampled_deserialize_duration_ns: GenericCounterVec<AtomicU64>,
     pub source_output_row_count: GenericCounterVec<AtomicU64>,
+    pub source_row_per_barrier: GenericCounterVec<AtomicU64>,
     pub exchange_recv_size: GenericCounterVec<AtomicU64>,
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
 
@@ -95,6 +96,14 @@ impl StreamingMetrics {
             "stream_source_output_rows_counts",
             "Total number of rows that have been output from source",
             &["source_id", "source_name"],
+            registry
+        )
+        .unwrap();
+
+        let source_row_per_barrier = register_int_counter_vec_with_registry!(
+            "stream_source_rows_per_barrier_counts",
+            "Total number of rows that have been output from source per barrier",
+            &["actor_id", "executor_id"],
             registry
         )
         .unwrap();
