@@ -88,7 +88,6 @@ async fn test_storage_table_get_row() {
     state.commit(epoch).await.unwrap();
     test_env.commit_epoch(epoch.prev).await;
 
-
     let get_row1_res = table
         .get_row(
             &OwnedRow::new(vec![Some(1_i32.into()), None]),
