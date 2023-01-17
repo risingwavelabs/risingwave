@@ -358,6 +358,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
             self.expected_barrier_latency_ms as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
+        let mut metric_row_per_barrier: u64 = 0;
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
@@ -386,6 +387,19 @@ impl<S: StateStore> SourceExecutorV2<S> {
                     }
 
                     self.take_snapshot_and_clear_cache(epoch).await?;
+
+                    self.metrics
+                        .source_row_per_barrier
+                        .with_label_values(&[
+                            self.ctx.id.to_string().as_str(),
+                            self.stream_source_core
+                                .as_ref()
+                                .unwrap()
+                                .source_identify
+                                .as_ref(),
+                        ])
+                        .inc_by(metric_row_per_barrier);
+                    metric_row_per_barrier = 0;
 
                     yield Message::Barrier(barrier);
                 }
@@ -424,6 +438,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
                             .state_cache
                             .extend(state);
                     }
+                    metric_row_per_barrier += chunk.cardinality() as u64;
 
                     self.metrics
                         .source_output_row_count
