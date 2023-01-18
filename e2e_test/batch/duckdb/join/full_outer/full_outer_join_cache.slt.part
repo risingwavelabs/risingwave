@@ -13,7 +13,6 @@ statement ok
 INSERT INTO smalltable VALUES (1);
 
 # values 1...1024 10x
-
 statement ok
 CREATE TABLE bigtable(a int);
 

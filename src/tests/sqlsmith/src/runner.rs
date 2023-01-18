@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Provides E2E Test runner functionality.
 use itertools::Itertools;
 use rand::{Rng, SeedableRng};
 use tokio_postgres::error::Error as PgError;
 
-use crate::{
-    create_table_statement_to_table, is_permissible_error, mview_sql_gen, parse_sql, sql_gen, Table,
-};
+use crate::validation::is_permissible_error;
+use crate::{create_table_statement_to_table, mview_sql_gen, parse_sql, sql_gen, Table};
 
 /// e2e test runner for sqlsmith
 pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize) {
@@ -109,7 +109,7 @@ async fn test_stream_queries<R: Rng>(
 }
 
 fn get_seed_table_sql(testdata: &str) -> String {
-    let seed_files = vec!["tpch.sql", "nexmark.sql"];
+    let seed_files = vec!["tpch.sql", "nexmark.sql", "alltypes.sql"];
     seed_files
         .iter()
         .map(|filename| std::fs::read_to_string(format!("{}/{}", testdata, filename)).unwrap())
@@ -143,9 +143,12 @@ async fn create_tables(
         let (create_sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
         setup_sql.push_str(&format!("{};", &create_sql));
         tracing::info!("Executing MView Setup: {}", &create_sql);
-        client.execute(&create_sql, &[]).await.unwrap();
-        tables.push(table.clone());
-        mviews.push(table);
+        let response = client.execute(&create_sql, &[]).await;
+        let skip_count = validate_response(&setup_sql, &create_sql, response);
+        if skip_count == 0 {
+            tables.push(table.clone());
+            mviews.push(table);
+        }
     }
     (tables, mviews, setup_sql)
 }
@@ -153,7 +156,10 @@ async fn create_tables(
 /// Drops mview tables.
 async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
     client
-        .execute(&format!("DROP MATERIALIZED VIEW {}", mview.name), &[])
+        .execute(
+            &format!("DROP MATERIALIZED VIEW IF EXISTS {}", mview.name),
+            &[],
+        )
         .await
         .unwrap();
 }
@@ -166,7 +172,7 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::
         drop_mview_table(mview, client).await;
     }
 
-    let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql"];
+    let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql", "drop_alltypes.sql"];
     let sql = seed_files
         .iter()
         .map(|filename| std::fs::read_to_string(format!("{}/{}", testdata, filename)).unwrap())

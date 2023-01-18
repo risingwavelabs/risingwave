@@ -121,8 +121,8 @@ SELECT 2 + 2 / 2 AS three;
 SELECT (2 + 2) / 2 AS two;
 
 -- corner case
---@ SELECT (-1::int4<<31)::text;
---@ SELECT ((-1::int4<<31)+1)::text;
+SELECT (-1::int4<<31)::text AS text;
+SELECT ((-1::int4<<31)+1)::text AS text;
 
 -- check sane handling of INT_MIN overflow cases
 SELECT (-2147483648)::int4 * (-1)::int4;

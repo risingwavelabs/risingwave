@@ -19,7 +19,6 @@ statement ok
 INSERT INTO integers2 VALUES (1, 10), (2, 20);
 
 # equality join
-
 query IIII
 SELECT i, j, k, l FROM integers FULL OUTER JOIN integers2 ON integers.i=integers2.k ORDER BY i;
 ----
@@ -28,7 +27,6 @@ SELECT i, j, k, l FROM integers FULL OUTER JOIN integers2 ON integers.i=integers
 NULL	NULL	2	20
 
 # equality join with additional non-equality predicate
-
 query IIII
 SELECT i, j, k, l FROM integers FULL OUTER JOIN integers2 ON integers.i=integers2.k AND integers.j > integers2.l ORDER BY 1, 2, 3, 4;
 ----
@@ -38,7 +36,6 @@ NULL	NULL	1	10
 NULL	NULL	2	20
 
 # equality join with varchar values
-
 query IIIT
 SELECT i, j, k, l FROM integers FULL OUTER JOIN (SELECT k, l::VARCHAR AS l FROM integers2) integers2 ON integers.i=integers2.k ORDER BY 1, 2, 3, 4;
 ----
@@ -47,7 +44,6 @@ SELECT i, j, k, l FROM integers FULL OUTER JOIN (SELECT k, l::VARCHAR AS l FROM 
 NULL	NULL	2	20
 
 # empty RHS
-
 query IIII
 SELECT i, j, k, l FROM integers FULL OUTER JOIN (SELECT * FROM integers2 WHERE 1=0) integers2 ON integers.i=integers2.k ORDER BY 1, 2, 3, 4;
 ----

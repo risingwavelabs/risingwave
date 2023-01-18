@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -46,6 +46,14 @@ macro_rules! impl_chrono_wrapper {
                 $variant_name(data)
             }
         }
+
+        impl std::str::FromStr for $variant_name {
+            type Err = chrono::ParseError;
+
+            fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+                Ok($variant_name(s.parse()?))
+            }
+        }
     };
 }
 
@@ -72,39 +80,39 @@ impl Default for NaiveDateTimeWrapper {
 }
 
 impl ToText for NaiveDateWrapper {
-    fn to_text(&self) -> String {
-        self.0.to_string()
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            super::DataType::Date => self.to_text(),
+            super::DataType::Date => self.write(f),
             _ => unreachable!(),
         }
     }
 }
 
 impl ToText for NaiveTimeWrapper {
-    fn to_text(&self) -> String {
-        self.0.to_string()
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            super::DataType::Time => self.to_text(),
+            super::DataType::Time => self.write(f),
             _ => unreachable!(),
         }
     }
 }
 
 impl ToText for NaiveDateTimeWrapper {
-    fn to_text(&self) -> String {
-        self.0.to_string()
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            super::DataType::Timestamp => self.to_text(),
+            super::DataType::Timestamp => self.write(f),
             _ => unreachable!(),
         }
     }
@@ -160,9 +168,8 @@ impl NaiveDateWrapper {
 
     pub fn with_days_value(days: i32) -> value_encoding::Result<Self> {
         Ok(NaiveDateWrapper::new(
-            #[allow(clippy::unnecessary_lazy_evaluations)]
             NaiveDate::from_num_days_from_ce_opt(days)
-                .ok_or_else(|| ValueEncodingError::InvalidNaiveDateEncoding(days))?,
+                .ok_or(ValueEncodingError::InvalidNaiveDateEncoding(days))?,
         ))
     }
 
@@ -214,10 +221,9 @@ impl NaiveTimeWrapper {
     }
 
     pub fn with_secs_nano_value(secs: u32, nano: u32) -> value_encoding::Result<Self> {
-        #[allow(clippy::unnecessary_lazy_evaluations)] // TODO: remove in toolchain bump
         Ok(NaiveTimeWrapper::new(
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
-                .ok_or_else(|| ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))?,
+                .ok_or(ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))?,
         ))
     }
 
@@ -267,9 +273,9 @@ impl NaiveDateTimeWrapper {
 
     pub fn with_secs_nsecs_value(secs: i64, nsecs: u32) -> value_encoding::Result<Self> {
         Ok(NaiveDateTimeWrapper::new({
-            #[allow(clippy::unnecessary_lazy_evaluations)] // TODO: remove in toolchain bump
-            NaiveDateTime::from_timestamp_opt(secs, nsecs)
-                .ok_or_else(|| ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs))?
+            NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or(
+                ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs),
+            )?
         }))
     }
 

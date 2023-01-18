@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,7 +13,9 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::StreamExt;
 use minitrace::prelude::*;
@@ -24,8 +26,10 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
 };
+use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
+use task_stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio_metrics::TaskMonitor;
@@ -41,6 +45,46 @@ use crate::task::BatchTaskContext;
 
 // Now we will only at most have 2 status for each status channel. Running -> Failed or Finished.
 const TASK_STATUS_BUFFER_SIZE: usize = 2;
+
+/// A special version for batch allocation stat, passed in another task `context` C to report task
+/// mem usage 0 bytes at the end.
+pub async fn allocation_stat_for_batch<Fut, T, F, C>(
+    future: Fut,
+    interval: Duration,
+    mut report: F,
+    context: C,
+) -> T
+where
+    Fut: Future<Output = T>,
+    F: FnMut(usize),
+    C: BatchTaskContext,
+{
+    BYTES_ALLOCATED
+        .scope(TaskLocalBytesAllocated::new(), async move {
+            // The guard has the same lifetime as the counter so that the counter will keep positive
+            // in the whole scope. When the scope exits, the guard is released, so the counter can
+            // reach zero eventually and then `drop` itself.
+            let _guard = Box::new(114514);
+            let monitor = async move {
+                let mut interval = tokio::time::interval(interval);
+                loop {
+                    interval.tick().await;
+                    BYTES_ALLOCATED.with(|bytes| report(bytes.val()));
+                }
+            };
+            let output = tokio::select! {
+                biased;
+                _ = monitor => unreachable!(),
+                output = future => {
+                    // Report mem usage as 0 after ends immediately.
+                    context.store_mem_usage(0);
+                    output
+                },
+            };
+            output
+        })
+        .await
+}
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Default)]
 pub struct TaskId {
@@ -203,6 +247,8 @@ pub struct BatchTaskExecution<C> {
     /// Receivers data of the task.
     receivers: Mutex<Vec<Option<ChanReceiverImpl>>>,
 
+    sender: ChanSenderImpl,
+
     /// Context for task execution
     context: C,
 
@@ -216,7 +262,7 @@ pub struct BatchTaskExecution<C> {
     /// This is a hack, cuz there is no easy way to get out the receiver.
     state_rx: Mutex<Option<tokio::sync::mpsc::Receiver<TaskInfoResponseResult>>>,
 
-    epoch: u64,
+    epoch: BatchQueryEpoch,
 
     /// Runtime for the batch tasks.
     runtime: &'static Runtime,
@@ -227,21 +273,31 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         prost_tid: &ProstTaskId,
         plan: PlanFragment,
         context: C,
-        epoch: u64,
+        epoch: BatchQueryEpoch,
         runtime: &'static Runtime,
     ) -> Result<Self> {
         let task_id = TaskId::from(prost_tid);
+
+        let (sender, receivers) = create_output_channel(
+            plan.get_exchange_info()?,
+            context.get_config().developer.batch_output_channel_size,
+        )?;
+
+        let mut rts = Vec::new();
+        rts.extend(receivers.into_iter().map(Some));
+
         Ok(Self {
             task_id,
             plan,
             state: Mutex::new(TaskStatus::Pending),
-            receivers: Mutex::new(Vec::new()),
+            receivers: Mutex::new(rts),
             failure: Arc::new(Mutex::new(None)),
             epoch,
             shutdown_tx: Mutex::new(None),
             state_rx: Mutex::new(None),
             context,
             runtime,
+            sender,
         })
     }
 
@@ -266,24 +322,15 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             self.plan.root.as_ref().unwrap(),
             &self.task_id,
             self.context.clone(),
-            self.epoch,
+            self.epoch.clone(),
         )
         .build()
         .await?;
 
         // Init shutdown channel and data receivers.
-        let (sender, receivers) = create_output_channel(
-            self.plan.get_exchange_info()?,
-            self.context
-                .get_config()
-                .developer
-                .batch_output_channel_size,
-        )?;
+        let sender = self.sender.clone();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();
         *self.shutdown_tx.lock() = Some(shutdown_tx);
-        self.receivers
-            .lock()
-            .extend(receivers.into_iter().map(Some));
         let failure = self.failure.clone();
         let task_id = self.task_id.clone();
 
@@ -299,7 +346,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let t_1 = self.clone();
         let t_2 = self.clone();
         // Spawn task for real execution.
-        self.runtime.spawn(async move {
+        let fut = async move {
             trace!("Executing plan [{:?}]", task_id);
             let mut sender = sender;
             let mut state_tx = state_tx;
@@ -371,7 +418,21 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     error!("Batch task {:?} panic!", task_id);
                 }
             }
-        });
+        };
+
+        // For every fired Batch Task, we will wrap it with allocation stats to report memory
+        // estimation per task to `BatchManager`.
+        let ctx1 = self.context.clone();
+        let ctx2 = self.context.clone();
+        let alloc_stat_wrap_fut = allocation_stat_for_batch(
+            fut,
+            Duration::from_millis(1000),
+            move |bytes| {
+                ctx1.store_mem_usage(bytes);
+            },
+            ctx2,
+        );
+        self.runtime.spawn(alloc_stat_wrap_fut);
         Ok(())
     }
 
@@ -470,6 +531,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 e
             );
         }
+
         Ok(())
     }
 
@@ -532,6 +594,16 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             .lock()
             .take()
             .expect("The state receivers must have been inited!")
+    }
+
+    pub fn get_mem_usage(&self) -> usize {
+        self.context.get_mem_usage()
+    }
+
+    /// Check the task status: whether has ended.
+    pub fn is_end(&self) -> bool {
+        let guard = self.state.lock();
+        !(*guard == TaskStatus::Running || *guard == TaskStatus::Pending)
     }
 }
 

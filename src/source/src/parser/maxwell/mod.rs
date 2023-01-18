@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,40 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-mod json_parser;
 mod operators;
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 mod simd_json_parser;
 
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-pub use json_parser::*;
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 pub use simd_json_parser::*;
 
 #[cfg(test)]
 mod test {
     use risingwave_common::array::Op;
+    use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
     use risingwave_expr::vector_op::cast::str_to_timestamp;
 
@@ -55,8 +30,8 @@ mod test {
     async fn test_json_parser() {
         let parser = MaxwellParser;
         let descs = vec![
-            SourceColumnDesc::simple("id", DataType::Int32, 0.into()),
-            SourceColumnDesc::simple("name", DataType::Varchar, 1.into()),
+            SourceColumnDesc::simple("ID", DataType::Int32, 0.into()),
+            SourceColumnDesc::simple("NAME", DataType::Varchar, 1.into()),
             SourceColumnDesc::simple("is_adult", DataType::Int16, 2.into()),
             SourceColumnDesc::simple("birthday", DataType::Timestamp, 3.into()),
         ];
@@ -80,17 +55,17 @@ mod test {
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
-            assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
             assert_eq!(
-                row.value_at(1).to_owned_datum(),
+                row.datum_at(1).to_owned_datum(),
                 (Some(ScalarImpl::Utf8("tom".into())))
             );
             assert_eq!(
-                row.value_at(2).to_owned_datum(),
+                row.datum_at(2).to_owned_datum(),
                 (Some(ScalarImpl::Int16(0)))
             );
             assert_eq!(
-                row.value_at(3).to_owned_datum(),
+                row.datum_at(3).to_owned_datum(),
                 (Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("2017-12-31 16:00:01").unwrap()
                 )))
@@ -100,17 +75,17 @@ mod test {
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
-            assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int32(2)));
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(2)));
             assert_eq!(
-                row.value_at(1).to_owned_datum(),
+                row.datum_at(1).to_owned_datum(),
                 (Some(ScalarImpl::Utf8("alex".into())))
             );
             assert_eq!(
-                row.value_at(2).to_owned_datum(),
+                row.datum_at(2).to_owned_datum(),
                 (Some(ScalarImpl::Int16(1)))
             );
             assert_eq!(
-                row.value_at(3).to_owned_datum(),
+                row.datum_at(3).to_owned_datum(),
                 (Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("1999-12-31 16:00:01").unwrap()
                 )))
@@ -120,17 +95,17 @@ mod test {
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::UpdateDelete);
-            assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int32(2)));
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(2)));
             assert_eq!(
-                row.value_at(1).to_owned_datum(),
+                row.datum_at(1).to_owned_datum(),
                 (Some(ScalarImpl::Utf8("alex".into())))
             );
             assert_eq!(
-                row.value_at(2).to_owned_datum(),
+                row.datum_at(2).to_owned_datum(),
                 (Some(ScalarImpl::Int16(1)))
             );
             assert_eq!(
-                row.value_at(3).to_owned_datum(),
+                row.datum_at(3).to_owned_datum(),
                 (Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("1999-12-31 16:00:01").unwrap()
                 )))
@@ -140,17 +115,17 @@ mod test {
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::UpdateInsert);
-            assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int32(2)));
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(2)));
             assert_eq!(
-                row.value_at(1).to_owned_datum(),
+                row.datum_at(1).to_owned_datum(),
                 (Some(ScalarImpl::Utf8("chi".into())))
             );
             assert_eq!(
-                row.value_at(2).to_owned_datum(),
+                row.datum_at(2).to_owned_datum(),
                 (Some(ScalarImpl::Int16(1)))
             );
             assert_eq!(
-                row.value_at(3).to_owned_datum(),
+                row.datum_at(3).to_owned_datum(),
                 (Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("1999-12-31 16:00:01").unwrap()
                 )))

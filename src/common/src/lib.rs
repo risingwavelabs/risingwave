@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,7 +29,13 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(let_chains)]
+#![feature(return_position_impl_trait_in_trait)]
+#![feature(portable_simd)]
+#![feature(array_chunks)]
+#![allow(incomplete_features)]
 
+#[macro_use]
+pub mod jemalloc;
 #[macro_use]
 pub mod error;
 #[macro_use]

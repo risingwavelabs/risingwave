@@ -8,14 +8,15 @@ edition = "2021"
 anyhow = "1.0"
 async-trait = "0.1"
 clap = "3"
-etcd-client = { version = "0.2.11", package = "madsim-etcd-client" }
+console = "0.15"
+etcd-client = { version = "0.2.13", package = "madsim-etcd-client" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
 itertools = "0.10"
-madsim = "0.2.11"
+madsim = "0.2.13"
 paste = "1"
 rand = "0.8"
-rdkafka = { package = "madsim-rdkafka", version = "=0.2.8-alpha", features = ["cmake-build"] }
+rdkafka = { package = "madsim-rdkafka", version = "=0.2.13-alpha", features = ["cmake-build"] }
 risingwave_common = { path = "../../common" }
 risingwave_compactor = { path = "../../storage/compactor" }
 risingwave_compute = { path = "../../compute" }
@@ -24,8 +25,12 @@ risingwave_frontend = { path = "../../frontend" }
 risingwave_meta = { path = "../../meta" }
 risingwave_pb = { path = "../../prost" }
 risingwave_sqlsmith = { path = "../sqlsmith" }
-sqllogictest = "0.8"
+serde = "1.0.152"
+serde_derive = "1.0.152"
+serde_json = "1.0.91"
+sqllogictest = "0.11.1"
 tempfile = "3"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7.7"
 tracing = "0.1"
+tracing-subscriber = "0.3"

@@ -5,9 +5,13 @@ package expr;
 import "data.proto";
 import "plan_common.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message ExprNode {
+  // a "pure function" will be defined as having `1 < expr_node as i32 <= 600`.
+  // Please modify this definition if adding a pure function that does not belong
+  // to this range.
   enum Type {
     UNSPECIFIED = 0;
     INPUT_REF = 1;
@@ -30,6 +34,8 @@ message ExprNode {
     OR = 22;
     NOT = 23;
     IN = 24;
+    SOME = 25;
+    ALL = 26;
     // bitwise operators
     BITWISE_AND = 31;
     BITWISE_OR = 32;
@@ -40,9 +46,16 @@ message ExprNode {
     // date functions
     EXTRACT = 101;
     TUMBLE_START = 103;
+    // From f64 to timestamp.
+    // e.g. `select to_timestamp(1672044740.0)`
     TO_TIMESTAMP = 104;
     AT_TIME_ZONE = 105;
     DATE_TRUNC = 106;
+    // Parse text to timestamp by format string.
+    // e.g. `select to_timestamp('2022 08 21', 'YYYY MM DD')`
+    TO_TIMESTAMP1 = 107;
+    // Performs a cast with additional timezone information.
+    CAST_WITH_TIME_ZONE = 108;
     // other functions
     CAST = 201;
     SUBSTR = 202;
@@ -102,11 +115,15 @@ message ExprNode {
     ARRAY_CAT = 531;
     ARRAY_APPEND = 532;
     ARRAY_PREPEND = 533;
-    // Search operator and Search ARGument
-    SEARCH = 998;
-    SARG = 999;
+
+    // Non-pure functions below (> 600)
+    // ------------------------
     // Internal functions
     VNODE = 1101;
+    // Non-deterministic functions
+    NOW = 2022;
+    // User defined functions
+    UDF = 3000;
   }
   Type expr_type = 1;
   data.DataType return_type = 3;
@@ -114,6 +131,7 @@ message ExprNode {
     InputRefExpr input_ref = 4;
     data.Datum constant = 5;
     FunctionCall func_call = 6;
+    UserDefinedFunction udf = 7;
   }
 }
 
@@ -202,4 +220,12 @@ message AggCall {
   }
   repeated OrderByField order_by_fields = 5;
   ExprNode filter = 6;
+}
+
+message UserDefinedFunction {
+  repeated ExprNode children = 1;
+  string name = 2;
+  repeated data.DataType arg_types = 3;
+  string language = 4;
+  string path = 5;
 }

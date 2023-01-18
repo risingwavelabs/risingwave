@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,9 +16,9 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Field;
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::error::ErrorCode;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName, TableAlias};
+use risingwave_sqlparser::ast::{FunctionArg, TableAlias};
 
 use super::{Binder, Relation, Result};
 use crate::expr::{ExprImpl, InputRef};
@@ -66,23 +66,10 @@ impl Binder {
 
         self.push_context();
 
-        let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))) = args.next() else {
-            return Err(ErrorCode::BindError(ERROR_1ST_ARG.to_string()).into());
-        };
-        let table_name = match expr {
-            Expr::Identifier(ident) => Ok::<_, RwError>(ObjectName(vec![ident])),
-            Expr::CompoundIdentifier(idents) => Ok(ObjectName(idents)),
-            _ => Err(ErrorCode::BindError(ERROR_1ST_ARG.to_string()).into()),
-        }?;
+        let (base, table_name) = self.bind_relation_by_function_arg(args.next(), ERROR_1ST_ARG)?;
 
-        let base = self.bind_relation_by_name(table_name.clone(), None)?;
+        let time_col = self.bind_column_by_function_args(args.next(), ERROR_2ND_ARG_EXPR)?;
 
-        let time_col = if let Some(time_col_arg) = args.next()
-          && let Some(ExprImpl::InputRef(time_col)) = self.bind_function_arg(time_col_arg)?.into_iter().next() {
-            time_col
-        } else {
-            return Err(ErrorCode::BindError(ERROR_2ND_ARG_EXPR.to_string()).into());
-        };
         let Some(output_type) = DataType::window_of(&time_col.data_type) else {
             return Err(ErrorCode::BindError(ERROR_2ND_ARG_TYPE.to_string()).into());
         };

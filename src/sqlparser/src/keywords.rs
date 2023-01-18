@@ -2,7 +2,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -180,6 +180,7 @@ define_keywords!(
     DEFAULT,
     DEFERRABLE,
     DELETE,
+    DELIMITED,
     DENSE_RANK,
     DEREF,
     DESC,
@@ -261,6 +262,7 @@ define_keywords!(
     INSERT,
     INT,
     INTEGER,
+    INTERNAL,
     INTERSECT,
     INTERSECTION,
     INTERVAL,
@@ -575,6 +577,7 @@ pub const RESERVED_FOR_TABLE_ALIAS: &[Keyword] = &[
     // for MSSQL-specific OUTER APPLY (seems reserved in most dialects)
     Keyword::OUTER,
     Keyword::SET,
+    Keyword::RETURNING,
 ];
 
 /// Can't be used as a column alias, so that `SELECT <expr> alias`

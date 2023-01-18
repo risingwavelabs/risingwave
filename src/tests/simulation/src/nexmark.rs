@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -66,7 +66,7 @@ impl NexmarkCluster {
             output
         };
 
-        self.run(&format!(
+        self.run(format!(
             r#"
 create source auction (
     id INTEGER,
@@ -87,7 +87,7 @@ with (
         ))
         .await?;
 
-        self.run(&format!(
+        self.run(format!(
             r#"
 create source bid (
     auction INTEGER,
@@ -103,7 +103,7 @@ with (
         ))
         .await?;
 
-        self.run(&format!(
+        self.run(format!(
             r#"
 create source person (
     id INTEGER,
@@ -141,6 +141,7 @@ impl DerefMut for NexmarkCluster {
 }
 
 /// Nexmark queries.
+// TODO: import the query from external files and avoid duplicating the queries in the code.
 pub mod queries {
     use std::time::Duration;
 
@@ -148,6 +149,8 @@ pub mod queries {
     const DEFAULT_INITIAL_TIMEOUT: Duration = Duration::from_secs(20);
 
     pub mod q3 {
+        //! Covers hash inner join.
+
         use super::*;
         pub const CREATE: &str = r#"
 CREATE MATERIALIZED VIEW nexmark_q3
@@ -170,6 +173,8 @@ DROP MATERIALIZED VIEW nexmark_q3;
     }
 
     pub mod q4 {
+        //! Covers hash inner join and hash aggregation.
+
         use super::*;
         pub const CREATE: &str = r#"
 CREATE MATERIALIZED VIEW nexmark_q4
@@ -203,6 +208,8 @@ DROP MATERIALIZED VIEW nexmark_q4;
     }
 
     pub mod q5 {
+        //! Covers self-join.
+
         use super::*;
         pub const CREATE: &str = r#"
 CREATE MATERIALIZED VIEW nexmark_q5
@@ -247,6 +254,8 @@ DROP MATERIALIZED VIEW nexmark_q5;
     }
 
     pub mod q7 {
+        //! Covers self-join.
+
         use super::*;
         pub const CREATE: &str = r#"
 CREATE MATERIALIZED VIEW nexmark_q7
@@ -282,6 +291,8 @@ DROP MATERIALIZED VIEW nexmark_q7;
     }
 
     pub mod q8 {
+        //! Covers self-join.
+
         use super::*;
         pub const CREATE: &str = r#"
 CREATE MATERIALIZED VIEW nexmark_q8
@@ -330,6 +341,8 @@ DROP MATERIALIZED VIEW nexmark_q8;
     }
 
     pub mod q9 {
+        //! Covers group top-n.
+
         use super::*;
         pub const CREATE: &str = r#"
 CREATE MATERIALIZED VIEW nexmark_q9
@@ -350,6 +363,157 @@ SELECT * FROM nexmark_q9 ORDER BY id;
 "#;
         pub const DROP: &str = r#"
 DROP MATERIALIZED VIEW nexmark_q9;
+"#;
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
+    pub mod q101 {
+        //! A self-made query that covers outer join.
+        //!
+        //! Monitor ongoing auctions and track the current highest bid for each one in real-time. If
+        //! the auction has no bids, the highest bid will be NULL.
+
+        use super::*;
+        pub const CREATE: &str = r#"
+CREATE MATERIALIZED VIEW nexmark_q101
+AS
+SELECT
+    a.id AS auction_id,
+    a.item_name AS auction_item_name,
+    b.max_price AS current_highest_bid
+FROM auction a
+LEFT OUTER JOIN (
+    SELECT
+        b1.auction,
+        MAX(b1.price) max_price
+    FROM bid b1
+    GROUP BY b1.auction
+) b ON a.id = b.auction;
+"#;
+        pub const SELECT: &str = r#"
+SELECT * FROM nexmark_q101 ORDER BY auction_id;
+"#;
+        pub const DROP: &str = r#"
+DROP MATERIALIZED VIEW nexmark_q101;
+"#;
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
+    pub mod q102 {
+        //! A self-made query that covers dynamic filter and simple aggregation.
+        //!
+        //! Show the auctions whose count of bids is greater than the overall average count of bids
+        //! per auction.
+
+        use super::*;
+        pub const CREATE: &str = r#"
+CREATE MATERIALIZED VIEW nexmark_q102
+AS
+SELECT
+    a.id AS auction_id,
+    a.item_name AS auction_item_name,
+    COUNT(b.auction) AS bid_count
+FROM auction a
+JOIN bid b ON a.id = b.auction
+GROUP BY a.id, a.item_name
+HAVING COUNT(b.auction) >= (
+    SELECT COUNT(*) / COUNT(DISTINCT auction) FROM bid
+);
+"#;
+        pub const SELECT: &str = r#"
+SELECT * FROM nexmark_q102 ORDER BY auction_id;
+"#;
+        pub const DROP: &str = r#"
+DROP MATERIALIZED VIEW nexmark_q102;
+"#;
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
+    pub mod q103 {
+        //! A self-made query that covers semi join.
+        //!
+        //! Show the auctions that have at least 20 bids.
+
+        use super::*;
+        pub const CREATE: &str = r#"
+CREATE MATERIALIZED VIEW nexmark_q103
+AS
+SELECT
+    a.id AS auction_id,
+    a.item_name AS auction_item_name
+FROM auction a
+WHERE a.id IN (
+    SELECT b.auction FROM bid b
+    GROUP BY b.auction
+    HAVING COUNT(*) >= 20
+);
+"#;
+        pub const SELECT: &str = r#"
+SELECT * FROM nexmark_q103 ORDER BY auction_id;
+"#;
+        pub const DROP: &str = r#"
+DROP MATERIALIZED VIEW nexmark_q103;
+"#;
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
+    pub mod q104 {
+        //! A self-made query that covers anti join.
+        //!
+        //! This is the same as q103, which shows the auctions that have at least 20 bids.
+
+        use super::*;
+        pub const CREATE: &str = r#"
+CREATE MATERIALIZED VIEW nexmark_q104
+AS
+SELECT
+    a.id AS auction_id,
+    a.item_name AS auction_item_name
+FROM auction a
+WHERE a.id NOT IN (
+    SELECT b.auction FROM bid b
+    GROUP BY b.auction
+    HAVING COUNT(*) < 20
+);
+"#;
+        pub const SELECT: &str = r#"
+SELECT * FROM nexmark_q104 ORDER BY auction_id;
+"#;
+        pub const DROP: &str = r#"
+DROP MATERIALIZED VIEW nexmark_q104;
+"#;
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+    }
+
+    pub mod q105 {
+        //! A self-made query that covers singleton top-n (and local-phase group top-n).
+        //!
+        //! Show the top 1000 auctions by the number of bids.
+
+        use super::*;
+        pub const CREATE: &str = r#"
+CREATE MATERIALIZED VIEW nexmark_q105
+AS
+SELECT
+    a.id AS auction_id,
+    a.item_name AS auction_item_name,
+    COUNT(b.auction) AS bid_count
+FROM auction a
+JOIN bid b ON a.id = b.auction
+GROUP BY a.id, a.item_name
+ORDER BY bid_count DESC
+LIMIT 1000;
+"#;
+        pub const SELECT: &str = r#"
+SELECT * FROM nexmark_q105;
+"#;
+        pub const DROP: &str = r#"
+DROP MATERIALIZED VIEW nexmark_q105;
 "#;
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;

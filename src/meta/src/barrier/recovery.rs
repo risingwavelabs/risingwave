@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -117,7 +117,7 @@ where
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
 
-        debug!("recovery start!");
+        tracing::info!("recovery start!");
         self.clean_dirty_fragments()
             .await
             .expect("clean dirty fragments");
@@ -189,7 +189,7 @@ where
         })
         .await
         .expect("Retry until recovery success.");
-        debug!("recovery success");
+        tracing::info!("recovery success");
 
         new_epoch
     }
@@ -333,7 +333,7 @@ where
 
     /// Reset all compute nodes by calling `force_stop_actors`.
     async fn reset_compute_nodes(&self, info: &BarrierActorInfo) -> MetaResult<()> {
-        let futures = info.node_map.iter().map(|(_, worker_node)| async move {
+        let futures = info.node_map.values().map(|worker_node| async move {
             let client = self.env.stream_client_pool().get(worker_node).await?;
             debug!(worker = ?worker_node.id, "force stop actors");
             client

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,39 +13,30 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ColumnDesc, Field};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{ObjectName, Query, Statement};
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
+use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::{BoundSetExpr, BoundStatement};
-use crate::handler::create_table::gen_create_table_plan_without_bind;
+use crate::handler::create_table::{gen_create_table_plan_without_bind, ColumnIdGenerator};
 use crate::handler::query::handle_query;
 use crate::{build_graph, Binder, OptimizerContext};
-
-/// Used in `handle_create_as` to convert filed to column desc
-fn convert_field_to_column_desc(field: &Field, column_id: i32) -> ColumnDesc {
-    let field_descs = field
-        .sub_fields
-        .iter()
-        .map(|field| convert_field_to_column_desc(field, 0))
-        .collect();
-
-    ColumnDesc {
-        data_type: field.data_type(),
-        name: field.name.clone(),
-        column_id: column_id.into(),
-        field_descs,
-        type_name: "".to_string(),
-    }
-}
 
 pub async fn handle_create_as(
     handler_args: HandlerArgs,
     table_name: ObjectName,
     if_not_exists: bool,
     query: Box<Query>,
+    columns: Vec<ColumnDef>,
 ) -> Result<RwPgResponse> {
+    if columns.iter().any(|column| column.data_type.is_some()) {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "Should not specify data type in CREATE TABLE AS".into(),
+        )
+        .into());
+    }
     let session = handler_args.session.clone();
 
     if let Err(e) = session.check_relation_name_duplicated(table_name.clone()) {
@@ -60,7 +51,7 @@ pub async fn handle_create_as(
     }
 
     // Generate catalog descs from query
-    let column_descs: Vec<_> = {
+    let mut column_descs: Vec<_> = {
         let mut binder = Binder::new(&session);
         let bound = binder.bind(Statement::Query(query.clone()))?;
         if let BoundStatement::Query(query) = bound {
@@ -74,31 +65,50 @@ pub async fn handle_create_as(
                 }
             }
 
+            let mut col_id_gen = ColumnIdGenerator::new_initial();
+
             // Create ColumnCatelog by Field
             query
                 .schema()
                 .fields()
                 .iter()
-                .enumerate()
-                .map(|(column_id, field)| convert_field_to_column_desc(field, column_id as i32))
+                .map(|field| {
+                    let id = col_id_gen.generate(&field.name);
+                    ColumnDesc::from_field_with_column_id(field, id.get_id())
+                })
                 .collect()
         } else {
             unreachable!()
         }
     };
 
+    if columns.len() > column_descs.len() {
+        return Err(ErrorCode::InvalidInputSyntax(
+            "too many column names were specified".to_string(),
+        )
+        .into());
+    }
+
+    columns.iter().enumerate().for_each(|(idx, column)| {
+        column_descs[idx].name = column.name.real_value();
+    });
+
     let (graph, source, table) = {
-        let context = OptimizerContext::new_with_handler_args(handler_args.clone());
+        let context = OptimizerContext::from_handler_args(handler_args.clone());
         let (plan, source, table) = gen_create_table_plan_without_bind(
-            &session,
-            context.into(),
+            context,
             table_name.clone(),
             column_descs,
             None,
             vec![],
+            "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
+            None,          // TODO: support `ALTER TABLE` for `CREATE TABLE AS`
         )?;
-        let graph = build_graph(plan);
-
+        let mut graph = build_graph(plan);
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
         (graph, source, table)
     };
 
@@ -119,6 +129,7 @@ pub async fn handle_create_as(
         table_name,
         columns: vec![],
         source: query,
+        returning: vec![],
     };
 
     handle_query(handler_args, insert, false).await

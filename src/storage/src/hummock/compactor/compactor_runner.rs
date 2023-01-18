@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,26 +18,25 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
 use super::task_progress::TaskProgress;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
-use crate::hummock::compactor::{
-    CompactOutput, CompactionFilter, Compactor, CompactorContext, CompactorSstableStoreRef,
-};
+use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
 use crate::hummock::sstable::DeleteRangeAggregatorBuilder;
 use crate::hummock::{
     CachePolicy, CompressionAlgorithm, HummockResult, RangeTombstonesCollector,
-    SstableBuilderOptions,
+    SstableBuilderOptions, SstableStoreRef,
 };
 use crate::monitor::StoreLocalStatistic;
 
 pub struct CompactorRunner {
     compact_task: CompactTask,
     compactor: Compactor,
-    sstable_store: CompactorSstableStoreRef,
+    sstable_store: SstableStoreRef,
     key_range: KeyRange,
     split_index: usize,
 }
@@ -90,7 +89,7 @@ impl CompactorRunner {
         Self {
             compactor,
             compact_task: task,
-            sstable_store: context.sstable_store.clone(),
+            sstable_store: context.context.sstable_store.clone(),
             key_range,
             split_index,
         }
@@ -117,9 +116,10 @@ impl CompactorRunner {
         Ok((self.split_index, ssts, table_stats_map))
     }
 
-    pub async fn build_delete_range_iter(
+    pub async fn build_delete_range_iter<F: CompactionFilter>(
         compact_task: &CompactTask,
-        sstable_store: &CompactorSstableStoreRef,
+        sstable_store: &SstableStoreRef,
+        filter: &mut F,
     ) -> HummockResult<Arc<RangeTombstonesCollector>> {
         let mut builder = DeleteRangeAggregatorBuilder::default();
         let mut local_stats = StoreLocalStatistic::default();
@@ -130,7 +130,20 @@ impl CompactorRunner {
 
             for table_info in &level.table_infos {
                 let table = sstable_store.sstable(table_info, &mut local_stats).await?;
-                builder.add_tombstone(table.value().meta.range_tombstone_list.clone());
+                let range_tombstone_list = table
+                    .value()
+                    .meta
+                    .range_tombstone_list
+                    .iter()
+                    .filter(|tombstone| {
+                        !filter.should_delete(FullKey::from_user_key(
+                            tombstone.start_user_key.as_ref(),
+                            tombstone.sequence,
+                        ))
+                    })
+                    .cloned()
+                    .collect_vec();
+                builder.add_tombstone(range_tombstone_list);
             }
         }
         let aggregator = builder.build(compact_task.watermark, compact_task.gc_delete_keys);
@@ -178,5 +191,65 @@ impl CompactorRunner {
             }
         }
         Ok(UnorderedMergeIteratorInner::for_compactor(table_iters))
+    }
+}
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::UserKey;
+    use risingwave_pb::hummock::InputLevel;
+
+    use super::*;
+    use crate::hummock::compactor::StateCleanUpCompactionFilter;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_test_sstable_with_range_tombstone,
+    };
+    use crate::hummock::DeleteRangeTombstone;
+
+    #[tokio::test]
+    async fn test_delete_range_aggregator_with_filter() {
+        let sstable_store = mock_sstable_store();
+        let kv_pairs = vec![];
+        let range_tombstones = vec![
+            DeleteRangeTombstone::new(TableId::new(1), b"abc".to_vec(), b"cde".to_vec(), 1),
+            DeleteRangeTombstone::new(TableId::new(2), b"abc".to_vec(), b"def".to_vec(), 1),
+        ];
+        let sstable_info = gen_test_sstable_with_range_tombstone(
+            default_builder_opt_for_test(),
+            1,
+            kv_pairs.into_iter(),
+            range_tombstones.clone(),
+            sstable_store.clone(),
+        )
+        .await
+        .get_sstable_info();
+        let compact_task = CompactTask {
+            input_ssts: vec![InputLevel {
+                level_idx: 0,
+                level_type: 0,
+                table_infos: vec![sstable_info],
+            }],
+            existing_table_ids: vec![2],
+            ..Default::default()
+        };
+        let mut state_clean_up_filter = StateCleanUpCompactionFilter::new(HashSet::from_iter(
+            compact_task.existing_table_ids.clone(),
+        ));
+        let collector = CompactorRunner::build_delete_range_iter(
+            &compact_task,
+            &sstable_store,
+            &mut state_clean_up_filter,
+        )
+        .await
+        .unwrap();
+        let ret = collector.get_tombstone_between(
+            &UserKey::<Bytes>::default().as_ref(),
+            &UserKey::<Bytes>::default().as_ref(),
+        );
+        assert_eq!(ret.len(), 1);
+        assert_eq!(ret[0], range_tombstones[1]);
     }
 }

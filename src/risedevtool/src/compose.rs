@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -264,7 +264,11 @@ impl Compose for FrontendConfig {
 impl Compose for CompactorConfig {
     fn compose(&self, config: &ComposeConfig) -> Result<ComposeService> {
         let mut command = Command::new("compactor-node");
-        CompactorService::apply_command_args(&mut command, self)?;
+        CompactorService::apply_command_args(
+            &mut command,
+            self,
+            HummockInMemoryStrategy::Disallowed,
+        )?;
 
         if let Some(c) = &config.rw_config_path {
             let target = Path::new(&config.config_directory).join("risingwave.toml");
@@ -421,17 +425,17 @@ impl Compose for GrafanaConfig {
         let config_root = Path::new(&config.config_directory);
         std::fs::write(
             config_root.join("grafana.ini"),
-            &GrafanaGen.gen_custom_ini(self),
+            GrafanaGen.gen_custom_ini(self),
         )?;
 
         std::fs::write(
             config_root.join("grafana-risedev-datasource.yml"),
-            &GrafanaGen.gen_datasource_yml(self)?,
+            GrafanaGen.gen_datasource_yml(self)?,
         )?;
 
         std::fs::write(
             config_root.join("grafana-risedev-dashboard.yml"),
-            &GrafanaGen.gen_dashboard_yml(self, config_root, "/")?,
+            GrafanaGen.gen_dashboard_yml(self, config_root, "/")?,
         )?;
 
         let service = ComposeService {

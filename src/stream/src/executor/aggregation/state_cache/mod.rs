@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
+use std::collections::BTreeMap;
+
 use risingwave_common::array::Op;
 use risingwave_common::types::{Datum, DatumRef};
 use smallvec::SmallVec;
@@ -71,10 +72,10 @@ impl<'a> StateCacheFiller<'a> {
     pub fn insert(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>) {
         self.cache.insert_unchecked(key, value)
     }
-}
 
-impl<'a> Drop for StateCacheFiller<'a> {
-    fn drop(&mut self) {
+    /// Finish the cache filling process.
+    /// Must be called after inserting all entries to mark the cache as synced.
+    pub fn finish(self) {
         self.cache.set_synced();
     }
 }
@@ -91,8 +92,8 @@ pub trait StateCacheAggregator {
     fn aggregate<'a>(&'a self, values: impl Iterator<Item = &'a Self::Value>) -> Datum;
 }
 
-/// A [`StateCache`] implementation that uses [`OrderedCache`] as the cache.
-pub struct GenericStateCache<Agg>
+/// A sorted [`StateCache`] implementation with capacity limit.
+pub struct TopNStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
@@ -102,28 +103,24 @@ where
     /// The inner ordered cache.
     cache: OrderedCache<CacheKey, Agg::Value>,
 
-    /// Number of all items in the state store.
-    total_count: usize,
-
     /// Sync status of the state cache.
     synced: bool,
 }
 
-impl<Agg> GenericStateCache<Agg>
+impl<Agg> TopNStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
-    pub fn new(aggregator: Agg, capacity: usize, total_count: usize) -> Self {
+    pub fn new(aggregator: Agg, capacity: usize) -> Self {
         Self {
             aggregator,
             cache: OrderedCache::new(capacity),
-            total_count,
-            synced: total_count == 0,
+            synced: false,
         }
     }
 }
 
-impl<Agg> StateCache for GenericStateCache<Agg>
+impl<Agg> StateCache for TopNStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {
@@ -131,45 +128,40 @@ where
         self.synced
     }
 
-    fn apply_batch(&mut self, mut batch: StateCacheInputBatch<'_>) {
+    fn apply_batch(&mut self, batch: StateCacheInputBatch<'_>) {
         if self.synced {
-            // only insert/delete entries if the cache is synced
-            for (op, key, value) in batch.by_ref() {
-                match op {
-                    Op::Insert | Op::UpdateInsert => {
-                        self.total_count += 1;
-                        if self.cache.len() == self.total_count - 1
-                            || &key < self.cache.last_key().unwrap()
-                        {
-                            self.cache
-                                .insert(key, self.aggregator.convert_cache_value(value));
+            if self.cache.is_empty() {
+                // the empty cache may be marked as synced before, but we can't
+                // insert into it safely, so make it unsynced and bye bye.
+                self.synced = false;
+            } else {
+                // only insert/delete entries if the cache is synced
+                for (op, key, value) in batch {
+                    match op {
+                        Op::Insert | Op::UpdateInsert => {
+                            if &key < self.cache.last_key().expect("the cache must not be empty") {
+                                self.cache
+                                    .insert(key, self.aggregator.convert_cache_value(value));
+                            }
                         }
-                    }
-                    Op::Delete | Op::UpdateDelete => {
-                        self.total_count -= 1;
-                        self.cache.remove(key);
-                        if self.total_count > 0 /* still has rows after deletion */ && self.cache.is_empty()
-                        {
-                            // the cache is empty, but the state table is not, so it's not synced
-                            // any more
-                            self.synced = false;
-                            break;
+                        Op::Delete | Op::UpdateDelete => {
+                            self.cache.remove(key);
+                            if self.cache.is_empty() {
+                                // the cache becomes empty, but we don't know if there're still rows
+                                // in the table, so mark it as not synced conservatively.
+                                self.synced = false;
+                                break;
+                            }
                         }
                     }
                 }
             }
         }
-
-        // count remaining ops
-        let op_counts = batch.counts_by(|(op, _, _)| op);
-        self.total_count += op_counts.get(&Op::Insert).unwrap_or(&0)
-            + op_counts.get(&Op::UpdateInsert).unwrap_or(&0);
-        self.total_count -= op_counts.get(&Op::Delete).unwrap_or(&0)
-            + op_counts.get(&Op::UpdateDelete).unwrap_or(&0);
     }
 
     fn begin_syncing(&mut self) -> StateCacheFiller<'_> {
-        self.cache.clear(); // ensure the cache is clear before syncing
+        self.synced = false;
+        self.cache.clear(); // ensure that the cache is empty before syncing
         StateCacheFiller {
             capacity: self.cache.capacity(),
             cache: self,
@@ -177,12 +169,96 @@ where
     }
 
     fn get_output(&self) -> Datum {
-        debug_assert!(self.synced);
+        assert!(self.synced);
         self.aggregator.aggregate(self.cache.iter_values())
     }
 }
 
-impl<Agg> StateCacheMaintain for GenericStateCache<Agg>
+impl<Agg> StateCacheMaintain for TopNStateCache<Agg>
+where
+    Agg: StateCacheAggregator + Send + Sync + 'static,
+{
+    fn insert_unchecked(&mut self, key: CacheKey, value: SmallVec<[DatumRef<'_>; 2]>) {
+        let value = self.aggregator.convert_cache_value(value);
+        self.cache.insert(key, value);
+    }
+
+    fn set_synced(&mut self) {
+        self.synced = true;
+    }
+}
+
+/// A sorted [`StateCache`] implementation without capacity limit.
+/// In other words, this cache is a fully synced cache.
+pub struct SortedStateCache<Agg>
+where
+    Agg: StateCacheAggregator + Send + Sync + 'static,
+{
+    /// Aggregator implementation.
+    aggregator: Agg,
+
+    /// The inner ordered cache.
+    cache: BTreeMap<CacheKey, Agg::Value>,
+
+    /// Sync status of the state cache.
+    /// If true, the cache is FULLY synced with corresponding state table.
+    synced: bool,
+}
+
+impl<Agg> SortedStateCache<Agg>
+where
+    Agg: StateCacheAggregator + Send + Sync + 'static,
+{
+    pub fn new(aggregator: Agg) -> Self {
+        Self {
+            aggregator,
+            cache: Default::default(),
+            synced: false,
+        }
+    }
+}
+
+impl<Agg> StateCache for SortedStateCache<Agg>
+where
+    Agg: StateCacheAggregator + Send + Sync + 'static,
+{
+    fn is_synced(&self) -> bool {
+        self.synced
+    }
+
+    fn apply_batch(&mut self, batch: StateCacheInputBatch<'_>) {
+        if self.synced {
+            // only insert/delete entries if the cache is synced
+            for (op, key, value) in batch {
+                match op {
+                    Op::Insert | Op::UpdateInsert => {
+                        self.cache
+                            .insert(key, self.aggregator.convert_cache_value(value));
+                    }
+                    Op::Delete | Op::UpdateDelete => {
+                        self.cache.remove(&key);
+                    }
+                }
+            }
+        }
+    }
+
+    fn begin_syncing(&mut self) -> StateCacheFiller<'_> {
+        self.synced = false;
+        self.cache.clear(); // ensure that the cache is empty before syncing
+        StateCacheFiller {
+            capacity: usize::MAX, // use `usize::MAX` for unlimited capacity
+            cache: self,
+        }
+    }
+
+    fn get_output(&self) -> Datum {
+        assert!(self.synced);
+        self.aggregator.aggregate(self.cache.values())
+    }
+}
+
+impl<Agg> StateCacheMaintain for SortedStateCache<Agg>
 where
     Agg: StateCacheAggregator + Send + Sync + 'static,
 {

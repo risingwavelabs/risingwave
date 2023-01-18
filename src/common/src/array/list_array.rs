@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,14 +23,13 @@ use itertools::Itertools;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
 use serde::{Deserializer, Serializer};
 
-use super::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, ArrayResult, RowRef,
-};
+use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult, RowRef};
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::row::Row;
 use crate::types::to_text::ToText;
 use crate::types::{
-    deserialize_datum_from, hash_datum, serialize_datum_into, DataType, Datum, DatumRef, Scalar,
-    ScalarRefImpl, ToDatumRef,
+    hash_datum, memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum,
+    DatumRef, Scalar, ScalarRefImpl, ToDatumRef,
 };
 
 /// This is a naive implementation of list array.
@@ -38,7 +37,7 @@ use crate::types::{
 #[derive(Debug)]
 pub struct ListArrayBuilder {
     bitmap: BitmapBuilder,
-    offsets: Vec<usize>,
+    offsets: Vec<u32>,
     value: Box<ArrayBuilderImpl>,
     value_type: DataType,
     len: usize,
@@ -77,24 +76,31 @@ impl ArrayBuilder for ListArrayBuilder {
         }
     }
 
-    fn append(&mut self, value: Option<ListRef<'_>>) {
+    fn append_n(&mut self, n: usize, value: Option<ListRef<'_>>) {
         match value {
             None => {
-                self.bitmap.append(false);
+                self.bitmap.append_n(n, false);
                 let last = *self.offsets.last().unwrap();
-                self.offsets.push(last);
+                for _ in 0..n {
+                    self.offsets.push(last);
+                }
             }
             Some(v) => {
-                self.bitmap.append(true);
-                let last = *self.offsets.last().unwrap();
-                let values_ref = v.values_ref();
-                self.offsets.push(last + values_ref.len());
-                for f in values_ref {
-                    self.value.append_datum(f);
+                self.bitmap.append_n(n, true);
+                for _ in 0..n {
+                    let last = *self.offsets.last().unwrap();
+                    let values_ref = v.values_ref();
+                    self.offsets.push(
+                        last.checked_add(values_ref.len() as u32)
+                            .expect("offset overflow"),
+                    );
+                    for f in values_ref {
+                        self.value.append_datum(f);
+                    }
                 }
             }
         }
-        self.len += 1;
+        self.len += n;
     }
 
     fn append_array(&mut self, other: &ListArray) {
@@ -107,17 +113,14 @@ impl ArrayBuilder for ListArrayBuilder {
     }
 
     fn pop(&mut self) -> Option<()> {
-        if self.bitmap.pop().is_some() {
-            let start = self.offsets.pop().unwrap();
-            let end = *self.offsets.last().unwrap();
-            self.len -= 1;
-            for _ in end..start {
-                self.value.pop().unwrap()
-            }
-            Some(())
-        } else {
-            None
+        self.bitmap.pop()?;
+        let start = self.offsets.pop().unwrap();
+        let end = *self.offsets.last().unwrap();
+        self.len -= 1;
+        for _ in end..start {
+            self.value.pop().unwrap();
         }
+        Some(())
     }
 
     fn finish(self) -> ListArray {
@@ -126,7 +129,6 @@ impl ArrayBuilder for ListArrayBuilder {
             offsets: self.offsets,
             value: Box::new(self.value.finish()),
             value_type: self.value_type,
-            len: self.len,
         }
     }
 }
@@ -135,9 +137,10 @@ impl ListArrayBuilder {
     pub fn append_row_ref(&mut self, row: RowRef<'_>) {
         self.bitmap.append(true);
         let last = *self.offsets.last().unwrap();
-        self.offsets.push(last + row.size());
+        self.offsets
+            .push(last.checked_add(row.len() as u32).expect("offset overflow"));
         self.len += 1;
-        for v in row.values() {
+        for v in row.iter() {
             self.value.append_datum(v);
         }
     }
@@ -145,43 +148,25 @@ impl ListArrayBuilder {
 
 /// This is a naive implementation of list array.
 /// We will eventually move to a more efficient flatten implementation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ListArray {
     bitmap: Bitmap,
-    offsets: Vec<usize>,
-    value: Box<ArrayImpl>,
+    pub(super) offsets: Vec<u32>,
+    pub(super) value: Box<ArrayImpl>,
     value_type: DataType,
-    len: usize,
 }
 
 impl Array for ListArray {
     type Builder = ListArrayBuilder;
-    type Iter<'a> = ArrayIterator<'a, Self>;
     type OwnedItem = ListValue;
     type RefItem<'a> = ListRef<'a>;
 
-    fn value_at(&self, idx: usize) -> Option<ListRef<'_>> {
-        if !self.is_null(idx) {
-            Some(ListRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
-    }
-
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<ListRef<'_>> {
-        if !self.is_null_unchecked(idx) {
-            Some(ListRef::Indexed { arr: self, idx })
-        } else {
-            None
-        }
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
+        ListRef::Indexed { arr: self, idx }
     }
 
     fn len(&self) -> usize {
-        self.len
-    }
-
-    fn iter(&self) -> Self::Iter<'_> {
-        ArrayIterator::new(self)
+        self.bitmap.len()
     }
 
     fn to_protobuf(&self) -> ProstArray {
@@ -190,7 +175,7 @@ impl Array for ListArray {
             array_type: ProstArrayType::List as i32,
             struct_array_data: None,
             list_array_data: Some(Box::new(ListArrayData {
-                offsets: self.offsets.iter().map(|u| *u as u32).collect(),
+                offsets: self.offsets.clone(),
                 value: Some(Box::new(value)),
                 value_type: Some(self.value_type.to_protobuf()),
             })),
@@ -235,51 +220,51 @@ impl ListArray {
             "Must have no buffer in a list array"
         );
         let bitmap: Bitmap = array.get_null_bitmap()?.into();
-        let cardinality = bitmap.len();
         let array_data = array.get_list_array_data()?.to_owned();
-        let value = ArrayImpl::from_protobuf(array_data.value.as_ref().unwrap(), cardinality)?;
+        let value = ArrayImpl::from_protobuf(array_data.value.as_ref().unwrap(), bitmap.len())?;
         let arr = ListArray {
             bitmap,
-            offsets: array_data.offsets.iter().map(|u| *u as usize).collect(),
+            offsets: array_data.offsets,
             value: Box::new(value),
             value_type: DataType::from(&array_data.value_type.unwrap()),
-            len: cardinality,
         };
         Ok(arr.into())
     }
 
     // Used for testing purposes
-    pub fn from_slices(
-        null_bitmap: &[bool],
-        values: Vec<Option<ArrayImpl>>,
+    pub fn from_iter(
+        values: impl IntoIterator<Item = Option<ArrayImpl>>,
         value_type: DataType,
     ) -> ListArray {
-        let cardinality = null_bitmap.len();
-        let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
-        let mut offsets = vec![0];
-        let mut values = values.into_iter().peekable();
-        let mut builder = values.peek().unwrap().as_ref().unwrap().create_builder(0);
-        for i in values {
-            match i {
+        let values = values.into_iter();
+        let size_hint = values.size_hint().0;
+
+        let mut offsets = vec![0u32];
+        offsets.reserve(size_hint);
+        let mut builder = ArrayBuilderImpl::from_type(&value_type, size_hint);
+        let mut bitmap = BitmapBuilder::with_capacity(size_hint);
+        for v in values {
+            bitmap.append(v.is_some());
+            let last_offset = *offsets.last().unwrap();
+            match v {
                 Some(a) => {
-                    offsets.push(a.len());
+                    offsets.push(
+                        last_offset
+                            .checked_add(a.len() as u32)
+                            .expect("offset overflow"),
+                    );
                     builder.append_array(&a)
                 }
                 None => {
-                    offsets.push(0);
+                    offsets.push(last_offset);
                 }
             }
         }
-        offsets.iter_mut().fold(0, |acc, x| {
-            *x += acc;
-            *x
-        });
         ListArray {
-            bitmap,
+            bitmap: bitmap.finish(),
             offsets,
             value: Box::new(builder.finish()),
             value_type,
-            len: cardinality,
         }
     }
 
@@ -334,7 +319,7 @@ impl ListValue {
         &self.values
     }
 
-    pub fn deserialize(
+    pub fn memcmp_deserialize(
         datatype: &DataType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
@@ -360,7 +345,10 @@ impl ListValue {
         let mut inner_deserializer = memcomparable::Deserializer::new(bytes.as_slice());
         let mut values = Vec::new();
         while inner_deserializer.has_remaining() {
-            values.push(deserialize_datum_from(datatype, &mut inner_deserializer)?)
+            values.push(memcmp_deserialize_datum_from(
+                datatype,
+                &mut inner_deserializer,
+            )?)
         }
         Ok(Self::new(values))
     }
@@ -376,7 +364,7 @@ macro_rules! iter_elems_ref {
     ($self:ident, $it:ident, { $($body:tt)* }) => {
         match $self {
             ListRef::Indexed { arr, idx } => {
-                let $it = (arr.offsets[*idx]..arr.offsets[*idx + 1]).map(|o| arr.value.value_at(o));
+                let $it = (arr.offsets[*idx]..arr.offsets[*idx + 1]).map(|o| arr.value.value_at(o as usize));
                 $($body)*
             }
             ListRef::ValueRef { val } => {
@@ -410,7 +398,7 @@ impl<'a> ListRef<'a> {
         match self {
             ListRef::Indexed { arr, idx } => {
                 if index <= arr.value.len() {
-                    Ok(arr.value.value_at(arr.offsets[*idx] + index - 1))
+                    Ok(arr.value.value_at(arr.offsets[*idx] as usize + index - 1))
                 } else {
                     Ok(None)
                 }
@@ -425,14 +413,14 @@ impl<'a> ListRef<'a> {
         }
     }
 
-    pub fn serialize(
+    pub fn memcmp_serialize(
         &self,
         serializer: &mut memcomparable::Serializer<impl BufMut>,
     ) -> memcomparable::Result<()> {
         let mut inner_serializer = memcomparable::Serializer::new(vec![]);
         iter_elems_ref!(self, it, {
             for datum_ref in it {
-                serialize_datum_into(datum_ref, &mut inner_serializer)?
+                memcmp_serialize_datum_into(datum_ref, &mut inner_serializer)?
             }
         });
         serializer.serialize_bytes(&inner_serializer.into_inner())
@@ -488,7 +476,7 @@ impl Debug for ListRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         iter_elems_ref!(self, it, {
             for v in it {
-                v.fmt(f)?;
+                Debug::fmt(&v, f)?;
             }
             Ok(())
         })
@@ -498,9 +486,10 @@ impl Debug for ListRef<'_> {
 impl ToText for ListRef<'_> {
     // This function will be invoked when pgwire prints a list value in string.
     // Refer to PostgreSQL `array_out` or `appendPGArray`.
-    fn to_text(&self) -> String {
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         iter_elems_ref!(self, it, {
-            format!(
+            write!(
+                f,
                 "{{{}}}",
                 it.format_with(",", |datum_ref, f| {
                     let s = datum_ref.to_text();
@@ -532,9 +521,9 @@ impl ToText for ListRef<'_> {
         })
     }
 
-    fn to_text_with_type(&self, ty: &DataType) -> String {
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
         match ty {
-            DataType::List { .. } => self.to_text(),
+            DataType::List { .. } => self.write(f),
             _ => unreachable!(),
         }
     }
@@ -559,9 +548,8 @@ mod tests {
     #[test]
     fn test_list_with_values() {
         use crate::array::*;
-        let arr = ListArray::from_slices(
-            &[true, false, true, true],
-            vec![
+        let arr = ListArray::from_iter(
+            [
                 Some(array! { I32Array, [Some(12), Some(-7), Some(25)] }.into()),
                 None,
                 Some(array! { I32Array, [Some(0), Some(-127), Some(127), Some(50)] }.into()),
@@ -606,18 +594,16 @@ mod tests {
         let arr = builder.finish();
         assert_eq!(arr.values_vec(), list_values);
 
-        let part1 = ListArray::from_slices(
-            &[true, false],
-            vec![
+        let part1 = ListArray::from_iter(
+            [
                 Some(array! { I32Array, [Some(12), Some(-7), Some(25)] }.into()),
                 None,
             ],
             DataType::Int32,
         );
 
-        let part2 = ListArray::from_slices(
-            &[true, true],
-            vec![
+        let part2 = ListArray::from_iter(
+            [
                 Some(array! { I32Array, [Some(0), Some(-127), Some(127), Some(50)] }.into()),
                 Some(empty_array! { I32Array }.into()),
             ],
@@ -640,9 +626,8 @@ mod tests {
     #[test]
     fn test_list_create_builder() {
         use crate::array::*;
-        let arr = ListArray::from_slices(
-            &[true],
-            vec![Some(
+        let arr = ListArray::from_iter(
+            [Some(
                 array! { F32Array, [Some(2.0), Some(42.0), Some(1.0)] }.into(),
             )],
             DataType::Float32,
@@ -709,18 +694,16 @@ mod tests {
     fn test_list_nested_layout() {
         use crate::array::*;
 
-        let listarray1 = ListArray::from_slices(
-            &[true, true],
-            vec![
+        let listarray1 = ListArray::from_iter(
+            [
                 Some(array! { I32Array, [Some(1), Some(2)] }.into()),
                 Some(array! { I32Array, [Some(3), Some(4)] }.into()),
             ],
             DataType::Int32,
         );
 
-        let listarray2 = ListArray::from_slices(
-            &[true, false, true],
-            vec![
+        let listarray2 = ListArray::from_iter(
+            [
                 Some(array! { I32Array, [Some(5), Some(6), Some(7)] }.into()),
                 None,
                 Some(array! { I32Array, [Some(8)] }.into()),
@@ -728,15 +711,13 @@ mod tests {
             DataType::Int32,
         );
 
-        let listarray3 = ListArray::from_slices(
-            &[true],
-            vec![Some(array! { I32Array, [Some(9), Some(10)] }.into())],
+        let listarray3 = ListArray::from_iter(
+            [Some(array! { I32Array, [Some(9), Some(10)] }.into())],
             DataType::Int32,
         );
 
-        let nestarray = ListArray::from_slices(
-            &[true, true, true],
-            vec![
+        let nestarray = ListArray::from_iter(
+            [
                 Some(listarray1.into()),
                 Some(listarray2.into()),
                 Some(listarray3.into()),
@@ -856,12 +837,12 @@ mod tests {
         let list_ref = ListRef::ValueRef { val: &value };
         let mut serializer = memcomparable::Serializer::new(vec![]);
         serializer.set_reverse(true);
-        list_ref.serialize(&mut serializer).unwrap();
+        list_ref.memcmp_serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         deserializer.set_reverse(true);
         assert_eq!(
-            ListValue::deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
+            ListValue::memcmp_deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
             value
         );
 
@@ -875,11 +856,11 @@ mod tests {
         let array = builder.finish();
         let list_ref = array.value_at(0).unwrap();
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        list_ref.serialize(&mut serializer).unwrap();
+        list_ref.memcmp_serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         assert_eq!(
-            ListValue::deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
+            ListValue::memcmp_deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
             value
         );
     }
@@ -930,14 +911,14 @@ mod tests {
             let lhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 ListRef::ValueRef { val: &lhs }
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
             let rhs_serialized = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
                 ListRef::ValueRef { val: &rhs }
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -957,7 +938,7 @@ mod tests {
                 array
                     .value_at(0)
                     .unwrap()
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -966,7 +947,7 @@ mod tests {
                 array
                     .value_at(1)
                     .unwrap()
-                    .serialize(&mut serializer)
+                    .memcmp_serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
@@ -978,9 +959,8 @@ mod tests {
     fn test_listref() {
         use crate::array::*;
         use crate::types;
-        let arr = ListArray::from_slices(
-            &[true, false, true],
-            vec![
+        let arr = ListArray::from_iter(
+            [
                 Some(array! { I32Array, [Some(1), Some(2), Some(3)] }.into()),
                 None,
                 Some(array! { I32Array, [Some(4), Some(5), Some(6), Some(7)] }.into()),

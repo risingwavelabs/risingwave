@@ -33,13 +33,11 @@ INSERT INTO t3 VALUES (3, 4);
 # 1	2	3	4
 
 # column does not exist on left side of join
-
-statement error 
+statement error
 SELECT * FROM t1 JOIN t2 USING (c);
 
 # column does not exist on right side of join
-
-statement error 
+statement error
 SELECT * FROM t1 JOIN t2 USING (a);
 
 statement ok

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -98,7 +98,7 @@ mod tests {
             assert!(*b, "vnode {} should be set", idx);
         }
 
-        let vnodes = bitmaps.values().map(|bitmap| bitmap.num_high_bits());
+        let vnodes = bitmaps.values().map(|bitmap| bitmap.count_ones());
         let (min, max) = vnodes.minmax().into_option().unwrap();
 
         assert!((max - min) <= 1, "min {} max {}", min, max);
@@ -249,7 +249,7 @@ mod tests {
             check_bitmaps(&result);
 
             let (_, bitmap) = result.iter().exactly_one().unwrap();
-            assert!(bitmap.is_all_set());
+            assert!(bitmap.all());
         }
     }
 

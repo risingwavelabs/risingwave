@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,6 +23,7 @@ use console::style;
 use dialoguer::MultiSelect;
 use enum_iterator::{all, Sequence};
 use itertools::Itertools;
+use risedev::RISEDEV_CONFIG_FILE;
 
 #[derive(Parser)]
 #[clap(author, version, about, long_about = None)]
@@ -190,7 +191,7 @@ Required if you want to create CDC source from external Databases.
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
             Self::Kafka => "ENABLE_KAFKA",
-            Self::Pubsub => "ENABLE_PUBSUB_EMU",
+            Self::Pubsub => "ENABLE_PUBSUB",
             Self::Redis => "ENABLE_REDIS",
             Self::RustComponents => "ENABLE_BUILD_RUST",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD_V2",
@@ -377,7 +378,7 @@ fn main() -> Result<()> {
     println!(
         "If you want to use these components, please {} in {} to start that component.",
         style("modify the cluster config").yellow().bold(),
-        style("risedev.yml").bold(),
+        style(RISEDEV_CONFIG_FILE).bold(),
     );
     println!("See CONTRIBUTING.md or RiseDev's readme for more information.");
 

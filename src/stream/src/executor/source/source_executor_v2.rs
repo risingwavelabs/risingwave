@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,6 +14,7 @@
 
 use std::fmt::Formatter;
 
+use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -37,7 +38,7 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 /// [`StreamSourceCore`] stores the necessary information for the source executor to execute on the
 /// external connector.
 pub struct StreamSourceCore<S: StateStore> {
-    table_id: TableId,
+    source_id: TableId,
     source_name: String,
 
     column_ids: Vec<ColumnId>,
@@ -50,13 +51,37 @@ pub struct StreamSourceCore<S: StateStore> {
 
     /// Split info for stream source. A source executor might read data from several splits of
     /// external connector.
-    stream_source_splits: Vec<SplitImpl>,
+    stream_source_splits: HashMap<SplitId, SplitImpl>,
 
     /// Stores information of the splits.
     split_state_store: SourceStateTableHandler<S>,
 
     /// In-memory cache for the splits.
     state_cache: HashMap<SplitId, SplitImpl>,
+}
+
+impl<S> StreamSourceCore<S>
+where
+    S: StateStore,
+{
+    pub fn new(
+        source_id: TableId,
+        source_name: String,
+        column_ids: Vec<ColumnId>,
+        source_desc_builder: SourceDescBuilderV2,
+        split_state_store: SourceStateTableHandler<S>,
+    ) -> Self {
+        Self {
+            source_id,
+            source_name,
+            column_ids,
+            source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
+            source_desc_builder: Some(source_desc_builder),
+            stream_source_splits: HashMap::new(),
+            split_state_store,
+            state_cache: HashMap::new(),
+        }
+    }
 }
 
 pub struct SourceExecutorV2<S: StateStore> {
@@ -109,7 +134,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
         &self,
         source_desc: &SourceDescV2,
         state: ConnectorState,
-    ) -> StreamExecutorResult<BoxSourceWithStateStream> {
+    ) -> StreamExecutorResult<BoxSourceWithStateStream<StreamChunkWithState>> {
         let column_ids = source_desc
             .columns
             .iter()
@@ -123,7 +148,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
                 source_desc.metrics.clone(),
                 SourceContext::new(
                     self.ctx.id,
-                    self.stream_source_core.as_ref().unwrap().table_id,
+                    self.stream_source_core.as_ref().unwrap().source_id,
                 ),
             )
             .await
@@ -134,7 +159,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
     async fn apply_split_change(
         &mut self,
         source_desc: &SourceDescV2,
-        stream: &mut SourceReaderStream,
+        stream: &mut SourceReaderStream<StreamChunkWithState>,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
@@ -191,7 +216,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
     async fn replace_stream_reader_with_target_state(
         &mut self,
         source_desc: &SourceDescV2,
-        stream: &mut SourceReaderStream,
+        stream: &mut SourceReaderStream<StreamChunkWithState>,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -209,7 +234,10 @@ impl<S: StateStore> SourceExecutorV2<S> {
         self.stream_source_core
             .as_mut()
             .unwrap()
-            .stream_source_splits = target_state;
+            .stream_source_splits = target_state
+            .into_iter()
+            .map(|split| (split.id(), split))
+            .collect();
 
         Ok(())
     }
@@ -249,7 +277,13 @@ impl<S: StateStore> SourceExecutorV2<S> {
             .recv()
             .stack_trace("source_recv_first_barrier")
             .await
-            .unwrap();
+            .ok_or_else(|| {
+                StreamExecutorError::from(anyhow!(
+                    "failed to receive the first barrier, actor_id: {:?}, source_id: {:?}",
+                    self.ctx.id,
+                    self.stream_source_core.as_ref().unwrap().source_id
+                ))
+            })?;
 
         let mut core = self.stream_source_core.unwrap();
 
@@ -262,16 +296,16 @@ impl<S: StateStore> SourceExecutorV2<S> {
             .await
             .map_err(StreamExecutorError::connector_error)?;
 
+        let mut boot_state = Vec::default();
         if let Some(mutation) = barrier.mutation.as_ref() {
             match mutation.as_ref() {
-                Mutation::Add { splits, .. } => {
+                Mutation::Add { splits, .. }
+                | Mutation::Update {
+                    actor_splits: splits,
+                    ..
+                } => {
                     if let Some(splits) = splits.get(&self.ctx.id) {
-                        core.stream_source_splits = splits.clone();
-                    }
-                }
-                Mutation::Update { actor_splits, .. } => {
-                    if let Some(splits) = actor_splits.get(&self.ctx.id) {
-                        core.stream_source_splits = splits.clone();
+                        boot_state = splits.clone();
                     }
                 }
                 _ => {}
@@ -280,7 +314,12 @@ impl<S: StateStore> SourceExecutorV2<S> {
 
         core.split_state_store.init_epoch(barrier.epoch);
 
-        let mut boot_state = core.stream_source_splits.clone();
+        core.stream_source_splits = boot_state
+            .clone()
+            .into_iter()
+            .map(|split| (split.id(), split))
+            .collect();
+
         for ele in &mut boot_state {
             if let Some(recover_state) = core
                 .split_state_store
@@ -295,11 +334,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
         self.stream_source_core = Some(core);
 
         let recover_state: ConnectorState = (!boot_state.is_empty()).then_some(boot_state);
-        tracing::info!(
-            "start actor {:?} with state {:?}",
-            self.ctx.id,
-            recover_state
-        );
+        tracing::info!(actor_id = self.ctx.id, state = ?recover_state, "start with state");
 
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
@@ -323,6 +358,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
             self.expected_barrier_latency_ms as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
         let mut last_barrier_time = Instant::now();
         let mut self_paused = false;
+        let mut metric_row_per_barrier: u64 = 0;
         while let Some(msg) = stream.next().await {
             match msg? {
                 // This branch will be preferred.
@@ -334,7 +370,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
                     }
                     let epoch = barrier.epoch;
 
-                    if let Some(mutation) = barrier.mutation.as_deref() {
+                    if let Some(ref mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             Mutation::SourceChangeSplit(actor_splits) => {
                                 self.apply_split_change(&source_desc, &mut stream, actor_splits)
@@ -351,6 +387,19 @@ impl<S: StateStore> SourceExecutorV2<S> {
                     }
 
                     self.take_snapshot_and_clear_cache(epoch).await?;
+
+                    self.metrics
+                        .source_row_per_barrier
+                        .with_label_values(&[
+                            self.ctx.id.to_string().as_str(),
+                            self.stream_source_core
+                                .as_ref()
+                                .unwrap()
+                                .source_identify
+                                .as_ref(),
+                        ])
+                        .inc_by(metric_row_per_barrier);
+                    metric_row_per_barrier = 0;
 
                     yield Message::Barrier(barrier);
                 }
@@ -369,21 +418,16 @@ impl<S: StateStore> SourceExecutorV2<S> {
                     if let Some(mapping) = split_offset_mapping {
                         let state: HashMap<_, _> = mapping
                             .iter()
-                            .flat_map(|(split, offset)| {
+                            .flat_map(|(split_id, offset)| {
                                 let origin_split_impl = self
                                     .stream_source_core
                                     .as_ref()
                                     .unwrap()
                                     .stream_source_splits
-                                    .iter()
-                                    .filter(|origin_split| &origin_split.id() == split)
-                                    .at_most_one()
-                                    .unwrap_or_else(|_| {
-                                        panic!("multiple splits with same id `{split}`")
-                                    });
+                                    .get(split_id);
 
                                 origin_split_impl.map(|split_impl| {
-                                    (split.clone(), split_impl.update(offset.clone()))
+                                    (split_id.clone(), split_impl.update(offset.clone()))
                                 })
                             })
                             .collect();
@@ -394,6 +438,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
                             .state_cache
                             .extend(state);
                     }
+                    metric_row_per_barrier += chunk.cardinality() as u64;
 
                     self.metrics
                         .source_output_row_count
@@ -431,7 +476,12 @@ impl<S: StateStore> SourceExecutorV2<S> {
             .recv()
             .stack_trace("source_recv_first_barrier")
             .await
-            .unwrap();
+            .ok_or_else(|| {
+                StreamExecutorError::from(anyhow!(
+                    "failed to receive the first barrier, actor_id: {:?} with no stream source",
+                    self.ctx.id
+                ))
+            })?;
         yield Message::Barrier(barrier);
 
         while let Some(barrier) = barrier_receiver.recv().await {
@@ -466,7 +516,7 @@ impl<S: StateStore> Debug for SourceExecutorV2<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(core) = &self.stream_source_core {
             f.debug_struct("SourceExecutor")
-                .field("source_id", &core.table_id)
+                .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
                 .field("pk_indices", &self.pk_indices)
                 .finish()
@@ -478,6 +528,7 @@ impl<S: StateStore> Debug for SourceExecutorV2<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU64;
     use std::time::Duration;
 
     use maplit::{convert_args, hashmap};
@@ -527,8 +578,8 @@ mod tests {
         ));
         let source_desc_builder = create_source_desc_builder(
             &schema,
-            row_id_index,
             pk_column_ids,
+            row_id_index,
             source_info,
             properties,
         );
@@ -538,11 +589,11 @@ mod tests {
         )
         .await;
         let core = StreamSourceCore::<MemoryStateStore> {
-            table_id,
+            source_id: table_id,
             column_ids,
             source_identify: "Table_".to_string() + &table_id.table_id().to_string(),
             source_desc_builder: Some(source_desc_builder),
-            stream_source_splits: vec![],
+            stream_source_splits: HashMap::new(),
             split_state_store,
             state_cache: HashMap::new(),
             source_name: MOCK_SOURCE_NAME.to_string(),
@@ -614,8 +665,8 @@ mod tests {
 
         let source_desc_builder = create_source_desc_builder(
             &schema,
-            row_id_index,
             pk_column_ids,
+            row_id_index,
             source_info,
             properties,
         );
@@ -630,11 +681,11 @@ mod tests {
         .await;
 
         let core = StreamSourceCore::<MemoryStateStore> {
-            table_id,
+            source_id: table_id,
             column_ids: column_ids.clone(),
             source_identify: "Table_".to_string() + &table_id.table_id().to_string(),
             source_desc_builder: Some(source_desc_builder),
-            stream_source_splits: vec![],
+            stream_source_splits: HashMap::new(),
             split_state_store,
             state_cache: HashMap::new(),
             source_name: MOCK_SOURCE_NAME.to_string(),
@@ -658,8 +709,7 @@ mod tests {
             vec![OrderPair::new(0, OrderType::Ascending)],
             column_ids,
             2,
-            None,
-            0,
+            Arc::new(AtomicU64::new(0)),
             false,
         )
         .await

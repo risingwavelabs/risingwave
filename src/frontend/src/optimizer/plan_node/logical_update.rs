@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,8 +24,11 @@ use super::{
 };
 use crate::catalog::TableId;
 use crate::expr::ExprImpl;
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+};
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::utils::Condition;
+use crate::utils::{ColIndexMapping, Condition};
 
 /// [`LogicalUpdate`] iterates on input relation, set some columns, and inject update records into
 /// specified table.
@@ -34,11 +37,11 @@ use crate::utils::Condition;
 #[derive(Debug, Clone)]
 pub struct LogicalUpdate {
     pub base: PlanBase,
-    table_source_name: String, // explain-only
-    source_id: TableId,        // TODO: use SourceId
-    associated_mview_id: TableId,
+    table_name: String, // explain-only
+    table_id: TableId,
     input: PlanRef,
     exprs: Vec<ExprImpl>,
+    returning: bool,
 }
 
 impl LogicalUpdate {
@@ -46,22 +49,25 @@ impl LogicalUpdate {
     pub fn new(
         input: PlanRef,
         table_source_name: String,
-        source_id: TableId,
-        associated_mview_id: TableId,
+        table_id: TableId,
         exprs: Vec<ExprImpl>,
+        returning: bool,
     ) -> Self {
         let ctx = input.ctx();
-        // TODO: support `RETURNING`.
-        let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
+        let schema = if returning {
+            input.schema().clone()
+        } else {
+            Schema::new(vec![Field::unnamed(DataType::Int64)])
+        };
         let fd_set = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
         Self {
             base,
-            table_source_name,
-            source_id,
-            associated_mview_id,
+            table_name: table_source_name,
+            table_id,
             input,
             exprs,
+            returning,
         }
     }
 
@@ -69,40 +75,45 @@ impl LogicalUpdate {
     pub fn create(
         input: PlanRef,
         table_source_name: String,
-        source_id: TableId,
         table_id: TableId,
         exprs: Vec<ExprImpl>,
+        returning: bool,
     ) -> Result<Self> {
         Ok(Self::new(
             input,
             table_source_name,
-            source_id,
             table_id,
             exprs,
+            returning,
         ))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         write!(
             f,
-            "{} {{ table: {}, exprs: {:?} }}",
-            name, self.table_source_name, self.exprs
+            "{} {{ table: {}, exprs: {:?}{} }}",
+            name,
+            self.table_name,
+            self.exprs,
+            if self.returning {
+                ", returning: true"
+            } else {
+                ""
+            }
         )
     }
 
-    /// Get the logical update's source id.
     #[must_use]
-    pub fn source_id(&self) -> TableId {
-        self.source_id
-    }
-
-    #[must_use]
-    pub fn associated_mview_id(&self) -> TableId {
-        self.associated_mview_id
+    pub fn table_id(&self) -> TableId {
+        self.table_id
     }
 
     pub fn exprs(&self) -> &[ExprImpl] {
         self.exprs.as_ref()
+    }
+
+    pub fn has_returning(&self) -> bool {
+        self.returning
     }
 }
 
@@ -114,10 +125,10 @@ impl PlanTreeNodeUnary for LogicalUpdate {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(
             input,
-            self.table_source_name.clone(),
-            self.source_id,
-            self.associated_mview_id,
+            self.table_name.clone(),
+            self.table_id,
             self.exprs.clone(),
+            self.returning,
         )
     }
 }
@@ -131,16 +142,20 @@ impl fmt::Display for LogicalUpdate {
 }
 
 impl ColPrunable for LogicalUpdate {
-    fn prune_col(&self, _required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, _required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let required_cols: Vec<_> = (0..self.input.schema().len()).collect();
-        self.clone_with_input(self.input.prune_col(&required_cols))
+        self.clone_with_input(self.input.prune_col(&required_cols, ctx))
             .into()
     }
 }
 
 impl PredicatePushdown for LogicalUpdate {
-    fn predicate_pushdown(&self, predicate: Condition) -> PlanRef {
-        gen_filter_and_pushdown(self, predicate, Condition::true_cond())
+    fn predicate_pushdown(
+        &self,
+        predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
 
@@ -153,11 +168,14 @@ impl ToBatch for LogicalUpdate {
 }
 
 impl ToStream for LogicalUpdate {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
         unreachable!("update should always be converted to batch plan");
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, crate::utils::ColIndexMapping)> {
+    fn logical_rewrite_for_stream(
+        &self,
+        _ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
         unreachable!("update should always be converted to batch plan");
     }
 }

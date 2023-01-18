@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -189,10 +189,10 @@ pub async fn put_sst(
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`
-pub async fn gen_test_sstable_inner(
+pub async fn gen_test_sstable_inner<B: AsRef<[u8]>>(
     opts: SstableBuilderOptions,
     sst_id: HummockSstableId,
-    kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
+    kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     range_tombstones: Vec<DeleteRangeTombstone>,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
@@ -221,10 +221,10 @@ pub async fn gen_test_sstable_inner(
 }
 
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
-pub async fn gen_test_sstable(
+pub async fn gen_test_sstable<B: AsRef<[u8]>>(
     opts: SstableBuilderOptions,
     sst_id: HummockSstableId,
-    kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
+    kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
     gen_test_sstable_inner(

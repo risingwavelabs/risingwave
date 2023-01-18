@@ -34,6 +34,7 @@ hyper = "0.14"
 itertools = "0.10"
 libc = "0.2"
 lz4 = "1.23.1"
+memcomparable = "0.1"
 minitrace = "0.4"
 minstant = "0.1"
 nix = { version = "0.25", features = ["fs", "mman"] }
@@ -45,6 +46,7 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
 rand = "0.8"
 regex = "1"
+risingwave_backup = { path = "../storage/backup" }
 risingwave_common = { path = "../common" }
 risingwave_common_service = { path = "../common/common_service" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
@@ -79,8 +81,7 @@ tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
-twox-hash = "1"
-xxhash-rust = { version = "0.8.5", features = ["xxh32"] }
+xxhash-rust = { version = "0.8.5", features = ["xxh32", "xxh64"] }
 zstd = "0.11.2"
 
 [target.'cfg(not(madsim))'.dependencies]

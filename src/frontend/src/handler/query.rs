@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,7 +27,8 @@ use risingwave_sqlparser::ast::Statement;
 
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
-use crate::handler::privilege::{check_privileges, resolve_privileges};
+use crate::handler::flush::do_flush;
+use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef};
@@ -35,7 +36,7 @@ use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::{
     BatchPlanFragmenter, DistributedQueryStream, ExecutionContext, ExecutionContextRef,
-    HummockSnapshotGuard, LocalQueryExecution, LocalQueryStream,
+    LocalQueryExecution, LocalQueryStream, PinnedHummockSnapshot,
 };
 use crate::session::SessionImpl;
 use crate::PlanRef;
@@ -53,7 +54,7 @@ pub fn gen_batch_query_plan(
     };
 
     let check_items = resolve_privileges(&bound);
-    check_privileges(session, &check_items)?;
+    session.check_privileges(&check_items)?;
 
     let mut planner = Planner::new(context);
 
@@ -80,7 +81,7 @@ pub fn gen_batch_query_plan(
     };
 
     let mut logical = planner.plan(bound)?;
-    let schema = logical.schema().clone();
+    let schema = logical.schema();
 
     let physical = match query_mode {
         QueryMode::Local => logical.gen_batch_local_plan()?,
@@ -97,12 +98,15 @@ pub async fn handle_query(
     let stmt_type = to_statement_type(&stmt)?;
     let session = handler_args.session.clone();
     let query_start_time = Instant::now();
+    let only_checkpoint_visible = handler_args.session.config().only_checkpoint_visible();
+    let mut notice = String::new();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, query_mode, output_schema) = {
-        let context = OptimizerContext::new_with_handler_args(handler_args);
+        let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
 
+        let context = plan.plan_base().ctx.clone();
         tracing::trace!(
             "Generated query plan: {:?}, query_mode:{:?}",
             plan.explain_to_string()?,
@@ -112,7 +116,9 @@ pub async fn handle_query(
             session.env().worker_node_manager_ref(),
             session.env().catalog_reader().clone(),
         );
-        (plan_fragmenter.split(plan)?, query_mode, schema)
+        let query = plan_fragmenter.split(plan)?;
+        context.append_notice(&mut notice);
+        (query, query_mode, schema)
     };
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
@@ -128,33 +134,42 @@ pub async fn handle_query(
         .collect_vec();
 
     let mut row_stream = {
-        // Acquire hummock snapshot for execution.
-        // TODO: if there's no table scan, we don't need to acquire snapshot.
-        let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
-        let query_id = query.query_id().clone();
-        let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
-
+        let query_epoch = session.config().get_query_epoch();
+        let query_snapshot = if let Some(query_epoch) = query_epoch {
+            PinnedHummockSnapshot::Other(query_epoch)
+        } else {
+            // Acquire hummock snapshot for execution.
+            // TODO: if there's no table scan, we don't need to acquire snapshot.
+            let hummock_snapshot_manager = session.env().hummock_snapshot_manager();
+            let query_id = query.query_id().clone();
+            let pinned_snapshot = hummock_snapshot_manager.acquire(&query_id).await?;
+            PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, only_checkpoint_visible)
+        };
         match query_mode {
             QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-                local_execute(session.clone(), query, pinned_snapshot).await?,
+                local_execute(session.clone(), query, query_snapshot).await?,
                 column_types,
                 format,
+                session.clone(),
             )),
             // Local mode do not support cancel tasks.
             QueryMode::Distributed => {
                 PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                    distribute_execute(session.clone(), query, pinned_snapshot).await?,
+                    distribute_execute(session.clone(), query, query_snapshot).await?,
                     column_types,
                     format,
+                    session.clone(),
                 ))
             }
         }
     };
 
-    let rows_count = match stmt_type {
-        StatementType::SELECT => None,
+    let rows_count: Option<i32> = match stmt_type {
+        StatementType::SELECT
+        | StatementType::INSERT_RETURNING
+        | StatementType::DELETE_RETURNING
+        | StatementType::UPDATE_RETURNING => None,
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            // Get the row from the row_stream.
             let first_row_set = row_stream
                 .next()
                 .await
@@ -183,6 +198,8 @@ pub async fn handle_query(
     };
 
     // Implicitly flush the writes.
+    // FIXME(bugen): the DMLs with `RETURNING` clause is done only after the `row_stream` is fully
+    // consumed, so implicitly flushing here doesn't work.
     if session.config().get_implicit_flush() {
         flush_for_write(&session, stmt_type).await?;
     }
@@ -202,8 +219,8 @@ pub async fn handle_query(
             .inc();
     }
 
-    Ok(PgResponse::new_for_stream(
-        stmt_type, rows_count, row_stream, pg_descs,
+    Ok(PgResponse::new_for_stream_with_notice(
+        stmt_type, rows_count, row_stream, pg_descs, notice,
     ))
 }
 
@@ -212,9 +229,27 @@ fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
 
     match stmt {
         Statement::Query(_) => Ok(SELECT),
-        Statement::Insert { .. } => Ok(INSERT),
-        Statement::Delete { .. } => Ok(DELETE),
-        Statement::Update { .. } => Ok(UPDATE),
+        Statement::Insert { returning, .. } => {
+            if returning.is_empty() {
+                Ok(INSERT)
+            } else {
+                Ok(INSERT_RETURNING)
+            }
+        }
+        Statement::Delete { returning, .. } => {
+            if returning.is_empty() {
+                Ok(DELETE)
+            } else {
+                Ok(DELETE_RETURNING)
+            }
+        }
+        Statement::Update { returning, .. } => {
+            if returning.is_empty() {
+                Ok(UPDATE)
+            } else {
+                Ok(UPDATE_RETURNING)
+            }
+        }
         _ => Err(RwError::from(ErrorCode::InvalidInputSyntax(
             "unsupported statement type".to_string(),
         ))),
@@ -224,7 +259,7 @@ fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
 pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
-    pinned_snapshot: HummockSnapshotGuard,
+    pinned_snapshot: PinnedHummockSnapshot,
 ) -> Result<DistributedQueryStream> {
     let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
     let query_manager = session.env().query_manager().clone();
@@ -238,7 +273,7 @@ pub async fn distribute_execute(
 pub async fn local_execute(
     session: Arc<SessionImpl>,
     query: Query,
-    pinned_snapshot: HummockSnapshotGuard,
+    pinned_snapshot: PinnedHummockSnapshot,
 ) -> Result<LocalQueryStream> {
     let front_env = session.env();
 
@@ -255,16 +290,8 @@ pub async fn local_execute(
 }
 
 pub async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
-    match stmt_type {
-        StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            let client = session.env().meta_client();
-            let snapshot = client.flush(true).await?;
-            session
-                .env()
-                .hummock_snapshot_manager()
-                .update_epoch(snapshot);
-        }
-        _ => {}
+    if stmt_type.is_dml() {
+        do_flush(session).await?;
     }
     Ok(())
 }

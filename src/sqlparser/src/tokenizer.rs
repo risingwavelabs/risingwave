@@ -2,7 +2,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -47,6 +47,8 @@ pub enum Token {
     Char(char),
     /// Single quoted string: i.e: 'string'
     SingleQuotedString(String),
+    /// Single quoted string with c-style escapes: i.e: E'string'
+    CstyleEscapesString(String),
     /// "National" string literal: i.e: N'string'
     NationalStringLiteral(String),
     /// Hexadecimal string literal: i.e.: X'deadbeef'
@@ -150,6 +152,7 @@ impl fmt::Display for Token {
             Token::SingleQuotedString(ref s) => write!(f, "'{}'", s),
             Token::NationalStringLiteral(ref s) => write!(f, "N'{}'", s),
             Token::HexStringLiteral(ref s) => write!(f, "X'{}'", s),
+            Token::CstyleEscapesString(ref s) => write!(f, "E'{}'", s),
             Token::Comma => f.write_str(","),
             Token::Whitespace(ws) => write!(f, "{}", ws),
             Token::DoubleEq => f.write_str("=="),
@@ -373,6 +376,21 @@ impl<'a> Tokenizer<'a> {
                         }
                     }
                 }
+                x @ 'e' | x @ 'E' => {
+                    chars.next(); // consume, to check the next char
+                    match chars.peek() {
+                        Some('\'') => {
+                            // E'...' - a <character string literal>
+                            let s = self.tokenize_single_quoted_string_with_escape(chars)?;
+                            Ok(Some(Token::CstyleEscapesString(s)))
+                        }
+                        _ => {
+                            // regular identifier starting with an "E"
+                            let s = self.tokenize_word(x, chars);
+                            Ok(Some(Token::make_word(&s, None)))
+                        }
+                    }
+                }
                 // The spec only allows an uppercase 'X' to introduce a hex
                 // string, but PostgreSQL, at least, allows a lowercase 'x' too.
                 x @ 'x' | x @ 'X' => {
@@ -395,11 +413,11 @@ impl<'a> Tokenizer<'a> {
                     chars.next(); // consume the first char
                     let s = self.tokenize_word(ch, chars);
 
-                    if s.chars().all(|x| ('0'..='9').contains(&x) || x == '.') {
+                    if s.chars().all(|x| x.is_ascii_digit() || x == '.') {
                         let mut s = peeking_take_while(&mut s.chars().peekable(), |ch| {
-                            matches!(ch, '0'..='9' | '.')
+                            ch.is_ascii_digit() || ch == '.'
                         });
-                        let s2 = peeking_take_while(chars, |ch| matches!(ch, '0'..='9' | '.'));
+                        let s2 = peeking_take_while(chars, |ch| ch.is_ascii_digit() || ch == '.');
                         s += s2.as_str();
                         return Ok(Some(Token::Number(s)));
                     }
@@ -427,7 +445,7 @@ impl<'a> Tokenizer<'a> {
                 }
                 // numbers and period
                 '0'..='9' | '.' => {
-                    let mut s = peeking_take_while(chars, |ch| matches!(ch, '0'..='9'));
+                    let mut s = peeking_take_while(chars, |ch| ch.is_ascii_digit());
 
                     // match binary literal that starts with 0x
                     if s == "0" && chars.peek() == Some(&'x') {
@@ -444,7 +462,7 @@ impl<'a> Tokenizer<'a> {
                         s.push('.');
                         chars.next();
                     }
-                    s += &peeking_take_while(chars, |ch| matches!(ch, '0'..='9'));
+                    s += &peeking_take_while(chars, |ch| ch.is_ascii_digit());
 
                     // No number -> Token::Period
                     if s == "." {
@@ -461,7 +479,7 @@ impl<'a> Tokenizer<'a> {
                                 s.push('-');
                                 chars.next();
                             }
-                            s += &peeking_take_while(chars, |ch| matches!(ch, '0'..='9'));
+                            s += &peeking_take_while(chars, |ch| ch.is_ascii_digit());
                             return Ok(Some(Token::Number(s)));
                         }
                         // Not a scientific number
@@ -656,6 +674,46 @@ impl<'a> Tokenizer<'a> {
         self.tokenizer_error("Unterminated string literal")
     }
 
+    /// Read a single qutoed string with escape
+    fn tokenize_single_quoted_string_with_escape(
+        &self,
+        chars: &mut Peekable<Chars<'_>>,
+    ) -> Result<String, TokenizerError> {
+        let mut s = String::new();
+        chars.next(); // consume the opening quote
+
+        while let Some(&ch) = chars.peek() {
+            match ch {
+                '\'' => {
+                    chars.next(); // consume
+                    if chars.peek().map(|c| *c == '\'').unwrap_or(false) {
+                        s.push('\\');
+                        s.push(ch);
+                        chars.next();
+                    } else {
+                        return Ok(s);
+                    }
+                }
+                '\\' => {
+                    s.push(ch);
+                    chars.next();
+                    if chars
+                        .peek()
+                        .map(|c| *c == '\'' || *c == '\\')
+                        .unwrap_or(false)
+                    {
+                        s.push(chars.next().unwrap());
+                    }
+                }
+                _ => {
+                    chars.next(); // consume
+                    s.push(ch);
+                }
+            }
+        }
+        self.tokenizer_error("Unterminated string literal")
+    }
+
     fn tokenize_multiline_comment(
         &self,
         chars: &mut Peekable<Chars<'_>>,
@@ -729,16 +787,12 @@ fn is_identifier_start(ch: char) -> bool {
     // See https://www.postgresql.org/docs/11/sql-syntax-lexical.html#SQL-SYNTAX-IDENTIFIERS
     // We don't yet support identifiers beginning with "letters with
     // diacritical marks and non-Latin letters"
-    ('a'..='z').contains(&ch) || ('A'..='Z').contains(&ch) || ch == '_'
+    ch.is_ascii_alphabetic() || ch == '_'
 }
 
 /// Determine if a character is a valid unquoted identifier character
 fn is_identifier_part(ch: char) -> bool {
-    ('a'..='z').contains(&ch)
-        || ('A'..='Z').contains(&ch)
-        || ('0'..='9').contains(&ch)
-        || ch == '$'
-        || ch == '_'
+    ch.is_ascii_alphanumeric() || ch == '$' || ch == '_'
 }
 
 #[cfg(test)]

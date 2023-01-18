@@ -13,6 +13,7 @@ members = [
   "src/expr",
   "src/frontend",
   "src/frontend/planner_test",
+  "src/java_binding",
   "src/meta",
   "src/object_store",
   "src/prost",
@@ -23,6 +24,8 @@ members = [
   "src/sqlparser",
   "src/sqlparser/test_runner",
   "src/storage",
+  "src/storage/backup",
+  "src/storage/backup/cmd",
   "src/storage/compactor",
   "src/storage/hummock_sdk",
   "src/storage/hummock_test",
@@ -33,6 +36,7 @@ members = [
   "src/tests/simulation",
   "src/tests/sqlsmith",
   "src/tracing",
+  "src/udf",
   "src/utils/async_stack_trace",
   "src/utils/local_stats_alloc",
   "src/utils/pgwire",
@@ -98,6 +102,8 @@ opt-level = 3
 [profile.ci-dev.package."async_stack_trace"]
 opt-level = 3
 [profile.ci-dev.package."indextree"]
+opt-level = 3
+[profile.ci-dev.package."task_stats_alloc"]
 opt-level = 3
 
 # The profile used for deterministic simulation tests in CI.

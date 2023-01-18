@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,7 @@ use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-use crate::row::Row;
+use crate::row::OwnedRow;
 use crate::types::ScalarImpl;
 
 #[derive(PartialEq, Eq, Copy, Clone, Debug)]
@@ -46,6 +46,9 @@ impl OrderType {
     }
 }
 
+/// Column index with an order type (ASC or DESC). Used to represent a sort key (`Vec<OrderPair>`).
+///
+/// Corresponds to protobuf [`ColumnOrder`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrderPair {
     pub column_idx: usize,
@@ -125,7 +128,7 @@ impl PartialEq for HeapElem {
 
 impl Eq for HeapElem {}
 
-fn compare_values<'a, T>(lhs: Option<&T>, rhs: Option<&T>, order_type: &'a OrderType) -> Ordering
+fn compare_values<T>(lhs: Option<&T>, rhs: Option<&T>, order_type: &OrderType) -> Ordering
 where
     T: Ord,
 {
@@ -143,7 +146,7 @@ where
     }
 }
 
-pub fn compare_rows(lhs: &Row, rhs: &Row, order_pairs: &[OrderPair]) -> Result<Ordering> {
+pub fn compare_rows(lhs: &OwnedRow, rhs: &OwnedRow, order_pairs: &[OrderPair]) -> Result<Ordering> {
     for order_pair in order_pairs.iter() {
         let lhs = lhs[order_pair.column_idx].as_ref();
         let rhs = rhs[order_pair.column_idx].as_ref();
@@ -261,7 +264,7 @@ mod tests {
 
     use super::{compare_rows, OrderPair, OrderType};
     use crate::array::{DataChunk, ListValue, StructValue};
-    use crate::row::{Row, Row2};
+    use crate::row::{OwnedRow, Row};
     use crate::types::{DataType, ScalarImpl};
     use crate::util::sort_util::compare_rows_in_chunk;
 
@@ -274,8 +277,8 @@ mod tests {
         let v21 = Some(ScalarImpl::Utf8("hell".into()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
-        let row1 = Row::new(vec![v10, v11, v12]);
-        let row2 = Row::new(vec![v20, v21, v22]);
+        let row1 = OwnedRow::new(vec![v10, v11, v12]);
+        let row2 = OwnedRow::new(vec![v20, v21, v22]);
         let order_pairs = vec![
             OrderPair::new(0, OrderType::Ascending),
             OrderPair::new(1, OrderType::Descending),
@@ -300,8 +303,8 @@ mod tests {
         let v21 = Some(ScalarImpl::Utf8("hell".into()));
         let v22 = Some(ScalarImpl::Float32(3.0.into()));
 
-        let row1 = Row::new(vec![v10, v11, v12]);
-        let row2 = Row::new(vec![v20, v21, v22]);
+        let row1 = OwnedRow::new(vec![v10, v11, v12]);
+        let row2 = OwnedRow::new(vec![v20, v21, v22]);
         let chunk = DataChunk::from_rows(
             &[row1, row2],
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
@@ -323,7 +326,7 @@ mod tests {
 
     #[test]
     fn test_compare_all_types() {
-        let row1 = Row::new(vec![
+        let row1 = OwnedRow::new(vec![
             Some(ScalarImpl::Int16(16)),
             Some(ScalarImpl::Int32(32)),
             Some(ScalarImpl::Int64(64)),
@@ -345,7 +348,7 @@ mod tests {
                 Some(ScalarImpl::Int32(2)),
             ]))),
         ]);
-        let row2 = Row::new(vec![
+        let row2 = OwnedRow::new(vec![
             Some(ScalarImpl::Int16(16)),
             Some(ScalarImpl::Int32(32)),
             Some(ScalarImpl::Int64(64)),

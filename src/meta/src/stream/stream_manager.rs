@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -946,6 +946,7 @@ mod tests {
 
             let source_manager = Arc::new(
                 SourceManager::new(
+                    None,
                     barrier_scheduler.clone(),
                     catalog_manager.clone(),
                     fragment_manager.clone(),
@@ -1058,13 +1059,14 @@ mod tests {
             0,
             Fragment {
                 fragment_id: 0,
-                fragment_type: FragmentType::Mview as i32,
+                fragment_type_mask: FragmentTypeFlag::Mview as u32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 ..Default::default()
             },
         );
-        let table_fragments = TableFragments::new(table_id, fragments);
+        let table_fragments =
+            TableFragments::new(table_id, fragments, StreamEnvironment::default());
         services.create_materialized_view(table_fragments).await?;
 
         for actor in actors {
@@ -1143,14 +1145,15 @@ mod tests {
             0,
             Fragment {
                 fragment_id: 0,
-                fragment_type: FragmentType::Mview as i32,
+                fragment_type_mask: FragmentTypeFlag::Mview as u32,
                 distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
                 ..Default::default()
             },
         );
 
-        let table_fragments = TableFragments::new(table_id, fragments);
+        let table_fragments =
+            TableFragments::new(table_id, fragments, StreamEnvironment::default());
         services
             .create_materialized_view(table_fragments)
             .await

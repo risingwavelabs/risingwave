@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,6 +16,7 @@ use std::collections::{hash_map, HashMap};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use hytra::TrAdder;
 use parking_lot::Mutex;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
@@ -23,6 +24,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstTaskOutputId,
 };
+use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::GetDataResponse;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Sender;
@@ -43,6 +45,11 @@ pub struct BatchManager {
 
     /// Batch configuration
     config: BatchConfig,
+
+    /// Total batch memory usage in this CN.
+    /// When each task context report their own usage, it will apply the diff into this total mem
+    /// value for all tasks.
+    total_mem_val: Arc<TrAdder<i64>>,
 }
 
 impl BatchManager {
@@ -65,6 +72,7 @@ impl BatchManager {
             // stream manager.
             runtime: Box::leak(Box::new(runtime)),
             config,
+            total_mem_val: TrAdder::new().into(),
         }
     }
 
@@ -72,7 +80,7 @@ impl BatchManager {
         &self,
         tid: &ProstTaskId,
         plan: PlanFragment,
-        epoch: u64,
+        epoch: BatchQueryEpoch,
         context: ComputeNodeContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
@@ -201,6 +209,43 @@ impl BatchManager {
     pub fn config(&self) -> &BatchConfig {
         &self.config
     }
+
+    /// Kill batch queries with larges memory consumption per task. Required to maintain task level
+    /// memory usage in the struct. Will be called by global memory manager.
+    pub fn kill_queries(&self) {
+        let mut max_mem_task_id = None;
+        let mut max_mem = usize::MIN;
+        let guard = self.tasks.lock();
+        for (t_id, t) in guard.iter() {
+            // If the task has been stopped, we should not count this.
+            if t.is_end() {
+                continue;
+            }
+            // Alternatively, we can use a bool flag to indicate end of execution.
+            // Now we use only store 0 bytes in Context after execution ends.
+            let mem_usage = t.get_mem_usage();
+            if mem_usage > max_mem {
+                max_mem = mem_usage;
+                max_mem_task_id = Some(t_id.clone());
+            }
+        }
+        if let Some(id) = max_mem_task_id {
+            let t = guard.get(&id).unwrap();
+            t.abort_task();
+        }
+    }
+
+    /// Called by global memory manager for total usage of batch tasks. This op is designed to be
+    /// light-weight
+    pub fn get_all_memory_usage(&self) -> usize {
+        self.total_mem_val.get() as usize
+    }
+
+    /// Calculate the diff between this time and last time memory usage report, apply the diff for
+    /// the global counter. Due to the limitation of hytra, we need to use i64 type here.
+    pub fn apply_mem_diff(&self, diff: i64) {
+        self.total_mem_val.inc(diff)
+    }
 }
 
 impl Default for BatchManager {
@@ -214,6 +259,7 @@ mod tests {
     use risingwave_common::config::BatchConfig;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::make_i32_literal;
+    use risingwave_hummock_sdk::to_committed_batch_query_epoch;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::batch_plan::{
@@ -279,11 +325,16 @@ mod tests {
             task_id: 0,
         };
         manager
-            .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .fire_task(
+                &task_id,
+                plan.clone(),
+                to_committed_batch_query_epoch(0),
+                context.clone(),
+            )
             .await
             .unwrap();
         let err = manager
-            .fire_task(&task_id, plan, 0, context)
+            .fire_task(&task_id, plan, to_committed_batch_query_epoch(0), context)
             .await
             .unwrap_err();
         assert!(err
@@ -324,7 +375,12 @@ mod tests {
             task_id: 0,
         };
         manager
-            .fire_task(&task_id, plan.clone(), 0, context.clone())
+            .fire_task(
+                &task_id,
+                plan.clone(),
+                to_committed_batch_query_epoch(0),
+                context.clone(),
+            )
             .await
             .unwrap();
         manager.abort_task(&task_id);

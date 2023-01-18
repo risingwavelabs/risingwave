@@ -9,8 +9,8 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-# Stream tables with minimal overlap that require merge tasks on both sides.
 
+# Stream tables with minimal overlap that require merge tasks on both sides.
 query II
 SELECT lhs.begin, rhs.begin
 FROM (

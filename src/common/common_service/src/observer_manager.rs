@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -123,6 +123,7 @@ where
             | Info::Sink(_)
             | Info::Index(_)
             | Info::View(_)
+            | Info::Function(_)
             | Info::User(_) => notification.version > catalog_version,
             Info::ParallelUnitMapping(_) => notification.version > parallel_unit_mapping_version,
             Info::Node(_) => notification.version > worker_node_version,
@@ -130,6 +131,7 @@ where
                 version_delta.version_deltas[0].id > info.hummock_version.as_ref().unwrap().id
             }
             Info::HummockSnapshot(_) => true,
+            Info::MetaBackupManifestId(_) => true,
             Info::Snapshot(_) => unreachable!(),
         });
 

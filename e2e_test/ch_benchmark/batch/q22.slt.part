@@ -1,14 +1,14 @@
-query TIR rowsort
+query TIR
 select	 substr(c_state,1,1) as country,
     	 count(*) as numcust,
-    	 sum(c_balance) as totacctbal
+    	 round(sum(c_balance)::decimal, 0) as totacctbal
 from	 customer
 where	 substr(c_phone,1,1) in ('1','2','3','4','5','6','7')
     	 and c_balance > (select avg(c_BALANCE)
                           from 	 customer
                           where  c_balance > 0.00
                                  and substr(c_phone,1,1) in ('1','2','3','4','5','6','7'))
-    	 and not exists (select *
+    	 and exists (select *
                          from      orders
                          where     o_c_id = c_id
                                 and o_w_id = c_w_id
@@ -16,6 +16,16 @@ where	 substr(c_phone,1,1) in ('1','2','3','4','5','6','7')
 group by substr(c_state,1,1)
 order by substr(c_state,1,1);
 ----
-g 1 1000
-i 1 1000
-y 1 1000
+2             1      70777
+7             1      84631
+A             1      60247
+H             2     127428
+K             1      60478
+P             1      74144
+R             1      52923
+T             1      87668
+Y             1      74439
+Z             1      72966
+e             2     143868
+g             1      66072
+r             1      67979

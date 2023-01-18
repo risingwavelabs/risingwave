@@ -150,11 +150,8 @@
     select i.x as ix, ii.x as iix from i join i as ii on i.x=ii.x;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: i.x = i.x, output: all }
-      ├─BatchExchange { order: [], dist: HashShard(i.x) }
-      | └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
-      └─BatchExchange { order: [], dist: HashShard(i.x) }
-        └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
+    └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: all }
+      └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
   stream_plan: |
     StreamMaterialize { columns: [ix, iix, i.t._row_id(hidden), i.t._row_id#1(hidden)], pk_columns: [i.t._row_id, i.t._row_id#1, ix, iix] }
     └─StreamHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x, i.x, i.t._row_id, i.t._row_id] }
@@ -169,11 +166,8 @@
     select i.x as ix, t.x as tx from i join t on i.x=t.x;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: Inner, predicate: i.x = t.x, output: all }
-      ├─BatchExchange { order: [], dist: HashShard(i.x) }
-      | └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
-      └─BatchExchange { order: [], dist: HashShard(t.x) }
-        └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+    └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: all }
+      └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
   stream_plan: |
     StreamMaterialize { columns: [ix, tx, i.t._row_id(hidden), t._row_id(hidden)], pk_columns: [i.t._row_id, t._row_id, ix, tx] }
     └─StreamHashJoin { type: Inner, predicate: i.x = t.x, output: [i.x, t.x, i.t._row_id, t._row_id] }
@@ -194,15 +188,11 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [Coalesce(i.x, i.x)] }
       └─BatchHashJoin { type: FullOuter, predicate: i.x = i.x, output: all }
-        ├─BatchHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
-        | ├─BatchExchange { order: [], dist: HashShard(i.x) }
-        | | └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
-        | └─BatchExchange { order: [], dist: HashShard(i.x) }
+        ├─BatchExchange { order: [], dist: HashShard(i.x) }
+        | └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
         |   └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
-        └─BatchHashJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
-          ├─BatchExchange { order: [], dist: HashShard(i.x) }
-          | └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
-          └─BatchExchange { order: [], dist: HashShard(i.x) }
+        └─BatchExchange { order: [], dist: HashShard(i.x) }
+          └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
             └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
   stream_plan: |
     StreamMaterialize { columns: [x, i.t._row_id(hidden), i.t._row_id#1(hidden), i.x(hidden), i.x#1(hidden), i.t._row_id#2(hidden), i.t._row_id#3(hidden), i.x#2(hidden), i.x#3(hidden)], pk_columns: [i.t._row_id, i.t._row_id#1, i.x, i.x#1, i.t._row_id#2, i.t._row_id#3, i.x#2, i.x#3] }
@@ -553,12 +543,13 @@
     select * from t1 join t3 where t1.v2 = t3.v1 and t3.v1 > 1;
   optimized_logical_plan: |
     LogicalJoin { type: Inner, on: (t1.v2 = t3.v1), output: all }
-    ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2] }
-    └─LogicalScan { table: t3, output_columns: [t3.v1, t3.v2], required_columns: [v1, v2], predicate: (t3.v1 > 1:Int32) }
+    ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (t1.v2 > 1:Int32) }
+    └─LogicalScan { table: t3, columns: [t3.v1, t3.v2], predicate: (t3.v1 > 1:Int32) }
   batch_local_plan: |
     BatchLookupJoin { type: Inner, predicate: t1.v2 = t3.v1 AND (t3.v1 > 1:Int32), output: all }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
+      └─BatchFilter { predicate: (t1.v2 > 1:Int32) }
+        └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
   with_config_map:
     QUERY_MODE: local
     RW_BATCH_ENABLE_LOOKUP_JOIN: 'true'
@@ -584,3 +575,39 @@
     | └─LogicalScan { table: t1, columns: [t1.x, t1.y] }
     └─LogicalProject { exprs: [t2.x, t2.y, t2.y] }
       └─LogicalScan { table: t2, columns: [t2.x, t2.y] }
+- name: Lookup join with no eq keys after pulling up predicate will revert to hash join
+  sql: |
+    create table t1 (v1 int, v2 int);
+    create table t2 (v1 int, v2 int);
+    create materialized view t3 as select v1, count(v2) as v2 from t2 group by v1;
+    select * from (select * from t1 where false) as t1_s join (select * from t3 where false) as t3_s on t1_s.v2 = t3_s.v1;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: t1.v2 = t3.v1, output: all }
+      ├─BatchExchange { order: [], dist: HashShard(t1.v2) }
+      | └─BatchValues { rows: [] }
+      └─BatchExchange { order: [], dist: HashShard(t3.v1) }
+        └─BatchValues { rows: [] }
+- name: Able to join on `IS NOT DISTINCT FROM` on unequal but implicitly castable types
+  sql: |
+    create table t1 (v1 int);
+    create table t2 (v2 bigint);
+    select * from t1 join t2 on v1 IS NOT DISTINCT FROM v2;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+    └─BatchHashJoin { type: Inner, predicate: t1.v1::Int64 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2] }
+      ├─BatchExchange { order: [], dist: HashShard(t1.v1::Int64) }
+      | └─BatchProject { exprs: [t1.v1, t1.v1::Int64] }
+      |   └─BatchScan { table: t1, columns: [t1.v1], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t2.v2) }
+        └─BatchProject { exprs: [t2.v2, t2.v2] }
+          └─BatchScan { table: t2, columns: [t2.v2], distribution: SomeShard }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t1.v1::Int64(hidden), t2._row_id(hidden), t2.v2(hidden)], pk_columns: [t1._row_id, t2._row_id, t1.v1::Int64, t2.v2] }
+    └─StreamHashJoin { type: Inner, predicate: t1.v1::Int64 IS NOT DISTINCT FROM t2.v2, output: [t1.v1, t2.v2, t1._row_id, t1.v1::Int64, t2._row_id, t2.v2] }
+      ├─StreamExchange { dist: HashShard(t1.v1::Int64) }
+      | └─StreamProject { exprs: [t1.v1, t1.v1::Int64, t1._row_id] }
+      |   └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+      └─StreamExchange { dist: HashShard(t2.v2) }
+        └─StreamProject { exprs: [t2.v2, t2.v2, t2._row_id] }
+          └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }

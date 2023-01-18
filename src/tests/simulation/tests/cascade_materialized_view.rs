@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -38,7 +38,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
     cluster.run(MV1).await?;
 
     let fragment = cluster
-        .locate_one_fragment(vec![
+        .locate_one_fragment([
             identity_contains("materialize"),
             no_identity_contains("chain"),
             no_identity_contains("hashjoin"),
@@ -54,7 +54,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
     assert_eq!(fragment.inner.actors.len(), 1);
 
     let chain_fragment = cluster
-        .locate_one_fragment(vec![identity_contains("chain")])
+        .locate_one_fragment([identity_contains("chain")])
         .await?;
 
     assert_eq!(
@@ -84,7 +84,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
     assert_eq!(fragment.inner.actors.len(), 6);
 
     let chain_fragment = cluster
-        .locate_one_fragment(vec![identity_contains("chain")])
+        .locate_one_fragment([identity_contains("chain")])
         .await?;
 
     assert_eq!(
@@ -126,7 +126,7 @@ async fn test_diamond_cascade_materialized_view() -> Result<()> {
     cluster.run(MV5).await?;
 
     let fragment = cluster
-        .locate_one_fragment(vec![
+        .locate_one_fragment([
             identity_contains("materialize"),
             no_identity_contains("chain"),
             no_identity_contains("hashjoin"),

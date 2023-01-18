@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -26,10 +26,13 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum_to_bytes};
+use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
 use risingwave_connector::source::SplitImpl;
+use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::ExprError;
 use risingwave_pb::data::{Datum as ProstDatum, Epoch as ProstEpoch};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation as ProstMutation;
@@ -42,6 +45,7 @@ use risingwave_pb::stream_plan::{
 };
 use smallvec::SmallVec;
 
+use crate::common::InfallibleExpression;
 use crate::error::StreamResult;
 use crate::task::{ActorId, FragmentId};
 
@@ -78,10 +82,12 @@ pub mod row_id_gen;
 mod simple;
 mod sink;
 mod sort;
+mod sort_buffer;
 pub mod source;
 pub mod subtask;
 mod top_n;
 mod union;
+mod watermark;
 mod watermark_filter;
 mod wrapper;
 
@@ -134,7 +140,7 @@ pub type BoxedMessageStream = BoxStream<'static, MessageStreamItem>;
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
 /// Static information of an executor.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ExecutorInfo {
     /// See [`Executor::schema`].
     pub schema: Schema,
@@ -578,12 +584,36 @@ impl Watermark {
         }
     }
 
+    pub fn transform_with_expr(
+        self,
+        expr: &BoxedExpression,
+        new_col_idx: usize,
+        on_err: impl Fn(ExprError),
+    ) -> Option<Self> {
+        let Self {
+            col_idx,
+            data_type,
+            val,
+        } = self;
+        let row = {
+            let mut row = vec![None; col_idx + 1];
+            row[col_idx] = Some(val);
+            OwnedRow::new(row)
+        };
+        let val = expr.eval_row_infallible(&row, on_err)?;
+        Some(Self {
+            col_idx: new_col_idx,
+            data_type,
+            val,
+        })
+    }
+
     pub fn to_protobuf(&self) -> ProstWatermark {
         ProstWatermark {
             col_idx: self.col_idx as _,
             data_type: Some(self.data_type.to_protobuf()),
             val: Some(ProstDatum {
-                body: serialize_datum_to_bytes(Some(&self.val)),
+                body: serialize_datum(Some(&self.val)),
             }),
         }
     }
@@ -597,6 +627,14 @@ impl Watermark {
             data_type,
             val,
         })
+    }
+
+    pub fn with_idx(self, idx: usize) -> Self {
+        Self {
+            col_idx: idx,
+            data_type: self.data_type,
+            val: self.val,
+        }
     }
 }
 
@@ -670,7 +708,6 @@ pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
 /// Expect the first message of the given `stream` as a barrier.
-#[track_caller]
 pub async fn expect_first_barrier(
     stream: &mut (impl MessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {
@@ -686,7 +723,6 @@ pub async fn expect_first_barrier(
 }
 
 /// Expect the first message of the given `stream` as a barrier.
-#[track_caller]
 pub async fn expect_first_barrier_from_aligned_stream(
     stream: &mut (impl AlignedMessageStream + Unpin),
 ) -> StreamExecutorResult<Barrier> {

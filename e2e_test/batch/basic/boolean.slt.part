@@ -80,6 +80,8 @@ f	t	f	t	t
 f	t	t	f	f
 t	f	f	t	f
 
+
+
 statement ok
 DROP TABLE TB1;
 

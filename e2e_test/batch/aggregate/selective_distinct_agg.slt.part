@@ -40,6 +40,7 @@ with z(a, b) as (select count(distinct v1), count(v2) from t) select a from z;
 statement ok
 drop table t
 
+
 statement ok
 create table t(x int, y int)
 

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,6 +22,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::compaction::ManualCompactionOption;
 use risingwave_meta::hummock::test_utils::{
@@ -42,9 +43,10 @@ use serial_test::serial;
 use super::compactor_tests::tests::{
     flush_and_commit, get_hummock_storage, prepare_compactor_and_filter,
 };
-use crate::test_utils::get_test_notification_client;
+use crate::get_test_notification_client;
 
 #[tokio::test]
+#[cfg(feature = "sync_point")]
 #[serial]
 async fn test_syncpoints_sstable_id_manager() {
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -93,7 +95,7 @@ async fn test_syncpoints_sstable_id_manager() {
     }
 }
 
-#[cfg(feature = "failpoints")]
+#[cfg(all(feature = "sync_point", feature = "failpoints"))]
 #[tokio::test]
 #[serial]
 async fn test_syncpoints_test_failpoints_fetch_ids() {
@@ -148,6 +150,7 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
 }
 
 #[tokio::test]
+#[cfg(feature = "sync_point")]
 #[serial]
 async fn test_syncpoints_test_local_notification_receiver() {
     let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
@@ -239,6 +242,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     let storage = get_hummock_storage(
         hummock_meta_client.clone(),
         get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+        &hummock_manager_ref,
         TableId::from(existing_table_id),
     )
     .await;
@@ -326,10 +330,11 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     storage.wait_version(version).await;
     let read_options = ReadOptions {
         ignore_range_tombstone: false,
-        check_bloom_filter: false,
-        dist_key_hint: None,
+
+        prefix_hint: None,
         table_id: TableId::from(existing_table_id),
         retention_seconds: None,
+        read_version_from_backup: false,
     };
     let get_result = storage
         .get(b"hhh", 120, read_options.clone())
@@ -365,4 +370,38 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         .unwrap();
     assert_eq!(get_result.unwrap(), val0);
     assert!(skip_flag.load(Ordering::Acquire));
+}
+
+#[tokio::test]
+#[cfg(feature = "sync_point")]
+#[serial]
+async fn test_syncpoints_hummock_version_safe_point() {
+    let (_env, hummock_manager, _, _) = setup_compute_env(80).await;
+    assert_eq!(
+        hummock_manager.get_min_pinned_version_id().await,
+        HummockVersionId::MAX
+    );
+    let v = hummock_manager.get_current_version().await;
+    let sp = hummock_manager.register_safe_point().await;
+    assert_eq!(v.id, sp.id);
+    assert_eq!(hummock_manager.get_min_pinned_version_id().await, v.id);
+    hummock_manager.unregister_safe_point(sp.id).await;
+    assert_eq!(
+        hummock_manager.get_min_pinned_version_id().await,
+        HummockVersionId::MAX
+    );
+
+    let sp = hummock_manager.register_safe_point().await;
+    assert_eq!(hummock_manager.get_min_pinned_version_id().await, v.id);
+    drop(sp);
+    sync_point::wait_timeout(
+        "UNREGISTER_HUMMOCK_VERSION_SAFE_POINT",
+        Duration::from_secs(10),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        hummock_manager.get_min_pinned_version_id().await,
+        HummockVersionId::MAX
+    );
 }

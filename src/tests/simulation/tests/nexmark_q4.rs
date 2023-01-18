@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,6 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use futures::future::BoxFuture;
 use madsim::time::sleep;
 use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::ctl_ext::predicate::{
@@ -29,20 +28,20 @@ use risingwave_simulation::utils::AssertResult;
 
 #[cfg(target_os = "linux")]
 const RESULT: &str = r#"
-10 28621445.114754098360655737705
-11 28749150.521624007060900264784
-12 29301291.591155234657039711191
-13 31170352.90419708029197080292
-14 26981020.86615515771526001705
+10 28586726.812614259597806215722
+11 29089413.538191395961369622476
+12 29245370.435142594296228150874
+13 30910968.113309352517985611511
+14 26961712.806972789115646258503
 "#;
 
 #[cfg(target_os = "macos")]
 const RESULT: &str = r#"
-10 28621445.112932604735883424408
-11 28749150.514563106796116504854
-12 29301291.583935018050541516245
-13 31170352.90419708029197080292
-14 26981020.86615515771526001705
+10 28586726.810786106032906764168
+11 29089413.531167690956979806848
+12 29245370.427782888684452621895
+13 30910968.113309352517985611511
+14 26961712.806972789115646258503
 "#;
 
 async fn init() -> Result<NexmarkCluster> {
@@ -68,7 +67,7 @@ async fn nexmark_q4_ref() -> Result<()> {
     Ok(())
 }
 
-async fn nexmark_q4_common_inner(predicates: Vec<BoxedPredicate>) -> Result<()> {
+async fn nexmark_q4_common(predicates: impl IntoIterator<Item = BoxedPredicate>) -> Result<()> {
     let mut cluster = init().await?;
 
     let fragment = cluster.locate_one_fragment(predicates).await?;
@@ -96,13 +95,9 @@ async fn nexmark_q4_common_inner(predicates: Vec<BoxedPredicate>) -> Result<()> 
     Ok(())
 }
 
-fn nexmark_q4_common(predicates: Vec<BoxedPredicate>) -> BoxFuture<'static, Result<()>> {
-    Box::pin(nexmark_q4_common_inner(predicates))
-}
-
 #[madsim::test]
 async fn nexmark_q4_materialize_agg() -> Result<()> {
-    nexmark_q4_common(vec![
+    nexmark_q4_common([
         identity_contains("materialize"),
         identity_contains("hashagg"),
     ])
@@ -110,14 +105,13 @@ async fn nexmark_q4_materialize_agg() -> Result<()> {
 }
 
 #[madsim::test]
-#[ignore = "there's some problem for scaling nexmark source"]
 async fn nexmark_q4_source() -> Result<()> {
-    nexmark_q4_common(vec![identity_contains("source: \"bid\"")]).await
+    nexmark_q4_common([identity_contains("source: \"bid\"")]).await
 }
 
 #[madsim::test]
 async fn nexmark_q4_agg_join() -> Result<()> {
-    nexmark_q4_common(vec![
+    nexmark_q4_common([
         identity_contains("hashagg"),
         identity_contains("hashjoin"),
         upstream_fragment_count(2),
@@ -130,7 +124,7 @@ async fn nexmark_q4_cascade() -> Result<()> {
     let mut cluster = init().await?;
 
     let fragment_1 = cluster
-        .locate_one_fragment(vec![
+        .locate_one_fragment([
             identity_contains("materialize"),
             identity_contains("hashagg"),
         ])
@@ -138,7 +132,7 @@ async fn nexmark_q4_cascade() -> Result<()> {
     let id_1 = fragment_1.id();
 
     let fragment_2 = cluster
-        .locate_one_fragment(vec![
+        .locate_one_fragment([
             identity_contains("hashagg"),
             identity_contains("hashjoin"),
             upstream_fragment_count(2),
@@ -178,7 +172,7 @@ async fn nexmark_q4_materialize_agg_cache_invalidation() -> Result<()> {
     let mut cluster = init().await?;
 
     let fragment = cluster
-        .locate_one_fragment(vec![
+        .locate_one_fragment([
             identity_contains("materialize"),
             identity_contains("hashagg"),
         ])

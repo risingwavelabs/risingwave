@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,16 +17,21 @@
 #![feature(generators)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
+#![feature(result_option_inspect)]
+#![feature(lint_reasons)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
 extern crate tracing;
 
+pub mod memory_management;
 pub mod rpc;
 pub mod server;
 
 use clap::clap_derive::ArgEnum;
 use clap::Parser;
+use risingwave_common::util::resource_util::cpu::total_cpu_available;
+use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 
 #[derive(Debug, Clone, ArgEnum)]
 pub enum AsyncStackTraceOption {
@@ -42,7 +47,9 @@ pub struct ComputeNodeOpts {
     #[clap(long, default_value = "127.0.0.1:5688")]
     pub host: String,
 
-    // Optional, we will use listen_address if not specified.
+    /// The address of the compute node's meta client.
+    ///
+    /// Optional, we will use listen_address if not specified.
     #[clap(long)]
     pub client_address: Option<String>,
 
@@ -96,6 +103,28 @@ pub struct ComputeNodeOpts {
     pub parallelism: usize,
 }
 
+fn validate_opts(opts: &ComputeNodeOpts) {
+    let total_memory_available_bytes = total_memory_available_bytes();
+    if opts.total_memory_bytes > total_memory_available_bytes {
+        let error_msg = format!("total_memory_bytes {} is larger than the total memory available bytes {} that can be acquired.", opts.total_memory_bytes, total_memory_available_bytes);
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+    if opts.parallelism == 0 {
+        let error_msg = "parallelism should not be zero";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+    let total_cpu_available = total_cpu_available().ceil() as usize;
+    if opts.parallelism > total_cpu_available {
+        let error_msg = format!(
+            "parallelism {} is larger than the total cpu available {} that can be acquired.",
+            opts.parallelism, total_cpu_available
+        );
+        tracing::warn!(error_msg);
+    }
+}
+
 use std::future::Future;
 use std::pin::Pin;
 
@@ -107,6 +136,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
     // slow compile in release mode.
     Box::pin(async move {
         tracing::info!("Compute node options: {:?}", opts);
+        validate_opts(&opts);
 
         let listen_address = opts.host.parse().unwrap();
         tracing::info!("Server Listening at {}", listen_address);
@@ -132,13 +162,9 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
 }
 
 fn default_total_memory_bytes() -> usize {
-    use sysinfo::{System, SystemExt};
-
-    let mut sys = System::new();
-    sys.refresh_memory();
-    sys.total_memory() as usize
+    total_memory_available_bytes()
 }
 
 fn default_parallelism() -> usize {
-    std::thread::available_parallelism().unwrap().get()
+    total_cpu_available().ceil() as usize
 }

@@ -1,6 +1,6 @@
 statement ok
 create materialized view ch_benchmark_q18 as
-select	 c_last, c_id o_id, o_entry_d, o_ol_cnt, sum(ol_amount) as sum_ol_amount
+select	 c_last, c_id o_id, o_entry_d, o_ol_cnt, round(sum(ol_amount)::decimal, 0) as revenue
 from	 customer, orders, orderline
 where	 c_id = o_c_id
     	 and c_w_id = o_w_id
@@ -9,5 +9,4 @@ where	 c_id = o_c_id
     	 and ol_d_id = o_d_id
     	 and ol_o_id = o_id
 group by o_id, o_w_id, o_d_id, c_id, c_last, o_entry_d, o_ol_cnt
-having	 sum(ol_amount) > 200
-order by sum(ol_amount) desc, o_entry_d;
+having	 sum(ol_amount) > 52000;

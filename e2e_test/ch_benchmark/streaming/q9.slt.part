@@ -1,4 +1,35 @@
 query TTR rowsort
-select * from ch_benchmark_q9;
+select * from ch_benchmark_q9
+order by n_name, l_year desc;
 ----
- GERMANY    2015           0
+BELGIUM          2022      53358
+BRAZIL           2022      37962
+CAMEROON         2022      33848
+CANADA           2022      55840
+EGYPT            2022      75780
+FRANCE           2022      46961
+GREECE           2022     120320
+INDIA            2022      68969
+INDONESIA        2022     113342
+IRAN             2022      28799
+ITALY            2022     106881
+KENYA            2022      48952
+NEPAL            2022      24158
+NETHERLANDS      2022      51849
+NORTH KOREA      2022      96672
+PAKISTAN         2022      59903
+PERU             2022     112499
+PHILIPPINES      2022      36252
+PORTUGAL         2022      50061
+ROMANIA          2022      49718
+SAUDI ARABIA     2022      43043
+SOUTH AFRICA     2022      45356
+SOUTH KOREA      2022      31805
+SPAIN            2022      62534
+SRI LANKA        2022      76558
+SYRIA            2022      32916
+THAILAND         2022      81021
+UKRAINE          2022      78403
+UNITED KINGDOM   2022     187124
+UNITED STATES    2022      22604
+VIETNAM          2022      46196

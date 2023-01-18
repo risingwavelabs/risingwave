@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -37,13 +37,13 @@ use crate::array::{
 };
 use crate::collection::estimate_size::EstimateSize;
 use crate::hash::vnode::VirtualNode;
-use crate::row::{Row, RowDeserializer};
+use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
     OrderedF32, OrderedF64, ScalarRef,
 };
 use crate::util::hash_util::Crc32FastBuilder;
-use crate::util::value_encoding::{deserialize_datum, serialize_datum};
+use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
 
 /// A wrapper for u64 hash result.
 #[derive(Default, Clone, Copy, Debug, PartialEq)]
@@ -139,7 +139,7 @@ pub trait HashKey:
             .collect()
     }
 
-    fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<Row>;
+    fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow>;
 
     fn deserialize_to_builders(
         &self,
@@ -594,10 +594,10 @@ impl HashKeySerializer for SerializedKeySerializer {
         self.null_bitmap.grow(len_bitmap + 1);
         match data {
             Some(v) => {
-                serialize_datum(&Some(v.to_owned_scalar().into()), &mut self.buffer);
+                serialize_datum_into(&Some(v.to_owned_scalar().into()), &mut self.buffer);
             }
             None => {
-                serialize_datum(&None, &mut self.buffer);
+                serialize_datum_into(&None, &mut self.buffer);
                 self.null_bitmap.insert(len_bitmap);
             }
         }
@@ -668,7 +668,7 @@ impl ArrayBuilderImpl {
 impl<const N: usize> HashKey for FixedSizeKey<N> {
     type S = FixedSizeKeySerializer<N>;
 
-    fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<Row> {
+    fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
         // TODO: directly deserialize to Row
         let mut builders: Vec<_> = data_types
             .iter()
@@ -676,7 +676,7 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
             .collect();
 
         self.deserialize_to_builders(&mut builders, data_types)?;
-        Ok(Row::new(
+        Ok(OwnedRow::new(
             builders
                 .into_iter()
                 .map(|builder| builder.finish().to_datum())
@@ -704,7 +704,7 @@ impl<const N: usize> HashKey for FixedSizeKey<N> {
 impl HashKey for SerializedKey {
     type S = SerializedKeySerializer;
 
-    fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<Row> {
+    fn deserialize(&self, data_types: &[DataType]) -> ArrayResult<OwnedRow> {
         RowDeserializer::new(data_types)
             .deserialize(self.key.as_slice())
             .map_err(ArrayError::internal)

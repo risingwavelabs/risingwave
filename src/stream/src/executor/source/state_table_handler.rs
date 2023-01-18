@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,15 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Deref;
+use std::collections::HashSet;
+use std::ops::{Bound, Deref};
 
 use bytes::Bytes;
-use risingwave_common::bail;
+use futures::{pin_mut, StreamExt};
 use risingwave_common::catalog::{DatabaseId, SchemaId};
-use risingwave_common::row::{Row, Row2};
+use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+use risingwave_common::hash::VirtualNode;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::{bail, row};
+use risingwave_connector::source::filesystem::FsSplit;
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
+use risingwave_hummock_sdk::key::next_key;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
@@ -32,12 +38,21 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::StreamExecutorResult;
 
+// TODO: A randomly generated complex prefix that can reduce the probability of occurrence in the
+// split id
+const COMPLETE_SPLIT_PREFIX: &str = "completed_";
+
 pub struct SourceStateTableHandler<S: StateStore> {
     pub state_store: StateTable<S>,
 }
 
 impl<S: StateStore> SourceStateTableHandler<S> {
     pub async fn from_table_catalog(table_catalog: &ProstTable, store: S) -> Self {
+        // The state of source should not be cleaned up by retention_seconds
+        assert!(!table_catalog
+            .properties
+            .contains_key(&String::from(PROPERTIES_RETENTION_SECOND_KEY)));
+
         Self {
             state_store: StateTable::from_table_catalog(table_catalog, store, None).await,
         }
@@ -51,18 +66,83 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         ScalarImpl::Utf8(rhs.into().into_boxed_str())
     }
 
-    pub(crate) async fn get(&self, key: SplitId) -> StreamExecutorResult<Option<Row>> {
+    pub(crate) async fn get(&self, key: SplitId) -> StreamExecutorResult<Option<OwnedRow>> {
         self.state_store
-            .get_row(&Row::new(vec![Some(Self::string_to_scalar(key.deref()))]))
+            .get_row(row::once(Some(Self::string_to_scalar(key.deref()))))
             .await
             .map_err(StreamExecutorError::from)
     }
 
-    async fn set(&mut self, key: SplitId, value: Bytes) -> StreamExecutorResult<()> {
-        let row = Row::new(vec![
-            Some(Self::string_to_scalar(key.deref())),
+    // this method should only be used by `FsSourceExecutor
+    pub(crate) async fn get_all_completed(&self) -> StreamExecutorResult<HashSet<SplitId>> {
+        let start = Bound::Excluded(row::once(Some(Self::string_to_scalar(
+            COMPLETE_SPLIT_PREFIX,
+        ))));
+        let next = next_key(COMPLETE_SPLIT_PREFIX.as_bytes());
+        let end = Bound::Excluded(row::once(Some(Self::string_to_scalar(
+            String::from_utf8(next).unwrap(),
+        ))));
+
+        // all source executor has vnode id zero
+        let iter = self
+            .state_store
+            .iter_with_pk_range(&(start, end), VirtualNode::ZERO)
+            .await?;
+
+        let mut set = HashSet::new();
+        pin_mut!(iter);
+        while let Some(row) = iter.next().await {
+            let row = row?;
+            if let Some(ScalarRefImpl::Bytea(bytes)) = row.datum_at(1) {
+                let split = FsSplit::restore_from_bytes(bytes)?;
+                if split.offset == split.size {
+                    let split_id = split.id();
+                    set.insert(split_id);
+                }
+            }
+        }
+        Ok(set)
+    }
+
+    async fn set_complete(&mut self, key: SplitId, value: Bytes) -> StreamExecutorResult<()> {
+        let row = [
+            Some(Self::string_to_scalar(format!(
+                "{}{}",
+                COMPLETE_SPLIT_PREFIX,
+                key.deref()
+            ))),
             Some(ScalarImpl::Bytea(Box::from(value.as_ref()))),
-        ]);
+        ];
+        if let Some(prev_row) = self.get(key).await? {
+            self.state_store.delete(prev_row);
+        }
+        self.state_store.insert(row);
+        Ok(())
+    }
+
+    /// set all complete
+    /// can only used by `FsSourceExecutor`
+    pub(crate) async fn set_all_complete<SS>(&mut self, states: Vec<SS>) -> StreamExecutorResult<()>
+    where
+        SS: SplitMetaData,
+    {
+        if states.is_empty() {
+            // TODO should be a clear Error Code
+            bail!("states require not null");
+        } else {
+            for split in states {
+                self.set_complete(split.id(), split.encode_to_bytes())
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn set(&mut self, key: SplitId, value: Bytes) -> StreamExecutorResult<()> {
+        let row = [
+            Some(Self::string_to_scalar(key.deref())),
+            Some(ScalarImpl::Bytea(Vec::from(value).into_boxed_slice())),
+        ];
         match self.get(key).await? {
             Some(prev_row) => {
                 self.state_store.update(prev_row, row);
@@ -150,7 +230,7 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
 pub(crate) mod tests {
     use std::sync::Arc;
 
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{Datum, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_connector::source::kafka::KafkaSplit;
@@ -174,12 +254,12 @@ pub(crate) mod tests {
         let next_epoch = EpochPair::new_test_epoch(init_epoch_num + 1);
 
         state_table.init_epoch(init_epoch);
-        state_table.insert(Row::new(vec![a.clone(), b.clone()]));
+        state_table.insert(OwnedRow::new(vec![a.clone(), b.clone()]));
         state_table.commit(next_epoch).await.unwrap();
 
         let a: Arc<str> = String::from("a").into();
         let a: Datum = Some(ScalarImpl::Utf8(a.as_ref().into()));
-        let _resp = state_table.get_row(&Row::new(vec![a])).await.unwrap();
+        let _resp = state_table.get_row(&OwnedRow::new(vec![a])).await.unwrap();
     }
 
     #[tokio::test]

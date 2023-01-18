@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,9 +17,9 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Ident, ObjectName, ShowObject};
+use risingwave_sqlparser::ast::{Ident, ObjectName, ShowCreateType, ShowObject};
 
 use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
@@ -67,9 +67,18 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
             .iter_table()
             .map(|t| t.name.clone())
             .collect(),
+        ShowObject::InternalTable { schema } => catalog_reader
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .iter_internal_table()
+            .map(|t| t.name.clone())
+            .collect(),
         ShowObject::Database => catalog_reader.get_all_database_names(),
         ShowObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
-        // If not include schema name, use default schema name
+        ShowObject::View { schema } => catalog_reader
+            .get_schema_by_name(session.database(), &schema_or_default(&schema))?
+            .iter_view()
+            .map(|t| t.name.clone())
+            .collect(),
         ShowObject::MaterializedView { schema } => catalog_reader
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_mv()
@@ -96,7 +105,7 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
 
             return Ok(PgResponse::new_for_stream(
                 StatementType::SHOW_COMMAND,
-                Some(rows.len() as i32),
+                None,
                 rows.into(),
                 vec![
                     PgFieldDescriptor::new(
@@ -121,13 +130,74 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
 
     Ok(PgResponse::new_for_stream(
         StatementType::SHOW_COMMAND,
-        Some(rows.len() as i32),
+        None,
         rows.into(),
         vec![PgFieldDescriptor::new(
             "Name".to_owned(),
             DataType::VARCHAR.to_oid(),
             DataType::VARCHAR.type_len(),
         )],
+    ))
+}
+
+pub fn handle_show_create_object(
+    handle_args: HandlerArgs,
+    show_create_type: ShowCreateType,
+    name: ObjectName,
+) -> Result<RwPgResponse> {
+    let session = handle_args.session;
+    let catalog_reader = session.env().catalog_reader().read_guard();
+    let (schema_name, object_name) =
+        Binder::resolve_schema_qualified_name(session.database(), name.clone())?;
+    let schema_name = schema_name.unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
+    let schema = catalog_reader.get_schema_by_name(session.database(), &schema_name)?;
+    let sql = match show_create_type {
+        ShowCreateType::MaterializedView => {
+            let mv = schema
+                .get_table_by_name(&object_name)
+                .filter(|t| t.is_mview())
+                .ok_or_else(|| CatalogError::NotFound("materialized view", name.to_string()))?;
+            mv.create_sql()
+        }
+        ShowCreateType::View => {
+            let view = schema
+                .get_view_by_name(&object_name)
+                .ok_or_else(|| CatalogError::NotFound("view", name.to_string()))?;
+            view.create_sql()
+        }
+        ShowCreateType::Table => {
+            let table = schema
+                .get_table_by_name(&object_name)
+                .filter(|t| t.is_table())
+                .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
+            table.create_sql()
+        }
+        _ => {
+            return Err(ErrorCode::NotImplemented(
+                format!("show create on: {}", show_create_type),
+                None.into(),
+            )
+            .into());
+        }
+    };
+    let name = format!("{}.{}", schema_name, object_name);
+
+    Ok(PgResponse::new_for_stream(
+        StatementType::SHOW_COMMAND,
+        None,
+        vec![Row::new(vec![Some(name.into()), Some(sql.into())])].into(),
+        vec![
+            PgFieldDescriptor::new(
+                "Name".to_owned(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Create Sql".to_owned(),
+                DataType::VARCHAR.to_oid(),
+                DataType::VARCHAR.type_len(),
+            ),
+        ],
     ))
 }
 

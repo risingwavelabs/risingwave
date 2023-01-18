@@ -6,13 +6,13 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-statement error 
+statement error
 SELECT * FROM generate_series(0,10,1) LIMIT 3 OFFSET -1;
 
-statement error 
+statement error
 SELECT * FROM generate_series(0,10,1) LIMIT -3;
 
-statement error 
+statement error
 SELECT * FROM generate_series(0,10,1) LIMIT -1%;
 
 statement ok
@@ -21,10 +21,10 @@ CREATE TABLE integers(k int);
 statement ok
 INSERT INTO integers VALUES (-1);
 
-statement error 
+statement error
 SELECT * FROM generate_series(0,10,1) LIMIT (SELECT k FROM integers);
 
-statement error 
+statement error
 SELECT * FROM generate_series(0,10,1) LIMIT 1 OFFSET (SELECT k FROM integers);
 
 statement ok

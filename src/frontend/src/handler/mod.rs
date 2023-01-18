@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,18 +23,20 @@ use pgwire::pg_response::{PgResponse, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{DropStatement, ObjectType, Statement};
+use risingwave_sqlparser::ast::*;
 
 use self::util::DataChunkToRowSetAdapter;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_table;
 pub mod alter_user;
 mod create_database;
+pub mod create_function;
 pub mod create_index;
 pub mod create_mv;
-mod create_schema;
+pub mod create_schema;
 pub mod create_sink;
 pub mod create_source;
 pub mod create_table;
@@ -43,6 +45,7 @@ pub mod create_user;
 mod create_view;
 mod describe;
 mod drop_database;
+pub mod drop_function;
 mod drop_index;
 pub mod drop_mv;
 mod drop_schema;
@@ -51,7 +54,7 @@ pub mod drop_source;
 pub mod drop_table;
 pub mod drop_user;
 mod drop_view;
-mod explain;
+pub mod explain;
 mod flush;
 pub mod handle_privilege;
 pub mod privilege;
@@ -90,8 +93,58 @@ impl From<Vec<Row>> for PgResponseStream {
 #[derive(Clone)]
 pub struct HandlerArgs {
     pub session: Arc<SessionImpl>,
-    pub sql: Arc<str>,
+    pub sql: String,
+    pub normalized_sql: String,
     pub with_options: WithOptions,
+}
+
+impl HandlerArgs {
+    pub fn new(session: Arc<SessionImpl>, stmt: &Statement, sql: &str) -> Result<Self> {
+        Ok(Self {
+            session,
+            sql: sql.into(),
+            with_options: WithOptions::try_from(stmt)?,
+            normalized_sql: Self::normalize_sql(stmt),
+        })
+    }
+
+    /// Get normalized SQL from the statement.
+    ///
+    /// - Generally, the normalized SQL is the unparsed (and formatted) result of the statement.
+    /// - For `CREATE` statements, the clauses like `OR REPLACE` and `IF NOT EXISTS` are removed to
+    ///   make it suitable for the `SHOW CREATE` statements.
+    fn normalize_sql(stmt: &Statement) -> String {
+        let mut stmt = stmt.clone();
+        match &mut stmt {
+            Statement::CreateView { or_replace, .. } => {
+                *or_replace = false;
+            }
+            Statement::CreateTable {
+                or_replace,
+                if_not_exists,
+                ..
+            } => {
+                *or_replace = false;
+                *if_not_exists = false;
+            }
+            Statement::CreateIndex { if_not_exists, .. } => {
+                *if_not_exists = false;
+            }
+            Statement::CreateSource {
+                stmt: CreateSourceStatement { if_not_exists, .. },
+                ..
+            } => {
+                *if_not_exists = false;
+            }
+            Statement::CreateSink {
+                stmt: CreateSinkStatement { if_not_exists, .. },
+            } => {
+                *if_not_exists = false;
+            }
+            _ => {}
+        }
+        stmt.to_string()
+    }
 }
 
 pub async fn handle(
@@ -100,11 +153,7 @@ pub async fn handle(
     sql: &str,
     format: bool,
 ) -> Result<RwPgResponse> {
-    let handler_args = HandlerArgs {
-        session,
-        sql: Arc::from(sql),
-        with_options: WithOptions::try_from(&stmt)?,
-    };
+    let handler_args = HandlerArgs::new(session, &stmt, sql)?;
     match stmt {
         Statement::Explain {
             statement,
@@ -116,6 +165,25 @@ pub async fn handle(
             stmt,
         } => create_source::handle_create_source(handler_args, is_materialized, stmt).await,
         Statement::CreateSink { stmt } => create_sink::handle_create_sink(handler_args, stmt).await,
+        Statement::CreateFunction {
+            or_replace,
+            temporary,
+            name,
+            args,
+            return_type,
+            params,
+        } => {
+            create_function::handle_create_function(
+                handler_args,
+                or_replace,
+                temporary,
+                name,
+                args,
+                return_type,
+                params,
+            )
+            .await
+        }
         Statement::CreateTable {
             name,
             columns,
@@ -127,6 +195,7 @@ pub async fn handle(
             or_replace,
             temporary,
             if_not_exists,
+            source_schema,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
@@ -143,8 +212,14 @@ pub async fn handle(
                 .into());
             }
             if let Some(query) = query {
-                return create_table_as::handle_create_as(handler_args, name, if_not_exists, query)
-                    .await;
+                return create_table_as::handle_create_as(
+                    handler_args,
+                    name,
+                    if_not_exists,
+                    query,
+                    columns,
+                )
+                .await;
             }
             create_table::handle_create_table(
                 handler_args,
@@ -152,6 +227,7 @@ pub async fn handle(
                 columns,
                 constraints,
                 if_not_exists,
+                source_schema,
             )
             .await
         }
@@ -173,6 +249,9 @@ pub async fn handle(
         }
         Statement::Describe { name } => describe::handle_describe(handler_args, name),
         Statement::ShowObjects(show_object) => show::handle_show_object(handler_args, show_object),
+        Statement::ShowCreateObject { create_type, name } => {
+            show::handle_show_create_object(handler_args, create_type, name)
+        }
         Statement::Drop(DropStatement {
             object_type,
             object_name,
@@ -224,6 +303,11 @@ pub async fn handle(
             ))
             .into()),
         },
+        Statement::DropFunction {
+            if_exists,
+            func_desc,
+            option,
+        } => drop_function::handle_drop_function(handler_args, if_exists, func_desc, option).await,
         Statement::Query(_)
         | Statement::Insert { .. }
         | Statement::Delete { .. }
@@ -283,6 +367,10 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::AddColumn { column_def },
+        } => alter_table::handle_add_column(handler_args, name, column_def).await,
         // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
         // final implementation.
         // 1. Fully support transaction is too hard and gives few benefits to us.

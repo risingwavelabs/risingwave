@@ -11,6 +11,16 @@ select nullif(1,2);
 ----
 1
 
+query I
+select mod(5,2);
+----
+1
+
+query I
+select mod(7.7,2.2);
+----
+1.1
+
 query IIIII
 select coalesce(1,2), coalesce(null,2), coalesce(null), coalesce(null,null), coalesce(null,2,3);
 ----
@@ -68,6 +78,7 @@ create table t (v1 int);
 
 statement ok
 create table b (b1 int, b2 int);
+
 
 statement ok
 insert into t values (2);
@@ -147,6 +158,7 @@ select concat_ws(v1, v2, v3, v4, v5, v6, v7, v8) from t;
 ----
 1,2,3.01,4,5.01,t
 
+
 statement ok
 drop table t;
 
@@ -174,6 +186,7 @@ query T
 select split_part('abc,def,ghi,jkl', ',', -2);
 ----
 ghi
+
 
 query I
 select char_length('hello world');
@@ -266,7 +279,6 @@ select pg_typeof(array[1, 2]);
 integer[]
 
 # Note that PostgreSQL still displays `integer[]` in this case.
-
 query T
 select pg_typeof(array[array[1, 2], array[3, 4]]);
 ----
@@ -283,7 +295,47 @@ select regexp_match('abc', 'bc');
 {bc}
 
 query T
+select regexp_match('abc', 'Bc');
+----
+NULL
+
+query T
+select regexp_match('abc', 'Bc', 'i');
+----
+{bc}
+
+query T
+select regexp_match('abc', 'Bc', 'ic');
+----
+NULL
+
+query T
+select regexp_match('abc', 'Bc', 'ici');
+----
+{bc}
+
+query T
+select regexp_match('abc', '(?i)Bc');
+----
+{bc}
+
+query T
+select regexp_match('abc', '(?i)Bc', 'c');
+----
+{bc}
+
+query T
 select regexp_match('abc', 'd');
+----
+NULL
+
+query T
+select regexp_match('abc', NULL);
+----
+NULL
+
+query T
+select regexp_match('abc', 'a', NULL);
 ----
 NULL
 
@@ -298,6 +350,11 @@ select regexp_match('foobarbequebaz', 'bar(beque)');
 {beque}
 
 query T
+select regexp_match('foobarbequebaz', 'bar((be)|(bo))(que)');
+----
+{be,be,NULL,que}
+
+query T
 select regexp_match('foobarbequebaz', 'bar.*que');
 ----
 {barbeque}
@@ -310,5 +367,51 @@ select regexp_match('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
 query T
 select regexp_matches('foobarbequebazilbarfbonk', '(b[^b]+)(b[^b]+)', 'g');
 ----
- {bar,beque}
- {bazil,barf}
+{bar,beque}
+{bazil,barf}
+
+query T
+select regexp_matches('foobarbequebazfoobarbequebaz', 'bar((be)|(bo))(que)');
+----
+{be,be,NULL,que}
+{be,be,NULL,que}
+
+query T
+select regexp_matches('abcabc', 'Bc');
+----
+
+query T
+select regexp_matches('abcabc', 'Bc', 'i');
+----
+{bc}
+{bc}
+
+query T
+select regexp_matches('abcabc', 'Bc', 'ic');
+----
+
+query T
+select regexp_matches('abcabc', 'Bc', 'ici');
+----
+{bc}
+{bc}
+
+query T
+select regexp_matches('abcabc', '(?i)Bc');
+----
+{bc}
+{bc}
+
+query T
+select regexp_matches('abcabc', '(?i)Bc', 'c');
+----
+{bc}
+{bc}
+
+query T
+select regexp_matches('abcabc', NULL);
+----
+
+query T
+select regexp_matches('abcabc', 'a', NULL);
+----

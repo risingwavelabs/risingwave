@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package backup_service;
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+message MetaBackupManifestId {
+  uint64 id = 1;
+}
+
+enum BackupJobStatus {
+  UNSPECIFIED = 0;
+  RUNNING = 1;
+  SUCCEEDED = 2;
+  // NOT_FOUND indicates one of these cases:
+  // - Invalid job id.
+  // - Job has failed.
+  // - Job has succeeded, but its resulted backup has been deleted later.
+  NOT_FOUND = 3;
+}
+message BackupMetaRequest {}
+message BackupMetaResponse {
+  uint64 job_id = 1;
+}
+message GetBackupJobStatusRequest {
+  uint64 job_id = 1;
+}
+message GetBackupJobStatusResponse {
+  uint64 job_id = 1;
+  BackupJobStatus job_status = 2;
+}
+message DeleteMetaSnapshotRequest {
+  repeated uint64 snapshot_ids = 1;
+}
+message DeleteMetaSnapshotResponse {}
+message GetMetaSnapshotManifestRequest {}
+message GetMetaSnapshotManifestResponse {
+  MetaSnapshotManifest manifest = 1;
+}
+message MetaSnapshotManifest {
+  uint64 manifest_id = 1;
+  repeated MetaSnapshotMetadata snapshot_metadata = 2;
+}
+message MetaSnapshotMetadata {
+  uint64 id = 1;
+  uint64 hummock_version_id = 2;
+  uint64 max_committed_epoch = 3;
+  uint64 safe_epoch = 4;
+}
+
+service BackupService {
+  rpc BackupMeta(BackupMetaRequest) returns (BackupMetaResponse);
+  rpc GetBackupJobStatus(GetBackupJobStatusRequest) returns (GetBackupJobStatusResponse);
+  rpc DeleteMetaSnapshot(DeleteMetaSnapshotRequest) returns (DeleteMetaSnapshotResponse);
+  rpc GetMetaSnapshotManifest(GetMetaSnapshotManifestRequest) returns (GetMetaSnapshotManifestResponse);
+}

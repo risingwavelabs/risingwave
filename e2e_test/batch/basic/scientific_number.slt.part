@@ -17,13 +17,13 @@ select * from t;
 ----
 1000000 -1000000 1e-06 -1e-06
 
-statement error 
+statement error
 INSERT INTO t values (1e1000, 1, 1, 1)
 
-statement error 
+statement error
 INSERT INTO t values (1e-1000, 1, 1, 1)
 
-statement error 
+statement error
 INSERT INTO t values (-1e1000, 1, 1, 1)
 
 statement ok

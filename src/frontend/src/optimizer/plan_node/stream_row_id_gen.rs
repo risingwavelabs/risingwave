@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -35,6 +35,8 @@ impl StreamRowIdGen {
             input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
+            input.watermark_columns().clone(),
         );
         Self {
             base,

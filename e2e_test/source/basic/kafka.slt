@@ -52,7 +52,7 @@ statement ok
 select * from s4;
 
 statement ok
-create materialized source s5 (v1 int, v2 varchar) with (
+create materialized source s5 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic_with_100_message',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -89,7 +89,7 @@ show sinks
 si
 
 statement ok
-create materialized source s7 (v1 int, v2 varchar) with (
+create materialized source s7 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) with (
   connector = 'kafka',
   topic = 'sink_target',
   properties.bootstrap.server = '127.0.0.1:29092',
@@ -125,7 +125,6 @@ create materialized source s8 (
   properties.bootstrap.server = '127.0.0.1:29092'
 ) row format debezium_json
 
-
 statement ok
 create materialized source s9 with (
   connector = 'kafka', 
@@ -134,7 +133,6 @@ create materialized source s9 with (
   scan.startup.mode = 'earliest'
 ) row format avro message 'test_student' row schema location 'file:///risingwave/avro-simple-schema.avsc'
 
-
 statement ok
 create materialized source s10 with (
   connector = 'kafka', 
@@ -142,7 +140,6 @@ create materialized source s10 with (
   properties.bootstrap.server = '127.0.0.1:29092',
   scan.startup.mode = 'earliest'
 ) row format avro message 'user' row schema location 'file:///risingwave/avro-complex-schema.avsc'
-
 
 statement ok
 create materialized source s11 with (
@@ -226,6 +223,23 @@ create materialized source s16 (v1 int, v2 varchar) with (
   properties.bootstrap.server = '127.0.0.1:29092',
   scan.startup.mode = 'latest'
 ) row format json
+
+statement ok
+create source s17 with (
+  connector = 'kafka', 
+  topic = 'proto_c_bin',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest',
+  proto.message = 'test.User'
+) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema'
+
+statement ok
+create source s18 with (
+  connector = 'kafka', 
+  topic = 'avro_c_bin',
+  properties.bootstrap.server = '127.0.0.1:29092',
+  scan.startup.mode = 'earliest'
+) row format avro message 'user' row schema location 'file:///risingwave/avro-complex-schema.avsc'
 
 statement ok
 flush;
@@ -317,25 +331,25 @@ flush;
 query IT rowsort
 select v1, v2 from source_mv1;
 ----
+0 name5
 0 name9
-3 name2
-7 name5
+1 name0
 1 name7
+2 name0
+2 name3
+3 name2
 3 name9
 4 name6
-5 name3
-8 name8
-9 name2
-2 name3
 4 name7
-7 name0
-1 name0
-2 name0
-6 name3
-0 name5
+5 name3
 5 name8
+6 name3
 6 name4
+7 name0
+7 name5
+8 name8
 8 name9
+9 name2
 9 name2
 
 query II
@@ -346,10 +360,10 @@ select sum_v1, count_v2 from source_mv2;
 query ITTT rowsort
 select id, first_name, last_name, email from s8;
 ----
-1004 Anne1 Kretchmar annek@noanswer.org
 1001 Sally Thomas sally.thomas@acme.com
-1003 Edward Walker ed@walker.com
 1002 George Bailey gbailey@foobar.com
+1003 Edward Walker ed@walker.com
+1004 Anne1 Kretchmar annek@noanswer.org
 1005 add add2 add
 
 query IITFFBTT
@@ -428,3 +442,9 @@ drop source s15
 
 statement ok
 drop source s16
+
+statement ok
+drop source s17
+
+statement ok
+drop source s18

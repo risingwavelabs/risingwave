@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use itertools::join;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::row::Row;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
 
 use crate::sink::{Result, Sink};
@@ -64,7 +65,7 @@ impl ConsoleSink {
 impl Sink for ConsoleSink {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         for (op, row_ref) in chunk.rows() {
-            let row_repr = join(row_ref.values().map(parse_datum), ", ");
+            let row_repr = join(row_ref.iter().map(parse_datum), ", ");
             let op_repr = match op {
                 Op::Insert => "INSERT",
                 Op::UpdateDelete => "UPDATE_DELETE",
@@ -197,8 +198,7 @@ mod test {
                     )))),
                     Column::new(Arc::new(ArrayImpl::from(StructArray::from_slices(
                         &[true, true, true],
-                        vec![ArrayImpl::from(ListArray::from_slices(
-                            &[true, true, true],
+                        vec![ArrayImpl::from(ListArray::from_iter(
                             vec![
                                 Some(ArrayImpl::from(array!(Utf8Array, [Some("1 Poultry Rd")]))),
                                 Some(ArrayImpl::from(array!(Utf8Array, [Some("50 Vesey St")]))),
@@ -230,8 +230,7 @@ mod test {
                     )))),
                     Column::new(Arc::new(ArrayImpl::from(StructArray::from_slices(
                         &[true, true, true],
-                        vec![ArrayImpl::from(ListArray::from_slices(
-                            &[true, true, true],
+                        vec![ArrayImpl::from(ListArray::from_iter(
                             vec![
                                 Some(ArrayImpl::from(array!(
                                     Utf8Array,

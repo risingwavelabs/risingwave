@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package meta;
 
+import "backup_service.proto";
 import "catalog.proto";
 import "common.proto";
 import "hummock.proto";
@@ -9,6 +10,7 @@ import "source.proto";
 import "stream_plan.proto";
 import "user.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message HeartbeatRequest {
@@ -64,7 +66,8 @@ message TableFragments {
       HASH = 2;
     }
     uint32 fragment_id = 1;
-    stream_plan.FragmentType fragment_type = 2;
+    // Bitwise-OR of FragmentTypeFlags
+    uint32 fragment_type_mask = 2;
     FragmentDistributionType distribution_type = 3;
     repeated stream_plan.StreamActor actors = 4;
     // Vnode mapping (which should be set in upstream dispatcher) of the fragment.
@@ -82,6 +85,8 @@ message TableFragments {
   map<uint32, Fragment> fragments = 3;
   map<uint32, ActorStatus> actor_status = 4;
   map<uint32, source.ConnectorSplits> actor_splits = 5;
+
+  stream_plan.StreamEnvironment env = 6;
 }
 
 // TODO: remove this when dashboard refactored.
@@ -115,6 +120,7 @@ message ListTableFragmentsResponse {
   }
   message TableFragmentInfo {
     repeated FragmentInfo fragments = 1;
+    stream_plan.StreamEnvironment env = 2;
   }
   map<uint32, TableFragmentInfo> table_fragments = 1;
 }
@@ -198,6 +204,7 @@ message MetaSnapshot {
   repeated catalog.Table tables = 5;
   repeated catalog.Index indexes = 6;
   repeated catalog.View views = 7;
+  repeated catalog.Function functions = 15;
   repeated user.UserInfo users = 8;
   repeated common.ParallelUnitMapping parallel_unit_mappings = 9;
   repeated common.WorkerNode nodes = 10;
@@ -205,6 +212,7 @@ message MetaSnapshot {
   hummock.HummockVersion hummock_version = 12;
 
   SnapshotVersion version = 13;
+  backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
 }
 
 message SubscribeResponse {
@@ -226,12 +234,14 @@ message SubscribeResponse {
     catalog.Sink sink = 8;
     catalog.Index index = 9;
     catalog.View view = 10;
+    catalog.Function function = 18;
     user.UserInfo user = 11;
     common.ParallelUnitMapping parallel_unit_mapping = 12;
     common.WorkerNode node = 13;
     hummock.HummockSnapshot hummock_snapshot = 14;
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
     MetaSnapshot snapshot = 16;
+    backup_service.MetaBackupManifestId meta_backup_manifest_id = 17;
   }
 }
 

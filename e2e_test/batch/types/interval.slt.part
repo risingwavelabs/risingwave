@@ -74,7 +74,6 @@ SELECT INTERVAL '3 mins' * 1.5;
 00:04:30
 
 # https://github.com/risingwavelabs/risingwave/issues/3873
-
 query TTTTT
 select distinct * from (values (interval '1' month), (interval '30' day)) as t;
 ----
@@ -109,3 +108,9 @@ query TTTTTT
 select interval '1 year 1 month 1 day 1:1:1.009';
 ----
 1 year 1 mon 1 day 01:01:01.009
+
+# issue#7059, if we improve precision, then this should be removed.
+query TTTTTT
+select '1 mons 1 days 00:00:00.000001'::INTERVAL;
+----
+1 mon 1 day

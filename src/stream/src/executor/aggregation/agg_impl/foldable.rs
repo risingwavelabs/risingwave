@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -414,6 +414,7 @@ impl_fold_agg! { F32Array, Float32, F32Array }
 impl_fold_agg! { F64Array, Float64, F64Array }
 impl_fold_agg! { DecimalArray, Decimal, DecimalArray }
 impl_fold_agg! { Utf8Array, Utf8, Utf8Array }
+impl_fold_agg! { BytesArray, Bytea, BytesArray }
 impl_fold_agg! { StructArray, Struct, StructArray }
 impl_fold_agg! { IntervalArray, Interval, IntervalArray }
 impl_fold_agg! { NaiveTimeArray, NaiveTime, NaiveTimeArray }

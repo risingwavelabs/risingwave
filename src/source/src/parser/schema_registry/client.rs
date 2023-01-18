@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use reqwest::{Method, Url};
 use risingwave_common::error::ErrorCode::ProtocolError;
@@ -25,20 +25,34 @@ use serde::{Deserialize, Serialize};
 pub struct Client {
     inner: reqwest::Client,
     url: Url,
+    username: Option<String>,
+    password: Option<String>,
 }
 
 impl Client {
-    pub(crate) fn new(url: Url) -> Result<Self> {
+    pub(crate) fn new(url: Url, props: &HashMap<String, String>) -> Result<Self> {
+        const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
+        const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
+
         if url.cannot_be_a_base() {
             return Err(RwError::from(ProtocolError(format!(
                 "{} cannot be a base url",
                 url
             ))));
         }
+
         let inner = reqwest::Client::builder().build().map_err(|e| {
             RwError::from(ProtocolError(format!("build reqwest client failed {}", e)))
         })?;
-        Ok(Client { inner, url })
+
+        let username = props.get(SCHEMA_REGISTRY_USERNAME).cloned();
+        let password = props.get(SCHEMA_REGISTRY_PASSWORD).cloned();
+        Ok(Client {
+            inner,
+            url,
+            username,
+            password,
+        })
     }
 
     fn build_request<P>(&self, method: Method, path: P) -> reqwest::RequestBuilder
@@ -52,7 +66,13 @@ impl Client {
             .clear()
             .extend(path);
 
-        self.inner.request(method, url)
+        let mut request = self.inner.request(method, url);
+
+        if self.username.is_some() {
+            request = request.basic_auth(self.username.clone().unwrap(), self.password.clone())
+        }
+
+        request
     }
 
     /// get schema by id
@@ -209,11 +229,12 @@ struct ErrorResp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[tokio::test]
     #[ignore]
     async fn test_get_subject() {
         let url = Url::parse("http://localhost:8081").unwrap();
-        let client = Client::new(url).unwrap();
+        let client = Client::new(url, &HashMap::new()).unwrap();
         let subject = client
             .get_subject_and_references("proto_c_bin-value")
             .await

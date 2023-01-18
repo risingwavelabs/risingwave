@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -715,8 +715,7 @@ async fn test_print_compact_task() {
     );
 
     let s = compact_task_to_string(&compact_task);
-    println!("{:?}", s);
-    assert!(s.contains("Compaction task id: 1, target level: 0"));
+    assert!(s.contains("Compaction task id: 1, group-id: 2, target level: 0"));
 }
 
 #[tokio::test]
@@ -867,27 +866,6 @@ async fn test_trigger_compaction_deterministic() {
     shutdown_tx
         .send(())
         .expect("shutdown compaction scheduler error");
-}
-
-#[tokio::test]
-async fn test_reset_current_version() {
-    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
-    let context_id = worker_node.id;
-
-    // Generate data for compaction task
-    let _ = add_test_tables(&hummock_manager, context_id).await;
-
-    let cur_version = hummock_manager.get_current_version().await;
-
-    let old_version = hummock_manager.reset_current_version().await.unwrap();
-    assert_eq!(cur_version.id, old_version.id);
-    assert_eq!(
-        cur_version.max_committed_epoch,
-        old_version.max_committed_epoch
-    );
-    let new_version = hummock_manager.get_current_version().await;
-    assert_eq!(new_version.id, FIRST_VERSION_ID);
-    assert_eq!(new_version.max_committed_epoch, INVALID_EPOCH);
 }
 
 // This is a non-deterministic test

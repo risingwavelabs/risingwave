@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Exits as soon as any line fails.
 set -euo pipefail
@@ -43,6 +43,7 @@ cargo make link-all-in-one-binaries
 host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
 
 echo "--- e2e, ci-3cn-3fe, streaming"
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-3cn-3fe
 sqllogictest ${host_args} -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}"
 
@@ -50,6 +51,7 @@ echo "--- Kill cluster"
 cargo make ci-kill
 
 echo "--- e2e, ci-3cn-3fe, batch"
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-3cn-3fe
 sqllogictest ${host_args} -d dev './e2e_test/ddl/**/*.slt' --junit "parallel-batch-ddl-${profile}"
 sqllogictest ${host_args} -d dev './e2e_test/batch/**/*.slt' -j 16 --junit "parallel-batch-${profile}"
@@ -58,6 +60,7 @@ echo "--- Kill cluster"
 cargo make ci-kill
 
 echo "--- e2e, ci-3cn-3fe, generated"
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-3cn-3fe
 sqllogictest ${host_args} -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}"
 

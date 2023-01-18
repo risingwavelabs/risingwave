@@ -1,5 +1,6 @@
 /* eslint-disable */
-import { Database, Index, Schema, Sink, Source, Table, View } from "./catalog";
+import { MetaBackupManifestId } from "./backup_service";
+import { Database, Function, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import {
   HostAddress,
   ParallelUnit,
@@ -12,14 +13,7 @@ import {
 } from "./common";
 import { HummockSnapshot, HummockVersion, HummockVersionDeltas } from "./hummock";
 import { ConnectorSplits } from "./source";
-import {
-  Dispatcher,
-  FragmentType,
-  fragmentTypeFromJSON,
-  fragmentTypeToJSON,
-  StreamActor,
-  StreamNode,
-} from "./stream_plan";
+import { Dispatcher, StreamActor, StreamEnvironment, StreamNode } from "./stream_plan";
 import { UserInfo } from "./user";
 
 export const protobufPackage = "meta";
@@ -92,6 +86,7 @@ export interface TableFragments {
   fragments: { [key: number]: TableFragments_Fragment };
   actorStatus: { [key: number]: TableFragments_ActorStatus };
   actorSplits: { [key: number]: ConnectorSplits };
+  env: StreamEnvironment | undefined;
 }
 
 /** The state of the fragments of this table */
@@ -202,7 +197,8 @@ export function tableFragments_ActorStatus_ActorStateToJSON(object: TableFragmen
 
 export interface TableFragments_Fragment {
   fragmentId: number;
-  fragmentType: FragmentType;
+  /** Bitwise-OR of FragmentTypeFlags */
+  fragmentTypeMask: number;
   distributionType: TableFragments_Fragment_FragmentDistributionType;
   actors: StreamActor[];
   /**
@@ -319,6 +315,7 @@ export interface ListTableFragmentsResponse_FragmentInfo {
 
 export interface ListTableFragmentsResponse_TableFragmentInfo {
   fragments: ListTableFragmentsResponse_FragmentInfo[];
+  env: StreamEnvironment | undefined;
 }
 
 export interface ListTableFragmentsResponse_TableFragmentsEntry {
@@ -379,12 +376,14 @@ export interface MetaSnapshot {
   tables: Table[];
   indexes: Index[];
   views: View[];
+  functions: Function[];
   users: UserInfo[];
   parallelUnitMappings: ParallelUnitMapping[];
   nodes: WorkerNode[];
   hummockSnapshot: HummockSnapshot | undefined;
   hummockVersion: HummockVersion | undefined;
   version: MetaSnapshot_SnapshotVersion | undefined;
+  metaBackupManifestId: MetaBackupManifestId | undefined;
 }
 
 export interface MetaSnapshot_SnapshotVersion {
@@ -405,12 +404,14 @@ export interface SubscribeResponse {
     | { $case: "sink"; sink: Sink }
     | { $case: "index"; index: Index }
     | { $case: "view"; view: View }
+    | { $case: "function"; function: Function }
     | { $case: "user"; user: UserInfo }
     | { $case: "parallelUnitMapping"; parallelUnitMapping: ParallelUnitMapping }
     | { $case: "node"; node: WorkerNode }
     | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
     | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
-    | { $case: "snapshot"; snapshot: MetaSnapshot };
+    | { $case: "snapshot"; snapshot: MetaSnapshot }
+    | { $case: "metaBackupManifestId"; metaBackupManifestId: MetaBackupManifestId };
 }
 
 export const SubscribeResponse_Operation = {
@@ -617,7 +618,14 @@ export const HeartbeatResponse = {
 };
 
 function createBaseTableFragments(): TableFragments {
-  return { tableId: 0, state: TableFragments_State.UNSPECIFIED, fragments: {}, actorStatus: {}, actorSplits: {} };
+  return {
+    tableId: 0,
+    state: TableFragments_State.UNSPECIFIED,
+    fragments: {},
+    actorStatus: {},
+    actorSplits: {},
+    env: undefined,
+  };
 }
 
 export const TableFragments = {
@@ -646,6 +654,7 @@ export const TableFragments = {
           return acc;
         }, {})
         : {},
+      env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
     };
   },
 
@@ -671,6 +680,7 @@ export const TableFragments = {
         obj.actorSplits[k] = ConnectorSplits.toJSON(v);
       });
     }
+    message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
     return obj;
   },
 
@@ -704,6 +714,9 @@ export const TableFragments = {
       },
       {},
     );
+    message.env = (object.env !== undefined && object.env !== null)
+      ? StreamEnvironment.fromPartial(object.env)
+      : undefined;
     return message;
   },
 };
@@ -743,7 +756,7 @@ export const TableFragments_ActorStatus = {
 function createBaseTableFragments_Fragment(): TableFragments_Fragment {
   return {
     fragmentId: 0,
-    fragmentType: FragmentType.FRAGMENT_UNSPECIFIED,
+    fragmentTypeMask: 0,
     distributionType: TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED,
     actors: [],
     vnodeMapping: undefined,
@@ -756,15 +769,11 @@ export const TableFragments_Fragment = {
   fromJSON(object: any): TableFragments_Fragment {
     return {
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
-      fragmentType: isSet(object.fragmentType)
-        ? fragmentTypeFromJSON(object.fragmentType)
-        : FragmentType.FRAGMENT_UNSPECIFIED,
+      fragmentTypeMask: isSet(object.fragmentTypeMask) ? Number(object.fragmentTypeMask) : 0,
       distributionType: isSet(object.distributionType)
         ? tableFragments_Fragment_FragmentDistributionTypeFromJSON(object.distributionType)
         : TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED,
-      actors: Array.isArray(object?.actors)
-        ? object.actors.map((e: any) => StreamActor.fromJSON(e))
-        : [],
+      actors: Array.isArray(object?.actors) ? object.actors.map((e: any) => StreamActor.fromJSON(e)) : [],
       vnodeMapping: isSet(object.vnodeMapping) ? ParallelUnitMapping.fromJSON(object.vnodeMapping) : undefined,
       stateTableIds: Array.isArray(object?.stateTableIds) ? object.stateTableIds.map((e: any) => Number(e)) : [],
       upstreamFragmentIds: Array.isArray(object?.upstreamFragmentIds)
@@ -776,7 +785,7 @@ export const TableFragments_Fragment = {
   toJSON(message: TableFragments_Fragment): unknown {
     const obj: any = {};
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
-    message.fragmentType !== undefined && (obj.fragmentType = fragmentTypeToJSON(message.fragmentType));
+    message.fragmentTypeMask !== undefined && (obj.fragmentTypeMask = Math.round(message.fragmentTypeMask));
     message.distributionType !== undefined &&
       (obj.distributionType = tableFragments_Fragment_FragmentDistributionTypeToJSON(message.distributionType));
     if (message.actors) {
@@ -802,7 +811,7 @@ export const TableFragments_Fragment = {
   fromPartial<I extends Exact<DeepPartial<TableFragments_Fragment>, I>>(object: I): TableFragments_Fragment {
     const message = createBaseTableFragments_Fragment();
     message.fragmentId = object.fragmentId ?? 0;
-    message.fragmentType = object.fragmentType ?? FragmentType.FRAGMENT_UNSPECIFIED;
+    message.fragmentTypeMask = object.fragmentTypeMask ?? 0;
     message.distributionType = object.distributionType ?? TableFragments_Fragment_FragmentDistributionType.UNSPECIFIED;
     message.actors = object.actors?.map((e) => StreamActor.fromPartial(e)) || [];
     message.vnodeMapping = (object.vnodeMapping !== undefined && object.vnodeMapping !== null)
@@ -1140,7 +1149,7 @@ export const ListTableFragmentsResponse_FragmentInfo = {
 };
 
 function createBaseListTableFragmentsResponse_TableFragmentInfo(): ListTableFragmentsResponse_TableFragmentInfo {
-  return { fragments: [] };
+  return { fragments: [], env: undefined };
 }
 
 export const ListTableFragmentsResponse_TableFragmentInfo = {
@@ -1149,6 +1158,7 @@ export const ListTableFragmentsResponse_TableFragmentInfo = {
       fragments: Array.isArray(object?.fragments)
         ? object.fragments.map((e: any) => ListTableFragmentsResponse_FragmentInfo.fromJSON(e))
         : [],
+      env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
     };
   },
 
@@ -1159,6 +1169,7 @@ export const ListTableFragmentsResponse_TableFragmentInfo = {
     } else {
       obj.fragments = [];
     }
+    message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
     return obj;
   },
 
@@ -1167,6 +1178,9 @@ export const ListTableFragmentsResponse_TableFragmentInfo = {
   ): ListTableFragmentsResponse_TableFragmentInfo {
     const message = createBaseListTableFragmentsResponse_TableFragmentInfo();
     message.fragments = object.fragments?.map((e) => ListTableFragmentsResponse_FragmentInfo.fromPartial(e)) || [];
+    message.env = (object.env !== undefined && object.env !== null)
+      ? StreamEnvironment.fromPartial(object.env)
+      : undefined;
     return message;
   },
 };
@@ -1466,12 +1480,14 @@ function createBaseMetaSnapshot(): MetaSnapshot {
     tables: [],
     indexes: [],
     views: [],
+    functions: [],
     users: [],
     parallelUnitMappings: [],
     nodes: [],
     hummockSnapshot: undefined,
     hummockVersion: undefined,
     version: undefined,
+    metaBackupManifestId: undefined,
   };
 }
 
@@ -1485,6 +1501,7 @@ export const MetaSnapshot = {
       tables: Array.isArray(object?.tables) ? object.tables.map((e: any) => Table.fromJSON(e)) : [],
       indexes: Array.isArray(object?.indexes) ? object.indexes.map((e: any) => Index.fromJSON(e)) : [],
       views: Array.isArray(object?.views) ? object.views.map((e: any) => View.fromJSON(e)) : [],
+      functions: Array.isArray(object?.functions) ? object.functions.map((e: any) => Function.fromJSON(e)) : [],
       users: Array.isArray(object?.users) ? object.users.map((e: any) => UserInfo.fromJSON(e)) : [],
       parallelUnitMappings: Array.isArray(object?.parallelUnitMappings)
         ? object.parallelUnitMappings.map((e: any) => ParallelUnitMapping.fromJSON(e))
@@ -1495,6 +1512,9 @@ export const MetaSnapshot = {
       hummockSnapshot: isSet(object.hummockSnapshot) ? HummockSnapshot.fromJSON(object.hummockSnapshot) : undefined,
       hummockVersion: isSet(object.hummockVersion) ? HummockVersion.fromJSON(object.hummockVersion) : undefined,
       version: isSet(object.version) ? MetaSnapshot_SnapshotVersion.fromJSON(object.version) : undefined,
+      metaBackupManifestId: isSet(object.metaBackupManifestId)
+        ? MetaBackupManifestId.fromJSON(object.metaBackupManifestId)
+        : undefined,
     };
   },
 
@@ -1535,6 +1555,11 @@ export const MetaSnapshot = {
     } else {
       obj.views = [];
     }
+    if (message.functions) {
+      obj.functions = message.functions.map((e) => e ? Function.toJSON(e) : undefined);
+    } else {
+      obj.functions = [];
+    }
     if (message.users) {
       obj.users = message.users.map((e) => e ? UserInfo.toJSON(e) : undefined);
     } else {
@@ -1556,6 +1581,9 @@ export const MetaSnapshot = {
       (obj.hummockVersion = message.hummockVersion ? HummockVersion.toJSON(message.hummockVersion) : undefined);
     message.version !== undefined &&
       (obj.version = message.version ? MetaSnapshot_SnapshotVersion.toJSON(message.version) : undefined);
+    message.metaBackupManifestId !== undefined && (obj.metaBackupManifestId = message.metaBackupManifestId
+      ? MetaBackupManifestId.toJSON(message.metaBackupManifestId)
+      : undefined);
     return obj;
   },
 
@@ -1568,6 +1596,7 @@ export const MetaSnapshot = {
     message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
     message.indexes = object.indexes?.map((e) => Index.fromPartial(e)) || [];
     message.views = object.views?.map((e) => View.fromPartial(e)) || [];
+    message.functions = object.functions?.map((e) => Function.fromPartial(e)) || [];
     message.users = object.users?.map((e) => UserInfo.fromPartial(e)) || [];
     message.parallelUnitMappings = object.parallelUnitMappings?.map((e) => ParallelUnitMapping.fromPartial(e)) || [];
     message.nodes = object.nodes?.map((e) => WorkerNode.fromPartial(e)) || [];
@@ -1579,6 +1608,9 @@ export const MetaSnapshot = {
       : undefined;
     message.version = (object.version !== undefined && object.version !== null)
       ? MetaSnapshot_SnapshotVersion.fromPartial(object.version)
+      : undefined;
+    message.metaBackupManifestId = (object.metaBackupManifestId !== undefined && object.metaBackupManifestId !== null)
+      ? MetaBackupManifestId.fromPartial(object.metaBackupManifestId)
       : undefined;
     return message;
   },
@@ -1643,6 +1675,8 @@ export const SubscribeResponse = {
         ? { $case: "index", index: Index.fromJSON(object.index) }
         : isSet(object.view)
         ? { $case: "view", view: View.fromJSON(object.view) }
+        : isSet(object.function)
+        ? { $case: "function", function: Function.fromJSON(object.function) }
         : isSet(object.user)
         ? { $case: "user", user: UserInfo.fromJSON(object.user) }
         : isSet(object.parallelUnitMapping)
@@ -1661,6 +1695,11 @@ export const SubscribeResponse = {
         }
         : isSet(object.snapshot)
         ? { $case: "snapshot", snapshot: MetaSnapshot.fromJSON(object.snapshot) }
+        : isSet(object.metaBackupManifestId)
+        ? {
+          $case: "metaBackupManifestId",
+          metaBackupManifestId: MetaBackupManifestId.fromJSON(object.metaBackupManifestId),
+        }
         : undefined,
     };
   },
@@ -1682,6 +1721,8 @@ export const SubscribeResponse = {
     message.info?.$case === "index" &&
       (obj.index = message.info?.index ? Index.toJSON(message.info?.index) : undefined);
     message.info?.$case === "view" && (obj.view = message.info?.view ? View.toJSON(message.info?.view) : undefined);
+    message.info?.$case === "function" &&
+      (obj.function = message.info?.function ? Function.toJSON(message.info?.function) : undefined);
     message.info?.$case === "user" && (obj.user = message.info?.user ? UserInfo.toJSON(message.info?.user) : undefined);
     message.info?.$case === "parallelUnitMapping" && (obj.parallelUnitMapping = message.info?.parallelUnitMapping
       ? ParallelUnitMapping.toJSON(message.info?.parallelUnitMapping)
@@ -1696,6 +1737,9 @@ export const SubscribeResponse = {
       : undefined);
     message.info?.$case === "snapshot" &&
       (obj.snapshot = message.info?.snapshot ? MetaSnapshot.toJSON(message.info?.snapshot) : undefined);
+    message.info?.$case === "metaBackupManifestId" && (obj.metaBackupManifestId = message.info?.metaBackupManifestId
+      ? MetaBackupManifestId.toJSON(message.info?.metaBackupManifestId)
+      : undefined);
     return obj;
   },
 
@@ -1726,6 +1770,9 @@ export const SubscribeResponse = {
     }
     if (object.info?.$case === "view" && object.info?.view !== undefined && object.info?.view !== null) {
       message.info = { $case: "view", view: View.fromPartial(object.info.view) };
+    }
+    if (object.info?.$case === "function" && object.info?.function !== undefined && object.info?.function !== null) {
+      message.info = { $case: "function", function: Function.fromPartial(object.info.function) };
     }
     if (object.info?.$case === "user" && object.info?.user !== undefined && object.info?.user !== null) {
       message.info = { $case: "user", user: UserInfo.fromPartial(object.info.user) };
@@ -1765,6 +1812,16 @@ export const SubscribeResponse = {
     }
     if (object.info?.$case === "snapshot" && object.info?.snapshot !== undefined && object.info?.snapshot !== null) {
       message.info = { $case: "snapshot", snapshot: MetaSnapshot.fromPartial(object.info.snapshot) };
+    }
+    if (
+      object.info?.$case === "metaBackupManifestId" &&
+      object.info?.metaBackupManifestId !== undefined &&
+      object.info?.metaBackupManifestId !== null
+    ) {
+      message.info = {
+        $case: "metaBackupManifestId",
+        metaBackupManifestId: MetaBackupManifestId.fromPartial(object.info.metaBackupManifestId),
+      };
     }
     return message;
   },

@@ -13,14 +13,12 @@ statement ok
 INSERT INTO integers VALUES (1), (2), (3), (NULL);
 
 # test join on ungrouped aggregates
-
 query RR
 SELECT * FROM (SELECT SUM(i) AS x FROM integers) a, (SELECT SUM(i) AS x FROM integers) b WHERE a.x=b.x;
 ----
 6	6
 
 # Test join on aggregates with GROUP BY
-
 statement ok
 CREATE TABLE groups(i INTEGER, j INTEGER);
 

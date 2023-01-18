@@ -7,15 +7,16 @@ import "data.proto";
 option java_outer_classname = "ConnectorServiceProto";
 option java_package = "com.risingwave.proto";
 
-message SinkConfig {
-  message TableSchema {
-    message Column {
-      string name = 1;
-      data.DataType.TypeName data_type = 2;
-    }
-    repeated Column columns = 1;
-    repeated uint32 pk_indices = 2;
+message TableSchema {
+  message Column {
+    string name = 1;
+    data.DataType.TypeName data_type = 2;
   }
+  repeated Column columns = 1;
+  repeated uint32 pk_indices = 2;
+}
+
+message SinkConfig {
   string sink_type = 1;
   map<string, string> properties = 2;
   TableSchema table_schema = 3;
@@ -83,27 +84,37 @@ message SinkResponse {
   }
 }
 
-message DbConnectorProperties {
-  string database_host = 1;
-  string database_port = 2;
-  string database_user = 3;
-  string database_password = 4;
-  string database_name = 5;
-  string table_name = 6;
-  string partition = 7;
-  string start_offset = 8;
-  bool include_schema_events = 9;
-}
-
 message CdcMessage {
   string payload = 1;
   string partition = 2;
   string offset = 3;
 }
 
+enum SourceType {
+  UNSPECIFIED = 0;
+  MYSQL = 1;
+  POSTGRES = 2;
+}
+
 message GetEventStreamRequest {
-  uint64 source_id = 1;
-  DbConnectorProperties properties = 2;
+  message ValidateProperties {
+    uint64 source_id = 1;
+    SourceType source_type = 2;
+    map<string, string> properties = 3;
+    TableSchema table_schema = 4;
+  }
+
+  message StartSource {
+    uint64 source_id = 1;
+    SourceType source_type = 2;
+    string start_offset = 3;
+    map<string, string> properties = 4;
+  }
+
+  oneof request {
+    ValidateProperties validate = 1;
+    StartSource start = 2;
+  }
 }
 
 message GetEventStreamResponse {

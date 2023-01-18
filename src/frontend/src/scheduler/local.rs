@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,11 +14,10 @@
 
 //! Local execution for batch query.
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 
-use futures::Stream;
+use futures::executor::block_on;
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
@@ -35,44 +34,27 @@ use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeSource, LocalExecutePlan, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as ProstTaskId, TaskOutputId,
 };
+use tokio::sync::mpsc;
+use tokio::task::spawn_blocking;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 use uuid::Uuid;
 
 use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
-use super::HummockSnapshotGuard;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
-use crate::scheduler::SchedulerResult;
+use crate::scheduler::{PinnedHummockSnapshot, SchedulerResult};
 use crate::session::{AuthContext, FrontendEnv};
 
-pub struct LocalQueryStream {
-    data_stream: BoxedDataChunkStream,
-}
-
-impl Stream for LocalQueryStream {
-    type Item = Result<DataChunk, BoxedError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        match self.data_stream.as_mut().poll_next(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(chunk) => match chunk {
-                Some(chunk_result) => match chunk_result {
-                    Ok(chunk) => Poll::Ready(Some(Ok(chunk))),
-                    Err(err) => Poll::Ready(Some(Err(Box::new(err)))),
-                },
-                None => Poll::Ready(None),
-            },
-        }
-    }
-}
+pub type LocalQueryStream = ReceiverStream<Result<DataChunk, BoxedError>>;
 
 pub struct LocalQueryExecution {
     sql: String,
     query: Query,
     front_env: FrontendEnv,
     // The snapshot will be released when LocalQueryExecution is dropped.
-    snapshot: HummockSnapshotGuard,
+    snapshot: PinnedHummockSnapshot,
     auth_context: Arc<AuthContext>,
 }
 
@@ -81,7 +63,7 @@ impl LocalQueryExecution {
         query: Query,
         front_env: FrontendEnv,
         sql: S,
-        snapshot: HummockSnapshotGuard,
+        snapshot: PinnedHummockSnapshot,
         auth_context: Arc<AuthContext>,
     ) -> Self {
         Self {
@@ -115,8 +97,7 @@ impl LocalQueryExecution {
             &plan_node,
             &task_id,
             context,
-            // TODO: Add support to use current epoch when needed
-            self.snapshot.get_committed_epoch(),
+            self.snapshot.get_batch_query_epoch(),
         );
         let executor = executor.build().await?;
 
@@ -131,9 +112,24 @@ impl LocalQueryExecution {
     }
 
     pub fn stream_rows(self) -> LocalQueryStream {
-        LocalQueryStream {
-            data_stream: self.run(),
+        let (sender, receiver) = mpsc::channel(10);
+        let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
+
+        let future = async move {
+            while let Some(r) = data_stream.next().await {
+                if (sender.send(r).await).is_err() {
+                    tracing::info!("Receiver closed.");
+                }
+            }
+        };
+
+        if cfg!(madsim) {
+            tokio::spawn(future);
+        } else {
+            spawn_blocking(move || block_on(future));
         }
+
+        ReceiverStream::new(receiver)
     }
 
     /// Convert query to plan fragment.
@@ -246,8 +242,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            // TODO: Add support to use current epoch when needed
-                            epoch: self.snapshot.get_committed_epoch(),
+                            epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
@@ -279,8 +274,7 @@ impl LocalQueryExecution {
                         };
                         let local_execute_plan = LocalExecutePlan {
                             plan: Some(second_stage_plan_fragment),
-                            // TODO: Add support to use current epoch when needed
-                            epoch: self.snapshot.get_committed_epoch(),
+                            epoch: Some(self.snapshot.get_batch_query_epoch()),
                         };
                         // NOTE: select a random work node here.
                         let worker_node = self.front_env.worker_node_manager().next_random()?;
@@ -312,8 +306,7 @@ impl LocalQueryExecution {
 
                     let local_execute_plan = LocalExecutePlan {
                         plan: Some(second_stage_plan_fragment),
-                        // TODO: Add support to use current epoch when needed
-                        epoch: self.snapshot.get_committed_epoch(),
+                        epoch: Some(self.snapshot.get_batch_query_epoch()),
                     };
 
                     let workers = if second_stage.parallelism == 1 {

@@ -2,7 +2,7 @@ I hereby agree to the terms of the [Singularity Data, Inc. Contributor License A
 
 ## What's changed and what's your intention?
 
-***PLEASE DO NOT LEAVE THIS EMPTY !!!***
+**This section will be used as the commit message. Please do not leave this empty!**
 
 Please explain **IN DETAIL** what the changes are in this PR and why they are needed:
 
@@ -15,6 +15,7 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 
 - [ ] I have written necessary rustdoc comments
 - [ ] I have added necessary unit tests and integration tests
+- [ ] I have added fuzzing tests or opened an issue to track them. (Optional, recommended for new SQL features).
 - [ ] All checks passed in `./risedev check` (or alias, `./risedev c`)
 
 ## Documentation

@@ -19,6 +19,7 @@ select * from mv1;
 (1,2)
 (1,3)
 
+
 statement ok
 create table t1 (v1 int, v2 struct<v3 int, v4 struct<v5 int, v6 int>>);
 
@@ -50,6 +51,7 @@ create materialized view mv3 as select * from t1 order by (v2).v3;
 
 # The result of select * from mv3 is not expected
 
+
 statement ok
 drop materialized view mv3;
 
@@ -63,7 +65,6 @@ statement ok
 drop table st;
 
 # More tests to ensure `>>` in struct types can be parsed correctly
-
 statement ok
 create table t(v2 struct<v1 int, v2 struct<v1 int, v2 int>>, v1 int);
 

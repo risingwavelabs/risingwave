@@ -4,6 +4,7 @@ package plan_common;
 
 import "data.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 // Field is a column in the streaming or batch plan.
@@ -39,6 +40,7 @@ message StorageTableDesc {
   repeated uint32 dist_key_indices = 4;
   uint32 retention_seconds = 5;
   repeated uint32 value_indices = 6;
+  uint32 read_prefix_len_hint = 7;
 }
 
 enum JoinType {
@@ -61,6 +63,7 @@ enum OrderType {
   DESCENDING = 2;
 }
 
+// Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`).
 message ColumnOrder {
   // maybe other name
   OrderType order_type = 1;
@@ -75,4 +78,5 @@ enum RowFormatType {
   AVRO = 4;
   MAXWELL = 5;
   CANAL_JSON = 6;
+  CSV = 7;
 }

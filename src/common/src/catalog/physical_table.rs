@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -43,6 +43,9 @@ pub struct TableDesc {
     pub retention_seconds: u32,
 
     pub value_indices: Vec<usize>,
+
+    /// The prefix len of pk, used in bloom filter.
+    pub read_prefix_len_hint: usize,
 }
 
 impl TableDesc {
@@ -70,6 +73,7 @@ impl TableDesc {
             dist_key_indices: self.distribution_key.iter().map(|&k| k as u32).collect(),
             retention_seconds: self.retention_seconds,
             value_indices: self.value_indices.iter().map(|&v| v as u32).collect(),
+            read_prefix_len_hint: self.read_prefix_len_hint as u32,
         }
     }
 

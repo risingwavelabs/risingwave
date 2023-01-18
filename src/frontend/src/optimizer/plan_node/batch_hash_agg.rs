@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 
-use super::generic::PlanAggCall;
+use super::generic::{GenericPlanRef, PlanAggCall};
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -35,7 +35,7 @@ impl BatchHashAgg {
         let input = logical.input();
         let input_dist = input.distribution();
         let dist = match input_dist {
-            Distribution::HashShard(_) => logical
+            Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) => logical
                 .i2o_col_mapping()
                 .rewrite_provided_distribution(input_dist),
             d => d.clone(),
@@ -85,7 +85,7 @@ impl ToBatchProst for BatchHashAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(PlanAggCall::to_protobuf)
+                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
                 .collect(),
             group_key: self
                 .group_key()

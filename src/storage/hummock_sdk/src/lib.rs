@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,6 +27,7 @@ extern crate num_derive;
 use std::cmp::Ordering;
 
 pub use key_cmp::*;
+use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::compaction_group::StaticCompactionGroupId;
@@ -168,6 +169,24 @@ pub enum HummockReadEpoch {
     Current(HummockEpoch),
     /// We don't need to wait epoch, we usually do stream reading with it.
     NoWait(HummockEpoch),
+    /// We don't need to wait epoch.
+    Backup(HummockEpoch),
+}
+
+impl From<BatchQueryEpoch> for HummockReadEpoch {
+    fn from(e: BatchQueryEpoch) -> Self {
+        match e.epoch.unwrap() {
+            batch_query_epoch::Epoch::Committed(epoch) => HummockReadEpoch::Committed(epoch),
+            batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::Current(epoch),
+            batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
+        }
+    }
+}
+
+pub fn to_committed_batch_query_epoch(epoch: u64) -> BatchQueryEpoch {
+    BatchQueryEpoch {
+        epoch: Some(batch_query_epoch::Epoch::Committed(epoch)),
+    }
 }
 
 impl HummockReadEpoch {
@@ -176,6 +195,7 @@ impl HummockReadEpoch {
             HummockReadEpoch::Committed(epoch) => epoch,
             HummockReadEpoch::Current(epoch) => epoch,
             HummockReadEpoch::NoWait(epoch) => epoch,
+            HummockReadEpoch::Backup(epoch) => epoch,
         }
     }
 }

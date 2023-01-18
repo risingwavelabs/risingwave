@@ -38,13 +38,13 @@ hyper = "0.14"
 itertools = "0.10"
 maplit = "1.0.2"
 mysql_async = "0.31"
-nexmark = { version = "0.1", features = ["serde"] }
+nexmark = { version = "0.2", features = ["serde"] }
 num-traits = "0.2"
 paste = "1"
 prost = "0.11"
 pulsar = { version = "4.2", default-features = false, features = ["tokio-runtime"] }
 rand = "0.8"
-rdkafka = { package = "madsim-rdkafka", version = "=0.2.8-alpha", features = ["cmake-build", "ssl-vendored", "gssapi"] }
+rdkafka = { package = "madsim-rdkafka", version = "=0.2.13-alpha", features = ["cmake-build", "ssl-vendored", "gssapi"] }
 risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }

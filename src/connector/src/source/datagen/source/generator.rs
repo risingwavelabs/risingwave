@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use bytes::Bytes;
@@ -20,13 +20,19 @@ use futures_async_stream::try_stream;
 use risingwave_common::field_generator::FieldGeneratorImpl;
 use serde_json::Value;
 
-use crate::source::{SourceMessage, SplitId};
+use crate::source::{SourceMessage, SourceMeta, SplitId};
 
 pub struct DatagenEventGenerator {
     fields_map: HashMap<String, FieldGeneratorImpl>,
     offset: u64,
     split_id: SplitId,
     partition_rows_per_second: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DatagenMeta {
+    // timestamp(milliseconds) of the data generated
+    pub timestamp: Option<i64>,
 }
 
 impl DatagenEventGenerator {
@@ -54,27 +60,44 @@ impl DatagenEventGenerator {
     #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn into_stream(mut self) {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
+        const MAX_ROWS_PER_YIELD: u64 = 1024;
         loop {
             // generate `partition_rows_per_second` rows per second
             interval.tick().await;
-            let mut msgs = vec![];
-            for _ in 0..self.partition_rows_per_second {
-                let value = Value::Object(
-                    self.fields_map
-                        .iter_mut()
-                        .map(|(name, field_generator)| {
-                            (name.to_string(), field_generator.generate(self.offset))
-                        })
-                        .collect(),
+            let mut rows_generated_this_second = 0;
+            while rows_generated_this_second < self.partition_rows_per_second {
+                let mut msgs = vec![];
+                let num_rows_to_generate = std::cmp::min(
+                    MAX_ROWS_PER_YIELD,
+                    self.partition_rows_per_second - rows_generated_this_second,
                 );
-                msgs.push(SourceMessage {
-                    payload: Some(Bytes::from(value.to_string())),
-                    offset: self.offset.to_string(),
-                    split_id: self.split_id.clone(),
-                });
-                self.offset += 1;
+                for _ in 0..num_rows_to_generate {
+                    let value = Value::Object(
+                        self.fields_map
+                            .iter_mut()
+                            .map(|(name, field_generator)| {
+                                (name.to_string(), field_generator.generate(self.offset))
+                            })
+                            .collect(),
+                    );
+                    msgs.push(SourceMessage {
+                        payload: Some(Bytes::from(value.to_string())),
+                        offset: self.offset.to_string(),
+                        split_id: self.split_id.clone(),
+                        meta: SourceMeta::Datagen(DatagenMeta {
+                            timestamp: Some(
+                                SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_millis() as i64,
+                            ),
+                        }),
+                    });
+                    self.offset += 1;
+                    rows_generated_this_second += 1;
+                }
+                yield msgs;
             }
-            yield msgs;
         }
     }
 }

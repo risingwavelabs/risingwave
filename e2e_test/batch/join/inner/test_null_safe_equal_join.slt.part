@@ -30,6 +30,7 @@ NULL 1 NULL 1
 NULL 2 NULL 2
 NULL NULL NULL NULL
 
+
 query IIII
 select * from t1 join t2 on (t1.x is not distinct from t2.x) and (t1.y = t2.y) order by t1.x, t1.y;
 ----

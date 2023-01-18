@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -96,10 +96,6 @@ where
         user_key_range.start_bound().map(UserKey::encode),
         user_key_range.end_bound().map(UserKey::encode),
     );
-    #[cfg(any(test, feature = "test"))]
-    if table_id.table_id() == 0 {
-        return range_overlap(&encoded_user_key_range, table_start, table_end);
-    }
     range_overlap(&encoded_user_key_range, table_start, table_end)
         && info
             .get_table_ids()

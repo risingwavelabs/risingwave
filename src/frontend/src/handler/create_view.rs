@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -40,13 +40,12 @@ pub async fn handle_create_view(
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let properties = handler_args.with_options.clone();
-    let sql = handler_args.sql.clone();
 
     session.check_relation_name_duplicated(name.clone())?;
 
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {
-        let context = OptimizerContext::new_with_handler_args(handler_args);
+        let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, _mode, schema) = super::query::gen_batch_query_plan(
             &session,
             context.into(),
@@ -89,10 +88,7 @@ pub async fn handle_create_view(
         properties: properties.inner().clone(),
         owner: session.user_id(),
         dependent_relations,
-        // Here we save the original sql instead of the unparsed one from AST, in case there're
-        // uncovered cases in the unparsing implementation.
-        // TODO: this includes the `CREATE VIEW` prefix, which can be removed if we have span info.
-        sql: sql.to_string(),
+        sql: format!("{}", query),
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
     };
 

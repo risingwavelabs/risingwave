@@ -1,21 +1,23 @@
-# `src/risedevtool/risedev-schema.json` defines the schema for risedev.yml
+# The schema for RiseDev configuration files is defined under `src/risedevtool/schemas`.
 #
 # You can add the following section to `.vscode/settings.json` to get hover support in VS Code:
 #
 # ```
 #     "yaml.schemas": {
-#         "src/risedevtool/risedev-schema.json": "risedev.yml"
+#         "src/risedevtool/schemas/risedev.json": "risedev.yml",
+#         "src/risedevtool/schemas/risedev-profiles.user.json": "risedev-profiles.user.yml"
 #     }
 # ```
 
-risedev:
-  #########################################
-  ### Configurations used by developers ###
-  #########################################
+profile:
+  #################################################
+  ### Configuration profiles used by developers ###
+  #################################################
 
   # The default configuration will start 1 compute node, 1 meta node and 1 frontend.
   default:
-    config-path: src/config/default.toml
+    # Specify a configuration file to override the default settings
+    # config-path: src/config/example.toml
     steps:
       # If you want to use the local s3 storage, enable the following line
       # - use: minio
@@ -67,7 +69,6 @@ risedev:
 
   # The minimum config to use with risectl.
   for-ctl:
-    config-path: src/config/default.toml
     steps:
       - use: minio
       - use: meta-node
@@ -130,8 +131,38 @@ risedev:
       - use: kafka
         persist-data: true
 
+
+  3etcd-3meta:
+    steps:
+      - use: etcd
+        unsafe-no-fsync: true
+        port: 2388
+        peer-port: 2389
+        exporter-port: 2379
+      - use: etcd
+        unsafe-no-fsync: true
+        port: 12388
+        peer-port: 12389
+        exporter-port: 12379
+      - use: etcd
+        unsafe-no-fsync: true
+        port: 22388
+        peer-port: 22389
+        exporter-port: 22379
+      - use: meta-node
+        port: 5690
+        dashboard-port: 5691
+        exporter-port: 1250
+      - use: meta-node
+        port: 15690
+        dashboard-port: 15691
+        exporter-port: 11250
+      - use: meta-node
+        port: 25690
+        dashboard-port: 25691
+        exporter-port: 21250
+
   3etcd-3meta-1cn-1fe:
-    config-path: src/config/default.toml
     steps:
       - use: etcd
         unsafe-no-fsync: true
@@ -162,62 +193,6 @@ risedev:
         exporter-port: 21250
       - use: compute-node
       - use: frontend
-
-  ##########################################
-  ### Configuration used for ./risedev p ###
-  ##########################################
-
-  playground:
-    config-path: src/config/playground.toml
-    steps:
-      - use: meta-node
-      - use: compute-node
-        total-memory-bytes: 2147483648
-        parallelism: 2
-      - use: frontend
-
-  playground-3cn:
-    config-path: src/config/playground.toml
-    steps:
-      - use: meta-node
-      - use: compute-node
-        port: 5687
-        exporter-port: 1222
-      - use: compute-node
-        port: 5688
-        exporter-port: 1223
-      - use: compute-node
-        port: 5689
-        exporter-port: 1224
-      - use: frontend
-      - use: compactor
-
-  docker-playground:
-    config-path: src/config/default.toml
-    steps:
-      - use: meta-node
-        listen-address: "0.0.0.0"
-        address: "127.0.0.1"
-      - use: compute-node
-        listen-address: "0.0.0.0"
-        address: "127.0.0.1"
-      - use: frontend
-        listen-address: "0.0.0.0"
-        address: "127.0.0.1"
-
-  # The profile for the online playground
-  online-docker-playground:
-    config-path: src/config/playground.toml
-    steps:
-      - use: meta-node
-        listen-address: "0.0.0.0"
-        address: "127.0.0.1"
-      - use: compute-node
-        listen-address: "0.0.0.0"
-        address: "127.0.0.1"
-      - use: frontend
-        listen-address: "0.0.0.0"
-        address: "127.0.0.1"
 
   ######################################
   ### Configurations used in Compose ###
@@ -535,6 +510,27 @@ risedev:
       - use: frontend
       - use: compactor
 
+  ci-meta-backup-test:
+    config-path: src/config/ci-meta-backup-test.toml
+    steps:
+      - use: etcd
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+
+  ci-meta-backup-test-restore:
+    config-path: src/config/ci-meta-backup-test.toml
+    steps:
+      - use: etcd
+      - use: minio
+
+  ci-delete-range-test:
+    config-path: src/config/ci-delete-range-test.toml
+    steps:
+      - use: minio
+
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"
@@ -675,6 +671,9 @@ template:
 
     # Id of this instance
     id: meta-node-${port}
+
+    # RPC endpoint for connector node colocated with Meta
+    connector-rpc-endpoint: "127.0.0.1:60061"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false

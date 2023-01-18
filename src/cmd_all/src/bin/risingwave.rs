@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,17 +15,15 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 #![feature(let_chains)]
 
-use tikv_jemallocator::Jemalloc;
-
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
-
 use std::collections::HashMap;
 use std::env;
 
 use anyhow::{bail, Result};
 use clap::StructOpt;
 use risingwave_cmd_all::playground;
+use risingwave_common::enable_task_local_jemalloc_on_linux;
+
+enable_task_local_jemalloc_on_linux!();
 
 type RwFns = HashMap<&'static str, Box<dyn Fn(Vec<String>) -> Result<()>>>;
 
@@ -106,17 +104,19 @@ fn main() -> Result<()> {
     }
 
     // risectl
-    fns.insert(
-        "risectl",
-        Box::new(move |args: Vec<String>| {
-            eprintln!("launching risectl");
+    for fn_name in ["ctl", "risectl"] {
+        fns.insert(
+            fn_name,
+            Box::new(move |args: Vec<String>| {
+                eprintln!("launching risectl");
 
-            let opts = risingwave_ctl::CliOpts::parse_from(args);
-            risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+                let opts = risingwave_ctl::CliOpts::parse_from(args);
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
 
-            risingwave_rt::main_okk(risingwave_ctl::start(opts))
-        }),
-    );
+                risingwave_rt::main_okk(risingwave_ctl::start(opts))
+            }),
+        );
+    }
 
     // playground
     for fn_name in ["play", "playground"] {

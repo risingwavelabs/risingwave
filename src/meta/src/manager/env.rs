@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,19 +16,13 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(any(test, feature = "test"))]
-use prost::Message;
 use risingwave_pb::meta::MetaLeaderInfo;
-#[cfg(any(test, feature = "test"))]
-use risingwave_pb::meta::MetaLeaseInfo;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
 };
-#[cfg(any(test, feature = "test"))]
-use crate::rpc::{META_CF_NAME, META_LEADER_KEY, META_LEASE_KEY};
 #[cfg(any(test, feature = "test"))]
 use crate::storage::MemStore;
 use crate::storage::MetaStore;
@@ -71,10 +65,6 @@ pub struct MetaOpts {
     pub barrier_interval: Duration,
     /// The maximum number of barriers in-flight in the compute nodes.
     pub in_flight_barrier_nums: usize,
-    /// Whether to enable the minimal scheduling strategy, that is, only schedule the streaming
-    /// fragment on one parallel unit per compute node.
-    pub minimal_scheduling: bool,
-
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
@@ -99,6 +89,10 @@ pub struct MetaOpts {
     /// The prometheus endpoint for dashboard service.
     pub prometheus_endpoint: Option<String>,
 
+    /// Endpoint of the connector node, there will be a sidecar connector node
+    /// colocated with Meta node in the cloud environment
+    pub connector_rpc_endpoint: Option<String>,
+
     /// The storage url for storing backups.
     pub backup_storage_url: String,
     /// The storage directory for storing backups.
@@ -112,7 +106,6 @@ impl MetaOpts {
             enable_recovery,
             barrier_interval: Duration::from_millis(250),
             in_flight_barrier_nums: 40,
-            minimal_scheduling: false,
             max_idle_ms: 0,
             checkpoint_frequency: 10,
             compaction_deterministic_test: false,
@@ -123,6 +116,7 @@ impl MetaOpts {
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
             prometheus_endpoint: None,
+            connector_rpc_endpoint: None,
             backup_storage_url: "memory".to_string(),
             backup_storage_directory: "backup".to_string(),
         }
@@ -205,32 +199,8 @@ impl MetaSrvEnv<MemStore> {
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
-        let leader_info = MetaLeaderInfo {
-            lease_id: 0,
-            node_address: "".to_string(),
-        };
-        let lease_info = MetaLeaseInfo {
-            leader: Some(leader_info.clone()),
-            lease_register_time: 0,
-            lease_expire_time: 10,
-        };
+        let leader_info = MetaLeaderInfo::default();
         let meta_store = Arc::new(MemStore::default());
-        meta_store
-            .put_cf(
-                META_CF_NAME,
-                META_LEADER_KEY.as_bytes().to_vec(),
-                leader_info.encode_to_vec(),
-            )
-            .await
-            .unwrap();
-        meta_store
-            .put_cf(
-                META_CF_NAME,
-                META_LEASE_KEY.as_bytes().to_vec(),
-                lease_info.encode_to_vec(),
-            )
-            .await
-            .unwrap();
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());

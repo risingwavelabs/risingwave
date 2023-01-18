@@ -9,7 +9,7 @@ create table t(x int);
 statement ok
 create materialized view mv1 as select * from t order by x limit 9223372036854775807;
 
-statement error 
+statement error
 create materialized view mv2 as select * from t order by x limit 9223372036854775808;
 
 statement ok

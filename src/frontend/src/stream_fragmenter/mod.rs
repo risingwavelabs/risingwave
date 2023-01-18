@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,14 +17,15 @@ use graph::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod rewrite;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use derivative::Derivative;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, FragmentType,
+    DispatchStrategy, DispatcherType, ExchangeNode, FragmentTypeFlag,
     StreamFragmentGraph as StreamFragmentGraphProto, StreamNode,
 };
 
@@ -50,6 +51,11 @@ pub struct BuildFragmentGraphState {
 
     /// dependent table ids
     dependent_table_ids: HashSet<TableId>,
+
+    /// operator id to `LocalFragmentId` mapping used by share operator.
+    share_mapping: HashMap<u32, LocalFragmentId>,
+    /// operator id to `StreamNode` mapping used by share operator.
+    share_stream_node_mapping: HashMap<u32, StreamNode>,
 }
 
 impl BuildFragmentGraphState {
@@ -76,6 +82,15 @@ impl BuildFragmentGraphState {
     /// Generate an table id
     pub fn gen_table_id_wrapped(&mut self) -> TableId {
         TableId::new(self.gen_table_id())
+    }
+
+    pub fn add_share_stream_node(&mut self, operator_id: u32, stream_node: StreamNode) {
+        self.share_stream_node_mapping
+            .insert(operator_id, stream_node);
+    }
+
+    pub fn get_share_stream_node(&mut self, operator_id: u32) -> Option<&StreamNode> {
+        self.share_stream_node_mapping.get(&operator_id)
     }
 }
 
@@ -178,15 +193,29 @@ fn generate_fragment_graph(
 pub(self) fn build_and_add_fragment(
     state: &mut BuildFragmentGraphState,
     stream_node: StreamNode,
-) -> Result<StreamFragment> {
-    let mut fragment = state.new_stream_fragment();
-    let node = build_fragment(state, &mut fragment, stream_node)?;
+) -> Result<Rc<StreamFragment>> {
+    let operator_id = stream_node.operator_id as u32;
+    match state.share_mapping.get(&operator_id) {
+        None => {
+            let mut fragment = state.new_stream_fragment();
+            let node = build_fragment(state, &mut fragment, stream_node)?;
 
-    assert!(fragment.node.is_none());
-    fragment.node = Some(Box::new(node));
+            assert!(fragment.node.is_none());
+            fragment.node = Some(Box::new(node));
+            let fragment_ref = Rc::new(fragment);
 
-    state.fragment_graph.add_fragment(fragment.clone());
-    Ok(fragment)
+            state.fragment_graph.add_fragment(fragment_ref.clone());
+            state
+                .share_mapping
+                .insert(operator_id, fragment_ref.fragment_id);
+            Ok(fragment_ref)
+        }
+        Some(fragment_id) => Ok(state
+            .fragment_graph
+            .get_fragment(fragment_id)
+            .unwrap()
+            .clone()),
+    }
 }
 
 /// Build new fragment and link dependencies by visiting children recursively, update
@@ -200,17 +229,22 @@ fn build_fragment(
 ) -> Result<StreamNode> {
     // Update current fragment based on the node we're visiting.
     match stream_node.get_node_body()? {
-        NodeBody::Source(_) => current_fragment.fragment_type = FragmentType::Source,
+        NodeBody::Source(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
+        }
 
-        NodeBody::Materialize(_) => current_fragment.fragment_type = FragmentType::Mview,
+        NodeBody::Materialize(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Mview as u32;
+        }
 
-        NodeBody::Sink(_) => current_fragment.fragment_type = FragmentType::Sink,
+        NodeBody::Sink(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Sink as u32,
 
         // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
         NodeBody::TopN(_) => current_fragment.is_singleton = true,
 
         // FIXME: workaround for single-fragment mview on singleton upstream mview.
         NodeBody::Chain(node) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::ChainNode as u32;
             // memorize table id for later use
             state
                 .dependent_table_ids
@@ -218,6 +252,8 @@ fn build_fragment(
             current_fragment.upstream_table_ids.push(node.table_id);
             current_fragment.is_singleton = node.is_singleton;
         }
+
+        NodeBody::Now(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Now as u32,
 
         _ => {}
     };

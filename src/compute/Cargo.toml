@@ -27,6 +27,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 hyper = "0.14"
 itertools = "0.10"
+lru = { git = "https://github.com/risingwavelabs/lru-rs.git", branch = "evict_by_timestamp" }
 maplit = "1.0.2"
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -68,6 +69,9 @@ tower-http = { version = "0.3", features = ["add-extension", "cors"] }
 tracing = "0.1"
 twox-hash = "1"
 url = "2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tikv-jemalloc-ctl = "0.5"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

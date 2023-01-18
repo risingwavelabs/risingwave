@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,13 +17,14 @@ use std::sync::{Arc, Mutex};
 use anyhow::Context;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
 use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
 
-use super::exchange::permit::channel;
+use super::exchange::permit::channel_for_test;
 use super::*;
 use crate::executor::actor::ActorContext;
 use crate::executor::aggregation::{AggArgs, AggCall};
@@ -74,7 +75,7 @@ async fn test_merger_sum_aggr() {
             1,
         )
         .unwrap();
-        let (tx, rx) = channel();
+        let (tx, rx) = channel_for_test();
         let consumer = SenderConsumer {
             input: aggregator.boxed(),
             channel: Box::new(LocalOutput::new(233, tx)),
@@ -102,7 +103,7 @@ async fn test_merger_sum_aggr() {
 
     // create 17 local aggregation actors
     for _ in 0..17 {
-        let (tx, rx) = channel();
+        let (tx, rx) = channel_for_test();
         let (actor, channel) = make_actor(rx);
         outputs.push(channel);
         handles.push(tokio::spawn(actor.run()));
@@ -110,7 +111,7 @@ async fn test_merger_sum_aggr() {
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
-    let (input, rx) = channel();
+    let (input, rx) = channel_for_test();
     let _schema = Schema {
         fields: vec![Field::unnamed(DataType::Int64)],
     };
@@ -145,7 +146,7 @@ async fn test_merger_sum_aggr() {
         merger.boxed(),
         vec![
             AggCall {
-                kind: AggKind::Sum,
+                kind: AggKind::Sum0,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
                 order_pairs: vec![],
@@ -175,6 +176,7 @@ async fn test_merger_sum_aggr() {
             Box::new(InputRefExpression::new(DataType::Int64, 1)),
         ],
         3,
+        MultiMap::new(),
     );
 
     let items = Arc::new(Mutex::new(vec![]));

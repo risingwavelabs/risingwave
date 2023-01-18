@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,9 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{
-    ColumnDesc, Field, INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
-};
+use risingwave_common::catalog::{Field, SYSTEM_SCHEMAS};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_sqlparser::ast::{Statement, TableAlias};
@@ -32,24 +30,12 @@ use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::{TableCatalog, TableType};
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{CatalogError, IndexCatalog, TableId};
-use crate::user::UserId;
 
 #[derive(Debug, Clone)]
 pub struct BoundBaseTable {
     pub table_id: TableId,
     pub table_catalog: TableCatalog,
     pub table_indexes: Vec<Arc<IndexCatalog>>,
-}
-
-/// `BoundTableSource` is used by DML statement on table source like insert, update.
-#[derive(Debug)]
-pub struct BoundTableSource {
-    pub name: String,       // explain-only
-    pub source_id: TableId, // TODO: refactor to source id
-    pub associated_mview_id: TableId,
-    pub columns: Vec<ColumnDesc>,
-    pub append_only: bool,
-    pub owner: UserId,
 }
 
 #[derive(Debug, Clone)]
@@ -78,7 +64,7 @@ impl Binder {
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
         fn is_system_schema(schema_name: &str) -> bool {
-            schema_name == PG_CATALOG_SCHEMA_NAME || schema_name == INFORMATION_SCHEMA_SCHEMA_NAME
+            SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
         }
 
         // define some helper functions converting catalog to bound relation
@@ -232,17 +218,11 @@ impl Binder {
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let ast = Parser::parse_sql(&view_catalog.sql)
             .expect("a view's sql should be parsed successfully");
-        let ast = ast
+        let Statement::Query(query) = ast
             .into_iter()
             .exactly_one()
-            .expect("a view should contain only one statement");
-        let query = match ast {
-            Statement::CreateView {
-                materialized: false,
-                query,
-                ..
-            } => query,
-            _ => unreachable!("a view should contain a query statement, but got {ast:?}"),
+            .expect("a view should contain only one statement") else {
+            unreachable!("a view should contain a query statement");
         };
         let query = self.bind_query(*query).map_err(|e| {
             ErrorCode::BindError(format!(
@@ -304,69 +284,66 @@ impl Binder {
         })
     }
 
-    pub(crate) fn bind_table_source(
-        &mut self,
+    pub(crate) fn resolve_dml_table<'a>(
+        &'a self,
         schema_name: Option<&str>,
-        source_name: &str,
-    ) -> Result<BoundTableSource> {
+        table_name: &str,
+        is_insert: bool,
+    ) -> Result<&'a TableCatalog> {
         let db_name = &self.db_name;
         let schema_path = match schema_name {
             Some(schema_name) => SchemaPath::Name(schema_name),
             None => SchemaPath::Path(&self.search_path, &self.auth_context.user_name),
         };
-        let (associate_table, schema_name) =
+
+        let (table, _schema_name) =
             self.catalog
-                .get_table_by_name(db_name, schema_path, source_name)?;
-        match associate_table.table_type() {
-            TableType::Table => {}
+                .get_table_by_name(db_name, schema_path, table_name)?;
+
+        match table.table_type() {
+            TableType::Table => {
+                // TODO(Yuanxin): Remove this after supporting `CREATE TABLE WITH connector`.
+                if table.associated_source_id().is_some() {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "cannot change materialized source \"{table_name}\""
+                    ))
+                    .into());
+                }
+            }
             TableType::Index => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "cannot change index \"{source_name}\""
+                    "cannot change index \"{table_name}\""
                 ))
                 .into())
             }
             TableType::MaterializedView => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "cannot change materialized view \"{source_name}\""
+                    "cannot change materialized view \"{table_name}\""
                 ))
                 .into())
             }
             TableType::Internal => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "cannot change internal table \"{source_name}\""
+                    "cannot change internal table \"{table_name}\""
                 ))
                 .into())
             }
         }
-        let associate_table_id = associate_table.id();
 
-        let (source, _) = self.catalog.get_source_by_name(
-            &self.db_name,
-            SchemaPath::Name(schema_name),
-            source_name,
-        )?;
+        if table.append_only && !is_insert {
+            return Err(ErrorCode::BindError(
+                "append-only table does not support update or delete".to_string(),
+            )
+            .into());
+        }
 
-        let source_id = TableId::new(source.id);
+        Ok(table)
+    }
 
-        let append_only = source.append_only;
-        let columns = source
-            .columns
-            .iter()
-            .filter(|c| !c.is_hidden)
-            .map(|c| c.column_desc.clone())
-            .collect();
-
-        let owner = source.owner;
-
-        // Note(bugen): do not bind context here.
-
-        Ok(BoundTableSource {
-            name: source_name.to_string(),
-            source_id,
-            associated_mview_id: associate_table_id,
-            columns,
-            append_only,
-            owner,
-        })
+    pub(crate) fn resolve_regclass(&self, class_name: &str) -> Result<u32> {
+        let schema_path = SchemaPath::Path(&self.search_path, &self.auth_context.user_name);
+        Ok(self
+            .catalog
+            .get_id_by_class_name(&self.db_name, schema_path, class_name)?)
     }
 }

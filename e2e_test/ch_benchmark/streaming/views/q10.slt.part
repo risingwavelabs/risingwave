@@ -1,6 +1,6 @@
 statement ok
 create materialized view ch_benchmark_q10 as
-select	 c_id, c_last, sum(ol_amount) as revenue, c_city, c_phone, n_name
+select	 c_id, c_last, round(sum(ol_amount)::decimal, 0) as revenue, c_city, c_phone, n_name
 from	 customer, orders, orderline, nation
 where	 c_id = o_c_id
     	 and c_w_id = o_w_id
@@ -12,4 +12,4 @@ where	 c_id = o_c_id
     	 and o_entry_d <= ol_delivery_d
     	 and n_nationkey = ascii(substr(c_state,1,1)) - 48
 group by c_id, c_last, c_city, c_phone, n_name
-order by revenue desc;
+having round(sum(ol_amount)::decimal, 0) > 0;

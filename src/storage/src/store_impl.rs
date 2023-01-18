@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,7 +16,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
-use risingwave_common::config::StorageConfig;
+use risingwave_common::config::RwConfig;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_object_store::object::{
@@ -24,6 +24,7 @@ use risingwave_object_store::object::{
 };
 
 use crate::error::StorageResult;
+use crate::hummock::backup_reader::{parse_meta_snapshot_storage, BackupReader};
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
@@ -32,7 +33,10 @@ use crate::hummock::{
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
-use crate::monitor::{MonitoredStateStore as Monitored, ObjectStoreMetrics, StateStoreMetrics};
+use crate::monitor::{
+    CompactorMetrics, HummockStateStoreMetrics, MonitoredStateStore as Monitored,
+    MonitoredStorageMetrics, ObjectStoreMetrics,
+};
 use crate::StateStore;
 
 pub type HummockStorageType = impl StateStore + AsHummockTrait;
@@ -104,44 +108,47 @@ fn may_verify(state_store: impl StateStore + AsHummockTrait) -> impl StateStore 
 impl StateStoreImpl {
     fn in_memory(
         state_store: MemoryStateStore,
-        state_store_metrics: Arc<StateStoreMetrics>,
+        storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of MemoryStateStoreType in deducted here.
-        Self::MemoryStateStore(may_dynamic_dispatch(state_store).monitored(state_store_metrics))
+        Self::MemoryStateStore(may_dynamic_dispatch(state_store).monitored(storage_metrics))
     }
 
     pub fn hummock(
         state_store: HummockStorage,
-        state_store_metrics: Arc<StateStoreMetrics>,
+        storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of HummockStateStoreType in deducted here.
         Self::HummockStateStore(
-            may_dynamic_dispatch(may_verify(state_store)).monitored(state_store_metrics),
+            may_dynamic_dispatch(may_verify(state_store)).monitored(storage_metrics),
         )
     }
 
     pub fn hummock_v1(
         state_store: HummockStorageV1,
-        state_store_metrics: Arc<StateStoreMetrics>,
+        storage_metrics: Arc<MonitoredStorageMetrics>,
     ) -> Self {
         // The specific type of HummockStateStoreV1Type in deducted here.
         Self::HummockStateStoreV1(
-            may_dynamic_dispatch(may_verify(state_store)).monitored(state_store_metrics),
+            may_dynamic_dispatch(may_verify(state_store)).monitored(storage_metrics),
         )
     }
 
-    pub fn sled(state_store: SledStateStore, state_store_metrics: Arc<StateStoreMetrics>) -> Self {
-        Self::SledStateStore(may_dynamic_dispatch(state_store).monitored(state_store_metrics))
+    pub fn sled(
+        state_store: SledStateStore,
+        storage_metrics: Arc<MonitoredStorageMetrics>,
+    ) -> Self {
+        Self::SledStateStore(may_dynamic_dispatch(state_store).monitored(storage_metrics))
     }
 
-    pub fn shared_in_memory_store(state_store_metrics: Arc<StateStoreMetrics>) -> Self {
-        Self::in_memory(MemoryStateStore::shared(), state_store_metrics)
+    pub fn shared_in_memory_store(storage_metrics: Arc<MonitoredStorageMetrics>) -> Self {
+        Self::in_memory(MemoryStateStore::shared(), storage_metrics)
     }
 
     pub fn for_test() -> Self {
         Self::in_memory(
             MemoryStateStore::new(),
-            Arc::new(StateStoreMetrics::unused()),
+            Arc::new(MonitoredStorageMetrics::unused()),
         )
     }
 
@@ -249,7 +256,7 @@ pub mod verify {
     use crate::storage_value::StorageValue;
     use crate::store::*;
     use crate::store_impl::{AsHummockTrait, HummockTrait};
-    use crate::{StateStore, StateStoreIter};
+    use crate::StateStore;
 
     fn assert_result_eq<Item: PartialEq + Debug, E>(
         first: &std::result::Result<Item, E>,
@@ -278,25 +285,6 @@ pub mod verify {
     impl<A: AsHummockTrait, E> AsHummockTrait for VerifyStateStore<A, E> {
         fn as_hummock_trait(&self) -> Option<&dyn HummockTrait> {
             self.actual.as_hummock_trait()
-        }
-    }
-
-    impl<A: StateStoreIter<Item: PartialEq + Debug>, E: StateStoreIter<Item = A::Item>>
-        StateStoreIter for VerifyStateStore<A, E>
-    {
-        type Item = A::Item;
-
-        type NextFuture<'a> = impl NextFutureTrait<'a, A::Item>;
-
-        fn next(&mut self) -> Self::NextFuture<'_> {
-            async {
-                let actual = self.actual.next().await;
-                if let Some(expected) = &mut self.expected {
-                    let expected = expected.next().await;
-                    assert_result_eq(&actual, &expected);
-                }
-                actual
-            }
         }
     }
 
@@ -409,7 +397,7 @@ pub mod verify {
     impl<A: StateStore, E: StateStore> StateStore for VerifyStateStore<A, E> {
         type Local = VerifyStateStore<A::Local, E::Local>;
 
-        type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send;
+        type NewLocalFuture<'a> = impl Future<Output = Self::Local> + Send + 'a;
 
         define_state_store_associated_type!();
 
@@ -464,13 +452,16 @@ impl StateStoreImpl {
     pub async fn new(
         s: &str,
         file_cache_dir: &str,
-        config: Arc<StorageConfig>,
+        rw_config: &RwConfig,
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
-        state_store_stats: Arc<StateStoreMetrics>,
+        state_store_metrics: Arc<HummockStateStoreMetrics>,
         object_store_metrics: Arc<ObjectStoreMetrics>,
         tiered_cache_metrics_builder: TieredCacheMetricsBuilder,
         tracing: Arc<risingwave_tracing::RwTracingService>,
+        storage_metrics: Arc<MonitoredStorageMetrics>,
+        compactor_metrics: Arc<CompactorMetrics>,
     ) -> StorageResult<Self> {
+        let config = Arc::new(rw_config.storage.clone());
         #[cfg(not(target_os = "linux"))]
         let tiered_cache = TieredCache::none();
 
@@ -508,6 +499,7 @@ impl StateStoreImpl {
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     config.object_store_use_batch_delete,
+                    "Hummock",
                 )
                 .await;
                 let object_store = if config.enable_local_spill {
@@ -531,41 +523,46 @@ impl StateStoreImpl {
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
 
                 if !config.enable_state_store_v1 {
+                    let backup_store = parse_meta_snapshot_storage(rw_config).await?;
+                    let backup_reader = BackupReader::new(backup_store);
                     let inner = HummockStorage::new(
                         config.clone(),
                         sstable_store,
+                        backup_reader,
                         hummock_meta_client.clone(),
                         notification_client,
-                        state_store_stats.clone(),
+                        state_store_metrics.clone(),
                         tracing,
+                        compactor_metrics.clone(),
                     )
                     .await?;
 
-                    StateStoreImpl::hummock(inner, state_store_stats)
+                    StateStoreImpl::hummock(inner, storage_metrics)
                 } else {
                     let inner = HummockStorageV1::new(
                         config.clone(),
                         sstable_store,
                         hummock_meta_client.clone(),
                         notification_client,
-                        state_store_stats.clone(),
+                        state_store_metrics.clone(),
                         tracing,
+                        compactor_metrics.clone(),
                     )
                     .await?;
 
-                    StateStoreImpl::hummock_v1(inner, state_store_stats)
+                    StateStoreImpl::hummock_v1(inner, storage_metrics)
                 }
             }
 
             "in_memory" | "in-memory" => {
                 tracing::warn!("In-memory state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
-                StateStoreImpl::shared_in_memory_store(state_store_stats.clone())
+                StateStoreImpl::shared_in_memory_store(storage_metrics.clone())
             }
 
             sled if sled.starts_with("sled://") => {
                 tracing::warn!("sled state store should never be used in end-to-end benchmarks or production environment. Scaling and recovery are not supported.");
                 let path = sled.strip_prefix("sled://").unwrap();
-                StateStoreImpl::sled(SledStateStore::new(path), state_store_stats.clone())
+                StateStoreImpl::sled(SledStateStore::new(path), storage_metrics.clone())
             }
 
             other => unimplemented!("{} state store is not supported", other),
@@ -605,6 +602,7 @@ impl HummockTrait for HummockStorage {
         Some(self)
     }
 }
+
 impl HummockTrait for HummockStorageV1 {
     fn sstable_id_manager(&self) -> &SstableIdManagerRef {
         self.sstable_id_manager()
@@ -674,6 +672,7 @@ pub mod boxed_state_store {
     // For StateStoreRead
 
     pub type BoxStateStoreReadIterStream = BoxStream<'static, StorageResult<StateStoreIterItem>>;
+
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
         async fn get<'a>(
@@ -790,10 +789,12 @@ pub mod boxed_state_store {
         DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreWrite
     {
     }
+
     impl<S: DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreWrite>
         DynamicDispatchedLocalStateStore for S
     {
     }
+
     pub type BoxDynamicDispatchedLocalStateStore = Box<dyn DynamicDispatchedLocalStateStore>;
 
     impl_state_store_read_for_box!(BoxDynamicDispatchedLocalStateStore);
@@ -840,6 +841,7 @@ pub mod boxed_state_store {
     }
 
     pub type BoxDynamicDispatchedStateStore = Box<dyn DynamicDispatchedStateStore>;
+
     // With this trait, we can implement `Clone` for BoxDynamicDispatchedStateStore
     pub trait DynamicDispatchedStateStoreCloneBox {
         fn clone_box(&self) -> BoxDynamicDispatchedStateStore;
@@ -852,6 +854,7 @@ pub mod boxed_state_store {
         + AsHummockTrait
     {
     }
+
     impl<
             S: DynamicDispatchedStateStoreCloneBox
                 + DynamicDispatchedStateStoreRead

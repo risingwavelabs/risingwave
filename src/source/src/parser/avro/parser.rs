@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -58,7 +58,7 @@ impl AvroParser {
         })?;
         let (schema, schema_resolver) = if use_schema_registry {
             let kafka_topic = get_kafka_topic(&props)?;
-            let client = Client::new(url)?;
+            let client = Client::new(url, &props)?;
             let (schema, resolver) =
                 ConfluentSchemaResolver::new(format!("{}-value", kafka_topic).as_str(), client)
                     .await?;
@@ -331,7 +331,7 @@ mod test {
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
-    use risingwave_common::row::Row2;
+    use risingwave_common::row::Row;
     use risingwave_common::types::{
         DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl,
     };
@@ -490,70 +490,80 @@ mod test {
                 name: "id".to_string(),
                 data_type: DataType::Int32,
                 column_id: ColumnId::from(0),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "sequence_id".to_string(),
                 data_type: DataType::Int64,
                 column_id: ColumnId::from(1),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "name".to_string(),
                 data_type: DataType::Varchar,
                 column_id: ColumnId::from(2),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "score".to_string(),
                 data_type: DataType::Float32,
                 column_id: ColumnId::from(3),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "avg_score".to_string(),
                 data_type: DataType::Float64,
                 column_id: ColumnId::from(4),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "is_lasted".to_string(),
                 data_type: DataType::Boolean,
                 column_id: ColumnId::from(5),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "entrance_date".to_string(),
                 data_type: DataType::Date,
                 column_id: ColumnId::from(6),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "birthday".to_string(),
                 data_type: DataType::Timestamp,
                 column_id: ColumnId::from(7),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "anniversary".to_string(),
                 data_type: DataType::Timestamp,
                 column_id: ColumnId::from(8),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "passed".to_string(),
                 data_type: DataType::Interval,
                 column_id: ColumnId::from(9),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
         ]

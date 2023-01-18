@@ -57,7 +57,6 @@ NULL
 4983
 
 # large offset
-
 query I
 SELECT k FROM integers WHERE i>4978 order by i LIMIT 5 OFFSET 100;
 ----
@@ -77,7 +76,6 @@ NULL
 5983
 
 # IN-clause (semi join)
-
 query I rowsort
 SELECT k FROM integers WHERE i IN (SELECT * FROM other_table)
 ----

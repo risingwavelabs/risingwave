@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,35 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-pub use json_parser::*;
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 pub use simd_json_parser::*;
 
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-mod json_parser;
 mod operators;
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 mod simd_json_parser;
 
 #[cfg(test)]
@@ -50,7 +24,7 @@ mod test {
 
     use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnId;
-    use risingwave_common::row::{Row, Row2};
+    use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::*;
@@ -62,28 +36,32 @@ mod test {
                 name: "id".to_string(),
                 data_type: DataType::Int32,
                 column_id: ColumnId::from(0),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "name".to_string(),
                 data_type: DataType::Varchar,
                 column_id: ColumnId::from(1),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "description".to_string(),
                 data_type: DataType::Varchar,
                 column_id: ColumnId::from(2),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
             SourceColumnDesc {
                 name: "weight".to_string(),
                 data_type: DataType::Float64,
                 column_id: ColumnId::from(3),
-                skip_parse: false,
+                is_row_id: false,
+                is_meta: false,
                 fields: vec![],
             },
         ];
@@ -95,7 +73,7 @@ mod test {
         parser: impl SourceParser,
         columns: Vec<SourceColumnDesc>,
         payload: &[u8],
-    ) -> Vec<(Op, Row)> {
+    ) -> Vec<(Op, OwnedRow)> {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
         {
             let writer = builder.row_writer();

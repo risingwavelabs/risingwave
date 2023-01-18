@@ -1,16 +1,18 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field};
@@ -79,8 +81,8 @@ fn build_lookup_for_delta_join(
 fn build_delta_join_inner(
     state: &mut BuildFragmentGraphState,
     current_fragment: &mut StreamFragment,
-    arrange_0_frag: StreamFragment,
-    arrange_1_frag: StreamFragment,
+    arrange_0_frag: Rc<StreamFragment>,
+    arrange_1_frag: Rc<StreamFragment>,
     node: &StreamNode,
     is_local_table_id: bool,
 ) -> Result<StreamNode> {
@@ -329,5 +331,6 @@ fn infer_internal_table_catalog(
         );
     }
 
+    // TODO: give the real look-up keys
     internal_table_catalog_builder.build(distribution_key)
 }

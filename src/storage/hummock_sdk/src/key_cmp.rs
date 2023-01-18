@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -114,15 +114,15 @@ mod tests {
         let key3 = UserKey::for_test(TableId::new(1), b"0".to_vec());
 
         assert_eq!(
-            KeyComparator::compare_user_key_cross_format(&key1.encode(), &key1),
+            KeyComparator::compare_user_key_cross_format(key1.encode(), &key1),
             Ordering::Equal
         );
         assert_eq!(
-            KeyComparator::compare_user_key_cross_format(&key1.encode(), &key2),
+            KeyComparator::compare_user_key_cross_format(key1.encode(), &key2),
             Ordering::Less
         );
         assert_eq!(
-            KeyComparator::compare_user_key_cross_format(&key2.encode(), &key3),
+            KeyComparator::compare_user_key_cross_format(key2.encode(), &key3),
             Ordering::Less
         );
     }

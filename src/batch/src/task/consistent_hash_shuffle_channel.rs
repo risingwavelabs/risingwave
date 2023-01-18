@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,6 +32,7 @@ use crate::error::Result as BatchResult;
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 
+#[derive(Clone)]
 pub struct ConsistentHashShuffleSender {
     senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
     consistent_hash_info: ConsistentHashInfo,
@@ -90,7 +91,7 @@ fn generate_new_data_chunks(
     let mut res = Vec::with_capacity(output_count);
     for (sink_id, vis_map_vec) in vis_maps.into_iter().enumerate() {
         let vis_map: Bitmap = vis_map_vec.into_iter().collect();
-        let vis_map = if let Some(visibility) = chunk.get_visibility_ref() {
+        let vis_map = if let Some(visibility) = chunk.visibility() {
             vis_map.bitand(visibility)
         } else {
             vis_map
@@ -107,7 +108,7 @@ fn generate_new_data_chunks(
 }
 
 impl ChanSender for ConsistentHashShuffleSender {
-    type SendFuture<'a> = impl Future<Output = BatchResult<()>>;
+    type SendFuture<'a> = impl Future<Output = BatchResult<()>> + 'a;
 
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
         async move {
@@ -152,7 +153,7 @@ impl ConsistentHashShuffleSender {
 }
 
 impl ChanReceiver for ConsistentHashShuffleReceiver {
-    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunkInChannel>>>;
+    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunkInChannel>>> + 'a;
 
     fn recv(&mut self) -> Self::RecvFuture<'_> {
         async move {

@@ -7,6 +7,7 @@ import "common.proto";
 import "data.proto";
 import "stream_plan.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 // Task is a running instance of Stage.
@@ -33,7 +34,7 @@ message TaskInfo {
 message CreateTaskRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
-  uint64 epoch = 3;
+  common.BatchQueryEpoch epoch = 3;
 }
 
 message AbortTaskRequest {
@@ -61,7 +62,7 @@ message GetDataResponse {
 message ExecuteRequest {
   batch_plan.TaskId task_id = 1;
   batch_plan.PlanFragment plan = 2;
-  uint64 epoch = 3;
+  common.BatchQueryEpoch epoch = 3;
 }
 
 service TaskService {

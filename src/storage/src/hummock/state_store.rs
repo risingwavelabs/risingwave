@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -61,8 +61,11 @@ impl HummockStorage {
             Bound::Included(TableKey(key.to_vec())),
         );
 
-        let read_version_tuple =
-            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?;
+        let read_version_tuple = if read_options.read_version_from_backup {
+            self.build_read_version_tuple_from_backup(epoch).await?
+        } else {
+            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?
+        };
 
         self.hummock_version_reader
             .get(TableKey(key), epoch, read_options, read_version_tuple)
@@ -75,12 +78,33 @@ impl HummockStorage {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
-        let read_version_tuple =
-            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?;
+        let read_version_tuple = if read_options.read_version_from_backup {
+            self.build_read_version_tuple_from_backup(epoch).await?
+        } else {
+            self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?
+        };
 
         self.hummock_version_reader
             .iter(key_range, epoch, read_options, read_version_tuple)
             .await
+    }
+
+    async fn build_read_version_tuple_from_backup(
+        &self,
+        epoch: u64,
+    ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+        match self.backup_reader.try_get_hummock_version(epoch).await {
+            Ok(Some(backup_version)) => {
+                validate_epoch(backup_version.safe_epoch(), epoch)?;
+                Ok((Vec::default(), Vec::default(), backup_version))
+            }
+            Ok(None) => Err(HummockError::read_backup_error(format!(
+                "backup include epoch {} not found",
+                epoch
+            ))
+            .into()),
+            Err(e) => Err(e),
+        }
     }
 
     fn build_read_version_tuple(
@@ -102,10 +126,8 @@ impl HummockStorage {
                     let read_guard = self.read_version_mapping.read();
                     read_guard
                         .get(&table_id)
-                        .unwrap()
-                        .values()
-                        .cloned()
-                        .collect_vec()
+                        .map(|v| v.values().cloned().collect_vec())
+                        .unwrap_or(Vec::new())
                 };
 
                 // When the system has just started and no state has been created, the memory state
@@ -172,7 +194,7 @@ impl StateStore for HummockStorage {
                     );
                     return Ok(());
                 }
-                HummockReadEpoch::NoWait(_) => return Ok(()),
+                HummockReadEpoch::NoWait(_) | HummockReadEpoch::Backup(_) => return Ok(()),
             };
             if wait_epoch == HummockEpoch::MAX {
                 panic!("epoch should not be u64::MAX");
@@ -244,6 +266,9 @@ impl StateStore for HummockStorage {
             warn!("sealing invalid epoch");
             return;
         }
+        // Update `seal_epoch` synchronously,
+        // as `HummockEvent::SealEpoch` is handled asynchronously.
+        self.seal_epoch.store(epoch, MemOrdering::SeqCst);
         self.hummock_event_sender
             .send(HummockEvent::SealEpoch {
                 epoch,

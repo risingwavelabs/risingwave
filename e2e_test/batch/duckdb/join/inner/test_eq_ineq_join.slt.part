@@ -53,7 +53,6 @@ statement ok
 DROP TABLE test2;
 
 # Equality + inequality anti and semi joins
-
 statement ok
 CREATE TABLE test (a INTEGER, b INTEGER, str VARCHAR);
 
@@ -101,7 +100,6 @@ statement ok
 DROP TABLE test2;
 
 # Equality + inequality anti and semi joins with selection vector
-
 statement ok
 CREATE TABLE test (a INTEGER, b INTEGER, str VARCHAR);
 

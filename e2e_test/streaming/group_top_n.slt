@@ -124,7 +124,6 @@ drop table t;
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
 statement ok
 CREATE TABLE bid (
     "bidtime" TIMESTAMP,
@@ -147,7 +146,6 @@ insert into bid values
 
 # Window Top-N follows directly after Window TVF
 # Top 3 items which have the highest price for every tumbling 10 minutes window
-
 statement ok
 CREATE MATERIALIZED VIEW mv as 
 SELECT window_start, window_end, item, price
@@ -172,7 +170,6 @@ drop materialized view mv;
 
 # Window Top-N which follows after Window Aggregation
 # Top 3 suppliers who have the highest sales for every tumbling 10 minutes window.
-
 statement ok
 CREATE MATERIALIZED VIEW mv as 
 SELECT window_start, window_end, supplier_id, price, cnt
@@ -201,3 +198,31 @@ drop materialized view mv;
 
 statement ok
 drop table bid;
+
+# https://github.com/risingwavelabs/risingwave/issues/7276
+statement ok
+CREATE TABLE t (
+    x int,
+    ts TIMESTAMP
+);
+
+statement ok
+create materialized view mv as SELECT
+    1 as x
+FROM (
+    SELECT
+    row_number() over (partition by ts order by x) as rank
+    FROM
+    t
+)
+WHERE rank <=1;
+
+statement ok
+INSERT INTO t VALUES
+(1, '2015-07-15 00:00:01');
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;

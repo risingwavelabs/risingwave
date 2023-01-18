@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -72,10 +72,13 @@ impl DmlExecutor {
     async fn execute_inner(self: Box<Self>) {
         let mut upstream = self.upstream.execute();
 
-        // Construct the reader of batch data (DML from users).
+        // Construct the reader of batch data (DML from users). We must create a variable to hold
+        // this `Arc<TableSource>` here, or it will be dropped due to the `Weak` reference in
+        // `DmlManager`.
         let batch_reader = self
             .dml_manager
-            .register_reader(&self.table_id, &self.column_descs);
+            .register_reader(self.table_id, &self.column_descs)
+            .map_err(StreamExecutorError::connector_error)?;
         let batch_reader = batch_reader
             .stream_reader_v2()
             .into_stream_v2()
@@ -198,7 +201,7 @@ mod tests {
         tx.push_chunk(stream_chunk3);
 
         // Message from batch
-        let _ = dml_manager.write_chunk(&table_id, batch_chunk).unwrap();
+        dml_manager.write_chunk(&table_id, batch_chunk).unwrap();
 
         // Consume the 1st message from upstream executor
         let msg = dml_executor.next().await.unwrap().unwrap();

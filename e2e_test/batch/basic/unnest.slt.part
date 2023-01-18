@@ -16,7 +16,6 @@ SELECT * FROM unnest(Array[Array[1,3,4,5],Array[2,3]]);
 3
 
 # table functions used with usual expressions (those in Project): padding
-
 query II
 SELECT unnest(Array[1,2,3]), 1;
 ----
@@ -25,7 +24,6 @@ SELECT unnest(Array[1,2,3]), 1;
 3 1
 
 # multiple table functions: padding with NULL
-
 query I
 select unnest(array[1,2,3]), unnest(array['a', 'b']);
 ----

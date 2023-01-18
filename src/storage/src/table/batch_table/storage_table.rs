@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,23 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::assert_matches::assert_matches;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
-use std::ops::RangeBounds;
+use std::ops::{Index, RangeBounds};
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
 use auto_enums::auto_enum;
+use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
-    get_dist_key_in_pk_indices, get_dist_key_start_index_in_pk, ColumnDesc, ColumnId, Schema,
-    TableId, TableOption,
+    get_dist_key_in_pk_indices, ColumnDesc, ColumnId, Schema, TableId, TableOption,
 };
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{self, Row, Row2, RowDeserializer, RowExt};
+use risingwave_common::row::{self, OwnedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
@@ -42,7 +43,7 @@ use crate::row_serde::row_serde_util::{
 };
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::ReadOptions;
-use crate::table::{compute_vnode, Distribution, TableIter};
+use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
 use crate::StateStore;
 
 /// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
@@ -59,8 +60,19 @@ pub struct StorageTable<S: StateStore> {
     /// RowSeqScanExecutor.
     schema: Schema,
 
-    /// Used for serializing the primary key.
+    /// Used for serializing and deserializing the primary key.
     pk_serializer: OrderedRowSerde,
+
+    output_indices: Vec<usize>,
+
+    /// the key part of output_indices.
+    key_output_indices: Option<Vec<usize>>,
+
+    /// the value part of output_indices.
+    value_output_indices: Vec<usize>,
+
+    /// used for deserializing key part of output row from pk.
+    output_row_in_key_indices: Vec<usize>,
 
     /// Mapping from column id to column index for deserializing the row.
     mapping: Arc<ColumnMapping>,
@@ -81,7 +93,6 @@ pub struct StorageTable<S: StateStore> {
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Vec<usize>,
-    distribution_key_start_index_in_pk: Option<usize>,
 
     /// Virtual nodes that the table is partitioned into.
     ///
@@ -92,6 +103,8 @@ pub struct StorageTable<S: StateStore> {
 
     /// Used for catalog table_properties
     table_option: TableOption,
+
+    read_prefix_len_hint: usize,
 }
 
 impl<S: StateStore> std::fmt::Debug for StorageTable<S> {
@@ -116,6 +129,7 @@ impl<S: StateStore> StorageTable<S> {
         distribution: Distribution,
         table_options: TableOption,
         value_indices: Vec<usize>,
+        read_prefix_len_hint: usize,
     ) -> Self {
         Self::new_inner(
             store,
@@ -127,6 +141,7 @@ impl<S: StateStore> StorageTable<S> {
             distribution,
             table_options,
             value_indices,
+            read_prefix_len_hint,
         )
     }
 
@@ -136,9 +151,9 @@ impl<S: StateStore> StorageTable<S> {
         columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
+        value_indices: Vec<usize>,
     ) -> Self {
         let column_ids = columns.iter().map(|c| c.column_id).collect();
-        let value_indices = (0..columns.len()).collect_vec();
         Self::new_inner(
             store,
             table_id,
@@ -149,7 +164,12 @@ impl<S: StateStore> StorageTable<S> {
             Distribution::fallback(),
             Default::default(),
             value_indices,
+            0,
         )
+    }
+
+    pub fn pk_serializer(&self) -> &OrderedRowSerde {
+        &self.pk_serializer
     }
 }
 
@@ -168,41 +188,71 @@ impl<S: StateStore> StorageTable<S> {
         }: Distribution,
         table_option: TableOption,
         value_indices: Vec<usize>,
+        read_prefix_len_hint: usize,
     ) -> Self {
         assert_eq!(order_types.len(), pk_indices.len());
 
         let (output_columns, output_indices) = find_columns_by_ids(&table_columns, &column_ids);
-        assert!(
-            output_indices.iter().all(|i| value_indices.contains(i)),
-            "output_indices must be a subset of value_indices"
-        );
+        let mut value_output_indices = vec![];
+        let mut key_output_indices = vec![];
+
+        for idx in &output_indices {
+            if value_indices.contains(idx) {
+                value_output_indices.push(*idx);
+            } else {
+                key_output_indices.push(*idx);
+            }
+        }
+
+        let output_row_in_value_indices = value_output_indices
+            .iter()
+            .map(|&di| value_indices.iter().position(|&pi| di == pi).unwrap())
+            .collect_vec();
+        let output_row_in_key_indices = key_output_indices
+            .iter()
+            .map(|&di| pk_indices.iter().position(|&pi| di == pi).unwrap())
+            .collect_vec();
         let schema = Schema::new(output_columns.iter().map(Into::into).collect());
-        let mapping = ColumnMapping::new(output_indices);
+
+        let mapping = ColumnMapping::new(output_row_in_value_indices);
 
         let pk_data_types = pk_indices
             .iter()
             .map(|i| table_columns[*i].data_type.clone())
             .collect();
-        let all_data_types = table_columns.iter().map(|d| d.data_type.clone()).collect();
+        let all_data_types = table_columns
+            .iter()
+            .map(|d| d.data_type.clone())
+            .collect_vec();
+        let data_types = value_indices
+            .iter()
+            .map(|idx| all_data_types[*idx].clone())
+            .collect_vec();
         let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
-        let row_deserializer = RowDeserializer::new(all_data_types);
+        let row_deserializer = RowDeserializer::new(data_types);
 
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
-        let distribution_key_start_index_in_pk =
-            get_dist_key_start_index_in_pk(&dist_key_in_pk_indices);
+        let key_output_indices = match key_output_indices.is_empty() {
+            true => None,
+            false => Some(key_output_indices),
+        };
         Self {
             table_id,
             store,
             schema,
             pk_serializer,
+            output_indices,
+            key_output_indices,
+            value_output_indices,
+            output_row_in_key_indices,
             mapping: Arc::new(mapping),
             row_deserializer: Arc::new(row_deserializer),
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
-            distribution_key_start_index_in_pk,
             vnodes,
             table_option,
+            read_prefix_len_hint,
         }
     }
 
@@ -218,13 +268,13 @@ impl<S: StateStore> StorageTable<S> {
 /// Point get
 impl<S: StateStore> StorageTable<S> {
     /// Get vnode value with given primary key.
-    fn compute_vnode_by_pk(&self, pk: impl Row2) -> VirtualNode {
+    fn compute_vnode_by_pk(&self, pk: impl Row) -> VirtualNode {
         compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
     }
 
     /// Try getting vnode value with given primary key prefix, used for `vnode_hint` in iterators.
     /// Return `None` if the provided columns are not enough.
-    fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: impl Row2) -> Option<VirtualNode> {
+    fn try_compute_vnode_by_pk_prefix(&self, pk_prefix: impl Row) -> Option<VirtualNode> {
         self.dist_key_in_pk_indices
             .iter()
             .all(|&d| d < pk_prefix.len())
@@ -234,38 +284,69 @@ impl<S: StateStore> StorageTable<S> {
     /// Get a single row by point get
     pub async fn get_row(
         &self,
-        pk: impl Row2,
+        pk: impl Row,
         wait_epoch: HummockReadEpoch,
-    ) -> StorageResult<Option<Row>> {
+    ) -> StorageResult<Option<OwnedRow>> {
         let epoch = wait_epoch.get_epoch();
+        let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
         self.store.try_wait_epoch(wait_epoch).await?;
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
         assert!(pk.len() <= self.pk_indices.len());
-        let key_indices = (0..pk.len())
-            .into_iter()
-            .map(|index| self.pk_indices[index])
-            .collect_vec();
+
+        let prefix_hint = if self.read_prefix_len_hint != 0 && self.read_prefix_len_hint == pk.len()
+        {
+            Some(serialized_pk.slice(VirtualNode::SIZE..))
+        } else {
+            None
+        };
 
         let read_options = ReadOptions {
-            dist_key_hint: None,
-            check_bloom_filter: !self.dist_key_indices.is_empty()
-                && self.dist_key_indices == key_indices,
+            prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
             ignore_range_tombstone: false,
             table_id: self.table_id,
+            read_version_from_backup: read_backup,
         };
         if let Some(value) = self.store.get(&serialized_pk, epoch, read_options).await? {
             let full_row = self.row_deserializer.deserialize(value)?;
-            let result_row = self.mapping.project(full_row);
-            Ok(Some(result_row))
+            let result_row_in_value = self.mapping.project(full_row).into_owned_row();
+            match &self.key_output_indices {
+                Some(key_output_indices) => {
+                    let result_row_in_key =
+                        pk.project(&self.output_row_in_key_indices).into_owned_row();
+                    let mut result_row_vec = vec![];
+                    for idx in &self.output_indices {
+                        if self.value_output_indices.contains(idx) {
+                            let item_position_in_value_indices = &self
+                                .value_output_indices
+                                .iter()
+                                .position(|p| idx == p)
+                                .unwrap();
+                            result_row_vec.push(
+                                result_row_in_value
+                                    .index(*item_position_in_value_indices)
+                                    .clone(),
+                            );
+                        } else {
+                            let item_position_in_pk_indices =
+                                key_output_indices.iter().position(|p| idx == p).unwrap();
+                            result_row_vec
+                                .push(result_row_in_key.index(item_position_in_pk_indices).clone());
+                        }
+                    }
+                    let result_row = OwnedRow::new(result_row_vec);
+                    Ok(Some(result_row))
+                }
+                None => Ok(Some(result_row_in_value)),
+            }
         } else {
             Ok(None)
         }
     }
 }
 
-pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, Row)>> + Send;
+pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, OwnedRow)>> + Send;
 
 /// The row iterator of the storage table.
 /// The wrapper of [`StorageTableIter`] if pk is not persisted.
@@ -273,7 +354,7 @@ pub type StorageTableIter<S: StateStore> = impl PkAndRowStream;
 
 #[async_trait::async_trait]
 impl<S: PkAndRowStream + Unpin> TableIter for S {
-    async fn next_row(&mut self) -> StorageResult<Option<Row>> {
+    async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>> {
         self.next()
             .await
             .transpose()
@@ -287,7 +368,7 @@ impl<S: StateStore> StorageTable<S> {
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
-        dist_key_hint: Option<Vec<u8>>,
+        prefix_hint: Option<Bytes>,
         encoded_key_range: R,
         wait_epoch: HummockReadEpoch,
         vnode_hint: Option<VirtualNode>,
@@ -297,35 +378,61 @@ impl<S: StateStore> StorageTable<S> {
         R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
     {
-        // Vnodes that are set and should be accessed.
-        #[auto_enum(Iterator)]
-        let vnodes = match vnode_hint {
-            // If `vnode_hint` is set, we can only access this single vnode.
-            Some(vnode) => std::iter::once(vnode),
-            // Otherwise, we need to access all vnodes of this table.
-            None => self.vnodes.ones().map(VirtualNode::from_index),
+        let raw_key_ranges = if !ordered
+            && matches!(encoded_key_range.start_bound(), Unbounded)
+            && matches!(encoded_key_range.end_bound(), Unbounded)
+        {
+            // If the range is unbounded and order is not required, we can create a single iterator
+            // for each continuous vnode range.
+
+            // In this case, the `vnode_hint` must be default for singletons and `None` for
+            // distributed tables.
+            assert_eq!(vnode_hint.unwrap_or(DEFAULT_VNODE), DEFAULT_VNODE);
+
+            Either::Left(self.vnodes.high_ranges().map(|r| {
+                let start = Included(VirtualNode::from_index(*r.start()).to_be_bytes().to_vec());
+                let end = end_bound_of_prefix(&VirtualNode::from_index(*r.end()).to_be_bytes());
+                assert_matches!(end, Excluded(_) | Unbounded);
+                (start, end)
+            }))
+        } else {
+            // Vnodes that are set and should be accessed.
+            let vnodes = match vnode_hint {
+                // If `vnode_hint` is set, we can only access this single vnode.
+                Some(vnode) => Either::Left(std::iter::once(vnode)),
+                // Otherwise, we need to access all vnodes of this table.
+                None => Either::Right(self.vnodes.iter_ones().map(VirtualNode::from_index)),
+            };
+            Either::Right(
+                vnodes.map(|vnode| prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes())),
+            )
         };
 
-        // For each vnode, construct an iterator.
-        // TODO: if there're some vnodes continuously in the range and we don't care about order, we
-        // can use a single iterator.
-        let iterators: Vec<_> = try_join_all(vnodes.map(|vnode| {
-            let raw_key_range = prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes());
-
-            let dist_key_hint = dist_key_hint.clone();
+        // For each key range, construct an iterator.
+        let iterators: Vec<_> = try_join_all(raw_key_ranges.map(|raw_key_range| {
+            let prefix_hint = prefix_hint.clone();
             let wait_epoch = wait_epoch.clone();
+            let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
             async move {
-                let check_bloom_filter = dist_key_hint.is_some();
                 let read_options = ReadOptions {
-                    dist_key_hint,
-                    check_bloom_filter,
+                    prefix_hint,
                     ignore_range_tombstone: false,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
+                    read_version_from_backup: read_backup,
+                };
+                let pk_serializer = match self.output_row_in_key_indices.is_empty() {
+                    true => None,
+                    false => Some(Arc::new(self.pk_serializer.clone())),
                 };
                 let iter = StorageTableIterInner::<S>::new(
                     &self.store,
                     self.mapping.clone(),
+                    pk_serializer,
+                    self.output_indices.clone(),
+                    self.key_output_indices.clone(),
+                    self.value_output_indices.clone(),
+                    self.output_row_in_key_indices.clone(),
                     self.row_deserializer.clone(),
                     raw_key_range,
                     read_options,
@@ -356,14 +463,15 @@ impl<S: StateStore> StorageTable<S> {
     async fn iter_with_pk_bounds(
         &self,
         epoch: HummockReadEpoch,
-        pk_prefix: impl Row2,
-        range_bounds: impl RangeBounds<Row>,
+        pk_prefix: impl Row,
+        range_bounds: impl RangeBounds<OwnedRow>,
         ordered: bool,
     ) -> StorageResult<StorageTableIter<S>> {
+        // TODO: directly use `prefixed_range`.
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerde,
-            pk_prefix: impl Row2,
-            range_bound: Bound<&Row>,
+            pk_prefix: impl Row,
+            range_bound: Bound<&OwnedRow>,
             is_start_bound: bool,
         ) -> Bound<Vec<u8>> {
             match range_bound {
@@ -428,32 +536,18 @@ impl<S: StateStore> StorageTable<S> {
             .map(|index| self.pk_indices[index])
             .collect_vec();
 
-        let dist_key_hint = if let Some(distribution_key_start_index_in_pk) =
-            self.distribution_key_start_index_in_pk &&
-            self.dist_key_indices.len() + distribution_key_start_index_in_pk
-                <= pk_prefix.len()
+        let prefix_hint = if self.read_prefix_len_hint != 0
+            && self.read_prefix_len_hint <= pk_prefix.len()
         {
             let encoded_prefix = if let Bound::Included(start_key) = start_key.as_ref() {
                 start_key
             } else {
                 unreachable!()
             };
-            let distribution_key_end_index_in_pk =
-                self.dist_key_in_pk_indices.len() + distribution_key_start_index_in_pk;
-            let (dist_key_start_position, dist_key_len) = self
+            let prefix_len = self
                 .pk_serializer
-                .deserialize_dist_key_position_with_column_indices(
-                    encoded_prefix,
-                    (
-                        distribution_key_start_index_in_pk,
-                        distribution_key_end_index_in_pk,
-                    ),
-                )
-                .unwrap();
-            Some(
-                encoded_prefix[dist_key_start_position..dist_key_len + dist_key_start_position]
-                    .to_vec(),
-            )
+                .deserialize_prefix_len(encoded_prefix, self.read_prefix_len_hint)?;
+            Some(Bytes::from(encoded_prefix[..prefix_len].to_vec()))
         } else {
             trace!(
                     "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
@@ -466,9 +560,9 @@ impl<S: StateStore> StorageTable<S> {
         };
 
         trace!(
-            "iter_with_pk_bounds table_id {} dist_key_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
+            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
             self.table_id,
-            dist_key_hint,
+            prefix_hint,
             start_key,
             end_key,
             pk_prefix,
@@ -477,7 +571,7 @@ impl<S: StateStore> StorageTable<S> {
         );
 
         self.iter_with_encoded_key_range(
-            dist_key_hint,
+            prefix_hint,
             (start_key, end_key),
             epoch,
             self.try_compute_vnode_by_pk_prefix(pk_prefix),
@@ -491,16 +585,21 @@ impl<S: StateStore> StorageTable<S> {
     pub async fn batch_iter_with_pk_bounds(
         &self,
         epoch: HummockReadEpoch,
-        pk_prefix: impl Row2,
-        range_bounds: impl RangeBounds<Row>,
+        pk_prefix: impl Row,
+        range_bounds: impl RangeBounds<OwnedRow>,
+        ordered: bool,
     ) -> StorageResult<StorageTableIter<S>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, true)
+        self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered)
             .await
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`.
-    pub async fn batch_iter(&self, epoch: HummockReadEpoch) -> StorageResult<StorageTableIter<S>> {
-        self.batch_iter_with_pk_bounds(epoch, row::empty(), ..)
+    pub async fn batch_iter(
+        &self,
+        epoch: HummockReadEpoch,
+        ordered: bool,
+    ) -> StorageResult<StorageTableIter<S>> {
+        self.batch_iter_with_pk_bounds(epoch, row::empty(), .., ordered)
             .await
     }
 }
@@ -513,13 +612,33 @@ struct StorageTableIterInner<S: StateStore> {
     mapping: Arc<ColumnMapping>,
 
     row_deserializer: Arc<RowDeserializer>,
+
+    /// Used for serializing and deserializing the primary key.
+    pk_serializer: Option<Arc<OrderedRowSerde>>,
+
+    output_indices: Vec<usize>,
+
+    /// the key part of output_indices.
+    key_output_indices: Option<Vec<usize>>,
+
+    /// the value part of output_indices.
+    value_output_indices: Vec<usize>,
+
+    /// used for deserializing key part of output row from pk.
+    output_row_in_key_indices: Vec<usize>,
 }
 
 impl<S: StateStore> StorageTableIterInner<S> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
+    #[allow(clippy::too_many_arguments)]
     async fn new<R, B>(
         store: &S,
         mapping: Arc<ColumnMapping>,
+        pk_serializer: Option<Arc<OrderedRowSerde>>,
+        output_indices: Vec<usize>,
+        key_output_indices: Option<Vec<usize>>,
+        value_output_indices: Vec<usize>,
+        output_row_in_key_indices: Vec<usize>,
         row_deserializer: Arc<RowDeserializer>,
         raw_key_range: R,
         read_options: ReadOptions,
@@ -540,12 +659,17 @@ impl<S: StateStore> StorageTableIterInner<S> {
             iter,
             mapping,
             row_deserializer,
+            pk_serializer,
+            output_indices,
+            key_output_indices,
+            value_output_indices,
+            output_row_in_key_indices,
         };
         Ok(iter)
     }
 
     /// Yield a row with its primary key.
-    #[try_stream(ok = (Vec<u8>, Row), error = StorageError)]
+    #[try_stream(ok = (Vec<u8>, OwnedRow), error = StorageError)]
     async fn into_stream(self) {
         use futures::TryStreamExt;
 
@@ -558,9 +682,46 @@ impl<S: StateStore> StorageTableIterInner<S> {
             .await?
         {
             let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);
+
             let full_row = self.row_deserializer.deserialize(value)?;
-            let row = self.mapping.project(full_row);
-            yield (key.to_vec(), row)
+            let result_row_in_value = self.mapping.project(full_row).into_owned_row();
+            match &self.key_output_indices {
+                Some(key_output_indices) => {
+                    let result_row_in_key = match self.pk_serializer.clone() {
+                        Some(pk_serializer) => {
+                            let pk = pk_serializer.deserialize(key)?;
+
+                            pk.project(&self.output_row_in_key_indices).into_owned_row()
+                        }
+                        None => OwnedRow::empty(),
+                    };
+
+                    let mut result_row_vec = vec![];
+                    for idx in &self.output_indices {
+                        if self.value_output_indices.contains(idx) {
+                            let item_position_in_value_indices = &self
+                                .value_output_indices
+                                .iter()
+                                .position(|p| idx == p)
+                                .unwrap();
+                            result_row_vec.push(
+                                result_row_in_value
+                                    .index(*item_position_in_value_indices)
+                                    .clone(),
+                            );
+                        } else {
+                            let item_position_in_pk_indices =
+                                key_output_indices.iter().position(|p| idx == p).unwrap();
+                            result_row_vec
+                                .push(result_row_in_key.index(item_position_in_pk_indices).clone());
+                        }
+                    }
+                    let row = OwnedRow::new(result_row_vec);
+
+                    yield (key.to_vec(), row)
+                }
+                None => yield (key.to_vec(), result_row_in_value),
+            }
         }
     }
 }

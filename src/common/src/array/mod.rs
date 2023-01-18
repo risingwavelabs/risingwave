@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,6 +14,7 @@
 
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
+mod arrow;
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
@@ -50,7 +51,7 @@ pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
-pub use iterator::{ArrayImplIterator, ArrayIterator};
+pub use iterator::ArrayIterator;
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
@@ -62,7 +63,6 @@ pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
 use crate::buffer::Bitmap;
-pub use crate::row::{Row, RowDeserializer};
 use crate::types::*;
 pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
 
@@ -105,8 +105,15 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     /// Panics if `meta`'s type mismatches with the array type.
     fn with_meta(capacity: usize, meta: ArrayMeta) -> Self;
 
+    /// Append a value multiple times.
+    ///
+    /// This should be more efficient than calling `append` multiple times.
+    fn append_n(&mut self, n: usize, value: Option<<Self::ArrayType as Array>::RefItem<'_>>);
+
     /// Append a value to builder.
-    fn append(&mut self, value: Option<<<Self as ArrayBuilder>::ArrayType as Array>::RefItem<'_>>);
+    fn append(&mut self, value: Option<<Self::ArrayType as Array>::RefItem<'_>>) {
+        self.append_n(1, value);
+    }
 
     fn append_null(&mut self) {
         self.append(None)
@@ -159,24 +166,54 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     /// Corresponding builder of this array, which is reciprocal to `Array`.
     type Builder: ArrayBuilder<ArrayType = Self>;
 
-    /// Iterator type of this array.
-    type Iter<'a>: Iterator<Item = Option<Self::RefItem<'a>>>
-    where
-        Self: 'a;
+    /// Retrieve a reference to value regardless of whether it is null
+    /// without checking the index boundary.
+    ///
+    /// The returned value for NULL values is the default value.
+    ///
+    /// # Safety
+    ///
+    /// Index must be within the bounds.
+    unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_>;
 
     /// Retrieve a reference to value.
-    fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>>;
+    #[inline]
+    fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>> {
+        if !self.is_null(idx) {
+            // Safety: the above `is_null` check ensures that the index is valid.
+            Some(unsafe { self.raw_value_at_unchecked(idx) })
+        } else {
+            None
+        }
+    }
 
     /// # Safety
     ///
     /// Retrieve a reference to value without checking the index boundary.
-    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>>;
+    #[inline]
+    unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>> {
+        if !self.is_null_unchecked(idx) {
+            Some(self.raw_value_at_unchecked(idx))
+        } else {
+            None
+        }
+    }
 
     /// Number of items of array.
     fn len(&self) -> usize;
 
     /// Get iterator of current array.
-    fn iter(&self) -> Self::Iter<'_>;
+    fn iter(&self) -> ArrayIterator<'_, Self> {
+        ArrayIterator::new(self)
+    }
+
+    /// Get raw iterator of current array.
+    ///
+    /// The raw iterator simply iterates values without checking the null bitmap.
+    /// The returned value for NULL values is undefined.
+    fn raw_iter(&self) -> impl DoubleEndedIterator<Item = Self::RefItem<'_>> {
+        (0..self.len()).map(|i| unsafe { self.raw_value_at_unchecked(i) })
+    }
 
     /// Serialize to protobuf
     fn to_protobuf(&self) -> ProstArray;
@@ -238,8 +275,13 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ArrayMeta {
     Simple, // Simple array without given any extra metadata.
-    Struct { children: Arc<[DataType]> },
-    List { datatype: Box<DataType> },
+    Struct {
+        children: Arc<[DataType]>,
+        children_names: Arc<[String]>,
+    },
+    List {
+        datatype: Box<DataType>,
+    },
 }
 
 impl From<&DataType> for ArrayMeta {
@@ -247,6 +289,7 @@ impl From<&DataType> for ArrayMeta {
         match data_type {
             DataType::Struct(struct_type) => ArrayMeta::Struct {
                 children: struct_type.fields.clone().into(),
+                children_names: struct_type.field_names.clone().into(),
             },
             DataType::List { datatype } => ArrayMeta::List {
                 datatype: datatype.clone(),
@@ -359,8 +402,8 @@ impl From<BytesArray> for ArrayImpl {
 /// `impl_convert` implements several conversions for `Array` and `ArrayBuilder`.
 /// * `ArrayImpl -> &Array` with `impl.as_int16()`.
 /// * `ArrayImpl -> Array` with `impl.into_int16()`.
-/// * `Array -> ArrayImpl` with `From` trait.
 /// * `&ArrayImpl -> &Array` with `From` trait.
+/// * `ArrayImpl -> Array` with `From` trait.
 /// * `ArrayBuilder -> ArrayBuilderImpl` with `From` trait.
 macro_rules! impl_convert {
     ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
@@ -441,12 +484,14 @@ macro_rules! impl_array_builder {
                 }
             }
 
-            /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
-            pub fn append_datum(&mut self, datum: impl ToDatumRef) {
+            /// Append a [`Datum`] or [`DatumRef`] multiple times, return error while type not match.
+            pub fn append_datum_n(&mut self, n: usize, datum: impl ToDatumRef) {
                 match datum.to_datum_ref() {
-                    None => self.append_null(),
+                    None => match self {
+                        $( Self::$variant_name(inner) => inner.append_n(n, None), )*
+                    }
                     Some(scalar_ref) => match (self, scalar_ref) {
-                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append(Some(v)), )*
+                        $( (Self::$variant_name(inner), ScalarRefImpl::$variant_name(v)) => inner.append_n(n, Some(v)), )*
                         (this_builder, this_scalar_ref) => panic!(
                             "Failed to append datum, array builder type: {}, scalar type: {}",
                             this_builder.get_ident(),
@@ -454,6 +499,11 @@ macro_rules! impl_array_builder {
                         ),
                     },
                 }
+            }
+
+            /// Append a [`Datum`] or [`DatumRef`], return error while type not match.
+            pub fn append_datum(&mut self, datum: impl ToDatumRef) {
+                self.append_datum_n(1, datum);
             }
 
             pub fn append_array_element(&mut self, other: &ArrayImpl, idx: usize) {
@@ -596,8 +646,8 @@ macro_rules! impl_array {
 for_all_variants! { impl_array }
 
 impl ArrayImpl {
-    pub fn iter(&self) -> ArrayImplIterator<'_> {
-        ArrayImplIterator::new(self)
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> {
+        (0..self.len()).map(|i| self.value_at(i))
     }
 
     pub fn from_protobuf(array: &ProstArray, cardinality: usize) -> ArrayResult<Self> {
@@ -632,6 +682,13 @@ impl ArrayImpl {
             }
         };
         Ok(array)
+    }
+}
+
+impl ArrayBuilderImpl {
+    /// Create an array builder from given type.
+    pub fn from_type(datatype: &DataType, capacity: usize) -> Self {
+        datatype.create_array_builder(capacity)
     }
 }
 

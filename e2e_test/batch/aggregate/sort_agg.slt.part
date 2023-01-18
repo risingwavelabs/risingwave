@@ -20,6 +20,7 @@ select v1, max(v2) from mv group by v1
 4 7
 9 3
 
+
 query II
 select v1, max(v2) from t group by v1 order by v1 desc
 ----

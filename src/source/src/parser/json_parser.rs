@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -22,66 +22,6 @@ use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 #[derive(Debug)]
 pub struct JsonParser;
 
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-impl JsonParser {
-    fn parse_inner(
-        &self,
-        payload: &[u8],
-        mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
-        use serde_json::Value;
-
-        use crate::parser::common::json_parse_value;
-
-        let value: Value = serde_json::from_slice(payload)
-            .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
-
-        writer.insert(|desc| {
-            json_parse_value(&desc.data_type, value.get(&desc.name)).map_err(|e| {
-                tracing::error!(
-                    "failed to process value ({}): {}",
-                    String::from_utf8_lossy(payload),
-                    e
-                );
-                e.into()
-            })
-        })
-    }
-}
-
-#[cfg(not(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-)))]
-impl SourceParser for JsonParser {
-    type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
-
-    fn parse<'a, 'b, 'c>(
-        &'a self,
-        payload: &'b [u8],
-        writer: SourceStreamChunkRowWriter<'c>,
-    ) -> Self::ParseResult<'a>
-    where
-        'b: 'a,
-        'c: 'a,
-    {
-        ready(self.parse_inner(payload, writer))
-    }
-}
-
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 impl JsonParser {
     fn parse_inner(
         &self,
@@ -98,7 +38,11 @@ impl JsonParser {
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         writer.insert(|desc| {
-            simd_json_parse_value(&desc.data_type, value.get(desc.name.as_str())).map_err(|e| {
+            simd_json_parse_value(
+                &desc.data_type,
+                value.get(desc.name.to_ascii_lowercase().as_str()),
+            )
+            .map_err(|e| {
                 tracing::error!(
                     "failed to process value ({}): {}",
                     String::from_utf8_lossy(payload),
@@ -110,12 +54,6 @@ impl JsonParser {
     }
 }
 
-#[cfg(any(
-    target_feature = "sse4.2",
-    target_feature = "avx2",
-    target_feature = "neon",
-    target_feature = "simd128"
-))]
 impl SourceParser for JsonParser {
     type ParseResult<'a> = impl ParseFuture<'a, Result<WriteGuard>>;
 
@@ -139,7 +77,7 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::catalog::ColumnDesc;
-    use risingwave_common::row::Row2;
+    use risingwave_common::row::Row;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, Decimal, ScalarImpl, ToOwnedDatum};
     use risingwave_expr::vector_op::cast::{str_to_date, str_to_timestamp};
@@ -179,43 +117,43 @@ mod tests {
         {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
-            assert_eq!(row.value_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
+            assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
             assert_eq!(
-                row.value_at(1).to_owned_datum(),
+                row.datum_at(1).to_owned_datum(),
                 (Some(ScalarImpl::Bool(true)))
             );
             assert_eq!(
-                row.value_at(2).to_owned_datum(),
+                row.datum_at(2).to_owned_datum(),
                 (Some(ScalarImpl::Int16(1)))
             );
             assert_eq!(
-                row.value_at(3).to_owned_datum(),
+                row.datum_at(3).to_owned_datum(),
                 (Some(ScalarImpl::Int64(12345678)))
             );
             assert_eq!(
-                row.value_at(4).to_owned_datum(),
+                row.datum_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Float32(1.23.into())))
             );
             assert_eq!(
-                row.value_at(5).to_owned_datum(),
+                row.datum_at(5).to_owned_datum(),
                 (Some(ScalarImpl::Float64(1.2345.into())))
             );
             assert_eq!(
-                row.value_at(6).to_owned_datum(),
+                row.datum_at(6).to_owned_datum(),
                 (Some(ScalarImpl::Utf8("varchar".into())))
             );
             assert_eq!(
-                row.value_at(7).to_owned_datum(),
+                row.datum_at(7).to_owned_datum(),
                 (Some(ScalarImpl::NaiveDate(str_to_date("2021-01-01").unwrap())))
             );
             assert_eq!(
-                row.value_at(8).to_owned_datum(),
+                row.datum_at(8).to_owned_datum(),
                 (Some(ScalarImpl::NaiveDateTime(
                     str_to_timestamp("2021-01-01 16:06:12.269").unwrap()
                 )))
             );
             assert_eq!(
-                row.value_at(9).to_owned_datum(),
+                row.datum_at(9).to_owned_datum(),
                 (Some(ScalarImpl::Decimal(
                     Decimal::from_str("12345.67890").unwrap()
                 )))
@@ -226,20 +164,20 @@ mod tests {
             let (op, row) = rows.next().unwrap();
             assert_eq!(op, Op::Insert);
             assert_eq!(
-                row.value_at(0).to_owned_datum(),
+                row.datum_at(0).to_owned_datum(),
                 (Some(ScalarImpl::Int32(1)))
             );
-            assert_eq!(row.value_at(1).to_owned_datum(), None);
+            assert_eq!(row.datum_at(1).to_owned_datum(), None);
             assert_eq!(
-                row.value_at(4).to_owned_datum(),
+                row.datum_at(4).to_owned_datum(),
                 (Some(ScalarImpl::Float32(12345e+10.into())))
             );
             assert_eq!(
-                row.value_at(5).to_owned_datum(),
+                row.datum_at(5).to_owned_datum(),
                 (Some(ScalarImpl::Float64(12345.into())))
             );
             assert_eq!(
-                row.value_at(9).to_owned_datum(),
+                row.datum_at(9).to_owned_datum(),
                 (Some(ScalarImpl::Decimal(12345.into())))
             );
         }

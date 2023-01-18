@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16ArrayBuilder};
-use risingwave_common::row::{Row, Row2, RowExt};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
@@ -76,7 +76,7 @@ impl Expression for VnodeExpression {
         Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
-    fn eval_row(&self, input: &Row) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let vnode = input
             .project(&self.dist_key_indices)
             .hash(Crc32FastBuilder)
@@ -90,7 +90,7 @@ impl Expression for VnodeExpression {
 mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::hash::VirtualNode;
-    use risingwave_common::row::Row2;
+    use risingwave_common::row::Row;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::RexNode;

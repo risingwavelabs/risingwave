@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -76,6 +76,9 @@ pub enum ErrorCode {
     ConnectorError(BoxedError),
     #[error("Feature is not yet implemented: {0}\n{1}")]
     NotImplemented(String, TrackingIssue),
+    // Tips: Use this only if it's intended to reject the query
+    #[error("Not supported: {0}\nHINT: {1}")]
+    NotSupported(String, String),
     #[error(transparent)]
     IoError(IoError),
     #[error("Storage error: {0}")]
@@ -243,9 +246,7 @@ impl PartialEq for RwError {
 impl PartialEq for ErrorCode {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (&ErrorCode::InternalError(ref msg), &ErrorCode::InternalError(ref msg2)) => {
-                msg == msg2
-            }
+            (ErrorCode::InternalError(msg), ErrorCode::InternalError(msg2)) => msg == msg2,
             (_, _) => false,
         }
     }

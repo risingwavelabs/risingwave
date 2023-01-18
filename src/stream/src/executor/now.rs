@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,20 +13,19 @@
 // limitations under the License.
 
 use async_stack_trace::StackTrace;
-use chrono::NaiveDateTime;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, NaiveDateTimeWrapper, ScalarImpl};
+use risingwave_common::row;
+use risingwave_common::types::{DataType, ScalarImpl, ToDatumRef};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{
     Barrier, BoxedMessageStream, Executor, Message, Mutation, PkIndices, PkIndicesRef,
-    StreamExecutorError, Watermark,
+    StreamExecutorError,
 };
 use crate::common::table::state_table::StateTable;
 
@@ -47,7 +46,7 @@ impl<S: StateStore> NowExecutor<S> {
         state_table: StateTable<S>,
     ) -> Self {
         let schema = Schema::new(vec![Field {
-            data_type: DataType::Timestamp,
+            data_type: DataType::Timestamptz,
             name: String::from("now"),
             sub_fields: vec![],
             type_name: String::default(),
@@ -98,22 +97,16 @@ impl<S: StateStore> NowExecutor<S> {
         while let Some(barrier) = barrier_receiver.recv().await {
             if !is_pausing {
                 let time_millis = Epoch::from(barrier.epoch.curr).as_unix_millis();
-                let timestamp = Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                    NaiveDateTime::from_timestamp_opt(
-                        (time_millis / 1000) as i64,
-                        (time_millis % 1000 * 1_000_000) as u32,
-                    )
-                    .unwrap(),
-                )));
+                let timestamp = Some(ScalarImpl::Int64((time_millis * 1000) as i64));
 
                 let data_chunk = DataChunk::from_rows(
                     &if last_timestamp.is_some() {
                         vec![
-                            Row::new(vec![last_timestamp.clone()]),
-                            Row::new(vec![timestamp.clone()]),
+                            row::once(last_timestamp.to_datum_ref()),
+                            row::once(timestamp.to_datum_ref()),
                         ]
                     } else {
-                        vec![Row::new(vec![timestamp.clone()])]
+                        vec![row::once(timestamp.to_datum_ref())]
                     },
                     &schema.data_types(),
                 );
@@ -126,16 +119,17 @@ impl<S: StateStore> NowExecutor<S> {
                 let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
                 yield Message::Chunk(stream_chunk);
 
-                yield Message::Watermark(Watermark::new(
-                    0,
-                    DataType::TIMESTAMP,
-                    timestamp.as_ref().unwrap().clone(),
-                ));
+                // TODO: depends on "https://github.com/risingwavelabs/risingwave/issues/6042"
+                // yield Message::Watermark(Watermark::new(
+                // 0,
+                // DataType::TIMESTAMPTZ,
+                // timestamp.as_ref().unwrap().clone(),
+                // ));
 
                 if last_timestamp.is_some() {
-                    state_table.delete(Row::new(vec![last_timestamp]));
+                    state_table.delete(row::once(last_timestamp));
                 }
-                state_table.insert(Row::new(vec![timestamp.clone()]));
+                state_table.insert(row::once(timestamp.to_datum_ref()));
                 last_timestamp = timestamp;
 
                 state_table.commit(barrier.epoch).await?;
@@ -175,21 +169,18 @@ impl<S: StateStore> Executor for NowExecutor<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
-    use chrono::NaiveDateTime;
     use futures::StreamExt;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::{DataType, NaiveDateTimeWrapper, ScalarImpl};
+    use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
     use super::NowExecutor;
     use crate::common::table::state_table::StateTable;
-    use crate::executor::{Barrier, BoxedMessageStream, Executor, Message, PkIndices, Watermark};
+    use crate::executor::{Barrier, BoxedMessageStream, Executor, PkIndices};
 
     #[tokio::test]
     async fn test_now() {
@@ -211,24 +202,22 @@ mod tests {
         assert_eq!(
             chunk_msg.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
-                " TS
-                + 2021-04-01T00:00:00.001"
+                " TSZ
+                + 1617235200001000"
             )
         );
 
         // Consume the watermark
-        let watermark = now_executor.next().await.unwrap().unwrap();
-
-        assert_eq!(
-            watermark,
-            Message::Watermark(Watermark::new(
-                0,
-                DataType::TIMESTAMP,
-                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                    NaiveDateTime::from_str("2021-04-01T00:00:00.001").unwrap()
-                ))
-            ))
-        );
+        // let watermark = now_executor.next().await.unwrap().unwrap();
+        //
+        // assert_eq!(
+        // watermark,
+        // Message::Watermark(Watermark::new(
+        // 0,
+        // DataType::TIMESTAMPTZ,
+        // ScalarImpl::Int64(1617235200001000)
+        // ))
+        // );
 
         // Consume the barrier
         now_executor.next().await.unwrap().unwrap();
@@ -242,25 +231,23 @@ mod tests {
         assert_eq!(
             chunk_msg.into_chunk().unwrap().compact(),
             StreamChunk::from_pretty(
-                " TS
-                - 2021-04-01T00:00:00.001
-                + 2021-04-01T00:00:00.002"
+                " TSZ
+                - 1617235200001000
+                + 1617235200002000"
             )
         );
 
         // Consume the watermark
-        let watermark = now_executor.next().await.unwrap().unwrap();
-
-        assert_eq!(
-            watermark,
-            Message::Watermark(Watermark::new(
-                0,
-                DataType::TIMESTAMP,
-                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
-                    NaiveDateTime::from_str("2021-04-01T00:00:00.002").unwrap()
-                ))
-            ))
-        );
+        // let watermark = now_executor.next().await.unwrap().unwrap();
+        //
+        // assert_eq!(
+        // watermark,
+        // Message::Watermark(Watermark::new(
+        // 0,
+        // DataType::TIMESTAMPTZ,
+        // ScalarImpl::Int64(1617235200002000)
+        // ))
+        // );
 
         // Consume the barrier
         now_executor.next().await.unwrap().unwrap();
@@ -279,7 +266,7 @@ mod tests {
     async fn create_state_table() -> StateTable<MemoryStateStore> {
         let memory_state_store = MemoryStateStore::new();
         let table_id = TableId::new(1);
-        let column_descs = vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamp)];
+        let column_descs = vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamptz)];
         let order_types = create_order_types();
         let pk_indices = create_pk_indices();
         StateTable::new_without_distribution(

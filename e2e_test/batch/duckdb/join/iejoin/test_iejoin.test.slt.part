@@ -7,7 +7,6 @@ SET RW_IMPLICIT_FLUSH TO true;
 
 # Restrictive tail predicates
 # Use inequalities to prevent future range choice optimisation
-
 query II
 WITH test AS (
 	SELECT
@@ -62,7 +61,6 @@ ORDER BY lhs.id, rhs.id
 9	8
 
 # Subquery/CTE
-
 query II
 WITH test AS (
 	SELECT
@@ -107,7 +105,6 @@ FROM sub
 #3
 
 # Fix missing continue statement in right join handler
-
 statement ok
 CREATE VIEW issue3486 AS
 SELECT generate_series as ts from generate_series(timestamp '2020-01-01 00:00:00', timestamp '2021-01-01 00:00:00',
@@ -183,6 +180,7 @@ WITH data_table AS (
 37	1607087520	1607878080	9
 38	1607878080	1608668640	9
 39	1608668640	1609459200	9
+
 
 statement ok
 DROP VIEW issue3486;

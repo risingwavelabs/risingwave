@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,16 +21,15 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
+use bytes::{BufMut, Bytes, BytesMut};
 use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{
-    get_dist_key_in_pk_indices, get_dist_key_start_index_in_pk, ColumnDesc, TableId, TableOption,
-};
+use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{self, CompactedRow, Row, Row2, RowDeserializer, RowExt};
+use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
@@ -39,15 +38,13 @@ use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
 use risingwave_pb::catalog::Table;
+use risingwave_storage::mem_table::{KeyOp, MemTable, MemTableError, MemTableIter};
 use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     LocalStateStore, ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions,
-};
-use risingwave_storage::table::streaming_table::mem_table::{
-    MemTable, MemTableError, MemTableIter, RowOp,
 };
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
 use risingwave_storage::StateStore;
@@ -91,7 +88,7 @@ pub struct StateTable<S: StateStore> {
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Vec<usize>,
 
-    distribution_key_start_index_in_pk: Option<usize>,
+    prefix_hint_len: usize,
 
     /// Virtual nodes that the table is partitioned into.
     ///
@@ -132,6 +129,25 @@ impl<S: StateStore> StateTable<S> {
         table_catalog: &Table,
         store: S,
         vnodes: Option<Arc<Bitmap>>,
+    ) -> Self {
+        Self::from_table_catalog_may_disable_sanity_check(table_catalog, store, vnodes, false).await
+    }
+
+    /// Create state table from table catalog and store with sanity check disabled.
+    pub async fn from_table_catalog_no_sanity_check(
+        table_catalog: &Table,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+    ) -> Self {
+        Self::from_table_catalog_may_disable_sanity_check(table_catalog, store, vnodes, true).await
+    }
+
+    /// Create state table from table catalog and store.
+    async fn from_table_catalog_may_disable_sanity_check(
+        table_catalog: &Table,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+        disable_sanity_check: bool,
     ) -> Self {
         let table_id = TableId::new(table_catalog.id);
         let table_columns: Vec<ColumnDesc> = table_catalog
@@ -179,9 +195,6 @@ impl<S: StateStore> StateTable<S> {
             },
             None => Distribution::fallback(),
         };
-        let distribution_key_start_index_in_pk =
-            get_dist_key_start_index_in_pk(&dist_key_in_pk_indices);
-
         let vnode_col_idx_in_pk =
             table_catalog
                 .vnode_col_index
@@ -203,13 +216,14 @@ impl<S: StateStore> StateTable<S> {
 
         let no_shuffle_value_indices = (0..table_columns.len()).collect_vec();
 
-        // if value_indices is the no shuffle full columns and
+        // if value_indices is the no shuffle full columns.
         let value_indices = match input_value_indices.len() == table_columns.len()
             && input_value_indices == no_shuffle_value_indices
         {
             true => None,
             false => Some(input_value_indices),
         };
+        let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
         Self {
             table_id,
             mem_table: MemTable::new(),
@@ -219,10 +233,10 @@ impl<S: StateStore> StateTable<S> {
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
             dist_key_in_pk_indices,
-            distribution_key_start_index_in_pk,
+            prefix_hint_len,
             vnodes,
             table_option: TableOption::build_table_option(table_catalog.get_properties()),
-            disable_sanity_check: false,
+            disable_sanity_check,
             vnode_col_idx_in_pk,
             value_indices,
             epoch: None,
@@ -248,6 +262,48 @@ impl<S: StateStore> StateTable<S> {
             pk_indices,
             Distribution::fallback(),
             None,
+        )
+        .await
+    }
+
+    /// Create a state table without distribution, used for unit tests.
+    pub async fn new_with_value_indices_without_distribution(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        value_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_with_distribution(
+            store,
+            table_id,
+            columns,
+            order_types,
+            pk_indices,
+            Distribution::fallback(),
+            Some(value_indices),
+        )
+        .await
+    }
+
+    /// Create a state table without distribution, used for unit tests.
+    pub async fn new_without_distribution_no_sanity_check(
+        store: S,
+        table_id: TableId,
+        columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_with_distribution_may_disable_sanity_check(
+            store,
+            table_id,
+            columns,
+            order_types,
+            pk_indices,
+            Distribution::fallback(),
+            None,
+            true,
         )
         .await
     }
@@ -281,11 +337,57 @@ impl<S: StateStore> StateTable<S> {
         table_columns: Vec<ColumnDesc>,
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
+        distribution: Distribution,
+        value_indices: Option<Vec<usize>>,
+    ) -> Self {
+        Self::new_with_distribution_may_disable_sanity_check(
+            store,
+            table_id,
+            table_columns,
+            order_types,
+            pk_indices,
+            distribution,
+            value_indices,
+            false,
+        )
+        .await
+    }
+
+    pub async fn new_with_distribution_no_sanity_check(
+        store: S,
+        table_id: TableId,
+        table_columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
+        distribution: Distribution,
+        value_indices: Option<Vec<usize>>,
+    ) -> Self {
+        Self::new_with_distribution_may_disable_sanity_check(
+            store,
+            table_id,
+            table_columns,
+            order_types,
+            pk_indices,
+            distribution,
+            value_indices,
+            true,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn new_with_distribution_may_disable_sanity_check(
+        store: S,
+        table_id: TableId,
+        table_columns: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+        pk_indices: Vec<usize>,
         Distribution {
             dist_key_indices,
             vnodes,
         }: Distribution,
         value_indices: Option<Vec<usize>>,
+        disable_sanity_check: bool,
     ) -> Self {
         let local_state_store = store.new_local(table_id).await;
 
@@ -312,10 +414,10 @@ impl<S: StateStore> StateTable<S> {
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
-            distribution_key_start_index_in_pk: None,
+            prefix_hint_len: 0,
             vnodes,
             table_option: Default::default(),
-            disable_sanity_check: false,
+            disable_sanity_check,
             vnode_col_idx_in_pk: None,
             value_indices,
             epoch: None,
@@ -323,11 +425,6 @@ impl<S: StateStore> StateTable<S> {
             cur_watermark: None,
             num_wmked_commits_since_last_clean: 0,
         }
-    }
-
-    /// Disable sanity check on this storage table.
-    pub fn disable_sanity_check(&mut self) {
-        self.disable_sanity_check = true;
     }
 
     fn table_id(&self) -> TableId {
@@ -356,14 +453,8 @@ impl<S: StateStore> StateTable<S> {
         self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id())).curr
     }
 
-    /// get the previous epoch of the state store and panic if the `init_epoch()` has never be
-    /// called
-    pub fn prev_epoch(&self) -> u64 {
-        self.epoch.unwrap_or_else(|| panic!("try to use state table's epoch, but the init_epoch() has not been called, table_id: {}", self.table_id())).prev
-    }
-
     /// Get the vnode value with given (prefix of) primary key
-    fn compute_prefix_vnode(&self, pk_prefix: impl Row2) -> VirtualNode {
+    fn compute_prefix_vnode(&self, pk_prefix: impl Row) -> VirtualNode {
         let prefix_len = pk_prefix.len();
         if let Some(vnode_col_idx_in_pk) = self.vnode_col_idx_in_pk {
             let vnode = pk_prefix.datum_at(vnode_col_idx_in_pk).unwrap();
@@ -376,7 +467,7 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Get the vnode value of the given row
-    pub fn compute_vnode(&self, row: impl Row2) -> VirtualNode {
+    pub fn compute_vnode(&self, row: impl Row) -> VirtualNode {
         compute_vnode(row, &self.dist_key_indices, &self.vnodes)
     }
 
@@ -415,7 +506,7 @@ const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 // point get
 impl<S: StateStore> StateTable<S> {
     /// Get a single row from state table.
-    pub async fn get_row(&self, pk: impl Row2) -> StreamExecutorResult<Option<Row>> {
+    pub async fn get_row(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
         let compacted_row: Option<CompactedRow> = self.get_compacted_row(pk).await?;
         match compacted_row {
             Some(compacted_row) => {
@@ -431,35 +522,41 @@ impl<S: StateStore> StateTable<S> {
     /// Get a compacted row from state table.
     pub async fn get_compacted_row(
         &self,
-        pk: impl Row2,
+        pk: impl Row,
     ) -> StreamExecutorResult<Option<CompactedRow>> {
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
-        let mem_table_res = self.mem_table.get_row_op(&serialized_pk);
+        let mem_table_res = self.mem_table.get_key_op(&serialized_pk);
 
         match mem_table_res {
-            Some(row_op) => match row_op {
-                RowOp::Insert(row_bytes) => Ok(Some(CompactedRow {
-                    row: row_bytes.to_vec(),
+            Some(key_op) => match key_op {
+                KeyOp::Insert(row_bytes) => Ok(Some(CompactedRow {
+                    row: row_bytes.clone(),
                 })),
-                RowOp::Delete(_) => Ok(None),
-                RowOp::Update((_, row_bytes)) => Ok(Some(CompactedRow {
-                    row: row_bytes.to_vec(),
+                KeyOp::Delete(_) => Ok(None),
+                KeyOp::Update((_, row_bytes)) => Ok(Some(CompactedRow {
+                    row: row_bytes.clone(),
                 })),
             },
             None => {
                 assert!(pk.len() <= self.pk_indices.len());
-                let key_indices = (0..pk.len())
-                    .into_iter()
-                    .map(|index| self.pk_indices[index])
-                    .collect_vec();
+
+                if self.prefix_hint_len != 0 {
+                    debug_assert_eq!(self.prefix_hint_len, pk.len());
+                }
+
+                let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
+                    Some(serialized_pk.slice(VirtualNode::SIZE..))
+                } else {
+                    None
+                };
+
                 let read_options = ReadOptions {
-                    dist_key_hint: None,
-                    check_bloom_filter: !self.dist_key_indices.is_empty()
-                        && self.dist_key_indices == key_indices,
+                    prefix_hint,
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     ignore_range_tombstone: false,
+                    read_version_from_backup: false,
                 };
                 if let Some(storage_row_bytes) = self
                     .local_store
@@ -467,7 +564,7 @@ impl<S: StateStore> StateTable<S> {
                     .await?
                 {
                     Ok(Some(CompactedRow {
-                        row: storage_row_bytes.to_vec(),
+                        row: storage_row_bytes,
                     }))
                 } else {
                     Ok(None)
@@ -499,8 +596,9 @@ impl<S: StateStore> StateTable<S> {
 }
 // write
 impl<S: StateStore> StateTable<S> {
-    fn handle_mem_table_error(&self, e: MemTableError) {
-        match e {
+    #[expect(clippy::boxed_local)]
+    fn handle_mem_table_error(&self, e: Box<MemTableError>) {
+        match *e {
             MemTableError::Conflict { key, prev, new } => {
                 let (vnode, key) = deserialize_pk_with_vnode(&key, &self.pk_serde).unwrap();
                 panic!(
@@ -515,21 +613,20 @@ impl<S: StateStore> StateTable<S> {
         }
     }
 
-    fn serialize_value(&self, value: impl Row2) -> Vec<u8> {
+    fn serialize_value(&self, value: impl Row) -> Bytes {
         if let Some(value_indices) = self.value_indices.as_ref() {
-            value.project(value_indices).value_serialize()
+            value.project(value_indices).value_serialize_bytes()
         } else {
-            value.value_serialize()
+            value.value_serialize_bytes()
         }
     }
 
     /// Insert a row into state table. Must provide a full row corresponding to the column desc of
     /// the table.
-    pub fn insert(&mut self, value: impl Row2) {
+    pub fn insert(&mut self, value: impl Row) {
         let pk = (&value).project(self.pk_indices());
 
-        let key_bytes =
-            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
+        let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let value_bytes = self.serialize_value(value);
         self.mem_table
             .insert(key_bytes, value_bytes)
@@ -538,11 +635,10 @@ impl<S: StateStore> StateTable<S> {
 
     /// Delete a row from state table. Must provide a full row of old value corresponding to the
     /// column desc of the table.
-    pub fn delete(&mut self, old_value: impl Row2) {
+    pub fn delete(&mut self, old_value: impl Row) {
         let pk = (&old_value).project(self.pk_indices());
 
-        let key_bytes =
-            serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
+        let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, self.compute_prefix_vnode(pk));
         let value_bytes = self.serialize_value(old_value);
         self.mem_table
             .delete(key_bytes, value_bytes)
@@ -550,16 +646,16 @@ impl<S: StateStore> StateTable<S> {
     }
 
     /// Update a row. The old and new value should have the same pk.
-    pub fn update(&mut self, old_value: impl Row2, new_value: impl Row2) {
+    pub fn update(&mut self, old_value: impl Row, new_value: impl Row) {
         let old_pk = (&old_value).project(self.pk_indices());
         let new_pk = (&new_value).project(self.pk_indices());
         debug_assert!(
-            Row2::eq(&old_pk, &new_pk),
+            Row::eq(&old_pk, new_pk),
             "pk should not change: {old_pk:?} vs {new_pk:?}",
         );
 
         let new_key_bytes =
-            serialize_pk_with_vnode(&new_pk, &self.pk_serde, self.compute_prefix_vnode(&new_pk));
+            serialize_pk_with_vnode(new_pk, &self.pk_serde, self.compute_prefix_vnode(new_pk));
         let old_value_bytes = self.serialize_value(old_value);
         let new_value_bytes = self.serialize_value(new_value);
 
@@ -574,12 +670,7 @@ impl<S: StateStore> StateTable<S> {
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
         let (chunk, op) = chunk.into_parts();
 
-        let mut vnode_and_pks = vec![vec![]; chunk.capacity()];
-
-        compute_chunk_vnode(&chunk, &self.dist_key_indices, &self.vnodes)
-            .into_iter()
-            .zip_eq(vnode_and_pks.iter_mut())
-            .for_each(|(vnode, vnode_and_pk)| vnode_and_pk.extend(vnode.to_be_bytes()));
+        let vnodes = compute_chunk_vnode(&chunk, &self.dist_key_indices, &self.vnodes);
 
         let value_chunk = if let Some(ref value_indices) = self.value_indices {
             chunk.clone().reorder_columns(value_indices)
@@ -589,14 +680,18 @@ impl<S: StateStore> StateTable<S> {
         let values = value_chunk.serialize();
 
         let key_chunk = chunk.reorder_columns(self.pk_indices());
-        key_chunk
+        let vnode_and_pks = key_chunk
             .rows_with_holes()
-            .zip_eq(vnode_and_pks.iter_mut())
-            .for_each(|(r, vnode_and_pk)| {
+            .zip_eq(vnodes.iter())
+            .map(|(r, vnode)| {
+                let mut buffer = BytesMut::new();
+                buffer.put_slice(&vnode.to_be_bytes()[..]);
                 if let Some(r) = r {
-                    self.pk_serde.serialize(r, vnode_and_pk);
+                    self.pk_serde.serialize(r, &mut buffer);
                 }
-            });
+                buffer.freeze()
+            })
+            .collect_vec();
 
         let (_, vis) = key_chunk.into_parts();
         match vis {
@@ -646,14 +741,6 @@ impl<S: StateStore> StateTable<S> {
         Ok(())
     }
 
-    /// used for unit test, and do not need to assert epoch.
-    pub async fn commit_for_test(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
-        let mem_table = std::mem::take(&mut self.mem_table).into_parts();
-        self.batch_write_rows(mem_table, new_epoch.prev).await?;
-        self.update_epoch(new_epoch);
-        Ok(())
-    }
-
     // TODO(st1page): maybe we should extract a pub struct to do it
     /// just specially used by those state table read-only and after the call the data
     /// in the epoch will be visible
@@ -669,7 +756,7 @@ impl<S: StateStore> StateTable<S> {
     /// Write to state store.
     async fn batch_write_rows(
         &mut self,
-        buffer: BTreeMap<Vec<u8>, RowOp>,
+        buffer: BTreeMap<Bytes, KeyOp>,
         epoch: u64,
     ) -> StreamExecutorResult<()> {
         let watermark = self.cur_watermark.as_ref().and_then(|cur_watermark_ref| {
@@ -694,31 +781,31 @@ impl<S: StateStore> StateTable<S> {
         };
         let range_end_suffix = watermark.map(|watermark| {
             serialize_pk(
-                &Row::new(vec![Some(watermark.clone())]),
+                row::once(Some(watermark.clone())),
                 prefix_serializer.as_ref().unwrap(),
             )
         });
-        for (pk, row_op) in buffer {
+        for (pk, key_op) in buffer {
             if let Some(ref range_end) = range_end_suffix && &pk[VirtualNode::SIZE..] < range_end.as_slice() {
                 continue;
             }
-            match row_op {
+            match key_op {
                 // Currently, some executors do not strictly comply with these semantics. As a
-                // workaround you may call disable the check by calling `.disable_sanity_check()` on
-                // state table.
-                RowOp::Insert(row) => {
+                // workaround you may call disable the check by initializing the state store with
+                // `disable_sanity_check=true`.
+                KeyOp::Insert(row) => {
                     if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
                         self.do_insert_sanity_check(&pk, &row, epoch).await?;
                     }
                     write_batch.put(pk, StorageValue::new_put(row));
                 }
-                RowOp::Delete(row) => {
+                KeyOp::Delete(row) => {
                     if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
                         self.do_delete_sanity_check(&pk, &row, epoch).await?;
                     }
                     write_batch.delete(pk);
                 }
-                RowOp::Update((old_row, new_row)) => {
+                KeyOp::Update((old_row, new_row)) => {
                     if ENABLE_SANITY_CHECK && !self.disable_sanity_check {
                         self.do_update_sanity_check(&pk, &old_row, &new_row, epoch)
                             .await?;
@@ -730,13 +817,13 @@ impl<S: StateStore> StateTable<S> {
         if let Some(range_end_suffix) = range_end_suffix {
             let range_begin_suffix = if let Some(ref last_watermark) = self.last_watermark {
                 serialize_pk(
-                    &Row::new(vec![Some(last_watermark.clone())]),
+                    row::once(Some(last_watermark.clone())),
                     prefix_serializer.as_ref().unwrap(),
                 )
             } else {
                 vec![]
             };
-            for vnode in self.vnodes.ones() {
+            for vnode in self.vnodes.iter_ones() {
                 let mut range_begin = vnode.to_be_bytes().to_vec();
                 let mut range_end = range_begin.clone();
                 range_begin.extend(&range_begin_suffix);
@@ -760,11 +847,11 @@ impl<S: StateStore> StateTable<S> {
         epoch: u64,
     ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
-            dist_key_hint: None,
-            check_bloom_filter: false,
+            prefix_hint: None,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             ignore_range_tombstone: false,
+            read_version_from_backup: false,
         };
         let stored_value = self.local_store.get(key, epoch, read_options).await?;
 
@@ -792,11 +879,11 @@ impl<S: StateStore> StateTable<S> {
         epoch: u64,
     ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
-            dist_key_hint: None,
-            check_bloom_filter: false,
+            prefix_hint: None,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             ignore_range_tombstone: false,
+            read_version_from_backup: false,
         };
         let stored_value = self.local_store.get(key, epoch, read_options).await?;
 
@@ -826,11 +913,11 @@ impl<S: StateStore> StateTable<S> {
         epoch: u64,
     ) -> StreamExecutorResult<()> {
         let read_options = ReadOptions {
-            dist_key_hint: None,
+            prefix_hint: None,
             ignore_range_tombstone: false,
-            check_bloom_filter: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
+            read_version_from_backup: false,
         };
         let stored_value = self.local_store.get(key, epoch, read_options).await?;
 
@@ -869,7 +956,7 @@ impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table with specific `pk_prefix`.
     pub async fn iter_with_pk_prefix(
         &self,
-        pk_prefix: impl Row2,
+        pk_prefix: impl Row,
     ) -> StreamExecutorResult<RowStream<'_, S>> {
         let (mem_table_iter, storage_iter_stream) = self
             .iter_with_pk_prefix_inner(pk_prefix, self.epoch())
@@ -886,7 +973,7 @@ impl<S: StateStore> StateTable<S> {
     /// This function scans rows from the relational table with specific `pk_prefix`.
     async fn iter_with_pk_range_inner(
         &self,
-        pk_range: &(Bound<impl Row2>, Bound<impl Row2>),
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
@@ -908,7 +995,7 @@ impl<S: StateStore> StateTable<S> {
 
     pub async fn iter_with_pk_range(
         &self,
-        pk_range: &(Bound<impl Row2>, Bound<impl Row2>),
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
@@ -926,7 +1013,7 @@ impl<S: StateStore> StateTable<S> {
 
     pub async fn iter_key_and_val_with_pk_range(
         &self,
-        pk_range: &(Bound<impl Row2>, Bound<impl Row2>),
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTable` owns.
@@ -941,28 +1028,11 @@ impl<S: StateStore> StateTable<S> {
         )
     }
 
-    /// This function scans rows from the relational table with specific `pk_prefix`.
-    pub async fn iter_prev_epoch_with_pk_prefix(
-        &self,
-        pk_prefix: impl Row2,
-    ) -> StreamExecutorResult<RowStream<'_, S>> {
-        let (mem_table_iter, storage_iter_stream) = self
-            .iter_with_pk_prefix_inner(pk_prefix, self.prev_epoch())
-            .await?;
-
-        let storage_iter = storage_iter_stream.into_stream();
-        Ok(
-            StateTableRowIter::new(mem_table_iter, storage_iter, self.row_deserializer.clone())
-                .into_stream()
-                .map(get_second),
-        )
-    }
-
     /// This function scans rows from the relational table with specific `pk_prefix`, return both
     /// key and value.
     pub async fn iter_key_and_val(
         &self,
-        pk_prefix: impl Row2,
+        pk_prefix: impl Row,
     ) -> StreamExecutorResult<RowStreamWithPk<'_, S>> {
         let (mem_table_iter, storage_iter_stream) = self
             .iter_with_pk_prefix_inner(pk_prefix, self.epoch())
@@ -977,7 +1047,7 @@ impl<S: StateStore> StateTable<S> {
 
     async fn iter_with_pk_prefix_inner(
         &self,
-        pk_prefix: impl Row2,
+        pk_prefix: impl Row,
         epoch: u64,
     ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
@@ -992,60 +1062,48 @@ impl<S: StateStore> StateTable<S> {
 
         // Construct prefix hint for prefix bloom filter.
         let pk_prefix_indices = &self.pk_indices[..pk_prefix.len()];
-        let dist_key_hint = {
-            if self.dist_key_indices.is_empty()
-                || self.distribution_key_start_index_in_pk.is_none()
-                || self.dist_key_indices.len() + self.distribution_key_start_index_in_pk.unwrap()
-                    > pk_prefix.len()
-            {
+        if self.prefix_hint_len != 0 {
+            debug_assert_eq!(self.prefix_hint_len, pk_prefix.len());
+        }
+        let prefix_hint = {
+            if self.prefix_hint_len == 0 || self.prefix_hint_len > pk_prefix.len() {
                 None
             } else {
-                let distribution_key_end_index_in_pk = self.dist_key_in_pk_indices.len()
-                    + self.distribution_key_start_index_in_pk.unwrap();
-                let (dist_key_start_position, dist_key_len) = self
+                let encoded_prefix_len = self
                     .pk_serde
-                    .deserialize_dist_key_position_with_column_indices(
-                        &encoded_prefix,
-                        (
-                            self.distribution_key_start_index_in_pk.unwrap(),
-                            distribution_key_end_index_in_pk,
-                        ),
-                    )?;
+                    .deserialize_prefix_len(&encoded_prefix, self.prefix_hint_len)?;
 
-                Some(
-                    encoded_prefix[dist_key_start_position..dist_key_len + dist_key_start_position]
-                        .to_vec(),
-                )
+                Some(Bytes::from(encoded_prefix[..encoded_prefix_len].to_vec()))
             }
         };
 
         trace!(
             table_id = ?self.table_id(),
-            ?dist_key_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
+            ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
             dist_key_indices = ?self.dist_key_indices, ?pk_prefix_indices,
             "storage_iter_with_prefix"
         );
 
-        self.iter_inner(encoded_key_range_with_vnode, dist_key_hint, epoch)
+        self.iter_inner(encoded_key_range_with_vnode, prefix_hint, epoch)
             .await
     }
 
     async fn iter_inner(
         &self,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        dist_key_hint: Option<Vec<u8>>,
+        prefix_hint: Option<Bytes>,
         epoch: u64,
     ) -> StreamExecutorResult<(MemTableIter<'_>, StorageIterInner<S::Local>)> {
+        let (l, r) = key_range.clone();
+        let bytes_key_range = (l.map(Bytes::from), r.map(Bytes::from));
         // Mem table iterator.
-        let mem_table_iter = self.mem_table.iter(key_range.clone());
-
-        let check_bloom_filter = dist_key_hint.is_some();
+        let mem_table_iter = self.mem_table.iter(bytes_key_range);
         let read_options = ReadOptions {
-            dist_key_hint,
-            check_bloom_filter,
+            prefix_hint,
             ignore_range_tombstone: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
+            read_version_from_backup: false,
         };
 
         // Storage iterator.
@@ -1066,9 +1124,9 @@ impl<S: StateStore> StateTable<S> {
     }
 }
 
-pub type RowStream<'a, S: StateStore> = impl Stream<Item = StreamExecutorResult<Cow<'a, Row>>>;
+pub type RowStream<'a, S: StateStore> = impl Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
 pub type RowStreamWithPk<'a, S: StateStore> =
-    impl Stream<Item = StreamExecutorResult<(Cow<'a, Vec<u8>>, Cow<'a, Row>)>>;
+    impl Stream<Item = StreamExecutorResult<(Cow<'a, Bytes>, OwnedRow)>> + 'a;
 
 /// `StateTableRowIter` is able to read the just written data (uncommitted data).
 /// It will merge the result of `mem_table_iter` and `state_store_iter`.
@@ -1081,8 +1139,8 @@ struct StateTableRowIter<'a, M, C> {
 
 impl<'a, M, C> StateTableRowIter<'a, M, C>
 where
-    M: Iterator<Item = (&'a Vec<u8>, &'a RowOp)>,
-    C: Stream<Item = StreamExecutorResult<(Vec<u8>, Row)>>,
+    M: Iterator<Item = (&'a Bytes, &'a KeyOp)>,
+    C: Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>>,
 {
     fn new(mem_table_iter: M, storage_iter: C, deserializer: RowDeserializer) -> Self {
         Self {
@@ -1096,7 +1154,7 @@ where
     /// This function scans kv pairs from the `shared_storage` and
     /// memory(`mem_table`) with optional pk_bounds. If a record exist in both `shared_storage` and
     /// `mem_table`, result `mem_table` is returned according to the operation(RowOp) on it.
-    #[try_stream(ok = (Cow<'a, Vec<u8>>, Cow<'a, Row>), error = StreamExecutorError)]
+    #[try_stream(ok = (Cow<'a, Bytes>, OwnedRow), error = StreamExecutorError)]
     async fn into_stream(self) {
         let storage_iter = self.storage_iter.peekable();
         pin_mut!(storage_iter);
@@ -1109,16 +1167,16 @@ where
                 // The mem table side has come to an end, return data from the shared storage.
                 (Some(_), None) => {
                     let (pk, row) = storage_iter.next().await.unwrap()?;
-                    yield (Cow::Owned(pk), Cow::Owned(row))
+                    yield (Cow::Owned(pk), row)
                 }
                 // The stream side has come to an end, return data from the mem table.
                 (None, Some(_)) => {
-                    let (pk, row_op) = mem_table_iter.next().unwrap();
-                    match row_op {
-                        RowOp::Insert(row_bytes) | RowOp::Update((_, row_bytes)) => {
+                    let (pk, key_op) = mem_table_iter.next().unwrap();
+                    match key_op {
+                        KeyOp::Insert(row_bytes) | KeyOp::Update((_, row_bytes)) => {
                             let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
-                            yield (Cow::Borrowed(pk), Cow::Owned(row))
+                            yield (Cow::Borrowed(pk), row)
                         }
                         _ => {}
                     }
@@ -1128,22 +1186,22 @@ where
                         Ordering::Less => {
                             // yield data from storage
                             let (pk, row) = storage_iter.next().await.unwrap()?;
-                            yield (Cow::Owned(pk), Cow::Owned(row));
+                            yield (Cow::Owned(pk), row);
                         }
                         Ordering::Equal => {
                             // both memtable and storage contain the key, so we advance both
                             // iterators and return the data in memory.
 
-                            let (pk, row_op) = mem_table_iter.next().unwrap();
+                            let (pk, key_op) = mem_table_iter.next().unwrap();
                             let (_, old_row_in_storage) = storage_iter.next().await.unwrap()?;
-                            match row_op {
-                                RowOp::Insert(row_bytes) => {
+                            match key_op {
+                                KeyOp::Insert(row_bytes) => {
                                     let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
-                                    yield (Cow::Borrowed(pk), Cow::Owned(row));
+                                    yield (Cow::Borrowed(pk), row);
                                 }
-                                RowOp::Delete(_) => {}
-                                RowOp::Update((old_row_bytes, new_row_bytes)) => {
+                                KeyOp::Delete(_) => {}
+                                KeyOp::Update((old_row_bytes, new_row_bytes)) => {
                                     let old_row =
                                         self.deserializer.deserialize(old_row_bytes.as_ref())?;
                                     let new_row =
@@ -1151,22 +1209,22 @@ where
 
                                     debug_assert!(old_row == old_row_in_storage);
 
-                                    yield (Cow::Borrowed(pk), Cow::Owned(new_row));
+                                    yield (Cow::Borrowed(pk), new_row);
                                 }
                             }
                         }
                         Ordering::Greater => {
                             // yield data from mem table
-                            let (pk, row_op) = mem_table_iter.next().unwrap();
+                            let (pk, key_op) = mem_table_iter.next().unwrap();
 
-                            match row_op {
-                                RowOp::Insert(row_bytes) => {
+                            match key_op {
+                                KeyOp::Insert(row_bytes) => {
                                     let row = self.deserializer.deserialize(row_bytes.as_ref())?;
 
-                                    yield (Cow::Borrowed(pk), Cow::Owned(row));
+                                    yield (Cow::Borrowed(pk), row);
                                 }
-                                RowOp::Delete(_) => {}
-                                RowOp::Update(_) => unreachable!(
+                                KeyOp::Delete(_) => {}
+                                KeyOp::Update(_) => unreachable!(
                                     "memtable update should always be paired with a storage key"
                                 ),
                             }
@@ -1203,7 +1261,7 @@ impl<S: LocalStateStore> StorageIterInner<S> {
     }
 
     /// Yield a row with its primary key.
-    #[try_stream(ok = (Vec<u8>, Row), error = StreamExecutorError)]
+    #[try_stream(ok = (Bytes, OwnedRow), error = StreamExecutorError)]
     async fn into_stream(self) {
         use futures::TryStreamExt;
 
@@ -1223,7 +1281,7 @@ impl<S: LocalStateStore> StorageIterInner<S> {
 
 pub fn prefix_range_to_memcomparable(
     pk_serde: &OrderedRowSerde,
-    range: &(Bound<impl Row2>, Bound<impl Row2>),
+    range: &(Bound<impl Row>, Bound<impl Row>),
 ) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
     (
         to_memcomparable(pk_serde, &range.0, false),
@@ -1231,7 +1289,7 @@ pub fn prefix_range_to_memcomparable(
     )
 }
 
-fn to_memcomparable<R: Row2>(
+fn to_memcomparable<R: Row>(
     pk_serde: &OrderedRowSerde,
     bound: &Bound<R>,
     is_upper: bool,

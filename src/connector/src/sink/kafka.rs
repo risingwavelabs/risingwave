@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -25,6 +25,7 @@ use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::array::{ArrayError, ArrayResult, Op, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::row::Row;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
 use serde::Deserialize;
@@ -317,7 +318,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 
     let data_type = field.data_type();
 
-    tracing::info!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
+    tracing::debug!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
 
     let value = match (data_type, scalar_ref) {
         (DataType::Boolean, ScalarRefImpl::Bool(v)) => {
@@ -349,33 +350,31 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
             dt @ DataType::Date
             | dt @ DataType::Time
             | dt @ DataType::Timestamp
-            | dt @ DataType::Timestampz
+            | dt @ DataType::Timestamptz
             | dt @ DataType::Interval
             | dt @ DataType::Bytea,
             scalar,
         ) => {
             json!(scalar.to_text_with_type(&dt))
         }
-        (DataType::List { .. }, ScalarRefImpl::List(list_ref)) => {
-            let mut vec = Vec::with_capacity(field.sub_fields.len());
-            for (sub_datum_ref, sub_field) in list_ref
-                .values_ref()
-                .into_iter()
-                .zip_eq(field.sub_fields.iter())
-            {
-                let value = datum_to_json_object(sub_field, sub_datum_ref)?;
+        (DataType::List { datatype }, ScalarRefImpl::List(list_ref)) => {
+            let mut vec = Vec::with_capacity(list_ref.values_ref().len());
+            let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
+            for sub_datum_ref in list_ref.values_ref() {
+                let value = datum_to_json_object(&inner_field, sub_datum_ref)?;
                 vec.push(value);
             }
             json!(vec)
         }
-        (DataType::Struct { .. }, ScalarRefImpl::Struct(struct_ref)) => {
-            let mut map = Map::with_capacity(field.sub_fields.len());
-            for (sub_datum_ref, sub_field) in struct_ref
-                .fields_ref()
-                .into_iter()
-                .zip_eq(field.sub_fields.iter())
-            {
-                let value = datum_to_json_object(sub_field, sub_datum_ref)?;
+        (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
+            let mut map = Map::with_capacity(st.fields.len());
+            for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq(
+                st.fields
+                    .iter()
+                    .zip_eq(st.field_names.iter())
+                    .map(|(dt, name)| Field::with_name(dt.clone(), name)),
+            ) {
+                let value = datum_to_json_object(&sub_field, sub_datum_ref)?;
                 map.insert(sub_field.name.clone(), value);
             }
             json!(map)
@@ -392,7 +391,7 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
 
 fn record_to_json(row: RowRef<'_>, schema: Vec<Field>) -> Result<Map<String, Value>> {
     let mut mappings = Map::with_capacity(schema.len());
-    for (field, datum_ref) in schema.iter().zip_eq(row.values()) {
+    for (field, datum_ref) in schema.iter().zip_eq(row.iter()) {
         let key = field.name.clone();
         let value = datum_to_json_object(field, datum_ref)
             .map_err(|e| SinkError::JsonParse(e.to_string()))?;
@@ -482,8 +481,7 @@ impl KafkaTransactionConductor {
     }
 
     async fn flush(&self) -> KafkaResult<()> {
-        self.inner.flush(self.properties.timeout).await;
-        Ok(())
+        self.inner.flush(self.properties.timeout).await
     }
 
     #[expect(clippy::unused_async)]

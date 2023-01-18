@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -443,8 +443,8 @@ impl ClusterManagerCore {
         worker_state: Option<State>,
     ) -> Vec<WorkerNode> {
         self.workers
-            .iter()
-            .map(|(_, worker)| worker.to_protobuf())
+            .values()
+            .map(|worker| worker.to_protobuf())
             .filter(|w| w.r#type == worker_type as i32)
             .filter(|w| match worker_state {
                 None => true,
@@ -475,8 +475,8 @@ impl ClusterManagerCore {
         ];
         let mut ret = HashMap::new();
         self.workers
-            .iter()
-            .map(|(_, worker)| worker.worker_type())
+            .values()
+            .map(|worker| worker.worker_type())
             .filter(|worker_type| MONITORED_WORKER_TYPES.contains(worker_type))
             .for_each(|worker_type| {
                 ret.entry(worker_type)

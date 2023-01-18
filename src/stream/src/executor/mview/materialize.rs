@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,28 +16,30 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use futures::{stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
-use risingwave_common::array::{Op, RowDeserializer, StreamChunk, Vis};
+use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
-use risingwave_common::row::CompactedRow;
+use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_pb::catalog::Table;
-use risingwave_storage::table::streaming_table::mem_table::RowOp;
+use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::StateStore;
 
-use crate::cache::{EvictableHashMap, ExecutorCache, LruManagerRef};
+use crate::cache::{new_unbounded, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
     Executor, ExecutorInfo, Message, PkIndicesRef, StreamExecutorResult,
 };
+use crate::task::AtomicU64Ref;
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore> {
@@ -69,8 +71,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
-        lru_manager: Option<LruManagerRef>,
-        cache_size: usize,
+        watermark_epoch: AtomicU64Ref,
         handle_pk_conflict: bool,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
@@ -89,7 +90,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(lru_manager, cache_size),
+            materialize_cache: MaterializeCache::new(watermark_epoch),
             handle_pk_conflict,
         }
     }
@@ -103,8 +104,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         keys: Vec<OrderPair>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
-        lru_manager: Option<LruManagerRef>,
-        cache_size: usize,
+        watermark_epoch: AtomicU64Ref,
         handle_pk_conflict: bool,
     ) -> Self {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
@@ -135,7 +135,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
-            materialize_cache: MaterializeCache::new(lru_manager, cache_size),
+            materialize_cache: MaterializeCache::new(watermark_epoch),
             handle_pk_conflict,
         }
     }
@@ -220,25 +220,25 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
 /// Construct output `StreamChunk` from given buffer.
 fn generate_output(
-    changes: Vec<(Vec<u8>, RowOp)>,
+    changes: Vec<(Vec<u8>, KeyOp)>,
     data_types: Vec<DataType>,
 ) -> StreamExecutorResult<Option<StreamChunk>> {
     // construct output chunk
     // TODO(st1page): when materialize partial columns(), we should construct some columns in the pk
     let mut new_ops: Vec<Op> = vec![];
-    let mut new_rows: Vec<Vec<u8>> = vec![];
+    let mut new_rows: Vec<Bytes> = vec![];
     let row_deserializer = RowDeserializer::new(data_types.clone());
     for (_, row_op) in changes {
         match row_op {
-            RowOp::Insert(value) => {
+            KeyOp::Insert(value) => {
                 new_ops.push(Op::Insert);
                 new_rows.push(value);
             }
-            RowOp::Delete(old_value) => {
+            KeyOp::Delete(old_value) => {
                 new_ops.push(Op::Delete);
                 new_rows.push(old_value);
             }
-            RowOp::Update((old_value, new_value)) => {
+            KeyOp::Update((old_value, new_value)) => {
                 new_ops.push(Op::UpdateDelete);
                 new_ops.push(Op::UpdateInsert);
                 new_rows.push(old_value);
@@ -262,9 +262,9 @@ fn generate_output(
     }
 }
 
-/// `MaterializeBuffer` is a buffer to handle chunk into `RowOp`.
+/// `MaterializeBuffer` is a buffer to handle chunk into `KeyOp`.
 pub struct MaterializeBuffer {
-    buffer: HashMap<Vec<u8>, RowOp>,
+    buffer: HashMap<Vec<u8>, KeyOp>,
 }
 
 impl MaterializeBuffer {
@@ -327,36 +327,36 @@ impl MaterializeBuffer {
         buffer
     }
 
-    fn insert(&mut self, pk: Vec<u8>, value: Vec<u8>) {
+    fn insert(&mut self, pk: Vec<u8>, value: Bytes) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                e.insert(RowOp::Insert(value));
+                e.insert(KeyOp::Insert(value));
             }
             Entry::Occupied(mut e) => match e.get_mut() {
-                RowOp::Delete(ref mut old_value) => {
+                KeyOp::Delete(ref mut old_value) => {
                     let old_val = std::mem::take(old_value);
-                    e.insert(RowOp::Update((old_val, value)));
+                    e.insert(KeyOp::Update((old_val, value)));
                 }
                 _ => {
-                    e.insert(RowOp::Insert(value));
+                    e.insert(KeyOp::Insert(value));
                 }
             },
         }
     }
 
-    fn delete(&mut self, pk: Vec<u8>, old_value: Vec<u8>) {
+    fn delete(&mut self, pk: Vec<u8>, old_value: Bytes) {
         let entry = self.buffer.entry(pk);
         match entry {
             Entry::Vacant(e) => {
-                e.insert(RowOp::Delete(old_value));
+                e.insert(KeyOp::Delete(old_value));
             }
             Entry::Occupied(mut e) => match e.get_mut() {
-                RowOp::Insert(_) => {
+                KeyOp::Insert(_) => {
                     e.remove();
                 }
                 _ => {
-                    e.insert(RowOp::Delete(old_value));
+                    e.insert(KeyOp::Delete(old_value));
                 }
             },
         }
@@ -370,7 +370,7 @@ impl MaterializeBuffer {
         self.buffer.keys()
     }
 
-    pub fn into_parts(self) -> HashMap<Vec<u8>, RowOp> {
+    pub fn into_parts(self) -> HashMap<Vec<u8>, KeyOp> {
         self.buffer
     }
 }
@@ -390,6 +390,10 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
     fn identity(&self) -> &str {
         self.info.identity.as_str()
     }
+
+    fn info(&self) -> ExecutorInfo {
+        self.info.clone()
+    }
 }
 
 impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
@@ -407,12 +411,8 @@ pub struct MaterializeCache {
 }
 
 impl MaterializeCache {
-    pub fn new(lru_manager: Option<LruManagerRef>, cache_size: usize) -> Self {
-        let cache = if let Some(lru_manager) = lru_manager {
-            ExecutorCache::Managed(lru_manager.create_cache())
-        } else {
-            ExecutorCache::Local(EvictableHashMap::new(cache_size))
-        };
+    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
+        let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
         Self { data: cache }
     }
 
@@ -420,7 +420,7 @@ impl MaterializeCache {
         &mut self,
         changes: MaterializeBuffer,
         table: &StateTable<S>,
-    ) -> StreamExecutorResult<Vec<(Vec<u8>, RowOp)>> {
+    ) -> StreamExecutorResult<Vec<(Vec<u8>, KeyOp)>> {
         // fill cache
         self.fetch_keys(changes.keys().map(|v| v.as_ref()), table)
             .await?;
@@ -429,32 +429,32 @@ impl MaterializeCache {
         // handle pk conflict
         for (key, row_op) in changes.into_parts() {
             match row_op {
-                RowOp::Insert(new_row) => {
+                KeyOp::Insert(new_row) => {
                     match self.force_get(&key) {
                         Some(old_row) => fixed_changes.push((
                             key.clone(),
-                            RowOp::Update((old_row.row.clone(), new_row.clone())),
+                            KeyOp::Update((old_row.row.clone(), new_row.clone())),
                         )),
-                        None => fixed_changes.push((key.clone(), RowOp::Insert(new_row.clone()))),
+                        None => fixed_changes.push((key.clone(), KeyOp::Insert(new_row.clone()))),
                     };
                     self.put(key, Some(CompactedRow { row: new_row }));
                 }
-                RowOp::Delete(_) => {
+                KeyOp::Delete(_) => {
                     match self.force_get(&key) {
                         Some(old_row) => {
-                            fixed_changes.push((key.clone(), RowOp::Delete(old_row.row.clone())));
+                            fixed_changes.push((key.clone(), KeyOp::Delete(old_row.row.clone())));
                         }
                         None => (), // delete a nonexistent value
                     };
                     self.put(key, None);
                 }
-                RowOp::Update((_, new_row)) => {
+                KeyOp::Update((_, new_row)) => {
                     match self.force_get(&key) {
                         Some(old_row) => fixed_changes.push((
                             key.clone(),
-                            RowOp::Update((old_row.row.clone(), new_row.clone())),
+                            KeyOp::Update((old_row.row.clone(), new_row.clone())),
                         )),
-                        None => fixed_changes.push((key.clone(), RowOp::Insert(new_row.clone()))),
+                        None => fixed_changes.push((key.clone(), KeyOp::Insert(new_row.clone()))),
                     }
                     self.put(key, Some(CompactedRow { row: new_row }));
                 }
@@ -509,10 +509,12 @@ impl MaterializeCache {
 #[cfg(test)]
 mod tests {
 
+    use std::sync::atomic::AtomicU64;
+
     use futures::stream::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
-    use risingwave_common::row::Row;
+    use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -572,6 +574,7 @@ mod tests {
             column_descs,
             order_types,
             vec![0],
+            vec![0, 1],
         );
 
         let mut materialize_executor = Box::new(
@@ -582,8 +585,7 @@ mod tests {
                 vec![OrderPair::new(0, OrderType::Ascending)],
                 column_ids,
                 1,
-                None,
-                0,
+                Arc::new(AtomicU64::new(0)),
                 false,
             )
             .await,
@@ -598,14 +600,14 @@ mod tests {
             Some(Message::Barrier(_)) => {
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(3_i32.into())]),
+                        &OwnedRow::new(vec![Some(3_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(3_i32.into()), Some(6_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(3_i32.into()), Some(6_i32.into())]))
                 );
             }
             _ => unreachable!(),
@@ -616,14 +618,14 @@ mod tests {
             Some(Message::Barrier(_)) => {
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(7_i32.into())]),
+                        &OwnedRow::new(vec![Some(7_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(7_i32.into()), Some(8_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(7_i32.into()), Some(8_i32.into())]))
                 );
             }
             _ => unreachable!(),
@@ -689,6 +691,7 @@ mod tests {
             column_descs,
             order_types,
             vec![0],
+            vec![0, 1],
         );
 
         let mut materialize_executor = Box::new(
@@ -699,8 +702,7 @@ mod tests {
                 vec![OrderPair::new(0, OrderType::Ascending)],
                 column_ids,
                 1,
-                None,
-                1 << 16,
+                Arc::new(AtomicU64::new(0)),
                 true,
             )
             .await,
@@ -716,38 +718,38 @@ mod tests {
             Some(Message::Barrier(_)) => {
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(3_i32.into())]),
+                        &OwnedRow::new(vec![Some(3_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(3_i32.into()), Some(6_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(3_i32.into()), Some(6_i32.into())]))
                 );
 
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(1_i32.into())]),
+                        &OwnedRow::new(vec![Some(1_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(1_i32.into()), Some(3_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(1_i32.into()), Some(3_i32.into())]))
                 );
 
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(2_i32.into())]),
+                        &OwnedRow::new(vec![Some(2_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(2_i32.into()), Some(6_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(2_i32.into()), Some(6_i32.into())]))
                 );
             }
             _ => unreachable!(),
@@ -822,6 +824,7 @@ mod tests {
             column_descs,
             order_types,
             vec![0],
+            vec![0, 1],
         );
 
         let mut materialize_executor = Box::new(
@@ -832,8 +835,7 @@ mod tests {
                 vec![OrderPair::new(0, OrderType::Ascending)],
                 column_ids,
                 1,
-                None,
-                1 << 16,
+                Arc::new(AtomicU64::new(0)),
                 true,
             )
             .await,
@@ -849,14 +851,14 @@ mod tests {
                 // can read (8, 3), check insert after update
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(8_i32.into())]),
+                        &OwnedRow::new(vec![Some(8_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(8_i32.into()), Some(3_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(8_i32.into()), Some(3_i32.into())]))
                 );
             }
             _ => unreachable!(),
@@ -867,20 +869,20 @@ mod tests {
             Some(Message::Barrier(_)) => {
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(7_i32.into())]),
+                        &OwnedRow::new(vec![Some(7_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(7_i32.into()), Some(8_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(7_i32.into()), Some(8_i32.into())]))
                 );
 
                 // check delete wrong value
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(3_i32.into())]),
+                        &OwnedRow::new(vec![Some(3_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
@@ -890,7 +892,7 @@ mod tests {
                 // check delete wrong pk
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(5_i32.into())]),
+                        &OwnedRow::new(vec![Some(5_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
@@ -906,40 +908,40 @@ mod tests {
             Some(Message::Barrier(_)) => {
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(1_i32.into())]),
+                        &OwnedRow::new(vec![Some(1_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(1_i32.into()), Some(5_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(1_i32.into()), Some(5_i32.into())]))
                 );
 
                 // check update wrong value
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(2_i32.into())]),
+                        &OwnedRow::new(vec![Some(2_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(2_i32.into()), Some(8_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(2_i32.into()), Some(8_i32.into())]))
                 );
 
                 // check update wrong pk, should become insert
                 let row = table
                     .get_row(
-                        &Row::new(vec![Some(9_i32.into())]),
+                        &OwnedRow::new(vec![Some(9_i32.into())]),
                         HummockReadEpoch::NoWait(u64::MAX),
                     )
                     .await
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(Row::new(vec![Some(9_i32.into()), Some(1_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(9_i32.into()), Some(1_i32.into())]))
                 );
             }
             _ => unreachable!(),

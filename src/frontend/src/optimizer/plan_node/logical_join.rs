@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::max;
+use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -27,14 +28,14 @@ use super::{
     PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
-use crate::optimizer::max_one_row_visitor::MaxOneRowVisitor;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, EqJoinPredicate,
-    LogicalFilter, LogicalScan, StreamDynamicFilter, StreamFilter,
+    BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext,
+    EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
+    StreamDynamicFilter, StreamFilter, ToStreamContext,
 };
-use crate::optimizer::plan_visitor::PlanVisitor;
+use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -169,7 +170,9 @@ impl LogicalJoin {
 
     /// get the Mapping of columnIndex from output column index to internal column index
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        self.i2o_col_mapping().inverse()
+        // If output_indices = [0, 0, 1], we should use it as `o2i_col_mapping` directly.
+        // If we use `self.i2o_col_mapping().inverse()`, we will lose the first 0.
+        ColIndexMapping::new(self.output_indices().iter().map(|x| Some(*x)).collect())
     }
 
     fn derive_fd(core: &generic::Join<PlanRef>) -> FunctionalDependencySet {
@@ -286,13 +289,12 @@ impl LogicalJoin {
         push_on: bool,
     ) -> (Condition, Condition, Condition) {
         let conjunctions = std::mem::take(&mut predicate.conjunctions);
+
         let (mut left, right, mut others) =
             Condition { conjunctions }.split(left_col_num, right_col_num);
 
-        let mut cannot_push = vec![];
-
         if !push_left {
-            cannot_push.extend(left);
+            others.conjunctions.extend(left);
             left = Condition::true_cond();
         };
 
@@ -303,19 +305,23 @@ impl LogicalJoin {
             );
             right.rewrite_expr(&mut mapping)
         } else {
-            cannot_push.extend(right);
+            others.conjunctions.extend(right);
             Condition::true_cond()
         };
 
         let on = if push_on {
-            others.conjunctions.extend(std::mem::take(&mut cannot_push));
-            others
+            // Do not push now on to the on, it will be pulled up into a filter instead.
+            Condition {
+                conjunctions: others
+                    .conjunctions
+                    .drain_filter(|expr| expr.count_nows() == 0)
+                    .collect(),
+            }
         } else {
-            cannot_push.extend(others);
             Condition::true_cond()
         };
 
-        predicate.conjunctions = cannot_push;
+        predicate.conjunctions = others.conjunctions;
 
         (left, right, on)
     }
@@ -589,6 +595,12 @@ impl LogicalJoin {
             new_join_on.clone(),
         );
 
+        // We discovered that we cannot use a lookup join after pulling up the predicate
+        // from one side and simplifying the condition. Let's use some other join instead.
+        if !new_predicate.has_eq() {
+            return None;
+        }
+
         // Rewrite the join output indices and all output indices referred to the old scan need to
         // rewrite.
         let new_join_output_indices = logical_join
@@ -709,7 +721,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
 impl_plan_tree_node_for_binary! { LogicalJoin }
 
 impl ColPrunable for LogicalJoin {
-    fn prune_col(&self, required_cols: &[usize]) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         // make `required_cols` point to internal table instead of output schema.
         let required_cols = required_cols
             .iter()
@@ -764,14 +776,91 @@ impl ColPrunable for LogicalJoin {
         };
 
         LogicalJoin::with_output_indices(
-            self.left().prune_col(&left_required_cols),
-            self.right().prune_col(&right_required_cols),
+            self.left().prune_col(&left_required_cols, ctx),
+            self.right().prune_col(&right_required_cols, ctx),
             self.join_type(),
             on,
             new_output_indices,
         )
         .into()
     }
+}
+
+fn is_pure_fn_except_for_input_ref(expr: &ExprImpl) -> bool {
+    match expr {
+        ExprImpl::Literal(_) => true,
+        ExprImpl::FunctionCall(inner) => {
+            inner.is_pure() && inner.inputs().iter().all(is_pure_fn_except_for_input_ref)
+        }
+        ExprImpl::InputRef(_) => true,
+        _ => false,
+    }
+}
+
+/// We are trying to derive a predicate to apply to the other side of a join if all
+/// the `InputRef`s in the predicate are eq condition columns, and can hence be substituted
+/// with the corresponding eq condition columns of the other side.
+///
+/// Strategy:
+/// 1. If the function is pure except for any `InputRef` (which may refer to impure computation),
+///    then we proceed. Else abort.
+/// 2. Then, we collect `InputRef`s in the conjunction.
+/// 3. If they are all columns in the given side of join eq condition, then we proceed. Else abort.
+/// 4. We then rewrite the `ExprImpl`, by replacing `InputRef` column indices with
+///    the equivalent in the other side.
+///
+/// # Arguments
+///
+/// Suppose we derive a predicate from the left side to be pushed to the right side.
+/// * `expr`: An expr from the left side.
+/// * `col_num`: The number of columns in the left side.
+fn derive_predicate_from_eq_condition(
+    expr: &ExprImpl,
+    eq_condition: &EqJoinPredicate,
+    col_num: usize,
+    expr_is_left: bool,
+) -> Option<ExprImpl> {
+    if !is_pure_fn_except_for_input_ref(expr) {
+        return None;
+    }
+    let eq_indices = if expr_is_left {
+        eq_condition.left_eq_indexes()
+    } else {
+        eq_condition.right_eq_indexes()
+    };
+    if expr
+        .collect_input_refs(col_num)
+        .ones()
+        .any(|index| !eq_indices.contains(&index))
+    {
+        // expr contains an InputRef not in eq_condition
+        return None;
+    }
+    // The function is pure except for `InputRef` and all `InputRef`s are `eq_condition` indices.
+    // Hence, we can substitute those `InputRef`s with indices from the other side.
+    let other_side_mapping = if expr_is_left {
+        eq_condition.eq_indexes_typed().into_iter().collect()
+    } else {
+        eq_condition
+            .eq_indexes_typed()
+            .into_iter()
+            .map(|(x, y)| (y, x))
+            .collect()
+    };
+    struct InputRefsRewriter {
+        mapping: HashMap<InputRef, InputRef>,
+    }
+    impl ExprRewriter for InputRefsRewriter {
+        fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+            self.mapping[&input_ref].clone().into()
+        }
+    }
+    Some(
+        InputRefsRewriter {
+            mapping: other_side_mapping,
+        }
+        .rewrite_expr(expr.clone()),
+    )
 }
 
 impl PredicatePushdown for LogicalJoin {
@@ -798,7 +887,11 @@ impl PredicatePushdown for LogicalJoin {
     /// |--------------------------|---------------------|----------------------|
     /// | Join predicate (on)      | Not Pushed          | Pushed               |
     /// | Where predicate (filter) | Pushed              | Not Pushed           |
-    fn predicate_pushdown(&self, mut predicate: Condition) -> PlanRef {
+    fn predicate_pushdown(
+        &self,
+        mut predicate: Condition,
+        ctx: &mut PredicatePushdownContext,
+    ) -> PlanRef {
         let left_col_num = self.left().schema().len();
         let right_col_num = self.right().schema().len();
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type());
@@ -834,8 +927,55 @@ impl PredicatePushdown for LogicalJoin {
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);
 
-        let new_left = self.left().predicate_pushdown(left_predicate);
-        let new_right = self.right().predicate_pushdown(right_predicate);
+        // Derive conditions to push to the other side based on eq condition columns
+        let eq_condition = EqJoinPredicate::create(left_col_num, right_col_num, new_on.clone());
+
+        // Only push to RHS if RHS is inner side of a join (RHS requires match on LHS)
+        let right_from_left = if matches!(
+            join_type,
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi | JoinType::LeftSemi
+        ) {
+            Condition {
+                conjunctions: left_predicate
+                    .conjunctions
+                    .iter()
+                    .filter_map(|expr| {
+                        derive_predicate_from_eq_condition(expr, &eq_condition, left_col_num, true)
+                    })
+                    .collect(),
+            }
+        } else {
+            Condition::true_cond()
+        };
+
+        // Only push to LHS if LHS is inner side of a join (LHS requires match on RHS)
+        let left_from_right = if matches!(
+            join_type,
+            JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi | JoinType::RightSemi
+        ) {
+            Condition {
+                conjunctions: right_predicate
+                    .conjunctions
+                    .iter()
+                    .filter_map(|expr| {
+                        derive_predicate_from_eq_condition(
+                            expr,
+                            &eq_condition,
+                            right_col_num,
+                            false,
+                        )
+                    })
+                    .collect(),
+            }
+        } else {
+            Condition::true_cond()
+        };
+
+        let left_predicate = left_predicate.and(left_from_right);
+        let right_predicate = right_predicate.and(right_from_left);
+
+        let new_left = self.left().predicate_pushdown(left_predicate, ctx);
+        let new_right = self.right().predicate_pushdown(right_predicate, ctx);
         let new_join = LogicalJoin::with_output_indices(
             new_left,
             new_right,
@@ -851,14 +991,16 @@ impl PredicatePushdown for LogicalJoin {
 }
 
 impl LogicalJoin {
-    fn to_stream_hash_join(&self, predicate: EqJoinPredicate) -> Result<PlanRef> {
+    fn to_stream_hash_join(
+        &self,
+        predicate: EqJoinPredicate,
+        ctx: &mut ToStreamContext,
+    ) -> Result<PlanRef> {
         assert!(predicate.has_eq());
-        let mut right = self
-            .right()
-            .to_stream_with_dist_required(&RequiredDist::shard_by_key(
-                self.right().schema().len(),
-                &predicate.right_eq_indexes(),
-            ))?;
+        let mut right = self.right().to_stream_with_dist_required(
+            &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
+            ctx,
+        )?;
         let mut left = self.left();
 
         let r2l = predicate.r2l_eq_columns_mapping(left.schema().len(), right.schema().len());
@@ -869,13 +1011,16 @@ impl LogicalJoin {
             Distribution::HashShard(_) => {
                 let left_dist = r2l
                     .rewrite_required_distribution(&RequiredDist::PhysicalDist(right_dist.clone()));
-                left = left.to_stream_with_dist_required(&left_dist)?;
+                left = left.to_stream_with_dist_required(&left_dist, ctx)?;
             }
             Distribution::UpstreamHashShard(_, _) => {
-                left = left.to_stream_with_dist_required(&RequiredDist::shard_by_key(
-                    self.left().schema().len(),
-                    &predicate.left_eq_indexes(),
-                ))?;
+                left = left.to_stream_with_dist_required(
+                    &RequiredDist::shard_by_key(
+                        self.left().schema().len(),
+                        &predicate.left_eq_indexes(),
+                    ),
+                    ctx,
+                )?;
                 let left_dist = left.distribution();
                 match left_dist {
                     Distribution::HashShard(_) => {
@@ -932,8 +1077,11 @@ impl LogicalJoin {
         }
     }
 
-    fn to_stream_dynamic_filter(&self, predicate: EqJoinPredicate) -> Result<Option<PlanRef>> {
-        assert!(!predicate.has_eq());
+    fn to_stream_dynamic_filter(
+        &self,
+        predicate: Condition,
+        ctx: &mut ToStreamContext,
+    ) -> Result<Option<PlanRef>> {
         // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
         // join is a `Inner` join, we can convert the scalar subquery into a
         // `StreamDynamicFilter`
@@ -947,26 +1095,33 @@ impl LogicalJoin {
         if !MaxOneRowVisitor.visit(self.right()) {
             return Ok(None);
         }
+        if self.right().schema().len() != 1 {
+            return Ok(None);
+        }
 
         // Check if the join condition is a correlated comparison
-        let conj = &predicate.other_cond().conjunctions;
-        let left_ref_index = if let [expr] = conj.as_slice() {
-            if let Some((left_ref, _, right_ref)) = expr.as_comparison_cond()
-                && left_ref.index < self.left().schema().len()
-                && right_ref.index >= self.left().schema().len()
-            {
-                let left_datatype = &self.left().schema().data_types()[left_ref.index];
-                let right_index = right_ref.index - self.left().schema().len();
-                let right_datatype = &self.right().schema().data_types()[right_index];
-                // We align input types on all join predicates with cmp operator
-                assert_eq!(left_datatype, right_datatype);
-                left_ref.index
-            } else {
-                return Ok(None);
-            }
-        } else {
+        if predicate.conjunctions.len() > 1 {
             return Ok(None);
+        }
+        let expr: ExprImpl = predicate.into();
+        let (left_ref, comparator, right_ref) = match expr.as_comparison_cond() {
+            Some(v) => v,
+            None => return Ok(None),
         };
+
+        let condition_cross_inputs = left_ref.index < self.left().schema().len()
+            && right_ref.index == self.left().schema().len() /* right side has only one column */;
+        if !condition_cross_inputs {
+            // Maybe we should panic here because it means some predicates are not pushed down.
+            return Ok(None);
+        }
+
+        // We align input types on all join predicates with cmp operator
+        if self.left().schema().fields()[left_ref.index].data_type
+            != self.right().schema().fields()[0].data_type
+        {
+            return Ok(None);
+        }
 
         // Check if non of the columns from the inner side is required to output
         let all_output_from_left = self
@@ -977,11 +1132,11 @@ impl LogicalJoin {
             return Ok(None);
         }
 
-        let left = self.left().to_stream()?;
-
-        let right = self
-            .right()
-            .to_stream_with_dist_required(&RequiredDist::PhysicalDist(Distribution::Broadcast))?;
+        let left = self.left().to_stream(ctx)?;
+        let right = self.right().to_stream_with_dist_required(
+            &RequiredDist::PhysicalDist(Distribution::Broadcast),
+            ctx,
+        )?;
 
         assert!(right.as_stream_exchange().is_some());
         assert_eq!(
@@ -989,9 +1144,7 @@ impl LogicalJoin {
             Distribution::Single
         );
 
-        let plan =
-            StreamDynamicFilter::new(left_ref_index, predicate.other_cond().clone(), left, right)
-                .into();
+        let plan = StreamDynamicFilter::new(left_ref.index, comparator, left, right).into();
 
         // TODO: `DynamicFilterExecutor` should support `output_indices` in `ChunkBuilder`
         if self
@@ -1093,6 +1246,12 @@ impl ToBatch for LogicalJoin {
         let config = self.base.ctx.session_ctx().config();
 
         if predicate.has_eq() {
+            if !predicate.eq_keys_are_type_aligned() {
+                return Err(ErrorCode::InternalError(format!(
+                    "Join eq keys are not aligned for predicate: {predicate:?}"
+                ))
+                .into());
+            }
             if config.get_batch_enable_lookup_join() {
                 if let Some(lookup_join) = self.to_batch_lookup_join_with_index_selection(
                     predicate.clone(),
@@ -1111,7 +1270,7 @@ impl ToBatch for LogicalJoin {
 }
 
 impl ToStream for LogicalJoin {
-    fn to_stream(&self) -> Result<PlanRef> {
+    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let predicate = EqJoinPredicate::create(
             self.left().schema().len(),
             self.right().schema().len(),
@@ -1119,21 +1278,35 @@ impl ToStream for LogicalJoin {
         );
 
         if predicate.has_eq() {
-            self.to_stream_hash_join(predicate)
-        } else if let Some(dynamic_filter) = self.to_stream_dynamic_filter(predicate)? {
+            if !predicate.eq_keys_are_type_aligned() {
+                return Err(ErrorCode::InternalError(format!(
+                    "Join eq keys are not aligned for predicate: {predicate:?}"
+                ))
+                .into());
+            }
+            self.to_stream_hash_join(predicate, ctx)
+        } else if let Some(dynamic_filter) =
+            self.to_stream_dynamic_filter(self.on().clone(), ctx)?
+        {
             Ok(dynamic_filter)
         } else {
-            Err(RwError::from(ErrorCode::NotImplemented(
-                "stream nested-loop join".to_string(),
-                None.into(),
+            Err(RwError::from(ErrorCode::NotSupported(
+                "streaming nested-loop join".to_string(),
+                // TODO: replace the link with user doc
+                "The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. \
+                 Consider rewriting the query to use dynamic filter as a substitute if possible.\n\
+                 See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md".to_owned(),
             )))
         }
     }
 
-    fn logical_rewrite_for_stream(&self) -> Result<(PlanRef, ColIndexMapping)> {
-        let (left, left_col_change) = self.left().logical_rewrite_for_stream()?;
+    fn logical_rewrite_for_stream(
+        &self,
+        ctx: &mut RewriteStreamContext,
+    ) -> Result<(PlanRef, ColIndexMapping)> {
+        let (left, left_col_change) = self.left().logical_rewrite_for_stream(ctx)?;
         let left_len = left.schema().len();
-        let (right, right_col_change) = self.right().logical_rewrite_for_stream()?;
+        let (right, right_col_change) = self.right().logical_rewrite_for_stream(ctx)?;
         let (join, out_col_change) = self.rewrite_with_left_right(
             left.clone(),
             left_col_change,
@@ -1261,16 +1434,17 @@ mod tests {
             .unwrap(),
         ));
         let join_type = JoinType::Inner;
-        let join = LogicalJoin::new(
+        let join: PlanRef = LogicalJoin::new(
             left.into(),
             right.into(),
             join_type,
             Condition::with_expr(on),
-        );
+        )
+        .into();
 
         // Perform the prune
         let required_cols = vec![2, 3];
-        let plan = join.prune_col(&required_cols);
+        let plan = join.prune_col(&required_cols, &mut ColumnPruningContext::new(join.clone()));
 
         // Check the result
         let join = plan.as_logical_join().unwrap();
@@ -1337,11 +1511,11 @@ mod tests {
             );
 
             let offset = if join.is_right_join() { 3 } else { 0 };
-
+            let join: PlanRef = join.into();
             // Perform the prune
             let required_cols = vec![0];
             // key 0 is never used in the join (always key 1)
-            let plan = join.prune_col(&required_cols);
+            let plan = join.prune_col(&required_cols, &mut ColumnPruningContext::new(join.clone()));
             let as_plan = plan.as_logical_join().unwrap();
             // Check the result
             assert_eq!(as_plan.schema().fields().len(), 1);
@@ -1350,7 +1524,7 @@ mod tests {
             // Perform the prune
             let required_cols = vec![0, 1, 2];
             // should not panic here
-            let plan = join.prune_col(&required_cols);
+            let plan = join.prune_col(&required_cols, &mut ColumnPruningContext::new(join.clone()));
             let as_plan = plan.as_logical_join().unwrap();
             // Check the result
             assert_eq!(as_plan.schema().fields().len(), 3);
@@ -1404,16 +1578,17 @@ mod tests {
             .unwrap(),
         ));
         let join_type = JoinType::Inner;
-        let join = LogicalJoin::new(
+        let join: PlanRef = LogicalJoin::new(
             left.into(),
             right.into(),
             join_type,
             Condition::with_expr(on),
-        );
+        )
+        .into();
 
         // Perform the prune
         let required_cols = vec![1, 3];
-        let plan = join.prune_col(&required_cols);
+        let plan = join.prune_col(&required_cols, &mut ColumnPruningContext::new(join.clone()));
 
         // Check the result
         let join = plan.as_logical_join().unwrap();
@@ -1647,16 +1822,17 @@ mod tests {
             .unwrap(),
         ));
         let join_type = JoinType::Inner;
-        let join = LogicalJoin::new(
+        let join: PlanRef = LogicalJoin::new(
             left.into(),
             right.into(),
             join_type,
             Condition::with_expr(on),
-        );
+        )
+        .into();
 
         // Perform the prune
         let required_cols = vec![3, 2];
-        let plan = join.prune_col(&required_cols);
+        let plan = join.prune_col(&required_cols, &mut ColumnPruningContext::new(join.clone()));
 
         // Check the result
         let join = plan.as_logical_join().unwrap();

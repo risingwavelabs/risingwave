@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { DataType } from "./data";
 import { ExprNode } from "./expr";
 import {
   ColumnCatalog,
@@ -20,21 +21,13 @@ export interface ColumnIndex {
   index: number;
 }
 
-export interface SourceInfo {
-  sourceInfo?: { $case: "streamSource"; streamSource: StreamSourceInfo } | {
-    $case: "tableSource";
-    tableSource: TableSourceInfo;
-  };
-}
-
 export interface StreamSourceInfo {
   rowFormat: RowFormatType;
   rowSchemaLocation: string;
   useSchemaRegistry: boolean;
   protoMessageName: string;
-}
-
-export interface TableSourceInfo {
+  csvDelimiter: number;
+  csvHasHeader: boolean;
 }
 
 export interface Source {
@@ -58,11 +51,8 @@ export interface Source {
   pkColumnIds: number[];
   /** Properties specified by the user in WITH clause. */
   properties: { [key: string]: string };
-  info?: { $case: "streamSource"; streamSource: StreamSourceInfo } | {
-    $case: "tableSource";
-    tableSource: TableSourceInfo;
-  };
   owner: number;
+  info: StreamSourceInfo | undefined;
 }
 
 export interface Source_PropertiesEntry {
@@ -108,6 +98,18 @@ export interface Index {
   originalColumns: number[];
 }
 
+export interface Function {
+  id: number;
+  schemaId: number;
+  databaseId: number;
+  name: string;
+  argTypes: DataType[];
+  returnType: DataType | undefined;
+  language: string;
+  path: string;
+  owner: number;
+}
+
 /** See `TableCatalog` struct in frontend crate for more information. */
 export interface Table {
   id: number;
@@ -148,6 +150,12 @@ export interface Table {
   valueIndices: number[];
   definition: string;
   handlePkConflict: boolean;
+  readPrefixLenHint: number;
+  /**
+   * Per-table catalog version, used by schema change. `None` for internal tables and tests.
+   * Not to be confused with the global catalog version for notification service.
+   */
+  version: Table_TableVersion | undefined;
 }
 
 export const Table_TableType = {
@@ -201,6 +209,19 @@ export function table_TableTypeToJSON(object: Table_TableType): string {
     default:
       return "UNRECOGNIZED";
   }
+}
+
+export interface Table_TableVersion {
+  /**
+   * The version number, which will be 0 by default and be increased by 1 for
+   * each schema change in the frontend.
+   */
+  version: number;
+  /**
+   * The ID of the next column to be added, which is used to make all columns
+   * in the table have unique IDs, even if some columns have been dropped.
+   */
+  nextColumnId: number;
 }
 
 export interface Table_PropertiesEntry {
@@ -261,64 +282,14 @@ export const ColumnIndex = {
   },
 };
 
-function createBaseSourceInfo(): SourceInfo {
-  return { sourceInfo: undefined };
-}
-
-export const SourceInfo = {
-  fromJSON(object: any): SourceInfo {
-    return {
-      sourceInfo: isSet(object.streamSource)
-        ? { $case: "streamSource", streamSource: StreamSourceInfo.fromJSON(object.streamSource) }
-        : isSet(object.tableSource)
-        ? { $case: "tableSource", tableSource: TableSourceInfo.fromJSON(object.tableSource) }
-        : undefined,
-    };
-  },
-
-  toJSON(message: SourceInfo): unknown {
-    const obj: any = {};
-    message.sourceInfo?.$case === "streamSource" && (obj.streamSource = message.sourceInfo?.streamSource
-      ? StreamSourceInfo.toJSON(message.sourceInfo?.streamSource)
-      : undefined);
-    message.sourceInfo?.$case === "tableSource" && (obj.tableSource = message.sourceInfo?.tableSource
-      ? TableSourceInfo.toJSON(message.sourceInfo?.tableSource)
-      : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<SourceInfo>, I>>(object: I): SourceInfo {
-    const message = createBaseSourceInfo();
-    if (
-      object.sourceInfo?.$case === "streamSource" &&
-      object.sourceInfo?.streamSource !== undefined &&
-      object.sourceInfo?.streamSource !== null
-    ) {
-      message.sourceInfo = {
-        $case: "streamSource",
-        streamSource: StreamSourceInfo.fromPartial(object.sourceInfo.streamSource),
-      };
-    }
-    if (
-      object.sourceInfo?.$case === "tableSource" &&
-      object.sourceInfo?.tableSource !== undefined &&
-      object.sourceInfo?.tableSource !== null
-    ) {
-      message.sourceInfo = {
-        $case: "tableSource",
-        tableSource: TableSourceInfo.fromPartial(object.sourceInfo.tableSource),
-      };
-    }
-    return message;
-  },
-};
-
 function createBaseStreamSourceInfo(): StreamSourceInfo {
   return {
     rowFormat: RowFormatType.ROW_UNSPECIFIED,
     rowSchemaLocation: "",
     useSchemaRegistry: false,
     protoMessageName: "",
+    csvDelimiter: 0,
+    csvHasHeader: false,
   };
 }
 
@@ -329,6 +300,8 @@ export const StreamSourceInfo = {
       rowSchemaLocation: isSet(object.rowSchemaLocation) ? String(object.rowSchemaLocation) : "",
       useSchemaRegistry: isSet(object.useSchemaRegistry) ? Boolean(object.useSchemaRegistry) : false,
       protoMessageName: isSet(object.protoMessageName) ? String(object.protoMessageName) : "",
+      csvDelimiter: isSet(object.csvDelimiter) ? Number(object.csvDelimiter) : 0,
+      csvHasHeader: isSet(object.csvHasHeader) ? Boolean(object.csvHasHeader) : false,
     };
   },
 
@@ -338,6 +311,8 @@ export const StreamSourceInfo = {
     message.rowSchemaLocation !== undefined && (obj.rowSchemaLocation = message.rowSchemaLocation);
     message.useSchemaRegistry !== undefined && (obj.useSchemaRegistry = message.useSchemaRegistry);
     message.protoMessageName !== undefined && (obj.protoMessageName = message.protoMessageName);
+    message.csvDelimiter !== undefined && (obj.csvDelimiter = Math.round(message.csvDelimiter));
+    message.csvHasHeader !== undefined && (obj.csvHasHeader = message.csvHasHeader);
     return obj;
   },
 
@@ -347,26 +322,8 @@ export const StreamSourceInfo = {
     message.rowSchemaLocation = object.rowSchemaLocation ?? "";
     message.useSchemaRegistry = object.useSchemaRegistry ?? false;
     message.protoMessageName = object.protoMessageName ?? "";
-    return message;
-  },
-};
-
-function createBaseTableSourceInfo(): TableSourceInfo {
-  return {};
-}
-
-export const TableSourceInfo = {
-  fromJSON(_: any): TableSourceInfo {
-    return {};
-  },
-
-  toJSON(_: TableSourceInfo): unknown {
-    const obj: any = {};
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<TableSourceInfo>, I>>(_: I): TableSourceInfo {
-    const message = createBaseTableSourceInfo();
+    message.csvDelimiter = object.csvDelimiter ?? 0;
+    message.csvHasHeader = object.csvHasHeader ?? false;
     return message;
   },
 };
@@ -381,8 +338,8 @@ function createBaseSource(): Source {
     columns: [],
     pkColumnIds: [],
     properties: {},
-    info: undefined,
     owner: 0,
+    info: undefined,
   };
 }
 
@@ -402,12 +359,8 @@ export const Source = {
           return acc;
         }, {})
         : {},
-      info: isSet(object.streamSource)
-        ? { $case: "streamSource", streamSource: StreamSourceInfo.fromJSON(object.streamSource) }
-        : isSet(object.tableSource)
-        ? { $case: "tableSource", tableSource: TableSourceInfo.fromJSON(object.tableSource) }
-        : undefined,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
+      info: isSet(object.info) ? StreamSourceInfo.fromJSON(object.info) : undefined,
     };
   },
 
@@ -435,11 +388,8 @@ export const Source = {
         obj.properties[k] = v;
       });
     }
-    message.info?.$case === "streamSource" &&
-      (obj.streamSource = message.info?.streamSource ? StreamSourceInfo.toJSON(message.info?.streamSource) : undefined);
-    message.info?.$case === "tableSource" &&
-      (obj.tableSource = message.info?.tableSource ? TableSourceInfo.toJSON(message.info?.tableSource) : undefined);
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
+    message.info !== undefined && (obj.info = message.info ? StreamSourceInfo.toJSON(message.info) : undefined);
     return obj;
   },
 
@@ -463,21 +413,10 @@ export const Source = {
       },
       {},
     );
-    if (
-      object.info?.$case === "streamSource" &&
-      object.info?.streamSource !== undefined &&
-      object.info?.streamSource !== null
-    ) {
-      message.info = { $case: "streamSource", streamSource: StreamSourceInfo.fromPartial(object.info.streamSource) };
-    }
-    if (
-      object.info?.$case === "tableSource" &&
-      object.info?.tableSource !== undefined &&
-      object.info?.tableSource !== null
-    ) {
-      message.info = { $case: "tableSource", tableSource: TableSourceInfo.fromPartial(object.info.tableSource) };
-    }
     message.owner = object.owner ?? 0;
+    message.info = (object.info !== undefined && object.info !== null)
+      ? StreamSourceInfo.fromPartial(object.info)
+      : undefined;
     return message;
   },
 };
@@ -714,6 +653,71 @@ export const Index = {
   },
 };
 
+function createBaseFunction(): Function {
+  return {
+    id: 0,
+    schemaId: 0,
+    databaseId: 0,
+    name: "",
+    argTypes: [],
+    returnType: undefined,
+    language: "",
+    path: "",
+    owner: 0,
+  };
+}
+
+export const Function = {
+  fromJSON(object: any): Function {
+    return {
+      id: isSet(object.id) ? Number(object.id) : 0,
+      schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
+      databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+      argTypes: Array.isArray(object?.argTypes) ? object.argTypes.map((e: any) => DataType.fromJSON(e)) : [],
+      returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
+      language: isSet(object.language) ? String(object.language) : "",
+      path: isSet(object.path) ? String(object.path) : "",
+      owner: isSet(object.owner) ? Number(object.owner) : 0,
+    };
+  },
+
+  toJSON(message: Function): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
+    message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
+    message.name !== undefined && (obj.name = message.name);
+    if (message.argTypes) {
+      obj.argTypes = message.argTypes.map((e) => e ? DataType.toJSON(e) : undefined);
+    } else {
+      obj.argTypes = [];
+    }
+    message.returnType !== undefined &&
+      (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
+    message.language !== undefined && (obj.language = message.language);
+    message.path !== undefined && (obj.path = message.path);
+    message.owner !== undefined && (obj.owner = Math.round(message.owner));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function>, I>>(object: I): Function {
+    const message = createBaseFunction();
+    message.id = object.id ?? 0;
+    message.schemaId = object.schemaId ?? 0;
+    message.databaseId = object.databaseId ?? 0;
+    message.name = object.name ?? "";
+    message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
+    message.returnType = (object.returnType !== undefined && object.returnType !== null)
+      ? DataType.fromPartial(object.returnType)
+      : undefined;
+    message.language = object.language ?? "";
+    message.path = object.path ?? "";
+    message.owner = object.owner ?? 0;
+    return message;
+  },
+};
+
 function createBaseTable(): Table {
   return {
     id: 0,
@@ -736,6 +740,8 @@ function createBaseTable(): Table {
     valueIndices: [],
     definition: "",
     handlePkConflict: false,
+    readPrefixLenHint: 0,
+    version: undefined,
   };
 }
 
@@ -775,6 +781,8 @@ export const Table = {
         : [],
       definition: isSet(object.definition) ? String(object.definition) : "",
       handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
+      version: isSet(object.version) ? Table_TableVersion.fromJSON(object.version) : undefined,
     };
   },
 
@@ -832,6 +840,9 @@ export const Table = {
     }
     message.definition !== undefined && (obj.definition = message.definition);
     message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
+    message.version !== undefined &&
+      (obj.version = message.version ? Table_TableVersion.toJSON(message.version) : undefined);
     return obj;
   },
 
@@ -878,6 +889,37 @@ export const Table = {
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
     message.handlePkConflict = object.handlePkConflict ?? false;
+    message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
+    message.version = (object.version !== undefined && object.version !== null)
+      ? Table_TableVersion.fromPartial(object.version)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseTable_TableVersion(): Table_TableVersion {
+  return { version: 0, nextColumnId: 0 };
+}
+
+export const Table_TableVersion = {
+  fromJSON(object: any): Table_TableVersion {
+    return {
+      version: isSet(object.version) ? Number(object.version) : 0,
+      nextColumnId: isSet(object.nextColumnId) ? Number(object.nextColumnId) : 0,
+    };
+  },
+
+  toJSON(message: Table_TableVersion): unknown {
+    const obj: any = {};
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    message.nextColumnId !== undefined && (obj.nextColumnId = Math.round(message.nextColumnId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Table_TableVersion>, I>>(object: I): Table_TableVersion {
+    const message = createBaseTable_TableVersion();
+    message.version = object.version ?? 0;
+    message.nextColumnId = object.nextColumnId ?? 0;
     return message;
   },
 };

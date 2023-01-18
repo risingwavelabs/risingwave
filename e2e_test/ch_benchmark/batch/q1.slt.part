@@ -1,17 +1,26 @@
-query IIIIII rowsort
+query IIIIII
 select   ol_number,
          sum(ol_quantity) as sum_qty,
-         sum(ol_amount) as sum_amount,
-         avg(ol_quantity) as avg_qty,
-         avg(ol_amount) as avg_amount,
+         sum(round(ol_amount::decimal,0)) as sum_amount,
+         round(avg(ol_quantity)::decimal, 0) as avg_qty,
+         round(avg(ol_amount)::decimal, 0) as avg_amount,
          count(*) as count_order
 from     orderline
 where    ol_delivery_d > '2007-01-02 00:00:00.000000'
 group by ol_number order by ol_number;
 ----
-         1     600         84                              5                0.7         120
-         2     550          0                              5                  0         110
-         3     560      14739 5.0909090909090909090909090909  133.9909090909091         110
-         4     550       44.1                              5 0.4009090770374645         110
-         5     550          0                              5                  0         110
-         6     200          0                              5                  0          40
+         1    1500     403719 5       1346         300
+         2    1500     454030 5       1513         300
+         3    1500     473050 5       1577         300
+         4    1500     440377 5       1468         300
+         5    1500     459623 5       1532         300
+         6    1320     393809 5       1492         264
+         7    1175     362077 5       1541         235
+         8    1035     311578 5       1505         207
+         9     935     266525 5       1425         187
+        10     795     242822 5       1527         159
+        11     705     215283 5       1527         141
+        12     565     179147 5       1585         113
+        13     465     134188 5       1443          93
+        14     325     112391 5       1729          65
+        15     180      54179 5       1505          36

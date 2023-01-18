@@ -1,4 +1,5 @@
-query ITTTR rowsort
-select * from ch_benchmark_q15;
+query ITTTR
+select * from ch_benchmark_q15
+order by su_suppkey;
 ----
-5  Supplier#000000005  Gcdm2rJRzl5qlTVzc  21-151-690-3663          14739
+96 'Supplier#000000096 'UTv1FnnAXhSsDyW?PT36MNpCpBfDiWtSC62GpH' 16-578-413-5053 113342

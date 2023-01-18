@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,6 +17,7 @@ mod fragment;
 mod user;
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::iter;
 use std::option::Option::Some;
 use std::sync::Arc;
 
@@ -27,11 +28,11 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     valid_table_name, TableId as StreamingJobId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
     DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG, DEFAULT_SUPER_USER_FOR_PG_ID,
-    DEFAULT_SUPER_USER_ID, INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
+    DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
+use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -52,6 +53,7 @@ pub type SinkId = u32;
 pub type RelationId = u32;
 pub type IndexId = u32;
 pub type ViewId = u32;
+pub type FunctionId = u32;
 
 pub type UserId = u32;
 
@@ -170,11 +172,7 @@ where
         let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
         databases.insert(database.id, database.clone());
         let mut schemas_added = vec![];
-        for schema_name in [
-            DEFAULT_SCHEMA_NAME,
-            PG_CATALOG_SCHEMA_NAME,
-            INFORMATION_SCHEMA_SCHEMA_NAME,
-        ] {
+        for schema_name in iter::once(DEFAULT_SCHEMA_NAME).chain(SYSTEM_SCHEMAS) {
             let schema = Schema {
                 id: self
                     .env
@@ -452,6 +450,59 @@ where
         }
     }
 
+    pub async fn create_function(&self, function: &Function) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        database_core.ensure_database_id(function.database_id)?;
+        database_core.ensure_schema_id(function.schema_id)?;
+
+        #[cfg(not(test))]
+        user_core.ensure_user_id(function.owner)?;
+
+        let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
+        functions.insert(function.id, function.clone());
+        commit_meta!(self, functions)?;
+
+        user_core.increase_ref(function.owner);
+
+        let version = self
+            .notify_frontend(Operation::Add, Info::Function(function.to_owned()))
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+        let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
+        let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
+
+        let function = functions
+            .remove(function_id)
+            .ok_or_else(|| anyhow!("function not found"))?;
+
+        let objects = &[Object::FunctionId(function_id)];
+        let users_need_update = Self::update_user_privileges(&mut users, objects);
+
+        commit_meta!(self, functions, users)?;
+
+        user_core.decrease_ref(function.owner);
+
+        for user in users_need_update {
+            self.notify_frontend(Operation::Update, Info::User(user))
+                .await;
+        }
+
+        let version = self
+            .notify_frontend(Operation::Delete, Info::Function(function))
+            .await;
+
+        Ok(version)
+    }
+
     pub async fn start_create_stream_job_procedure(
         &self,
         stream_job: &StreamingJob,
@@ -462,9 +513,13 @@ where
             StreamingJob::Index(index, index_table) => {
                 self.start_create_index_procedure(index, index_table).await
             }
-            StreamingJob::MaterializedSource(source, table) => {
-                self.start_create_materialized_source_procedure(source, table)
-                    .await
+            StreamingJob::Table(source, table) => {
+                if let Some(source) = source {
+                    self.start_create_table_procedure_with_source(source, table)
+                        .await
+                } else {
+                    self.start_create_table_procedure(table).await
+                }
             }
         }
     }
@@ -507,6 +562,7 @@ where
             .await;
     }
 
+    /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
     pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -535,6 +591,7 @@ where
         }
     }
 
+    /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
     pub async fn finish_create_table_procedure(
         &self,
         internal_tables: Vec<Table>,
@@ -569,7 +626,7 @@ where
 
             Ok(version)
         } else {
-            unreachable!("table must not exist and be in creating procedure");
+            unreachable!("table must not exist and must be in creating procedure");
         }
     }
 
@@ -589,7 +646,7 @@ where
             user_core.decrease_ref(table.owner);
             Ok(())
         } else {
-            unreachable!("table must not exist and be in creating procedure");
+            unreachable!("table must not exist and must be in creating procedure");
         }
     }
 
@@ -835,7 +892,7 @@ where
 
             Ok(version)
         } else {
-            unreachable!("source must not exist and be in creating procedure");
+            unreachable!("source must not exist and must be in creating procedure");
         }
     }
 
@@ -851,7 +908,7 @@ where
             user_core.decrease_ref(source.owner);
             Ok(())
         } else {
-            unreachable!("source must not exist and be in creating procedure");
+            unreachable!("source must not exist and must be in creating procedure");
         }
     }
 
@@ -892,10 +949,10 @@ where
         }
     }
 
-    pub async fn start_create_materialized_source_procedure(
+    pub async fn start_create_table_procedure_with_source(
         &self,
         source: &Source,
-        mview: &Table,
+        table: &Table,
     ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -906,9 +963,9 @@ where
         database_core.check_relation_name_duplicated(&source_key)?;
         #[cfg(not(test))]
         user_core.ensure_user_id(source.owner)?;
-        assert_eq!(source.owner, mview.owner);
+        assert_eq!(source.owner, table.owner);
 
-        let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
+        let mview_key = (table.database_id, table.schema_id, table.name.clone());
         if database_core.has_in_progress_creation(&source_key)
             || database_core.has_in_progress_creation(&mview_key)
         {
@@ -916,15 +973,15 @@ where
         } else {
             database_core.mark_creating(&source_key);
             database_core.mark_creating(&mview_key);
-            database_core.mark_creating_streaming_job(mview.id);
-            ensure!(mview.dependent_relations.is_empty());
-            // source and mview
+            database_core.mark_creating_streaming_job(table.id);
+            ensure!(table.dependent_relations.is_empty());
+            // source and table
             user_core.increase_ref_count(source.owner, 2);
             Ok(())
         }
     }
 
-    pub async fn finish_create_materialized_source_procedure(
+    pub async fn finish_create_table_procedure_with_source(
         &self,
         source: &Source,
         mview: &Table,
@@ -973,41 +1030,41 @@ where
                 .await;
             Ok(version)
         } else {
-            unreachable!("source must not exist and be in creating procedure");
+            unreachable!("source must not exist and must be in creating procedure");
         }
     }
 
-    pub async fn cancel_create_materialized_source_procedure(
+    pub async fn cancel_create_table_procedure_with_source(
         &self,
         source: &Source,
-        mview: &Table,
+        table: &Table,
     ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
         let source_key = (source.database_id, source.schema_id, source.name.clone());
-        let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
+        let table_key = (table.database_id, table.schema_id, table.name.clone());
         if !database_core.sources.contains_key(&source.id)
-            && !database_core.tables.contains_key(&mview.id)
+            && !database_core.tables.contains_key(&table.id)
             && database_core.has_in_progress_creation(&source_key)
-            && database_core.has_in_progress_creation(&mview_key)
+            && database_core.has_in_progress_creation(&table_key)
         {
             database_core.unmark_creating(&source_key);
-            database_core.unmark_creating(&mview_key);
-            database_core.unmark_creating_streaming_job(mview.id);
-            // source and mview
-            user_core.decrease_ref_count(source.owner, 2);
+            database_core.unmark_creating(&table_key);
+            database_core.unmark_creating_streaming_job(table.id);
+            user_core.decrease_ref_count(source.owner, 2); // source and table
             Ok(())
         } else {
-            unreachable!("source must not exist and be in creating procedure");
+            unreachable!("source must not exist and must be in creating procedure");
         }
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.
-    pub async fn drop_materialized_source(
+    /// NOTE: This method repeats a lot with `drop_table`. Might need refactor.
+    pub async fn drop_table_with_source(
         &self,
         source_id: SourceId,
-        mview_id: TableId,
+        table_id: TableId,
         internal_table_id: TableId,
     ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
         let core = &mut *self.core.lock().await;
@@ -1019,7 +1076,7 @@ where
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
 
-        let mview = tables.remove(mview_id);
+        let mview = tables.remove(table_id);
         let source = sources.remove(source_id);
         match (mview, source) {
             (Some(mview), Some(source)) => {
@@ -1033,16 +1090,16 @@ where
                     bail!("mview do not have associated source id");
                 }
 
-                // check ref count
+                // Check `ref_count`
                 let (index_ids, index_table_ids): (Vec<_>, Vec<_>) = indexes
                     .tree_ref()
                     .iter()
-                    .filter(|(_, index)| index.primary_table_id == mview_id)
+                    .filter(|(_, index)| index.primary_table_id == table_id)
                     .map(|(index_id, index)| (*index_id, index.index_table_id))
                     .unzip();
-                if let Some(ref_count) = database_core.relation_ref_count.get(&mview_id).cloned() {
-                    // Indexes are dependent on mv. We can drop mv only if its ref_count is strictly
-                    // equal to number of indexes.
+                if let Some(ref_count) = database_core.relation_ref_count.get(&table_id).cloned() {
+                    // Indexes are dependent on table. We can drop table only if its `ref_count` is
+                    // strictly equal to number of indexes.
                     if ref_count > index_ids.len() {
                         return Err(MetaError::permission_denied(format!(
                             "Fail to delete table `{}` because {} other relation(s) depend on it",
@@ -1080,7 +1137,7 @@ where
 
                 let objects = [
                     Object::SourceId(source_id),
-                    Object::TableId(mview_id),
+                    Object::TableId(table_id),
                     Object::TableId(internal_table_id),
                 ]
                 .into_iter()
@@ -1093,11 +1150,10 @@ where
                 commit_meta!(self, tables, sources, indexes, users)?;
 
                 indexes_removed.iter().for_each(|index| {
-                    // index table and index.
-                    user_core.decrease_ref_count(index.owner, 2);
+                    user_core.decrease_ref_count(index.owner, 2); // index table and index
                 });
-                // source and mview.
-                user_core.decrease_ref_count(mview.owner, 2);
+
+                user_core.decrease_ref_count(mview.owner, 2); // source and mview.
 
                 for index in indexes_removed {
                     self.notify_frontend(Operation::Delete, Info::Index(index))
@@ -1130,7 +1186,7 @@ where
 
                 let catalog_deleted_ids = index_table_ids
                     .into_iter()
-                    .chain(std::iter::once(mview_id))
+                    .chain(std::iter::once(table_id))
                     .map(|id| id.into())
                     .collect_vec();
                 Ok((version, catalog_deleted_ids))
@@ -1196,7 +1252,7 @@ where
             user_core.decrease_ref_count(index.owner, 2);
             Ok(())
         } else {
-            unreachable!("index must not exist and be in creating procedure");
+            unreachable!("index must not exist and must be in creating procedure");
         }
     }
 
@@ -1233,7 +1289,7 @@ where
 
             Ok(version)
         } else {
-            unreachable!("index must not exist and be in creating procedure");
+            unreachable!("index must not exist and must be in creating procedure");
         }
     }
 
@@ -1292,7 +1348,7 @@ where
 
             Ok(version)
         } else {
-            unreachable!("sink must not exist and be in creating procedure");
+            unreachable!("sink must not exist and must be in creating procedure");
         }
     }
 
@@ -1312,7 +1368,7 @@ where
             user_core.decrease_ref(sink.owner);
             Ok(())
         } else {
-            unreachable!("sink must not exist and be in creating procedure");
+            unreachable!("sink must not exist and must be in creating procedure");
         }
     }
 

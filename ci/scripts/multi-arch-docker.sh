@@ -1,7 +1,14 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Exits as soon as any line fails.
 set -euo pipefail
+
+# Create multi-arch docker images from ${BUILDKITE_COMMIT}-x86_64 and ${BUILDKITE_COMMIT}-aarch64
+# They are created by ci/scripts/docker.sh
+#
+# Also add addtional tags to the images:
+# nightly-yyyyMMdd: nightly build in main-cron
+# latest: only push to ghcr. dockerhub latest is latest release
 
 date="$(date +%Y%m%d)"
 ghcraddr="ghcr.io/risingwavelabs/risingwave"
@@ -54,7 +61,6 @@ if [ "${BUILDKITE_SOURCE}" == "ui" ] && [[ -n "${IMAGE_TAG+x}" ]]; then
   # If this is a ui build, tag the image with the $imagetag.
   TAG="${IMAGE_TAG}"
   pushGchr ${TAG}
-  pushDockerhub ${TAG}
 fi
 
 if [[ -n "${BUILDKITE_TAG}" ]]; then

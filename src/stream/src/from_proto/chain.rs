@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -119,6 +119,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .iter()
                     .map(|&k| k as usize)
                     .collect_vec();
+                let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
                 // TODO: refactor it with from_table_catalog in the future.
                 let table = StorageTable::new_partial(
                     state_store,
@@ -130,6 +131,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     distribution,
                     table_option,
                     value_indices,
+                    prefix_hint_len,
                 );
 
                 BackfillExecutor::new(

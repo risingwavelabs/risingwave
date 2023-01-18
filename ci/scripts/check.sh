@@ -1,7 +1,19 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Exits as soon as any line fails.
 set -euo pipefail
+
+# Check ci bash scripts contains `set -euo pipefail`.
+for script in ci/**/*.sh; do
+    # skip .env.sh
+    if [[ "$script" == *".env.sh" ]]; then
+        continue
+    fi
+    if ! grep -Fq 'set -euo pipefail' "$script"; then
+        echo "ERROR: $script does not contain 'set -euo pipefail'"
+        exit 1
+    fi
+done
 
 source ci/scripts/common.env.sh
 

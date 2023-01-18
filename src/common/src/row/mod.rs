@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,35 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod chain;
-mod compacted_row;
-mod empty;
-mod once;
-mod owned_row;
-mod project;
-mod repeat_n;
-
 use std::borrow::Cow;
-use std::cmp::Ordering;
 use std::hash::{BuildHasher, Hasher};
 
-use bytes::BufMut;
-pub use chain::Chain;
-pub use compacted_row::CompactedRow;
-pub use empty::{empty, Empty};
-pub use once::{once, Once};
-pub use owned_row::{Row, RowDeserializer};
-pub use project::Project;
-pub use repeat_n::{repeat_n, RepeatN};
+use bytes::{BufMut, Bytes, BytesMut};
 
+use self::empty::EMPTY;
 use crate::hash::HashCode;
 use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum};
 use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
 
 /// The trait for abstracting over a Row-like type.
-// TODO(row trait): rename type `Row(Vec<Datum>)` to `OwnedRow` and rename trait `Row2` to `Row`.
-pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
+pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
     type Iter<'a>: Iterator<Item = DatumRef<'a>>
     where
         Self: 'a;
@@ -66,17 +50,17 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     /// Returns an iterator over the datums in the row, in [`DatumRef`] form.
     fn iter(&self) -> Self::Iter<'_>;
 
-    /// Converts the row into an owned [`Row`].
+    /// Converts the row into an [`OwnedRow`].
     ///
     /// Prefer `into_owned_row` if the row is already owned.
     #[inline]
-    fn to_owned_row(&self) -> Row {
-        Row::new(self.iter().map(|d| d.to_owned_datum()).collect())
+    fn to_owned_row(&self) -> OwnedRow {
+        OwnedRow::new(self.iter().map(|d| d.to_owned_datum()).collect())
     }
 
-    /// Consumes `self` and converts it into an owned [`Row`].
+    /// Consumes `self` and converts it into an [`OwnedRow`].
     #[inline]
-    fn into_owned_row(self) -> Row {
+    fn into_owned_row(self) -> OwnedRow {
         self.to_owned_row()
     }
 
@@ -84,7 +68,7 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
     #[inline]
     fn value_serialize_into(&self, mut buf: impl BufMut) {
         for datum in self.iter() {
-            value_encoding::serialize_datum(datum, &mut buf);
+            value_encoding::serialize_datum_into(datum, &mut buf);
         }
     }
 
@@ -94,6 +78,14 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
         let mut buf = Vec::with_capacity(self.len()); // each datum is at least 1 byte
         self.value_serialize_into(&mut buf);
         buf
+    }
+
+    /// Serializes the row with value encoding and returns the bytes.
+    #[inline]
+    fn value_serialize_bytes(&self) -> Bytes {
+        let mut buf = BytesMut::with_capacity(self.len()); // each datum is at least 1 byte
+        self.value_serialize_into(&mut buf);
+        buf.freeze()
     }
 
     /// Serializes the row with memcomparable encoding, into the given `buf`. As each datum may have
@@ -124,25 +116,19 @@ pub trait Row2: Sized + std::fmt::Debug + PartialEq + Eq {
 
     /// Determines whether the datums of this row are equal to those of another.
     #[inline]
-    fn eq(this: &Self, other: impl Row2) -> bool {
+    fn eq(this: &Self, other: impl Row) -> bool {
         this.iter().eq(other.iter())
-    }
-
-    /// Lexicographically compares the datums of this row with those of another.
-    #[inline]
-    fn cmp(this: &Self, other: impl Row2) -> Ordering {
-        this.iter().cmp(other.iter())
     }
 }
 
-const fn assert_row<R: Row2>(r: R) -> R {
+const fn assert_row<R: Row>(r: R) -> R {
     r
 }
 
-/// An extension trait for [`Row2`]s that provides a variety of convenient adapters.
-pub trait RowExt: Row2 {
+/// An extension trait for [`Row`]s that provides a variety of convenient adapters.
+pub trait RowExt: Row {
     /// Adapter for chaining two rows together.
-    fn chain<R: Row2>(self, other: R) -> Chain<Self, R>
+    fn chain<R: Row>(self, other: R) -> Chain<Self, R>
     where
         Self: Sized,
     {
@@ -161,9 +147,9 @@ pub trait RowExt: Row2 {
     }
 }
 
-impl<R: Row2> RowExt for R {}
+impl<R: Row> RowExt for R {}
 
-/// Forward the implementation of [`Row2`] to the deref target.
+/// Forward the implementation of [`Row`] to the deref target.
 macro_rules! deref_forward_row {
     () => {
         fn datum_at(&self, index: usize) -> DatumRef<'_> {
@@ -186,11 +172,11 @@ macro_rules! deref_forward_row {
             (**self).iter()
         }
 
-        fn to_owned_row(&self) -> Row {
+        fn to_owned_row(&self) -> OwnedRow {
             (**self).to_owned_row()
         }
 
-        fn value_serialize_into(&self, buf: impl BufMut) {
+        fn value_serialize_into(&self, buf: impl bytes::BufMut) {
             (**self).value_serialize_into(buf)
         }
 
@@ -198,29 +184,29 @@ macro_rules! deref_forward_row {
             (**self).value_serialize()
         }
 
-        fn memcmp_serialize_into(&self, serde: &OrderedRowSerde, buf: impl BufMut) {
+        fn memcmp_serialize_into(
+            &self,
+            serde: &$crate::util::ordered::OrderedRowSerde,
+            buf: impl bytes::BufMut,
+        ) {
             (**self).memcmp_serialize_into(serde, buf)
         }
 
-        fn memcmp_serialize(&self, serde: &OrderedRowSerde) -> Vec<u8> {
+        fn memcmp_serialize(&self, serde: &$crate::util::ordered::OrderedRowSerde) -> Vec<u8> {
             (**self).memcmp_serialize(serde)
         }
 
-        fn hash<H: BuildHasher>(&self, hash_builder: H) -> HashCode {
+        fn hash<H: std::hash::BuildHasher>(&self, hash_builder: H) -> $crate::hash::HashCode {
             (**self).hash(hash_builder)
         }
 
-        fn eq(this: &Self, other: impl Row2) -> bool {
-            Row2::eq(&(**this), other)
-        }
-
-        fn cmp(this: &Self, other: impl Row2) -> Ordering {
-            Row2::cmp(&(**this), other)
+        fn eq(this: &Self, other: impl Row) -> bool {
+            Row::eq(&(**this), other)
         }
     };
 }
 
-impl<R: Row2> Row2 for &R {
+impl<R: Row> Row for &R {
     type Iter<'a> = R::Iter<'a>
     where
         Self: 'a;
@@ -228,7 +214,7 @@ impl<R: Row2> Row2 for &R {
     deref_forward_row!();
 }
 
-impl<R: Row2 + Clone> Row2 for Cow<'_, R> {
+impl<R: Row + Clone> Row for Cow<'_, R> {
     type Iter<'a> = R::Iter<'a>
     where
         Self: 'a;
@@ -236,12 +222,12 @@ impl<R: Row2 + Clone> Row2 for Cow<'_, R> {
     deref_forward_row!();
 
     // Manually implemented in case `R` has a more efficient implementation.
-    fn into_owned_row(self) -> Row {
+    fn into_owned_row(self) -> OwnedRow {
         self.into_owned().into_owned_row()
     }
 }
 
-impl<R: Row2> Row2 for Box<R> {
+impl<R: Row> Row for Box<R> {
     type Iter<'a> = R::Iter<'a>
     where
         Self: 'a;
@@ -250,12 +236,12 @@ impl<R: Row2> Row2 for Box<R> {
 
     // Manually implemented in case the `Cow` is `Owned` and `R` has a more efficient
     // implementation.
-    fn into_owned_row(self) -> Row {
+    fn into_owned_row(self) -> OwnedRow {
         (*self).into_owned_row()
     }
 }
 
-/// Implements [`Row2`] for a slice of datums.
+/// Implements [`Row`] for a slice of datums.
 macro_rules! impl_slice_row {
     () => {
         #[inline]
@@ -280,18 +266,96 @@ macro_rules! impl_slice_row {
     };
 }
 
-impl<D: ToDatumRef> Row2 for &[D] {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+type SliceIter<'a, D> = std::iter::Map<std::slice::Iter<'a, D>, fn(&'a D) -> DatumRef<'a>>;
+
+impl<D: ToDatumRef> Row for &[D] {
+    type Iter<'a> = SliceIter<'a, D>
     where
         Self: 'a;
 
     impl_slice_row!();
 }
 
-impl<D: ToDatumRef, const N: usize> Row2 for [D; N] {
-    type Iter<'a> = impl Iterator<Item = DatumRef<'a>>
+impl<D: ToDatumRef, const N: usize> Row for [D; N] {
+    type Iter<'a> = SliceIter<'a, D>
     where
         Self: 'a;
 
     impl_slice_row!();
 }
+
+/// Implements [`Row`] for an optional row.
+impl<R: Row> Row for Option<R> {
+    type Iter<'a> = itertools::Either<R::Iter<'a>, <Empty as Row>::Iter<'a>>
+    where
+        Self: 'a;
+
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        match self {
+            Some(row) => row.datum_at(index),
+            None => EMPTY.datum_at(index),
+        }
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        match self {
+            Some(row) => row.datum_at_unchecked(index),
+            None => EMPTY.datum_at_unchecked(index),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Some(row) => row.len(),
+            None => 0,
+        }
+    }
+
+    fn iter(&self) -> Self::Iter<'_> {
+        match self {
+            Some(row) => itertools::Either::Left(row.iter()),
+            None => itertools::Either::Right(EMPTY.iter()),
+        }
+    }
+
+    fn to_owned_row(&self) -> OwnedRow {
+        match self {
+            Some(row) => row.to_owned_row(),
+            None => OwnedRow::new(Vec::new()),
+        }
+    }
+
+    fn into_owned_row(self) -> OwnedRow {
+        match self {
+            Some(row) => row.into_owned_row(),
+            None => OwnedRow::new(Vec::new()),
+        }
+    }
+
+    fn value_serialize_into(&self, buf: impl BufMut) {
+        if let Some(row) = self {
+            row.value_serialize_into(buf);
+        }
+    }
+
+    fn memcmp_serialize_into(&self, serde: &OrderedRowSerde, buf: impl BufMut) {
+        if let Some(row) = self {
+            row.memcmp_serialize_into(serde, buf);
+        }
+    }
+}
+
+mod chain;
+mod compacted_row;
+mod empty;
+mod once;
+mod owned_row;
+mod project;
+mod repeat_n;
+pub use chain::Chain;
+pub use compacted_row::CompactedRow;
+pub use empty::{empty, Empty};
+pub use once::{once, Once};
+pub use owned_row::{AscentOwnedRow, OwnedRow, RowDeserializer};
+pub use project::Project;
+pub use repeat_n::{repeat_n, RepeatN};

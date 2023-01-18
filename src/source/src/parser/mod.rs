@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,7 +18,9 @@ use std::sync::Arc;
 
 pub use avro::*;
 pub use canal::*;
+use csv_parser::CsvParser;
 pub use debezium::*;
+use enum_as_inner::EnumAsInner;
 use futures::Future;
 use itertools::Itertools;
 pub use json_parser::*;
@@ -27,6 +29,7 @@ use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::Datum;
+use risingwave_pb::catalog::StreamSourceInfo;
 
 use crate::parser::maxwell::MaxwellParser;
 use crate::{SourceColumnDesc, SourceFormat};
@@ -34,6 +37,7 @@ use crate::{SourceColumnDesc, SourceFormat};
 mod avro;
 mod canal;
 mod common;
+mod csv_parser;
 mod debezium;
 mod json_parser;
 mod macros;
@@ -79,6 +83,10 @@ impl SourceStreamChunkBuilder {
                 .collect(),
             None,
         )
+    }
+
+    pub fn op_num(&self) -> usize {
+        self.op_builder.len()
     }
 }
 
@@ -185,31 +193,31 @@ impl SourceStreamChunkRowWriter<'_> {
         &mut self,
         mut f: impl FnMut(&SourceColumnDesc) -> Result<A::Output>,
     ) -> Result<WriteGuard> {
-        // The closure `f` may fail so that a part of builders were appended incompletely.
-        // Loop invariant: `builders[0..appended_idx)` has been appended on every iter ended or loop
-        // exited.
-        let mut appended_idx = 0;
+        let mut modify_col = vec![];
 
         self.descs
             .iter()
             .zip_eq(self.builders.iter_mut())
             .enumerate()
             .try_for_each(|(idx, (desc, builder))| -> Result<()> {
-                let output = if desc.skip_parse {
+                if desc.is_meta {
+                    return Ok(());
+                }
+                let output = if desc.is_row_id {
                     A::DEFAULT_OUTPUT
                 } else {
                     f(desc)?
                 };
                 A::apply(builder, output);
-                appended_idx = idx + 1;
+                modify_col.push(idx);
 
                 Ok(())
             })
             .inspect_err(|e| {
                 tracing::warn!("failed to parse source data: {}", e);
-                self.builders[..appended_idx]
-                    .iter_mut()
-                    .for_each(A::rollback);
+                modify_col.iter().for_each(|idx| {
+                    A::rollback(&mut self.builders[*idx]);
+                });
             })?;
 
         A::finish(self);
@@ -228,6 +236,29 @@ impl SourceStreamChunkRowWriter<'_> {
         f: impl FnMut(&SourceColumnDesc) -> Result<Datum>,
     ) -> Result<WriteGuard> {
         self.do_action::<OpActionInsert>(f)
+    }
+
+    /// For other op like 'insert', 'update', 'delete', we will leave the hollow for the meta column
+    /// builder. e.g after insert
+    /// `data_budiler` = [1], `meta_column_builder` = [], `op` = [insert]
+    ///
+    /// This function is used to fulfill this hollow in `meta_column_builder`.
+    /// e.g after fulfill
+    /// `data_budiler` = [1], `meta_column_builder` = [1], `op` = [insert]
+    pub fn fulfill_meta_column(
+        &mut self,
+        mut f: impl FnMut(&SourceColumnDesc) -> Option<Datum>,
+    ) -> Result<WriteGuard> {
+        self.descs
+            .iter()
+            .zip_eq(self.builders.iter_mut())
+            .for_each(|(desc, builder)| {
+                if let Some(output) = f(desc) {
+                    builder.append_datum(output);
+                }
+            });
+
+        Ok(WriteGuard(()))
     }
 
     /// Write a `Delete` record to the [`StreamChunk`].
@@ -260,6 +291,7 @@ impl SourceStreamChunkRowWriter<'_> {
 
 pub trait ParseFuture<'a, Out> = Future<Output = Out> + Send + 'a;
 
+// TODO: use `async_fn_in_traits` to implement it
 /// `SourceParser` is the message parser, `ChunkReader` will parse the messages in `SourceReader`
 /// one by one through `SourceParser` and assemble them into `DataChunk`
 /// Note that the `skip_parse` parameter in `SourceColumnDesc`, when it is true, should skip the
@@ -346,5 +378,80 @@ impl SourceParserImpl {
             }
         };
         Ok(Arc::new(parser))
+    }
+}
+
+// TODO: use `async_fn_in_traits` to implement it
+/// A parser trait that parse byte stream instead of one byte chunk
+pub trait ByteStreamSourceParser: Send + Debug + 'static {
+    type ParseResult<'a>: ParseFuture<'a, Result<Option<WriteGuard>>>;
+    /// Parse the payload and append the result to the [`StreamChunk`] directly.
+    /// If the payload is not enough to parse one record, the parser will cache
+    /// the payload and wait for more byte to be passed.
+    ///
+    /// # Arguments
+    ///
+    /// - `self`: A needs to be a member method because parser need to cache some payload
+    /// - writer: Write exactly one record during a `parse` call.
+    ///
+    /// # Returns
+    ///
+    /// An [`Option<WriteGuard>`], None if the payload is not enough to parse one record, else Some
+    fn parse<'a, 'b, 'c>(
+        &'a mut self,
+        payload: &'a mut &'b [u8],
+        writer: SourceStreamChunkRowWriter<'c>,
+    ) -> Self::ParseResult<'a>
+    where
+        'b: 'a,
+        'c: 'a;
+}
+
+#[derive(Debug)]
+pub enum ByteStreamSourceParserImpl {
+    Csv(CsvParser),
+}
+
+#[derive(Debug, Clone, EnumAsInner)]
+pub enum ParserConfig {
+    Csv(u8, bool),
+}
+
+impl ParserConfig {
+    pub fn new(format: &SourceFormat, info: &StreamSourceInfo) -> Self {
+        match format {
+            SourceFormat::Csv => Self::Csv(info.csv_delimiter as u8, info.csv_has_header),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl ByteStreamSourceParserImpl {
+    pub async fn parse(
+        &mut self,
+        payload: &mut &[u8],
+        writer: SourceStreamChunkRowWriter<'_>,
+    ) -> Result<Option<WriteGuard>> {
+        match self {
+            Self::Csv(csv_parser) => csv_parser.parse(payload, writer).await,
+        }
+    }
+
+    // Keep this `async` in consideration of other parsers in the future.
+    #[allow(clippy::unused_async)]
+    pub async fn create(
+        format: &SourceFormat,
+        _properties: &HashMap<String, String>,
+        parser_config: ParserConfig,
+    ) -> Result<Self> {
+        match format {
+            SourceFormat::Csv => {
+                let (delimiter, has_header) = parser_config.into_csv().unwrap();
+                CsvParser::new(delimiter, has_header).map(Self::Csv)
+            }
+            _ => Err(RwError::from(ProtocolError(
+                "format not support".to_string(),
+            ))),
+        }
     }
 }

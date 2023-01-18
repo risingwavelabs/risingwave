@@ -7,7 +7,6 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 # SMALLINT limits
-
 statement ok
 CREATE TABLE t(t_k0 SMALLINT);
 
@@ -33,7 +32,6 @@ statement ok
 DROP TABLE u;
 
 # INTEGER limits
-
 statement ok
 CREATE TABLE t(t_k0 INTEGER);
 
@@ -59,7 +57,6 @@ statement ok
 DROP TABLE u;
 
 # BIGINT limits
-
 statement ok
 CREATE TABLE t(t_k0 BIGINT);
 

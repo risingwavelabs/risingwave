@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -700,9 +700,6 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::SubLevelMaxCompactionBytes(c) => {
                 target.sub_level_max_compaction_bytes = *c;
             }
-            MutableConfig::Level0TriggerFileNumber(c) => {
-                target.level0_trigger_file_number = *c;
-            }
             MutableConfig::Level0TierCompactFileNumber(c) => {
                 target.level0_tier_compact_file_number = *c;
             }
@@ -728,6 +725,7 @@ mod tests {
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::meta::table_fragments::Fragment;
+    use risingwave_pb::stream_plan::StreamEnvironment;
 
     use crate::hummock::manager::compaction_group_manager::CompactionGroupManagerInner;
     use crate::hummock::manager::versioning::Versioning;
@@ -746,16 +744,16 @@ mod tests {
         let registered_number = |inner: &CompactionGroupManagerInner<MemStore>| {
             inner
                 .compaction_groups
-                .iter()
-                .map(|(_, cg)| cg.member_table_ids.len())
+                .values()
+                .map(|cg| cg.member_table_ids.len())
                 .sum::<usize>()
         };
 
         let table_option_number = |inner: &CompactionGroupManagerInner<MemStore>| {
             inner
                 .compaction_groups
-                .iter()
-                .map(|(_, cg)| cg.table_id_to_options().len())
+                .values()
+                .map(|cg| cg.table_id_to_options().len())
                 .sum::<usize>()
         };
 
@@ -867,6 +865,7 @@ mod tests {
                     ..Default::default()
                 },
             )]),
+            StreamEnvironment::default(),
         );
         let table_fragment_2 = TableFragments::new(
             TableId::new(20),
@@ -878,6 +877,7 @@ mod tests {
                     ..Default::default()
                 },
             )]),
+            StreamEnvironment::default(),
         );
 
         // Test register_table_fragments

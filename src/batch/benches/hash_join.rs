@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,9 +19,9 @@ use risingwave_batch::executor::hash_join::HashJoinExecutor;
 use risingwave_batch::executor::test_utils::{gen_projected_data, MockExecutor};
 use risingwave_batch::executor::{BoxedExecutor, JoinType};
 use risingwave_common::catalog::schema_test_utils::field_n;
-use risingwave_common::hash;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_common::util::value_encoding::serialize_datum_to_bytes;
+use risingwave_common::util::value_encoding::serialize_datum;
+use risingwave_common::{enable_jemalloc_on_linux, hash};
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::Datum as ProstDatum;
@@ -30,11 +30,9 @@ use risingwave_pb::expr::expr_node::Type::{
     ConstantValue as TConstValue, GreaterThan, InputRef, Modulus,
 };
 use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
-use tikv_jemallocator::Jemalloc;
 use utils::bench_join;
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+enable_jemalloc_on_linux!();
 
 fn create_hash_join_executor(
     join_type: JoinType,
@@ -61,7 +59,7 @@ fn create_hash_join_executor(
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ProstDatum {
-                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(123)).as_ref()),
+                body: serialize_datum(Some(ScalarImpl::Int64(123)).as_ref()),
             })),
         };
         ExprNode {
@@ -91,7 +89,7 @@ fn create_hash_join_executor(
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ProstDatum {
-                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(456)).as_ref()),
+                body: serialize_datum(Some(ScalarImpl::Int64(456)).as_ref()),
             })),
         };
         ExprNode {
@@ -144,7 +142,7 @@ fn create_hash_join_executor(
                 ..Default::default()
             }),
             rex_node: Some(RexNode::Constant(ProstDatum {
-                body: serialize_datum_to_bytes(Some(ScalarImpl::Int64(100)).as_ref()),
+                body: serialize_datum(Some(ScalarImpl::Int64(100)).as_ref()),
             })),
         };
         Some(ExprNode {

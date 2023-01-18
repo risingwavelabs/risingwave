@@ -19,7 +19,6 @@ statement ok
 INSERT INTO integers2 VALUES (1, 10);
 
 # range join
-
 query IIII
 SELECT i, j, k, l FROM integers FULL OUTER JOIN integers2 ON integers.i<integers2.k ORDER BY 1, 2, 3, 4;
 ----
@@ -27,7 +26,6 @@ SELECT i, j, k, l FROM integers FULL OUTER JOIN integers2 ON integers.i<integers
 NULL	NULL	1	10
 
 # empty RHS
-
 query IIII
 SELECT i, j, k, l FROM integers FULL OUTER JOIN (SELECT * FROM integers2 WHERE 1=0) integers2 ON integers.i<integers2.k ORDER BY 1, 2, 3, 4;
 ----

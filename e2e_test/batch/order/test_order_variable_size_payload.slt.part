@@ -11,7 +11,6 @@ SET RW_IMPLICIT_FLUSH TO true;
 # select range % 2 i, string_agg('thisstringis200characterslong..........................................................................................................................................................................') s from range(5000) group by i order by i
 
 # weird one from SQLancer
-
 statement ok
 create table t0 (c0 varchar);
 
@@ -30,7 +29,6 @@ NULL
 a
 
 # strings longer than the 12 character prefix
-
 statement ok
 CREATE TABLE test0 (job VARCHAR, name VARCHAR);
 
@@ -100,7 +98,6 @@ NULL
 # 10000
 
 # multiple columns
-
 statement ok
 CREATE TABLE test4 (i INT, j INT);
 
@@ -217,7 +214,6 @@ insert into test5 values (3, 'ababa'), (1, 'babab'), (NULL, 'abbab'), (2, NULL);
 # 3	{'i': 3, 's': [[a, a, a]]}
 
 # sorting by a mix of variable size and constant size columns
-
 statement ok
 CREATE TABLE test6 (i1 INT, s1 VARCHAR, i2 int, s2 VARCHAR);
 
@@ -361,7 +357,6 @@ SELECT s1, s2, i1, i2 FROM test6 ORDER BY i2 DESC, s1, s2, i1;
 0reallylongstring2	1reallylongstring8	6	3
 
 # snippet from tpch q16
-
 statement ok
 create table test7 (p_brand VARCHAR, p_type VARCHAR, p_size INT, supplier_cnt BIGINT);
 
@@ -382,7 +377,6 @@ Brand#11	ECONOMY BURNISHED NICKEL	14	4
 Brand#11	ECONOMY BURNISHED NICKEL	49	4
 
 # simple nested lists (no structs)
-
 statement ok
 create table test8 (i int, s varchar);
 
@@ -412,6 +406,7 @@ insert into test8 values (3, 'aba'), (1, 'ccbcc'), (NULL, 'dbdbd'), (2, NULL);
 # 1	[[cc, cc]]
 # 2	[NULL]
 # 3	[[a, a]]
+
 
 # lists longer than STANDARD_VECTOR_SIZE
 # need single thread since order within list is otherwise undefined

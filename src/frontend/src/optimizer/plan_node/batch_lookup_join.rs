@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,6 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
+use super::generic::GenericPlanRef;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -60,8 +61,11 @@ impl BatchLookupJoin {
         lookup_prefix_len: usize,
         distributed_lookup: bool,
     ) -> Self {
+        // We cannot create a `BatchLookupJoin` without any eq keys. We require eq keys to do the
+        // lookup.
+        assert!(eq_join_predicate.has_eq());
         let ctx = logical.base.ctx.clone();
-        let dist = Self::derive_dist(logical.left().distribution());
+        let dist = Self::derive_dist(logical.left().distribution(), &logical);
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         Self {
             base,
@@ -74,8 +78,17 @@ impl BatchLookupJoin {
         }
     }
 
-    fn derive_dist(left: &Distribution) -> Distribution {
-        left.clone()
+    fn derive_dist(left: &Distribution, logical: &LogicalJoin) -> Distribution {
+        match left {
+            Distribution::Single => Distribution::Single,
+            Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) => {
+                let l2o = logical
+                    .l2i_col_mapping()
+                    .composite(&logical.i2o_col_mapping());
+                l2o.rewrite_provided_distribution(left)
+            }
+            _ => unreachable!(),
+        }
     }
 
     fn eq_join_predicate(&self) -> &EqJoinPredicate {
@@ -181,7 +194,12 @@ impl ToBatchProst for BatchLookupJoin {
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| x.to_expr_proto()),
+                    .map(|x| {
+                        self.base
+                            .ctx()
+                            .expr_with_session_timezone(x)
+                            .to_expr_proto()
+                    }),
                 outer_side_key: self
                     .eq_join_predicate
                     .left_eq_indexes()
@@ -216,7 +234,12 @@ impl ToBatchProst for BatchLookupJoin {
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| x.to_expr_proto()),
+                    .map(|x| {
+                        self.base
+                            .ctx()
+                            .expr_with_session_timezone(x)
+                            .to_expr_proto()
+                    }),
                 outer_side_key: self
                     .eq_join_predicate
                     .left_eq_indexes()

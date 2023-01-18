@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,7 +15,9 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes};
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
@@ -27,7 +29,8 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
 
-use crate::test_utils::{get_test_notification_client, HummockV2MixedStateStore};
+use crate::get_test_notification_client;
+use crate::test_utils::HummockV2MixedStateStore;
 
 #[tokio::test]
 #[ignore]
@@ -81,16 +84,22 @@ async fn test_failpoints_state_store_read_upload() {
         .unwrap();
 
     // Get the value after flushing to remote.
+    let anchor_prefix_hint = {
+        let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + anchor.len());
+        ret.put_u32(TableId::default().table_id());
+        ret.put_slice(anchor.as_ref());
+        ret
+    };
     let value = hummock_storage
         .get(
             &anchor,
             1,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+                prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -126,16 +135,22 @@ async fn test_failpoints_state_store_read_upload() {
     sstable_store.clear_meta_cache();
     fail::cfg(mem_read_err, "return").unwrap();
 
+    let anchor_prefix_hint = {
+        let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + anchor.len());
+        ret.put_u32(TableId::default().table_id());
+        ret.put_slice(anchor.as_ref());
+        ret
+    };
     let result = hummock_storage
         .get(
             &anchor,
             2,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+                prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await;
@@ -146,25 +161,31 @@ async fn test_failpoints_state_store_read_upload() {
             2,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: false,
-                dist_key_hint: None,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await;
     assert!(result.is_err());
 
+    let bee_prefix_hint = {
+        let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + b"ee".as_ref().len());
+        ret.put_u32(TableId::default().table_id());
+        ret.put_slice(b"ee".as_ref().as_ref());
+        ret
+    };
     let value = hummock_storage
         .get(
             b"ee".as_ref(),
             2,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+                prefix_hint: Some(Bytes::from(bee_prefix_hint)),
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -189,16 +210,22 @@ async fn test_failpoints_state_store_read_upload() {
         .await
         .unwrap();
 
+    let anchor_prefix_hint = {
+        let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + anchor.len());
+        ret.put_u32(TableId::default().table_id());
+        ret.put_slice(anchor.as_ref());
+        ret
+    };
     let value = hummock_storage
         .get(
             &anchor,
             5,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+                prefix_hint: Some(Bytes::from(anchor_prefix_hint)),
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -211,10 +238,10 @@ async fn test_failpoints_state_store_read_upload() {
             5,
             ReadOptions {
                 ignore_range_tombstone: false,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+                prefix_hint: None,
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             },
         )
         .await

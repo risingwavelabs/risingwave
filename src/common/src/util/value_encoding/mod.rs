@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,17 +32,17 @@ use error::ValueEncodingError;
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
 
 /// Serialize a datum into bytes and return (Not order guarantee, used in value encoding).
-pub fn serialize_datum_to_bytes(cell: Option<&ScalarImpl>) -> Vec<u8> {
+pub fn serialize_datum(cell: impl ToDatumRef) -> Vec<u8> {
     let mut buf: Vec<u8> = vec![];
-    serialize_datum(cell.map(|scala| scala.as_scalar_ref_impl()), &mut buf);
+    serialize_datum_into(cell, &mut buf);
     buf
 }
 
 /// Serialize a datum into bytes (Not order guarantee, used in value encoding).
-pub fn serialize_datum(datum_ref: impl ToDatumRef, buf: &mut impl BufMut) {
+pub fn serialize_datum_into(datum_ref: impl ToDatumRef, buf: &mut impl BufMut) {
     if let Some(d) = datum_ref.to_datum_ref() {
         buf.put_u8(1);
-        serialize_value(d, buf)
+        serialize_scalar(d, buf)
     } else {
         buf.put_u8(0);
     }
@@ -64,7 +64,7 @@ fn inner_deserialize_datum(data: &mut impl Buf, ty: &DataType) -> Result<Datum> 
     }
 }
 
-fn serialize_value(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
+fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
     match value {
         ScalarRefImpl::Int16(v) => buf.put_i16_le(v),
         ScalarRefImpl::Int32(v) => buf.put_i32_le(v),
@@ -93,7 +93,7 @@ fn serialize_struct(value: StructRef<'_>, buf: &mut impl BufMut) {
         .fields_ref()
         .iter()
         .map(|field_value| {
-            serialize_datum(*field_value, buf);
+            serialize_datum_into(*field_value, buf);
         })
         .collect_vec();
 }
@@ -105,7 +105,7 @@ fn serialize_list(value: ListRef<'_>, buf: &mut impl BufMut) {
     values_ref
         .iter()
         .map(|field_value| {
-            serialize_datum(*field_value, buf);
+            serialize_datum_into(*field_value, buf);
         })
         .collect_vec();
 }
@@ -152,7 +152,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Interval => ScalarImpl::Interval(deserialize_interval(data)?),
         DataType::Time => ScalarImpl::NaiveTime(deserialize_naivetime(data)?),
         DataType::Timestamp => ScalarImpl::NaiveDateTime(deserialize_naivedatetime(data)?),
-        DataType::Timestampz => ScalarImpl::Int64(data.get_i64_le()),
+        DataType::Timestamptz => ScalarImpl::Int64(data.get_i64_le()),
         DataType::Date => ScalarImpl::NaiveDate(deserialize_naivedate(data)?),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),

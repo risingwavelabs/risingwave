@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,7 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
@@ -79,6 +80,13 @@ pub fn iterator_test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
     UserKey::for_test(TableId::default(), iterator_test_table_key_of(idx))
 }
 
+pub fn iterator_test_bytes_user_key_of(idx: usize) -> UserKey<Bytes> {
+    UserKey::for_test(
+        TableId::default(),
+        Bytes::from(iterator_test_table_key_of(idx)),
+    )
+}
+
 /// Generates keys like `{table_id=0}key_test_00002` with epoch 233.
 pub fn iterator_test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
@@ -87,12 +95,22 @@ pub fn iterator_test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     }
 }
 
+/// Generates keys like `{table_id=0}key_test_00002` with epoch 233.
+pub fn iterator_test_bytes_key_of(idx: usize) -> FullKey<Bytes> {
+    iterator_test_key_of(idx).into_bytes()
+}
+
 /// Generates keys like `{table_id=0}key_test_00002` with epoch `epoch` .
 pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: iterator_test_user_key_of(idx),
         epoch,
     }
+}
+
+/// Generates keys like `{table_id=0}key_test_00002` with epoch `epoch` .
+pub fn iterator_test_bytes_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Bytes> {
+    iterator_test_key_of_epoch(idx, epoch).into_bytes()
 }
 
 /// The value of an index, like `value_test_00002` without value meta

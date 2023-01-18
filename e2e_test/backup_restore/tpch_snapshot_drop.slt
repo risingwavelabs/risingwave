@@ -1,0 +1,4 @@
+statement ok
+drop materialized view tpch_q7;
+
+include ../tpch/drop_tables.slt.part

@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,13 +15,13 @@
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::sync::Arc;
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes};
 use futures::TryStreamExt;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_hummock_sdk::key::{map_table_key_range, FullKey};
+use risingwave_hummock_sdk::key::{map_table_key_range, FullKey, UserKey, TABLE_PREFIX_LEN};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
@@ -38,7 +38,7 @@ use risingwave_storage::hummock::store::version::{
 };
 use risingwave_storage::hummock::test_utils::default_config_for_test;
 use risingwave_storage::hummock::{MemoryLimiter, SstableIdManager, SstableStore};
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     ReadOptions, StateStoreRead, StateStoreWrite, SyncResult, WriteOptions,
@@ -46,7 +46,7 @@ use risingwave_storage::store::{
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
-use crate::test_utils::prepare_first_valid_version;
+use crate::test_utils::{prepare_first_valid_version, register_test_tables};
 
 pub async fn prepare_hummock_event_handler(
     opt: Arc<StorageConfig>,
@@ -64,13 +64,16 @@ pub async fn prepare_hummock_event_handler(
         worker_node.id,
     ));
 
+    let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+    register_test_tables(&filter_key_extractor_manager, &hummock_manager_ref, &[0]).await;
+
     let compactor_context = Arc::new(Context::new_local_compact_context(
         opt.clone(),
         sstable_store_ref,
         hummock_meta_client,
-        Arc::new(StateStoreMetrics::unused()),
+        Arc::new(CompactorMetrics::unused()),
         sstable_id_manager,
-        Arc::new(FilterKeyExtractorManager::default()),
+        filter_key_extractor_manager,
     ));
 
     let hummock_event_handler = HummockEventHandler::new(
@@ -165,7 +168,7 @@ async fn test_storage_basic() {
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
     let hummock_version_reader =
-        HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
+        HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
 
     let hummock_storage =
         get_local_hummock_storage(Default::default(), event_tx.clone(), hummock_version_reader)
@@ -224,8 +227,9 @@ async fn test_storage_basic() {
                 ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+
+                prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -240,8 +244,9 @@ async fn test_storage_basic() {
                 ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+
+                prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -258,8 +263,9 @@ async fn test_storage_basic() {
                 ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+
+                prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -288,8 +294,9 @@ async fn test_storage_basic() {
                 ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+
+                prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -320,8 +327,9 @@ async fn test_storage_basic() {
                 ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+
+                prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -337,8 +345,9 @@ async fn test_storage_basic() {
                 ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+
+                prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -354,8 +363,9 @@ async fn test_storage_basic() {
                 ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+
+                prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -363,14 +373,14 @@ async fn test_storage_basic() {
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch1),
+            FullKey::for_test(TableId::default(), b"aa".to_vec().into(), epoch1),
             Bytes::copy_from_slice(&b"111"[..])
         )),
         iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch1),
+            FullKey::for_test(TableId::default(), b"bb".to_vec().into(), epoch1),
             Bytes::copy_from_slice(&b"222"[..])
         )),
         iter.try_next().await.unwrap()
@@ -386,8 +396,9 @@ async fn test_storage_basic() {
                 ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+
+                prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -404,8 +415,9 @@ async fn test_storage_basic() {
                 ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+
+                prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -421,8 +433,9 @@ async fn test_storage_basic() {
                 ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+
+                prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -430,21 +443,21 @@ async fn test_storage_basic() {
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"aa".to_vec(), epoch2),
+            FullKey::for_test(TableId::default(), b"aa".to_vec().into(), epoch2),
             Bytes::copy_from_slice(&b"111111"[..])
         )),
         iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch1),
+            FullKey::for_test(TableId::default(), b"bb".to_vec().into(), epoch1),
             Bytes::copy_from_slice(&b"222"[..])
         )),
         iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch2),
+            FullKey::for_test(TableId::default(), b"cc".to_vec().into(), epoch2),
             Bytes::copy_from_slice(&b"333"[..])
         )),
         iter.try_next().await.unwrap()
@@ -460,8 +473,9 @@ async fn test_storage_basic() {
                 ignore_range_tombstone: false,
                 table_id: Default::default(),
                 retention_seconds: None,
-                check_bloom_filter: true,
-                dist_key_hint: None,
+
+                prefix_hint: None,
+                read_version_from_backup: false,
             },
         )
         .await
@@ -469,28 +483,28 @@ async fn test_storage_basic() {
     futures::pin_mut!(iter);
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"bb".to_vec(), epoch1),
+            FullKey::for_test(TableId::default(), b"bb".to_vec().into(), epoch1),
             Bytes::copy_from_slice(&b"222"[..])
         )),
         iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"cc".to_vec(), epoch2),
+            FullKey::for_test(TableId::default(), b"cc".to_vec().into(), epoch2),
             Bytes::copy_from_slice(&b"333"[..])
         )),
         iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"dd".to_vec(), epoch3),
+            FullKey::for_test(TableId::default(), b"dd".to_vec().into(), epoch3),
             Bytes::copy_from_slice(&b"444"[..])
         )),
         iter.try_next().await.unwrap()
     );
     assert_eq!(
         Some((
-            FullKey::for_test(TableId::default(), b"ee".to_vec(), epoch3),
+            FullKey::for_test(TableId::default(), b"ee".to_vec().into(), epoch3),
             Bytes::copy_from_slice(&b"555"[..])
         )),
         iter.try_next().await.unwrap()
@@ -530,7 +544,7 @@ async fn test_state_store_sync() {
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
     let hummock_version_reader =
-        HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
+        HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
 
     let hummock_storage =
         get_local_hummock_storage(Default::default(), event_tx.clone(), hummock_version_reader)
@@ -626,8 +640,9 @@ async fn test_state_store_sync() {
                         ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
-                        check_bloom_filter: false,
-                        dist_key_hint: None,
+
+                        prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -669,8 +684,9 @@ async fn test_state_store_sync() {
                         ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
-                        check_bloom_filter: false,
-                        dist_key_hint: None,
+
+                        prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -690,8 +706,9 @@ async fn test_state_store_sync() {
                     ignore_range_tombstone: false,
                     table_id: Default::default(),
                     retention_seconds: None,
-                    check_bloom_filter: false,
-                    dist_key_hint: None,
+
+                    prefix_hint: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
@@ -711,7 +728,7 @@ async fn test_state_store_sync() {
             assert_eq!(
                 result,
                 Some((
-                    FullKey::for_test(TableId::default(), k.to_vec(), e),
+                    FullKey::for_test(TableId::default(), k.to_vec().into(), e),
                     Bytes::from(v)
                 ))
             );
@@ -729,8 +746,9 @@ async fn test_state_store_sync() {
                     ignore_range_tombstone: false,
                     table_id: Default::default(),
                     retention_seconds: None,
-                    check_bloom_filter: false,
-                    dist_key_hint: None,
+
+                    prefix_hint: None,
+                    read_version_from_backup: false,
                 },
             )
             .await
@@ -751,7 +769,7 @@ async fn test_state_store_sync() {
             assert_eq!(
                 result,
                 Some((
-                    FullKey::for_test(TableId::default(), k.to_vec(), e),
+                    FullKey::for_test(TableId::default(), k.to_vec().into(), e),
                     Bytes::from(v)
                 ))
             );
@@ -789,7 +807,7 @@ async fn test_delete_get() {
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
     let hummock_version_reader =
-        HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
+        HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
 
     let hummock_storage =
         get_local_hummock_storage(Default::default(), event_tx.clone(), hummock_version_reader)
@@ -848,10 +866,11 @@ async fn test_delete_get() {
             epoch2,
             ReadOptions {
                 ignore_range_tombstone: false,
-                dist_key_hint: None,
-                check_bloom_filter: true,
+                prefix_hint: None,
+
                 table_id: Default::default(),
                 retention_seconds: None,
+                read_version_from_backup: false,
             }
         )
         .await
@@ -889,7 +908,7 @@ async fn test_multiple_epoch_sync() {
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
     let hummock_version_reader =
-        HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
+        HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
 
     let hummock_storage =
         get_local_hummock_storage(Default::default(), event_tx.clone(), hummock_version_reader)
@@ -960,8 +979,9 @@ async fn test_multiple_epoch_sync() {
                             ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
-                            check_bloom_filter: false,
-                            dist_key_hint: None,
+
+                            prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                     )
                     .await
@@ -977,8 +997,9 @@ async fn test_multiple_epoch_sync() {
                         ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
-                        check_bloom_filter: false,
-                        dist_key_hint: None,
+
+                        prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -993,8 +1014,9 @@ async fn test_multiple_epoch_sync() {
                             ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
-                            check_bloom_filter: false,
-                            dist_key_hint: None,
+
+                            prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                     )
                     .await
@@ -1057,7 +1079,7 @@ async fn test_iter_with_min_epoch() {
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
     let hummock_version_reader =
-        HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
+        HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
 
     let hummock_storage =
         get_local_hummock_storage(Default::default(), event_tx.clone(), hummock_version_reader)
@@ -1127,8 +1149,8 @@ async fn test_iter_with_min_epoch() {
                         ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
-                        check_bloom_filter: true,
-                        dist_key_hint: None,
+                        prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -1149,8 +1171,8 @@ async fn test_iter_with_min_epoch() {
                         ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
-                        check_bloom_filter: true,
-                        dist_key_hint: None,
+                        prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -1169,8 +1191,8 @@ async fn test_iter_with_min_epoch() {
                         ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: Some(1),
-                        check_bloom_filter: true,
-                        dist_key_hint: None,
+                        prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -1208,8 +1230,8 @@ async fn test_iter_with_min_epoch() {
                         ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
-                        check_bloom_filter: true,
-                        dist_key_hint: None,
+                        prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -1230,8 +1252,8 @@ async fn test_iter_with_min_epoch() {
                         ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: None,
-                        check_bloom_filter: true,
-                        dist_key_hint: None,
+                        prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -1252,8 +1274,8 @@ async fn test_iter_with_min_epoch() {
                         ignore_range_tombstone: false,
                         table_id: Default::default(),
                         retention_seconds: Some(1),
-                        check_bloom_filter: true,
-                        dist_key_hint: None,
+                        prefix_hint: None,
+                        read_version_from_backup: false,
                     },
                 )
                 .await
@@ -1297,7 +1319,7 @@ async fn test_hummock_version_reader() {
     tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
 
     let hummock_version_reader =
-        HummockVersionReader::new(sstable_store, Arc::new(StateStoreMetrics::unused()));
+        HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
 
     let hummock_storage = get_local_hummock_storage(
         Default::default(),
@@ -1402,8 +1424,8 @@ async fn test_hummock_version_reader() {
                             ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
-                            check_bloom_filter: true,
-                            dist_key_hint: None,
+                            prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                         read_snapshot,
                     )
@@ -1431,8 +1453,8 @@ async fn test_hummock_version_reader() {
                             ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
-                            check_bloom_filter: true,
-                            dist_key_hint: None,
+                            prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                         read_snapshot,
                     )
@@ -1460,8 +1482,8 @@ async fn test_hummock_version_reader() {
                             ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: Some(1),
-                            check_bloom_filter: true,
-                            dist_key_hint: None,
+                            prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                         read_snapshot,
                     )
@@ -1527,8 +1549,8 @@ async fn test_hummock_version_reader() {
                             ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
-                            check_bloom_filter: true,
-                            dist_key_hint: None,
+                            prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                         read_snapshot,
                     )
@@ -1565,8 +1587,8 @@ async fn test_hummock_version_reader() {
                             ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
-                            check_bloom_filter: true,
-                            dist_key_hint: None,
+                            prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                         read_snapshot,
                     )
@@ -1603,8 +1625,8 @@ async fn test_hummock_version_reader() {
                             ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: Some(1),
-                            check_bloom_filter: true,
-                            dist_key_hint: None,
+                            prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                         read_snapshot,
                     )
@@ -1641,8 +1663,8 @@ async fn test_hummock_version_reader() {
                             ignore_range_tombstone: false,
                             table_id: Default::default(),
                             retention_seconds: None,
-                            check_bloom_filter: true,
-                            dist_key_hint: None,
+                            prefix_hint: None,
+                            read_version_from_backup: false,
                         },
                         read_snapshot,
                     )
@@ -1685,8 +1707,8 @@ async fn test_hummock_version_reader() {
                                 ignore_range_tombstone: false,
                                 table_id: Default::default(),
                                 retention_seconds: None,
-                                check_bloom_filter: true,
-                                dist_key_hint: None,
+                                prefix_hint: None,
+                                read_version_from_backup: false,
                             },
                             read_snapshot,
                         )
@@ -1723,8 +1745,8 @@ async fn test_hummock_version_reader() {
                                 ignore_range_tombstone: false,
                                 table_id: Default::default(),
                                 retention_seconds: None,
-                                check_bloom_filter: true,
-                                dist_key_hint: None,
+                                prefix_hint: None,
+                                read_version_from_backup: false,
                             },
                             read_snapshot,
                         )
@@ -1736,5 +1758,280 @@ async fn test_hummock_version_reader() {
                 }
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn test_get_with_min_epoch() {
+    let sstable_store = mock_sstable_store();
+    let hummock_options = Arc::new(default_config_for_test());
+    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
+
+    let sstable_id_manager = Arc::new(SstableIdManager::new(
+        hummock_meta_client.clone(),
+        hummock_options.sstable_id_remote_fetch_number,
+    ));
+
+    let (hummock_event_handler, event_tx) = prepare_hummock_event_handler(
+        hummock_options.clone(),
+        env,
+        hummock_manager_ref,
+        worker_node,
+        sstable_store.clone(),
+        sstable_id_manager.clone(),
+    )
+    .await;
+
+    let version_update_notifier_tx = hummock_event_handler.version_update_notifier_tx();
+    tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
+
+    let hummock_version_reader =
+        HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
+
+    let hummock_storage =
+        get_local_hummock_storage(Default::default(), event_tx.clone(), hummock_version_reader)
+            .await;
+
+    let epoch1 = (31 * 1000) << 16;
+
+    let gen_key = |index: usize| -> Vec<u8> {
+        UserKey::for_test(TableId::default(), format!("key_{}", index)).encode()
+    };
+
+    let gen_val = |index: usize| -> String { format!("val_{}", index) };
+
+    // epoch 1 write
+    let batch_epoch1: Vec<(Bytes, StorageValue)> = (0..10)
+        .into_iter()
+        .map(|index| {
+            (
+                Bytes::from(gen_key(index)),
+                StorageValue::new_put(gen_val(index)),
+            )
+        })
+        .collect();
+
+    hummock_storage
+        .ingest_batch(
+            batch_epoch1,
+            vec![],
+            WriteOptions {
+                epoch: epoch1,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let epoch2 = (32 * 1000) << 16;
+    // epoch 2 write
+    let batch_epoch2: Vec<(Bytes, StorageValue)> = (20..30)
+        .into_iter()
+        .map(|index| {
+            (
+                Bytes::from(gen_key(index)),
+                StorageValue::new_put(gen_val(index)),
+            )
+        })
+        .collect();
+
+    hummock_storage
+        .ingest_batch(
+            batch_epoch2,
+            vec![],
+            WriteOptions {
+                epoch: epoch2,
+                table_id: Default::default(),
+            },
+        )
+        .await
+        .unwrap();
+
+    {
+        // test before sync
+        let k = gen_key(0);
+        let prefix_hint = {
+            let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + k.len());
+            ret.put_u32(TableId::default().table_id());
+            ret.put_slice(k.as_ref());
+            ret
+        };
+        {
+            let v = hummock_storage
+                .get(
+                    k.as_ref(),
+                    epoch1,
+                    ReadOptions {
+                        ignore_range_tombstone: false,
+                        table_id: Default::default(),
+                        retention_seconds: None,
+                        prefix_hint: None,
+                        read_version_from_backup: false,
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(v.is_some());
+        }
+
+        {
+            let v = hummock_storage
+                .get(
+                    k.as_ref(),
+                    epoch1,
+                    ReadOptions {
+                        ignore_range_tombstone: false,
+                        table_id: Default::default(),
+                        retention_seconds: None,
+                        prefix_hint: Some(Bytes::from(prefix_hint.clone())),
+                        read_version_from_backup: false,
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(v.is_some());
+        }
+
+        {
+            let v = hummock_storage
+                .get(
+                    k.as_ref(),
+                    epoch2,
+                    ReadOptions {
+                        ignore_range_tombstone: false,
+                        table_id: Default::default(),
+                        retention_seconds: None,
+                        prefix_hint: Some(Bytes::from(prefix_hint.clone())),
+                        read_version_from_backup: false,
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(v.is_some());
+        }
+
+        {
+            let v = hummock_storage
+                .get(
+                    k.as_ref(),
+                    epoch2,
+                    ReadOptions {
+                        ignore_range_tombstone: false,
+                        table_id: Default::default(),
+                        retention_seconds: Some(1),
+                        prefix_hint: Some(Bytes::from(prefix_hint.clone())),
+                        read_version_from_backup: false,
+                    },
+                )
+                .await
+                .unwrap();
+            assert!(v.is_none());
+        }
+    }
+
+    // test after sync
+
+    let sync_result1 = sync_epoch(&event_tx, epoch1).await;
+    let sync_result2 = sync_epoch(&event_tx, epoch2).await;
+    hummock_meta_client
+        .commit_epoch(epoch1, sync_result1.uncommitted_ssts)
+        .await
+        .unwrap();
+    hummock_meta_client
+        .commit_epoch(epoch2, sync_result2.uncommitted_ssts)
+        .await
+        .unwrap();
+
+    try_wait_epoch_for_test(epoch2, &version_update_notifier_tx).await;
+    let k = gen_key(0);
+    let prefix_hint = {
+        let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + k.len());
+        ret.put_u32(TableId::default().table_id());
+        ret.put_slice(k.as_ref());
+        ret
+    };
+
+    {
+        let v = hummock_storage
+            .get(
+                k.as_ref(),
+                epoch1,
+                ReadOptions {
+                    ignore_range_tombstone: false,
+                    table_id: Default::default(),
+                    retention_seconds: None,
+
+                    prefix_hint: None,
+                    read_version_from_backup: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(v.is_some());
+    }
+
+    {
+        let v = hummock_storage
+            .get(
+                k.as_ref(),
+                epoch1,
+                ReadOptions {
+                    ignore_range_tombstone: false,
+                    table_id: Default::default(),
+                    retention_seconds: None,
+
+                    prefix_hint: Some(Bytes::from(prefix_hint.clone())),
+                    read_version_from_backup: false,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(v.is_some());
+    }
+
+    {
+        let k = gen_key(0);
+        let v = hummock_storage
+            .get(
+                k.as_ref(),
+                epoch2,
+                ReadOptions {
+                    ignore_range_tombstone: false,
+                    table_id: Default::default(),
+                    retention_seconds: None,
+
+                    prefix_hint: Some(Bytes::from(prefix_hint.clone())),
+                    read_version_from_backup: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(v.is_some());
+    }
+
+    {
+        let k = gen_key(0);
+        let v = hummock_storage
+            .get(
+                k.as_ref(),
+                epoch2,
+                ReadOptions {
+                    ignore_range_tombstone: false,
+                    table_id: Default::default(),
+                    retention_seconds: Some(1),
+
+                    prefix_hint: Some(Bytes::from(prefix_hint.clone())),
+                    read_version_from_backup: false,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(v.is_none());
     }
 }

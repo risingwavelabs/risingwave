@@ -1,10 +1,10 @@
-// Copyright 2022 Singularity Data
+// Copyright 2023 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -157,18 +157,20 @@ impl DispatchExecutorInner {
         let dispatcher = self.find_dispatcher(update.dispatcher_id);
         dispatcher.remove_outputs(&ids);
 
-        match dispatcher {
-            // The hash mapping is only used by the hash dispatcher.
-            DispatcherImpl::Hash(dispatcher) => {
-                dispatcher.hash_mapping = {
-                    let compressed_mapping = update.get_hash_mapping()?;
-                    decompress_data(
-                        &compressed_mapping.original_indices,
-                        &compressed_mapping.data,
-                    )
-                }
+        // The hash mapping is only used by the hash dispatcher.
+        //
+        // We specify a single upstream hash mapping for scaling the downstream fragment. However,
+        // it's possible that there're multiple upstreams with different exchange types, for
+        // example, the `Broadcast` inner side of the dynamic filter. There're too many combinations
+        // to handle here, so we just ignore the `hash_mapping` field for any other exchange types.
+        if let DispatcherImpl::Hash(dispatcher) = dispatcher {
+            dispatcher.hash_mapping = {
+                let compressed_mapping = update.get_hash_mapping()?;
+                decompress_data(
+                    &compressed_mapping.original_indices,
+                    &compressed_mapping.data,
+                )
             }
-            _ => assert!(update.hash_mapping.is_none()),
         }
 
         Ok(())
@@ -867,7 +869,7 @@ mod tests {
 
     use super::*;
     use crate::executor::exchange::output::Output;
-    use crate::executor::exchange::permit::channel;
+    use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::receiver::ReceiverExecutor;
     use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
 
@@ -971,7 +973,7 @@ mod tests {
     #[tokio::test]
     async fn test_configuration_change() {
         let _schema = Schema { fields: vec![] };
-        let (tx, rx) = channel();
+        let (tx, rx) = channel_for_test();
         let actor_id = 233;
         let input = Box::new(ReceiverExecutor::for_test(rx));
         let ctx = Arc::new(SharedContext::for_test());

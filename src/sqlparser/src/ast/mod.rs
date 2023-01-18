@@ -2,7 +2,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -203,8 +203,17 @@ pub enum Expr {
     Identifier(Ident),
     /// Multi-part identifier, e.g. `table_alias.column` or `schema.table.col`
     CompoundIdentifier(Vec<Ident>),
-    /// Struct-field identifier, expr is a table or a column struct, ident is field.
+    /// Struct-field identifier.
+    /// Expr is an arbitrary expression, returning either a table or a column.
+    /// Idents are consecutive field accesses.
     /// e.g. `(table.v1).v2` or `(table).v1.v2`
+    ///
+    /// It must contain parentheses to be distinguished from a [`Expr::CompoundIdentifier`].
+    /// See also <https://www.postgresql.org/docs/current/rowtypes.html#ROWTYPES-ACCESSING>
+    ///
+    /// The left parentheses must be put at the beginning of the expression.
+    /// The first parenthesized part is the `expr` part, and the rest are flattened into `idents`.
+    /// e.g., `((v1).v2.v3).v4` is equivalent to `(v1).v2.v3.v4`.
     FieldIdentifier(Box<Expr>, Vec<Ident>),
     /// `IS NULL` operator
     IsNull(Box<Expr>),
@@ -247,6 +256,10 @@ pub enum Expr {
         op: BinaryOperator,
         right: Box<Expr>,
     },
+    /// Some operation e.g. `foo > Some(bar)`, It will be wrapped in the right side of BinaryExpr
+    SomeOp(Box<Expr>),
+    /// ALL operation e.g. `foo > ALL(bar)`, It will be wrapped in the right side of BinaryExpr
+    AllOp(Box<Expr>),
     /// Unary operation e.g. `NOT foo`
     UnaryOp { op: UnaryOperator, expr: Box<Expr> },
     /// CAST an expression to a different data type e.g. `CAST(foo AS VARCHAR)`
@@ -341,7 +354,7 @@ impl fmt::Display for Expr {
         match self {
             Expr::Identifier(s) => write!(f, "{}", s),
             Expr::CompoundIdentifier(s) => write!(f, "{}", display_separated(s, ".")),
-            Expr::FieldIdentifier(ast, s) => write!(f, "{}.{}", ast, display_separated(s, ".")),
+            Expr::FieldIdentifier(ast, s) => write!(f, "({}).{}", ast, display_separated(s, ".")),
             Expr::IsNull(ast) => write!(f, "{} IS NULL", ast),
             Expr::IsNotNull(ast) => write!(f, "{} IS NOT NULL", ast),
             Expr::IsTrue(ast) => write!(f, "{} IS TRUE", ast),
@@ -390,6 +403,8 @@ impl fmt::Display for Expr {
                 op,
                 fmt_expr_with_paren(right)
             ),
+            Expr::SomeOp(expr) => write!(f, "SOME({})", expr),
+            Expr::AllOp(expr) => write!(f, "ALL({})", expr),
             Expr::UnaryOp { op, expr } => {
                 if op == &UnaryOperator::PGPostfixFactorial {
                     write!(f, "{}{}", expr, op)
@@ -701,8 +716,10 @@ impl fmt::Display for AddDropSync {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ShowObject {
     Table { schema: Option<Ident> },
+    InternalTable { schema: Option<Ident> },
     Database,
     Schema,
+    View { schema: Option<Ident> },
     MaterializedView { schema: Option<Ident> },
     Source { schema: Option<Ident> },
     Sink { schema: Option<Ident> },
@@ -726,6 +743,12 @@ impl fmt::Display for ShowObject {
             ShowObject::Table { schema } => {
                 write!(f, "TABLES{}", fmt_schema(schema))
             }
+            ShowObject::InternalTable { schema } => {
+                write!(f, "INTERNAL TABLES{}", fmt_schema(schema))
+            }
+            ShowObject::View { schema } => {
+                write!(f, "VIEWS{}", fmt_schema(schema))
+            }
             ShowObject::MaterializedView { schema } => {
                 write!(f, "MATERIALIZED VIEWS{}", fmt_schema(schema))
             }
@@ -735,6 +758,32 @@ impl fmt::Display for ShowObject {
             }
             ShowObject::Sink { schema } => write!(f, "SINKS{}", fmt_schema(schema)),
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ShowCreateType {
+    Table,
+    MaterializedView,
+    View,
+    Index,
+    Source,
+    Sink,
+    Function,
+}
+
+impl fmt::Display for ShowCreateType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ShowCreateType::Table => f.write_str("TABLE"),
+            ShowCreateType::MaterializedView => f.write_str("MATERIALIZED VIEW"),
+            ShowCreateType::View => f.write_str("VIEW"),
+            ShowCreateType::Index => f.write_str("INDEX"),
+            ShowCreateType::Source => f.write_str("SOURCE"),
+            ShowCreateType::Sink => f.write_str("SINK"),
+            ShowCreateType::Function => f.write_str("FUNCTION"),
         }
     }
 }
@@ -832,6 +881,8 @@ pub enum Statement {
         columns: Vec<Ident>,
         /// A SQL query that specifies what to insert
         source: Box<Query>,
+        /// Define output of this insert statement
+        returning: Vec<SelectItem>,
     },
     Copy {
         /// TABLE
@@ -849,6 +900,8 @@ pub enum Statement {
         assignments: Vec<Assignment>,
         /// WHERE
         selection: Option<Expr>,
+        /// RETURNING
+        returning: Vec<SelectItem>,
     },
     /// DELETE
     Delete {
@@ -856,6 +909,8 @@ pub enum Statement {
         table_name: ObjectName,
         /// WHERE
         selection: Option<Expr>,
+        /// RETURNING
+        returning: Vec<SelectItem>,
     },
     /// CREATE VIEW
     CreateView {
@@ -878,6 +933,8 @@ pub enum Statement {
         columns: Vec<ColumnDef>,
         constraints: Vec<TableConstraint>,
         with_options: Vec<SqlOption>,
+        /// Optional schema of the external source with which the table is created
+        source_schema: Option<SourceSchema>,
         /// `AS ( query )`
         query: Option<Box<Query>>,
     },
@@ -904,10 +961,12 @@ pub enum Statement {
     /// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
     CreateFunction {
         or_replace: bool,
+        temporary: bool,
         name: ObjectName,
-        args: Option<Vec<CreateFunctionArg>>,
+        args: Option<Vec<OperateFunctionArg>>,
         return_type: Option<DataType>,
-        bodies: Vec<CreateFunctionBody>,
+        /// Optional parameters.
+        params: CreateFunctionBody,
     },
     /// ALTER TABLE
     AlterTable {
@@ -920,10 +979,25 @@ pub enum Statement {
         /// Table or Source name
         name: ObjectName,
     },
-    /// SHOW COMMAND
+    /// SHOW OBJECT COMMAND
     ShowObjects(ShowObject),
+    /// SHOW CREATE COMMAND
+    ShowCreateObject {
+        /// Show create object type
+        create_type: ShowCreateType,
+        /// Show create object name
+        name: ObjectName,
+    },
     /// DROP
     Drop(DropStatement),
+    /// DROP Function
+    DropFunction {
+        if_exists: bool,
+        /// One or more function to drop
+        func_desc: Vec<DropFunctionDesc>,
+        /// `CASCADE` or `RESTRICT`
+        option: Option<ReferentialAction>,
+    },
     /// SET <variable>
     ///
     /// Note: this is not a standard SQL statement, but it is supported by at
@@ -1061,18 +1135,26 @@ impl fmt::Display for Statement {
                 write!(f, "SHOW {}", show_object)?;
                 Ok(())
             }
+            Statement::ShowCreateObject{ create_type: show_type, name } => {
+                write!(f, "SHOW CREATE {} {}", show_type, name)?;
+                Ok(())
+            }
             Statement::Insert {
                 table_name,
                 columns,
                 source,
+                returning,
             } => {
                 write!(f, "INSERT INTO {table_name} ", table_name = table_name,)?;
                 if !columns.is_empty() {
                     write!(f, "({}) ", display_comma_separated(columns))?;
                 }
-                write!(f, "{}", source)
+                write!(f, "{}", source)?;
+                if !returning.is_empty() {
+                    write!(f, " RETURNING ({})", display_comma_separated(returning))?;
+                }
+                Ok(())
             }
-
             Statement::Copy {
                 table_name,
                 columns,
@@ -1102,6 +1184,7 @@ impl fmt::Display for Statement {
                 table_name,
                 assignments,
                 selection,
+                returning,
             } => {
                 write!(f, "UPDATE {}", table_name)?;
                 if !assignments.is_empty() {
@@ -1110,15 +1193,22 @@ impl fmt::Display for Statement {
                 if let Some(selection) = selection {
                     write!(f, " WHERE {}", selection)?;
                 }
+                if !returning.is_empty() {
+                    write!(f, " RETURNING ({})", display_comma_separated(returning))?;
+                }
                 Ok(())
             }
             Statement::Delete {
                 table_name,
                 selection,
+                returning,
             } => {
                 write!(f, "DELETE FROM {}", table_name)?;
                 if let Some(selection) = selection {
                     write!(f, " WHERE {}", selection)?;
+                }
+                if !returning.is_empty() {
+                    write!(f, " RETURNING {}", display_comma_separated(returning))?;
                 }
                 Ok(())
             }
@@ -1135,14 +1225,16 @@ impl fmt::Display for Statement {
             }
             Statement::CreateFunction {
                 or_replace,
+                temporary,
                 name,
                 args,
                 return_type,
-                bodies,
+                params,
             } => {
                 write!(
                     f,
-                    "CREATE {or_replace}FUNCTION {name}",
+                    "CREATE {or_replace}{temp}FUNCTION {name}",
+                    temp = if *temporary { "TEMPORARY " } else { "" },
                     or_replace = if *or_replace { "OR REPLACE " } else { "" },
                 )?;
                 if let Some(args) = args {
@@ -1151,7 +1243,7 @@ impl fmt::Display for Statement {
                 if let Some(return_type) = return_type {
                     write!(f, " RETURNS {}", return_type)?;
                 }
-                write!(f, " {}", display_separated(bodies, " "))?;
+                write!(f, "{params}")?;
                 Ok(())
             }
             Statement::CreateView {
@@ -1185,6 +1277,7 @@ impl fmt::Display for Statement {
                 or_replace,
                 if_not_exists,
                 temporary,
+                source_schema,
                 query,
             } => {
                 // We want to allow the following options
@@ -1214,6 +1307,9 @@ impl fmt::Display for Statement {
                 }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
+                }
+                if let Some(source_schema) = source_schema {
+                    write!(f, " ROW FORMAT {}", source_schema)?;
                 }
                 if let Some(query) = query {
                     write!(f, " AS {}", query)?;
@@ -1265,6 +1361,22 @@ impl fmt::Display for Statement {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
+            Statement::DropFunction {
+                if_exists,
+                func_desc,
+                option,
+            } => {
+                write!(
+                    f,
+                    "DROP FUNCTION{} {}",
+                    if *if_exists { " IF EXISTS" } else { "" },
+                    display_comma_separated(func_desc),
+                )?;
+                if let Some(op) = option {
+                    write!(f, " {}", op)?;
+                }
+                Ok(())
+            }
             Statement::SetVariable {
                 local,
                 variable,
@@ -1639,9 +1751,10 @@ impl fmt::Display for Assignment {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionArgExpr {
     Expr(Expr),
-    /// expr is a table or a column struct, object_name is field.
+    /// Expr is an arbitrary expression, returning either a table or a column.
+    /// Idents are the prefix of `*`, which are consecutive field accesses.
     /// e.g. `(table.v1).*` or `(table).v1.*`
-    ExprQualifiedWildcard(Expr, ObjectName),
+    ExprQualifiedWildcard(Expr, Vec<Ident>),
     /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
     QualifiedWildcard(ObjectName),
     /// An unqualified `*`
@@ -1653,7 +1766,14 @@ impl fmt::Display for FunctionArgExpr {
         match self {
             FunctionArgExpr::Expr(expr) => write!(f, "{}", expr),
             FunctionArgExpr::ExprQualifiedWildcard(expr, prefix) => {
-                write!(f, "{}.{}.*", expr, prefix)
+                write!(
+                    f,
+                    "({}){}.*",
+                    expr,
+                    prefix
+                        .iter()
+                        .format_with("", |i, f| f(&format_args!(".{i}")))
+                )
             }
             FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
             FunctionArgExpr::Wildcard => f.write_str("*"),
@@ -1889,17 +2009,53 @@ impl fmt::Display for ShowStatementFilter {
     }
 }
 
+/// Function describe in DROP FUNCTION.
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DropFunctionOption {
+    Restrict,
+    Cascade,
+}
+
+impl fmt::Display for DropFunctionOption {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DropFunctionOption::Restrict => write!(f, "RESTRICT "),
+            DropFunctionOption::Cascade => write!(f, "CASCADE  "),
+        }
+    }
+}
+
+/// Function describe in DROP FUNCTION.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub struct DropFunctionDesc {
+    pub name: ObjectName,
+    pub args: Option<Vec<OperateFunctionArg>>,
+}
+
+impl fmt::Display for DropFunctionDesc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)?;
+        if let Some(args) = &self.args {
+            write!(f, "({})", display_comma_separated(args))?;
+        }
+        Ok(())
+    }
+}
+
 /// Function argument in CREATE FUNCTION.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct CreateFunctionArg {
+pub struct OperateFunctionArg {
     pub mode: Option<ArgMode>,
     pub name: Option<Ident>,
     pub data_type: DataType,
     pub default_expr: Option<Expr>,
 }
 
-impl CreateFunctionArg {
+impl OperateFunctionArg {
     /// Returns an unnamed argument.
     pub fn unnamed(data_type: DataType) -> Self {
         Self {
@@ -1921,7 +2077,7 @@ impl CreateFunctionArg {
     }
 }
 
-impl fmt::Display for CreateFunctionArg {
+impl fmt::Display for OperateFunctionArg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(mode) = &self.mode {
             write!(f, "{} ", mode)?;
@@ -1975,29 +2131,57 @@ impl fmt::Display for FunctionBehavior {
     }
 }
 
-/// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[non_exhaustive]
-pub enum CreateFunctionBody {
-    /// AS 'definition'
-    As(String),
+pub enum FunctionDefinition {
+    SingleQuotedDef(String),
+    DoubleDollarDef(String),
+}
+
+impl fmt::Display for FunctionDefinition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FunctionDefinition::SingleQuotedDef(s) => write!(f, "'{s}'")?,
+            FunctionDefinition::DoubleDollarDef(s) => write!(f, "$${s}$$")?,
+        }
+        Ok(())
+    }
+}
+
+/// Postgres specific feature.
+///
+/// See [Postgresdocs](https://www.postgresql.org/docs/15/sql-createfunction.html)
+/// for more details
+#[derive(Debug, Default, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CreateFunctionBody {
     /// LANGUAGE lang_name
-    Language(Ident),
+    pub language: Option<Ident>,
     /// IMMUTABLE | STABLE | VOLATILE
-    Behavior(FunctionBehavior),
+    pub behavior: Option<FunctionBehavior>,
+    /// AS 'definition'
+    ///
+    /// Note that Hive's `AS class_name` is also parsed here.
+    pub as_: Option<FunctionDefinition>,
     /// RETURN expression
-    Return(Expr),
+    pub return_: Option<Expr>,
 }
 
 impl fmt::Display for CreateFunctionBody {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::As(definition) => write!(f, "AS '{definition}'"),
-            Self::Language(lang) => write!(f, "LANGUAGE {lang}"),
-            Self::Behavior(behavior) => write!(f, "{behavior}"),
-            Self::Return(expr) => write!(f, "RETURN {expr}"),
+        if let Some(language) = &self.language {
+            write!(f, " LANGUAGE {language}")?;
         }
+        if let Some(behavior) = &self.behavior {
+            write!(f, " {behavior}")?;
+        }
+        if let Some(definition) = &self.as_ {
+            write!(f, " AS {definition}")?;
+        }
+        if let Some(expr) = &self.return_ {
+            write!(f, " RETURN {expr}")?;
+        }
+        Ok(())
     }
 }
 
