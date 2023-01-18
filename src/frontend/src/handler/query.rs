@@ -202,8 +202,8 @@ pub async fn handle_query(
     // it sent. This is achieved by the `callback` in `PgResponse`.
     let callback = async move {
         // Implicitly flush the writes.
-        if session.config().get_implicit_flush() {
-            flush_for_write(&session, stmt_type).await?;
+        if session.config().get_implicit_flush() && stmt_type.is_dml() {
+            do_flush(&session).await?;
         }
 
         // update some metrics
@@ -293,11 +293,4 @@ pub async fn local_execute(
     );
 
     Ok(execution.stream_rows())
-}
-
-pub async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
-    if stmt_type.is_dml() {
-        do_flush(session).await?;
-    }
-    Ok(())
 }
