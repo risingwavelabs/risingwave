@@ -37,7 +37,6 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         match self.rng.gen_range(0..=range) {
             0..=7 => self.gen_simple_table(),
             8..=8 => self.gen_time_window_func(),
-            // TODO: Enable after resolving: <https://github.com/risingwavelabs/risingwave/issues/2771>.
             9..=9 => self.gen_join_clause(),
             10..=10 => self.gen_table_subquery(),
             _ => unreachable!(),

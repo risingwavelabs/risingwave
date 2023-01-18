@@ -97,8 +97,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     /// Generates a query with correlated context to ensure proper recursion.
     /// Used by Exists `Subquery`
     /// TODO: <https://github.com/risingwavelabs/risingwave/pull/4431#issuecomment-1327417328>
-    fn _gen_correlated_query(&mut self) -> (Query, Vec<Column>) {
-        let old_ctxt = self._clone_local_context();
+    pub(crate) fn gen_correlated_query(&mut self) -> (Query, Vec<Column>) {
+        let old_ctxt = self.clone_local_context();
         let t = self.gen_query();
         self.restore_context(old_ctxt);
         t

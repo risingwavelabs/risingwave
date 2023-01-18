@@ -41,7 +41,7 @@ fn is_window_error(db_error: &str) -> bool {
         || db_error.contains("Bind error: The 2st arg of window table function should be a column name but not complex expression. Consider using an intermediate CTE or view as workaround")
 }
 
-// Do not support streaming nested-loop join, it is expensive.
+// Streaming nested-loop join is not supported, as it is expensive.
 fn is_nested_loop_join_error(db_error: &str) -> bool {
     db_error.contains("Not supported: streaming nested-loop join")
 }
@@ -50,6 +50,10 @@ fn is_nested_loop_join_error(db_error: &str) -> bool {
 // This error should not occur, remove once issue is fixed.
 fn is_hash_shuffle_error(db_error: &str) -> bool {
     db_error.contains("broken hash_shuffle_channel")
+}
+
+fn is_subquery_unnesting_error(db_error: &str) -> bool {
+    db_error.contains("Subquery can not be unnested")
 }
 
 /// Certain errors are permitted to occur. This is because:
@@ -63,4 +67,5 @@ pub fn is_permissible_error(db_error: &str) -> bool {
         || is_window_error(db_error)
         || is_hash_shuffle_error(db_error)
         || is_nested_loop_join_error(db_error)
+        || is_subquery_unnesting_error(db_error)
 }
