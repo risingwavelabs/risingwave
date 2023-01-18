@@ -46,6 +46,7 @@ pub struct TableSource {
     core: RwLock<TableSourceCore>,
 
     /// All columns in this table.
+    #[allow(dead_code)]
     column_descs: Vec<ColumnDesc>,
 }
 
