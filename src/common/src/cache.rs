@@ -808,7 +808,7 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static, E> LookupResponse<K, T,
 /// Only implement `lookup_with_request_dedup` and `lookup_with_request_dedup_raw` for static
 /// values, as they can be sent across tokio spawned futures.
 impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
-    async fn lookup_with_request_dedup_unsafe<F, E, VC>(
+    async fn lookup_with_request_dedup_cancellation_unsafe<F, E, VC>(
         self: &Arc<Self>,
         hash: u64,
         key: K,
@@ -868,8 +868,10 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
                         let key2 = key.clone();
                         return LookupResponse::Miss(tokio::spawn(async move {
                             let _ = recv.await;
-                            this.lookup_with_request_dedup_unsafe(hash, key2, || fetch_value)
-                                .await
+                            this.lookup_with_request_dedup_cancellation_unsafe(hash, key2, || {
+                                fetch_value
+                            })
+                            .await
                         }));
                     }
                 }
