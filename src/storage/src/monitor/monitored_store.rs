@@ -254,6 +254,10 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             )
         }
     }
+
+    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {
+        self.inner.validate_read_epoch(epoch)
+    }
 }
 
 impl MonitoredStateStore<HummockStorage> {
