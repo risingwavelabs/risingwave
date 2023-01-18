@@ -95,7 +95,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [t1.a, t1.b, t1.c, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2] }
+     Table 0 { columns: [t1_a, t1_b, t1_c, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2] }
      Table 4294967294 { columns: [a, b, c], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0, 1, 2] }
 - sql: |
     create table t1 (a int, b numeric, c bigint, primary key(a));
@@ -153,7 +153,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [t1.a, t1.b, t1.c, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2] }
+     Table 0 { columns: [t1_a, t1_b, t1_c, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2] }
      Table 4294967294 { columns: [a, b, c], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0, 1, 2] }
 - sql: |
     create table t1 (a int, b numeric, c bigint);
