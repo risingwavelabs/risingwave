@@ -20,6 +20,6 @@ You can profile remote compute nodes from a local machine by simply type the fol
 ```shell
 ./risedev ctl profile --sleep [seconds]
 ```
-All compute nodes will be profile for a given `seconds` time and generated flame graph will be transferred to your local machine.
+All compute nodes will be profile for a given `seconds` time and generated flame graph will be transferred to your local machine `.risingwave/profiling/`.
 
 Note: To profile compute nodes remotely, please make sure all remote nodes have a public IP address accessible from your local machine (The one you are running `./risedev`)
