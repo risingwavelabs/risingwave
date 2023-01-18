@@ -1,8 +1,11 @@
 package com.risingwave.java;
 
+import com.risingwave.java.binding.Constants;
 import com.risingwave.java.binding.Iterator;
 import com.risingwave.java.binding.KeyedRow;
 import com.risingwave.java.binding.rpc.MetaClient;
+import com.risingwave.proto.JavaBinding.KeyRange;
+import com.risingwave.proto.JavaBinding.KeyRange.Bound;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.concurrent.ScheduledFuture;
@@ -18,8 +21,20 @@ public class Demo {
 
         ScheduledThreadPoolExecutor scheduledThreadPool = new ScheduledThreadPoolExecutor(2);
 
+        KeyRange keyRange =
+                KeyRange.newBuilder()
+                        .setRightBound(Bound.UNBOUNDED)
+                        .setLeftBound(Bound.UNBOUNDED)
+                        .build();
         try (MetaClient metaClient = new MetaClient(metaAddr, scheduledThreadPool);
-                Iterator iter = new Iterator(metaClient, stateStore, dbName, tableName)) {
+                Iterator iter =
+                        new Iterator(
+                                metaClient,
+                                stateStore,
+                                dbName,
+                                tableName,
+                                Constants.MAX_EPOCH,
+                                keyRange)) {
             ScheduledFuture<?> heartbeatFuture =
                     metaClient.startHeartbeatLoop(Duration.ofMillis(1000), Duration.ofSeconds(600));
 

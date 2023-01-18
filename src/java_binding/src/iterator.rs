@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound::Unbounded;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -20,10 +19,11 @@ use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_common::row::{OwnedRow, RowDeserializer};
 use risingwave_common::types::ScalarImpl;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
-use risingwave_pb::java_binding::ReadPlan;
+use risingwave_pb::java_binding::key_range::Bound;
+use risingwave_pb::java_binding::{KeyRange, ReadPlan};
 use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
@@ -93,8 +93,8 @@ impl Iterator {
         let stream = {
             let stream = reader
                 .iter(
-                    (Unbounded, Unbounded),
-                    HummockEpoch::MAX,
+                    table_key_range_from_prost(read_plan.key_range.unwrap()),
+                    read_plan.epoch,
                     ReadOptions {
                         prefix_hint: None,
                         ignore_range_tombstone: false,
@@ -138,4 +138,18 @@ impl Iterator {
             None => None,
         })
     }
+}
+
+fn table_key_range_from_prost(r: KeyRange) -> TableKeyRange {
+    let map_bound = |b, v| match b {
+        Bound::Unbounded => std::ops::Bound::Unbounded,
+        Bound::Included => std::ops::Bound::Included(TableKey(v)),
+        Bound::Excluded => std::ops::Bound::Excluded(TableKey(v)),
+        _ => unreachable!(),
+    };
+    let left_bound = r.left_bound();
+    let right_bound = r.right_bound();
+    let left = map_bound(left_bound, r.left);
+    let right = map_bound(right_bound, r.right);
+    (left, right)
 }
