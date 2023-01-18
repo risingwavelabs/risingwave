@@ -18,6 +18,7 @@ use std::io::Write;
 use bytes::{Bytes, BytesMut};
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
 use postgres_types::{ToSql, Type};
+use thiserror::Error;
 
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
@@ -67,39 +68,19 @@ impl_chrono_wrapper!(NaiveDateWrapper, NaiveDate);
 impl_chrono_wrapper!(NaiveDateTimeWrapper, NaiveDateTime);
 impl_chrono_wrapper!(NaiveTimeWrapper, NaiveTime);
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Error)]
 enum InvalidParamsErrorKind {
+    #[error("Invalid date: days: {days}")]
     Date { days: i32 },
+    #[error("Invalid time: secs: {secs}, nanoseconds: {nsecs}")]
     Time { secs: u32, nsecs: u32 },
+    #[error("Invalid datetime: seconds: {secs}, nanoseconds: {nsecs}")]
     DateTime { secs: i64, nsecs: u32 },
 }
 
-impl From<InvalidParamsErrorKind> for InvalidParamsError {
-    fn from(kind: InvalidParamsErrorKind) -> Self {
-        InvalidParamsError(kind)
-    }
-}
-
-#[derive(Debug)]
-pub struct InvalidParamsError(InvalidParamsErrorKind);
-
-impl std::fmt::Display for InvalidParamsError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.0 {
-            InvalidParamsErrorKind::Date { days } => {
-                write!(f, "Invalid date: days: {}", days)
-            }
-            InvalidParamsErrorKind::Time { secs, nsecs } => {
-                write!(f, "Invalid time: seconds: {}, nanoseconds: {}", secs, nsecs)
-            }
-            InvalidParamsErrorKind::DateTime { secs, nsecs } => write!(
-                f,
-                "Invalid datetime: seconds: {}, nanoseconds: {}",
-                secs, nsecs
-            ),
-        }
-    }
-}
+#[derive(Debug, Error)]
+#[error(transparent)]
+pub struct InvalidParamsError(#[from] InvalidParamsErrorKind);
 
 impl InvalidParamsError {
     pub fn date(days: i32) -> Self {
@@ -114,8 +95,6 @@ impl InvalidParamsError {
         InvalidParamsErrorKind::DateTime { secs, nsecs }.into()
     }
 }
-
-impl std::error::Error for InvalidParamsError {}
 
 type Result<T> = std::result::Result<T, InvalidParamsError>;
 
