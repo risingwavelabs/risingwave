@@ -6433,6 +6433,7 @@ dependencies = [
  "risingwave_connector",
  "risingwave_expr",
  "risingwave_hummock_sdk",
+ "risingwave_hummock_test",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_source",
