@@ -21,6 +21,7 @@ use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::RW_VERSION;
 use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr, WindowSpec};
 
@@ -335,9 +336,13 @@ impl Binder {
             }
             // internal
             "rw_vnode" => ExprType::Vnode,
-            // TODO: include version/tag/commit_id
             // TODO: choose which pg version we should return.
-            "version" => return Ok(ExprImpl::literal_varchar("PostgreSQL 13.9-RW".to_string())),
+            "version" => {
+                return Ok(ExprImpl::literal_varchar(format!(
+                    "PostgreSQL 13.9-RW-{}",
+                    RW_VERSION
+                )))
+            }
             // non-deterministic
             "now" => {
                 self.ensure_now_function_allowed()?;
