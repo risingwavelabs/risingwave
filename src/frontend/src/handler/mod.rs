@@ -153,6 +153,7 @@ pub async fn handle(
     sql: &str,
     format: bool,
 ) -> Result<RwPgResponse> {
+    session.clear_cancel_query_flag();
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
     match stmt {
         Statement::Explain {
