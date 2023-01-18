@@ -881,11 +881,11 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
         VC: Future<Output = Result<(T, usize), E>> + Send + 'static,
     {
         match self.lookup_for_request(hash, key.clone()) {
-            LookupResult::Cached(entry) => return LookupResponse::Cached(entry),
+            LookupResult::Cached(entry) => LookupResponse::Cached(entry),
             LookupResult::WaitPendingRequest(recv) => {
-                return LookupResponse::Pending(Box::pin(async move {
+                LookupResponse::Pending(Box::pin(async move {
                     recv.await.map_err(|recv_error| recv_error.into())
-                }));
+                }))
             }
             LookupResult::Miss => {
                 let this = self.clone();
@@ -902,9 +902,7 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
                     let entry = this.insert(key2, hash, charge, value);
                     Ok(entry)
                 });
-                return LookupResponse::Pending(Box::pin(
-                    async move { join_handle.await.unwrap() },
-                ));
+                LookupResponse::Pending(Box::pin(async move { join_handle.await.unwrap() }))
             }
         }
     }
