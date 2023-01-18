@@ -240,6 +240,9 @@ pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
     }
 
     fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_>;
+
+    /// Validates whether store can serve `epoch` at the moment.
+    fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()>;
 }
 
 /// A state store that is dedicated for streaming operator, which only reads the uncommitted data
