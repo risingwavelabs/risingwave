@@ -2287,6 +2287,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs-err"
+version = "2.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0845fa252299212f0389d64ba26f34fa32cfe41588355f21ed507c59a0f64541"
+
+[[package]]
 name = "fs2"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3456,9 +3462,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-etcd-client"
-version = "0.2.11"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f83388bf9b75da759e6ebc7470e8ab4911314504eb75e16946de66f56a5608ea"
+checksum = "a282949bceaf35a250b48d9c5dab411a3948d0155a0cccfbcb0db953f67cef65"
 dependencies = [
  "etcd-client",
  "futures-util",
@@ -3468,6 +3474,7 @@ dependencies = [
  "serde_with",
  "spin 0.9.4",
  "thiserror",
+ "tokio",
  "toml",
  "tonic",
  "tracing",
@@ -6030,6 +6037,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_test_runner",
+ "scopeguard",
  "serde",
  "serde_derive",
  "serde_json",
@@ -7089,12 +7097,14 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.9.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a89f3be6c90ef2b67d55f999663b367ede63747a2311e480e7710f70c52fef65"
+checksum = "8b2f781e2de5df40f526b3d7c93cb972f87425771a27cc8882a4178794b2ad11"
 dependencies = [
  "async-trait",
+ "derivative",
  "difference",
+ "fs-err",
  "futures",
  "glob",
  "humantime",

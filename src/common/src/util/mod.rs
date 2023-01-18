@@ -33,6 +33,7 @@ pub mod resource_util;
 pub mod scan_range;
 pub mod schema_check;
 pub mod sort_util;
+pub mod stream_cancel;
 pub mod value_encoding;
 pub mod worker_util;
 
