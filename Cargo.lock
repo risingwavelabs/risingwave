@@ -2052,19 +2052,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "env_logger"
-version = "0.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a12e6657c4c97ebab115a42dcee77225f7f482cdd841cf7088c657a42e9e00e7"
-dependencies = [
- "atty",
- "humantime",
- "log",
- "regex",
- "termcolor",
-]
-
-[[package]]
 name = "errno"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5047,18 +5034,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "quick-junit"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a434ae380664312ac1a70faa7e18df6bd67b6f6213ea52f9597074dd5973e678"
-dependencies = [
- "chrono",
- "indexmap",
- "quick-xml",
- "thiserror",
-]
-
-[[package]]
 name = "quick-xml"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7122,7 +7097,7 @@ dependencies = [
 [[package]]
 name = "sqllogictest"
 version = "0.11.1"
-source = "git+https://github.com/BugenZhao/sqllogictest-rs.git?branch=bz/engine#e83536390ca391f3328f96c72b2eae45d6b25f87"
+source = "git+https://github.com/BugenZhao/sqllogictest-rs.git?rev=9641538#9641538eaa9ffa7a88a0d49454aba42a73f6a33c"
 dependencies = [
  "async-trait",
  "derivative",
@@ -7144,32 +7119,19 @@ dependencies = [
 [[package]]
 name = "sqllogictest-engine"
 version = "0.11.1"
-source = "git+https://github.com/BugenZhao/sqllogictest-rs.git?branch=bz/engine#e83536390ca391f3328f96c72b2eae45d6b25f87"
+source = "git+https://github.com/BugenZhao/sqllogictest-rs.git?rev=9641538#9641538eaa9ffa7a88a0d49454aba42a73f6a33c"
 dependencies = [
- "anyhow",
  "async-trait",
  "bytes",
  "chrono",
- "clap 3.2.23",
- "console",
- "difference",
- "env_logger",
- "fs-err",
  "futures",
- "futures-lite",
- "glob",
- "humantime",
- "itertools",
  "log",
  "pg_interval",
  "postgres-types",
- "quick-junit",
- "rand 0.8.5",
  "rust_decimal",
  "serde",
  "serde_json",
  "sqllogictest",
- "tempfile",
  "thiserror",
  "tokio",
  "tokio-postgres",
@@ -8551,6 +8513,7 @@ dependencies = [
  "petgraph",
  "phf",
  "phf_shared",
+ "postgres-types",
  "proc-macro2",
  "prometheus",
  "prost 0.11.6",
@@ -8561,6 +8524,7 @@ dependencies = [
  "regex-syntax",
  "reqwest",
  "ring",
+ "rust_decimal",
  "scopeguard",
  "serde",
  "smallvec",

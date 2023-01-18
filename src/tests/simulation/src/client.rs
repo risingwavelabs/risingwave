@@ -14,25 +14,24 @@
 
 use std::time::Duration;
 
-use sqllogictest_engine::postgres::Postgres;
-use sqllogictest_engine::DBConfig;
+use sqllogictest_engine::postgres::{PostgresConfig, PostgresSimple};
 
 /// A RisingWave client for `sqllogictest`.
 pub struct RisingWave {
-    inner: Postgres,
+    inner: PostgresSimple,
     host: String,
     dbname: String,
 }
 
 impl RisingWave {
     pub async fn connect(host: String, dbname: String) -> Result<Self, tokio_postgres::Error> {
-        let inner = Postgres::connect(&DBConfig {
-            addrs: vec![(host.clone(), 4566)],
-            db: dbname.clone(),
-            user: "root".to_owned(),
-            pass: "".to_owned(),
-        })
-        .await?;
+        let mut pg_config = PostgresConfig::new();
+        pg_config
+            .host(&host)
+            .port(4566)
+            .dbname(&dbname)
+            .user("root");
+        let inner = PostgresSimple::connect(pg_config).await?;
 
         // For recovery.
         inner

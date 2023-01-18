@@ -28,8 +28,8 @@ risingwave_sqlsmith = { path = "../sqlsmith" }
 serde = "1.0.152"
 serde_derive = "1.0.152"
 serde_json = "1.0.91"
-sqllogictest = { git = "https://github.com/BugenZhao/sqllogictest-rs.git", branch = "bz/engine" }
-sqllogictest-engine = { git = "https://github.com/BugenZhao/sqllogictest-rs.git", branch = "bz/engine" }
+sqllogictest = { git = "https://github.com/BugenZhao/sqllogictest-rs.git", rev = "9641538" }
+sqllogictest-engine = { git = "https://github.com/BugenZhao/sqllogictest-rs.git", rev = "9641538" }
 tempfile = "3"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7.7"
