@@ -1,4 +1,4 @@
 query T
 SELECT version();
 ----
-PostgreSQL 13.9-RW-v0.1.15
+PostgreSQL 13.9-RW-0.2.0-alpha
