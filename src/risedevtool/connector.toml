@@ -13,7 +13,7 @@ dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_RW_CONNECTOR" ] }
 description = "Download RisingWave Connector"
 script = '''
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 if [ -f "${PREFIX_BIN}/risingwave-connector.jar" ]; then
     exit 0
