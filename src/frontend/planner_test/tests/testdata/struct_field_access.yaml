@@ -118,3 +118,15 @@
   logical_plan: |
     LogicalProject { exprs: [Field(Field(t.t, 0:Int32), 0:Int32)] }
     └─LogicalScan { table: t, columns: [t.t, t._row_id] }
+- sql: |
+    create table t(c STRUCT<x INTEGER, y INTEGER>[]);
+    select (c[0]).x from t
+  logical_plan: |
+    LogicalProject { exprs: [Field(ArrayAccess(t.c, 0:Int32), 0:Int32)] }
+    └─LogicalScan { table: t, columns: [t.c, t._row_id] }
+- sql: |
+    create table t(c STRUCT<x INTEGER, y INTEGER>);
+    select (case when true then c end).x from t
+  logical_plan: |
+    LogicalProject { exprs: [Field(Case(true:Boolean, t.c), 0:Int32)] }
+    └─LogicalScan { table: t, columns: [t.c, t._row_id] }
