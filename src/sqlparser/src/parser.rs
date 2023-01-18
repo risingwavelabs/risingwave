@@ -551,36 +551,13 @@ impl Parser {
 
     /// Parses a field selection expression. See also [`Expr::FieldIdentifier`].
     pub fn parse_struct_selection(&mut self, expr: Expr) -> Result<Expr, ParserError> {
-        let mut nested_expr = expr.clone();
+        let mut nested_expr = expr;
         // Unwrap parentheses
         while let Expr::Nested(inner) = nested_expr {
             nested_expr = *inner;
         }
-        match nested_expr {
-            // expr is `(foo)`
-            Expr::Identifier(ident) => Ok(Expr::FieldIdentifier(
-                Box::new(Expr::Identifier(ident)),
-                self.parse_fields()?,
-            )),
-            // expr is `(foo.v1)`
-            Expr::CompoundIdentifier(idents) => Ok(Expr::FieldIdentifier(
-                Box::new(Expr::CompoundIdentifier(idents)),
-                self.parse_fields()?,
-            )),
-            // expr is `((1,2,3)::foo)`
-            Expr::Cast { expr, data_type } => Ok(Expr::FieldIdentifier(
-                Box::new(Expr::Cast { expr, data_type }),
-                self.parse_fields()?,
-            )),
-            // expr is `((foo.v1).v2)`
-            Expr::FieldIdentifier(expr, mut idents) => {
-                idents.extend(self.parse_fields()?);
-                Ok(Expr::FieldIdentifier(expr, idents))
-            }
-            // expr is other things, e.g., `(1+2)`. It will become an unexpected period error at
-            // upper level.
-            _ => Ok(expr),
-        }
+        let fields = self.parse_fields()?;
+        Ok(Expr::FieldIdentifier(Box::new(nested_expr), fields))
     }
 
     /// Parses consecutive field identifiers after a period. i.e., `.foo.bar.baz`
