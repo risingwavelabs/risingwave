@@ -2515,7 +2515,7 @@ impl Parser {
             // which may start a construct allowed in this position, to be parsed as aliases.
             // (For example, in `FROM t1 JOIN` the `JOIN` will always be parsed as a keyword,
             // not an alias.)
-            Token::Word(w) if after_as || !reserved_kwds.contains(&w.keyword) => {
+            Token::Word(w) if after_as || (!reserved_kwds.contains(&w.keyword)) => {
                 Ok(Some(w.to_ident()))
             }
             // MSSQL supports single-quoted strings as aliases for columns
@@ -2646,6 +2646,20 @@ impl Parser {
         }
     }
 
+    pub fn parse_returning(
+        &mut self,
+        optional: IsOptional,
+    ) -> Result<Vec<SelectItem>, ParserError> {
+        if self.parse_keyword(Keyword::RETURNING) {
+            let cols = self.parse_comma_separated(Parser::parse_select_item)?;
+            Ok(cols)
+        } else if optional == Optional {
+            Ok(vec![])
+        } else {
+            self.expected("a list of columns or * after returning", self.peek_token())
+        }
+    }
+
     pub fn parse_row_expr(&mut self) -> Result<Expr, ParserError> {
         Ok(Expr::Row(self.parse_token_wrapped_exprs(
             &Token::LParen,
@@ -2708,10 +2722,12 @@ impl Parser {
         } else {
             None
         };
+        let returning = self.parse_returning(Optional)?;
 
         Ok(Statement::Delete {
             table_name,
             selection,
+            returning,
         })
     }
 
@@ -3548,11 +3564,13 @@ impl Parser {
         let columns = self.parse_parenthesized_column_list(Optional)?;
 
         let source = Box::new(self.parse_query()?);
+        let returning = self.parse_returning(Optional)?;
 
         Ok(Statement::Insert {
             table_name,
             columns,
             source,
+            returning,
         })
     }
 
@@ -3566,10 +3584,12 @@ impl Parser {
         } else {
             None
         };
+        let returning = self.parse_returning(Optional)?;
         Ok(Statement::Update {
             table_name,
             assignments,
             selection,
+            returning,
         })
     }
 
