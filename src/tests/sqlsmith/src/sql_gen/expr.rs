@@ -232,7 +232,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
         // Generation of subquery inside aggregation is now workaround.
         // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/3896>.
-        if self.is_mview || *ret != DataType::Boolean || context.can_gen_agg() {
+        if *ret != DataType::Boolean || context.can_gen_agg() {
             return self.gen_simple_scalar(ret);
         };
         // TODO: Feature is not yet implemented: correlated subquery in HAVING or SELECT with agg

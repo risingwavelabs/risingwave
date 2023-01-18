@@ -53,12 +53,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_complex_query(&mut self) -> (Query, Vec<Column>) {
         let (with, with_tables) = self.gen_with();
         let (query, schema) = self.gen_set_expr(with_tables);
+        let order_by = self.gen_order_by();
+        let has_order_by = !order_by.is_empty();
         (
             Query {
                 with,
                 body: query,
-                order_by: self.gen_order_by(),
-                limit: self.gen_limit(),
+                order_by,
+                limit: self.gen_limit(has_order_by),
                 offset: None,
                 fetch: None,
             },
@@ -161,8 +163,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         order_by
     }
 
-    fn gen_limit(&mut self) -> Option<String> {
+    fn gen_limit(&mut self, has_order_by: bool) -> Option<String> {
         if !self.is_mview && self.rng.gen_bool(0.2) {
+            Some(self.rng.gen_range(0..=100).to_string())
+        } else if self.is_mview && has_order_by && self.rng.gen_bool(0.2) {
             Some(self.rng.gen_range(0..=100).to_string())
         } else {
             None
