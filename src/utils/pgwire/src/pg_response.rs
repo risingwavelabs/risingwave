@@ -28,8 +28,11 @@ pub type RowSetResult = Result<RowSet, BoxedError>;
 #[expect(non_camel_case_types, clippy::upper_case_acronyms)]
 pub enum StatementType {
     INSERT,
+    INSERT_RETURNING,
     DELETE,
+    DELETE_RETURNING,
     UPDATE,
+    UPDATE_RETURNING,
     SELECT,
     MOVE,
     FETCH,
@@ -121,13 +124,21 @@ impl StatementType {
                 | StatementType::COPY
                 | StatementType::FETCH
                 | StatementType::SELECT
+                | StatementType::INSERT_RETURNING
+                | StatementType::DELETE_RETURNING
+                | StatementType::UPDATE_RETURNING
         )
     }
 
     pub fn is_dml(&self) -> bool {
         matches!(
             self,
-            StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE
+            StatementType::INSERT
+                | StatementType::DELETE
+                | StatementType::UPDATE
+                | StatementType::INSERT_RETURNING
+                | StatementType::DELETE_RETURNING
+                | StatementType::UPDATE_RETURNING
         )
     }
 
@@ -138,6 +149,18 @@ impl StatementType {
                 | StatementType::EXPLAIN
                 | StatementType::SHOW_COMMAND
                 | StatementType::DESCRIBE_TABLE
+                | StatementType::INSERT_RETURNING
+                | StatementType::DELETE_RETURNING
+                | StatementType::UPDATE_RETURNING
+        )
+    }
+
+    pub fn is_returning(&self) -> bool {
+        matches!(
+            self,
+            StatementType::INSERT_RETURNING
+                | StatementType::DELETE_RETURNING
+                | StatementType::UPDATE_RETURNING
         )
     }
 }

@@ -24,6 +24,7 @@ use super::intercept::MetricsMiddlewareLayer;
 use super::server::AddressInfo;
 use super::service::health_service::HealthServiceImpl;
 use crate::rpc::metrics::MetaMetrics;
+use crate::rpc::server::ElectionClientRef;
 use crate::rpc::service::leader_service::LeaderServiceImpl;
 
 /// Starts all services needed for the meta follower node
@@ -31,9 +32,16 @@ pub async fn start_follower_srv(
     mut svc_shutdown_rx: WatchReceiver<()>,
     follower_shutdown_rx: OneReceiver<()>,
     address_info: AddressInfo,
-    leader_rx: WatchReceiver<(MetaLeaderInfo, bool)>,
+    election_client: Option<ElectionClientRef>,
 ) {
-    let leader_srv = LeaderServiceImpl::new(leader_rx);
+    let leader_srv = LeaderServiceImpl::new(
+        election_client,
+        MetaLeaderInfo {
+            node_address: address_info.listen_addr.to_string(),
+            lease_id: 0,
+        },
+    );
+
     let health_srv = HealthServiceImpl::new();
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(Arc::new(MetaMetrics::new())))
