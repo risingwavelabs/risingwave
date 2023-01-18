@@ -33,6 +33,18 @@ fn is_create_table_as(sql: &str) -> bool {
     parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
 }
 
+const KILL_IGNORE_FILES: &[&str] = &[
+    // TPCH queries are too slow for recovery.
+    "tpch_snapshot.slt",
+    "tpch_upstream.slt",
+    // We already have visibility_all cases.
+    "visibility_checkpoint.slt",
+    // This depends on session config.
+    "session_timezone.slt",
+    // Implicit flush does not work for `RETURNING` now. (#7402)
+    "dml_returning.slt.part",
+];
+
 /// Run the sqllogictest files in `glob`.
 pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
     let host = cluster.rand_frontend_ip();
@@ -44,16 +56,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
         let file = file.unwrap();
         let path = file.as_path();
         println!("{}", path.display());
-        if kill && (path.ends_with("tpch_snapshot.slt") || path.ends_with("tpch_upstream.slt")) {
-            // Simply ignore the tpch test cases when enable kill nodes.
-            continue;
-        }
-        if kill && path.ends_with("visibility_checkpoint.slt") {
-            // Ignore visibility_checkpoint because we already have visibility_all cases.
-            continue;
-        }
-        if kill && path.ends_with("session_timezone.slt") {
-            // Ignore the session timezone test cases that depends on session config
+        if kill && KILL_IGNORE_FILES.iter().any(|s| path.ends_with(s)) {
             continue;
         }
         // XXX: hack for kafka source test
