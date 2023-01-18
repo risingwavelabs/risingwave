@@ -34,7 +34,7 @@ use crate::{
 const AFTER: &str = "data";
 const BEFORE: &str = "old";
 const OP: &str = "type";
-const IS_DDL: &str = "isDdl";
+const IS_DDL: &str = "isddl";
 
 #[derive(Debug)]
 pub struct CanalJsonParser;

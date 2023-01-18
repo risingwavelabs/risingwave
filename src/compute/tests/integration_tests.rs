@@ -231,6 +231,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         "InsertExecutor".to_string(),
         vec![], // ignore insertion order
         Some(row_id_index),
+        false,
     ));
 
     tokio::spawn(async move {
@@ -348,6 +349,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         delete_inner,
         1024,
         "DeleteExecutor".to_string(),
+        false,
     ));
 
     tokio::spawn(async move {
