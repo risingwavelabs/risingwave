@@ -39,7 +39,7 @@ use crate::error::BatchError::SenderError;
 use crate::error::{BatchError, Result as BatchResult};
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;
-use crate::rpc::service::task_service::TaskInfoResponseResult;
+use crate::rpc::service::task_service::{GetDataResponseResult, TaskInfoResponseResult};
 use crate::task::channel::{create_output_channel, ChanReceiverImpl, ChanSenderImpl};
 use crate::task::BatchTaskContext;
 
@@ -187,6 +187,7 @@ impl TaskOutput {
                 }
                 // Reached EOF
                 Ok(None) => {
+                    println!("end?");
                     break;
                 }
                 // Error happened
@@ -203,6 +204,7 @@ impl TaskOutput {
             }
             cnt += 1;
         }
+        println!("back");
         Ok(true)
     }
 
@@ -299,7 +301,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     /// hash partitioned across multiple channels.
     /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
     /// such, parallel consumers are able to consume the result independently.
-    pub async fn async_execute(self: Arc<Self>) -> Result<()> {
+    pub async fn async_execute(self: Arc<Self>, local_execution_failure_sender: Option<tokio::sync::mpsc::Sender<GetDataResponseResult>>) -> Result<()> {
+        let mut local_execution_failure_sender = local_execution_failure_sender;
         trace!(
             "Prepare executing plan [{:?}]: {}",
             self.task_id,
@@ -336,7 +339,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let (mut state_tx, state_rx) = tokio::sync::mpsc::channel(TASK_STATUS_BUFFER_SIZE);
         // Init the state receivers. Swap out later.
         *self.state_rx.lock() = Some(state_rx);
-        self.change_state_notify(TaskStatus::Running, &mut state_tx, None)
+        self.change_state_notify(TaskStatus::Running, &mut state_tx, None, None)
             .await?;
 
         // Clone `self` to make compiler happy because of the move block.
@@ -367,7 +370,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     let err_str = e.to_string();
                     *failure.lock() = Some(e);
                     if let Err(_e) = t_1
-                        .change_state_notify(TaskStatus::Failed, &mut state_tx, Some(err_str))
+                        .change_state_notify(TaskStatus::Failed, &mut state_tx, Some(err_str), local_execution_failure_sender.as_mut())
                         .await
                     {
                         // It's possible to send fail. Same reason in `.try_execute`.
@@ -439,9 +442,18 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         task_status: TaskStatus,
         state_tx: &mut tokio::sync::mpsc::Sender<TaskInfoResponseResult>,
         err_str: Option<String>,
+        local_exec_failur_tx: Option<&mut tokio::sync::mpsc::Sender<GetDataResponseResult>>
     ) -> BatchResult<()> {
         self.change_state(task_status);
         if let Some(err_str) = err_str {
+            // This is a hack for local execution mode failure propagate
+            if let Some(l) = local_exec_failur_tx {
+
+                l.send(Err(Status::internal(err_str.clone())))
+                    .await
+                    .map_err(|_| SenderError)?;
+                println!("send failure success");
+            }
             state_tx
                 .send(Err(Status::internal(err_str)))
                 .await
@@ -522,7 +534,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             }
         }
 
-        if let Err(e) = self.change_state_notify(state, state_tx, None).await {
+        if let Err(e) = self.change_state_notify(state, state_tx, None, None).await {
             warn!(
                 "The status receiver in FE has closed so the status push is failed {:}",
                 e

@@ -29,7 +29,7 @@ use crate::task::{
     self, BatchEnvironment, BatchManager, BatchTaskExecution, ComputeNodeContext, TaskId,
 };
 
-const LOCAL_EXECUTE_BUFFER_SIZE: usize = 64;
+const LOCAL_EXECUTE_BUFFER_SIZE: usize = 1024;
 
 #[derive(Clone)]
 pub struct BatchServiceImpl {
@@ -43,6 +43,7 @@ impl BatchServiceImpl {
     }
 }
 pub(crate) type TaskInfoResponseResult = std::result::Result<TaskInfoResponse, Status>;
+pub(crate) type GetDataResponseResult = std::result::Result<GetDataResponse, Status>;
 #[async_trait::async_trait]
 impl TaskService for BatchServiceImpl {
     type CreateTaskStream = ReceiverStream<TaskInfoResponseResult>;
@@ -120,8 +121,9 @@ impl TaskService for BatchServiceImpl {
         );
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch, self.mgr.runtime())?;
         let task = Arc::new(task);
+        let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
 
-        if let Err(e) = task.clone().async_execute().await {
+        if let Err(e) = task.clone().async_execute( Some(tx.clone()) ).await {
             error!(
                 "failed to build executors and trigger execution of Task {:?}: {}",
                 task_id, e
@@ -142,8 +144,6 @@ impl TaskService for BatchServiceImpl {
             );
             e
         })?;
-        let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
-
         let mut writer = GrpcExchangeWriter::new(tx.clone());
         let finish = output
             .take_data_with_num(&mut writer, tx.capacity())
@@ -152,7 +152,9 @@ impl TaskService for BatchServiceImpl {
             self.mgr.runtime().spawn(async move {
                 match output.take_data(&mut writer).await {
                     Ok(_) => Ok(()),
-                    Err(e) => tx.send(Err(e.into())).await,
+                    Err(e) => {
+                        tx.send(Err(e.into())).await
+                    },
                 }
             });
         }

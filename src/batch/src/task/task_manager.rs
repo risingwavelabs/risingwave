@@ -100,7 +100,7 @@ impl BatchManager {
             ))
             .into())
         };
-        task.clone().async_execute().await?;
+        task.clone().async_execute(None).await?;
         ret
     }
 
