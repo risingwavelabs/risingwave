@@ -301,12 +301,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             vec![rel]
         };
 
+        // We short-circuit here for mview to avoid streaming nested loop join,
+        // since CROSS JOIN below maybe correlated.
         if self.is_mview {
-            // TODO: These constraints are workarounds required by mview.
-            // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/4024>.
             assert!(!self.tables.is_empty());
             return from;
         }
+
+        // Generate CROSS JOIN
         let mut lateral_contexts = vec![];
         for _ in 0..self.tables.len() {
             if self.flip_coin() {
