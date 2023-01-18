@@ -42,7 +42,7 @@ fn is_window_error(db_error: &str) -> bool {
 }
 
 // FIXME: <https://github.com/risingwavelabs/risingwave/issues/7218#issuecomment-1386462219>
-// This error should not occur, re-enable once issue is fixed.
+// This error should not occur, remove once issue is fixed.
 fn is_hash_shuffle_error(db_error: &str) -> bool {
     db_error.contains("broken hash_shuffle_channel")
 }
