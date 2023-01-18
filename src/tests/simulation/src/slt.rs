@@ -41,8 +41,6 @@ const KILL_IGNORE_FILES: &[&str] = &[
     "visibility_checkpoint.slt",
     // This depends on session config.
     "session_timezone.slt",
-    // Implicit flush does not work for `RETURNING` now. (#7402)
-    "dml_returning.slt.part",
 ];
 
 /// Run the sqllogictest files in `glob`.
