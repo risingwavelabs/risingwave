@@ -793,10 +793,53 @@ pub enum LookupResponse<K: LruKey + Clone + 'static, T: LruValue + 'static, E> {
     Miss(JoinHandle<Result<CacheableEntry<K, T>, E>>),
 }
 
+impl<K: LruKey + Clone + 'static, T: LruValue + 'static, E> LookupResponse<K, T, E> {
+    pub async fn wait(self) -> Result<CacheableEntry<K, T>, E> {
+        match self {
+            LookupResponse::Cached(entry) => Ok(entry),
+            LookupResponse::Miss(join_handle) => join_handle.await.unwrap(),
+        }
+    }
+}
+
 /// Only implement `lookup_with_request_dedup` for static values, as they can be sent across tokio
 /// spawned futures.
 impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
-    #[allow(dead_code)]
+    async fn lookup_with_request_dedup_unsafe<F, E, VC>(
+        self: &Arc<Self>,
+        hash: u64,
+        key: K,
+        fetch_value: F,
+    ) -> Result<CacheableEntry<K, T>, E>
+    where
+        F: FnOnce() -> VC,
+        E: Error + Send + 'static,
+        VC: Future<Output = Result<(T, usize), E>> + Send + 'static,
+    {
+        loop {
+            let key_clone = key.clone();
+            match self.lookup_for_request(hash, key_clone) {
+                LookupResult::Cached(entry) => return Ok(entry),
+                LookupResult::WaitPendingRequest(recv) => {
+                    let _ = recv.await;
+                    continue;
+                }
+                LookupResult::Miss => {
+                    let fetch_value = fetch_value();
+                    let mut guard = CleanCacheGuard {
+                        cache: self,
+                        key: Some(key),
+                        hash,
+                    };
+                    let (value, charge) = fetch_value.await?;
+                    let key = guard.mark_success();
+                    let entry = self.insert(key, hash, charge, value);
+                    return Ok(entry);
+                }
+            }
+        }
+    }
+
     pub async fn lookup_with_request_dedup_raw<F, E, VC>(
         self: &Arc<Self>,
         hash: u64,
@@ -822,7 +865,7 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
                         let key2 = key.clone();
                         return LookupResponse::Miss(tokio::spawn(async move {
                             let _ = recv.await;
-                            this.lookup_with_request_dedup(hash, key2, || fetch_value)
+                            this.lookup_with_request_dedup_unsafe(hash, key2, || fetch_value)
                                 .await
                         }));
                     }
@@ -859,37 +902,10 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
         E: Error + Send + 'static,
         VC: Future<Output = Result<(T, usize), E>> + Send + 'static,
     {
-        loop {
-            let key_clone = key.clone();
-            match self.lookup_for_request(hash, key_clone) {
-                LookupResult::Cached(entry) => return Ok(entry),
-                LookupResult::WaitPendingRequest(recv) => {
-                    let _ = recv.await;
-                    continue;
-                }
-                LookupResult::Miss => {
-                    let this = self.clone();
-                    let fetch_value = fetch_value();
-                    let key2 = key.clone();
-                    let mut guard = CleanCacheGuard {
-                        cache: self,
-                        key: Some(key),
-                        hash,
-                    };
-                    let ret = tokio::spawn(async move {
-                        let (value, charge) = fetch_value.await?;
-                        let entry = this.insert(key2, hash, charge, value);
-                        Ok(entry)
-                    })
-                    .await
-                    .unwrap();
-                    if ret.is_ok() {
-                        guard.mark_success();
-                    }
-                    return ret;
-                }
-            }
-        }
+        self.lookup_with_request_dedup_raw(hash, key, |_| fetch_value(), true)
+            .await
+            .wait()
+            .await
     }
 }
 
