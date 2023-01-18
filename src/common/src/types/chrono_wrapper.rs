@@ -23,9 +23,6 @@ use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::{CheckedAdd, DataType, IntervalUnit};
 use crate::array::ArrayResult;
-use crate::error::Result;
-use crate::util::value_encoding;
-use crate::util::value_encoding::error::ValueEncodingError;
 
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
 /// Minus this magic number to store the number of days since 1970-01-01.
@@ -36,7 +33,16 @@ const NORMAL_DAYS: &[i32] = &[0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 macro_rules! impl_chrono_wrapper {
     ($variant_name:ident, $chrono:ty) => {
         #[derive(
-            Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, parse_display::Display,
+            Clone,
+            Copy,
+            Debug,
+            Default,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            parse_display::Display,
         )]
         #[repr(transparent)]
         pub struct $variant_name(pub $chrono);
@@ -61,23 +67,57 @@ impl_chrono_wrapper!(NaiveDateWrapper, NaiveDate);
 impl_chrono_wrapper!(NaiveDateTimeWrapper, NaiveDateTime);
 impl_chrono_wrapper!(NaiveTimeWrapper, NaiveTime);
 
-impl Default for NaiveDateWrapper {
-    fn default() -> Self {
-        NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1)
+#[derive(Copy, Clone, Debug)]
+enum InvalidParamsErrorKind {
+    Date { days: i32 },
+    Time { secs: u32, nsecs: u32 },
+    DateTime { secs: i64, nsecs: u32 },
+}
+
+impl From<InvalidParamsErrorKind> for InvalidParamsError {
+    fn from(kind: InvalidParamsErrorKind) -> Self {
+        InvalidParamsError(kind)
     }
 }
 
-impl Default for NaiveTimeWrapper {
-    fn default() -> Self {
-        NaiveTimeWrapper::from_hms_uncheck(0, 0, 0)
+#[derive(Debug)]
+pub struct InvalidParamsError(InvalidParamsErrorKind);
+
+impl std::fmt::Display for InvalidParamsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            InvalidParamsErrorKind::Date { days } => {
+                write!(f, "Invalid date: days: {}", days)
+            }
+            InvalidParamsErrorKind::Time { secs, nsecs } => {
+                write!(f, "Invalid time: seconds: {}, nanoseconds: {}", secs, nsecs)
+            }
+            InvalidParamsErrorKind::DateTime { secs, nsecs } => write!(
+                f,
+                "Invalid datetime: seconds: {}, nanoseconds: {}",
+                secs, nsecs
+            ),
+        }
     }
 }
 
-impl Default for NaiveDateTimeWrapper {
-    fn default() -> Self {
-        NaiveDateWrapper::default().into()
+impl InvalidParamsError {
+    pub fn date(days: i32) -> Self {
+        InvalidParamsErrorKind::Date { days }.into()
+    }
+
+    pub fn time(secs: u32, nsecs: u32) -> Self {
+        InvalidParamsErrorKind::Time { secs, nsecs }.into()
+    }
+
+    pub fn datetime(secs: i64, nsecs: u32) -> Self {
+        InvalidParamsErrorKind::DateTime { secs, nsecs }.into()
     }
 }
+
+impl std::error::Error for InvalidParamsError {}
+
+type Result<T> = std::result::Result<T, InvalidParamsError>;
 
 impl ToText for NaiveDateWrapper {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
@@ -119,7 +159,7 @@ impl ToText for NaiveDateTimeWrapper {
 }
 
 impl ToBinary for NaiveDateWrapper {
-    fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
         match ty {
             super::DataType::Date => {
                 let mut output = BytesMut::new();
@@ -132,7 +172,7 @@ impl ToBinary for NaiveDateWrapper {
 }
 
 impl ToBinary for NaiveTimeWrapper {
-    fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
         match ty {
             super::DataType::Time => {
                 let mut output = BytesMut::new();
@@ -145,7 +185,7 @@ impl ToBinary for NaiveTimeWrapper {
 }
 
 impl ToBinary for NaiveDateTimeWrapper {
-    fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
         match ty {
             super::DataType::Timestamp => {
                 let mut output = BytesMut::new();
@@ -158,18 +198,10 @@ impl ToBinary for NaiveDateTimeWrapper {
 }
 
 impl NaiveDateWrapper {
-    pub fn with_days(days: i32) -> memcomparable::Result<Self> {
-        Ok(NaiveDateWrapper::new(
-            NaiveDate::from_num_days_from_ce_opt(days).ok_or_else(|| {
-                memcomparable::Error::Message(format!("invalid date encoding: days={days}"))
-            })?,
-        ))
-    }
-
-    pub fn with_days_value(days: i32) -> value_encoding::Result<Self> {
+    pub fn with_days(days: i32) -> Result<Self> {
         Ok(NaiveDateWrapper::new(
             NaiveDate::from_num_days_from_ce_opt(days)
-                .ok_or(ValueEncodingError::InvalidNaiveDateEncoding(days))?,
+                .ok_or_else(|| InvalidParamsError::date(days))?,
         ))
     }
 
@@ -177,10 +209,6 @@ impl NaiveDateWrapper {
         output
             .write(&(self.0.num_days_from_ce()).to_be_bytes())
             .map_err(Into::into)
-    }
-
-    pub fn from_protobuf(days: i32) -> ArrayResult<Self> {
-        Self::with_days(days).map_err(Into::into)
     }
 
     pub fn from_ymd_uncheck(year: i32, month: u32, day: u32) -> Self {
@@ -210,20 +238,10 @@ impl NaiveDateWrapper {
 }
 
 impl NaiveTimeWrapper {
-    pub fn with_secs_nano(secs: u32, nano: u32) -> memcomparable::Result<Self> {
-        Ok(NaiveTimeWrapper::new(
-            NaiveTime::from_num_seconds_from_midnight_opt(secs, nano).ok_or_else(|| {
-                memcomparable::Error::Message(format!(
-                    "invalid time encoding: secs={secs}, nsecs={nano}"
-                ))
-            })?,
-        ))
-    }
-
-    pub fn with_secs_nano_value(secs: u32, nano: u32) -> value_encoding::Result<Self> {
+    pub fn with_secs_nano(secs: u32, nano: u32) -> Result<Self> {
         Ok(NaiveTimeWrapper::new(
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
-                .ok_or(ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))?,
+                .ok_or_else(|| InvalidParamsError::time(secs, nano))?,
         ))
     }
 
@@ -237,7 +255,7 @@ impl NaiveTimeWrapper {
             .map_err(Into::into)
     }
 
-    pub fn from_protobuf(nano: u64) -> ArrayResult<Self> {
+    pub fn with_nano(nano: u64) -> Result<Self> {
         let secs = (nano / 1_000_000_000) as u32;
         let nano = (nano % 1_000_000_000) as u32;
         Self::with_secs_nano(secs, nano).map_err(Into::into)
@@ -261,21 +279,10 @@ impl NaiveTimeWrapper {
 }
 
 impl NaiveDateTimeWrapper {
-    pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> memcomparable::Result<Self> {
+    pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> Result<Self> {
         Ok(NaiveDateTimeWrapper::new({
-            NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or_else(|| {
-                memcomparable::Error::Message(format!(
-                    "invalid datetime encoding: secs={secs}, nsecs={nsecs}"
-                ))
-            })?
-        }))
-    }
-
-    pub fn with_secs_nsecs_value(secs: i64, nsecs: u32) -> value_encoding::Result<Self> {
-        Ok(NaiveDateTimeWrapper::new({
-            NaiveDateTime::from_timestamp_opt(secs, nsecs).ok_or(
-                ValueEncodingError::InvalidNaiveDateTimeEncoding(secs, nsecs),
-            )?
+            NaiveDateTime::from_timestamp_opt(secs, nsecs)
+                .ok_or_else(|| InvalidParamsError::datetime(secs, nsecs))?
         }))
     }
 
@@ -286,10 +293,10 @@ impl NaiveDateTimeWrapper {
             .map_err(Into::into)
     }
 
-    pub fn from_protobuf(timestamp_micros: i64) -> ArrayResult<Self> {
+    pub fn with_macros(timestamp_micros: i64) -> Result<Self> {
         let secs = timestamp_micros.div_euclid(1_000_000);
         let nsecs = timestamp_micros.rem_euclid(1_000_000) * 1000;
-        Self::with_secs_nsecs(secs, nsecs as u32).map_err(Into::into)
+        Self::with_secs_nsecs(secs, nsecs as u32)
     }
 
     pub fn from_timestamp_uncheck(secs: i64, nsecs: u32) -> Self {

@@ -23,9 +23,6 @@ pub enum ArrayError {
     #[error("Prost decode error: {0}")]
     ProstDecode(#[from] prost::DecodeError),
 
-    #[error("Memcomparable error: {0}")]
-    Memcomparable(#[from] memcomparable::Error),
-
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
