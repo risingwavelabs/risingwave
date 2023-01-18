@@ -219,6 +219,8 @@ pub struct JoinHashMap<K: HashKey, S: StateStore> {
     degree_state: TableInner<S>,
     /// If degree table is need
     need_degree_table: bool,
+    /// Pk is part of the join key.
+    pk_contained_in_jk: bool,
     /// Metrics of the hash map
     metrics: JoinHashMapMetrics,
 }
@@ -247,6 +249,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         degree_pk_indices: Vec<usize>,
         null_matched: FixedBitSet,
         need_degree_table: bool,
+        pk_contained_in_jk: bool,
         metrics: Arc<StreamingMetrics>,
         actor_id: ActorId,
         side: &'static str,
@@ -290,6 +293,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             state,
             degree_state,
             need_degree_table,
+            pk_contained_in_jk,
             metrics: JoinHashMapMetrics::new(metrics, actor_id, side),
         }
     }
@@ -404,6 +408,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Insert a join row
+    #[allow(clippy::unused_async)]
     pub async fn insert(&mut self, key: &K, value: JoinRow<impl Row>) -> StreamExecutorResult<()> {
         let pk = (&value.row)
             .project(&self.state.pk_indices)
@@ -411,10 +416,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         if let Some(entry) = self.inner.get_mut(key) {
             // Update cache
             entry.insert(pk, value.encode());
-        } else {
-            // Refill cache when cache miss
+        } else if self.pk_contained_in_jk {
+            // Refill cache when the join key exist in neither cache or storage.
             self.metrics.insert_cache_miss_count += 1;
-            let mut state = self.fetch_cached_state(key).await?;
+            let mut state = JoinEntryState::default();
             state.insert(pk, value.encode());
             self.update_state(key, state.into());
         }
@@ -428,6 +433,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Insert a row.
     /// Used when the side does not need to update degree.
+    #[allow(clippy::unused_async)]
     pub async fn insert_row(&mut self, key: &K, value: impl Row) -> StreamExecutorResult<()> {
         let join_row = JoinRow::new(&value, 0);
         let pk = (&value)
@@ -436,10 +442,10 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         if let Some(entry) = self.inner.get_mut(key) {
             // Update cache
             entry.insert(pk, join_row.encode());
-        } else {
-            // Refill cache when cache miss
+        } else if self.pk_contained_in_jk {
+            // Refill cache when the join key exist in neither cache or storage.
             self.metrics.insert_cache_miss_count += 1;
-            let mut state = self.fetch_cached_state(key).await?;
+            let mut state = JoinEntryState::default();
             state.insert(pk, join_row.encode());
             self.update_state(key, state.into());
         }
