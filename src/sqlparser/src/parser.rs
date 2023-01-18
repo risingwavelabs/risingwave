@@ -551,7 +551,7 @@ impl Parser {
 
     /// Parses a field selection expression. See also [`Expr::FieldIdentifier`].
     pub fn parse_struct_selection(&mut self, expr: Expr) -> Result<Expr, ParserError> {
-        let mut nested_expr = expr.clone();
+        let mut nested_expr = expr;
         // Unwrap parentheses
         while let Expr::Nested(inner) = nested_expr {
             nested_expr = *inner;
