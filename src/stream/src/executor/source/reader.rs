@@ -156,11 +156,7 @@ mod tests {
         let (barrier_tx, barrier_rx) = mpsc::unbounded_channel();
 
         let table_source = TableSource::new(vec![]);
-        let source_stream = table_source
-            .stream_reader(vec![])
-            .await
-            .unwrap()
-            .into_stream();
+        let source_stream = table_source.stream_reader().into_stream();
 
         let stream = SourceReaderStream::new(barrier_rx, source_stream);
         pin_mut!(stream);

@@ -212,7 +212,7 @@ mod tests {
         let reader = dml_manager
             .register_reader(table_id, &column_descs)
             .unwrap();
-        let mut reader = reader.stream_reader_v2().into_stream_v2();
+        let mut reader = reader.stream_reader().into_stream();
 
         // Delete
         let delete_executor = Box::new(DeleteExecutor::new(

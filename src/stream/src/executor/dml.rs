@@ -80,8 +80,8 @@ impl DmlExecutor {
             .register_reader(self.table_id, &self.column_descs)
             .map_err(StreamExecutorError::connector_error)?;
         let batch_reader = batch_reader
-            .stream_reader_v2()
-            .into_stream_v2()
+            .stream_reader()
+            .into_stream()
             .map(Either::Right);
 
         // The first barrier message should be propagated.

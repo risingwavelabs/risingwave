@@ -84,7 +84,7 @@ where
     }
 }
 
-pub struct SourceExecutorV2<S: StateStore> {
+pub struct SourceExecutor<S: StateStore> {
     ctx: ActorContextRef,
 
     identity: String,
@@ -106,7 +106,7 @@ pub struct SourceExecutorV2<S: StateStore> {
     expected_barrier_latency_ms: u64,
 }
 
-impl<S: StateStore> SourceExecutorV2<S> {
+impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
@@ -490,7 +490,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
     }
 }
 
-impl<S: StateStore> Executor for SourceExecutorV2<S> {
+impl<S: StateStore> Executor for SourceExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         if self.stream_source_core.is_some() {
             self.execute_with_stream_source().boxed()
@@ -512,7 +512,7 @@ impl<S: StateStore> Executor for SourceExecutorV2<S> {
     }
 }
 
-impl<S: StateStore> Debug for SourceExecutorV2<S> {
+impl<S: StateStore> Debug for SourceExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(core) = &self.stream_source_core {
             f.debug_struct("SourceExecutor")
@@ -599,7 +599,7 @@ mod tests {
             source_name: MOCK_SOURCE_NAME.to_string(),
         };
 
-        let executor = SourceExecutorV2::new(
+        let executor = SourceExecutor::new(
             ActorContext::create(0),
             schema,
             pk_indices,
@@ -691,7 +691,7 @@ mod tests {
             source_name: MOCK_SOURCE_NAME.to_string(),
         };
 
-        let executor = SourceExecutorV2::new(
+        let executor = SourceExecutor::new(
             ActorContext::create(0),
             schema,
             pk_indices,

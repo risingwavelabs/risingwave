@@ -19,12 +19,10 @@ use futures_async_stream::try_stream;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use rand::seq::IteratorRandom;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{Result, RwError};
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::{mpsc, oneshot};
-
-use crate::StreamChunkWithState;
 
 pub type TableSourceRef = Arc<TableSource>;
 
@@ -61,6 +59,14 @@ impl TableSource {
             core: RwLock::new(core),
             column_descs,
         }
+    }
+
+    pub fn stream_reader(&self) -> TableStreamReader {
+        let mut core = self.core.write();
+        let (tx, rx) = mpsc::unbounded_channel();
+        core.changes_txs.push(tx);
+
+        TableStreamReader { rx }
     }
 
     /// Asynchronously write stream chunk into table. Changes written here will be simply passed to
@@ -121,70 +127,15 @@ impl TableSource {
 pub struct TableStreamReader {
     /// The receiver of the changes channel.
     rx: mpsc::UnboundedReceiver<(StreamChunk, oneshot::Sender<usize>)>,
-
-    /// Mappings from the source column to the column to be read.
-    column_indices: Vec<usize>,
 }
 
 impl TableStreamReader {
-    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
-    pub async fn into_stream(mut self) {
-        while let Some((chunk, notifier)) = self.rx.recv().await {
-            let (ops, columns, bitmap) = chunk.into_inner();
-
-            let selected_columns = self
-                .column_indices
-                .iter()
-                .map(|i| columns[*i].clone())
-                .collect();
-            let chunk = StreamChunk::new(ops, selected_columns, bitmap);
-
-            // Notify about that we've taken the chunk.
-            _ = notifier.send(chunk.cardinality());
-
-            yield chunk.into();
-        }
-    }
-
     #[try_stream(boxed, ok = StreamChunk, error = RwError)]
-    pub async fn into_stream_v2(mut self) {
+    pub async fn into_stream(mut self) {
         while let Some((chunk, notifier)) = self.rx.recv().await {
             // Notify about that we've taken the chunk.
             _ = notifier.send(chunk.cardinality());
             yield chunk;
-        }
-    }
-}
-
-impl TableSource {
-    /// Create a new stream reader.
-    #[expect(clippy::unused_async)]
-    pub async fn stream_reader(&self, column_ids: Vec<ColumnId>) -> Result<TableStreamReader> {
-        let column_indices = column_ids
-            .into_iter()
-            .map(|id| {
-                self.column_descs
-                    .iter()
-                    .position(|c| c.column_id == id)
-                    .expect("column id not exists")
-            })
-            .collect();
-
-        let mut core = self.core.write();
-        let (tx, rx) = mpsc::unbounded_channel();
-        core.changes_txs.push(tx);
-
-        Ok(TableStreamReader { rx, column_indices })
-    }
-
-    pub fn stream_reader_v2(&self) -> TableStreamReader {
-        let mut core = self.core.write();
-        let (tx, rx) = mpsc::unbounded_channel();
-        core.changes_txs.push(tx);
-
-        TableStreamReader {
-            rx,
-            column_indices: Default::default(),
         }
     }
 }
@@ -197,6 +148,7 @@ mod tests {
     use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::{Array, I64Array, Op};
+    use risingwave_common::catalog::ColumnId;
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
 
@@ -212,10 +164,7 @@ mod tests {
     #[tokio::test]
     async fn test_table_source() -> Result<()> {
         let source = Arc::new(new_source());
-        let mut reader = source
-            .stream_reader(vec![ColumnId::from(0)])
-            .await?
-            .into_stream();
+        let mut reader = source.stream_reader().into_stream();
 
         macro_rules! write_chunk {
             ($i:expr) => {{
@@ -234,7 +183,7 @@ mod tests {
         macro_rules! check_next_chunk {
             ($i: expr) => {
                 assert_matches!(reader.next().await.unwrap()?, chunk => {
-                    assert_eq!(chunk.chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
+                    assert_eq!(chunk.columns()[0].array_ref().as_int64().iter().collect_vec(), vec![Some($i)]);
                 });
             }
         }
