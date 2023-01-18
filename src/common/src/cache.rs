@@ -29,6 +29,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use tokio::sync::oneshot::{channel, Receiver, Sender};
+use tokio::task::JoinHandle;
 
 const IN_CACHE: u8 = 1;
 const REVERSE_IN_CACHE: u8 = !IN_CACHE;
@@ -769,22 +770,84 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
 
 pub struct CleanCacheGuard<'a, K: LruKey + Clone + 'static, T: LruValue + 'static> {
     cache: &'a Arc<LruCache<K, T>>,
-    key: K,
+    key: Option<K>,
     hash: u64,
-    success: bool,
+}
+
+impl<'a, K: LruKey + Clone + 'static, T: LruValue + 'static> CleanCacheGuard<'a, K, T> {
+    fn mark_success(&mut self) -> K {
+        self.key.take().unwrap()
+    }
 }
 
 impl<'a, K: LruKey + Clone + 'static, T: LruValue + 'static> Drop for CleanCacheGuard<'a, K, T> {
     fn drop(&mut self) {
-        if !self.success {
-            self.cache.clear_pending_request(&self.key, self.hash);
+        if let Some(key) = self.key.as_ref() {
+            self.cache.clear_pending_request(key, self.hash);
         }
     }
+}
+
+pub enum LookupResponse<K: LruKey + Clone + 'static, T: LruValue + 'static, E> {
+    Cached(CacheableEntry<K, T>),
+    Miss(JoinHandle<Result<CacheableEntry<K, T>, E>>),
 }
 
 /// Only implement `lookup_with_request_dedup` for static values, as they can be sent across tokio
 /// spawned futures.
 impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
+    #[allow(dead_code)]
+    pub async fn lookup_with_request_dedup_raw<F, E, VC>(
+        self: &Arc<Self>,
+        hash: u64,
+        key: K,
+        fetch_value: F,
+        allow_await: bool,
+    ) -> LookupResponse<K, T, E>
+    where
+        F: FnOnce(bool) -> VC,
+        E: Error + Send + 'static,
+        VC: Future<Output = Result<(T, usize), E>> + Send + 'static,
+    {
+        loop {
+            match self.lookup_for_request(hash, key.clone()) {
+                LookupResult::Cached(entry) => return LookupResponse::Cached(entry),
+                LookupResult::WaitPendingRequest(recv) => {
+                    if allow_await {
+                        let _ = recv.await;
+                        continue;
+                    } else {
+                        let this = self.clone();
+                        let fetch_value = fetch_value(false);
+                        let key2 = key.clone();
+                        return LookupResponse::Miss(tokio::spawn(async move {
+                            let _ = recv.await;
+                            this.lookup_with_request_dedup(hash, key2, || fetch_value)
+                                .await
+                        }));
+                    }
+                }
+                LookupResult::Miss => {
+                    let this = self.clone();
+                    let fetch_value = fetch_value(true);
+                    let key2 = key.clone();
+                    let ret = tokio::spawn(async move {
+                        let mut guard = CleanCacheGuard {
+                            cache: &this,
+                            key: Some(key2),
+                            hash,
+                        };
+                        let (value, charge) = fetch_value.await?;
+                        let key2 = guard.mark_success();
+                        let entry = this.insert(key2, hash, charge, value);
+                        Ok(entry)
+                    });
+                    return LookupResponse::Miss(ret);
+                }
+            }
+        }
+    }
+
     pub async fn lookup_with_request_dedup<F, E, VC>(
         self: &Arc<Self>,
         hash: u64,
@@ -797,7 +860,8 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
         VC: Future<Output = Result<(T, usize), E>> + Send + 'static,
     {
         loop {
-            match self.lookup_for_request(hash, key.clone()) {
+            let key_clone = key.clone();
+            match self.lookup_for_request(hash, key_clone) {
                 LookupResult::Cached(entry) => return Ok(entry),
                 LookupResult::WaitPendingRequest(recv) => {
                     let _ = recv.await;
@@ -809,9 +873,8 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
                     let key2 = key.clone();
                     let mut guard = CleanCacheGuard {
                         cache: self,
-                        key,
+                        key: Some(key),
                         hash,
-                        success: false,
                     };
                     let ret = tokio::spawn(async move {
                         let (value, charge) = fetch_value.await?;
@@ -821,7 +884,7 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
                     .await
                     .unwrap();
                     if ret.is_ok() {
-                        guard.success = true;
+                        guard.mark_success();
                     }
                     return ret;
                 }
