@@ -27,9 +27,8 @@ use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use super::util::at_least_one_ok;
 use crate::parser::canal::operators::*;
-use crate::{
-    ensure_rust_type, ensure_str, ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard,
-};
+use crate::parser::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::{ensure_rust_type, ensure_str};
 
 const AFTER: &str = "data";
 const BEFORE: &str = "old";

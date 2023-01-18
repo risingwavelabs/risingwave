@@ -23,12 +23,13 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::{ConnectorError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_connector::parser::SourceParserImpl;
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
+use risingwave_connector::{SourceColumnDesc, SourceFormat};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_source::connector_source::{ConnectorSource, SourceContext};
 use risingwave_source::monitor::SourceMetrics;
-use risingwave_source::{SourceColumnDesc, SourceFormat, SourceParserImpl};
 
 use super::Executor;
 use crate::error::BatchError;

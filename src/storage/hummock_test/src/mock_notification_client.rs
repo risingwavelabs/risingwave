@@ -77,7 +77,7 @@ impl<S: MetaStore> NotificationClient for MockNotificationClient<S> {
     }
 }
 
-pub fn get_test_notification_client(
+pub fn get_notification_client_for_test(
     env: MetaSrvEnv<MemStore>,
     hummock_manager_ref: Arc<HummockManager<MemStore>>,
     worker_node: WorkerNode,
