@@ -161,10 +161,9 @@ pub async fn handle(
             analyze,
             options,
         } => explain::handle_explain(handler_args, *statement, options, analyze),
-        Statement::CreateSource {
-            is_materialized,
-            stmt,
-        } => create_source::handle_create_source(handler_args, is_materialized, stmt).await,
+        Statement::CreateSource { stmt } => {
+            create_source::handle_create_source(handler_args, stmt).await
+        }
         Statement::CreateSink { stmt } => create_sink::handle_create_sink(handler_args, stmt).await,
         Statement::CreateFunction {
             or_replace,
@@ -299,10 +298,6 @@ pub async fn handle(
             ObjectType::View => {
                 drop_view::handle_drop_view(handler_args, object_name, if_exists).await
             }
-            ObjectType::MaterializedSource => Err((ErrorCode::InvalidInputSyntax(
-                "Use `DROP SOURCE` to drop a materialized source.".to_owned(),
-            ))
-            .into()),
         },
         Statement::DropFunction {
             if_exists,
