@@ -788,6 +788,9 @@ impl<'a, K: LruKey + Clone + 'static, T: LruValue + 'static> Drop for CleanCache
     }
 }
 
+/// `lookup_with_request_dedup` can directly return `Result<CacheableEntry<K, T>, E>`, but if we do
+/// not want to wait when cache miss happens, we can call `lookup_with_request_dedup_raw` which will
+/// return `JoinHandle<Result<CacheableEntry<K, T>, E>>` when cache miss happens.
 pub enum LookupResponse<K: LruKey + Clone + 'static, T: LruValue + 'static, E> {
     Cached(CacheableEntry<K, T>),
     Miss(JoinHandle<Result<CacheableEntry<K, T>, E>>),
@@ -802,8 +805,8 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static, E> LookupResponse<K, T,
     }
 }
 
-/// Only implement `lookup_with_request_dedup` for static values, as they can be sent across tokio
-/// spawned futures.
+/// Only implement `lookup_with_request_dedup` and `lookup_with_request_dedup_raw` for static
+/// values, as they can be sent across tokio spawned futures.
 impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
     async fn lookup_with_request_dedup_unsafe<F, E, VC>(
         self: &Arc<Self>,
