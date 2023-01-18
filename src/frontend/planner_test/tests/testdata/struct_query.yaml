@@ -31,7 +31,8 @@
       }
 - sql: |
     create materialized view t as select * from s;
-    select (t).country.city,(t).country,(country).city.address from t;
+    -- select (t).country.city,(t).country,(country).city.address from t;
+    select (t.country).city,t.country,(country).city.address from t;
   logical_plan: |
     LogicalProject { exprs: [Field(t.country, 1:Int32), t.country, Field(Field(t.country, 1:Int32), 0:Int32)] }
     └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
@@ -66,13 +67,15 @@
       >,
       zipcode BIGINT,
       rate FLOAT);
-    select (t).country.city.*,(t.country).*,(country).city.* from t;
+    -- select (t).country.city.*,(t.country).*,(country).city.* from t;
+    select (t.country).city.*,(t.country).*,(country).city.* from t;
   logical_plan: |
     LogicalProject { exprs: [Field(Field(t.country, 1:Int32), 0:Int32), Field(Field(t.country, 1:Int32), 1:Int32), Field(t.country, 0:Int32), Field(t.country, 1:Int32), Field(t.country, 2:Int32), Field(Field(t.country, 1:Int32), 0:Int32), Field(Field(t.country, 1:Int32), 1:Int32)] }
     └─LogicalScan { table: t, columns: [t.id, t.country, t.zipcode, t.rate, t._row_id] }
 - sql: |
     create materialized view t as select * from s;
-    select (t).country1.city.*,(t.country2).*,(country3).city.* from t;
+    -- select (t).country1.city.*,(t.country2).*,(country3).city.* from t;
+    select (t.country1).city.*,(t.country2).*,(country3).city.* from t;
   logical_plan: |
     LogicalProject { exprs: [Field(Field(t.country1, 1:Int32), 0:Int32), Field(Field(t.country1, 1:Int32), 1:Int32), Field(t.country2, 0:Int32), Field(t.country2, 1:Int32), Field(t.country2, 2:Int32), Field(Field(t.country3, 1:Int32), 0:Int32), Field(Field(t.country3, 1:Int32), 1:Int32)] }
     └─LogicalScan { table: t, columns: [t.id, t.country1, t.country2, t.country3, t.zipcode, t.rate, t._row_id] }
@@ -101,7 +104,8 @@
       }
 - sql: |
     create materialized view t as select * from s;
-    select (c).zipcode from (select (t).country.city as c from t);
+    -- select (c).zipcode from (select (t).country.city as c from t);
+    select (c).zipcode from (select (t.country).city as c from t);
   logical_plan: |
     LogicalProject { exprs: [Field(Field(t.country, 1:Int32), 1:Int32)] }
     └─LogicalProject { exprs: [Field(t.country, 1:Int32)] }
@@ -129,7 +133,8 @@
       }
 - sql: |
     create materialized view t as select * from s;
-    select (c).zipcode from (select min((t).country.city) as c from t);
+    -- select (c).zipcode from (select min((t).country.city) as c from t);
+    select (c).zipcode from (select min((t.country).city) as c from t);
   logical_plan: |
     LogicalProject { exprs: [Field(min(Field(t.country, 1:Int32)), 1:Int32)] }
     └─LogicalProject { exprs: [min(Field(t.country, 1:Int32))] }
