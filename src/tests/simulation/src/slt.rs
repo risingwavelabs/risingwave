@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rand::{thread_rng, Rng};
-use sqllogictest::ParallelTestError;
+use sqllogictest::{parse, ParallelTestError};
 
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
@@ -56,19 +56,19 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             // Ignore the session timezone test cases that depends on session config
             continue;
         }
-        // FIXME #7188: Temporarily enforce VISIBILITY_MODE to checkpoint because there is a known
-        // issue in failure propagation for local mode #7367, which would fail VISIBILITY_MODE=all.
-        let tempfile_visibility_mode = hack_visibility_mode_checkpoint(path);
-        let path_visibility_mode = tempfile_visibility_mode.path();
         // XXX: hack for kafka source test
-        let tempfile = path
-            .ends_with("kafka.slt")
-            .then(|| hack_kafka_test(path_visibility_mode));
-        let path = tempfile
-            .as_ref()
-            .map(|p| p.path())
-            .unwrap_or(path_visibility_mode);
-        for record in sqllogictest::parse_file(path).expect("failed to parse file") {
+        let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));
+        let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
+        let mut records = sqllogictest::parse_file(path).expect("failed to parse file");
+        if kill {
+            // FIXME #7188: Temporarily enforce VISIBILITY_MODE=checkpoint to work around the known
+            // issue in failure propagation for local mode #7367, which would fail
+            // VISIBILITY_MODE=all.
+            let preceding_records = parse("statement ok\nSET VISIBILITY_MODE to checkpoint;\n")
+                .expect("failed to parse str");
+            records = preceding_records.into_iter().chain(records).collect();
+        }
+        for record in records {
             if let sqllogictest::Record::Halt { .. } = record {
                 break;
             }
@@ -210,24 +210,6 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
     let file = tempfile::NamedTempFile::new().expect("failed to create temp file");
     std::fs::write(file.path(), content).expect("failed to write file");
     println!("created a temp file for kafka test: {:?}", file.path());
-    file
-}
-
-fn hack_visibility_mode_checkpoint(path: &Path) -> tempfile::NamedTempFile {
-    let content = std::fs::read_to_string(path).expect("failed to read file");
-    let content = [
-        "statement ok",
-        "SET VISIBILITY_MODE TO checkpoint;",
-        "",
-        &content,
-    ]
-    .join("\n");
-    let file = tempfile::NamedTempFile::new().expect("failed to create temp file");
-    std::fs::write(file.path(), content).expect("failed to write file");
-    println!(
-        "created a temp file to enforce visibility_mode: {:?}",
-        file.path()
-    );
     file
 }
 
