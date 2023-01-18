@@ -41,6 +41,12 @@ fn is_window_error(db_error: &str) -> bool {
     || db_error.contains("Bind error: The 2st arg of window table function should be a column name but not complex expression. Consider using an intermediate CTE or view as workaround")
 }
 
+// FIXME: <https://github.com/risingwavelabs/risingwave/issues/7218#issuecomment-1386462219>
+// This error should not occur, remove once issue is fixed.
+fn is_hash_shuffle_error(db_error: &str) -> bool {
+    db_error.contains("broken hash_shuffle_channel")
+}
+
 /// Certain errors are permitted to occur. This is because:
 /// 1. It is more complex to generate queries without these errors.
 /// 2. These errors seldom occur, skipping them won't affect overall effectiveness of sqlsmith.
@@ -50,4 +56,5 @@ pub fn is_permissible_error(db_error: &str) -> bool {
         || is_unimplemented_error(db_error)
         || not_unique_error(db_error)
         || is_window_error(db_error)
+        || is_hash_shuffle_error(db_error)
 }
