@@ -880,33 +880,31 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
         E: Error + Send + 'static + From<RecvError>,
         VC: Future<Output = Result<(T, usize), E>> + Send + 'static,
     {
-        loop {
-            match self.lookup_for_request(hash, key.clone()) {
-                LookupResult::Cached(entry) => return LookupResponse::Cached(entry),
-                LookupResult::WaitPendingRequest(recv) => {
-                    return LookupResponse::Pending(Box::pin(async move {
-                        recv.await.map_err(|recv_error| recv_error.into())
-                    }));
-                }
-                LookupResult::Miss => {
-                    let this = self.clone();
-                    let fetch_value = fetch_value();
-                    let key2 = key.clone();
-                    let join_handle = tokio::spawn(async move {
-                        let guard = CleanCacheGuard {
-                            cache: &this,
-                            key: Some(key2),
-                            hash,
-                        };
-                        let (value, charge) = fetch_value.await?;
-                        let key2 = guard.mark_success();
-                        let entry = this.insert(key2, hash, charge, value);
-                        Ok(entry)
-                    });
-                    return LookupResponse::Pending(Box::pin(
-                        async move { join_handle.await.unwrap() },
-                    ));
-                }
+        match self.lookup_for_request(hash, key.clone()) {
+            LookupResult::Cached(entry) => return LookupResponse::Cached(entry),
+            LookupResult::WaitPendingRequest(recv) => {
+                return LookupResponse::Pending(Box::pin(async move {
+                    recv.await.map_err(|recv_error| recv_error.into())
+                }));
+            }
+            LookupResult::Miss => {
+                let this = self.clone();
+                let fetch_value = fetch_value();
+                let key2 = key;
+                let join_handle = tokio::spawn(async move {
+                    let guard = CleanCacheGuard {
+                        cache: &this,
+                        key: Some(key2),
+                        hash,
+                    };
+                    let (value, charge) = fetch_value.await?;
+                    let key2 = guard.mark_success();
+                    let entry = this.insert(key2, hash, charge, value);
+                    Ok(entry)
+                });
+                return LookupResponse::Pending(Box::pin(
+                    async move { join_handle.await.unwrap() },
+                ));
             }
         }
     }
