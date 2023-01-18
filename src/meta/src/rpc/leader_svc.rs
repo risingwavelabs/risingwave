@@ -32,9 +32,7 @@ use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::MetaLeaderInfo;
 use risingwave_pb::user::user_service_server::UserServiceServer;
-use tokio::sync::oneshot::Sender as OneSender;
 use tokio::sync::watch::Receiver as WatchReceiver;
-use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
 use super::service::health_service::HealthServiceImpl;
@@ -48,7 +46,7 @@ use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
 };
 use crate::rpc::metrics::MetaMetrics;
-use crate::rpc::server::AddressInfo;
+use crate::rpc::server::{AddressInfo, ElectionClientRef};
 use crate::rpc::service::backup_service::BackupServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
@@ -59,13 +57,6 @@ use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::{hummock, MetaResult};
-
-// simple wrapper containing election sync related objects
-pub struct ElectionCoordination {
-    pub election_handle: JoinHandle<()>,
-    pub election_shutdown: OneSender<()>,
-    pub leader_rx: WatchReceiver<(MetaLeaderInfo, bool)>,
-}
 
 /// Starts all services needed for the meta leader node
 /// Only call this function once, since initializing the services multiple times will result in an
@@ -79,12 +70,12 @@ pub async fn start_leader_srv<S: MetaStore>(
     max_heartbeat_interval: Duration,
     opts: MetaOpts,
     current_leader: MetaLeaderInfo,
-    election_coordination: ElectionCoordination,
+    election_client: Option<ElectionClientRef>,
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
-    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), current_leader).await;
+    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), current_leader.clone()).await;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let registry = meta_metrics.registry();
@@ -284,10 +275,7 @@ pub async fn start_leader_srv<S: MetaStore>(
         .await,
     );
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
-    sub_tasks.push((
-        election_coordination.election_handle,
-        election_coordination.election_shutdown,
-    ));
+
     if cfg!(not(test)) {
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
@@ -312,7 +300,7 @@ pub async fn start_leader_srv<S: MetaStore>(
         }
     };
 
-    let leader_srv = LeaderServiceImpl::new(election_coordination.leader_rx);
+    let leader_srv = LeaderServiceImpl::new(election_client, current_leader);
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))

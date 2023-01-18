@@ -247,8 +247,6 @@ pub struct BatchTaskExecution<C> {
     /// Receivers data of the task.
     receivers: Mutex<Vec<Option<ChanReceiverImpl>>>,
 
-    sender: ChanSenderImpl,
-
     /// Context for task execution
     context: C,
 
@@ -277,27 +275,17 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         runtime: &'static Runtime,
     ) -> Result<Self> {
         let task_id = TaskId::from(prost_tid);
-
-        let (sender, receivers) = create_output_channel(
-            plan.get_exchange_info()?,
-            context.get_config().developer.batch_output_channel_size,
-        )?;
-
-        let mut rts = Vec::new();
-        rts.extend(receivers.into_iter().map(Some));
-
         Ok(Self {
             task_id,
             plan,
             state: Mutex::new(TaskStatus::Pending),
-            receivers: Mutex::new(rts),
+            receivers: Mutex::new(Vec::new()),
             failure: Arc::new(Mutex::new(None)),
             epoch,
             shutdown_tx: Mutex::new(None),
             state_rx: Mutex::new(None),
             context,
             runtime,
-            sender,
         })
     }
 
@@ -328,9 +316,18 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         .await?;
 
         // Init shutdown channel and data receivers.
-        let sender = self.sender.clone();
+        let (sender, receivers) = create_output_channel(
+            self.plan.get_exchange_info()?,
+            self.context
+                .get_config()
+                .developer
+                .batch_output_channel_size,
+        )?;
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();
         *self.shutdown_tx.lock() = Some(shutdown_tx);
+        self.receivers
+            .lock()
+            .extend(receivers.into_iter().map(Some));
         let failure = self.failure.clone();
         let task_id = self.task_id.clone();
 

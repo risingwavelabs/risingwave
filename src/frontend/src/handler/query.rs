@@ -164,10 +164,12 @@ pub async fn handle_query(
         }
     };
 
-    let rows_count = match stmt_type {
-        StatementType::SELECT => None,
+    let rows_count: Option<i32> = match stmt_type {
+        StatementType::SELECT
+        | StatementType::INSERT_RETURNING
+        | StatementType::DELETE_RETURNING
+        | StatementType::UPDATE_RETURNING => None,
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            // Get the row from the row_stream.
             let first_row_set = row_stream
                 .next()
                 .await
@@ -196,6 +198,8 @@ pub async fn handle_query(
     };
 
     // Implicitly flush the writes.
+    // FIXME(bugen): the DMLs with `RETURNING` clause is done only after the `row_stream` is fully
+    // consumed, so implicitly flushing here doesn't work.
     if session.config().get_implicit_flush() {
         flush_for_write(&session, stmt_type).await?;
     }
@@ -225,9 +229,27 @@ fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
 
     match stmt {
         Statement::Query(_) => Ok(SELECT),
-        Statement::Insert { .. } => Ok(INSERT),
-        Statement::Delete { .. } => Ok(DELETE),
-        Statement::Update { .. } => Ok(UPDATE),
+        Statement::Insert { returning, .. } => {
+            if returning.is_empty() {
+                Ok(INSERT)
+            } else {
+                Ok(INSERT_RETURNING)
+            }
+        }
+        Statement::Delete { returning, .. } => {
+            if returning.is_empty() {
+                Ok(DELETE)
+            } else {
+                Ok(DELETE_RETURNING)
+            }
+        }
+        Statement::Update { returning, .. } => {
+            if returning.is_empty() {
+                Ok(UPDATE)
+            } else {
+                Ok(UPDATE_RETURNING)
+            }
+        }
         _ => Err(RwError::from(ErrorCode::InvalidInputSyntax(
             "unsupported statement type".to_string(),
         ))),
@@ -269,11 +291,8 @@ pub async fn local_execute(
 }
 
 pub async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
-    match stmt_type {
-        StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            do_flush(session).await?;
-        }
-        _ => {}
+    if stmt_type.is_dml() {
+        do_flush(session).await?;
     }
     Ok(())
 }
