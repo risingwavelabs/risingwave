@@ -662,6 +662,9 @@ impl HummockVersionReader {
         drop(buffered);
         timer.observe_duration();
 
+        let sst_read_options = SstableIteratorReadOptions::default();
+        let sst_read_options = Arc::new(sst_read_options);
+
         for (level_type, fetch_meta_req) in fetch_meta_reqs {
             if level_type == LevelType::Nonoverlapping as i32 {
                 let mut sstables = vec![];
@@ -687,7 +690,7 @@ impl HummockVersionReader {
                 non_overlapping_iters.push(ConcatIterator::new_with_prefetch(
                     sstables,
                     self.sstable_store.clone(),
-                    Arc::new(SstableIteratorReadOptions::default()),
+                    sst_read_options.clone(),
                 ));
             } else {
                 let mut iters = Vec::new();
@@ -711,7 +714,7 @@ impl HummockVersionReader {
                     iters.push(SstableIterator::new(
                         sstable,
                         self.sstable_store.clone(),
-                        Arc::new(SstableIteratorReadOptions::default()),
+                        sst_read_options.clone(),
                     ));
                     overlapping_iter_count += 1;
                 }

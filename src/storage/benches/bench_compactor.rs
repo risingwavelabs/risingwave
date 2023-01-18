@@ -208,7 +208,10 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let info2 = runtime
         .block_on(async { build_table(sstable_store.clone(), 4, 0..test_key_size, 2).await });
     let level2 = vec![info1, info2];
-    let read_options = Arc::new(SstableIteratorReadOptions { prefetch: true });
+    let read_options = Arc::new(SstableIteratorReadOptions {
+        prefetch: true,
+        must_iterated_pos: None,
+    });
     c.bench_function("bench_union_merge_iterator", |b| {
         b.to_async(FuturesExecutor).iter(|| {
             let sstable_store1 = sstable_store.clone();
