@@ -172,7 +172,8 @@ impl ConnectorSourceReader {
 
             for msg in batch {
                 tracing::warn!("payload: {:?}", msg.payload);
-                let payload = Some(br#"{"amount": "1111111111111111111160", "sysTimestamp": 1673000000}"#.as_slice());
+                // bigint max = 9223372036854775807
+                let payload = Some(br#"{"amount": "1111111111111111111160", "sysTimestamp": 9223372036854775807}"#.as_slice());
                 if let Some(content) = payload {
                     split_offset_mapping.insert(msg.split_id, msg.offset);
 
