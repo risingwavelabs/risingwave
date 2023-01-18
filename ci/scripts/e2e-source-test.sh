@@ -35,9 +35,9 @@ echo "--- Download connector node jar"
 buildkite-agent artifact download connector-service.jar ./
 
 echo "--- Prepare data"
-cp src/source/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
-cp src/source/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
-cp src/source/src/test_data/complex-schema ./proto-complex-schema
+cp src/connector/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
+cp src/connector/src/test_data/complex-schema.avsc ./avro-complex-schema.avsc
+cp src/connector/src/test_data/complex-schema ./proto-complex-schema
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
