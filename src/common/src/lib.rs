@@ -62,5 +62,5 @@ pub mod test_prelude {
 #[cfg(build = "release")]
 pub const RW_VERSION: &str = "v0.1.15";
 
-#[cfg(build = "debug")]
+#[cfg(not((build = "release")))]
 pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");
