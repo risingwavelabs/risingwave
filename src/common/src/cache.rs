@@ -145,7 +145,7 @@ impl<K: LruKey, T: LruValue> LruHandle<K, T> {
         self.refs += 1;
     }
 
-    fn add_many_refs(&mut self, ref_count: u32) {
+    fn add_multi_refs(&mut self, ref_count: u32) {
         self.refs += ref_count;
     }
 
@@ -692,7 +692,7 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
             let ptr = shard.insert(key, hash, charge, value, &mut to_delete);
             debug_assert!(!ptr.is_null());
             if let Some(mut que) = pending_request {
-                (*ptr).add_many_refs(que.len() as u32);
+                (*ptr).add_multi_refs(que.len() as u32);
                 senders = std::mem::take(&mut que);
             }
             CacheableEntry {
