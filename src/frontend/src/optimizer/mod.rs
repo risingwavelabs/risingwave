@@ -604,25 +604,17 @@ impl PlanRoot {
     ) -> Result<StreamMaterialize> {
         let mut stream_plan = self.gen_stream_plan()?;
 
-        match dml_flag {
-            // TODO: remove this branch after we deprecate the materialized source
-            DmlFlag::Disable => { /* do nothing */ }
-
-            // NOTE(stonepage): we can not use this the plan's input append-only property here
-            DmlFlag::All | DmlFlag::AppendOnly => {
-                // Add DML node.
-                stream_plan = StreamDml::new(
-                    stream_plan,
-                    dml_flag == DmlFlag::AppendOnly,
-                    columns.iter().map(|c| c.column_desc.clone()).collect(),
-                )
-                .into();
-                // Add RowIDGen node if needed.
-                if let Some(row_id_index) = row_id_index {
-                    stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
-                }
-            }
-        };
+        // Add DML node.
+        stream_plan = StreamDml::new(
+            stream_plan,
+            dml_flag == DmlFlag::AppendOnly,
+            columns.iter().map(|c| c.column_desc.clone()).collect(),
+        )
+        .into();
+        // Add RowIDGen node if needed.
+        if let Some(row_id_index) = row_id_index {
+            stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
+        }
 
         StreamMaterialize::create_for_table(
             stream_plan,
