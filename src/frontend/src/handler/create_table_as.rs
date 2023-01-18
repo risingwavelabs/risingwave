@@ -129,6 +129,7 @@ pub async fn handle_create_as(
         table_name,
         columns: vec![],
         source: query,
+        returning: vec![],
     };
 
     handle_query(handler_args, insert, false).await
