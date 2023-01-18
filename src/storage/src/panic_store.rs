@@ -19,6 +19,7 @@ use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
 
+use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
@@ -109,6 +110,10 @@ impl StateStore for PanicStateStore {
         async {
             panic!("should not call new local from the panic state store");
         }
+    }
+
+    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+        panic!("should not call validate_read_epoch from the panic state store");
     }
 }
 
