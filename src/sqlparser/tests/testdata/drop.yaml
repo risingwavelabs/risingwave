@@ -3,9 +3,6 @@
   formatted_ast: |
     Drop(DropStatement { object_type: Source, if_exists: false, object_name: ObjectName([Ident { value: "src", quote_style: None }]), drop_mode: None })
 
-- input: DROP MATERIALIZED SOURCE src
-  formatted_sql: DROP MATERIALIZED SOURCE src
-
 - input: DROP MATERIALIZED VIEW t
   formatted_sql: DROP MATERIALIZED VIEW t
 

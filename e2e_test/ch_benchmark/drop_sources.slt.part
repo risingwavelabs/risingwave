@@ -1,35 +1,35 @@
 statement ok
-DROP SOURCE customer;
+DROP TABLE customer;
 
 statement ok
-DROP SOURCE district;
+DROP TABLE district;
 
 statement ok
-DROP SOURCE history;
+DROP TABLE history;
 
 statement ok
-DROP SOURCE item;
+DROP TABLE item;
 
 statement ok
-DROP SOURCE neworder;
+DROP TABLE neworder;
 
 statement ok
-DROP SOURCE orderline;
+DROP TABLE orderline;
 
 statement ok
-DROP SOURCE orders;
+DROP TABLE orders;
 
 statement ok
-DROP SOURCE stock;
+DROP TABLE stock;
 
 statement ok
-DROP SOURCE warehouse;
+DROP TABLE warehouse;
 
 statement ok
-DROP SOURCE supplier;
+DROP TABLE supplier;
 
 statement ok
-DROP SOURCE region;
+DROP TABLE region;
 
 statement ok
-DROP SOURCE nation;
+DROP TABLE nation;
