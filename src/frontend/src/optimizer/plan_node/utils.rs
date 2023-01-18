@@ -56,7 +56,7 @@ impl TableCatalogBuilder {
         let mut column_desc = ColumnDesc::from_field_with_column_id(field, column_id);
 
         // Replace dot of the internal table column name with underline.
-        column_desc.name = column_desc.name.replace(".", "_");
+        column_desc.name = column_desc.name.replace('.', "_");
         // Avoid column name duplicate.
         self.avoid_duplicate_col_name(&mut column_desc);
 
