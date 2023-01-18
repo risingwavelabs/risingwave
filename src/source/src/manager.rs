@@ -26,7 +26,9 @@ pub struct SourceColumnDesc {
     pub column_id: ColumnId,
     pub fields: Vec<ColumnDesc>,
     /// Now `skip_parse` is used to indicate whether the column is a row id column.
-    pub skip_parse: bool,
+    pub is_row_id: bool,
+
+    pub is_meta: bool,
 }
 
 impl SourceColumnDesc {
@@ -42,19 +44,22 @@ impl SourceColumnDesc {
             data_type,
             column_id,
             fields: vec![],
-            skip_parse: false,
+            is_row_id: false,
+            is_meta: false,
         }
     }
 }
 
 impl From<&ColumnDesc> for SourceColumnDesc {
     fn from(c: &ColumnDesc) -> Self {
+        let is_meta = c.name.starts_with("_rw_kafka_timestamp");
         Self {
             name: c.name.clone(),
             data_type: c.data_type.clone(),
             column_id: c.column_id,
             fields: c.field_descs.clone(),
-            skip_parse: false,
+            is_row_id: false,
+            is_meta,
         }
     }
 }

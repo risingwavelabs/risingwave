@@ -9,6 +9,7 @@ import "expr.proto";
 import "plan_common.proto";
 import "source.proto";
 
+option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message AddMutation {
@@ -575,6 +576,12 @@ enum FragmentTypeFlag {
   CHAIN_NODE = 16;
 }
 
+// The environment associated with a stream plan
+message StreamEnvironment {
+  // The timezone associated with the streaming plan. Only applies to MV for now.
+  string timezone = 1;
+}
+
 message StreamFragmentGraph {
   message StreamFragment {
     // 0-based on frontend, and will be rewritten to global id on meta.
@@ -603,6 +610,11 @@ message StreamFragmentGraph {
     uint32 upstream_id = 4;
     uint32 downstream_id = 5;
   }
+
+  message Parallelism {
+    uint64 parallelism = 1;
+  }
+
   // all the fragments in the graph.
   map<uint32, StreamFragment> fragments = 1;
   // edges between fragments.
@@ -610,4 +622,7 @@ message StreamFragmentGraph {
 
   repeated uint32 dependent_table_ids = 3;
   uint32 table_ids_cnt = 4;
+  StreamEnvironment env = 5;
+  // If none, default parallelism will be applied.
+  Parallelism parallelism = 6;
 }

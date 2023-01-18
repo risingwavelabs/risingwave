@@ -877,6 +877,8 @@ pub enum Statement {
         columns: Vec<Ident>,
         /// A SQL query that specifies what to insert
         source: Box<Query>,
+        /// Define output of this insert statement
+        returning: Vec<SelectItem>,
     },
     Copy {
         /// TABLE
@@ -894,6 +896,8 @@ pub enum Statement {
         assignments: Vec<Assignment>,
         /// WHERE
         selection: Option<Expr>,
+        /// RETURNING
+        returning: Vec<SelectItem>,
     },
     /// DELETE
     Delete {
@@ -901,6 +905,8 @@ pub enum Statement {
         table_name: ObjectName,
         /// WHERE
         selection: Option<Expr>,
+        /// RETURNING
+        returning: Vec<SelectItem>,
     },
     /// CREATE VIEW
     CreateView {
@@ -1130,14 +1136,18 @@ impl fmt::Display for Statement {
                 table_name,
                 columns,
                 source,
+                returning,
             } => {
                 write!(f, "INSERT INTO {table_name} ", table_name = table_name,)?;
                 if !columns.is_empty() {
                     write!(f, "({}) ", display_comma_separated(columns))?;
                 }
-                write!(f, "{}", source)
+                write!(f, "{}", source)?;
+                if !returning.is_empty() {
+                    write!(f, " RETURNING ({})", display_comma_separated(returning))?;
+                }
+                Ok(())
             }
-
             Statement::Copy {
                 table_name,
                 columns,
@@ -1167,6 +1177,7 @@ impl fmt::Display for Statement {
                 table_name,
                 assignments,
                 selection,
+                returning,
             } => {
                 write!(f, "UPDATE {}", table_name)?;
                 if !assignments.is_empty() {
@@ -1175,15 +1186,22 @@ impl fmt::Display for Statement {
                 if let Some(selection) = selection {
                     write!(f, " WHERE {}", selection)?;
                 }
+                if !returning.is_empty() {
+                    write!(f, " RETURNING ({})", display_comma_separated(returning))?;
+                }
                 Ok(())
             }
             Statement::Delete {
                 table_name,
                 selection,
+                returning,
             } => {
                 write!(f, "DELETE FROM {}", table_name)?;
                 if let Some(selection) = selection {
                     write!(f, " WHERE {}", selection)?;
+                }
+                if !returning.is_empty() {
+                    write!(f, " RETURNING {}", display_comma_separated(returning))?;
                 }
                 Ok(())
             }

@@ -415,16 +415,25 @@ impl HummockVersionReader {
         let table_id_string = read_options.table_id.to_string();
         let table_id_label = table_id_string.as_str();
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
+        let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
 
         // 1. read staging data
         for imm in &imms {
+            if imm.epoch() <= min_epoch {
+                continue;
+            }
+
             if let Some(data) = get_from_batch(imm, table_key, &mut local_stats) {
                 return Ok(data.into_user_value());
             }
         }
 
         // 2. order guarantee: imm -> sst
-        let dist_key_hash = Sstable::hash_for_bloom_filter(table_key.dist_key());
+        let dist_key_hash = read_options
+            .prefix_hint
+            .as_ref()
+            .map(|dist_key| Sstable::hash_for_bloom_filter(dist_key.as_ref()));
+
         let full_key = FullKey::new(read_options.table_id, table_key, epoch);
         for local_sst in &uncommitted_ssts {
             table_counts += 1;
@@ -438,6 +447,12 @@ impl HummockVersionReader {
             )
             .await?
             {
+                local_stats.report_bloom_filter_metrics(
+                    self.state_store_metrics.as_ref(),
+                    "get",
+                    table_id_label,
+                    false,
+                );
                 return Ok(data.into_user_value());
             }
         }
@@ -451,6 +466,7 @@ impl HummockVersionReader {
             if level.table_infos.is_empty() {
                 continue;
             }
+
             match level.level_type() {
                 LevelType::Overlapping | LevelType::Unspecified => {
                     let sstable_infos = prune_ssts(
@@ -470,6 +486,12 @@ impl HummockVersionReader {
                         )
                         .await?
                         {
+                            local_stats.report_bloom_filter_metrics(
+                                self.state_store_metrics.as_ref(),
+                                "get",
+                                table_id_label,
+                                false,
+                            );
                             // todo add global stat to report
                             local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                             return Ok(v.into_user_value());
@@ -508,6 +530,12 @@ impl HummockVersionReader {
                     )
                     .await?
                     {
+                        local_stats.report_bloom_filter_metrics(
+                            self.state_store_metrics.as_ref(),
+                            "get",
+                            table_id_label,
+                            false,
+                        );
                         local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                         return Ok(v.into_user_value());
                     }
@@ -515,6 +543,12 @@ impl HummockVersionReader {
             }
         }
 
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "get",
+            table_id_label,
+            true,
+        );
         local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
         self.state_store_metrics
             .iter_merge_sstable_counts
@@ -768,7 +802,16 @@ impl HummockVersionReader {
             .rewind()
             .in_span(Span::enter_with_local_parent("rewind"))
             .await?;
+
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "iter",
+            table_id_label,
+            user_iter.is_valid(),
+        );
+
         local_stats.report(self.state_store_metrics.deref(), table_id_label);
+
         Ok(HummockStorageIterator::new(
             user_iter,
             self.state_store_metrics.clone(),

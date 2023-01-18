@@ -41,7 +41,8 @@ use self::plan_node::{
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
 use self::plan_visitor::{
-    has_batch_exchange, has_logical_apply, has_logical_over_agg, HasMaxOneRowApply,
+    has_batch_delete, has_batch_exchange, has_batch_insert, has_batch_update, has_logical_apply,
+    has_logical_over_agg, HasMaxOneRowApply,
 };
 use self::property::RequiredDist;
 use self::rule::*;
@@ -496,15 +497,11 @@ impl PlanRoot {
             ctx.trace("To Batch Distributed Plan:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
-
-        let insert_exchange = match plan.node_type() {
-            // Always insert a exchange singleton for batch dml.
-            PlanNodeType::BatchInsert | PlanNodeType::BatchDelete | PlanNodeType::BatchUpdate => {
-                true
-            }
-            _ => Self::require_additional_exchange_on_root(plan.clone()),
-        };
-        if insert_exchange {
+        if has_batch_insert(plan.clone())
+            || has_batch_delete(plan.clone())
+            || has_batch_update(plan.clone())
+            || Self::require_additional_exchange_on_root(plan.clone())
+        {
             plan =
                 BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into();
         }

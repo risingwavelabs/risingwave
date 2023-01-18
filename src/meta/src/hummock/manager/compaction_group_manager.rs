@@ -725,6 +725,7 @@ mod tests {
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::meta::table_fragments::Fragment;
+    use risingwave_pb::stream_plan::StreamEnvironment;
 
     use crate::hummock::manager::compaction_group_manager::CompactionGroupManagerInner;
     use crate::hummock::manager::versioning::Versioning;
@@ -864,6 +865,7 @@ mod tests {
                     ..Default::default()
                 },
             )]),
+            StreamEnvironment::default(),
         );
         let table_fragment_2 = TableFragments::new(
             TableId::new(20),
@@ -875,6 +877,7 @@ mod tests {
                     ..Default::default()
                 },
             )]),
+            StreamEnvironment::default(),
         );
 
         // Test register_table_fragments
