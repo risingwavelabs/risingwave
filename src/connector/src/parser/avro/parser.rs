@@ -32,8 +32,7 @@ use url::Url;
 use super::schema_resolver::*;
 use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::util::get_kafka_topic;
-use crate::parser::ParseFuture;
-use crate::{SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 fn unix_epoch_days() -> i32 {
     NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1)
@@ -341,7 +340,8 @@ mod test {
         read_schema_from_http, read_schema_from_local, read_schema_from_s3, unix_epoch_days,
         AvroParser,
     };
-    use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
+    use crate::parser::{SourceParser, SourceStreamChunkBuilder};
+    use crate::SourceColumnDesc;
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();

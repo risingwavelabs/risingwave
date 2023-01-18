@@ -16,7 +16,10 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::StreamExt;
 
+use super::{SplitImpl, SplitReaderV2};
+use crate::parser::ParserConfig;
 use crate::source::{BoxSourceStream, Column, ConnectorState, SplitReader};
+use crate::BoxSourceWithStateStream;
 
 /// [`DummySplitReader`] is a placeholder for source executor that is assigned no split. It will
 /// wait forever when calling `next`.
@@ -36,6 +39,23 @@ impl SplitReader for DummySplitReader {
     }
 
     fn into_stream(self) -> BoxSourceStream {
+        futures::stream::pending().boxed()
+    }
+}
+
+#[async_trait]
+impl SplitReaderV2 for DummySplitReader {
+    type Properties = ();
+
+    async fn new(
+        _properties: Self::Properties,
+        _state: Vec<SplitImpl>,
+        _parser_config: ParserConfig,
+    ) -> Result<Self> {
+        Ok(Self {})
+    }
+
+    fn into_stream(self) -> BoxSourceWithStateStream {
         futures::stream::pending().boxed()
     }
 }
