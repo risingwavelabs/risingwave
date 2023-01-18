@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rand::{thread_rng, Rng};
-use sqllogictest::{parse, ParallelTestError};
+use sqllogictest::ParallelTestError;
 
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
@@ -59,16 +59,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
         // XXX: hack for kafka source test
         let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));
         let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
-        let mut records = sqllogictest::parse_file(path).expect("failed to parse file");
-        if kill {
-            // FIXME #7188: Temporarily enforce VISIBILITY_MODE=checkpoint to work around the known
-            // issue in failure propagation for local mode #7367, which would fail
-            // VISIBILITY_MODE=all.
-            let preceding_records = parse("statement ok\nSET VISIBILITY_MODE to checkpoint;\n")
-                .expect("failed to parse str");
-            records = preceding_records.into_iter().chain(records).collect();
-        }
-        for record in records {
+        for record in sqllogictest::parse_file(path).expect("failed to parse file") {
             if let sqllogictest::Record::Halt { .. } = record {
                 break;
             }

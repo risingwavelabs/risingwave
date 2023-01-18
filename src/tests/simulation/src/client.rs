@@ -47,6 +47,11 @@ impl RisingWave {
         client
             .simple_query("SET CREATE_COMPACTION_GROUP_FOR_MV TO true;")
             .await?;
+        // FIXME #7188: Temporarily enforce VISIBILITY_MODE=checkpoint to work around the known
+        // issue in failure propagation for local mode #7367, which would fail VISIBILITY_MODE=all.
+        client
+            .simple_query("SET VISIBILITY_MODE TO checkpoint;")
+            .await?;
         Ok(RisingWave {
             client,
             task,
