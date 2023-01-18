@@ -173,7 +173,7 @@ impl From<ObjectError> for HummockError {
 
 impl From<RecvError> for HummockError {
     fn from(error: RecvError) -> Self {
-        ObjectError::internal(error).into()
+        ObjectError::from(error).into()
     }
 }
 
