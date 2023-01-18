@@ -23,7 +23,7 @@ Query example:
 select max(v2), min(v3) from t group by v1 
 ```
 
-This query will need to initiate 2 Relational Tables. If the upstream is not append-only, the schema becomes `table_id/group_key/sort_key/upstrea_pk`. 
+This query will need to initiate 2 Relational Tables. If the upstream is not append-only, the schema becomes `table_id/group_key/sort_key/upstream_pk`. 
 
 The order of `sort_key` depends on the agg call kind. For example, if it's `max()`, `sort_key` will order with `Ascending`. if it's `min()`, `sort_key` will order with `Descending`. 
 The `upstream_pk` is also appended to ensure the uniqueness of the key.

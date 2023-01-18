@@ -78,7 +78,6 @@ impl<S: StateStore> AggState<S> {
     pub async fn create(
         agg_call: &AggCall,
         storage: &AggStateStorage<S>,
-        row_count: usize,
         prev_output: Option<&Datum>,
         pk_indices: &PkIndices,
         group_key: Option<&OwnedRow>,
@@ -97,7 +96,6 @@ impl<S: StateStore> AggState<S> {
                     agg_call,
                     pk_indices,
                     mapping,
-                    row_count,
                     extreme_cache_size,
                     input_schema,
                 ))
