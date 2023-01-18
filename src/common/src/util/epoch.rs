@@ -114,11 +114,9 @@ impl EpochPair {
         Self { curr, prev }
     }
 
-    pub fn inc(&self) -> Self {
-        Self {
-            curr: self.curr + 1,
-            prev: self.prev + 1,
-        }
+    pub fn inc(&mut self) {
+        self.curr += 1;
+        self.prev += 1;
     }
 
     pub fn new_test_epoch(curr: u64) -> Self {

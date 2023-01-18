@@ -512,8 +512,14 @@ impl<'a> BeMessage<'a> {
             // +-----+-----------+-----------------+
             BeMessage::CommandComplete(cmd) => {
                 let rows_cnt = cmd.rows_cnt;
-                let stmt_type = cmd.stmt_type;
+                let mut stmt_type = cmd.stmt_type;
                 let mut tag = "".to_owned();
+                stmt_type = match stmt_type {
+                    StatementType::INSERT_RETURNING => StatementType::INSERT,
+                    StatementType::DELETE_RETURNING => StatementType::DELETE,
+                    StatementType::UPDATE_RETURNING => StatementType::UPDATE,
+                    s => s,
+                };
                 tag.push_str(&stmt_type.to_string());
                 if stmt_type == StatementType::INSERT {
                     tag.push_str(" 0");
