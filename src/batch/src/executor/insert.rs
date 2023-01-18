@@ -45,9 +45,11 @@ pub struct InsertExecutor {
     column_indices: Vec<usize>,
 
     row_id_index: Option<usize>,
+    returning: bool,
 }
 
 impl InsertExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         table_id: TableId,
         dml_manager: DmlManagerRef,
@@ -56,18 +58,25 @@ impl InsertExecutor {
         identity: String,
         column_indices: Vec<usize>,
         row_id_index: Option<usize>,
+        returning: bool,
     ) -> Self {
+        let table_schema = child.schema().clone();
         Self {
             table_id,
             dml_manager,
             child,
             chunk_size,
-            schema: Schema {
-                fields: vec![Field::unnamed(DataType::Int64)],
+            schema: if returning {
+                table_schema
+            } else {
+                Schema {
+                    fields: vec![Field::unnamed(DataType::Int64)],
+                }
             },
             identity,
             column_indices,
             row_id_index,
+            returning,
         }
     }
 }
@@ -127,6 +136,9 @@ impl InsertExecutor {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
+            if self.returning {
+                yield data_chunk.clone();
+            }
             for chunk in builder.append_chunk(data_chunk) {
                 write_chunk(chunk)?;
             }
@@ -144,7 +156,7 @@ impl InsertExecutor {
             .sum::<usize>();
 
         // create ret value
-        {
+        if !self.returning {
             let mut array_builder = PrimitiveArrayBuilder::<i64>::new(1);
             array_builder.append(Some(rows_inserted as i64));
 
@@ -187,6 +199,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
                 .row_id_index
                 .as_ref()
                 .map(|index| index.index as _),
+            insert_node.returning,
         )))
     }
 }
@@ -274,6 +287,7 @@ mod tests {
             "InsertExecutor".to_string(),
             vec![], // Ignoring insertion order
             row_id_index,
+            false,
         ));
         let handle = tokio::spawn(async move {
             let mut stream = insert_executor.execute();
@@ -332,7 +346,6 @@ mod tests {
                 None,
                 ReadOptions {
                     prefix_hint: None,
-                    check_bloom_filter: false,
                     ignore_range_tombstone: false,
                     table_id: Default::default(),
                     retention_seconds: None,

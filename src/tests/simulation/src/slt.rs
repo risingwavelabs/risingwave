@@ -33,6 +33,16 @@ fn is_create_table_as(sql: &str) -> bool {
     parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
 }
 
+const KILL_IGNORE_FILES: &[&str] = &[
+    // TPCH queries are too slow for recovery.
+    "tpch_snapshot.slt",
+    "tpch_upstream.slt",
+    // We already have visibility_all cases.
+    "visibility_checkpoint.slt",
+    // This depends on session config.
+    "session_timezone.slt",
+];
+
 /// Run the sqllogictest files in `glob`.
 pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
     let host = cluster.rand_frontend_ip();
@@ -44,15 +54,9 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
         let file = file.unwrap();
         let path = file.as_path();
         println!("{}", path.display());
-        if kill && (path.ends_with("tpch_snapshot.slt") || path.ends_with("tpch_upstream.slt")) {
-            // Simply ignore the tpch test cases when enable kill nodes.
+        if kill && KILL_IGNORE_FILES.iter().any(|s| path.ends_with(s)) {
             continue;
         }
-        if kill && path.ends_with("visibility_all.slt") {
-            // Simply ignore the read uncommitted test cases when enable kill nodes.
-            continue;
-        }
-
         // XXX: hack for kafka source test
         let tempfile = path.ends_with("kafka.slt").then(|| hack_kafka_test(path));
         let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);

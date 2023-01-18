@@ -23,11 +23,12 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
 };
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, TableConstraint,
 };
 
-use super::create_source::{check_and_add_timestamp_column, resolve_source_schema};
+use super::create_source::resolve_source_schema;
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::column_catalog::ColumnCatalog;
@@ -43,8 +44,6 @@ use crate::{Binder, TableCatalog, WithOptions};
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum DmlFlag {
-    /// used for `create materialized view / sink / index`
-    Disable,
     /// used for `create table`
     All,
     /// used for `create table with (append_only = true)`
@@ -294,10 +293,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
     source_schema: SourceSchema,
     mut col_id_gen: ColumnIdGenerator,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
-    let (mut column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
+    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
     let properties = context.with_options().inner();
-
-    check_and_add_timestamp_column(properties, &mut column_descs, true, &mut col_id_gen);
 
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
@@ -310,6 +307,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         properties,
         row_id_index,
         &pk_column_ids,
+        true,
     )
     .await?;
 
@@ -436,11 +434,11 @@ fn gen_table_plan_inner(
         out_names,
     );
 
-    // The materialize executor need not handle primary key conflict if the primary key is row id.
-    let handle_pk_conflict = row_id_index.is_none();
-    let dml_flag = match context.with_options().append_only() {
-        true => DmlFlag::AppendOnly,
-        false => DmlFlag::All,
+    // Handle pk conflict in materialize executor only when the table is not append-only.
+    let (handle_pk_conflict, dml_flag) = if context.with_options().append_only() {
+        (false, DmlFlag::AppendOnly)
+    } else {
+        (true, DmlFlag::All)
     };
 
     let materialize = plan_root.gen_table_plan(
@@ -457,75 +455,6 @@ fn gen_table_plan_inner(
 
     table.owner = session.user_id();
     Ok((materialize.into(), source, table))
-}
-
-/// TODO(Yuanxin): Remove this method after unsupporting `CREATE MATERIALIZED SOURCE`.
-pub(crate) fn gen_materialize_plan(
-    context: OptimizerContextRef,
-    source: ProstSource,
-    owner: u32,
-) -> Result<(PlanRef, ProstTable)> {
-    let materialize = {
-        let row_id_index = source.row_id_index.as_ref().map(|index| index.index as _);
-        let definition = context.sql().to_owned(); // TODO: use formatted SQL
-
-        // Manually assemble the materialization plan for the table.
-        let source_node: PlanRef = LogicalSource::new(
-            Some(Rc::new((&source).into())),
-            source
-                .columns
-                .iter()
-                .map(|column| column.column_desc.clone().unwrap().into())
-                .collect(),
-            source
-                .pk_column_ids
-                .iter()
-                .map(|id| ColumnId::new(*id))
-                .collect(),
-            row_id_index,
-            true,
-            context,
-        )
-        .into();
-
-        // row_id_index is Some means that the user has not specified pk, then we will add a hidden
-        // column to store pk, and materialize executor do not need to handle pk conflict.
-        let handle_pk_conflict = row_id_index.is_none();
-        let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
-        required_cols.toggle_range(..);
-        let mut out_names = source_node.schema().names();
-        if let Some(row_id_index) = row_id_index {
-            required_cols.toggle(row_id_index);
-            out_names.remove(row_id_index);
-        }
-
-        let mut plan_root = PlanRoot::new(
-            source_node,
-            RequiredDist::Any,
-            Order::any(),
-            required_cols,
-            out_names,
-        );
-
-        plan_root.gen_table_plan(
-            source.name.clone(),
-            source
-                .columns
-                .into_iter()
-                .map(ColumnCatalog::from)
-                .collect(),
-            definition,
-            handle_pk_conflict,
-            row_id_index,
-            DmlFlag::Disable,
-            None,
-        )?
-    };
-    let mut table = materialize
-        .table()
-        .to_prost(source.schema_id, source.database_id);
-    table.owner = owner;
-    Ok((materialize.into(), table))
 }
 
 pub async fn handle_create_table(
@@ -574,8 +503,12 @@ pub async fn handle_create_table(
                 col_id_gen,
             )?,
         };
-
-        (build_graph(plan), source, table)
+        let mut graph = build_graph(plan);
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
+        (graph, source, table)
     };
 
     tracing::trace!(
@@ -585,7 +518,6 @@ pub async fn handle_create_table(
     );
 
     let catalog_writer = session.env().catalog_writer();
-
     catalog_writer.create_table(source, table, graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))

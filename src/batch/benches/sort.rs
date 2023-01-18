@@ -16,14 +16,13 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, SortExecutor};
+use risingwave_common::enable_jemalloc_on_linux;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use tikv_jemallocator::Jemalloc;
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
+enable_jemalloc_on_linux!();
 
 fn create_order_by_executor(
     chunk_size: usize,

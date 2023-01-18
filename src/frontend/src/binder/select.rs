@@ -16,7 +16,7 @@ use std::fmt::Debug;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
 
@@ -128,11 +128,12 @@ impl Binder {
         self.context.clause = Some(Clause::Where);
         let selection = select
             .selection
-            .map(|expr| self.bind_expr(expr))
+            .map(|expr| {
+                self.bind_expr(expr)
+                    .and_then(|expr| expr.enforce_bool_clause("WHERE"))
+            })
             .transpose()?;
         self.context.clause = None;
-
-        Self::require_bool_clause(&selection, "WHERE")?;
 
         // Bind GROUP BY clause.
         self.context.clause = Some(Clause::GroupBy);
@@ -145,8 +146,13 @@ impl Binder {
 
         // Bind HAVING clause.
         self.context.clause = Some(Clause::Having);
-        let having = select.having.map(|expr| self.bind_expr(expr)).transpose()?;
-        Self::require_bool_clause(&having, "HAVING")?;
+        let having = select
+            .having
+            .map(|expr| {
+                self.bind_expr(expr)
+                    .and_then(|expr| expr.enforce_bool_clause("HAVING"))
+            })
+            .transpose()?;
         self.context.clause = None;
 
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
@@ -250,6 +256,31 @@ impl Binder {
         Ok((select_list, aliases))
     }
 
+    pub fn bind_returning_list(
+        &mut self,
+        returning_items: Vec<SelectItem>,
+    ) -> Result<(Vec<ExprImpl>, Vec<Field>)> {
+        let (returning_list, aliases) = self.bind_select_list(returning_items)?;
+        if returning_list
+            .iter()
+            .any(|expr| expr.has_agg_call() || expr.has_window_function())
+        {
+            return Err(RwError::from(ErrorCode::BindError(
+                "should not have agg/window in the `RETURNING` list".to_string(),
+            )));
+        }
+
+        let fields = returning_list
+            .iter()
+            .zip_eq(aliases.iter())
+            .map(|(s, a)| {
+                let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
+                Ok::<Field, RwError>(Field::with_name(s.return_type(), name))
+            })
+            .try_collect()?;
+        Ok((returning_list, fields))
+    }
+
     /// `bind_get_user_by_id_select` binds a select statement that returns a single user name by id,
     /// this is used for function `pg_catalog.get_user_by_id()`.
     pub fn bind_get_user_by_id_select(&mut self, input: &ExprImpl) -> Result<BoundSelect> {
@@ -347,20 +378,6 @@ impl Binder {
                 }
             })
             .unzip()
-    }
-
-    fn require_bool_clause(expr: &Option<ExprImpl>, clause: &str) -> Result<()> {
-        if let Some(expr) = expr {
-            let return_type = expr.return_type();
-            if return_type != DataType::Boolean {
-                return Err(ErrorCode::InternalError(format!(
-                    "argument of {} must be boolean, not type {:?}",
-                    clause, return_type
-                ))
-                .into());
-            }
-        }
-        Ok(())
     }
 
     fn bind_distinct_on(&mut self, distinct: Distinct) -> Result<BoundDistinct> {

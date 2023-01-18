@@ -28,8 +28,11 @@ pub type RowSetResult = Result<RowSet, BoxedError>;
 #[expect(non_camel_case_types, clippy::upper_case_acronyms)]
 pub enum StatementType {
     INSERT,
+    INSERT_RETURNING,
     DELETE,
+    DELETE_RETURNING,
     UPDATE,
+    UPDATE_RETURNING,
     SELECT,
     MOVE,
     FETCH,
@@ -121,13 +124,21 @@ impl StatementType {
                 | StatementType::COPY
                 | StatementType::FETCH
                 | StatementType::SELECT
+                | StatementType::INSERT_RETURNING
+                | StatementType::DELETE_RETURNING
+                | StatementType::UPDATE_RETURNING
         )
     }
 
     pub fn is_dml(&self) -> bool {
         matches!(
             self,
-            StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE
+            StatementType::INSERT
+                | StatementType::DELETE
+                | StatementType::UPDATE
+                | StatementType::INSERT_RETURNING
+                | StatementType::DELETE_RETURNING
+                | StatementType::UPDATE_RETURNING
         )
     }
 
@@ -138,6 +149,18 @@ impl StatementType {
                 | StatementType::EXPLAIN
                 | StatementType::SHOW_COMMAND
                 | StatementType::DESCRIBE_TABLE
+                | StatementType::INSERT_RETURNING
+                | StatementType::DELETE_RETURNING
+                | StatementType::UPDATE_RETURNING
+        )
+    }
+
+    pub fn is_returning(&self) -> bool {
+        matches!(
+            self,
+            StatementType::INSERT_RETURNING
+                | StatementType::DELETE_RETURNING
+                | StatementType::UPDATE_RETURNING
         )
     }
 }
@@ -164,7 +187,11 @@ where
             row_cnt,
             values_stream: None,
             row_desc: vec![],
-            notice: Some(notice),
+            notice: if !notice.is_empty() {
+                Some(notice)
+            } else {
+                None
+            },
         }
     }
 
@@ -173,6 +200,36 @@ where
         row_cnt: Option<i32>,
         values_stream: VS,
         row_desc: Vec<PgFieldDescriptor>,
+    ) -> Self {
+        Self::new_for_stream_inner(stmt_type, row_cnt, values_stream, row_desc, None)
+    }
+
+    pub fn new_for_stream_with_notice(
+        stmt_type: StatementType,
+        row_cnt: Option<i32>,
+        values_stream: VS,
+        row_desc: Vec<PgFieldDescriptor>,
+        notice: String,
+    ) -> Self {
+        Self::new_for_stream_inner(
+            stmt_type,
+            row_cnt,
+            values_stream,
+            row_desc,
+            if !notice.is_empty() {
+                Some(notice)
+            } else {
+                None
+            },
+        )
+    }
+
+    fn new_for_stream_inner(
+        stmt_type: StatementType,
+        row_cnt: Option<i32>,
+        values_stream: VS,
+        row_desc: Vec<PgFieldDescriptor>,
+        notice: Option<String>,
     ) -> Self {
         assert!(
             stmt_type.is_query() ^ row_cnt.is_some(),
@@ -183,7 +240,7 @@ where
             row_cnt,
             values_stream: Some(values_stream),
             row_desc,
-            notice: None,
+            notice,
         }
     }
 

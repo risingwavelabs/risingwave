@@ -219,6 +219,10 @@ impl TableCatalog {
         self.table_type == TableType::Table
     }
 
+    pub fn is_internal_table(&self) -> bool {
+        self.table_type == TableType::Internal
+    }
+
     pub fn is_mview(&self) -> bool {
         self.table_type == TableType::MaterializedView
     }
@@ -235,15 +239,7 @@ impl TableCatalog {
                 "Use `DROP MATERIALIZED VIEW` to drop a materialized view."
             }
             TableType::Index => "Use `DROP INDEX` to drop an index.",
-            TableType::Table => {
-                // TODO(Yuanxin): Remove this after unsupporting `CREATE MATERIALIZED SOURCE`.
-                // Note(bugen): may make this a method on `TableType` instead.
-                if self.associated_source_id().is_some() {
-                    "Use `DROP SOURCE` to drop a source."
-                } else {
-                    "Use `DROP TABLE` to drop a table."
-                }
-            }
+            TableType::Table => "Use `DROP TABLE` to drop a table.",
             TableType::Internal => "Internal tables cannot be dropped.",
         };
 
@@ -254,6 +250,10 @@ impl TableCatalog {
     #[must_use]
     pub fn associated_source_id(&self) -> Option<TableId> {
         self.associated_source_id
+    }
+
+    pub fn has_associated_source(&self) -> bool {
+        self.associated_source_id.is_some()
     }
 
     /// Get a reference to the table catalog's columns.

@@ -99,12 +99,14 @@ pub async fn handle_query(
     let session = handler_args.session.clone();
     let query_start_time = Instant::now();
     let only_checkpoint_visible = handler_args.session.config().only_checkpoint_visible();
+    let mut notice = String::new();
 
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (query, query_mode, output_schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
         let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
 
+        let context = plan.plan_base().ctx.clone();
         tracing::trace!(
             "Generated query plan: {:?}, query_mode:{:?}",
             plan.explain_to_string()?,
@@ -114,7 +116,9 @@ pub async fn handle_query(
             session.env().worker_node_manager_ref(),
             session.env().catalog_reader().clone(),
         );
-        (plan_fragmenter.split(plan)?, query_mode, schema)
+        let query = plan_fragmenter.split(plan)?;
+        context.append_notice(&mut notice);
+        (query, query_mode, schema)
     };
     tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
 
@@ -146,6 +150,7 @@ pub async fn handle_query(
                 local_execute(session.clone(), query, query_snapshot).await?,
                 column_types,
                 format,
+                session.clone(),
             )),
             // Local mode do not support cancel tasks.
             QueryMode::Distributed => {
@@ -153,15 +158,18 @@ pub async fn handle_query(
                     distribute_execute(session.clone(), query, query_snapshot).await?,
                     column_types,
                     format,
+                    session.clone(),
                 ))
             }
         }
     };
 
-    let rows_count = match stmt_type {
-        StatementType::SELECT => None,
+    let rows_count: Option<i32> = match stmt_type {
+        StatementType::SELECT
+        | StatementType::INSERT_RETURNING
+        | StatementType::DELETE_RETURNING
+        | StatementType::UPDATE_RETURNING => None,
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            // Get the row from the row_stream.
             let first_row_set = row_stream
                 .next()
                 .await
@@ -190,6 +198,8 @@ pub async fn handle_query(
     };
 
     // Implicitly flush the writes.
+    // FIXME(bugen): the DMLs with `RETURNING` clause is done only after the `row_stream` is fully
+    // consumed, so implicitly flushing here doesn't work.
     if session.config().get_implicit_flush() {
         flush_for_write(&session, stmt_type).await?;
     }
@@ -209,8 +219,8 @@ pub async fn handle_query(
             .inc();
     }
 
-    Ok(PgResponse::new_for_stream(
-        stmt_type, rows_count, row_stream, pg_descs,
+    Ok(PgResponse::new_for_stream_with_notice(
+        stmt_type, rows_count, row_stream, pg_descs, notice,
     ))
 }
 
@@ -219,9 +229,27 @@ fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
 
     match stmt {
         Statement::Query(_) => Ok(SELECT),
-        Statement::Insert { .. } => Ok(INSERT),
-        Statement::Delete { .. } => Ok(DELETE),
-        Statement::Update { .. } => Ok(UPDATE),
+        Statement::Insert { returning, .. } => {
+            if returning.is_empty() {
+                Ok(INSERT)
+            } else {
+                Ok(INSERT_RETURNING)
+            }
+        }
+        Statement::Delete { returning, .. } => {
+            if returning.is_empty() {
+                Ok(DELETE)
+            } else {
+                Ok(DELETE_RETURNING)
+            }
+        }
+        Statement::Update { returning, .. } => {
+            if returning.is_empty() {
+                Ok(UPDATE)
+            } else {
+                Ok(UPDATE_RETURNING)
+            }
+        }
         _ => Err(RwError::from(ErrorCode::InvalidInputSyntax(
             "unsupported statement type".to_string(),
         ))),
@@ -256,17 +284,15 @@ pub async fn local_execute(
         "",
         pinned_snapshot,
         session.auth_context(),
+        session.reset_cancel_query_flag(),
     );
 
     Ok(execution.stream_rows())
 }
 
 pub async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
-    match stmt_type {
-        StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
-            do_flush(session).await?;
-        }
-        _ => {}
+    if stmt_type.is_dml() {
+        do_flush(session).await?;
     }
     Ok(())
 }

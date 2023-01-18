@@ -26,8 +26,7 @@ pub(super) async fn handle_flush(handler_args: HandlerArgs) -> Result<RwPgRespon
 
 pub(crate) async fn do_flush(session: &SessionImpl) -> Result<()> {
     let client = session.env().meta_client();
-    let checkpoint = session.config().only_checkpoint_visible();
-    let snapshot = client.flush(checkpoint).await?;
+    let snapshot = client.flush(true).await?;
     session
         .env()
         .hummock_snapshot_manager()

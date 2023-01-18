@@ -22,12 +22,24 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Expr, Value};
 
 use crate::sql_gen::expr::sql_null;
+use crate::sql_gen::types::data_type_to_ast_data_type;
 use crate::sql_gen::SqlGenerator;
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(super) fn gen_simple_scalar(&mut self, typ: &DataType) -> Expr {
         use DataType as T;
-        // TODO: chance to gen null for scalar.
+        // NOTE(kwannoel): Since this generates many invalid queries,
+        // its probability should be set to low, e.g. 0.02.
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7327
+        if self.rng.gen_bool(0.0) {
+            // NOTE(kwannoel): We generate Cast with NULL to avoid generating lots of ambiguous
+            // expressions. For instance agg calls such as `max(NULL)` may be generated,
+            // and coerced to VARCHAR, where we require a `NULL::int` instead.
+            return Expr::Cast {
+                expr: Box::new(sql_null()),
+                data_type: data_type_to_ast_data_type(typ),
+            };
+        }
         match *typ {
             T::Int64 => Expr::Value(Value::Number(
                 self.gen_int(i64::MIN as isize, i64::MAX as isize),
@@ -63,8 +75,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 data_type: AstDataType::Time(false),
                 value: self.gen_temporal_scalar(typ),
             },
-            T::Timestamp | T::Timestamptz => Expr::TypedString {
+            T::Timestamp => Expr::TypedString {
                 data_type: AstDataType::Timestamp(false),
+                value: self.gen_temporal_scalar(typ),
+            },
+            T::Timestamptz => Expr::TypedString {
+                data_type: AstDataType::Timestamp(true),
                 value: self.gen_temporal_scalar(typ),
             },
             T::Interval => Expr::TypedString {
@@ -75,7 +91,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 let n = self.rng.gen_range(1..=100); // Avoid ambiguous type
                 Expr::Array(self.gen_simple_scalar_list(ty, n))
             }
-            // TODO(Noel): Renable after https://github.com/risingwavelabs/risingwave/issues/7189
+            // ENABLE: https://github.com/risingwavelabs/risingwave/issues/6934
             // T::Struct(ref inner) => Expr::Row(
             //     inner
             //         .fields
@@ -130,25 +146,27 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let hour = 60 * minute;
         let day = 24 * hour;
         let week = 7 * day;
-        // `0` is not generated due to:
-        // Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/4504>
-        // It is tracked under refinements:
-        // <https://github.com/risingwavelabs/risingwave/issues/3896>
-        let choices = [1, minute, hour, day, week, rand_secs];
+        let choices = [0, 1, minute, hour, day, week, rand_secs];
         let secs = choices.choose(&mut self.rng).unwrap();
 
         let tm = DateTime::<Utc>::from(SystemTime::now() - Duration::from_secs(*secs));
         match typ {
             T::Date => tm.format("%F").to_string(),
             T::Timestamp | T::Timestamptz => tm.format("%Y-%m-%d %H:%M:%S").to_string(),
-            // TODO(Noel): Many timestamptz expressions are unsupported in RW, leave this out for
-            // now. T::Timestamptz => {
+            // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
+            // T::Timestamptz => {
             //     let timestamp = tm.format("%Y-%m-%d %H:%M:%S");
             //     let timezone = self.rng.gen_range(0..=15);
             //     format!("{}+{}", timestamp, timezone)
             // }
             T::Time => tm.format("%T").to_string(),
-            T::Interval => secs.to_string(),
+            T::Interval => {
+                if self.rng.gen_bool(0.5) {
+                    (-(*secs as i64)).to_string()
+                } else {
+                    secs.to_string()
+                }
+            }
             _ => unreachable!(),
         }
     }

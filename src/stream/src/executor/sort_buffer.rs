@@ -23,7 +23,7 @@ use gen_iter::GenIter;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::row::{self, AscentOwnedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_storage::StateStore;
@@ -32,7 +32,7 @@ use super::{Barrier, PkIndices, StreamExecutorResult};
 use crate::common::table::state_table::StateTable;
 
 /// [`SortBufferKey`] contains a record's timestamp and pk.
-type SortBufferKey = (ScalarImpl, OwnedRow);
+type SortBufferKey = (ScalarImpl, AscentOwnedRow);
 
 /// [`SortBufferValue`] contains a record's value and a flag indicating whether the record has been
 /// persisted to storage.
@@ -92,7 +92,7 @@ impl<S: StateStore> SortBuffer<S> {
         for row in select_all(streams) {
             let row = row?.to_owned_row();
             let timestamp_datum = row.datum_at(sort_column_index).to_owned_datum().unwrap();
-            let pk = (&row).project(&pk_indices).into_owned_row();
+            let pk = (&row).project(&pk_indices).into_owned_row().into();
             // Null event time should not exist in the row since the `WatermarkFilter` before
             // the `Sort` will filter out the Null event time.
             buffer.insert((timestamp_datum, pk), (row, true));
@@ -122,7 +122,7 @@ impl<S: StateStore> SortBuffer<S> {
                 .datum_at(self.sort_column_index)
                 .to_owned_datum()
                 .unwrap();
-            let pk = row_ref.project(&self.pk_indices).into_owned_row();
+            let pk = row_ref.project(&self.pk_indices).into_owned_row().into();
             let row = row_ref.into_owned_row();
             self.buffer.insert((timestamp_datum, pk), (row, false));
         }
@@ -144,7 +144,7 @@ impl<S: StateStore> SortBuffer<S> {
                 // should be output, but it's hard to represent `OwnedRow::MAX`. A possible
                 // implementation is introducing `next_unit` on a subset of `ScalarImpl` variants.
                 // Currently, we can skip some values explicitly.
-                Bound::Excluded((last_watermark, OwnedRow::empty()))
+                Bound::Excluded((last_watermark, OwnedRow::empty().into()))
             } else {
                 Bound::Unbounded
             };
@@ -195,7 +195,8 @@ impl<S: StateStore> SortBuffer<S> {
             .to_owned_datum()
             .unwrap();
         let pk = row.project(&self.pk_indices).into_owned_row();
-        if let Some((_, (row, persisted))) = self.buffer.remove_entry(&(timestamp_datum, pk)) {
+        if let Some((_, (row, persisted))) = self.buffer.remove_entry(&(timestamp_datum, pk.into()))
+        {
             if persisted {
                 self.state_table.delete(&row);
             }

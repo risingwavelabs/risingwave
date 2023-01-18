@@ -1246,6 +1246,12 @@ impl ToBatch for LogicalJoin {
         let config = self.base.ctx.session_ctx().config();
 
         if predicate.has_eq() {
+            if !predicate.eq_keys_are_type_aligned() {
+                return Err(ErrorCode::InternalError(format!(
+                    "Join eq keys are not aligned for predicate: {predicate:?}"
+                ))
+                .into());
+            }
             if config.get_batch_enable_lookup_join() {
                 if let Some(lookup_join) = self.to_batch_lookup_join_with_index_selection(
                     predicate.clone(),
@@ -1272,6 +1278,12 @@ impl ToStream for LogicalJoin {
         );
 
         if predicate.has_eq() {
+            if !predicate.eq_keys_are_type_aligned() {
+                return Err(ErrorCode::InternalError(format!(
+                    "Join eq keys are not aligned for predicate: {predicate:?}"
+                ))
+                .into());
+            }
             self.to_stream_hash_join(predicate, ctx)
         } else if let Some(dynamic_filter) =
             self.to_stream_dynamic_filter(self.on().clone(), ctx)?

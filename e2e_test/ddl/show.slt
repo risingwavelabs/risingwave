@@ -79,10 +79,6 @@ show materialized views;
 mv3
 
 query T
-show materialized sources;
-----
-
-query T
 show sources;
 ----
 
@@ -127,6 +123,7 @@ matviewname Varchar
 matviewowner Int32
 definition Varchar
 matviewid Int32
+matviewtimezone Varchar
 matviewgraph Varchar
 
 query TT
@@ -137,4 +134,5 @@ matviewname Varchar
 matviewowner Int32
 definition Varchar
 matviewid Int32
+matviewtimezone Varchar
 matviewgraph Varchar
