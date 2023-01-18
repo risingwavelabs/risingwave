@@ -175,6 +175,7 @@ impl ConfigExpander {
                     }
                     "zookeeper" => ServiceConfig::ZooKeeper(serde_yaml::from_str(&out_str)?),
                     "redpanda" => ServiceConfig::RedPanda(serde_yaml::from_str(&out_str)?),
+                    "nginx" => ServiceConfig::Nginx(serde_yaml::from_str(&out_str)?),
                     other => return Err(anyhow!("unsupported use type: {}", other)),
                 };
                 Ok(result)

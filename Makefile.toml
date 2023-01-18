@@ -2,6 +2,7 @@ extend = [
   { path = "src/risedevtool/grafana.toml" },
   { path = "src/risedevtool/prometheus.toml" },
   { path = "src/risedevtool/minio.toml" },
+  { path = "src/risedevtool/nginx.toml" },
   { path = "src/risedevtool/etcd.toml" },
   { path = "src/risedevtool/jaeger.toml" },
   { path = "src/risedevtool/kafka.toml" },
@@ -368,6 +369,7 @@ dependencies = [
   "download-prometheus",
   "download-pubsub",
   "download-redis",
+  "download-nginx",
 ]
 
 [tasks.create-user-profiles-file]

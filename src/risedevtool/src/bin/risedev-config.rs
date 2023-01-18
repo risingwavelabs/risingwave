@@ -71,6 +71,7 @@ pub enum Components {
     Release,
     AllInOne,
     Sanitizer,
+    Nginx,
 }
 
 impl Components {
@@ -89,6 +90,7 @@ impl Components {
             Self::Release => "[Build] Enable release mode",
             Self::AllInOne => "[Build] Enable all-in-one binary",
             Self::Sanitizer => "[Build] Enable sanitizer",
+            Self::Nginx => "[Build] Enable nginx",
         }
         .into()
     }
@@ -162,6 +164,11 @@ Required if you want to sink data to redis.
 Required if you want to create CDC source from external Databases.
                 "
             }
+            Self::Nginx => {
+                "
+Used to emulate a K8s service.
+                "
+            }
         }
         .into()
     }
@@ -181,6 +188,7 @@ Required if you want to create CDC source from external Databases.
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
             "ENABLE_RW_CONNECTOR" => Some(Self::ConnectorNode),
+            "ENABLE_NGINX" => Some(Self::Nginx),
             _ => None,
         }
     }
@@ -200,6 +208,7 @@ Required if you want to create CDC source from external Databases.
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
             Self::ConnectorNode => "ENABLE_RW_CONNECTOR",
+            Self::Nginx => "ENABLE_NGINX",
         }
         .into()
     }

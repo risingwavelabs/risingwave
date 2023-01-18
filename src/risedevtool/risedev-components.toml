@@ -14,3 +14,6 @@ set -e
 ENV_PATH="$(pwd)/risedev-components.user.env"
 cargo run --bin risedev-config -- -f "${ENV_PATH}" "$@"
 '''
+
+[tasks.config]
+alias = "configure"

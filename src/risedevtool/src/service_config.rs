@@ -292,6 +292,18 @@ pub struct RedisConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct NginxConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+
+    pub port: u16,
+    pub address: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct ConnectorNodeConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -319,6 +331,7 @@ pub enum ServiceConfig {
     ZooKeeper(ZooKeeperConfig),
     RedPanda(RedPandaConfig),
     ConnectorNode(ConnectorNodeConfig),
+    Nginx(NginxConfig),
 }
 
 impl ServiceConfig {
@@ -340,6 +353,7 @@ impl ServiceConfig {
             Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
             Self::ConnectorNode(c) => &c.id,
+            Self::Nginx(c) => &c.id,
         }
     }
 }

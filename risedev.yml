@@ -162,6 +162,11 @@ profile:
         exporter-port: 21250
       - use: compute-node
       - use: frontend
+      - use: nginx
+        port: 1234
+
+  # TODO: Download nginx. Add nginx to risedev config
+  # configure niginx https://towardsdatascience.com/sample-load-balancing-solution-with-docker-and-nginx-cf1ffc60e644
 
   ######################################
   ### Configurations used in Compose ###
@@ -883,4 +888,14 @@ template:
     port: 6379
 
     # address of redis
+    address: "127.0.0.1"
+
+  # used as load balancer to simulate K8s service
+  nginx:
+    # Id to be picked-up by services
+    id: nginx
+
+    port: 1234
+
+    # address of nginx
     address: "127.0.0.1"
