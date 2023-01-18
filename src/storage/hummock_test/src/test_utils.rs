@@ -58,7 +58,7 @@ use risingwave_storage::{
 };
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
-use crate::mock_notification_client::get_test_notification_client;
+use crate::mock_notification_client::get_notification_client_for_test;
 
 pub async fn prepare_first_valid_version(
     env: MetaSrvEnv<MemStore>,
@@ -71,7 +71,7 @@ pub async fn prepare_first_valid_version(
 ) {
     let (tx, mut rx) = unbounded_channel();
     let notification_client =
-        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone());
+        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone());
     let backup_manager = BackupReader::unused();
     let observer_manager = ObserverManager::new(
         notification_client,
@@ -295,7 +295,7 @@ pub async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHummockMeta
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
+        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
         Arc::new(HummockStateStoreMetrics::unused()),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
         Arc::new(CompactorMetrics::unused()),
@@ -303,7 +303,7 @@ pub async fn with_hummock_storage_v1() -> (HummockStorageV1, Arc<MockHummockMeta
     .await
     .unwrap();
 
-    register_test_tables_with_id(
+    register_tables_with_id_for_test(
         hummock_storage.filter_key_extractor_manager(),
         &hummock_manager_ref,
         &[0],
@@ -329,12 +329,12 @@ pub async fn with_hummock_storage_v2(
         hummock_options,
         sstable_store,
         meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
+        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
     )
     .await
     .unwrap();
 
-    register_test_tables_with_id(
+    register_tables_with_id_for_test(
         hummock_storage.filter_key_extractor_manager(),
         &hummock_manager_ref,
         &[table_id.table_id()],
@@ -347,7 +347,7 @@ pub async fn with_hummock_storage_v2(
     )
 }
 
-pub async fn register_test_tables_with_id<S: MetaStore>(
+pub async fn register_tables_with_id_for_test<S: MetaStore>(
     filter_key_extractor_manager: &FilterKeyExtractorManagerRef,
     hummock_manager_ref: &HummockManagerRef<S>,
     table_ids: &[u32],
@@ -361,7 +361,7 @@ pub async fn register_test_tables_with_id<S: MetaStore>(
     .await;
 }
 
-pub async fn register_test_tables_with_catalog<S: MetaStore>(
+pub async fn register_tables_with_catalog_for_test<S: MetaStore>(
     filter_key_extractor_manager: &FilterKeyExtractorManagerRef,
     hummock_manager_ref: &HummockManagerRef<S>,
     tables: &[ProstTable],
@@ -376,7 +376,6 @@ pub async fn register_test_tables_with_catalog<S: MetaStore>(
     .await;
 }
 
-#[allow(dead_code)]
 pub struct HummockTestEnv {
     pub storage: HummockStorage,
     pub manager: HummockManagerRef<MemStore>,
@@ -385,7 +384,7 @@ pub struct HummockTestEnv {
 
 impl HummockTestEnv {
     pub async fn register_table_id(&self, table_id: TableId) {
-        register_test_tables_with_id(
+        register_tables_with_id_for_test(
             self.storage.filter_key_extractor_manager(),
             &self.manager,
             &[table_id.table_id()],
@@ -394,7 +393,7 @@ impl HummockTestEnv {
     }
 
     pub async fn register_table(&self, table: ProstTable) {
-        register_test_tables_with_catalog(
+        register_tables_with_catalog_for_test(
             self.storage.filter_key_extractor_manager(),
             &self.manager,
             &[table],
@@ -426,7 +425,7 @@ pub async fn prepare_hummock_test_env() -> HummockTestEnv {
     ));
 
     let notification_client =
-        get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone());
+        get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone());
 
     let storage = HummockStorage::for_test(
         hummock_options,

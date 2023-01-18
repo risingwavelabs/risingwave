@@ -57,9 +57,9 @@ pub(crate) mod tests {
         ReadOptions, StateStoreReadExt, StateStoreWrite, WriteOptions,
     };
 
-    use crate::get_test_notification_client;
+    use crate::get_notification_client_for_test;
     use crate::test_utils::{
-        register_test_tables_with_id, HummockV2MixedStateStore,
+        register_tables_with_id_for_test, HummockV2MixedStateStore,
         HummockV2MixedStateStore as HummockStorage,
     };
 
@@ -89,7 +89,7 @@ pub(crate) mod tests {
         .await
         .unwrap();
 
-        register_test_tables_with_id(
+        register_tables_with_id_for_test(
             hummock.filter_key_extractor_manager(),
             hummock_manager_ref,
             &[table_id.table_id()],
@@ -207,7 +207,7 @@ pub(crate) mod tests {
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
             Default::default(),
         )
@@ -332,7 +332,7 @@ pub(crate) mod tests {
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
             Default::default(),
         )
@@ -530,7 +530,7 @@ pub(crate) mod tests {
         let existing_table_id: u32 = 1;
         let storage_existing_table_id = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
             &hummock_manager_ref,
             TableId::from(existing_table_id),
         )
@@ -621,7 +621,7 @@ pub(crate) mod tests {
 
         let global_storage = get_global_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
         )
         .await;
 
@@ -804,7 +804,7 @@ pub(crate) mod tests {
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
             TableId::from(2),
         )
@@ -980,7 +980,7 @@ pub(crate) mod tests {
 
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
             TableId::from(existing_table_id),
         )
@@ -1151,7 +1151,7 @@ pub(crate) mod tests {
         let existing_table_id: u32 = 1;
         let storage = get_hummock_storage(
             hummock_meta_client.clone(),
-            get_test_notification_client(env, hummock_manager_ref.clone(), worker_node.clone()),
+            get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
             &hummock_manager_ref,
             TableId::from(existing_table_id),
         )

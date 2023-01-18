@@ -28,6 +28,7 @@ mod local_version_manager_tests;
 mod snapshot_tests;
 #[cfg(test)]
 mod state_store_tests;
+#[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 #[cfg(test)]
 mod vacuum_tests;
@@ -40,4 +41,4 @@ mod hummock_storage_tests;
 mod mock_notification_client;
 #[cfg(all(test, feature = "sync_point"))]
 mod sync_point_tests;
-pub use mock_notification_client::get_test_notification_client;
+pub use mock_notification_client::get_notification_client_for_test;
