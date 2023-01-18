@@ -364,7 +364,7 @@ pub struct SessionImpl {
     /// Query cancel flag.
     /// This flag is set only when current query is executed in local mode, and used to cancel
     /// local query.
-    current_query_cancel_flag: RwLock<Option<Trigger>>,
+    current_query_cancel_flag: Mutex<Option<Trigger>>,
 }
 
 impl SessionImpl {
@@ -380,7 +380,7 @@ impl SessionImpl {
             user_authenticator,
             config_map: Default::default(),
             id,
-            current_query_cancel_flag: RwLock::new(None),
+            current_query_cancel_flag: Mutex::new(None),
         }
     }
 
@@ -397,7 +397,7 @@ impl SessionImpl {
             config_map: Default::default(),
             // Mock session use non-sense id.
             id: (0, 0),
-            current_query_cancel_flag: RwLock::new(None),
+            current_query_cancel_flag: Mutex::new(None),
         }
     }
 
@@ -483,19 +483,19 @@ impl SessionImpl {
     }
 
     pub fn clear_cancel_query_flag(&self) {
-        let mut flag = self.current_query_cancel_flag.write();
+        let mut flag = self.current_query_cancel_flag.lock().unwrap();
         *flag = None;
     }
 
     pub fn reset_cancel_query_flag(&self) -> Tripwire<std::result::Result<DataChunk, BoxedError>> {
-        let mut flag = self.current_query_cancel_flag.write();
+        let mut flag = self.current_query_cancel_flag.lock().unwrap();
         let (trigger, tripwire) = stream_tripwire(|| Err(Box::new(QueryCancelError) as BoxedError));
         *flag = Some(trigger);
         tripwire
     }
 
     pub fn cancel_current_query(&self) {
-        let mut flag_guard = self.current_query_cancel_flag.write();
+        let mut flag_guard = self.current_query_cancel_flag.lock().unwrap();
         if let Some(trigger) = flag_guard.take() {
             tracing::info!("Trying to cancel query in local mode.");
             // Current running query is in local mode

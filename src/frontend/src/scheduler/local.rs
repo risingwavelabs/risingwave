@@ -121,7 +121,7 @@ impl LocalQueryExecution {
 
         let mut data_stream = {
             let s = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
-            cancellable_stream(s, tripwire)
+            Box::pin(cancellable_stream(s, tripwire))
         };
 
         let future = async move {
