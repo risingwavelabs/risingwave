@@ -639,6 +639,10 @@ impl<R: RangeKv> StateStore for RangeKvStateStore<R> {
     fn new_local(&self, _table_id: TableId) -> Self::NewLocalFuture<'_> {
         async { self.clone() }
     }
+
+    fn validate_read_epoch(&self, _epoch: HummockReadEpoch) -> StorageResult<()> {
+        Ok(())
+    }
 }
 
 pub struct RangeKvStateStoreIter<R: RangeKv> {

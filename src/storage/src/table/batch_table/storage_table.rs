@@ -289,7 +289,7 @@ impl<S: StateStore> StorageTable<S> {
     ) -> StorageResult<Option<OwnedRow>> {
         let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
-        self.store.try_wait_epoch(wait_epoch).await?;
+        self.store.try_wait_epoch(wait_epoch.clone()).await?;
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
         assert!(pk.len() <= self.pk_indices.len());
@@ -309,6 +309,8 @@ impl<S: StateStore> StorageTable<S> {
             read_version_from_backup: read_backup,
         };
         if let Some(value) = self.store.get(&serialized_pk, epoch, read_options).await? {
+            // Refer to [`StorageTableIterInner::new`] for necessity of `validate_read_epoch`.
+            self.store.validate_read_epoch(wait_epoch)?;
             let full_row = self.row_deserializer.deserialize(value)?;
             let result_row_in_value = self.mapping.project(full_row).into_owned_row();
             match &self.key_output_indices {
@@ -653,8 +655,13 @@ impl<S: StateStore> StorageTableIterInner<S> {
             raw_key_range.start_bound().map(|b| b.as_ref().to_vec()),
             raw_key_range.end_bound().map(|b| b.as_ref().to_vec()),
         );
-        store.try_wait_epoch(epoch).await?;
+        store.try_wait_epoch(epoch.clone()).await?;
         let iter = store.iter(range, raw_epoch, read_options).await?;
+        // For `HummockStorage`, a cluster recovery will clear storage data and make subsequent
+        // `HummockReadEpoch::Current` read incomplete.
+        // `validate_read_epoch` is a safeguard against that incorrect read. It rejects the read
+        // result if any recovery has happened after `try_wait_epoch`.
+        store.validate_read_epoch(epoch)?;
         let iter = Self {
             iter,
             mapping,
