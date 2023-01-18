@@ -1,13 +1,13 @@
 # fail with invalid emulator_host
 statement error
-CREATE MATERIALIZED SOURCE s1 (v1 int, v2 varchar) WITH (
+CREATE TABLE s1 (v1 int, v2 varchar) WITH (
     pubsub.subscription = 'test-subscription-1',
     pubsub.emulator_host = 'localhost:5981',
     pubsub.split_count = 3
 ) row format json;
 
 statement ok
-CREATE MATERIALIZED SOURCE s1 (v1 int, v2 varchar) WITH (
+CREATE TABLE s1 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-1',
     pubsub.emulator_host = 'localhost:5980',
@@ -18,11 +18,11 @@ statement ok
 SELECT * FROM s1;
 
 statement ok
-DROP SOURCE s1;
+DROP TABLE s1;
 
 # fail with invalid subscription
 statement error
-CREATE MATERIALIZED SOURCE s2 (v1 int, v2 varchar) WITH (
+CREATE TABLE s2 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-not-2',
     pubsub.emulator_host = 'localhost:5980',
@@ -30,7 +30,7 @@ CREATE MATERIALIZED SOURCE s2 (v1 int, v2 varchar) WITH (
 ) row format json;
 
 statement ok
-CREATE MATERIALIZED SOURCE s2 (v1 int, v2 varchar) WITH (
+CREATE TABLE s2 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-2',
     pubsub.emulator_host = 'localhost:5980',
@@ -39,7 +39,7 @@ CREATE MATERIALIZED SOURCE s2 (v1 int, v2 varchar) WITH (
 
 # fail with invalid split count
 statement error
-CREATE MATERIALIZED SOURCE s3 (v1 int, v2 varchar) WITH (
+CREATE TABLE s3 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-3',
     pubsub.emulator_host = 'localhost:5980',
@@ -48,7 +48,7 @@ CREATE MATERIALIZED SOURCE s3 (v1 int, v2 varchar) WITH (
 
 # fail if both start_offset and start_snapshot are provided
 statement error
-CREATE MATERIALIZED SOURCE s3 (v1 int, v2 varchar) WITH (
+CREATE TABLE s3 (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
     pubsub.subscription = 'test-subscription-3',
     pubsub.emulator_host = 'localhost:5980',
@@ -89,5 +89,5 @@ select v1, v2 FROM s2;
 9 name2
 
 statement ok
-DROP SOURCE s2;
+DROP TABLE s2;
 

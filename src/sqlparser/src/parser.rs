@@ -1525,10 +1525,10 @@ impl Parser {
             self.parse_create_view(false, or_replace)
         } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
             self.parse_create_view(true, or_replace)
-        } else if self.parse_keyword(Keyword::SOURCE) {
-            self.parse_create_source(false, or_replace)
         } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::SOURCE]) {
-            self.parse_create_source(true, or_replace)
+            parser_err!("CREATE MATERIALIZED SOURCE has been deprecated, use CREATE TABLE instead")
+        } else if self.parse_keyword(Keyword::SOURCE) {
+            self.parse_create_source(or_replace)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_create_sink(or_replace)
         } else if self.parse_keyword(Keyword::FUNCTION) {
@@ -1602,13 +1602,8 @@ impl Parser {
     // [WITH (properties)]?
     // ROW FORMAT <row_format: Ident>
     // [ROW SCHEMA LOCATION <row_schema_location: String>]?
-    pub fn parse_create_source(
-        &mut self,
-        is_materialized: bool,
-        _or_replace: bool,
-    ) -> Result<Statement, ParserError> {
+    pub fn parse_create_source(&mut self, _or_replace: bool) -> Result<Statement, ParserError> {
         Ok(Statement::CreateSource {
-            is_materialized,
             stmt: CreateSourceStatement::parse_to(self)?,
         })
     }
@@ -1832,10 +1827,29 @@ impl Parser {
         // PostgreSQL supports `WITH ( options )`, before `AS`
         let with_options = self.parse_with_properties()?;
 
-        // Table can be created with an external stream source.
-        let source_schema = if self.parse_keywords(&[Keyword::ROW, Keyword::FORMAT]) {
-            Some(SourceSchema::parse_to(self)?)
+        let option = with_options
+            .iter()
+            .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
+        let source_schema = if let Some(opt) = option {
+            // Table is created with an external connector.
+            if opt.value.to_string().contains("-cdc") {
+                // cdc connectors
+                if self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
+                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
+                {
+                    return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
+                } else {
+                    Some(SourceSchema::DebeziumJson)
+                }
+            } else {
+                // non-cdc connectors
+                self
+                    .expect_keywords(&[Keyword::ROW, Keyword::FORMAT])
+                    .map_err(|_| ParserError::ParserError("Please specify 'connector' in WITH clause to create a table with a connector".to_string()))?;
+                Some(SourceSchema::parse_to(self)?)
+            }
         } else {
+            // Table is NOT created with an external connector.
             None
         };
 
@@ -2449,7 +2463,7 @@ impl Parser {
             // which may start a construct allowed in this position, to be parsed as aliases.
             // (For example, in `FROM t1 JOIN` the `JOIN` will always be parsed as a keyword,
             // not an alias.)
-            Token::Word(w) if after_as || !reserved_kwds.contains(&w.keyword) => {
+            Token::Word(w) if after_as || (!reserved_kwds.contains(&w.keyword)) => {
                 Ok(Some(w.to_ident()))
             }
             // MSSQL supports single-quoted strings as aliases for columns
@@ -2580,6 +2594,20 @@ impl Parser {
         }
     }
 
+    pub fn parse_returning(
+        &mut self,
+        optional: IsOptional,
+    ) -> Result<Vec<SelectItem>, ParserError> {
+        if self.parse_keyword(Keyword::RETURNING) {
+            let cols = self.parse_comma_separated(Parser::parse_select_item)?;
+            Ok(cols)
+        } else if optional == Optional {
+            Ok(vec![])
+        } else {
+            self.expected("a list of columns or * after returning", self.peek_token())
+        }
+    }
+
     pub fn parse_row_expr(&mut self) -> Result<Expr, ParserError> {
         Ok(Expr::Row(self.parse_token_wrapped_exprs(
             &Token::LParen,
@@ -2642,10 +2670,12 @@ impl Parser {
         } else {
             None
         };
+        let returning = self.parse_returning(Optional)?;
 
         Ok(Statement::Delete {
             table_name,
             selection,
+            returning,
         })
     }
 
@@ -3044,13 +3074,8 @@ impl Parser {
                         return Ok(Statement::ShowObjects(ShowObject::MaterializedView {
                             schema: self.parse_from_and_identifier()?,
                         }));
-                    } else if self.parse_keyword(Keyword::SOURCES) {
-                        return Ok(Statement::ShowObjects(ShowObject::MaterializedSource {
-                            schema: self.parse_from_and_identifier()?,
-                        }));
                     } else {
-                        return self
-                            .expected("VIEWS or SOURCES after MATERIALIZED", self.peek_token());
+                        return self.expected("VIEWS after MATERIALIZED", self.peek_token());
                     }
                 }
                 Keyword::COLUMNS => {
@@ -3482,11 +3507,13 @@ impl Parser {
         let columns = self.parse_parenthesized_column_list(Optional)?;
 
         let source = Box::new(self.parse_query()?);
+        let returning = self.parse_returning(Optional)?;
 
         Ok(Statement::Insert {
             table_name,
             columns,
             source,
+            returning,
         })
     }
 
@@ -3500,10 +3527,12 @@ impl Parser {
         } else {
             None
         };
+        let returning = self.parse_returning(Optional)?;
         Ok(Statement::Update {
             table_name,
             assignments,
             selection,
+            returning,
         })
     }
 

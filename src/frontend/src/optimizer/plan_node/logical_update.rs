@@ -41,6 +41,7 @@ pub struct LogicalUpdate {
     table_id: TableId,
     input: PlanRef,
     exprs: Vec<ExprImpl>,
+    returning: bool,
 }
 
 impl LogicalUpdate {
@@ -50,10 +51,14 @@ impl LogicalUpdate {
         table_source_name: String,
         table_id: TableId,
         exprs: Vec<ExprImpl>,
+        returning: bool,
     ) -> Self {
         let ctx = input.ctx();
-        // TODO: support `RETURNING`.
-        let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
+        let schema = if returning {
+            input.schema().clone()
+        } else {
+            Schema::new(vec![Field::unnamed(DataType::Int64)])
+        };
         let fd_set = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], fd_set);
         Self {
@@ -62,6 +67,7 @@ impl LogicalUpdate {
             table_id,
             input,
             exprs,
+            returning,
         }
     }
 
@@ -71,15 +77,29 @@ impl LogicalUpdate {
         table_source_name: String,
         table_id: TableId,
         exprs: Vec<ExprImpl>,
+        returning: bool,
     ) -> Result<Self> {
-        Ok(Self::new(input, table_source_name, table_id, exprs))
+        Ok(Self::new(
+            input,
+            table_source_name,
+            table_id,
+            exprs,
+            returning,
+        ))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         write!(
             f,
-            "{} {{ table: {}, exprs: {:?} }}",
-            name, self.table_name, self.exprs
+            "{} {{ table: {}, exprs: {:?}{} }}",
+            name,
+            self.table_name,
+            self.exprs,
+            if self.returning {
+                ", returning: true"
+            } else {
+                ""
+            }
         )
     }
 
@@ -90,6 +110,10 @@ impl LogicalUpdate {
 
     pub fn exprs(&self) -> &[ExprImpl] {
         self.exprs.as_ref()
+    }
+
+    pub fn has_returning(&self) -> bool {
+        self.returning
     }
 }
 
@@ -104,6 +128,7 @@ impl PlanTreeNodeUnary for LogicalUpdate {
             self.table_name.clone(),
             self.table_id,
             self.exprs.clone(),
+            self.returning,
         )
     }
 }

@@ -32,7 +32,6 @@ use crate::error::Result as BatchResult;
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 
-#[derive(Clone)]
 pub struct ConsistentHashShuffleSender {
     senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
     consistent_hash_info: ConsistentHashInfo,

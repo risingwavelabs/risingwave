@@ -55,7 +55,7 @@ where
     !too_left && !too_right
 }
 
-pub fn validate_epoch(safe_epoch: u64, epoch: u64) -> HummockResult<()> {
+pub fn validate_safe_epoch(safe_epoch: u64, epoch: u64) -> HummockResult<()> {
     if epoch < safe_epoch {
         return Err(HummockError::expired_epoch(safe_epoch, epoch));
     }
