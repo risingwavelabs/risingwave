@@ -30,7 +30,7 @@ use crate::error::BatchError::SenderError;
 use crate::error::Result as BatchResult;
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
-#[derive(Clone)]
+
 pub struct HashShuffleSender {
     senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
     hash_info: HashInfo,

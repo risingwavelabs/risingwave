@@ -218,7 +218,7 @@ impl SchemaCatalog {
     pub fn iter_table(&self) -> impl Iterator<Item = &Arc<TableCatalog>> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.is_table() && v.associated_source_id().is_none())
+            .filter(|(_, v)| v.is_table())
             .map(|(_, v)| v)
     }
 
@@ -248,18 +248,9 @@ impl SchemaCatalog {
         self.index_by_name.values()
     }
 
-    /// Iterate all sources, including the materialized sources.
+    /// Iterate all sources
     pub fn iter_source(&self) -> impl Iterator<Item = &Arc<SourceCatalog>> {
         self.source_by_name.values()
-    }
-
-    /// Iterate the materialized sources.
-    /// TODO(Yuanxin): Remove this method.
-    pub fn iter_materialized_source(&self) -> impl Iterator<Item = &Arc<SourceCatalog>> {
-        self.source_by_name
-            .iter()
-            .filter(|(name, _)| self.table_by_name.get(*name).is_some())
-            .map(|(_, v)| v)
     }
 
     pub fn iter_sink(&self) -> impl Iterator<Item = &Arc<SinkCatalog>> {
