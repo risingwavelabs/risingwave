@@ -963,8 +963,9 @@ impl ActorGraphBuilder {
         Ok(stream_graph)
     }
 
-    /// Build actor graph from fragment graph using topological sort. Setup dispatcher in actor and
-    /// generate actors by their parallelism.
+    /// Build actor graph from fragment graph using reverse topological order(from upstream to
+    /// downstream), because we want to setup parallelism for `NoShuffle` dispatcher correctly.
+    /// Setup dispatcher in actor and generate actors by their parallelism.
     fn build_actor_graph(
         &self,
         state: &mut BuildActorGraphState,
@@ -987,10 +988,10 @@ impl ActorGraphBuilder {
             }
         }
 
-        while let Some(fragment_id) = actionable_fragment_id.pop_front() {
-            // Build the actors corresponding to the fragment
-            self.build_actor_graph_fragment(fragment_id, state, fragment_graph, ctx)?;
+        // Reverse the topological order (from upstream to downstream).
+        let mut reverse_topological_order = actionable_fragment_id.clone();
 
+        while let Some(fragment_id) = actionable_fragment_id.pop_front() {
             // Find if we can process more fragments
             for upstream_id in fragment_graph.get_upstreams(fragment_id).keys() {
                 let downstream_cnt = downstream_cnts
@@ -1000,6 +1001,7 @@ impl ActorGraphBuilder {
                 if *downstream_cnt == 0 {
                     downstream_cnts.remove(upstream_id);
                     actionable_fragment_id.push_back(*upstream_id);
+                    reverse_topological_order.push_back(*upstream_id);
                 }
             }
         }
@@ -1007,6 +1009,12 @@ impl ActorGraphBuilder {
         if !downstream_cnts.is_empty() {
             // There are fragments that are not processed yet.
             bail!("graph is not a DAG");
+        }
+
+        // Build actor graph from fragment graph using reverse topological order.
+        while let Some(fragment_id) = reverse_topological_order.pop_back() {
+            // Build the actors corresponding to the fragment
+            self.build_actor_graph_fragment(fragment_id, state, fragment_graph, ctx)?;
         }
 
         Ok(())
@@ -1033,6 +1041,33 @@ impl ActorGraphBuilder {
 
         let parallel_degree = if current_fragment.is_singleton {
             1
+        } else if fragment_graph
+            .get_upstreams(fragment_id)
+            .values()
+            .any(|edge| {
+                matches!(
+                    edge.dispatch_strategy.as_ref().unwrap().get_type(),
+                    Ok(DispatcherType::NoShuffle)
+                )
+            })
+        {
+            let upstream_fragment_id = fragment_graph
+                .get_upstreams(fragment_id)
+                .iter()
+                .filter(|(_, edge)| {
+                    matches!(
+                        edge.dispatch_strategy.as_ref().unwrap().get_type(),
+                        Ok(DispatcherType::NoShuffle)
+                    )
+                })
+                .map(|(upstream_fragment_id, _)| upstream_fragment_id)
+                .exactly_one()
+                .unwrap();
+            state
+                .fragment_actors
+                .get(upstream_fragment_id)
+                .expect("upstream fragment not processed yet")
+                .len() as u32
         } else if let Some(upstream_table_id) = upstream_table_id {
             // set fragment parallelism to the parallelism of its dependent table.
             let upstream_actors = ctx
@@ -1057,11 +1092,11 @@ impl ActorGraphBuilder {
                 .add_actor(*id, fragment_id, node.clone());
         }
 
-        for (downstream_fragment_id, dispatch_edge) in fragment_graph.get_downstreams(fragment_id) {
-            let downstream_actors = state
+        for (upstream_fragment_id, dispatch_edge) in fragment_graph.get_upstreams(fragment_id) {
+            let upstream_actors = state
                 .fragment_actors
-                .get(downstream_fragment_id)
-                .expect("downstream fragment not processed yet");
+                .get(upstream_fragment_id)
+                .expect("upstream fragment not processed yet");
 
             let dispatch_strategy = dispatch_edge.dispatch_strategy.as_ref().unwrap();
             match dispatch_strategy.get_type()? {
@@ -1070,9 +1105,9 @@ impl ActorGraphBuilder {
                 | DispatcherType::Broadcast
                 | DispatcherType::NoShuffle => {
                     state.stream_graph_builder.add_link(
-                        fragment_id,
+                        *upstream_fragment_id,
+                        upstream_actors,
                         &actor_ids,
-                        downstream_actors,
                         dispatch_edge.clone(),
                     );
                 }

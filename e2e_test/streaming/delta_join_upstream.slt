@@ -2,16 +2,25 @@ statement ok
 set rw_implicit_flush = true;
 
 statement ok
+set streaming_parallelism = 2;
+
+statement ok
 create table a (a1 int, a2 int);
 
 statement ok
 create index i_a1 on a(a1);
 
 statement ok
+set streaming_parallelism = 3;
+
+statement ok
 create table b (b1 int, b2 int);
 
 statement ok
 create index i_b1 on b(b1);
+
+statement ok
+set streaming_parallelism = 4;
 
 statement ok
 create materialized view v as select * from a join b on a.a1 = b.b1 ;
