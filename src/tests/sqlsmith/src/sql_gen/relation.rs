@@ -14,11 +14,11 @@
 
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_common::types::DataType;
+
 use risingwave_common::types::DataType::Boolean;
-use risingwave_sqlparser::ast::Expr::Function;
+
 use risingwave_sqlparser::ast::{Ident, ObjectName, TableAlias, TableFactor, TableWithJoins};
-use tracing_subscriber::registry::Data;
+
 
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
