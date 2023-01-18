@@ -164,9 +164,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_limit(&mut self, has_order_by: bool) -> Option<String> {
-        if !self.is_mview && self.rng.gen_bool(0.2) {
-            Some(self.rng.gen_range(0..=100).to_string())
-        } else if self.is_mview && has_order_by && self.rng.gen_bool(0.2) {
+        if (!self.is_mview || has_order_by) && self.rng.gen_bool(0.2) {
             Some(self.rng.gen_range(0..=100).to_string())
         } else {
             None
