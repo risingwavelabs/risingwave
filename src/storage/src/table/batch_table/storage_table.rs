@@ -534,7 +534,6 @@ impl<S: StateStore> StorageTable<S> {
 
         assert!(pk_prefix.len() <= self.pk_indices.len());
         let pk_prefix_indices = (0..pk_prefix.len())
-            .into_iter()
             .map(|index| self.pk_indices[index])
             .collect_vec();
 

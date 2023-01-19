@@ -948,7 +948,7 @@ impl ToStream for LogicalAgg {
         // LogicalAgg.
         // Please note that the index of group key need not be changed.
 
-        let mut output_indices = (0..self.schema().len()).into_iter().collect_vec();
+        let mut output_indices = (0..self.schema().len()).collect_vec();
         output_indices
             .iter_mut()
             .skip(self.group_key().len())
