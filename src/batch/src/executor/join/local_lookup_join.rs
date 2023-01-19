@@ -553,7 +553,7 @@ mod tests {
             lookup_prefix_len: 1,
             chunk_builder: DataChunkBuilder::new(original_schema.data_types(), CHUNK_SIZE),
             schema: original_schema.clone(),
-            output_indices: (0..original_schema.len()).into_iter().collect(),
+            output_indices: (0..original_schema.len()).collect(),
             chunk_size: CHUNK_SIZE,
             identity: "TestLookupJoinExecutor".to_string(),
         }
