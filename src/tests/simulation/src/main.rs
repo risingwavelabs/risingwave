@@ -128,6 +128,7 @@ async fn main() {
     tracing_subscriber::fmt()
         // no ANSI color codes when output to file
         .with_ansi(console::colors_enabled_stderr() && console::colors_enabled())
+        .with_writer(std::io::stderr)
         .init();
 
     let args = Args::parse();
