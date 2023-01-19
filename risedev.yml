@@ -133,6 +133,12 @@ profile:
 
   3etcd-3meta-1cn-1fe:
     steps:
+      - use: nginx
+        port: 1234
+        target-ports:
+          - 5690
+          - 15690
+          - 25690
       - use: etcd
         unsafe-no-fsync: true
         port: 2388
@@ -162,11 +168,9 @@ profile:
         exporter-port: 21250
       - use: compute-node
       - use: frontend
-      - use: nginx
-        port: 1234
 
-  # TODO: Download nginx. Add nginx to risedev config
-  # configure niginx https://towardsdatascience.com/sample-load-balancing-solution-with-docker-and-nginx-cf1ffc60e644
+  # TODO: Somehow tell the meta node that it should connect against nginx
+  #   Add config to compute nodes (and other nodes) where the meta service is
 
   ######################################
   ### Configurations used in Compose ###
@@ -742,13 +746,13 @@ template:
     # Id of this instance
     id: compactor-${port}
 
-    # Minio instances used by this compute node
+    # Minio instances used by this compactor node
     provide-minio: "minio*"
 
-    # AWS s3 bucket used by this compute node
+    # AWS s3 bucket used by this compactor node
     provide-aws-s3: "aws-s3*"
 
-    # Meta-nodes used by this compute node
+    # Meta-nodes used by this compactor node
     provide-meta-node: "meta-node*"
 
     # If `user-managed` is true, this service will be started by user with the above config
@@ -890,12 +894,19 @@ template:
     # address of redis
     address: "127.0.0.1"
 
+  # TODO: Rename all nginx things to LoadBalancer
+  # TODO: risedev.conf has to use these configs
   # used as load balancer to simulate K8s service
   nginx:
     # Id to be picked-up by services
     id: nginx
 
+    # Defines the exposed port of the load balancer
     port: 1234
 
     # address of nginx
     address: "127.0.0.1"
+
+    # defines the target ports of the load balancer
+    target-ports:
+      - 2345

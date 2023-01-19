@@ -1213,6 +1213,9 @@ const GRPC_REQUEST_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 impl GrpcMetaClient {
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
+        // TODO: We only want to retrieve the actual leader via the proxy.
+        // All other requests have to go to the leader server directly
+
         tracing::info!("Originally connect against {}", addr);
         let channel = get_channel_with_defaults(addr).await?;
 
