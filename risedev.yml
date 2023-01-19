@@ -927,7 +927,6 @@ template:
     # address of redis
     address: "127.0.0.1"
 
-  # TODO: risedev.conf has to use these configs
   # Uses nginx as load balancer to simulate K8s service
   load-balancer:
     # Id to be picked-up by services

@@ -81,6 +81,10 @@ pub struct MetaClient {
 }
 
 impl MetaClient {
+    pub fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
+        GrpcMetaClient::retry_strategy_for_request()
+    }
+
     // None if leader is presumed failed
     // HostAddress if connected against a working leader or follower node
     // Node may return a stale leader
@@ -115,73 +119,97 @@ impl MetaClient {
         None
     }
 
+    // Retrieve the leader from any of the meta nodes via a K8s service / load-balancer
     async fn get_current_leader_from_service(&self) -> HostAddress {
-        panic!("TODO")
+        // TODO: address of the service channel should not be hardcoded
+        let service_channel = get_channel_with_defaults("http://127.0.0.1/1234")
+            .await
+            .unwrap();
+        let mut lc = LeaderServiceClient::new(service_channel);
+        // TODO: retry this. May be send to overwhelmed node
+        let response = lc.leader(LeaderRequest {}).await;
+        let current_leader = response
+            .unwrap()
+            .into_inner()
+            .leader_addr
+            .expect("Meta node is supposed to know who the leader is");
+        current_leader
     }
 
-    async fn do_failover(&self, current_leader: Option<HostAddress>) {
-        let current_leader = match current_leader {
-            Some(l) => l,
-            None => self.get_current_leader_from_service().await,
-        };
+    async fn do_failover(&self, mut current_leader_init: Option<HostAddress>) {
+        for retry in self.get_retry_strategy() {
+            let current_leader = match current_leader_init {
+                Some(l) => l,
+                None => self.get_current_leader_from_service().await,
+            };
+            // always use service for retries
+            current_leader_init = None;
 
-        let addr = format!(
-            "http://{}:{}",
-            current_leader.get_host(),
-            current_leader.get_port()
-        );
-        tracing::info!("Failing over to new meta leader {}", addr);
-        let leader_channel = match get_channel_with_defaults(addr.as_str()).await {
-            Ok(lc) => lc,
-            Err(_) => {
-                tracing::error!("Failed to establish connection against new leader {}", addr);
-                return;
-            }
-        };
+            // TODO: How do we know that it always is http?
+            let addr = format!(
+                "http://{}:{}",
+                current_leader.get_host(),
+                current_leader.get_port()
+            );
+            tracing::info!("Failing over to new meta leader {}", addr);
+            let leader_channel = match get_channel_with_defaults(addr.as_str()).await {
+                Ok(lc) => lc,
+                Err(_) => {
+                    tracing::error!("Failed to establish connection leader {}. Seems to be stale leader info. Retrying...", addr);
+                    tokio::time::sleep(retry).await;
+                    continue;
+                }
+            };
 
-        // Hold locks on all sub-clients, to update atomically
-        {
-            let mut leader_c = self.inner.leader_client.as_ref().lock().await;
-            let mut cluster_c = self.inner.cluster_client.as_ref().lock().await;
-            let mut heartbeat_c = self.inner.heartbeat_client.as_ref().lock().await;
-            let mut ddl_c = self.inner.ddl_client.as_ref().lock().await;
-            let mut hummock_c = self.inner.hummock_client.as_ref().lock().await;
-            let mut notification_c = self.inner.notification_client.as_ref().lock().await;
-            let mut stream_c = self.inner.stream_client.as_ref().lock().await;
-            let mut user_c = self.inner.user_client.as_ref().lock().await;
-            let mut scale_c = self.inner.scale_client.as_ref().lock().await;
-            let mut backup_c = self.inner.backup_client.as_ref().lock().await;
+            // Hold locks on all sub-clients, to update atomically
+            {
+                let mut leader_c = self.inner.leader_client.as_ref().lock().await;
+                let mut cluster_c = self.inner.cluster_client.as_ref().lock().await;
+                let mut heartbeat_c = self.inner.heartbeat_client.as_ref().lock().await;
+                let mut ddl_c = self.inner.ddl_client.as_ref().lock().await;
+                let mut hummock_c = self.inner.hummock_client.as_ref().lock().await;
+                let mut notification_c = self.inner.notification_client.as_ref().lock().await;
+                let mut stream_c = self.inner.stream_client.as_ref().lock().await;
+                let mut user_c = self.inner.user_client.as_ref().lock().await;
+                let mut scale_c = self.inner.scale_client.as_ref().lock().await;
+                let mut backup_c = self.inner.backup_client.as_ref().lock().await;
 
-            *leader_c = LeaderServiceClient::new(leader_channel.clone());
-            *cluster_c = ClusterServiceClient::new(leader_channel.clone());
-            *heartbeat_c = HeartbeatServiceClient::new(leader_channel.clone());
-            *ddl_c = DdlServiceClient::new(leader_channel.clone());
-            *hummock_c = HummockManagerServiceClient::new(leader_channel.clone());
-            *notification_c = NotificationServiceClient::new(leader_channel.clone());
-            *stream_c = StreamManagerServiceClient::new(leader_channel.clone());
-            *user_c = UserServiceClient::new(leader_channel.clone());
-            *scale_c = ScaleServiceClient::new(leader_channel.clone());
-            *backup_c = BackupServiceClient::new(leader_channel);
-        } // release MutexGuards on all clients
+                *leader_c = LeaderServiceClient::new(leader_channel.clone());
+                *cluster_c = ClusterServiceClient::new(leader_channel.clone());
+                *heartbeat_c = HeartbeatServiceClient::new(leader_channel.clone());
+                *ddl_c = DdlServiceClient::new(leader_channel.clone());
+                *hummock_c = HummockManagerServiceClient::new(leader_channel.clone());
+                *notification_c = NotificationServiceClient::new(leader_channel.clone());
+                *stream_c = StreamManagerServiceClient::new(leader_channel.clone());
+                *user_c = UserServiceClient::new(leader_channel.clone());
+                *scale_c = ScaleServiceClient::new(leader_channel.clone());
+                *backup_c = BackupServiceClient::new(leader_channel);
+            } // release MutexGuards on all clients
 
-        tracing::info!("Updated client to connect against new leader {}", addr);
+            tracing::info!("Updated client to connect against new leader {}", addr);
+        }
     }
 
     // Execute the failover if it is needed. If no failover is needed do nothing
-    pub async fn do_failover_if_needed(&self) {
+    // Returns true if failover was needed, else false
+    pub async fn do_failover_if_needed(&self) -> bool {
         let current_leader = self.try_get_leader_from_connected_node().await;
         let current_leader_clone = current_leader.clone();
         {
-            // release mutex guard after this scope
             let connected_node = self.inner.leader_address.as_ref().lock().await.clone();
             if current_leader.is_some() && current_leader.unwrap() == connected_node {
-                return;
+                return false;
             }
+            // release mutex guard after this scope
         }
         self.do_failover(current_leader_clone).await;
+        true
     }
 
-    pub async fn failover(&self) {
+    // TODO: remove this function
+    pub async fn failover_do_not_use_deprecated(&self) {
+        panic!("Do not use this function anymore!");
+
         // if leader address failed, then failover
         {
             let mut hc = self.inner.heartbeat_client.as_ref().lock().await;

@@ -234,14 +234,29 @@ impl NotificationClient for RpcNotificationClient {
     // TODO: also handle failover here?
     // Should meta client have a failover thing?
     async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel> {
-        let res = self
+        let mut res = self
             .meta_client
             .subscribe(subscribe_type)
             .await
             .map_err(RpcError::into);
-        // TODO: When exactly do we need do failover here?
-        if true {
-            self.meta_client.failover().await;
+
+        for retry in self.meta_client.get_retry_strategy() {
+            if res.is_ok() {
+                return res;
+            }
+
+            // retry only if we have an incorrect connection
+            if !self.meta_client.do_failover_if_needed().await {
+                return res;
+            }
+
+            tokio::time::sleep(retry).await;
+
+            res = self
+                .meta_client
+                .subscribe(subscribe_type)
+                .await
+                .map_err(RpcError::into);
         }
         res
     }
