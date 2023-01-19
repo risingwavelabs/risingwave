@@ -34,7 +34,9 @@ use super::datagen::DatagenMeta;
 use super::filesystem::{FsSplit, S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR};
 use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
+use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
+use super::SourceContext;
 use crate::parser::ParserConfig;
 use crate::source::cdc::{
     CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, MYSQL_CDC_CONNECTOR,
@@ -107,6 +109,8 @@ pub trait SplitReaderV2: Sized {
         properties: Self::Properties,
         state: Vec<SplitImpl>,
         parser_config: ParserConfig,
+        metrics: Arc<SourceMetrics>,
+        source_context: SourceContext,
     ) -> Result<Self>;
 
     fn into_stream(self) -> BoxSourceWithStateStream;
@@ -228,6 +232,8 @@ impl SplitReaderV2Impl {
         config: ConnectorProperties,
         state: ConnectorState,
         parser_config: ParserConfig,
+        metrics: Arc<SourceMetrics>,
+        source_context: SourceContext,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         if state.is_none() {
@@ -236,7 +242,7 @@ impl SplitReaderV2Impl {
         let state = state.unwrap();
         let reader = match config {
             ConnectorProperties::S3(s3_props) => Self::S3(Box::new(
-                S3FileReader::new(*s3_props, state, parser_config).await?,
+                S3FileReader::new(*s3_props, state, parser_config, metrics, source_context).await?,
             )),
             _ => todo!(),
         };

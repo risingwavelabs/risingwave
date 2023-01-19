@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -31,7 +32,8 @@ use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::{SplitMetaData, SplitReaderV2, MAX_CHUNK_SIZE};
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
-use crate::source::{SourceMessage, SourceMeta, SplitImpl};
+use crate::source::monitor::SourceMetrics;
+use crate::source::{SourceContext, SourceMessage, SourceMeta, SplitImpl};
 use crate::{BoxSourceWithStateStream, StreamChunkWithState};
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
@@ -43,11 +45,24 @@ pub struct S3FileReader {
     s3_client: s3_client::Client,
     splits: Vec<FsSplit>,
     parser_config: ParserConfig,
+    // for stats
+    metrics: Arc<SourceMetrics>,
+    context: SourceContext,
 }
 
 impl S3FileReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    async fn stream_read(client_for_s3: s3_client::Client, bucket_name: String, split: FsSplit) {
+    async fn stream_read_object(
+        client_for_s3: s3_client::Client,
+        bucket_name: String,
+        split: FsSplit,
+        metrics: Arc<SourceMetrics>,
+        context: SourceContext,
+    ) {
+        let actor_id = context.actor_id.to_string();
+        let source_id = context.source_id.to_string();
+        let split_id = split.id();
+
         let object_name = split.name.clone();
         let byte_stream =
             S3FileReader::get_object(&client_for_s3, &bucket_name, &object_name, split.offset)
@@ -61,6 +76,7 @@ impl S3FileReader {
         let stream = ReaderStream::with_capacity(reader, STREAM_READER_CAPACITY);
 
         let mut offset: usize = split.offset;
+        let mut batch_size: usize = 0;
         let mut batch = Vec::new();
         #[for_await]
         for read in stream {
@@ -73,13 +89,23 @@ impl S3FileReader {
                 meta: SourceMeta::Empty,
             };
             offset += len;
+            batch_size += len;
             batch.push(msg);
             if batch.len() >= MAX_CHUNK_SIZE {
+                metrics
+                    .partition_input_bytes
+                    .with_label_values(&[&actor_id, &source_id, &split_id])
+                    .inc_by(batch_size as u64);
+                batch_size = 0;
                 yield batch.clone();
                 batch.clear();
             }
         }
         if !batch.is_empty() {
+            metrics
+                .partition_input_bytes
+                .with_label_values(&[&actor_id, &source_id, &split_id])
+                .inc_by(batch_size as u64);
             yield batch;
         }
     }
@@ -123,6 +149,8 @@ impl SplitReaderV2 for S3FileReader {
         props: S3Properties,
         state: Vec<SplitImpl>,
         parser_config: ParserConfig,
+        metrics: Arc<SourceMetrics>,
+        context: SourceContext,
     ) -> Result<Self> {
         let config = AwsConfigV2::from(HashMap::from(props.clone()));
         let sdk_config = config.load_config(None).await;
@@ -140,6 +168,8 @@ impl SplitReaderV2 for S3FileReader {
             s3_client,
             splits,
             parser_config,
+            metrics,
+            context,
         };
 
         Ok(s3_file_reader)
@@ -154,13 +184,28 @@ impl S3FileReader {
     #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
     pub async fn into_stream(self) {
         for split in self.splits {
-            let data_stream =
-                Self::stream_read(self.s3_client.clone(), self.bucket_name.clone(), split);
+            let actor_id = self.context.actor_id.to_string();
+            let source_id = self.context.source_id.to_string();
+            let split_id = split.id();
+
+            let data_stream = Self::stream_read_object(
+                self.s3_client.clone(),
+                self.bucket_name.clone(),
+                split,
+                self.metrics.clone(),
+                self.context,
+            );
+
             let parser = ByteStreamSourceParserImpl::create(self.parser_config.clone()).await?;
-            let msg_stream = parser.into_stream(data_stream);
+            let msg_stream = parser.into_stream(Box::pin(data_stream));
             #[for_await]
             for msg in msg_stream {
-                yield msg?;
+                let msg = msg?;
+                self.metrics
+                    .partition_input_count
+                    .with_label_values(&[&actor_id, &source_id, &split_id])
+                    .inc_by(msg.chunk.cardinality() as u64);
+                yield msg;
             }
         }
     }
@@ -212,7 +257,15 @@ mod tests {
             specific: SpecificParserConfig::Csv(csv_config),
         };
 
-        let reader = S3FileReader::new(props, splits, config).await.unwrap();
+        let reader = S3FileReader::new(
+            props,
+            splits,
+            config,
+            Arc::new(SourceMetrics::default()),
+            SourceContext::default(),
+        )
+        .await
+        .unwrap();
 
         let msg_stream = reader.into_stream();
         #[for_await]

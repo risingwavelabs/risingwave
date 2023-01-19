@@ -20,12 +20,29 @@ pub mod filesystem;
 pub mod google_pubsub;
 pub mod kafka;
 pub mod kinesis;
+pub mod monitor;
 pub mod nexmark;
 pub mod pulsar;
 pub use base::*;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
 pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
+use risingwave_common::catalog::TableId;
 
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SourceContext {
+    pub actor_id: u32,
+    pub source_id: TableId,
+}
+
+impl SourceContext {
+    pub fn new(actor_id: u32, source_id: TableId) -> Self {
+        SourceContext {
+            actor_id,
+            source_id,
+        }
+    }
+}
