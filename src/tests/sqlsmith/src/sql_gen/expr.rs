@@ -228,7 +228,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     fn gen_exists(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {
         // TODO: Streaming nested loop join is not implemented yet.
-        // Tracked by: <https://github.com/singularity-data/risingwave/issues/2655>.
+        // Tracked by: <https://github.com/risingwave-labs/risingwave/issues/2655>.
 
         // Generation of subquery inside aggregation is now workaround.
         // Tracked by: <https://github.com/risingwavelabs/risingwave/issues/3896>.
