@@ -295,7 +295,6 @@ fn assemble_materialize(
         )),
         Order::new(
             (0..index_columns.len())
-                .into_iter()
                 .map(FieldOrder::ascending)
                 .collect(),
         ),

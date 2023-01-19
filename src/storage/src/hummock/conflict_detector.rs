@@ -145,7 +145,6 @@ mod test {
         detector.check_conflict_and_track_write_batch(
             (0..2)
                 .map(|_| (Bytes::from("conflicted-key"), HummockValue::Delete))
-                .into_iter()
                 .collect_vec()
                 .as_slice(),
             233,
