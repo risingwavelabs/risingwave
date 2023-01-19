@@ -303,12 +303,12 @@ mod tests {
             let chunk = reader.next().await.unwrap()?;
 
             assert_eq!(
-                chunk.ops().chunks(2).collect_vec(),
+                chunk.chunk.ops().chunks(2).collect_vec(),
                 vec![&[Op::UpdateDelete, Op::UpdateInsert]; updated_rows.clone().count()]
             );
 
             assert_eq!(
-                chunk.columns()[0]
+                chunk.chunk.columns()[0]
                     .array()
                     .as_int32()
                     .iter()
@@ -321,7 +321,7 @@ mod tests {
             );
 
             assert_eq!(
-                chunk.columns()[1]
+                chunk.chunk.columns()[1]
                     .array()
                     .as_int32()
                     .iter()
