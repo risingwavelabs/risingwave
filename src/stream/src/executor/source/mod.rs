@@ -15,7 +15,7 @@
 mod fs_source_executor;
 pub use fs_source_executor::*;
 
-pub mod source_executor_v2;
+pub mod source_executor;
 
 mod reader;
 pub mod state_table_handler;
