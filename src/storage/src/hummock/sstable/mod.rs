@@ -23,7 +23,7 @@ pub use block::*;
 mod block_iterator;
 pub use block_iterator::*;
 mod bloom;
-use bloom::Bloom;
+use bloom::BloomFilterReader;
 pub mod builder;
 pub use builder::*;
 pub mod writer;
@@ -120,6 +120,7 @@ impl DeleteRangeTombstone {
 pub struct Sstable {
     pub id: HummockSstableId,
     pub meta: SstableMeta,
+    pub filter_reader: BloomFilterReader,
 }
 
 impl Debug for Sstable {
@@ -132,12 +133,18 @@ impl Debug for Sstable {
 }
 
 impl Sstable {
-    pub fn new(id: HummockSstableId, meta: SstableMeta) -> Self {
-        Self { id, meta }
+    pub fn new(id: HummockSstableId, mut meta: SstableMeta) -> Self {
+        let filter_data = std::mem::take(&mut meta.bloom_filter);
+        let filter_reader = BloomFilterReader::new(filter_data);
+        Self {
+            id,
+            meta,
+            filter_reader,
+        }
     }
 
     pub fn has_bloom_filter(&self) -> bool {
-        !self.meta.bloom_filter.is_empty()
+        !self.filter_reader.is_empty()
     }
 
     pub fn surely_not_have_dist_key(&self, dist_key: &[u8]) -> bool {
@@ -160,8 +167,7 @@ impl Sstable {
 
     #[inline(always)]
     pub fn surely_not_have_hashvalue(&self, hash: u32) -> bool {
-        let bloom = Bloom::new(&self.meta.bloom_filter);
-        bloom.surely_not_have_hash(hash)
+        !self.filter_reader.may_match(hash)
     }
 
     pub fn block_count(&self) -> usize {
