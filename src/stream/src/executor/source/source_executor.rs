@@ -20,8 +20,8 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_connector::source::{ConnectorState, SplitId, SplitMetaData};
+use risingwave_connector::{BoxSourceWithStateStream, StreamChunkWithState};
 use risingwave_source::connector_source::{SourceContext, SourceDescBuilderV2, SourceDescV2};
-use risingwave_source::{BoxSourceWithStateStream, StreamChunkWithState};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
@@ -84,7 +84,7 @@ where
     }
 }
 
-pub struct SourceExecutorV2<S: StateStore> {
+pub struct SourceExecutor<S: StateStore> {
     ctx: ActorContextRef,
 
     identity: String,
@@ -106,7 +106,7 @@ pub struct SourceExecutorV2<S: StateStore> {
     expected_barrier_latency_ms: u64,
 }
 
-impl<S: StateStore> SourceExecutorV2<S> {
+impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
@@ -134,7 +134,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
         &self,
         source_desc: &SourceDescV2,
         state: ConnectorState,
-    ) -> StreamExecutorResult<BoxSourceWithStateStream<StreamChunkWithState>> {
+    ) -> StreamExecutorResult<BoxSourceWithStateStream> {
         let column_ids = source_desc
             .columns
             .iter()
@@ -159,7 +159,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
     async fn apply_split_change(
         &mut self,
         source_desc: &SourceDescV2,
-        stream: &mut SourceReaderStream<StreamChunkWithState>,
+        stream: &mut SourceReaderStream,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
@@ -216,7 +216,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
     async fn replace_stream_reader_with_target_state(
         &mut self,
         source_desc: &SourceDescV2,
-        stream: &mut SourceReaderStream<StreamChunkWithState>,
+        stream: &mut SourceReaderStream,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(
@@ -490,7 +490,7 @@ impl<S: StateStore> SourceExecutorV2<S> {
     }
 }
 
-impl<S: StateStore> Executor for SourceExecutorV2<S> {
+impl<S: StateStore> Executor for SourceExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         if self.stream_source_core.is_some() {
             self.execute_with_stream_source().boxed()
@@ -512,7 +512,7 @@ impl<S: StateStore> Executor for SourceExecutorV2<S> {
     }
 }
 
-impl<S: StateStore> Debug for SourceExecutorV2<S> {
+impl<S: StateStore> Debug for SourceExecutor<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         if let Some(core) = &self.stream_source_core {
             f.debug_struct("SourceExecutor")
@@ -599,7 +599,7 @@ mod tests {
             source_name: MOCK_SOURCE_NAME.to_string(),
         };
 
-        let executor = SourceExecutorV2::new(
+        let executor = SourceExecutor::new(
             ActorContext::create(0),
             schema,
             pk_indices,
@@ -691,7 +691,7 @@ mod tests {
             source_name: MOCK_SOURCE_NAME.to_string(),
         };
 
-        let executor = SourceExecutorV2::new(
+        let executor = SourceExecutor::new(
             ActorContext::create(0),
             schema,
             pk_indices,
