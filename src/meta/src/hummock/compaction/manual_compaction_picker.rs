@@ -1228,7 +1228,7 @@ pub mod tests {
             levels,
             l0: Some(l0),
         };
-        let mut levels_handler = (0..5).into_iter().map(LevelHandler::new).collect_vec();
+        let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
 
         // pick_l0_to_sub_level
@@ -1326,7 +1326,7 @@ pub mod tests {
             levels,
             l0: Some(l0),
         };
-        let mut levels_handler = (0..5).into_iter().map(LevelHandler::new).collect_vec();
+        let mut levels_handler = (0..5).map(LevelHandler::new).collect_vec();
         let mut local_stats = LocalSelectorStatistic::default();
 
         // pick l3 -> l4

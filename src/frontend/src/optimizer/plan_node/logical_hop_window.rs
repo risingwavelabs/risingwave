@@ -48,8 +48,8 @@ impl LogicalHopWindow {
         output_indices: Option<Vec<usize>>,
     ) -> Self {
         // if output_indices is not specified, use default output_indices
-        let output_indices = output_indices
-            .unwrap_or_else(|| (0..input.schema().len() + 2).into_iter().collect_vec());
+        let output_indices =
+            output_indices.unwrap_or_else(|| (0..input.schema().len() + 2).collect_vec());
         let output_type = DataType::window_of(&time_col.data_type).unwrap();
         let original_schema: Schema = input
             .schema()
