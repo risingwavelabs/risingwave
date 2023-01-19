@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod telemetry;
+pub mod report;
 
 use serde::{Deserialize, Serialize};
 use sysinfo::{System, SystemExt};
@@ -20,7 +20,7 @@ use sysinfo::{System, SystemExt};
 #[derive(Debug, Serialize, Deserialize)]
 struct SystemData {
     memory: Memory,
-    os: OS,
+    os: Os,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,7 +30,7 @@ struct Memory {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct OS {
+struct Os {
     name: String,
     kernel_version: String,
     version: String,
@@ -44,7 +44,7 @@ impl SystemData {
                 available_mem: sys.available_memory(),
                 total_mem: sys.total_memory(),
             },
-            os: OS {
+            os: Os {
                 name: sys.name().unwrap_or_default(),
                 kernel_version: sys.kernel_version().unwrap_or_default(),
                 version: sys.os_version().unwrap_or_default(),

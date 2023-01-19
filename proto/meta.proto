@@ -12,6 +12,19 @@ import "user.proto";
 
 option optimize_for = SPEED;
 
+message TelemetryInfoRequest {
+}
+
+message TelemetryInfoResponse {
+  string tracking_id = 1;
+  bool telemetry_enabled = 2;
+}
+
+service TelemetryInfoService {
+  // Request telemetry info from meta node
+  rpc TelemetryInfo(TelemetryInfoRequest) returns(TelemetryInfoResponse);
+}
+
 message HeartbeatRequest {
   message ExtraInfo {
     oneof info {

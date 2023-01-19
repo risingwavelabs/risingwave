@@ -22,6 +22,7 @@ pub mod leader_service;
 pub mod notification_service;
 pub mod scale_service;
 pub mod stream_service;
+pub mod telemetry_service;
 pub mod user_service;
 
 use std::pin::Pin;

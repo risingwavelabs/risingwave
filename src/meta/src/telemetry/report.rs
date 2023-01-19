@@ -1,3 +1,17 @@
+// Copyright 2023 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -19,9 +33,9 @@ const TELEMETRY_ENV_ENABLE: &str = "ENABLE_TELEMETRY";
 const TELEMETRY_REPORT_URL: &str = "unreachable";
 /// Telemetry reporting interval in seconds
 const TELEMETRY_REPORT_INTERVAL: u64 = 24 * 60 * 60;
-const TELEMETRY_CF: &str = "cf/telemetry";
+pub const TELEMETRY_CF: &str = "cf/telemetry";
 /// `telemetry` in bytes
-const TELEMETRY_KEY: &[u8] = &[74, 65, 0x6c, 65, 0x6d, 65, 74, 72, 79];
+pub const TELEMETRY_KEY: &[u8] = &[74, 65, 0x6c, 65, 0x6d, 65, 74, 72, 79];
 
 #[derive(Debug, Serialize, Deserialize)]
 struct TelemetryReport {
@@ -64,7 +78,7 @@ pub async fn start_telemetry_reporting(
                 continue;
             }
 
-            match fetch_tracking_id(meta_store.clone()).await {
+            match get_or_create_tracking_id(meta_store.clone()).await {
                 Ok(tracking_id) => {
                     let report = TelemetryReport {
                         tracking_id: tracking_id.to_string(),
@@ -108,7 +122,7 @@ async fn post_telemetry_report(url: &str, report: &TelemetryReport) -> Result<()
 }
 
 /// fetch `tracking_id` from etcd
-async fn fetch_tracking_id(meta_store: Arc<impl MetaStore>) -> Result<Uuid, anyhow::Error> {
+async fn get_or_create_tracking_id(meta_store: Arc<impl MetaStore>) -> Result<Uuid, anyhow::Error> {
     match meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
         Ok(id) => Uuid::from_slice_le(&id).map_err(|e| anyhow!("failed to parse uuid, {}", e)),
         Err(_) => {
@@ -198,12 +212,12 @@ mod tests {
     }
     #[test]
     fn test_telemetry_enabled() {
-        assert_eq!(true, telemetry_enabled());
+        assert!(telemetry_enabled());
         std::env::set_var(TELEMETRY_ENV_ENABLE, "false");
-        assert_eq!(false, telemetry_enabled());
+        assert!(!telemetry_enabled());
         std::env::set_var(TELEMETRY_ENV_ENABLE, "wrong_str");
-        assert_eq!(true, telemetry_enabled());
+        assert!(telemetry_enabled());
         std::env::set_var(TELEMETRY_ENV_ENABLE, "False");
-        assert_eq!(false, telemetry_enabled());
+        assert!(!telemetry_enabled());
     }
 }

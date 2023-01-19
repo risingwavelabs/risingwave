@@ -58,7 +58,7 @@ use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::MetaStore;
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::telemetry::telemetry::start_telemetry_reporting;
+use crate::telemetry::report::start_telemetry_reporting;
 use crate::{hummock, MetaResult};
 
 // simple wrapper containing election sync related objects
