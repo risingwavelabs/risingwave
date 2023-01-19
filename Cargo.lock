@@ -8557,8 +8557,9 @@ dependencies = [
 name = "workspace-hack"
 version = "0.2.0-alpha"
 dependencies = [
- "ahash 0.7.6",
+ "ahash 0.8.2",
  "anyhow",
+ "arrayvec",
  "auto_enums",
  "auto_enums_derive",
  "bytes",
@@ -8570,6 +8571,7 @@ dependencies = [
  "crossbeam-channel",
  "crossbeam-deque",
  "crossbeam-epoch",
+ "crossbeam-utils",
  "either",
  "fail",
  "fixedbitset",
@@ -8584,6 +8586,7 @@ dependencies = [
  "futures-task",
  "futures-util",
  "hashbrown 0.12.3",
+ "hashbrown 0.13.2",
  "hdrhistogram",
  "hyper",
  "indexmap",
@@ -8602,6 +8605,7 @@ dependencies = [
  "madsim-tokio",
  "memchr",
  "minimal-lexical",
+ "miniz_oxide",
  "multimap",
  "nom 7.1.3",
  "num-bigint",
