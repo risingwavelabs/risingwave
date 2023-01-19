@@ -8564,6 +8564,7 @@ dependencies = [
  "arrayvec",
  "auto_enums",
  "auto_enums_derive",
+ "base64 0.21.0",
  "bytes",
  "cc",
  "chrono",
