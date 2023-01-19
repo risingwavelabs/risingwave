@@ -13,11 +13,14 @@
 // limitations under the License.
 
 use std::env;
+use std::env::temp_dir;
+use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
+use uuid::Uuid;
 
 use crate::{ExecuteContext, LoadBalancerConfig, Task};
 
@@ -38,6 +41,73 @@ impl LoadBalancerService {
     fn nginx(&self) -> Result<Command> {
         Ok(Command::new(self.nginx_path()?))
     }
+
+    // Creates nginx.conf in tmp dir, based on self.config.
+    // Overwrite if file already exists.
+    // Returns tmp file location or panics
+    fn create_config_file(&self) -> String {
+        // create tmp file
+        let mut dir = temp_dir();
+        let file_name = format!("{}.conf", Uuid::new_v4());
+        dir.push(file_name);
+        let dir_clone = dir.clone();
+        let mut file = File::create(dir).unwrap();
+
+        let mut file_content = String::new();
+        file_content.push_str(
+            r#"
+# This file was created based on the config in risedev.yaml
+
+daemon off;
+error_log stderr;
+
+events {
+  worker_connections 1024;
+}
+
+http {
+    upstream loadbalancer {
+"#,
+        );
+
+        assert!(
+            !self.config.target_ports.is_empty(),
+            "Please provide target ports for the load-balancer in risedev.yml"
+        );
+
+        let target_servers: Vec<_> = self
+            .config
+            .target_ports
+            .iter()
+            .map(|port| format!("      server localhost:{};", port))
+            .collect();
+        file_content.push_str(target_servers.join("\n").as_str());
+
+        file_content.push_str(
+            r#"
+    }
+    server {
+"#,
+        );
+
+        // TODO: delete config.address
+
+        let tmp = format!("        listen {} http2;", self.config.port);
+        file_content.push_str(tmp.as_str());
+        file_content.push_str(
+            r#"
+        server_name localhost;
+        location / {
+            grpc_pass grpc://loadbalancer;
+        }
+    }
+}
+"#,
+        );
+        file.write(file_content.as_bytes()).unwrap();
+
+        format!("{}", dir_clone.as_path().display())
+    }
 }
 
 impl Task for LoadBalancerService {
@@ -49,12 +119,17 @@ impl Task for LoadBalancerService {
             return Err(anyhow!("Nginx binary not found in {:?}\nDid you enable nginx feature in `./risedev configure`?", path));
         }
 
+        let conf_file_path = self.create_config_file();
+        let conf_file_path_clone = conf_file_path.clone();
+
         let mut cmd = self.nginx()?;
-        cmd.arg("-c")
-            .arg("/Users/janmensch/Documents/github/risingwave/nginx.conf");
-        // TODO: use relative path here
+        cmd.arg("-c").arg(conf_file_path);
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
+        ctx.pb.set_message(format!(
+            "Using nginx config file at {}",
+            conf_file_path_clone
+        ));
         ctx.pb.set_message("started");
 
         Ok(())

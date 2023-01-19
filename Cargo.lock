@@ -5477,6 +5477,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "toml",
+ "uuid",
  "workspace-hack",
  "yaml-rust",
 ]
@@ -8174,6 +8175,18 @@ dependencies = [
  "getrandom 0.2.7",
  "rand 0.8.5",
  "serde",
+ "uuid-macro-internal",
+]
+
+[[package]]
+name = "uuid-macro-internal"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73bc89f2894593e665241e0052c3791999e6787b7c4831daa0a5c2e637e276d8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

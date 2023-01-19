@@ -15,11 +15,9 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::thread::current;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use futures::lock;
 use futures::stream::BoxStream;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
