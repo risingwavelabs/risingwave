@@ -21,6 +21,7 @@ use rand::seq::IteratorRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{Result, RwError};
+use risingwave_connector::StreamChunkWithState;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::{mpsc, oneshot};
 

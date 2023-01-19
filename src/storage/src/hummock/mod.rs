@@ -307,6 +307,13 @@ impl HummockStorage {
         self.buffer_tracker.get_buffer_size()
     }
 
+    pub async fn try_wait_epoch_for_test(&self, wait_epoch: u64) {
+        let mut rx = self.version_update_notifier_tx.subscribe();
+        while *(rx.borrow_and_update()) < wait_epoch {
+            rx.changed().await.unwrap();
+        }
+    }
+
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
     pub async fn for_test(
         options: Arc<StorageConfig>,
@@ -329,6 +336,10 @@ impl HummockStorage {
 
     pub fn options(&self) -> &Arc<StorageConfig> {
         &self.context.options
+    }
+
+    pub fn version_reader(&self) -> &HummockVersionReader {
+        &self.hummock_version_reader
     }
 }
 

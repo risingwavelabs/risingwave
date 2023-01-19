@@ -20,12 +20,12 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_connector::parser::{AvroParser, ProtobufParser};
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo,
 };
 use risingwave_pb::plan_common::RowFormatType;
-use risingwave_source::{AvroParser, ProtobufParser};
 use risingwave_sqlparser::ast::{AvroSchema, CreateSourceStatement, ProtobufSchema, SourceSchema};
 
 use super::create_table::bind_sql_table_constraints;

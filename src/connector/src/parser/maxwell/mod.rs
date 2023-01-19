@@ -25,7 +25,7 @@ mod test {
     use risingwave_expr::vector_op::cast::str_to_timestamp;
 
     use super::*;
-    use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
+    use crate::parser::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
     #[tokio::test]
     async fn test_json_parser() {
         let parser = MaxwellParser;

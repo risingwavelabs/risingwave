@@ -20,8 +20,8 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_connector::source::{ConnectorState, SplitId, SplitMetaData};
+use risingwave_connector::{BoxSourceWithStateStream, StreamChunkWithState};
 use risingwave_source::connector_source::{SourceContext, SourceDescBuilderV2, SourceDescV2};
-use risingwave_source::{BoxSourceWithStateStream, StreamChunkWithState};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
@@ -134,7 +134,7 @@ impl<S: StateStore> SourceExecutor<S> {
         &self,
         source_desc: &SourceDescV2,
         state: ConnectorState,
-    ) -> StreamExecutorResult<BoxSourceWithStateStream<StreamChunkWithState>> {
+    ) -> StreamExecutorResult<BoxSourceWithStateStream> {
         let column_ids = source_desc
             .columns
             .iter()
@@ -159,7 +159,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn apply_split_change(
         &mut self,
         source_desc: &SourceDescV2,
-        stream: &mut SourceReaderStream<StreamChunkWithState>,
+        stream: &mut SourceReaderStream,
         mapping: &HashMap<ActorId, Vec<SplitImpl>>,
     ) -> StreamExecutorResult<()> {
         if let Some(target_splits) = mapping.get(&self.ctx.id).cloned() {
@@ -216,7 +216,7 @@ impl<S: StateStore> SourceExecutor<S> {
     async fn replace_stream_reader_with_target_state(
         &mut self,
         source_desc: &SourceDescV2,
-        stream: &mut SourceReaderStream<StreamChunkWithState>,
+        stream: &mut SourceReaderStream,
         target_state: Vec<SplitImpl>,
     ) -> StreamExecutorResult<()> {
         tracing::info!(

@@ -178,12 +178,12 @@ pub async fn run_parallel_slt_task(
 fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
     let content = std::fs::read_to_string(path).expect("failed to read file");
     let simple_avsc_full_path =
-        std::fs::canonicalize("src/source/src/test_data/simple-schema.avsc")
+        std::fs::canonicalize("src/connector/src/test_data/simple-schema.avsc")
             .expect("failed to get schema path");
     let complex_avsc_full_path =
-        std::fs::canonicalize("src/source/src/test_data/complex-schema.avsc")
+        std::fs::canonicalize("src/connector/src/test_data/complex-schema.avsc")
             .expect("failed to get schema path");
-    let proto_full_path = std::fs::canonicalize("src/source/src/test_data/complex-schema")
+    let proto_full_path = std::fs::canonicalize("src/connector/src/test_data/complex-schema")
         .expect("failed to get schema path");
     let content = content
         .replace("127.0.0.1:29092", "192.168.11.1:29092")
