@@ -68,7 +68,7 @@ impl Rule for AggDedupGroupKeyRule {
             new_agg.into(),
             group_key_mapping
                 .into_iter()
-                .chain((deduped_group_key_num..deduped_group_key_num + agg_call_num).into_iter()),
+                .chain(deduped_group_key_num..deduped_group_key_num + agg_call_num),
         );
         Some(proj.into())
     }

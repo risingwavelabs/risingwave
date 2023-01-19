@@ -225,7 +225,6 @@ async fn multi_part_upload(
     };
     let chunks = obj
         .chunks(part_size.as_u64() as usize)
-        .into_iter()
         .map(|chunk| chunk.to_owned())
         .collect_vec();
 

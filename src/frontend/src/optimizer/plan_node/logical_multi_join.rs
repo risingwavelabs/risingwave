@@ -360,7 +360,6 @@ impl LogicalMultiJoin {
                 .cloned()
                 .flat_map(|input_idx| {
                     (0..self.inputs[input_idx].schema().len())
-                        .into_iter()
                         .map(move |col_idx| self.inner_i2o_mappings[input_idx].map(col_idx))
                 })
                 .enumerate()

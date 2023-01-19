@@ -792,7 +792,6 @@ impl ActorGraphBuilder {
         let node = Arc::new(current_fragment.node.unwrap());
         let actor_ids = state
             .gen_actor_ids(parallel_degree)
-            .into_iter()
             .map(LocalActorId::Local)
             .collect_vec();
 
