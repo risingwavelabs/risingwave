@@ -802,7 +802,6 @@ macro_rules! scalar_impl_hash {
             }
         }
 
-        #[expect(clippy::derive_hash_xor_eq)]
         impl Hash for ScalarImpl {
             fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
                 match self {

@@ -84,7 +84,7 @@ enum ResponseStreamImpl {
 
 impl ResponseStreamImpl {
     pub async fn next(&mut self) -> Result<SinkResponse> {
-        return match self {
+        match self {
             ResponseStreamImpl::Grpc(ref mut response) => response
                 .next()
                 .await
@@ -95,7 +95,7 @@ impl ResponseStreamImpl {
                     SinkError::Remote("response stream closed unexpectedly".to_string())
                 })
             }
-        };
+        }
     }
 }
 

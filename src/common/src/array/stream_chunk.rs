@@ -254,7 +254,7 @@ impl StreamChunk {
         if column_mapping
             .iter()
             .copied()
-            .eq((0..self.data.columns().len()).into_iter())
+            .eq(0..self.data.columns().len())
         {
             // no reorder is needed
             self
