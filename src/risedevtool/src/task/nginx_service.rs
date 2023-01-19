@@ -35,7 +35,7 @@ impl NginxService {
         Ok(Path::new(&prefix_bin).join("nginx"))
     }
 
-    fn redis(&self) -> Result<Command> {
+    fn nginx(&self) -> Result<Command> {
         Ok(Command::new(self.nginx_path()?))
     }
 }
@@ -46,16 +46,13 @@ impl Task for NginxService {
         ctx.pb.set_message("starting");
         let path = self.nginx_path()?;
         if !path.exists() {
-            return Err(anyhow!("Nginx binary not found in {:?}\nDid you enable redis feature in `./risedev configure`?", path));
+            return Err(anyhow!("Nginx binary not found in {:?}\nDid you enable nginx feature in `./risedev configure`?", path));
         }
 
-        let mut cmd = self.redis()?;
-        cmd.arg("--bind")
-            .arg(&self.config.address)
-            .arg("--port")
-            .arg(self.config.port.to_string())
-            .arg("--shutdown-on-sigint")
-            .arg("nosave");
+        let mut cmd = self.nginx()?;
+        cmd.arg("-c")
+            .arg("/Users/janmensch/Documents/github/risingwave/nginx.conf");
+        // TODO: use relative path here
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
         ctx.pb.set_message("started");
