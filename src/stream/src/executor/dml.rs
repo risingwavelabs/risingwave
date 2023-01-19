@@ -17,7 +17,7 @@ use futures::stream::select;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
-use risingwave_connector::StreamChunkWithState;
+use risingwave_connector::source::StreamChunkWithState;
 use risingwave_source::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;

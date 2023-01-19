@@ -20,7 +20,8 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::Result;
 use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
-use risingwave_connector::{ConnectorParams, SourceColumnDesc, SourceFormat};
+use risingwave_connector::source::{SourceColumnDesc, SourceFormat};
+use risingwave_connector::ConnectorParams;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, StreamSourceInfo as ProstStreamSourceInfo,
 };

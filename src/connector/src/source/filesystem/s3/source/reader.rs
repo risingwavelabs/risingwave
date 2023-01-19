@@ -33,8 +33,10 @@ use crate::source::base::{SplitMetaData, SplitReaderV2, MAX_CHUNK_SIZE};
 use crate::source::filesystem::file_common::FsSplit;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::monitor::SourceMetrics;
-use crate::source::{SourceContext, SourceMessage, SourceMeta, SplitImpl};
-use crate::{BoxSourceWithStateStream, StreamChunkWithState};
+use crate::source::{
+    BoxSourceWithStateStream, SourceInfo, SourceMessage, SourceMeta, SplitImpl,
+    StreamChunkWithState,
+};
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
 
@@ -47,7 +49,7 @@ pub struct S3FileReader {
     parser_config: ParserConfig,
     // for stats
     metrics: Arc<SourceMetrics>,
-    context: SourceContext,
+    context: SourceInfo,
 }
 
 impl S3FileReader {
@@ -57,7 +59,7 @@ impl S3FileReader {
         bucket_name: String,
         split: FsSplit,
         metrics: Arc<SourceMetrics>,
-        context: SourceContext,
+        context: SourceInfo,
     ) {
         let actor_id = context.actor_id.to_string();
         let source_id = context.source_id.to_string();
@@ -150,7 +152,7 @@ impl SplitReaderV2 for S3FileReader {
         state: Vec<SplitImpl>,
         parser_config: ParserConfig,
         metrics: Arc<SourceMetrics>,
-        context: SourceContext,
+        context: SourceInfo,
     ) -> Result<Self> {
         let config = AwsConfigV2::from(HashMap::from(props.clone()));
         let sdk_config = config.load_config(None).await;
@@ -219,8 +221,7 @@ mod tests {
     use super::*;
     use crate::parser::{CommonParserConfig, CsvParserConfig, SpecificParserConfig};
     use crate::source::filesystem::{S3Properties, S3SplitEnumerator};
-    use crate::source::SplitEnumerator;
-    use crate::SourceColumnDesc;
+    use crate::source::{SourceColumnDesc, SplitEnumerator};
 
     #[tokio::test]
     #[ignore]
@@ -262,7 +263,7 @@ mod tests {
             splits,
             config,
             Arc::new(SourceMetrics::default()),
-            SourceContext::default(),
+            SourceInfo::default(),
         )
         .await
         .unwrap();

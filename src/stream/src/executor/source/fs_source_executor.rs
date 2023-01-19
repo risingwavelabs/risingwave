@@ -21,9 +21,9 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::source::{
-    ConnectorState, SourceContext, SplitId, SplitImpl, SplitMetaData,
+    BoxSourceWithStateStream, ConnectorState, SourceInfo, SplitId, SplitImpl, SplitMetaData,
+    StreamChunkWithState,
 };
-use risingwave_connector::{BoxSourceWithStateStream, StreamChunkWithState};
 use risingwave_source::source_desc::FsSourceDesc;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -99,7 +99,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
                 state,
                 column_ids,
                 source_desc.metrics.clone(),
-                SourceContext::new(self.ctx.id, self.stream_source_core.source_id),
+                SourceInfo::new(self.ctx.id, self.stream_source_core.source_id),
             )
             .await
             .map_err(StreamExecutorError::connector_error)?;

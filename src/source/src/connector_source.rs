@@ -28,10 +28,9 @@ use risingwave_common::util::select_all;
 use risingwave_connector::parser::{SourceParserImpl, SourceStreamChunkBuilder};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{
-    Column, ConnectorProperties, ConnectorState, SourceContext, SourceMessage, SourceMeta, SplitId,
-    SplitMetaData, SplitReaderImpl,
+    Column, ConnectorProperties, ConnectorState, SourceColumnDesc, SourceFormat, SourceInfo,
+    SourceMessage, SourceMeta, SplitId, SplitMetaData, SplitReaderImpl, StreamChunkWithState,
 };
-use risingwave_connector::{SourceColumnDesc, SourceFormat, StreamChunkWithState};
 use risingwave_expr::vector_op::cast::i64_to_timestamptz;
 
 fn default_split_id() -> SplitId {
@@ -44,7 +43,7 @@ struct InnerConnectorSourceReader {
     split: ConnectorState,
 
     metrics: Arc<SourceMetrics>,
-    context: SourceContext,
+    context: SourceInfo,
 }
 
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or
@@ -67,7 +66,7 @@ impl InnerConnectorSourceReader {
         split: ConnectorState,
         columns: Vec<SourceColumnDesc>,
         metrics: Arc<SourceMetrics>,
-        context: SourceContext,
+        context: SourceInfo,
     ) -> Result<Self> {
         tracing::debug!(
             "Spawning new connector source inner reader with config {:?}, split {:?}",
@@ -257,7 +256,7 @@ impl ConnectorSource {
         splits: ConnectorState,
         column_ids: Vec<ColumnId>,
         metrics: Arc<SourceMetrics>,
-        context: SourceContext,
+        context: SourceInfo,
     ) -> Result<ConnectorSourceReader> {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;

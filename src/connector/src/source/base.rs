@@ -36,7 +36,7 @@ use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
-use super::SourceContext;
+use super::SourceInfo;
 use crate::parser::ParserConfig;
 use crate::source::cdc::{
     CdcProperties, CdcSplit, CdcSplitReader, DebeziumSplitEnumerator, MYSQL_CDC_CONNECTOR,
@@ -65,10 +65,8 @@ use crate::source::pulsar::source::reader::PulsarSplitReader;
 use crate::source::pulsar::{
     PulsarProperties, PulsarSplit, PulsarSplitEnumerator, PULSAR_CONNECTOR,
 };
-use crate::{
-    impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader,
-    BoxSourceWithStateStream,
-};
+use crate::source::BoxSourceWithStateStream;
+use crate::{impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader};
 
 /// [`SplitEnumerator`] fetches the split metadata from the external source service.
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
@@ -110,7 +108,7 @@ pub trait SplitReaderV2: Sized {
         state: Vec<SplitImpl>,
         parser_config: ParserConfig,
         metrics: Arc<SourceMetrics>,
-        source_context: SourceContext,
+        source_context: SourceInfo,
     ) -> Result<Self>;
 
     fn into_stream(self) -> BoxSourceWithStateStream;
@@ -233,7 +231,7 @@ impl SplitReaderV2Impl {
         state: ConnectorState,
         parser_config: ParserConfig,
         metrics: Arc<SourceMetrics>,
-        source_context: SourceContext,
+        source_context: SourceInfo,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         if state.is_none() {
@@ -351,16 +349,6 @@ impl PartialEq for SourceMessage {
     }
 }
 impl Eq for SourceMessage {}
-
-/// The message pumped from the external source service.
-/// The third-party message structs will eventually be transformed into this struct.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct FsSourceMessage {
-    pub payload: Option<Bytes>,
-    pub offset: usize,
-    pub split_size: usize,
-    pub split_id: SplitId,
-}
 
 /// The metadata of a split.
 pub trait SplitMetaData: Sized {

@@ -18,8 +18,9 @@ use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_connector::source::{ConnectorState, SourceContext, SplitMetaData};
-use risingwave_connector::{BoxSourceWithStateStream, StreamChunkWithState};
+use risingwave_connector::source::{
+    BoxSourceWithStateStream, ConnectorState, SourceInfo, SplitMetaData, StreamChunkWithState,
+};
 use risingwave_source::source_desc::SourceDesc;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -96,7 +97,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 state,
                 column_ids,
                 source_desc.metrics.clone(),
-                SourceContext::new(
+                SourceInfo::new(
                     self.ctx.id,
                     self.stream_source_core.as_ref().unwrap().source_id,
                 ),

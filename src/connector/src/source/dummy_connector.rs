@@ -19,10 +19,11 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use super::monitor::SourceMetrics;
-use super::{SourceContext, SplitImpl, SplitReaderV2};
+use super::{SourceInfo, SplitImpl, SplitReaderV2};
 use crate::parser::ParserConfig;
-use crate::source::{BoxSourceStream, Column, ConnectorState, SplitReader};
-use crate::BoxSourceWithStateStream;
+use crate::source::{
+    BoxSourceStream, BoxSourceWithStateStream, Column, ConnectorState, SplitReader,
+};
 
 /// [`DummySplitReader`] is a placeholder for source executor that is assigned no split. It will
 /// wait forever when calling `next`.
@@ -55,7 +56,7 @@ impl SplitReaderV2 for DummySplitReader {
         _state: Vec<SplitImpl>,
         _parser_config: ParserConfig,
         _metrics: Arc<SourceMetrics>,
-        _source_context: SourceContext,
+        _source_context: SourceInfo,
     ) -> Result<Self> {
         Ok(Self {})
     }

@@ -341,7 +341,7 @@ mod test {
         AvroParser,
     };
     use crate::parser::{SourceParser, SourceStreamChunkBuilder};
-    use crate::SourceColumnDesc;
+    use crate::source::SourceColumnDesc;
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
