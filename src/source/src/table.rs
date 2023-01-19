@@ -21,10 +21,9 @@ use rand::seq::IteratorRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{Result, RwError};
+use risingwave_connector::StreamChunkWithState;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::{mpsc, oneshot};
-
-use crate::StreamChunkWithState;
 
 pub type TableSourceRef = Arc<TableSource>;
 

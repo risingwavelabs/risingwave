@@ -21,7 +21,7 @@ use simd_json::{BorrowedValue, StaticNode, ValueAccess};
 
 use super::operators::*;
 use crate::parser::common::simd_json_parse_value;
-use crate::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{ParseFuture, SourceParser, SourceStreamChunkRowWriter, WriteGuard};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
@@ -58,7 +58,7 @@ impl DebeziumJsonParser {
 
         let op = payload.get(OP).and_then(|v| v.as_str()).ok_or_else(|| {
             RwError::from(ProtocolError(
-                "op field not found in maxwell json".to_owned(),
+                "op field not found in debezium json".to_owned(),
             ))
         })?;
 

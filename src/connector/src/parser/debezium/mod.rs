@@ -28,7 +28,7 @@ mod test {
     use risingwave_common::types::{DataType, ScalarImpl};
 
     use super::*;
-    use crate::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
+    use crate::parser::{SourceColumnDesc, SourceParser, SourceStreamChunkBuilder};
 
     fn get_test_columns() -> Vec<SourceColumnDesc> {
         let descs = vec![

@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 
-use crate::WriteGuard;
+use crate::parser::WriteGuard;
 
 // `results.len()` should greater that zero
 // if all results are errors, return err
