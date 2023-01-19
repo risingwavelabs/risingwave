@@ -20,7 +20,7 @@ use risingwave_storage::panic_store::PanicStateStore;
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
-use crate::executor::source_executor_v2::{SourceExecutorV2, StreamSourceCore};
+use crate::executor::source_executor::{SourceExecutor, StreamSourceCore};
 use crate::executor::state_table_handler::SourceStateTableHandler;
 use crate::executor::FsSourceExecutor;
 
@@ -117,7 +117,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     state_table_handler,
                 );
 
-                Ok(Box::new(SourceExecutorV2::new(
+                Ok(Box::new(SourceExecutor::new(
                     params.actor_context,
                     schema,
                     params.pk_indices,
@@ -131,7 +131,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         } else {
             // If there is no external stream source, then no data should be persisted. We pass a
             // `PanicStateStore` type here for indication.
-            Ok(Box::new(SourceExecutorV2::<PanicStateStore>::new(
+            Ok(Box::new(SourceExecutor::<PanicStateStore>::new(
                 params.actor_context,
                 params.schema,
                 params.pk_indices,

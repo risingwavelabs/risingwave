@@ -297,7 +297,7 @@ impl FunctionalDependencySet {
         assert!(
             self.is_key_inner(&key),
             "{:?} is not a key!",
-            key.ones().into_iter().collect_vec()
+            key.ones().collect_vec()
         );
         let mut new_key = key.clone();
         for i in key.ones() {

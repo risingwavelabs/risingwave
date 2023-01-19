@@ -172,6 +172,9 @@ where
         }
 
         if result.is_empty() {
+            // Run the callback before sending the response.
+            result.run_callback().await?;
+
             msg_stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         } else if result.is_query() {
             // fetch row data
@@ -206,6 +209,9 @@ where
                 query_end = true;
             }
             if query_end {
+                // Run the callback before sending the `CommandComplete` message.
+                result.run_callback().await?;
+
                 msg_stream.write_no_flush(&BeMessage::CommandComplete(
                     BeCommandCompleteMessage {
                         stmt_type: result.get_stmt_type(),
@@ -216,6 +222,9 @@ where
                 msg_stream.write_no_flush(&BeMessage::PortalSuspended)?;
             }
         } else {
+            // Run the callback before sending the `CommandComplete` message.
+            result.run_callback().await?;
+
             msg_stream.write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                 stmt_type: result.get_stmt_type(),
                 rows_cnt: result

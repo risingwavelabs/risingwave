@@ -14,7 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::DerefMut;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
@@ -99,7 +99,6 @@ pub struct HummockEventHandler {
     read_version_mapping: Arc<ReadVersionMappingType>,
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
-    seal_epoch: Arc<AtomicU64>,
     pinned_version: Arc<ArcSwap<PinnedVersion>>,
     write_conflict_detector: Option<Arc<ConflictDetector>>,
 
@@ -142,7 +141,6 @@ impl HummockEventHandler {
         pinned_version: PinnedVersion,
         compactor_context: Arc<Context>,
     ) -> Self {
-        let seal_epoch = Arc::new(AtomicU64::new(pinned_version.max_committed_epoch()));
         let (version_update_notifier_tx, _) =
             tokio::sync::watch::channel(pinned_version.max_committed_epoch());
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
@@ -163,7 +161,6 @@ impl HummockEventHandler {
             hummock_event_rx,
             pending_sync_requests: Default::default(),
             version_update_notifier_tx,
-            seal_epoch,
             pinned_version: Arc::new(ArcSwap::from_pointee(pinned_version)),
             write_conflict_detector,
             read_version_mapping,
@@ -171,10 +168,6 @@ impl HummockEventHandler {
             last_instance_id: 0,
             sstable_id_manager,
         }
-    }
-
-    pub fn sealed_epoch(&self) -> Arc<AtomicU64> {
-        self.seal_epoch.clone()
     }
 
     pub fn version_update_notifier_tx(&self) -> Arc<tokio::sync::watch::Sender<HummockEpoch>> {

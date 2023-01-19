@@ -232,7 +232,7 @@ cargo run --bin risectl -- --help
 ... or
 
 ```
-./risingwave risectl --help
+./risedev ctl --help
 ```
 
 for more information.

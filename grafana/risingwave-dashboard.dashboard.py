@@ -957,6 +957,16 @@ def section_streaming(panels):
                 )
             ],
         ),
+        panels.timeseries_rowsps(
+            "Source Throughput(rows) per barrier",
+            "",
+            [
+                panels.target(
+                    f"rate({metric('stream_source_rows_per_barrier_counts')}[$__rate_interval])",
+                    "actor={{actor_id}} source={{source_id}} @ {{instance}}"
+                )
+            ]
+        ),
         panels.timeseries_count(
             "Barrier Number",
             "",
@@ -1307,6 +1317,10 @@ def section_streaming_actors(outer_panels):
                             f"rate({metric('stream_join_lookup_total_count')}[$__rate_interval])",
                             "total lookups {{actor_id}} {{side}}",
                         ),
+                        panels.target(
+                            f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
+                            "total lookups {{actor_id}} {{side}}",
+                        ),
                     ],
                 ),
                 panels.timeseries_actor_latency(
@@ -1585,6 +1599,18 @@ def section_hummock(panels):
                     f"sum(rate({metric('state_store_iter_in_process_counts')}[$__rate_interval])) by(job,instance,table_id)",
                     "iter - {{table_id}} @ {{job}} @ {{instance}}",
                 ),
+                panels.target(
+                    f"sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    "read_req bloom filter positive - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    "read_req bloom filter true positive  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                ),
+                panels.target(
+                    f"sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    "read_req check bloom filter  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                ),
             ],
         ),
         panels.timeseries_latency(
@@ -1696,12 +1722,12 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"sum(rate({metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id)",
-                    "bloom filter true negative  - {{table_id}} @ {{job}} @ {{instance}}",
+                    f"sum(rate({metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    "bloom filter true negative  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
-                    f"sum(rate({metric('state_bloom_filter_check_counts')}[$__rate_interval])) by (job,instance,table_id)",
-                    "bloom filter check count  - {{table_id}} @ {{job}} @ {{instance}}",
+                    f"sum(rate({metric('state_bloom_filter_check_counts')}[$__rate_interval])) by (job,instance,table_id,type)",
+                    "bloom filter check count  - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
             ],
         ),
@@ -1720,8 +1746,8 @@ def section_hummock(panels):
             "",
             [
                 panels.target(
-                    f"1 - (sum(rate({metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({metric('state_bloom_filter_check_counts')}[$__rate_interval])) by (job,instance,table_id))",
-                    "bloom filter miss rate - {{table_id}} @ {{job}} @ {{instance}}",
+                    f"1 - (sum(rate({metric('state_store_bloom_filter_true_negative_counts')}[$__rate_interval])) by (job,instance,table_id,type)) / (sum(rate({metric('state_bloom_filter_check_counts')}[$__rate_interval])) by (job,instance,table_id,type))",
+                    "bloom filter miss rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
                 panels.target(
                     f"(sum(rate({metric('state_store_sst_store_block_request_counts', mete_miss_filter)}[$__rate_interval])) by (job,instance,table_id)) / (sum(rate({metric('state_store_sst_store_block_request_counts', meta_total_filter)}[$__rate_interval])) by (job,instance,table_id))",
@@ -1734,6 +1760,16 @@ def section_hummock(panels):
                 panels.target(
                     f"(sum(rate({metric('file_cache_miss')}[$__rate_interval])) by (instance)) / (sum(rate({metric('file_cache_latency_count', file_cache_get_filter)}[$__rate_interval])) by (instance))",
                     "file cache miss rate @ {{instance}}",
+                ),
+
+                panels.target(
+                    f"1 - (((sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
+                    "read req bloom filter filter rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
+                ),
+
+                panels.target(
+                    f"1 - (((sum(rate({metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (job,instance,table_id,type))) / (sum(rate({metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (job,instance,table_id,type)))",
+                    "read req bloom filter false positive rate - {{table_id}} - {{type}} @ {{job}} @ {{instance}}",
                 ),
             ],
         ),
