@@ -49,7 +49,7 @@ pub struct S3FileReader {
     parser_config: ParserConfig,
     // for stats
     metrics: Arc<SourceMetrics>,
-    context: SourceInfo,
+    source_info: SourceInfo,
 }
 
 impl S3FileReader {
@@ -59,10 +59,10 @@ impl S3FileReader {
         bucket_name: String,
         split: FsSplit,
         metrics: Arc<SourceMetrics>,
-        context: SourceInfo,
+        source_info: SourceInfo,
     ) {
-        let actor_id = context.actor_id.to_string();
-        let source_id = context.source_id.to_string();
+        let actor_id = source_info.actor_id.to_string();
+        let source_id = source_info.source_id.to_string();
         let split_id = split.id();
 
         let object_name = split.name.clone();
@@ -152,7 +152,7 @@ impl SplitReaderV2 for S3FileReader {
         state: Vec<SplitImpl>,
         parser_config: ParserConfig,
         metrics: Arc<SourceMetrics>,
-        context: SourceInfo,
+        source_info: SourceInfo,
     ) -> Result<Self> {
         let config = AwsConfigV2::from(HashMap::from(props.clone()));
         let sdk_config = config.load_config(None).await;
@@ -171,7 +171,7 @@ impl SplitReaderV2 for S3FileReader {
             splits,
             parser_config,
             metrics,
-            context,
+            source_info,
         };
 
         Ok(s3_file_reader)
@@ -186,8 +186,8 @@ impl S3FileReader {
     #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
     pub async fn into_stream(self) {
         for split in self.splits {
-            let actor_id = self.context.actor_id.to_string();
-            let source_id = self.context.source_id.to_string();
+            let actor_id = self.source_info.actor_id.to_string();
+            let source_id = self.source_info.source_id.to_string();
             let split_id = split.id();
 
             let data_stream = Self::stream_read_object(
@@ -195,7 +195,7 @@ impl S3FileReader {
                 self.bucket_name.clone(),
                 split,
                 self.metrics.clone(),
-                self.context,
+                self.source_info,
             );
 
             let parser = ByteStreamSourceParserImpl::create(self.parser_config.clone()).await?;

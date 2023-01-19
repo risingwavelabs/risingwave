@@ -83,7 +83,7 @@ impl FsConnectorSource {
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
         metrics: Arc<SourceMetrics>,
-        context: SourceInfo,
+        source_info: SourceInfo,
     ) -> Result<SplitReaderV2Impl> {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
@@ -95,7 +95,7 @@ impl FsConnectorSource {
                 rw_columns: columns,
             },
         };
-        SplitReaderV2Impl::create(config, state, parser_config, metrics, context, None)
+        SplitReaderV2Impl::create(config, state, parser_config, metrics, source_info, None)
             .await
             .map_err(RwError::from)
     }

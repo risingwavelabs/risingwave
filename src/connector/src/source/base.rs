@@ -108,7 +108,7 @@ pub trait SplitReaderV2: Sized {
         state: Vec<SplitImpl>,
         parser_config: ParserConfig,
         metrics: Arc<SourceMetrics>,
-        source_context: SourceInfo,
+        source_info: SourceInfo,
     ) -> Result<Self>;
 
     fn into_stream(self) -> BoxSourceWithStateStream;
@@ -231,7 +231,7 @@ impl SplitReaderV2Impl {
         state: ConnectorState,
         parser_config: ParserConfig,
         metrics: Arc<SourceMetrics>,
-        source_context: SourceInfo,
+        source_info: SourceInfo,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         if state.is_none() {
@@ -240,7 +240,7 @@ impl SplitReaderV2Impl {
         let state = state.unwrap();
         let reader = match config {
             ConnectorProperties::S3(s3_props) => Self::S3(Box::new(
-                S3FileReader::new(*s3_props, state, parser_config, metrics, source_context).await?,
+                S3FileReader::new(*s3_props, state, parser_config, metrics, source_info).await?,
             )),
             _ => todo!(),
         };

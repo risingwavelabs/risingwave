@@ -56,7 +56,7 @@ impl SplitReaderV2 for DummySplitReader {
         _state: Vec<SplitImpl>,
         _parser_config: ParserConfig,
         _metrics: Arc<SourceMetrics>,
-        _source_context: SourceInfo,
+        _source_info: SourceInfo,
     ) -> Result<Self> {
         Ok(Self {})
     }

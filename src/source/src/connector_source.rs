@@ -43,7 +43,7 @@ struct InnerConnectorSourceReader {
     split: ConnectorState,
 
     metrics: Arc<SourceMetrics>,
-    context: SourceInfo,
+    source_info: SourceInfo,
 }
 
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or
@@ -66,7 +66,7 @@ impl InnerConnectorSourceReader {
         split: ConnectorState,
         columns: Vec<SourceColumnDesc>,
         metrics: Arc<SourceMetrics>,
-        context: SourceInfo,
+        source_info: SourceInfo,
     ) -> Result<Self> {
         tracing::debug!(
             "Spawning new connector source inner reader with config {:?}, split {:?}",
@@ -96,14 +96,14 @@ impl InnerConnectorSourceReader {
             reader,
             split,
             metrics,
-            context,
+            source_info,
         })
     }
 
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = RwError)]
     async fn into_stream(self) {
-        let actor_id = self.context.actor_id.to_string();
-        let source_id = self.context.source_id.to_string();
+        let actor_id = self.source_info.actor_id.to_string();
+        let source_id = self.source_info.source_id.to_string();
         let id = match &self.split {
             Some(splits) => splits[0].id(),
             None => default_split_id(),
@@ -256,7 +256,7 @@ impl ConnectorSource {
         splits: ConnectorState,
         column_ids: Vec<ColumnId>,
         metrics: Arc<SourceMetrics>,
-        context: SourceInfo,
+        source_info: SourceInfo,
     ) -> Result<ConnectorSourceReader> {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
@@ -269,17 +269,16 @@ impl ConnectorSource {
                 .collect::<Vec<ConnectorState>>(),
             None => vec![None],
         };
-        let readers =
-            try_join_all(to_reader_splits.into_iter().map(|split| {
-                tracing::debug!("spawning connector split reader for split {:?}", split);
-                let props = config.clone();
-                let columns = columns.clone();
-                let metrics = source_metrics.clone();
-                async move {
-                    InnerConnectorSourceReader::new(props, split, columns, metrics, context).await
-                }
-            }))
-            .await?;
+        let readers = try_join_all(to_reader_splits.into_iter().map(|split| {
+            tracing::debug!("spawning connector split reader for split {:?}", split);
+            let props = config.clone();
+            let columns = columns.clone();
+            let metrics = source_metrics.clone();
+            async move {
+                InnerConnectorSourceReader::new(props, split, columns, metrics, source_info).await
+            }
+        }))
+        .await?;
 
         let stream = select_all(readers.into_iter().map(|r| r.into_stream())).boxed();
 
