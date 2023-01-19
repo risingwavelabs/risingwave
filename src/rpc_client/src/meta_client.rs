@@ -97,12 +97,9 @@ impl MetaClient {
             // else repeat request
             if response.is_err() {
                 let err_code = response.err().unwrap().code();
-                if *&[
-                    tonic::Code::Unavailable,
-                    tonic::Code::Unimplemented,
-                    tonic::Code::Unknown,
-                ]
-                .contains(&err_code)
+                if err_code == tonic::Code::Unavailable
+                    || err_code == tonic::Code::Unimplemented
+                    || err_code == tonic::Code::Unknown
                 {
                     return None;
                 }
