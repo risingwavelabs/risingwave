@@ -342,12 +342,18 @@ where
                 }
             }
 
+            // Run the callback before sending the `CommandComplete` message.
+            res.run_callback().await?;
+
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.get_stmt_type(),
                     rows_cnt,
                 }))?;
         } else {
+            // Run the callback before sending the `CommandComplete` message.
+            res.run_callback().await?;
+
             self.stream
                 .write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
                     stmt_type: res.get_stmt_type(),
