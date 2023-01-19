@@ -37,7 +37,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{DeleteRangeTombstone, HummockResult};
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
-pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
+pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.001;
 #[derive(Clone, Debug)]
 pub struct SstableBuilderOptions {
     /// Approximate sstable capacity.
@@ -425,7 +425,7 @@ pub(super) mod tests {
             capacity: 0,
             block_capacity: 4096,
             restart_interval: 16,
-            bloom_false_positive: 0.1,
+            bloom_false_positive: 0.001,
             compression_algorithm: CompressionAlgorithm::None,
         };
 

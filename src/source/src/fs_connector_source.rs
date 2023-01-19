@@ -15,104 +15,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures::stream::BoxStream;
-use futures::{StreamExt, TryStreamExt};
-use futures_async_stream::try_stream;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
 use risingwave_common::error::{internal_error, Result, RwError};
-use risingwave_connector::source::filesystem::FsSplit;
-use risingwave_connector::source::{
-    ConnectorProperties, FsSourceMessage, FsSplitReaderImpl, SplitId,
-};
+use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
+use risingwave_connector::source::{ConnectorProperties, ConnectorState, SplitReaderV2Impl};
+use risingwave_connector::{SourceColumnDesc, SourceFormat};
 
 use crate::connector_source::SourceContext;
 use crate::monitor::SourceMetrics;
-use crate::{
-    ByteStreamSourceParserImpl, FsStreamChunkWithState, ParserConfig, SourceColumnDesc,
-    SourceFormat, SourceStreamChunkBuilder,
-};
-
-pub struct FsConnectorSourceReader {
-    parser_config: ParserConfig,
-    properties: HashMap<String, String>,
-    format: SourceFormat,
-
-    columns: Vec<SourceColumnDesc>,
-
-    stream: BoxStream<'static, Result<Vec<FsSourceMessage>>>,
-}
-
-impl FsConnectorSourceReader {
-    #[try_stream(boxed, ok = FsStreamChunkWithState, error = RwError)]
-    pub async fn into_stream(self) {
-        let mut parser = ByteStreamSourceParserImpl::create(
-            &self.format,
-            &self.properties,
-            self.parser_config.clone(),
-        )
-        .await?;
-
-        #[for_await]
-        for batch in self.stream {
-            let batch = batch?;
-            let mut builder =
-                SourceStreamChunkBuilder::with_capacity(self.columns.clone(), batch.len() * 2);
-            let mut split_offset_mapping: HashMap<SplitId, usize> = HashMap::new();
-
-            for msg in batch {
-                if let Some(content) = msg.payload {
-                    let mut offset = msg.offset;
-
-                    let mut buff = content.as_ref();
-                    let mut prev_buff_len = buff.len();
-                    loop {
-                        match parser.parse(&mut buff, builder.row_writer()).await {
-                            Err(e) => {
-                                tracing::warn!(
-                                    "message parsing failed {}, skipping",
-                                    e.to_string()
-                                );
-                                continue;
-                            }
-                            Ok(None) => {
-                                break;
-                            }
-                            Ok(Some(_)) => {
-                                offset += prev_buff_len - buff.len();
-                                prev_buff_len = buff.len();
-                            }
-                        }
-                    }
-
-                    // If a split is finished reading, recreate a parser
-                    if content.len() + msg.offset >= msg.split_size {
-                        // the last record in a file may be missing the terminator,
-                        // so we need to pass an empty payload to inform the parser.
-                        if let Err(e) = parser.parse(&mut buff, builder.row_writer()).await {
-                            tracing::warn!("message parsing failed {}, skipping", e.to_string());
-                        }
-
-                        parser = ByteStreamSourceParserImpl::create(
-                            &self.format,
-                            &self.properties,
-                            self.parser_config.clone(),
-                        )
-                        .await?;
-                        // Maybe there are still some bytes left that can't be parsed into a
-                        // complete record, just discard
-                        offset = msg.split_size;
-                    }
-                    split_offset_mapping.insert(msg.split_id, offset);
-                }
-            }
-            yield FsStreamChunkWithState {
-                chunk: builder.finish(),
-                split_offset_mapping: Some(split_offset_mapping),
-            };
-        }
-    }
-}
 
 #[derive(Clone, Debug)]
 pub struct FsConnectorSource {
@@ -120,7 +31,7 @@ pub struct FsConnectorSource {
     pub columns: Vec<SourceColumnDesc>,
     pub properties: HashMap<String, String>,
     pub format: SourceFormat,
-    pub parser_config: ParserConfig,
+    pub parser_config: SpecificParserConfig,
 }
 
 impl FsConnectorSource {
@@ -130,7 +41,7 @@ impl FsConnectorSource {
         properties: HashMap<String, String>,
         columns: Vec<SourceColumnDesc>,
         connector_node_addr: Option<String>,
-        parser_config: ParserConfig,
+        parser_config: SpecificParserConfig,
     ) -> Result<Self> {
         // Store the connector node address to properties for later use.
         let mut source_props: HashMap<String, String> =
@@ -169,26 +80,23 @@ impl FsConnectorSource {
 
     pub async fn stream_reader(
         &self,
-        splits: Vec<FsSplit>,
+        state: ConnectorState,
         column_ids: Vec<ColumnId>,
         _metrics: Arc<SourceMetrics>,
         _context: SourceContext,
-    ) -> Result<FsConnectorSourceReader> {
+    ) -> Result<SplitReaderV2Impl> {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
 
-        let stream = FsSplitReaderImpl::create(config, splits, None)
-            .await?
-            .into_stream()
+        let parser_config = ParserConfig {
+            specific: self.parser_config.clone(),
+            common: CommonParserConfig {
+                props: self.properties.clone(),
+                rw_columns: columns,
+            },
+        };
+        SplitReaderV2Impl::create(config, state, parser_config, None)
+            .await
             .map_err(RwError::from)
-            .boxed();
-
-        Ok(FsConnectorSourceReader {
-            columns,
-            stream,
-            format: self.format.clone(),
-            properties: self.properties.clone(),
-            parser_config: self.parser_config.clone(),
-        })
     }
 }

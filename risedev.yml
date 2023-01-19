@@ -131,6 +131,37 @@ profile:
       - use: kafka
         persist-data: true
 
+
+  3etcd-3meta:
+    steps:
+      - use: etcd
+        unsafe-no-fsync: true
+        port: 2388
+        peer-port: 2389
+        exporter-port: 2379
+      - use: etcd
+        unsafe-no-fsync: true
+        port: 12388
+        peer-port: 12389
+        exporter-port: 12379
+      - use: etcd
+        unsafe-no-fsync: true
+        port: 22388
+        peer-port: 22389
+        exporter-port: 22379
+      - use: meta-node
+        port: 5690
+        dashboard-port: 5691
+        exporter-port: 1250
+      - use: meta-node
+        port: 15690
+        dashboard-port: 15691
+        exporter-port: 11250
+      - use: meta-node
+        port: 25690
+        dashboard-port: 25691
+        exporter-port: 21250
+
   3etcd-3meta-1cn-1fe:
     steps:
       - use: nginx

@@ -49,7 +49,7 @@ use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::dml::DmlExecutor;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
-use risingwave_stream::executor::source_executor_v2::SourceExecutorV2;
+use risingwave_stream::executor::source_executor::SourceExecutor;
 use risingwave_stream::executor::{
     ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices,
 };
@@ -162,7 +162,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let actor_ctx = ActorContext::create(0x3f3f3f);
 
     // Create a `SourceExecutor` to read the changes.
-    let source_executor = SourceExecutorV2::<PanicStateStore>::new(
+    let source_executor = SourceExecutor::<PanicStateStore>::new(
         actor_ctx.clone(),
         all_schema.clone(),
         pk_indices.clone(),
@@ -231,6 +231,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         "InsertExecutor".to_string(),
         vec![], // ignore insertion order
         Some(row_id_index),
+        false,
     ));
 
     tokio::spawn(async move {
@@ -348,6 +349,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         delete_inner,
         1024,
         "DeleteExecutor".to_string(),
+        false,
     ));
 
     tokio::spawn(async move {
@@ -441,9 +443,8 @@ async fn test_row_seq_scan() -> Result<()> {
         vec![0, 1, 2],
     );
 
-    let epoch = EpochPair::new_test_epoch(1);
+    let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
-    epoch.inc();
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
         Some(4_i32.into()),
@@ -454,7 +455,9 @@ async fn test_row_seq_scan() -> Result<()> {
         Some(5_i32.into()),
         Some(8_i64.into()),
     ]));
-    state.commit_for_test(epoch.inc()).await.unwrap();
+
+    epoch.inc();
+    state.commit(epoch).await.unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table,

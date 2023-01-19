@@ -23,12 +23,17 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::ErrorCode::{ConnectorError, ProtocolError};
 use risingwave_common::error::{internal_error, Result, RwError, ToRwResult};
+use risingwave_common::types::Datum;
 use risingwave_common::util::select_all;
+use risingwave_connector::parser::{
+    SourceParserImpl, SourceStreamChunkBuilder, SpecificParserConfig,
+};
 use risingwave_connector::source::{
-    Column, ConnectorProperties, ConnectorState, SourceMessage, SplitId, SplitMetaData,
+    Column, ConnectorProperties, ConnectorState, SourceMessage, SourceMeta, SplitId, SplitMetaData,
     SplitReaderImpl,
 };
-use risingwave_connector::ConnectorParams;
+use risingwave_connector::{ConnectorParams, SourceColumnDesc, SourceFormat, StreamChunkWithState};
+use risingwave_expr::vector_op::cast::i64_to_timestamptz;
 use risingwave_pb::catalog::{
     ColumnIndex as ProstColumnIndex, StreamSourceInfo as ProstStreamSourceInfo,
 };
@@ -38,10 +43,6 @@ use risingwave_pb::plan_common::{
 
 use crate::fs_connector_source::FsConnectorSource;
 use crate::monitor::SourceMetrics;
-use crate::{
-    ParserConfig, SourceColumnDesc, SourceFormat, SourceParserImpl, SourceStreamChunkBuilder,
-    StreamChunkWithState,
-};
 
 pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 
@@ -171,6 +172,9 @@ impl ConnectorSourceReader {
             for msg in batch {
                 if let Some(content) = msg.payload {
                     split_offset_mapping.insert(msg.split_id, msg.offset);
+
+                    let old_op_num = builder.op_num();
+
                     if let Err(e) = self
                         .parser
                         .parse(content.as_ref(), builder.row_writer())
@@ -178,6 +182,32 @@ impl ConnectorSourceReader {
                     {
                         tracing::warn!("message parsing failed {}, skipping", e.to_string());
                         continue;
+                    }
+
+                    let new_op_num = builder.op_num();
+
+                    // new_op_num - old_op_num is the number of rows added to the builder
+                    for _ in old_op_num..new_op_num {
+                        // TODO: support more kinds of SourceMeta
+                        if let SourceMeta::Kafka(kafka_meta) = msg.meta.clone() {
+                            let f = |desc: &SourceColumnDesc| -> Option<Datum> {
+                                if !desc.is_meta {
+                                    return None;
+                                }
+                                match desc.name.as_str() {
+                                    "_rw_kafka_timestamp" => Some(
+                                        kafka_meta
+                                            .timestamp
+                                            .map(|ts| i64_to_timestamptz(ts).unwrap().into()),
+                                    ),
+                                    _ => unreachable!(
+                                        "kafka will not have this meta column: {}",
+                                        desc.name
+                                    ),
+                                }
+                            };
+                            builder.row_writer().fulfill_meta_column(f)?;
+                        }
                     }
                 }
             }
@@ -358,7 +388,7 @@ impl SourceDescBuilderV2 {
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
         if let Some(row_id_index) = self.row_id_index.as_ref() {
-            columns[row_id_index.index as usize].skip_parse = true;
+            columns[row_id_index.index as usize].is_row_id = true;
         }
         assert!(
             !self.pk_column_ids.is_empty(),
@@ -395,15 +425,19 @@ impl SourceDescBuilderV2 {
             ProstRowFormatType::Csv => SourceFormat::Csv,
             _ => unreachable!(),
         };
-        let parser_config = ParserConfig::new(&format, &self.source_info);
+
         let mut columns: Vec<_> = self
             .columns
             .iter()
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
+
         if let Some(row_id_index) = self.row_id_index.as_ref() {
-            columns[row_id_index.index as usize].skip_parse = true;
+            columns[row_id_index.index as usize].is_row_id = true;
         }
+
+        let parser_config = SpecificParserConfig::new(&format, &self.source_info);
+
         FsConnectorSource::new(
             format,
             self.properties.clone(),

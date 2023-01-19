@@ -80,21 +80,11 @@ impl<S: StateStore> AggGroup<S> {
             assert_eq!(prev_outputs.len(), agg_calls.len());
         }
 
-        let row_count = prev_outputs
-            .as_ref()
-            .and_then(|outputs| {
-                outputs[ROW_COUNT_COLUMN]
-                    .clone()
-                    .map(|x| x.into_int64() as usize)
-            })
-            .unwrap_or(0);
-
         let states =
             futures::future::try_join_all(agg_calls.iter().enumerate().map(|(idx, agg_call)| {
                 AggState::create(
                     agg_call,
                     &storages[idx],
-                    row_count,
                     prev_outputs.as_ref().map(|outputs| &outputs[idx]),
                     pk_indices,
                     group_key.as_ref(),

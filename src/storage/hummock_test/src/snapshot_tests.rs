@@ -29,7 +29,7 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
 
-use crate::get_test_notification_client;
+use crate::get_notification_client_for_test;
 use crate::test_utils::{
     with_hummock_storage_v1, with_hummock_storage_v2, HummockStateStoreTestTrait,
 };
@@ -48,7 +48,6 @@ macro_rules! assert_count_range_scan {
                 $epoch,
                 ReadOptions {
                     ignore_range_tombstone: false,
-                    check_bloom_filter: false,
                     prefix_hint: None,
                     table_id: Default::default(),
                     retention_seconds: None,
@@ -288,7 +287,7 @@ async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commi
         hummock_options,
         sstable_store,
         mock_hummock_meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
+        get_notification_client_for_test(env, hummock_manager_ref, worker_node),
         Arc::new(HummockStateStoreMetrics::unused()),
         Arc::new(risingwave_tracing::RwTracingService::disabled()),
         Arc::new(CompactorMetrics::unused()),

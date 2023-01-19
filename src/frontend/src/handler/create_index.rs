@@ -21,6 +21,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
@@ -161,6 +162,18 @@ pub(crate) fn gen_create_index_plan(
 
     let index_table = materialize.table();
     let mut index_table_prost = index_table.to_prost(index_schema_id, index_database_id);
+    {
+        use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
+        let retention_second_string_key = PROPERTIES_RETENTION_SECOND_KEY.to_string();
+
+        // Inherit table properties
+        table.properties.get(&retention_second_string_key).map(|v| {
+            index_table_prost
+                .properties
+                .insert(retention_second_string_key, v.clone())
+        });
+    }
+
     index_table_prost.owner = session.user_id();
 
     let index_prost = ProstIndex {
@@ -282,7 +295,6 @@ fn assemble_materialize(
         )),
         Order::new(
             (0..index_columns.len())
-                .into_iter()
                 .map(FieldOrder::ascending)
                 .collect(),
         ),
@@ -360,8 +372,11 @@ pub async fn handle_create_index(
             include,
             distributed_by,
         )?;
-        let graph = build_graph(plan);
-
+        let mut graph = build_graph(plan);
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
         (graph, index_table, index)
     };
 

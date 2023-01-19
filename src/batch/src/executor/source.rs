@@ -15,21 +15,24 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::DataChunk;
+use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::{ConnectorError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_connector::parser::SourceParserImpl;
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
+use risingwave_connector::{SourceColumnDesc, SourceFormat};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_source::connector_source::{ConnectorSource, SourceContext};
 use risingwave_source::monitor::SourceMetrics;
-use risingwave_source::{SourceColumnDesc, SourceFormat, SourceParserImpl};
 
 use super::Executor;
+use crate::error::BatchError;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
@@ -175,7 +178,7 @@ impl SourceExecutor {
         for chunk in stream {
             match chunk {
                 Ok(chunk) => {
-                    yield chunk.chunk.data_chunk().to_owned();
+                    yield covert_stream_chunk_to_batch_chunk(chunk.chunk)?;
                 }
                 Err(e) => {
                     return Err(e);
@@ -183,4 +186,17 @@ impl SourceExecutor {
             }
         }
     }
+}
+
+fn covert_stream_chunk_to_batch_chunk(chunk: StreamChunk) -> Result<DataChunk> {
+    // chunk read from source must be compact
+    assert!(chunk.data_chunk().visibility().is_none());
+
+    if chunk.ops().iter().any(|op| *op != Op::Insert) {
+        return Err(RwError::from(BatchError::Internal(anyhow!(
+            "Only support insert op in batch source executor"
+        ))));
+    }
+
+    Ok(chunk.data_chunk().clone())
 }

@@ -118,7 +118,7 @@ impl<S: MetaStore> HummockManager<S> {
             == Some(true);
         let table_option = TableOption::build_table_option(table_properties);
         let mut pairs = vec![];
-        // materialized_view or materialized_source
+        // materialized_view
         pairs.push((
             table_fragments.table_id().table_id,
             if is_independent_compaction_group {
@@ -725,6 +725,7 @@ mod tests {
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::meta::table_fragments::Fragment;
+    use risingwave_pb::stream_plan::StreamEnvironment;
 
     use crate::hummock::manager::compaction_group_manager::CompactionGroupManagerInner;
     use crate::hummock::manager::versioning::Versioning;
@@ -864,6 +865,7 @@ mod tests {
                     ..Default::default()
                 },
             )]),
+            StreamEnvironment::default(),
         );
         let table_fragment_2 = TableFragments::new(
             TableId::new(20),
@@ -875,6 +877,7 @@ mod tests {
                     ..Default::default()
                 },
             )]),
+            StreamEnvironment::default(),
         );
 
         // Test register_table_fragments
