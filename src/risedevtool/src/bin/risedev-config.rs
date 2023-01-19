@@ -71,7 +71,7 @@ pub enum Components {
     Release,
     AllInOne,
     Sanitizer,
-    Nginx,
+    LoadBalancer,
 }
 
 impl Components {
@@ -90,7 +90,7 @@ impl Components {
             Self::Release => "[Build] Enable release mode",
             Self::AllInOne => "[Build] Enable all-in-one binary",
             Self::Sanitizer => "[Build] Enable sanitizer",
-            Self::Nginx => "[Build] Enable nginx",
+            Self::LoadBalancer => "[Build] Enable LoadBalancer: Nginx",
         }
         .into()
     }
@@ -164,7 +164,7 @@ Required if you want to sink data to redis.
 Required if you want to create CDC source from external Databases.
                 "
             }
-            Self::Nginx => {
+            Self::LoadBalancer => {
                 "
 Used to emulate a K8s service.
                 "
@@ -188,7 +188,7 @@ Used to emulate a K8s service.
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
             "ENABLE_RW_CONNECTOR" => Some(Self::ConnectorNode),
-            "ENABLE_NGINX" => Some(Self::Nginx),
+            "ENABLE_LB" => Some(Self::LoadBalancer),
             _ => None,
         }
     }
@@ -208,7 +208,7 @@ Used to emulate a K8s service.
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
             Self::ConnectorNode => "ENABLE_RW_CONNECTOR",
-            Self::Nginx => "ENABLE_NGINX",
+            Self::LoadBalancer => "ENABLE_LB",
         }
         .into()
     }

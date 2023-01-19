@@ -131,7 +131,6 @@ profile:
       - use: kafka
         persist-data: true
 
-
   3etcd-3meta:
     steps:
       - use: etcd
@@ -164,7 +163,7 @@ profile:
 
   3etcd-3meta-1cn-1fe:
     steps:
-      - use: nginx
+      - use: load-balancer
         port: 1234
         target-ports:
           - 5690
@@ -200,7 +199,7 @@ profile:
       - use: compute-node
       - use: frontend
 
-  # TODO: Somehow tell the meta node that it should connect against nginx
+  # TODO: Somehow tell the meta node that it should connect against LB
   #   Add config to compute nodes (and other nodes) where the meta service is
 
   ######################################
@@ -925,17 +924,16 @@ template:
     # address of redis
     address: "127.0.0.1"
 
-  # TODO: Rename all nginx things to LoadBalancer
   # TODO: risedev.conf has to use these configs
-  # used as load balancer to simulate K8s service
-  nginx:
+  # Uses nginx as load balancer to simulate K8s service
+  load-balancer:
     # Id to be picked-up by services
-    id: nginx
+    id: load-balancer
 
     # Defines the exposed port of the load balancer
     port: 1234
 
-    # address of nginx
+    # address of the load balancer
     address: "127.0.0.1"
 
     # defines the target ports of the load balancer

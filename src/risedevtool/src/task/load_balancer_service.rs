@@ -19,14 +19,14 @@ use std::process::Command;
 
 use anyhow::{anyhow, Result};
 
-use crate::{ExecuteContext, NginxConfig, Task};
+use crate::{ExecuteContext, LoadBalancerConfig, Task};
 
-pub struct NginxService {
-    pub config: NginxConfig,
+pub struct LoadBalancerService {
+    pub config: LoadBalancerConfig,
 }
 
-impl NginxService {
-    pub fn new(config: NginxConfig) -> Result<Self> {
+impl LoadBalancerService {
+    pub fn new(config: LoadBalancerConfig) -> Result<Self> {
         Ok(Self { config })
     }
 
@@ -40,7 +40,7 @@ impl NginxService {
     }
 }
 
-impl Task for NginxService {
+impl Task for LoadBalancerService {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl Write>) -> Result<()> {
         ctx.service(self);
         ctx.pb.set_message("starting");

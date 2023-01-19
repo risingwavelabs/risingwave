@@ -26,9 +26,9 @@ use risedev::util::{complete_spin, fail_spin};
 use risedev::{
     compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
     ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext,
-    FrontendService, GrafanaService, JaegerService, KafkaService, MetaNodeService, MinioService,
-    NginxConfig, NginxService, PrometheusService, PubsubService, RedisService, ServiceConfig, Task,
-    ZooKeeperService, RISEDEV_SESSION_NAME,
+    FrontendService, GrafanaService, JaegerService, KafkaService, LoadBalancerConfig,
+    LoadBalancerService, MetaNodeService, MinioService, PrometheusService, PubsubService,
+    RedisService, ServiceConfig, Task, ZooKeeperService, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -108,7 +108,7 @@ fn task_main(
             ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Jaeger(c) => Some((c.dashboard_port, c.id.clone())),
             ServiceConfig::Kafka(c) => Some((c.port, c.id.clone())),
-            ServiceConfig::Nginx(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::LoadBalancer(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Pubsub(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Redis(c) => Some((c.port, c.id.clone())),
             ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
@@ -321,13 +321,13 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("redis {}:{}", c.address, c.port));
             }
-            ServiceConfig::Nginx(c) => {
+            ServiceConfig::LoadBalancer(c) => {
                 let mut ctx =
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
-                let mut service = NginxService::new(c.clone())?;
+                let mut service = LoadBalancerService::new(c.clone())?;
                 service.execute(&mut ctx)?;
                 ctx.pb
-                    .set_message(format!("redis {}:{}", c.address, c.port));
+                    .set_message(format!("Nginx {}:{}", c.address, c.port));
             }
             ServiceConfig::ConnectorNode(c) => {
                 let mut ctx =

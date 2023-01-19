@@ -7,14 +7,14 @@ extend = "common.toml"
 [tasks.download-nginx]
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-description = "Download and extract Nginx"
+description = "Download and extract Nginx. Used as Load Balancer"
 script = '''
 #!/bin/bash
 set -e
 if [ -f "${PREFIX_BIN}/nginx" ]; then
     exit 0
 fi
-echo "Nginx not found, downloading"
+echo "Load balancer Nginx not found, downloading"
 # TODO: Download bin depending on system
 brew install nginx
 cp /opt/homebrew/bin/nginx "${PREFIX_BIN}/nginx"

@@ -292,7 +292,7 @@ pub struct RedisConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
-pub struct NginxConfig {
+pub struct LoadBalancerConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
@@ -333,7 +333,7 @@ pub enum ServiceConfig {
     ZooKeeper(ZooKeeperConfig),
     RedPanda(RedPandaConfig),
     ConnectorNode(ConnectorNodeConfig),
-    Nginx(NginxConfig),
+    LoadBalancer(LoadBalancerConfig),
 }
 
 impl ServiceConfig {
@@ -355,7 +355,7 @@ impl ServiceConfig {
             Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
             Self::ConnectorNode(c) => &c.id,
-            Self::Nginx(c) => &c.id,
+            Self::LoadBalancer(c) => &c.id,
         }
     }
 }
