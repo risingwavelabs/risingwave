@@ -39,6 +39,8 @@ use crate::model::FragmentId;
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
+mod schedule;
+
 /// Id of an Actor, maybe local or global
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
 enum LocalActorId {
@@ -1123,6 +1125,14 @@ impl StreamFragmentGraph {
         fragment_id: GlobalFragmentId,
     ) -> &HashMap<GlobalFragmentId, StreamFragmentEdge> {
         self.upstreams.get(&fragment_id).unwrap_or(&EMPTY_HASHMAP)
+    }
+
+    fn edges(
+        &self,
+    ) -> impl Iterator<Item = (GlobalFragmentId, GlobalFragmentId, &StreamFragmentEdge)> {
+        self.downstreams
+            .iter()
+            .flat_map(|(&from, tos)| tos.iter().map(move |(&to, edge)| (from, to, edge)))
     }
 }
 
