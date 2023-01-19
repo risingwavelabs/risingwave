@@ -84,7 +84,7 @@ pub fn validate_table_key_range(version: &HummockVersion) {
     }
 }
 
-pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: &TableId, table_key_range: &R) -> bool
+pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, table_key_range: &R) -> bool
 where
     R: RangeBounds<TableKey<B>>,
     B: AsRef<[u8]>,
@@ -92,7 +92,7 @@ where
     let table_range = info.key_range.as_ref().unwrap();
     let table_start = user_key(table_range.left.as_slice());
     let table_end = user_key(table_range.right.as_slice());
-    let user_key_range = bound_table_key_range(*table_id, table_key_range);
+    let user_key_range = bound_table_key_range(table_id, table_key_range);
     let encoded_user_key_range = (
         user_key_range.start_bound().map(UserKey::encode),
         user_key_range.end_bound().map(UserKey::encode),
@@ -119,7 +119,7 @@ where
 /// a specific table id. Returns the sst ids after pruning.
 pub fn prune_overlapping_ssts<'a, R, B>(
     ssts: &'a [SstableInfo],
-    table_id: &'a TableId,
+    table_id: TableId,
     table_key_range: &'a R,
 ) -> impl DoubleEndedIterator<Item = &'a SstableInfo>
 where
@@ -127,7 +127,7 @@ where
     B: AsRef<[u8]>,
 {
     ssts.iter()
-        .filter(|info| filter_single_sst(info, table_id, table_key_range))
+        .filter(move |info| filter_single_sst(info, table_id, table_key_range))
 }
 
 /// Prune non-overlapping SSTs that does not overlap with a specific key range or does not overlap

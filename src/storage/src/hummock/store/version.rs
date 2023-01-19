@@ -175,7 +175,7 @@ impl StagingVersion {
                     .sstable_infos
                     .iter()
                     .map(|sstable| &sstable.sst_info)
-                    .filter(move |sstable| filter_single_sst(sstable, &table_id, table_key_range))
+                    .filter(move |sstable| filter_single_sst(sstable, table_id, table_key_range))
             });
         (overlapped_imms, overlapped_ssts)
     }
@@ -466,7 +466,7 @@ impl HummockVersionReader {
                     let single_table_key_range = table_key..=table_key;
                     let sstable_infos = prune_overlapping_ssts(
                         &level.table_infos,
-                        &read_options.table_id,
+                        read_options.table_id,
                         &single_table_key_range,
                     );
                     for sstable_info in sstable_infos {
@@ -611,7 +611,7 @@ impl HummockVersionReader {
             } else {
                 let table_infos = prune_overlapping_ssts(
                     &level.table_infos,
-                    &read_options.table_id,
+                    read_options.table_id,
                     &table_key_range,
                 );
                 // Overlapping
@@ -791,7 +791,7 @@ impl HummockVersionReader {
             for level in committed_version.levels(table_id) {
                 match level.level_type() {
                     LevelType::Overlapping | LevelType::Unspecified => {
-                        if prune_overlapping_ssts(&level.table_infos, &table_id, &table_key_range)
+                        if prune_overlapping_ssts(&level.table_infos, table_id, &table_key_range)
                             .peekable()
                             .peek()
                             .is_some()
@@ -846,7 +846,7 @@ impl HummockVersionReader {
             match level.level_type() {
                 LevelType::Overlapping | LevelType::Unspecified => {
                     let sstable_infos =
-                        prune_overlapping_ssts(&level.table_infos, &table_id, &table_key_range);
+                        prune_overlapping_ssts(&level.table_infos, table_id, &table_key_range);
                     for sstable_info in sstable_infos {
                         table_counts += 1;
                         if hit_sstable_bloom_filter(

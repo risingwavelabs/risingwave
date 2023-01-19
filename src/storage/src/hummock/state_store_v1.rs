@@ -141,7 +141,7 @@ impl HummockStorageV1 {
                     let single_table_key_range = table_key..=table_key;
                     let sstable_infos = prune_overlapping_ssts(
                         &level.table_infos,
-                        &table_id,
+                        table_id,
                         &single_table_key_range,
                     );
                     for sstable_info in sstable_infos {
@@ -338,7 +338,7 @@ impl HummockStorageV1 {
                 )));
             } else {
                 let table_infos =
-                    prune_overlapping_ssts(&level.table_infos, &table_id, &table_key_range);
+                    prune_overlapping_ssts(&level.table_infos, table_id, &table_key_range);
                 for table_info in table_infos.into_iter().rev() {
                     let sstable = self
                         .sstable_store
