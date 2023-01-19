@@ -768,6 +768,12 @@ impl HummockVersionReader {
         // 1. check staging data
         for imm in &imms {
             if imm.range_exists(&table_key_range) {
+                local_stats.report_bloom_filter_metrics(
+                    self.state_store_metrics.as_ref(),
+                    "surely_not_have",
+                    table_id_label,
+                    false,
+                );
                 local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                 return Ok(false);
             }
@@ -824,6 +830,12 @@ impl HummockVersionReader {
                 bloom_filter_prefix_hash,
                 &mut local_stats,
             ) {
+                local_stats.report_bloom_filter_metrics(
+                    self.state_store_metrics.as_ref(),
+                    "surely_not_have",
+                    table_id_label,
+                    false,
+                );
                 local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                 return Ok(false);
             }
@@ -851,6 +863,12 @@ impl HummockVersionReader {
                             bloom_filter_prefix_hash,
                             &mut local_stats,
                         ) {
+                            local_stats.report_bloom_filter_metrics(
+                                self.state_store_metrics.as_ref(),
+                                "surely_not_have",
+                                table_id_label,
+                                false,
+                            );
                             local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                             return Ok(false);
                         }
@@ -870,6 +888,12 @@ impl HummockVersionReader {
                             bloom_filter_prefix_hash,
                             &mut local_stats,
                         ) {
+                            local_stats.report_bloom_filter_metrics(
+                                self.state_store_metrics.as_ref(),
+                                "surely_not_have",
+                                table_id_label,
+                                false,
+                            );
                             local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
                             return Ok(false);
                         }
@@ -882,6 +906,12 @@ impl HummockVersionReader {
             .iter_merge_sstable_counts
             .with_label_values(&[table_id_label, "surely-not-have"])
             .observe(table_counts as f64);
+        local_stats.report_bloom_filter_metrics(
+            self.state_store_metrics.as_ref(),
+            "surely_not_have",
+            table_id_label,
+            true,
+        );
         local_stats.report(self.state_store_metrics.as_ref(), table_id_label);
         Ok(true)
     }
