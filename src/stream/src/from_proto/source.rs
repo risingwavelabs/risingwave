@@ -97,7 +97,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 .properties
                 .get("connector")
                 .map(|c| c.to_ascii_lowercase())
-                .unwrap();
+                .unwrap_or_default();
             let is_fs_connector = FS_CONNECTORS.contains(&connector.as_str());
 
             if is_fs_connector {
