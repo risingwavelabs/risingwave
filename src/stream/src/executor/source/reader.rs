@@ -21,7 +21,7 @@ use futures::stream::{select_with_strategy, BoxStream, PollNext, SelectWithStrat
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
-use risingwave_connector::{BoxSourceWithStateStream, StreamChunkWithState};
+use risingwave_connector::source::{BoxSourceWithStateStream, StreamChunkWithState};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};

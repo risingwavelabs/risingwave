@@ -27,18 +27,10 @@
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
 
-use std::collections::HashMap;
-
-use futures::stream::BoxStream;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::error::RwError;
-use source::SplitId;
-
 pub mod aws_utils;
 pub mod error;
 mod macros;
-mod manager;
-pub use manager::SourceColumnDesc;
+
 pub mod parser;
 pub mod sink;
 pub mod source;
@@ -52,39 +44,6 @@ impl ConnectorParams {
     pub fn new(connector_rpc_endpoint: Option<String>) -> Self {
         Self {
             connector_rpc_endpoint,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SourceFormat {
-    Invalid,
-    Json,
-    Protobuf,
-    DebeziumJson,
-    Avro,
-    Maxwell,
-    CanalJson,
-    Csv,
-}
-
-pub type BoxSourceWithStateStream = BoxStream<'static, Result<StreamChunkWithState, RwError>>;
-
-/// [`StreamChunkWithState`] returns stream chunk together with offset for each split. In the
-/// current design, one connector source can have multiple split reader. The keys are unique
-/// `split_id` and values are the latest offset for each split.
-#[derive(Clone, Debug)]
-pub struct StreamChunkWithState {
-    pub chunk: StreamChunk,
-    pub split_offset_mapping: Option<HashMap<SplitId, String>>,
-}
-
-/// The `split_offset_mapping` field is unused for the table source, so we implement `From` for it.
-impl From<StreamChunk> for StreamChunkWithState {
-    fn from(chunk: StreamChunk) -> Self {
-        Self {
-            chunk,
-            split_offset_mapping: None,
         }
     }
 }
