@@ -700,14 +700,11 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
                 handle: ptr,
             }
         };
-        let mut errs = vec![];
         for sender in senders {
-            if let Err(e) = sender.send(CacheableEntry {
+            let _ = sender.send(CacheableEntry {
                 cache: self.clone(),
                 handle: handle.handle,
-            }) {
-                errs.push(e);
-            }
+            });
         }
 
         // do not deallocate data with holding mutex.
