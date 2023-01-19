@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 create table t (v1 int);
 
 query I rowsort
@@ -7,10 +10,6 @@ insert into t values (1 + 2), (2 + 2), (2 + 3) returning *;
 3
 4
 5
-
-# FIXME: implicit flush for `RETURNING` does not work now.
-statement ok
-flush;
 
 query I rowsort
 select * from t;
@@ -25,9 +24,6 @@ update t set v1 = v1 + 3 where v1 <= 4 returning *;
 6
 7
 
-statement ok
-flush;
-
 query I rowsort
 select * from t;
 ----
@@ -40,9 +36,6 @@ delete from t where v1 > 5 returning v1, v1 * 2;
 ----
 6 12
 7 14
-
-statement ok
-flush;
 
 query I rowsort
 select * from t;
