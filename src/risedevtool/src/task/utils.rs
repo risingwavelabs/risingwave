@@ -27,15 +27,23 @@ pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) ->
             ));
         }
         meta_nodes => {
-            cmd.arg("--meta-address").arg(format!(
-                "http://{}:{}",
-                meta_nodes.last().unwrap().address,
-                meta_nodes.last().unwrap().port
-            ));
-            if meta_nodes.len() > 1 {
-                eprintln!("WARN: more than 1 meta node instance is detected, only using the last one for meta node.");
-                // According to some heruistics, the last etcd node seems always to be elected as
-                // leader. Therefore we ensure compute node can start by using the last one.
+            // TODO: undo this changes again. Only for debugging
+            cmd.arg("--meta-address")
+                .arg(format!("http://127.0.0.1:1234"));
+            eprintln!("WARN: hardcoded address used");
+
+            if false {
+                cmd.arg("--meta-address").arg(format!(
+                    "http://{}:{}",
+                    meta_nodes.last().unwrap().address,
+                    meta_nodes.last().unwrap().port
+                ));
+                if meta_nodes.len() > 1 {
+                    eprintln!("WARN: more than 1 meta node instance is detected, only using the last one for meta node.");
+                    // According to some heruistics, the last etcd node seems always to be elected
+                    // as leader. Therefore we ensure compute node can start by
+                    // using the last one.
+                }
             }
         }
     };

@@ -299,6 +299,8 @@ pub struct NginxConfig {
 
     pub port: u16,
     pub address: String,
+    #[serde(rename = "target-ports")]
+    pub target_ports: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
