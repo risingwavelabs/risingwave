@@ -35,7 +35,6 @@ use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, ExtraInfoSourceRef, MetaClient};
 use risingwave_source::dml_manager::DmlManager;
-use risingwave_source::monitor::SourceMetrics;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
