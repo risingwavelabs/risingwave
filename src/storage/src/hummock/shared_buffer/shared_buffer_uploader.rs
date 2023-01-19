@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 
-use crate::hummock::compactor::{compact, Context};
+use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::shared_buffer::OrderSortedUncommittedData;
 use crate::hummock::HummockResult;
 
@@ -26,11 +26,11 @@ pub(crate) type UploadTaskPayload = OrderSortedUncommittedData;
 pub(crate) type UploadTaskResult = HummockResult<Vec<LocalSstableInfo>>;
 
 pub struct SharedBufferUploader {
-    compactor_context: Arc<Context>,
+    compactor_context: Arc<CompactorContext>,
 }
 
 impl SharedBufferUploader {
-    pub fn new(compactor_context: Arc<Context>) -> Self {
+    pub fn new(compactor_context: Arc<CompactorContext>) -> Self {
         Self { compactor_context }
     }
 }

@@ -95,7 +95,7 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
 }
 
 /// Config that is updatable when compactor is running.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct CompactorRuntimeConfig {
     pub max_concurrent_task_number: u64,
 }
