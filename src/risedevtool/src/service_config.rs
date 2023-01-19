@@ -51,6 +51,7 @@ pub struct MetaNodeConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
+    pub lb_port: Option<u16>,
 
     pub address: String,
     #[serde(with = "string")]

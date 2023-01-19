@@ -188,19 +188,19 @@ profile:
         port: 5690
         dashboard-port: 5691
         exporter-port: 1250
+        lb-port: 1234
       - use: meta-node
         port: 15690
         dashboard-port: 15691
         exporter-port: 11250
+        lb-port: 1234
       - use: meta-node
         port: 25690
         dashboard-port: 25691
         exporter-port: 21250
+        lb-port: 1234
       - use: compute-node
       - use: frontend
-
-  # TODO: Somehow tell the meta node that it should connect against LB
-  #   Add config to compute nodes (and other nodes) where the meta service is
 
   ######################################
   ### Configurations used in Compose ###
@@ -691,6 +691,9 @@ template:
 
     # Prometheus nodes used by dashboard service
     provide-prometheus: "prometheus*"
+
+    # If the meta port should be accessed via a load-balancer, add the LB port here
+    lb-port: null
 
   prometheus:
     # Advertise address of Prometheus

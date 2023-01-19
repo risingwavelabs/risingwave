@@ -27,22 +27,37 @@ pub fn add_meta_node(provide_meta_node: &[MetaNodeConfig], cmd: &mut Command) ->
             ));
         }
         meta_nodes => {
-            // TODO: undo this changes again. Only for debugging
-            cmd.arg("--meta-address")
-                .arg(format!("http://127.0.0.1:1234"));
-            eprintln!("WARN: hardcoded address used");
-
-            if false {
-                cmd.arg("--meta-address").arg(format!(
-                    "http://{}:{}",
-                    meta_nodes.last().unwrap().address,
-                    meta_nodes.last().unwrap().port
-                ));
-                if meta_nodes.len() > 1 {
-                    eprintln!("WARN: more than 1 meta node instance is detected, only using the last one for meta node.");
-                    // According to some heruistics, the last etcd node seems always to be elected
-                    // as leader. Therefore we ensure compute node can start by
-                    // using the last one.
+            // access meta nodes via load-balancer
+            match meta_nodes.last().unwrap().lb_port {
+                Some(lb_port) => {
+                    // All nodes should be addressed by the same LB
+                    for mnc in meta_nodes {
+                        assert!(
+                            mnc.lb_port.is_some(),
+                            "if one meta node is addressed by a load-balancer, all should be addressed by an LB");
+                        assert!(
+                            mnc.lb_port.unwrap() == lb_port,
+                            "All meta nodes should use the same LB"
+                        );
+                    }
+                    cmd.arg("--meta-address")
+                        .arg(format!("http://127.0.0.1:{}", lb_port));
+                }
+                None => {
+                    // access one meta node directly
+                    cmd.arg("--meta-address").arg(format!(
+                        "http://{}:{}",
+                        meta_nodes.last().unwrap().address,
+                        meta_nodes.last().unwrap().port
+                    ));
+                    if meta_nodes.len() > 1 {
+                        eprintln!("WARN: more than 1 meta node instance is detected, only using the last one for meta node.");
+                        // According to some heruistics, the last etcd node seems always to be
+                        // elected as leader. Therefore we ensure compute
+                        // node can start by using the last one.
+                        // This is not the case for the meta nodes. The first meta node will get
+                        // elected
+                    }
                 }
             }
         }
