@@ -26,9 +26,9 @@ use risedev::util::{complete_spin, fail_spin};
 use risedev::{
     compute_risectl_env, preflight_check, AwsS3Config, CompactorService, ComputeNodeService,
     ConfigExpander, ConfigureTmuxTask, ConnectorNodeService, EnsureStopService, ExecuteContext,
-    FrontendService, GrafanaService, JaegerService, KafkaService, LoadBalancerConfig,
-    LoadBalancerService, MetaNodeService, MinioService, PrometheusService, PubsubService,
-    RedisService, ServiceConfig, Task, ZooKeeperService, RISEDEV_SESSION_NAME,
+    FrontendService, GrafanaService, JaegerService, KafkaService, LoadBalancerService,
+    MetaNodeService, MinioService, PrometheusService, PubsubService, RedisService, ServiceConfig,
+    Task, ZooKeeperService, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -326,8 +326,7 @@ fn task_main(
                     ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
                 let mut service = LoadBalancerService::new(c.clone())?;
                 service.execute(&mut ctx)?;
-                ctx.pb
-                    .set_message(format!("Nginx {}:{}", c.address, c.port));
+                ctx.pb.set_message(format!("Nginx localhost:{}", c.port));
             }
             ServiceConfig::ConnectorNode(c) => {
                 let mut ctx =

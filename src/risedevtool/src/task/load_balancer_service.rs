@@ -90,8 +90,6 @@ http {
 "#,
         );
 
-        // TODO: delete config.address
-
         let tmp = format!("        listen {} http2;", self.config.port);
         file_content.push_str(tmp.as_str());
         file_content.push_str(

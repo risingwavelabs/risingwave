@@ -298,7 +298,6 @@ pub struct LoadBalancerConfig {
     pub id: String,
 
     pub port: u16,
-    pub address: String,
     #[serde(rename = "target-ports")]
     pub target_ports: Vec<String>,
 }

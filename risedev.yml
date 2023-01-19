@@ -933,9 +933,6 @@ template:
     # Defines the exposed port of the load balancer
     port: 1234
 
-    # address of the load balancer
-    address: "127.0.0.1"
-
     # defines the target ports of the load balancer
     target-ports:
       - 2345
