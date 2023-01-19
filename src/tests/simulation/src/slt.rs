@@ -29,7 +29,6 @@ fn is_create_table_as(sql: &str) -> bool {
         .map(|s| s.to_lowercase())
         .collect();
 
-    println!("{:?}", parts);
     parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
 }
 
