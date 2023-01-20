@@ -209,5 +209,18 @@
 - name: Temporal filter works on complex columns on LHS (part 2, flipped)
   sql: |
     create table t1 (ts timestamp with time zone, additional_time_to_live interval);
-    select * from t1 where now() - interval '15 minutes' > ts + additional_time_to_live * 1.5;
-  stream_error: 'internal error: Valid now exprs should have been pushed down into left semi join a `Now` operator as the RHS input'
+    select * from t1 where now() - interval '15 minutes' < ts + additional_time_to_live * 1.5;
+  stream_plan: |
+    StreamMaterialize { columns: [ts, additional_time_to_live, t1._row_id(hidden)], pk_columns: [t1._row_id] }
+    └─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, t1._row_id] }
+      └─StreamDynamicFilter { predicate: ((t1.ts + (t1.additional_time_to_live * 1.5:Decimal)) > (now - '00:15:00':Interval)), output: [t1.ts, t1.additional_time_to_live, (t1.ts + (t1.additional_time_to_live * 1.5:Decimal)), t1._row_id] }
+        ├─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, (t1.ts + (t1.additional_time_to_live * 1.5:Decimal)), t1._row_id] }
+        | └─StreamTableScan { table: t1, columns: [t1.ts, t1.additional_time_to_live, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: Broadcast }
+          └─StreamProject { exprs: [(now - '00:15:00':Interval)], watermark_columns: [(now - '00:15:00':Interval)] }
+            └─StreamNow { output: [now] }
+- name: Temporal filter fails without `now()` in lower bound
+  sql: |-
+    create table t1 (ts timestamp with time zone);
+    select * from t1 where now() - interval '15 minutes' > ts;
+  stream_error: 'internal error: All `now()` exprs were valid, but the condition must have at least one now expr as a lower bound.'

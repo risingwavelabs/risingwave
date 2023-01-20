@@ -27,7 +27,7 @@
   sql: |
     create table t1 (ts timestamp with time zone, additional_time_to_live interval);
     select * from t1 where now() - interval '15 minutes' > ts + additional_time_to_live * 1.5;
-  stream_error: 'internal error: Valid now exprs should have been pushed down into left semi join a `Now` operator as the RHS input'
+  stream_error: 'internal error: All `now()` exprs were valid, but the condition must have at least one now expr as a lower bound.'
 - name: Temporal filter reorders now expressions correctly
   sql: |
     create table t1 (ts timestamp with time zone);
