@@ -53,6 +53,10 @@ pub struct VnodeMapping<T: VnodeMappingItem> {
     data: Vec<T::Item>,
 }
 
+#[expect(
+    clippy::len_without_is_empty,
+    reason = "empty vnode mapping makes no sense"
+)]
 impl<T: VnodeMappingItem> VnodeMapping<T> {
     /// Create a uniform vnode mapping with a **set** of items.
     ///
@@ -103,10 +107,6 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
             .last()
             .map(|&i| i as usize + 1)
             .unwrap_or(0)
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.original_indices.is_empty()
     }
 
     /// Get the item mapped to the given `vnode` by binary search.
@@ -308,6 +308,10 @@ impl ParallelUnitMapping {
 
 #[cfg(test)]
 mod tests {
+    use std::iter::repeat_with;
+
+    use rand::Rng;
+
     use super::*;
 
     struct Test;
@@ -323,15 +327,32 @@ mod tests {
     type TestMapping = VnodeMapping<Test>;
     type Test2Mapping = VnodeMapping<Test2>;
 
-    const ITEM_COUNTS: &[usize] = &[1, 3, 12, 42, VirtualNode::COUNT];
+    const COUNTS: &[usize] = &[1, 3, 12, 42, VirtualNode::COUNT];
+
+    fn uniforms() -> impl Iterator<Item = TestMapping> {
+        COUNTS
+            .iter()
+            .map(|&count| TestMapping::new_uniform(0..count as u32))
+    }
+
+    fn randoms() -> impl Iterator<Item = TestMapping> {
+        COUNTS.iter().map(|&count| {
+            let raw = repeat_with(|| rand::thread_rng().gen_range(0..count as u32))
+                .take(VirtualNode::COUNT)
+                .collect_vec();
+            TestMapping::from_expanded(&raw)
+        })
+    }
+
+    fn mappings() -> impl Iterator<Item = TestMapping> {
+        uniforms().chain(randoms())
+    }
 
     #[test]
     fn test_uniform() {
-        for &item_count in ITEM_COUNTS {
-            let items = (0..VirtualNode::COUNT as u32).take(item_count);
-            let vnode_mapping = TestMapping::new_uniform(items);
-
+        for vnode_mapping in uniforms() {
             assert_eq!(vnode_mapping.len(), VirtualNode::COUNT);
+            let item_count = vnode_mapping.iter_unique().count();
 
             let mut check: HashMap<u32, Vec<_>> = HashMap::new();
             for (vnode, item) in vnode_mapping.iter_with_vnode() {
@@ -352,11 +373,17 @@ mod tests {
     }
 
     #[test]
-    fn test_from_to_bitmaps() {
-        for &item_count in ITEM_COUNTS {
-            let items = (0..VirtualNode::COUNT as u32).take(item_count);
-            let vnode_mapping = TestMapping::new_uniform(items);
+    fn test_iter_with_get() {
+        for vnode_mapping in mappings() {
+            for (vnode, item) in vnode_mapping.iter_with_vnode() {
+                assert_eq!(vnode_mapping.get(vnode), item);
+            }
+        }
+    }
 
+    #[test]
+    fn test_from_to_bitmaps() {
+        for vnode_mapping in mappings() {
             let bitmaps = vnode_mapping.to_bitmaps();
             let new_vnode_mapping = TestMapping::from_bitmaps(&bitmaps);
 
@@ -366,11 +393,11 @@ mod tests {
 
     #[test]
     fn test_transform() {
-        for &item_count in ITEM_COUNTS {
-            let items = (0..VirtualNode::COUNT as u32).take(item_count);
-            let vnode_mapping = TestMapping::new_uniform(items.clone());
-
-            let transform_map: HashMap<_, _> = items.map(|item| (item, item + 1)).collect();
+        for vnode_mapping in mappings() {
+            let transform_map: HashMap<_, _> = vnode_mapping
+                .iter_unique()
+                .map(|item| (item, item + 1))
+                .collect();
             let vnode_mapping_2: Test2Mapping = vnode_mapping.transform(&transform_map);
 
             for (item, item_2) in vnode_mapping.iter().zip_eq(vnode_mapping_2.iter()) {
