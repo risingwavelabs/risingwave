@@ -207,12 +207,12 @@ impl ToStream for LogicalFilter {
             if predicate
                 .conjunctions
                 .iter()
-                .any(|expr| expr.as_now_comparison_cond().is_none())
+                .any(|expr| expr.count_nows() > 0 && expr.as_now_comparison_cond().is_none())
             {
                 bail!(
                     "Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or \
                     `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column \
-                    and contains no `now()`."
+                    and contains no `now()`. The condition must also have at least one now expr as a lower bound."
                 );
             }
             bail!(

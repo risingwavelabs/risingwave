@@ -29,7 +29,6 @@ pub struct FilterWithNowToJoinRule {}
 impl Rule for FilterWithNowToJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
-        // if filter.predicate().conjunctions.iter().(|)
 
         let lhs_len = filter.base.schema().len();
 
@@ -42,21 +41,24 @@ impl Rule for FilterWithNowToJoinRule {
         filter.predicate().conjunctions.iter().for_each(|expr| {
             if let Some((input_expr, cmp, now_expr)) = expr.as_now_comparison_cond() {
                 let now_expr = rewriter.rewrite_expr(now_expr);
-                now_filters.push(
-                    FunctionCall::new(cmp, vec![input_expr, now_expr])
-                        .unwrap()
-                        .into(),
-                );
+                now_filters.push(FunctionCall::new(cmp, vec![input_expr, now_expr]).unwrap());
             } else {
                 remainder.push(expr.clone());
             }
         });
 
-        // We want to put `input_expr >/>= now_expr` before `input_expr </<= now_expr` as the former 
-        // will introduce a watermark that can reduce state (since `now_expr` is monotonically increasing)
-        now_filters.sort_by(|(l, r)| rank_cmp(l).cmp(&rank_cmp(r)));
+        // We want to put `input_expr >/>= now_expr` before `input_expr </<= now_expr` as the former
+        // will introduce a watermark that can reduce state (since `now_expr` is monotonically
+        // increasing)
+        now_filters.sort_by_key(|l| rank_cmp(l.get_expr_type()));
 
-        if now_filters.is_empty() {
+        // Ignore no filter & forbid now filters that do not create a watermark
+        if now_filters.is_empty()
+            || !matches!(
+                now_filters[0].get_expr_type(),
+                Type::GreaterThan | Type::GreaterThanOrEqual
+            )
+        {
             return None;
         }
         let mut new_plan = plan.inputs()[0].clone();
@@ -67,7 +69,7 @@ impl Rule for FilterWithNowToJoinRule {
                 LogicalNow::new(plan.ctx()).into(),
                 JoinType::LeftSemi,
                 Condition {
-                    conjunctions: vec![now_filter],
+                    conjunctions: vec![now_filter.into()],
                 },
             )
             .into()
