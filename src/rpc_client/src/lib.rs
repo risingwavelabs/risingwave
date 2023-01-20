@@ -172,39 +172,35 @@ macro_rules! meta_rpc_client_method_impl {
         $(
             pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
                 let req_clone = request.clone();
+                let response = self
+                    .$client
+                    .as_ref()
+                    .lock()
+                    .await
+                    .$fn_name(request.clone())
+                    .await;
 
-                // TODO: do I need the extra scope here?
-                {
-                    let response = self
+                // meta server is leader. Connection is correct
+                if response.is_ok() {
+                    return Ok(response.unwrap().into_inner());
+                }
+
+                // TODO: Can I also manually release the mutex guard instead of changing the scope?
+                    
+                // repeat request if we were connected against the wrong node
+                if self.do_failover_if_needed().await {
+                    return Ok(self
                         .$client
                         .as_ref()
                         .lock()
                         .await
-                        .$fn_name(request.clone())
-                        .await;
+                        .$fn_name(req_clone)
+                        .await?
+                        .into_inner());
+                }
 
-                    // meta server is leader. Connection is correct
-                    if response.is_ok() {
-                        return Ok(response.unwrap().into_inner());
-                    }
-
-                    // TODO: Can I also manually release the mutex guard instead of changing the scope?
-                    
-                    // repeat request if we were connected against the wrong node
-                    if self.do_failover_if_needed().await {
-                        return Ok(self
-                            .$client
-                            .as_ref()
-                            .lock()
-                            .await
-                            .$fn_name(req_clone)
-                            .await?
-                            .into_inner());
-                    }
-
-                    response?;
-                    panic!("unreachable code reached");
-                } // release MutexGuard on $client
+                response?;
+                panic!("unreachable code reached");
             }
         )*
     }
