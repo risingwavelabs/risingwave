@@ -20,6 +20,11 @@ echo "Load balancer Nginx not found, downloading"
 if ! command -v brew &> /dev/null
 then
     echo "brew could not be found. Installing Nginx from source"
+    if ! command -v make &> /dev/null ; then echo "make not installed. Please install make or use homebrew to install Nginx"; exit 1; fi 
+    if ! command -v wget &> /dev/null ; then echo "wget not installed. Please install wget or use homebrew to install Nginx"; exit 1; fi 
+    if ! command -v tar  &> /dev/null ; then echo "tar not installed.  Please install tar  or use homebrew to install Nginx"; exit 1; fi 
+
+
     tmpdir=$(mktemp -d)
     bin_dir=$(pwd)/.risingwave/bin
 
