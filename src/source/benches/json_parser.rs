@@ -18,7 +18,7 @@ use rand::prelude::*;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::types::{DataType, NaiveDateTimeWrapper, NaiveDateWrapper};
 use risingwave_connector::parser::{JsonParser, SourceParser, SourceStreamChunkBuilder};
-use risingwave_connector::SourceColumnDesc;
+use risingwave_connector::source::SourceColumnDesc;
 
 const NUM_RECORDS: usize = 1 << 18; // ~ 250,000
 

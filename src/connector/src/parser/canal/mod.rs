@@ -31,7 +31,7 @@ mod tests {
 
     use super::*;
     use crate::parser::{SourceParser, SourceStreamChunkBuilder};
-    use crate::SourceColumnDesc;
+    use crate::source::SourceColumnDesc;
 
     #[tokio::test]
     async fn test_json_parser() {

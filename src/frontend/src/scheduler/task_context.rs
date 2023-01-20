@@ -20,8 +20,8 @@ use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
-use risingwave_source::monitor::SourceMetrics;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::session::{AuthContext, FrontendEnv};

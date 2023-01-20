@@ -65,7 +65,7 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
     });
     ChronoPatternBuilder {
         tmpl: chrono_tmpl,
-        items_builder: |tmpl| StrftimeItems::new(tmpl).into_iter().collect::<Vec<_>>(),
+        items_builder: |tmpl| StrftimeItems::new(tmpl).collect::<Vec<_>>(),
     }
     .build()
 }

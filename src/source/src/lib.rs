@@ -28,8 +28,8 @@ pub mod dml_manager;
 
 mod common;
 pub mod connector_source;
-pub use connector_source::test_utils as connector_test_utils;
+pub mod source_desc;
+pub use source_desc::test_utils as connector_test_utils;
 pub mod fs_connector_source;
-pub mod monitor;
 pub mod row_id;
 mod table;

@@ -16,9 +16,9 @@ use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::ConnectorParams;
 use risingwave_source::dml_manager::DmlManagerRef;
-use risingwave_source::monitor::SourceMetrics;
 use risingwave_storage::StateStoreImpl;
 
 pub(crate) type WorkerNodeId = u32;

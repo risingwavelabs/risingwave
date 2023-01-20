@@ -12,14 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use super::{SplitImpl, SplitReaderV2};
+use super::monitor::SourceMetrics;
+use super::{SourceInfo, SplitImpl, SplitReaderV2};
 use crate::parser::ParserConfig;
-use crate::source::{BoxSourceStream, Column, ConnectorState, SplitReader};
-use crate::BoxSourceWithStateStream;
+use crate::source::{
+    BoxSourceStream, BoxSourceWithStateStream, Column, ConnectorState, SplitReader,
+};
 
 /// [`DummySplitReader`] is a placeholder for source executor that is assigned no split. It will
 /// wait forever when calling `next`.
@@ -51,6 +55,8 @@ impl SplitReaderV2 for DummySplitReader {
         _properties: Self::Properties,
         _state: Vec<SplitImpl>,
         _parser_config: ParserConfig,
+        _metrics: Arc<SourceMetrics>,
+        _source_info: SourceInfo,
     ) -> Result<Self> {
         Ok(Self {})
     }

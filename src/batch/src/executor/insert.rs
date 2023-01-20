@@ -271,12 +271,12 @@ mod tests {
             .enumerate()
             .map(|(i, field)| ColumnDesc::unnamed(ColumnId::new(i as _), field.data_type.clone()))
             .collect_vec();
-        // We must create a variable to hold this `Arc<TableSource>` here, or it will be dropped due
-        // to the `Weak` reference in `DmlManager`.
+        // We must create a variable to hold this `Arc<TableDmlHandle>` here, or it will be dropped
+        // due to the `Weak` reference in `DmlManager`.
         let reader = dml_manager
             .register_reader(table_id, &column_descs)
             .unwrap();
-        let mut reader = reader.stream_reader_v2().into_stream_v2();
+        let mut reader = reader.stream_reader().into_stream();
 
         // Insert
         let insert_executor = Box::new(InsertExecutor::new(
@@ -308,7 +308,7 @@ mod tests {
         let chunk = reader.next().await.unwrap()?;
 
         assert_eq!(
-            chunk.columns()[0]
+            chunk.chunk.columns()[0]
                 .array()
                 .as_int32()
                 .iter()
@@ -317,7 +317,7 @@ mod tests {
         );
 
         assert_eq!(
-            chunk.columns()[1]
+            chunk.chunk.columns()[1]
                 .array()
                 .as_int32()
                 .iter()
@@ -335,7 +335,7 @@ mod tests {
             vec![DataType::Int32, DataType::Int32, DataType::Int32],
         )
         .into();
-        assert_eq!(*chunk.columns()[2].array(), array);
+        assert_eq!(*chunk.chunk.columns()[2].array(), array);
 
         let epoch = u64::MAX;
         let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);

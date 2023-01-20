@@ -536,9 +536,7 @@ impl LogicalJoin {
                 .map(|x| x.as_input_ref().unwrap().index)
                 .collect_vec()
         } else {
-            (0..logical_scan.output_col_idx().len())
-                .into_iter()
-                .collect_vec()
+            (0..logical_scan.output_col_idx().len()).collect_vec()
         };
         let left_schema_len = logical_join.left().schema().len();
 
@@ -1083,11 +1081,11 @@ impl LogicalJoin {
         ctx: &mut ToStreamContext,
     ) -> Result<Option<PlanRef>> {
         // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
-        // join is a `Inner` join, we can convert the scalar subquery into a
+        // join is a `Inner` or `LeftSemi` join, we can convert the scalar subquery into a
         // `StreamDynamicFilter`
 
-        // Check if `Inner` subquery (no `IN` or `EXISTS` keywords)
-        if self.join_type() != JoinType::Inner {
+        // Check if `Inner`/`LeftSemi`
+        if !matches!(self.join_type(), JoinType::Inner | JoinType::LeftSemi) {
             return Ok(None);
         }
 

@@ -12,17 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(io_error_other)]
-#![feature(lint_reasons, once_cell)]
-#![feature(trait_alias)]
-#![expect(clippy::doc_markdown, reason = "FIXME: later")]
-
-pub mod error;
-pub mod error_or_notice;
-pub mod pg_extended;
-pub mod pg_field_descriptor;
-pub mod pg_message;
-pub mod pg_protocol;
-pub mod pg_response;
-pub mod pg_server;
-pub mod types;
+pub(crate) mod filter_with_now_to_join_rule;
