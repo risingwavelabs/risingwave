@@ -39,7 +39,7 @@ use crate::manager::{FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
-    build_actor_connector_splits, ActorMapping2, SourceManagerRef, SplitAssignment,
+    build_actor_connector_splits, ActorMapping, SourceManagerRef, SplitAssignment,
 };
 use crate::MetaResult;
 
@@ -58,7 +58,7 @@ pub struct Reschedule {
     /// The upstream fragments of this fragment, and the dispatchers that should be updated.
     pub upstream_fragment_dispatcher_ids: Vec<(FragmentId, DispatcherId)>,
     /// New hash mapping of the upstream dispatcher to be updated.
-    pub upstream_dispatcher_mapping: Option<ActorMapping2>,
+    pub upstream_dispatcher_mapping: Option<ActorMapping>,
 
     /// The downstream fragments of this fragment.
     pub downstream_fragment_ids: Vec<FragmentId>,

@@ -25,7 +25,7 @@ mod tests {
 
     use crate::model::ActorId;
     use crate::stream::scale::rebalance_actor_vnode;
-    use crate::stream::{ActorMapping2, ParallelUnitMapping2};
+    use crate::stream::{ActorMapping, ParallelUnitMapping};
 
     fn simulated_parallel_unit_nums(min: Option<usize>, max: Option<usize>) -> Vec<usize> {
         let mut raw = vec![1, 3, 12, 42, VirtualNode::COUNT];
@@ -44,7 +44,7 @@ mod tests {
         let parallel_units = generate_parallel_units(info);
 
         let vnode_bitmaps =
-            ParallelUnitMapping2::new_uniform_parallel_units(&parallel_units).to_bitmaps();
+            ParallelUnitMapping::build(&parallel_units).to_bitmaps();
 
         info.iter()
             .map(|(actor_id, parallel_unit_id)| StreamActor {
@@ -106,7 +106,7 @@ mod tests {
                 .map(|i| (i as ActorId, i as ParallelUnitId))
                 .collect_vec();
             let parallel_units = generate_parallel_units(&info);
-            let vnode_mapping = ParallelUnitMapping2::new_uniform_parallel_units(&parallel_units);
+            let vnode_mapping = ParallelUnitMapping::build(&parallel_units);
 
             assert_eq!(vnode_mapping.len(), VirtualNode::COUNT);
 
@@ -136,7 +136,7 @@ mod tests {
                 .collect_vec();
             let parallel_units = generate_parallel_units(&info);
             let bitmaps =
-                ParallelUnitMapping2::new_uniform_parallel_units(&parallel_units).to_bitmaps();
+                ParallelUnitMapping::build(&parallel_units).to_bitmaps();
             check_bitmaps(&bitmaps);
         }
     }
@@ -164,7 +164,7 @@ mod tests {
 
     fn generate_actor_mapping(
         parallel_unit_num: usize,
-    ) -> (ActorMapping2, HashMap<ActorId, Bitmap>) {
+    ) -> (ActorMapping, HashMap<ActorId, Bitmap>) {
         let parallel_units = (0..parallel_unit_num)
             .map(|i| (i as ActorId, i as ParallelUnitId))
             .collect_vec();
@@ -180,7 +180,7 @@ mod tests {
             })
             .collect();
 
-        (ActorMapping2::from_bitmaps(&bitmaps), bitmaps)
+        (ActorMapping::from_bitmaps(&bitmaps), bitmaps)
     }
 
     #[test]

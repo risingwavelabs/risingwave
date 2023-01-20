@@ -42,7 +42,7 @@ use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{ActorMapping2, GlobalStreamManager};
+use crate::stream::{ActorMapping, GlobalStreamManager};
 use crate::MetaResult;
 
 #[derive(Debug)]
@@ -995,10 +995,10 @@ where
                             .first_key_value()
                             .unwrap()
                             .1;
-                        Some(ActorMapping2::new_single(actor_id))
+                        Some(ActorMapping::new_single(actor_id))
                     } else {
                         // Changes of the bitmap must occur in the case of HashDistribution
-                        Some(ActorMapping2::from_bitmaps(
+                        Some(ActorMapping::from_bitmaps(
                             &fragment_actor_bitmap[&fragment_id],
                         ))
                     }
@@ -1434,7 +1434,7 @@ where
                     fragment_actor_bitmap.get(&downstream_fragment_id)
                 {
                     // If downstream scale in/out
-                    *mapping = ActorMapping2::from_bitmaps(downstream_updated_bitmap).to_protobuf();
+                    *mapping = ActorMapping::from_bitmaps(downstream_updated_bitmap).to_protobuf();
                 }
             }
         }

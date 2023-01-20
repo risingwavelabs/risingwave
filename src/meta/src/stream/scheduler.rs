@@ -23,7 +23,7 @@ use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
-use super::ParallelUnitMapping2;
+use super::ParallelUnitMapping;
 use crate::manager::{WorkerId, WorkerLocations};
 use crate::model::ActorId;
 use crate::MetaResult;
@@ -246,8 +246,8 @@ impl Scheduler {
         &self,
         fragment: &mut Fragment,
         parallel_units: &[ParallelUnit],
-    ) -> MetaResult<ParallelUnitMapping2> {
-        let vnode_mapping = ParallelUnitMapping2::new_uniform_parallel_units(parallel_units);
+    ) -> MetaResult<ParallelUnitMapping> {
+        let vnode_mapping = ParallelUnitMapping::build(parallel_units);
         fragment.vnode_mapping = Some(vnode_mapping.to_protobuf(fragment.fragment_id));
         Ok(vnode_mapping)
     }

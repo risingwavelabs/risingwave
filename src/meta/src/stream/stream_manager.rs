@@ -31,7 +31,7 @@ use risingwave_pb::stream_service::{
 };
 use uuid::Uuid;
 
-use super::{ActorMapping2, ParallelUnitMapping2, ScheduledLocations};
+use super::{ActorMapping, ParallelUnitMapping, ScheduledLocations};
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
@@ -443,7 +443,7 @@ where
                 let vnode_mapping = fragment
                     .vnode_mapping
                     .as_ref()
-                    .map(|m| ParallelUnitMapping2::from_protobuf(m))
+                    .map(|m| ParallelUnitMapping::from_protobuf(m))
                     .clone();
 
                 for actor in &fragment.actors {
@@ -474,7 +474,7 @@ where
                     // This arm could be removed after the optimizer has been fully implemented.
                     &[single_downstream_actor] => {
                         dispatcher.hash_mapping =
-                            Some(ActorMapping2::new_single(single_downstream_actor).to_protobuf());
+                            Some(ActorMapping::new_single(single_downstream_actor).to_protobuf());
                     }
 
                     // For normal cases, we can simply transform the mapping from downstream actors

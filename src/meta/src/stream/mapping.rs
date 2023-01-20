@@ -21,8 +21,8 @@ use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ParallelUnitId, VirtualNode};
 use risingwave_common::util::compress::compress_data;
-use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
-use risingwave_pb::stream_plan::ActorMapping;
+use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto};
+use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
 use crate::model::{ActorId, FragmentId};
 
@@ -32,13 +32,13 @@ pub trait VnodeMappingItem {
 
 #[derive(Derivative)]
 #[derivative(Debug, Clone, PartialEq, Eq)]
-pub struct VnodeMapping2<T: VnodeMappingItem> {
+pub struct VnodeMapping<T: VnodeMappingItem> {
     original_indices: Vec<u32>,
 
     data: Vec<T::Item>,
 }
 
-impl<T: VnodeMappingItem> VnodeMapping2<T> {
+impl<T: VnodeMappingItem> VnodeMapping<T> {
     pub fn new_uniform(items: impl ExactSizeIterator<Item = T::Item>) -> Self {
         assert!(items.len() < VirtualNode::COUNT);
 
@@ -130,10 +130,10 @@ impl<T: VnodeMappingItem> VnodeMapping2<T> {
             .enumerate()
             .map(|(i, o)| o.unwrap_or_else(|| panic!("mapping at index `{i}` is not set")))
             .collect_vec();
-        Self::from_raw(&raw)
+        Self::from_slice(&raw)
     }
 
-    pub fn from_raw(raw: &[T::Item]) -> Self {
+    pub fn from_slice(raw: &[T::Item]) -> Self {
         assert_eq!(raw.len(), VirtualNode::COUNT);
         let (original_indices, data) = compress_data(&raw);
         Self {
@@ -142,66 +142,74 @@ impl<T: VnodeMappingItem> VnodeMapping2<T> {
         }
     }
 
+    pub fn to_vec(&self) -> Vec<T::Item> {
+        self.iter().collect()
+    }
+
     pub fn transform<T2: VnodeMappingItem>(
         &self,
         to_map: &HashMap<T::Item, T2::Item>,
-    ) -> VnodeMapping2<T2> {
-        VnodeMapping2 {
+    ) -> VnodeMapping<T2> {
+        VnodeMapping {
             original_indices: self.original_indices.clone(),
             data: self.data.iter().map(|item| to_map[item]).collect(),
         }
     }
 }
 
-pub struct Actor;
-impl VnodeMappingItem for Actor {
-    type Item = ActorId;
+pub mod marker {
+    use super::*;
+
+    pub struct Actor;
+    impl VnodeMappingItem for Actor {
+        type Item = ActorId;
+    }
+
+    pub struct ParallelUnit;
+    impl VnodeMappingItem for ParallelUnit {
+        type Item = ParallelUnitId;
+    }
 }
 
-pub struct ParallelUnit2;
-impl VnodeMappingItem for ParallelUnit2 {
-    type Item = ParallelUnitId;
-}
+pub type ActorMapping = VnodeMapping<marker::Actor>;
+pub type ParallelUnitMapping = VnodeMapping<marker::ParallelUnit>;
 
-pub type ActorMapping2 = VnodeMapping2<Actor>;
-pub type ParallelUnitMapping2 = VnodeMapping2<ParallelUnit2>;
-
-impl ActorMapping2 {
+impl ActorMapping {
     pub fn to_parallel_unit(
         &self,
         to_map: &HashMap<ActorId, ParallelUnitId>,
-    ) -> ParallelUnitMapping2 {
+    ) -> ParallelUnitMapping {
         self.transform(to_map)
     }
 
-    pub fn from_protobuf(proto: &ActorMapping) -> Self {
+    pub fn from_protobuf(proto: &ActorMappingProto) -> Self {
         Self {
             original_indices: proto.original_indices.clone(),
             data: proto.data.clone(),
         }
     }
 
-    pub fn to_protobuf(&self) -> ActorMapping {
-        ActorMapping {
+    pub fn to_protobuf(&self) -> ActorMappingProto {
+        ActorMappingProto {
             original_indices: self.original_indices.clone(),
             data: self.data.clone(),
         }
     }
 }
 
-impl ParallelUnitMapping2 {
+impl ParallelUnitMapping {
     /// Build a vnode mapping according to parallel units where the fragment is scheduled.
     /// For example, if `parallel_units` is `[0, 1, 2]`, and the total vnode count is 10, we'll
     /// generate mapping like `[0, 0, 0, 0, 1, 1, 1, 2, 2, 2]`.
-    pub fn new_uniform_parallel_units(parallel_units: &[ParallelUnit]) -> Self {
+    pub fn build(parallel_units: &[ParallelUnit]) -> Self {
         Self::new_uniform(parallel_units.iter().map(|pu| pu.id))
     }
 
-    pub fn to_actor(&self, to_map: &HashMap<ParallelUnitId, ActorId>) -> ActorMapping2 {
+    pub fn to_actor(&self, to_map: &HashMap<ParallelUnitId, ActorId>) -> ActorMapping {
         self.transform(to_map)
     }
 
-    pub fn from_protobuf(proto: &ParallelUnitMapping) -> Self {
+    pub fn from_protobuf(proto: &ParallelUnitMappingProto) -> Self {
         Self {
             original_indices: proto.original_indices.clone(),
             data: proto.data.clone(),
@@ -209,8 +217,8 @@ impl ParallelUnitMapping2 {
     }
 
     // TODO: remove the `fragment_id`
-    pub fn to_protobuf(&self, fragment_id: FragmentId) -> ParallelUnitMapping {
-        ParallelUnitMapping {
+    pub fn to_protobuf(&self, fragment_id: FragmentId) -> ParallelUnitMappingProto {
+        ParallelUnitMappingProto {
             fragment_id,
             original_indices: self.original_indices.clone(),
             data: self.data.clone(),
