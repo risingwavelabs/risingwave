@@ -194,6 +194,10 @@ impl PlanRoot {
 
     /// Apply logical optimization to the plan.
     pub fn gen_optimized_logical_plan(&self) -> Result<PlanRef> {
+        self.gen_optimized_logical_plan_inner(false)
+    }
+
+    fn gen_optimized_logical_plan_inner(&self, for_stream: bool) -> Result<PlanRef> {
         let mut plan = self.plan.clone();
         let ctx = plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -314,6 +318,16 @@ impl PlanRoot {
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string().unwrap());
+        }
+
+        // If for stream, push down predicates with now into a left-semi join
+        if for_stream {
+            plan = self.optimize_by_rules(
+                plan,
+                "Push down filter with now into a left semijoin".to_string(),
+                vec![FilterWithNowToJoinRule::create()],
+                ApplyOrder::TopDown,
+            );
         }
 
         // Push down the calculation of inputs of join's condition.
@@ -542,6 +556,10 @@ impl PlanRoot {
         Ok(plan)
     }
 
+    pub fn gen_optimized_logical_plan_for_stream(&self) -> Result<PlanRef> {
+        self.gen_optimized_logical_plan_inner(true)
+    }
+
     /// Generate create index or create materialize view plan.
     fn gen_stream_plan(&mut self) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
@@ -549,7 +567,7 @@ impl PlanRoot {
 
         let plan = match self.plan.convention() {
             Convention::Logical => {
-                let plan = self.gen_optimized_logical_plan()?;
+                let plan = self.gen_optimized_logical_plan_for_stream()?;
 
                 let (plan, out_col_change) =
                     plan.logical_rewrite_for_stream(&mut Default::default())?;
