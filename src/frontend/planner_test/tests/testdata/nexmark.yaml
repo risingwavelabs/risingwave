@@ -455,11 +455,11 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], primary key: [$2 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [2] }
-     Table 1 { columns: [bid.price, bid._row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 2 { columns: [max(bid.price), (TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), ((TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval) - '00:00:10':Interval)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
-     Table 3 { columns: [max(bid.price), (TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 4 { columns: [(TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), count, max(bid.price)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
+     Table 0 { columns: [bid_auction, bid_bidder, bid_price, bid_date_time, bid__row_id], primary key: [$2 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [2] }
+     Table 1 { columns: [bid_price, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 2 { columns: [max(bid_price), (TumbleStart(bid_date_time, '00:00:10':Interval) + '00:00:10':Interval), ((TumbleStart(bid_date_time, '00:00:10':Interval) + '00:00:10':Interval) - '00:00:10':Interval)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 3 { columns: [max(bid_price), (TumbleStart(bid_date_time, '00:00:10':Interval) + '00:00:10':Interval), _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
+     Table 4 { columns: [(TumbleStart(bid_date_time, '00:00:10':Interval) + '00:00:10':Interval), count, max(bid_price)], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
      Table 4294967294 { columns: [auction, price, bidder, date_time, bid._row_id, (TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), max(bid.price)], primary key: [$4 ASC, $5 ASC, $1 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [1] }
 - id: nexmark_q8
   before:
