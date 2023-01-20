@@ -45,6 +45,8 @@ pub struct KafkaConfig {
     #[serde(rename = "kafka.topic")]
     pub topic: String,
 
+    pub use_transaction: bool,
+
     // Optional. If not specified, the default value is None and messages are sent to random
     // partition. if we want to guarantee exactly once delivery, we need to specify the
     // partition number. The partition number should set by meta.
@@ -73,12 +75,17 @@ impl KafkaConfig {
                 "format must be set to \"append_only\" or \"debezium\"".to_string(),
             ));
         }
+        let use_txn = values
+            .get("use_transaction")
+            .map(|v| v == "true")
+            .unwrap_or(false);
 
         let topic = values.get("kafka.topic").expect("kafka.topic must be set");
 
         Ok(KafkaConfig {
             brokers: brokers.to_string(),
             topic: topic.to_string(),
+            use_transaction: use_txn,
             identifier: identifier.to_owned(),
             partition: None,
             timeout: Duration::from_secs(5), // default timeout is 5 seconds
@@ -270,18 +277,22 @@ impl Sink for KafkaSink {
     // transaction.
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.in_transaction_epoch = Some(epoch);
-        self.do_with_retry(|conductor| conductor.start_transaction())
-            .await?;
-        tracing::debug!("begin epoch {:?}", epoch);
+        if self.config.use_transaction {
+            self.do_with_retry(|conductor| conductor.start_transaction())
+                .await?;
+            tracing::debug!("begin epoch {:?}", epoch);
+        }
         Ok(())
     }
 
     async fn commit(&mut self) -> Result<()> {
-        self.do_with_retry(|conductor| conductor.flush()) // flush before commit
-            .await?;
+        if self.config.use_transaction {
+            self.do_with_retry(|conductor| conductor.flush()) // flush before commit
+                .await?;
 
-        self.do_with_retry(|conductor| conductor.commit_transaction())
-            .await?;
+            self.do_with_retry(|conductor| conductor.commit_transaction())
+                .await?;
+        }
         if let Some(epoch) = self.in_transaction_epoch.take() {
             self.state = KafkaSinkState::Running(epoch);
         } else {
@@ -296,9 +307,11 @@ impl Sink for KafkaSink {
     }
 
     async fn abort(&mut self) -> Result<()> {
-        self.do_with_retry(|conductor| conductor.abort_transaction())
-            .await?;
-        tracing::debug!("abort epoch {:?}", self.in_transaction_epoch);
+        if self.config.use_transaction {
+            self.do_with_retry(|conductor| conductor.abort_transaction())
+                .await?;
+            tracing::debug!("abort epoch {:?}", self.in_transaction_epoch);
+        }
         self.in_transaction_epoch = None;
         Ok(())
     }
