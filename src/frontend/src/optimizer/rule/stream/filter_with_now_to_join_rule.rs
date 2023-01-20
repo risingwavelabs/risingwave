@@ -52,7 +52,7 @@ impl Rule for FilterWithNowToJoinRule {
         // increasing)
         now_filters.sort_by_key(|l| rank_cmp(l.get_expr_type()));
 
-        // Ignore no filter & forbid now filters that do not create a watermark
+        // Ignore no now filter & forbid now filters that do not create a watermark
         if now_filters.is_empty()
             || !matches!(
                 now_filters[0].get_expr_type(),
