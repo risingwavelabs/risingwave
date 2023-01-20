@@ -443,7 +443,7 @@ where
                 let vnode_mapping = fragment
                     .vnode_mapping
                     .as_ref()
-                    .map(|m| ParallelUnitMapping::from_protobuf(m))
+                    .map(ParallelUnitMapping::from_protobuf)
                     .clone();
 
                 for actor in &fragment.actors {

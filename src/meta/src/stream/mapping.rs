@@ -54,7 +54,7 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     pub fn new_uniform(items: impl ExactSizeIterator<Item = T::Item>) -> Self {
         // If the number of items is greater than the total vnode count, no vnode will be mapped to
         // some items and the mapping will be invalid.
-        assert!(items.len() < VirtualNode::COUNT);
+        assert!(items.len() <= VirtualNode::COUNT);
 
         let mut original_indices = Vec::with_capacity(items.len());
         let mut data = Vec::with_capacity(items.len());
@@ -143,6 +143,7 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         let mut raw = vec![None; VirtualNode::COUNT];
 
         for (&item, bitmap) in bitmaps {
+            assert_eq!(bitmap.len(), VirtualNode::COUNT);
             for idx in bitmap.iter_ones() {
                 if let Some(prev) = raw[idx].replace(item) {
                     panic!("mapping at index `{idx}` is set to both `{prev:?}` and `{item:?}`");
@@ -161,7 +162,7 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     /// Create a vnode mapping from the expanded slice of items with length [`VirtualNode::COUNT`].
     pub fn from_expanded(items: &[T::Item]) -> Self {
         assert_eq!(items.len(), VirtualNode::COUNT);
-        let (original_indices, data) = compress_data(&items);
+        let (original_indices, data) = compress_data(items);
         Self {
             original_indices,
             data,

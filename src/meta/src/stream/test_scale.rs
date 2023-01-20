@@ -43,8 +43,7 @@ mod tests {
     fn build_fake_actors(info: &[(ActorId, ParallelUnitId)]) -> Vec<StreamActor> {
         let parallel_units = generate_parallel_units(info);
 
-        let vnode_bitmaps =
-            ParallelUnitMapping::build(&parallel_units).to_bitmaps();
+        let vnode_bitmaps = ParallelUnitMapping::build(&parallel_units).to_bitmaps();
 
         info.iter()
             .map(|(actor_id, parallel_unit_id)| StreamActor {
@@ -135,8 +134,7 @@ mod tests {
                 .map(|i| (i as ActorId, i as ParallelUnitId))
                 .collect_vec();
             let parallel_units = generate_parallel_units(&info);
-            let bitmaps =
-                ParallelUnitMapping::build(&parallel_units).to_bitmaps();
+            let bitmaps = ParallelUnitMapping::build(&parallel_units).to_bitmaps();
             check_bitmaps(&bitmaps);
         }
     }
