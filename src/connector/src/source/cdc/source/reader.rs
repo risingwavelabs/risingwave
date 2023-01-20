@@ -13,70 +13,69 @@
 // limitations under the License.
 
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use futures::pin_mut;
+use futures::{pin_mut, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::connector_service::GetEventStreamResponse;
 use risingwave_rpc_client::ConnectorClient;
 
-use crate::source::base::{SourceMessage, SplitReader};
+use crate::impl_common_split_reader_logic;
+use crate::parser::ParserConfig;
+use crate::source::base::SourceMessage;
 use crate::source::cdc::CdcProperties;
-use crate::source::{BoxSourceStream, Column, ConnectorState, SplitImpl};
+use crate::source::monitor::SourceMetrics;
+use crate::source::{Column, SourceInfo, SplitId, SplitImpl, SplitMetaData};
+
+impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
 
 pub struct CdcSplitReader {
     source_id: u64,
     start_offset: Option<String>,
     conn_props: CdcProperties,
+
+    split_id: SplitId,
+    parser_config: ParserConfig,
+    metrics: Arc<SourceMetrics>,
+    source_info: SourceInfo,
 }
 
-#[async_trait]
-impl SplitReader for CdcSplitReader {
-    type Properties = CdcProperties;
-
+impl CdcSplitReader {
+    #[allow(clippy::unused_async)]
     async fn new(
         conn_props: CdcProperties,
-        state: ConnectorState,
+        splits: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        metrics: Arc<SourceMetrics>,
+        source_info: SourceInfo,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        if let Some(splits) = state {
-            let split = splits
-                .into_iter()
-                .exactly_one()
-                .map_err(|e| anyhow!("failed to create cdc split reader: {e}"))?;
-
-            match split {
-                SplitImpl::MySqlCdc(split) => {
-                    return Ok(Self {
-                        source_id: split.source_id as u64,
-                        start_offset: split.start_offset,
-                        conn_props,
-                    });
-                }
-                SplitImpl::PostgresCdc(split) => {
-                    return Ok(Self {
-                        source_id: split.source_id as u64,
-                        start_offset: split.start_offset,
-                        conn_props,
-                    });
-                }
-                _ => {}
-            }
+        assert!(splits.len() == 1);
+        let split = splits.into_iter().next().unwrap();
+        let split_id = split.id();
+        match split {
+            SplitImpl::MySqlCdc(split) | SplitImpl::PostgresCdc(split) => Ok(Self {
+                source_id: split.source_id as u64,
+                start_offset: split.start_offset,
+                conn_props,
+                split_id,
+                parser_config,
+                metrics,
+                source_info,
+            }),
+            _ => Err(anyhow!(
+                "failed to create cdc split reader: invalid splis info"
+            )),
         }
-        Err(anyhow!("failed to create cdc split reader: invalid state"))
-    }
-
-    fn into_stream(self) -> BoxSourceStream {
-        self.into_stream()
     }
 }
 
 impl CdcSplitReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    pub async fn into_stream(self) {
+    async fn into_data_stream(self) {
         tracing::debug!("cdc props: {:?}", self.conn_props);
         let cdc_client =
             ConnectorClient::new(HostAddr::from_str(&self.conn_props.connector_node_addr)?).await?;
