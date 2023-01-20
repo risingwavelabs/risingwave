@@ -83,6 +83,10 @@ impl BloomFilterReader {
         self.data.is_empty()
     }
 
+    pub fn get_raw_data(&self) -> &[u8] {
+        &self.data
+    }
+
     /// Judges whether the hash value is in the table with the given false positive rate.
     ///
     /// Note:
@@ -91,7 +95,7 @@ impl BloomFilterReader {
     ///   - if the return value is true, then the table may or may not have the user key that has
     ///     the hash actually, a.k.a. we don't know the answer.
     pub fn may_match(&self, mut h: u32) -> bool {
-        if self.k > 30 {
+        if self.k > 30 || self.k == 00 {
             // potential new encoding for short Bloom filters
             true
         } else {

@@ -508,7 +508,7 @@ pub(super) mod tests {
         assert_eq!(table.has_bloom_filter(), with_blooms);
         for i in 0..key_count {
             let full_key = test_key_of(i);
-            assert!(!table.surely_not_have_dist_key(full_key.user_key.encode().as_slice()));
+            assert!(table.may_match(full_key.user_key.encode().as_slice()));
         }
     }
 

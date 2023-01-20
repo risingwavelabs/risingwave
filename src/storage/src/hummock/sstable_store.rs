@@ -869,14 +869,22 @@ mod tests {
     async fn validate_sst(
         sstable_store: SstableStoreRef,
         info: &SstableInfo,
-        meta: SstableMeta,
+        mut meta: SstableMeta,
         x_range: Range<usize>,
     ) {
         let mut stats = StoreLocalStatistic::default();
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
+        let mut filter_data = std::mem::take(&mut meta.bloom_filter);
+        if !filter_data.is_empty() {
+            filter_data.pop();
+        }
         assert_eq!(holder.value().meta, meta);
         let holder = sstable_store.sstable(info, &mut stats).await.unwrap();
         assert_eq!(holder.value().meta, meta);
+        assert_eq!(
+            filter_data.as_slice(),
+            holder.value().filter_reader.get_raw_data()
+        );
         let mut iter = SstableIterator::new(
             holder,
             sstable_store,

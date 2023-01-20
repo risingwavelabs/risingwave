@@ -415,12 +415,11 @@ pub fn hit_sstable_bloom_filter(
     local_stats: &mut StoreLocalStatistic,
 ) -> bool {
     local_stats.bloom_filter_check_counts += 1;
-    let surely_not_have = sstable_info_ref.surely_not_have_hashvalue(prefix_hash);
-
-    if surely_not_have {
+    let may_exist = sstable_info_ref.may_match_hash(prefix_hash);
+    if !may_exist {
         local_stats.bloom_filter_true_negative_count += 1;
     }
-    !surely_not_have
+    may_exist
 }
 
 /// Get `user_value` from `OrderSortedUncommittedData`. If not get successful, return None.

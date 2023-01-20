@@ -147,16 +147,16 @@ impl Sstable {
         !self.filter_reader.is_empty()
     }
 
-    pub fn surely_not_have_dist_key(&self, dist_key: &[u8]) -> bool {
+    pub fn may_match(&self, dist_key: &[u8]) -> bool {
         let enable_bloom_filter: fn() -> bool = || {
             fail_point!("disable_bloom_filter", |_| false);
             true
         };
         if enable_bloom_filter() && self.has_bloom_filter() {
             let hash = xxh32::xxh32(dist_key, 0);
-            self.surely_not_have_hashvalue(hash)
+            self.may_match_hash(hash)
         } else {
-            false
+            true
         }
     }
 
@@ -166,8 +166,8 @@ impl Sstable {
     }
 
     #[inline(always)]
-    pub fn surely_not_have_hashvalue(&self, hash: u32) -> bool {
-        !self.filter_reader.may_match(hash)
+    pub fn may_match_hash(&self, hash: u32) -> bool {
+        self.filter_reader.may_match(hash)
     }
 
     pub fn block_count(&self) -> usize {
