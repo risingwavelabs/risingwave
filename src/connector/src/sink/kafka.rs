@@ -277,22 +277,18 @@ impl Sink for KafkaSink {
     // transaction.
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.in_transaction_epoch = Some(epoch);
-        if self.config.use_transaction {
-            self.do_with_retry(|conductor| conductor.start_transaction())
-                .await?;
-            tracing::debug!("begin epoch {:?}", epoch);
-        }
+        self.do_with_retry(|conductor| conductor.start_transaction())
+            .await?;
+        tracing::debug!("begin epoch {:?}", epoch);
         Ok(())
     }
 
     async fn commit(&mut self) -> Result<()> {
-        if self.config.use_transaction {
-            self.do_with_retry(|conductor| conductor.flush()) // flush before commit
-                .await?;
+        self.do_with_retry(|conductor| conductor.flush()) // flush before commit
+            .await?;
 
-            self.do_with_retry(|conductor| conductor.commit_transaction())
-                .await?;
-        }
+        self.do_with_retry(|conductor| conductor.commit_transaction())
+            .await?;
         if let Some(epoch) = self.in_transaction_epoch.take() {
             self.state = KafkaSinkState::Running(epoch);
         } else {
@@ -307,11 +303,9 @@ impl Sink for KafkaSink {
     }
 
     async fn abort(&mut self) -> Result<()> {
-        if self.config.use_transaction {
-            self.do_with_retry(|conductor| conductor.abort_transaction())
-                .await?;
-            tracing::debug!("abort epoch {:?}", self.in_transaction_epoch);
-        }
+        self.do_with_retry(|conductor| conductor.abort_transaction())
+            .await?;
+        tracing::debug!("abort epoch {:?}", self.in_transaction_epoch);
         self.in_transaction_epoch = None;
         Ok(())
     }
@@ -472,7 +466,9 @@ impl KafkaTransactionConductor {
             .create()
             .await?;
 
-        inner.init_transactions(config.timeout).await?;
+        if config.use_transaction {
+            inner.init_transactions(config.timeout).await?;
+        }
 
         Ok(KafkaTransactionConductor {
             properties: config,
@@ -482,15 +478,27 @@ impl KafkaTransactionConductor {
 
     #[expect(clippy::unused_async)]
     async fn start_transaction(&self) -> KafkaResult<()> {
-        self.inner.begin_transaction()
+        if self.properties.use_transaction {
+            self.inner.begin_transaction()
+        } else {
+            Ok(())
+        }
     }
 
     async fn commit_transaction(&self) -> KafkaResult<()> {
-        self.inner.commit_transaction(self.properties.timeout).await
+        if self.properties.use_transaction {
+            self.inner.commit_transaction(self.properties.timeout).await
+        } else {
+            Ok(())
+        }
     }
 
     async fn abort_transaction(&self) -> KafkaResult<()> {
-        self.inner.abort_transaction(self.properties.timeout).await
+        if self.properties.use_transaction {
+            self.inner.abort_transaction(self.properties.timeout).await
+        } else {
+            Ok(())
+        }
     }
 
     async fn flush(&self) -> KafkaResult<()> {
