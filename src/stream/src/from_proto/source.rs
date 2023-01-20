@@ -15,15 +15,17 @@
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::SourceNode;
-use risingwave_source::connector_source::SourceDescBuilderV2;
+use risingwave_source::source_desc::SourceDescBuilder;
 use risingwave_storage::panic_store::PanicStateStore;
 use tokio::sync::mpsc::unbounded_channel;
 
 use super::*;
-use crate::executor::source_executor::{SourceExecutor, StreamSourceCore};
+use crate::executor::source::StreamSourceCore;
+use crate::executor::source_executor::SourceExecutor;
 use crate::executor::state_table_handler::SourceStateTableHandler;
 use crate::executor::FsSourceExecutor;
 
+const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
 
 #[async_trait::async_trait]
@@ -46,7 +48,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             let source_id = TableId::new(source.source_id);
             let source_name = source.source_name.clone();
 
-            let source_desc_builder = SourceDescBuilderV2::new(
+            let source_desc_builder = SourceDescBuilder::new(
                 source.columns.clone(),
                 params.env.source_metrics(),
                 source.pk_column_ids.clone(),
@@ -83,40 +85,33 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 store.clone(),
             )
             .await;
+            let stream_source_core = StreamSourceCore::new(
+                source_id,
+                source_name,
+                column_ids,
+                source_desc_builder,
+                state_table_handler,
+            );
 
-            // so ugly here, need some graceful method
-            let is_s3 = source
+            let connector = source
                 .properties
                 .get("connector")
-                .map(|s| s.to_lowercase())
-                .unwrap_or_default()
-                .eq("s3");
-            if is_s3 {
+                .map(|c| c.to_ascii_lowercase())
+                .unwrap_or_default();
+            let is_fs_connector = FS_CONNECTORS.contains(&connector.as_str());
+
+            if is_fs_connector {
                 Ok(Box::new(FsSourceExecutor::new(
                     params.actor_context,
-                    source_desc_builder,
-                    source_id,
-                    source_name,
-                    state_table_handler,
-                    column_ids,
                     schema,
                     params.pk_indices,
-                    barrier_receiver,
-                    params.executor_id,
-                    params.operator_id,
-                    params.op_info,
+                    stream_source_core,
                     params.executor_stats,
+                    barrier_receiver,
                     stream.config.barrier_interval_ms as u64,
+                    params.executor_id,
                 )?))
             } else {
-                let stream_source_core = StreamSourceCore::new(
-                    source_id,
-                    source_name,
-                    column_ids,
-                    source_desc_builder,
-                    state_table_handler,
-                );
-
                 Ok(Box::new(SourceExecutor::new(
                     params.actor_context,
                     schema,

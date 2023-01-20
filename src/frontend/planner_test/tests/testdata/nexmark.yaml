@@ -407,8 +407,7 @@
       └─BatchFilter { predicate: (bid.date_time >= ((TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval) - '00:00:10':Interval)) AND (bid.date_time <= (TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval)) }
         └─BatchHashJoin { type: Inner, predicate: bid.price = max(bid.price), output: all }
           ├─BatchExchange { order: [], dist: HashShard(bid.price) }
-          | └─BatchProject { exprs: [bid.auction, bid.bidder, bid.price, bid.date_time, bid.date_time] }
-          |   └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time], distribution: SomeShard }
+          | └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time], distribution: SomeShard }
           └─BatchExchange { order: [], dist: HashShard(max(bid.price)) }
             └─BatchProject { exprs: [max(bid.price), (TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), ((TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval) - '00:00:10':Interval)] }
               └─BatchHashAgg { group_key: [(TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval)], aggs: [max(bid.price)] }
@@ -421,8 +420,7 @@
       └─StreamFilter { predicate: (bid.date_time >= ((TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval) - '00:00:10':Interval)) AND (bid.date_time <= (TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval)) }
         └─StreamHashJoin { type: Inner, predicate: bid.price = max(bid.price), output: all }
           ├─StreamExchange { dist: HashShard(bid.price) }
-          | └─StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.date_time, bid.date_time, bid._row_id] }
-          |   └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+          | └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
           └─StreamExchange { dist: HashShard(max(bid.price)) }
             └─StreamProject { exprs: [max(bid.price), (TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), ((TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval) - '00:00:10':Interval)] }
               └─StreamAppendOnlyHashAgg { group_key: [(TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval)], aggs: [count, max(bid.price)] }
@@ -441,10 +439,9 @@
               StreamExchange Hash([0]) from 2
 
     Fragment 1
-      StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.date_time, bid.date_time, bid._row_id] }
-        Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
-          Upstream
-          BatchPlanNode
+      Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+        Upstream
+        BatchPlanNode
 
     Fragment 2
       StreamProject { exprs: [max(bid.price), (TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval), ((TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval) - '00:00:10':Interval)] }
@@ -458,7 +455,7 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [bid_auction, bid_bidder, bid_price, bid_date_time, bid_date_time_0, bid__row_id], primary key: [$2 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [2] }
+     Table 0 { columns: [bid_auction, bid_bidder, bid_price, bid_date_time, bid__row_id], primary key: [$2 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [2] }
      Table 1 { columns: [bid_price, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
      Table 2 { columns: [max(bid_price), (TumbleStart(bid_date_time, '00:00:10':Interval) + '00:00:10':Interval), ((TumbleStart(bid_date_time, '00:00:10':Interval) + '00:00:10':Interval) - '00:00:10':Interval)], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
      Table 3 { columns: [max(bid_price), (TumbleStart(bid_date_time, '00:00:10':Interval) + '00:00:10':Interval), _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }

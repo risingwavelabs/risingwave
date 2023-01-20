@@ -124,8 +124,10 @@ async fn main() {
     use risingwave_simulation::client::RisingWave;
     use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts};
     use risingwave_simulation::slt::*;
+    use tracing_subscriber::EnvFilter;
 
     tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
         // no ANSI color codes when output to file
         .with_ansi(console::colors_enabled_stderr() && console::colors_enabled())
         .with_writer(std::io::stderr)
