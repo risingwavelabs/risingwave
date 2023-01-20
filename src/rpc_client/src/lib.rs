@@ -186,7 +186,7 @@ macro_rules! meta_rpc_client_method_impl {
                 }
 
                 // TODO: Can I also manually release the mutex guard instead of changing the scope?
-                    
+
                 // repeat request if we were connected against the wrong node
                 if self.do_failover_if_needed().await {
                     return Ok(self

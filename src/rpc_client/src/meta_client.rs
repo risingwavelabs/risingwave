@@ -978,7 +978,6 @@ const GRPC_REQUEST_RETRY_MAX_ATTEMPTS: usize = 10;
 const GRPC_REQUEST_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
 impl GrpcMetaClient {
-    // TODO: Do I still need this function?
     pub fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
         GrpcMetaClient::retry_strategy_for_request()
     }
@@ -1124,7 +1123,7 @@ impl GrpcMetaClient {
         // Dummy address forces a client failover
         let dummy_address = HostAddress {
             host: "dummy".to_owned(),
-            port: 1234,
+            port: -1,
         };
 
         let client = GrpcMetaClient {
