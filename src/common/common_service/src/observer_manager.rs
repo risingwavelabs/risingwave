@@ -231,8 +231,6 @@ impl RpcNotificationClient {
 impl NotificationClient for RpcNotificationClient {
     type Channel = Streaming<SubscribeResponse>;
 
-    // TODO: also handle failover here?
-    // Should meta client have a failover thing?
     async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel> {
         let mut res = self
             .meta_client
@@ -245,7 +243,7 @@ impl NotificationClient for RpcNotificationClient {
                 return res;
             }
 
-            // retry only if we have an incorrect connection
+            // retry only on meta failure or if we connected against a follower
             if !self.meta_client.do_failover_if_needed().await {
                 return res;
             }
