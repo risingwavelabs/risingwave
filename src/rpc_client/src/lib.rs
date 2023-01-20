@@ -170,6 +170,56 @@ macro_rules! rpc_client_method_impl {
 macro_rules! meta_rpc_client_method_impl {
     ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
         $(
+            pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
+                let req_clone = request.clone();
+
+                // TODO: do I need the extra scope here?
+                {
+                    let response = self
+                        .$client
+                        .as_ref()
+                        .lock()
+                        .await
+                        .$fn_name(request.clone())
+                        .await;
+
+                    // meta server is leader. Connection is correct
+                    if response.is_ok() {
+                        return Ok(response.unwrap().into_inner());
+                    }
+
+                    // TODO: Can I also manually release the mutex guard instead of changing the scope?
+                    // repeat request if we were connected against the wrong node
+                    let mut did_failover = false;
+                    {
+                        did_failover = self.do_failover_if_needed().await;
+                    }
+
+                    if did_failover {
+                        return Ok(self
+                            .$client
+                            .as_ref()
+                            .lock()
+                            .await
+                            .$fn_name(req_clone)
+                            .await?
+                            .into_inner());
+                    }
+
+                    response?;
+                    panic!("unreachable code reached");
+                } // release MutexGuard on $client
+            }
+        )*
+    }
+}
+
+// TODO: remove this macro below. It is deprecated
+// separate macro for connections against meta server to handle meta node failover
+#[macro_export]
+macro_rules! meta_rpc_client_method_impl_rm_me_deprecated {
+    ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
+        $(
             // TODO: what is the difference between this and d97842031?
             // Why is the current version so spammy?
             // Cannot be only because I am using a request without a retry

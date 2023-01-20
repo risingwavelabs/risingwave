@@ -81,6 +81,7 @@ pub struct MetaClient {
 }
 
 impl MetaClient {
+    // TODO: Do I still need this function?
     pub fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
         GrpcMetaClient::retry_strategy_for_request()
     }
@@ -90,6 +91,7 @@ impl MetaClient {
     // Node may return a stale leader
     async fn try_get_leader_from_connected_node(&self) -> Option<HostAddress> {
         for retry in GrpcMetaClient::retry_strategy_for_request() {
+            tracing::info!("in try_get_leader_from_connected_node"); // TODO: Remove line
             let mut lc = self.inner.leader_client.as_ref().lock().await;
             let response = lc.leader(LeaderRequest {}).await;
 
@@ -101,6 +103,7 @@ impl MetaClient {
                     || err_code == tonic::Code::Unimplemented
                     || err_code == tonic::Code::Unknown
                 {
+                    tracing::info!("try_get_leader_from_connected_node: None"); // TODO: Remove line
                     return None;
                 }
                 tokio::time::sleep(retry).await;
@@ -111,6 +114,10 @@ impl MetaClient {
                 .into_inner()
                 .leader_addr
                 .expect("Meta node is supposed to know who the leader is");
+            tracing::info!(
+                "try_get_leader_from_connected_node: {:?}",
+                current_leader.clone()
+            ); // TODO: Remove line
             return Some(current_leader);
         }
         None
@@ -130,11 +137,16 @@ impl MetaClient {
             .into_inner()
             .leader_addr
             .expect("Meta node is supposed to know who the leader is");
+        tracing::info!(
+            "get_current_leader_from_service: {:?}",
+            current_leader.clone()
+        ); // TODO: Remove line
         current_leader
     }
 
     async fn do_failover(&self, mut current_leader_init: Option<HostAddress>) {
         for retry in self.get_retry_strategy() {
+            tracing::info!("in do_failover"); // TODO: Remove line
             let current_leader = match current_leader_init {
                 Some(l) => l,
                 None => self.get_current_leader_from_service().await,
@@ -190,15 +202,23 @@ impl MetaClient {
     // Execute the failover if it is needed. If no failover is needed do nothing
     // Returns true if failover was needed, else false
     pub async fn do_failover_if_needed(&self) -> bool {
+        // TODO: Remove this function and remove all related functions in MetaClient
+        return self.inner.do_failover_if_needed().await;
+
+        tracing::info!("in MetaClient.do_failover_if_needed"); // TODO: Remove line
         let current_leader = self.try_get_leader_from_connected_node().await;
+
         let current_leader_clone = current_leader.clone();
         {
             let connected_node = self.inner.leader_address.as_ref().lock().await.clone();
+
             if current_leader.is_some() && current_leader.unwrap() == connected_node {
+                tracing::info!("Failover NOT needed"); // TODO: Remove this line
                 return false;
             }
             // release mutex guard after this scope
         }
+        tracing::info!("Failover NEEDED"); // TODO: Remove this line
         self.do_failover(current_leader_clone).await;
         true
     }
@@ -1170,9 +1190,10 @@ async fn get_channel(
             .connect()
             .await
             .inspect_err(|e| {
+                panic!("lets find out where this was called from. Addr: {}", addr); // TODO: remove line
                 let wait_msg = if retry { ", wait for online" } else { "" };
                 tracing::warn!(
-                    "Failed to connect to meta server {}{}:{}",
+                    "Failed to connect to meta server {}{}: {}",
                     addr,
                     wait_msg,
                     e
@@ -1234,6 +1255,144 @@ const GRPC_REQUEST_RETRY_MAX_ATTEMPTS: usize = 10;
 const GRPC_REQUEST_RETRY_MAX_INTERVAL_MS: u64 = 5000;
 
 impl GrpcMetaClient {
+    // TODO: Do I still need this function?
+    pub fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
+        GrpcMetaClient::retry_strategy_for_request()
+    }
+
+    // None if leader is presumed failed
+    // HostAddress if connected against a working leader or follower node
+    // Node may return a stale leader
+    async fn try_get_leader_from_connected_node(&self) -> Option<HostAddress> {
+        for retry in GrpcMetaClient::retry_strategy_for_request() {
+            tracing::info!("in try_get_leader_from_connected_node"); // TODO: Remove line
+            let mut lc = self.leader_client.as_ref().lock().await;
+            let response = lc.leader(LeaderRequest {}).await;
+
+            // assume leader node crashed if err is unavailable, unimplemented or unknown
+            // else repeat request
+            if response.is_err() {
+                let err_code = response.err().unwrap().code();
+                if err_code == tonic::Code::Unavailable
+                    || err_code == tonic::Code::Unimplemented
+                    || err_code == tonic::Code::Unknown
+                {
+                    tracing::info!("try_get_leader_from_connected_node: None"); // TODO: Remove line
+                    return None;
+                }
+                tokio::time::sleep(retry).await;
+                continue;
+            }
+            let current_leader = response
+                .unwrap()
+                .into_inner()
+                .leader_addr
+                .expect("Meta node is supposed to know who the leader is");
+            tracing::info!(
+                "try_get_leader_from_connected_node: {:?}",
+                current_leader.clone()
+            ); // TODO: Remove line
+            return Some(current_leader);
+        }
+        None
+    }
+
+    // Retrieve the leader from any of the meta nodes via a K8s service / load-balancer
+    async fn get_current_leader_from_service(&self) -> HostAddress {
+        // TODO: address of the service channel should not be hardcoded
+        let service_channel = get_channel_with_defaults("http://127.0.0.1:1234")
+            .await
+            .unwrap();
+        let mut lc = LeaderServiceClient::new(service_channel);
+        // TODO: retry this. May be send to overwhelmed node
+        let response = lc.leader(LeaderRequest {}).await;
+        let current_leader = response
+            .unwrap()
+            .into_inner()
+            .leader_addr
+            .expect("Meta node is supposed to know who the leader is");
+        tracing::info!(
+            "get_current_leader_from_service: {:?}",
+            current_leader.clone()
+        ); // TODO: Remove line
+        current_leader
+    }
+
+    async fn do_failover(&self, mut current_leader_init: Option<HostAddress>) {
+        for retry in self.get_retry_strategy() {
+            tracing::info!("in do_failover"); // TODO: Remove line
+            let current_leader = match current_leader_init {
+                Some(l) => l,
+                None => self.get_current_leader_from_service().await,
+            };
+            // always use service for retries
+            current_leader_init = None;
+
+            // TODO: How do we know that it always is http?
+            let addr = format!(
+                "http://{}:{}",
+                current_leader.get_host(),
+                current_leader.get_port()
+            );
+            tracing::info!("Failing over to new meta leader {}", addr);
+            let leader_channel = match get_channel_with_defaults(addr.as_str()).await {
+                Ok(lc) => lc,
+                Err(_) => {
+                    tracing::error!("Failed to establish connection leader {}. Seems to be stale leader info. Retrying...", addr);
+                    tokio::time::sleep(retry).await;
+                    continue;
+                }
+            };
+
+            // Hold locks on all sub-clients, to update atomically
+            {
+                let mut leader_c = self.leader_client.as_ref().lock().await;
+                let mut cluster_c = self.cluster_client.as_ref().lock().await;
+                let mut heartbeat_c = self.heartbeat_client.as_ref().lock().await;
+                let mut ddl_c = self.ddl_client.as_ref().lock().await;
+                let mut hummock_c = self.hummock_client.as_ref().lock().await;
+                let mut notification_c = self.notification_client.as_ref().lock().await;
+                let mut stream_c = self.stream_client.as_ref().lock().await;
+                let mut user_c = self.user_client.as_ref().lock().await;
+                let mut scale_c = self.scale_client.as_ref().lock().await;
+                let mut backup_c = self.backup_client.as_ref().lock().await;
+
+                *leader_c = LeaderServiceClient::new(leader_channel.clone());
+                *cluster_c = ClusterServiceClient::new(leader_channel.clone());
+                *heartbeat_c = HeartbeatServiceClient::new(leader_channel.clone());
+                *ddl_c = DdlServiceClient::new(leader_channel.clone());
+                *hummock_c = HummockManagerServiceClient::new(leader_channel.clone());
+                *notification_c = NotificationServiceClient::new(leader_channel.clone());
+                *stream_c = StreamManagerServiceClient::new(leader_channel.clone());
+                *user_c = UserServiceClient::new(leader_channel.clone());
+                *scale_c = ScaleServiceClient::new(leader_channel.clone());
+                *backup_c = BackupServiceClient::new(leader_channel);
+            } // release MutexGuards on all clients
+
+            tracing::info!("Updated client to connect against new leader {}", addr);
+        }
+    }
+
+    // Execute the failover if it is needed. If no failover is needed do nothing
+    // Returns true if failover was needed, else false
+    pub async fn do_failover_if_needed(&self) -> bool {
+        tracing::info!("in GrpcMetaClient.do_failover_if_needed"); // TODO: Remove line
+
+        let current_leader = self.try_get_leader_from_connected_node().await;
+        let current_leader_clone = current_leader.clone();
+        {
+            let connected_node = self.leader_address.as_ref().lock().await.clone();
+            if current_leader.is_some() && current_leader.unwrap() == connected_node {
+                tracing::info!("failover was NOT needed");
+                return false;
+            }
+            // release mutex guard after this scope
+        }
+        tracing::info!("failover was NEEDED");
+        self.do_failover(current_leader_clone).await;
+        true
+    }
+
     /// Connect to the meta server `addr`.
     pub async fn new(addr: &str) -> Result<Self> {
         // TODO: We only want to retrieve the actual leader via the proxy.
@@ -1243,30 +1402,41 @@ impl GrpcMetaClient {
         let channel = get_channel_with_defaults(addr).await?;
 
         let mut leader_client = LeaderServiceClient::new(channel.clone());
-        let resp = leader_client
-            .leader(LeaderRequest {})
-            .await
-            .expect("Expect that leader service always knows who leader is")
-            .into_inner();
-        let leader_addr: HostAddress = resp
-            .leader_addr
-            .expect("Expect that leader service always knows who leader is");
-        let tmp = addr.split("://").collect::<Vec<&str>>();
-        let protocol = if tmp.len() == 1 {
-            "".to_owned()
-        } else {
-            format!("{}://", tmp[0])
-        };
-        let leader_addr_str = format!(
-            "{}{}:{}",
-            protocol,
-            leader_addr.get_host(),
-            leader_addr.get_port()
-        );
-        tracing::info!("Current leader is {}", leader_addr_str);
 
-        Ok(GrpcMetaClient {
-            leader_address: Arc::new(Mutex::new(leader_addr)),
+        // TODO: remove this part
+        if false {
+            let resp = leader_client
+                .leader(LeaderRequest {})
+                .await
+                .expect("Expect that leader service always knows who leader is")
+                .into_inner();
+            let leader_addr: HostAddress = resp
+                .leader_addr
+                .expect("Expect that leader service always knows who leader is");
+            let tmp = addr.split("://").collect::<Vec<&str>>();
+            let protocol = if tmp.len() == 1 {
+                "".to_owned()
+            } else {
+                format!("{}://", tmp[0])
+            };
+            let leader_addr_str = format!(
+                "{}{}:{}",
+                protocol,
+                leader_addr.get_host(),
+                leader_addr.get_port()
+            );
+            tracing::info!("Current leader is {}", leader_addr_str);
+        }
+
+        // Dummy address forces a client failover
+        let dummy_address = HostAddress {
+            host: "dummy".to_owned(),
+            port: 1234,
+        };
+
+        // TODO: I never update the channel to the actual leader channel
+        let client = GrpcMetaClient {
+            leader_address: Arc::new(Mutex::new(dummy_address)),
             leader_client: Arc::new(Mutex::new(LeaderServiceClient::new(channel.clone()))),
             cluster_client: Arc::new(Mutex::new(ClusterServiceClient::new(channel.clone()))),
             heartbeat_client: Arc::new(Mutex::new(HeartbeatServiceClient::new(channel.clone()))),
@@ -1281,7 +1451,12 @@ impl GrpcMetaClient {
             user_client: Arc::new(Mutex::new(UserServiceClient::new(channel.clone()))),
             scale_client: Arc::new(Mutex::new(ScaleServiceClient::new(channel.clone()))),
             backup_client: Arc::new(Mutex::new(BackupServiceClient::new(channel))),
-        })
+        };
+
+        // Original connection may be against follower meta node OR against a K8s service/Nginx LB
+        client.do_failover_if_needed().await;
+
+        Ok(client)
     }
 
     /// Return retry strategy for retrying meta requests.
