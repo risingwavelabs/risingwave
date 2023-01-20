@@ -73,7 +73,7 @@ impl DmlExecutor {
         let mut upstream = self.upstream.execute();
 
         // Construct the reader of batch data (DML from users). We must create a variable to hold
-        // this `Arc<TableSource>` here, or it will be dropped due to the `Weak` reference in
+        // this `Arc<TableDmlHandle>` here, or it will be dropped due to the `Weak` reference in
         // `DmlManager`.
         let batch_reader = self
             .dml_manager
