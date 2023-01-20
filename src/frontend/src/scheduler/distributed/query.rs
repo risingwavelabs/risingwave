@@ -584,7 +584,8 @@ pub(crate) mod tests {
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
-        worker_node_manager.insert_fragment_mapping(0, vec![]);
+        // FIXME(mapping)
+        // worker_node_manager.insert_fragment_mapping(0, vec![]);
         let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
         catalog.write().insert_table_id_mapping(table_id, 0);
         let catalog_reader = CatalogReader::new(catalog);

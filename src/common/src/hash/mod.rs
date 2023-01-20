@@ -18,3 +18,5 @@ mod dispatcher;
 pub use dispatcher::HashKeyDispatcher;
 mod vnode;
 pub use vnode::*;
+mod mapping;
+pub use mapping::*;

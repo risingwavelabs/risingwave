@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::util::compress::decompress_data;
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -126,11 +126,8 @@ impl ObserverState for FrontendObserverNode {
                          fragment_id,
                          mapping,
                      }| {
-                        let mapping = mapping.as_ref().unwrap();
-                        (
-                            *fragment_id,
-                            decompress_data(&mapping.original_indices, &mapping.data),
-                        )
+                        let mapping = ParallelUnitMapping::from_protobuf(mapping.as_ref().unwrap());
+                        (*fragment_id, mapping)
                     },
                 )
                 .collect(),
@@ -276,8 +273,9 @@ impl FrontendObserverNode {
             Info::ParallelUnitMapping(parallel_unit_mapping) => {
                 let fragment_id = parallel_unit_mapping.fragment_id;
                 let mapping = || {
-                    let mapping = parallel_unit_mapping.mapping.as_ref().unwrap();
-                    decompress_data(&mapping.original_indices, &mapping.data)
+                    ParallelUnitMapping::from_protobuf(
+                        parallel_unit_mapping.mapping.as_ref().unwrap(),
+                    )
                 };
 
                 match resp.operation() {
