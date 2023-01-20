@@ -17,8 +17,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
-
-use crate::SourceColumnDesc;
+use risingwave_connector::source::SourceColumnDesc;
 
 pub(crate) trait SourceChunkBuilder {
     fn build_columns<'a>(

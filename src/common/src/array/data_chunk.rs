@@ -344,11 +344,7 @@ impl DataChunk {
     /// `[c, b, a]`. If `column_mapping` is [2, 0], then the output will be `[c, a]`
     /// If the input mapping is identity mapping, no reorder will be performed.
     pub fn reorder_columns(self, column_mapping: &[usize]) -> Self {
-        if column_mapping
-            .iter()
-            .copied()
-            .eq((0..self.columns().len()).into_iter())
-        {
+        if column_mapping.iter().copied().eq(0..self.columns().len()) {
             return self;
         }
         let mut new_columns = Vec::with_capacity(column_mapping.len());

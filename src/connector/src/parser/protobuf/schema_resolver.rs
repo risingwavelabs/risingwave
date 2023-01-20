@@ -20,9 +20,9 @@ use protobuf_native::compiler::{SourceTreeDescriptorDatabase, VirtualSourceTree}
 use protobuf_native::MessageLite;
 use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_connector::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
 use url::Url;
 
+use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
 use crate::parser::schema_registry::Client;
 use crate::parser::util::download_from_http;
 
