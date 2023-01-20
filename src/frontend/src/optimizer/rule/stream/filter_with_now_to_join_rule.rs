@@ -16,7 +16,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::JoinType;
 
-use crate::expr::{ExprRewriter, FunctionCall, InputRef};
+use crate::expr::{ExprRewriter, FunctionCall, InputRef, try_derive_watermark};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalNow};
 use crate::optimizer::rule::{BoxedRule, Rule};
@@ -41,6 +41,11 @@ impl Rule for FilterWithNowToJoinRule {
         filter.predicate().conjunctions.iter().for_each(|expr| {
             if let Some((input_expr, cmp, now_expr)) = expr.as_now_comparison_cond() {
                 let now_expr = rewriter.rewrite_expr(now_expr);
+
+                // as a sanity check, ensure that this expression will derive a watermark
+                // on the output of the now executor
+                debug_assert_eq!(try_derive_watermark(&now_expr), Some(lhs_len));
+                
                 now_filters.push(FunctionCall::new(cmp, vec![input_expr, now_expr]).unwrap());
             } else {
                 remainder.push(expr.clone());
