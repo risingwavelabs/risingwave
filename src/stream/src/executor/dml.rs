@@ -17,7 +17,7 @@ use futures::stream::select;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
-use risingwave_connector::StreamChunkWithState;
+use risingwave_connector::source::StreamChunkWithState;
 use risingwave_source::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
@@ -73,7 +73,7 @@ impl DmlExecutor {
         let mut upstream = self.upstream.execute();
 
         // Construct the reader of batch data (DML from users). We must create a variable to hold
-        // this `Arc<TableSource>` here, or it will be dropped due to the `Weak` reference in
+        // this `Arc<TableDmlHandle>` here, or it will be dropped due to the `Weak` reference in
         // `DmlManager`.
         let batch_reader = self
             .dml_manager
