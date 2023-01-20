@@ -792,8 +792,7 @@ impl HummockVersionReader {
                 match level.level_type() {
                     LevelType::Overlapping | LevelType::Unspecified => {
                         if prune_overlapping_ssts(&level.table_infos, table_id, &table_key_range)
-                            .peekable()
-                            .peek()
+                            .next()
                             .is_some()
                         {
                             return Ok(false);
@@ -801,8 +800,7 @@ impl HummockVersionReader {
                     }
                     LevelType::Nonoverlapping => {
                         if prune_nonoverlapping_ssts(&level.table_infos, &encoded_user_key_range)
-                            .peekable()
-                            .peek()
+                            .next()
                             .is_some()
                         {
                             return Ok(false);

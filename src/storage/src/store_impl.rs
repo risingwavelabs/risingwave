@@ -395,6 +395,9 @@ pub mod verify {
     impl<A: LocalStateStore, E: LocalStateStore> LocalStateStore for VerifyStateStore<A, E> {
         define_local_state_store_associated_type!();
 
+        // We don't verify `surely_not_have` across different state stores because
+        // the return value of `surely_not_have` is implementation specific and may not
+        // be consistent across different state store backends.
         fn surely_not_have(
             &self,
             _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
@@ -794,14 +797,26 @@ pub mod boxed_state_store {
 
     // For LocalStateStore
 
+    #[async_trait::async_trait]
     pub trait DynamicDispatchedLocalStateStore:
         DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreWrite
     {
+        async fn surely_not_have(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            read_options: ReadOptions,
+        ) -> StorageResult<bool>;
     }
 
-    impl<S: DynamicDispatchedStateStoreRead + DynamicDispatchedStateStoreWrite>
-        DynamicDispatchedLocalStateStore for S
-    {
+    #[async_trait::async_trait]
+    impl<S: LocalStateStore> DynamicDispatchedLocalStateStore for S {
+        async fn surely_not_have(
+            &self,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            read_options: ReadOptions,
+        ) -> StorageResult<bool> {
+            self.surely_not_have(key_range, read_options).await
+        }
     }
 
     pub type BoxDynamicDispatchedLocalStateStore = Box<dyn DynamicDispatchedLocalStateStore>;
@@ -814,10 +829,10 @@ pub mod boxed_state_store {
 
         fn surely_not_have(
             &self,
-            _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-            _read_options: ReadOptions,
+            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            read_options: ReadOptions,
         ) -> Self::SurelyNotHaveFuture<'_> {
-            async move { Ok(false) }
+            self.deref().surely_not_have(key_range, read_options)
         }
     }
 
