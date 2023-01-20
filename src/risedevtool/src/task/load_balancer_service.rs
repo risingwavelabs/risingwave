@@ -42,7 +42,7 @@ impl LoadBalancerService {
         Ok(Command::new(self.nginx_path()?))
     }
 
-    // Creates nginx.conf in tmp dir, based on self.config.
+    // Creates nginx.conf in tmp dir, based on self.conf.
     // Overwrite if file already exists.
     // Returns tmp file location or panics
     fn create_config_file(&self) -> String {
