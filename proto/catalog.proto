@@ -10,7 +10,7 @@ option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 // The rust prost library always treats uint64 as required and message as
-// optional. In order to allow `row_id_index` as an optional field, we wrap 
+// optional. In order to allow `row_id_index` as an optional field, we wrap
 // uint64 inside this message.
 message ColumnIndex {
   uint64 index = 1;
