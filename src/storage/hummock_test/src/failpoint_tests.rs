@@ -29,7 +29,7 @@ use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
 use risingwave_storage::StateStore;
 
-use crate::get_test_notification_client;
+use crate::get_notification_client_for_test;
 use crate::test_utils::HummockV2MixedStateStore;
 
 #[tokio::test]
@@ -51,7 +51,7 @@ async fn test_failpoints_state_store_read_upload() {
         hummock_options.clone(),
         sstable_store.clone(),
         meta_client.clone(),
-        get_test_notification_client(env, hummock_manager_ref, worker_node),
+        get_notification_client_for_test(env, hummock_manager_ref, worker_node),
     )
     .await
     .unwrap();

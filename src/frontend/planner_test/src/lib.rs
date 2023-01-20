@@ -108,7 +108,10 @@ pub struct TestCase {
     pub stream_error: Option<String>,
 
     /// Support using file content or file location to create source.
-    pub create_source: Option<CreateSource>,
+    pub create_source: Option<CreateConnector>,
+
+    /// Support using file content or file location to create table with connector.
+    pub create_table_with_connector: Option<CreateConnector>,
 
     /// Provide config map to frontend
     pub with_config_map: Option<BTreeMap<String, String>>,
@@ -117,11 +120,11 @@ pub struct TestCase {
 #[serde_with::skip_serializing_none]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct CreateSource {
+pub struct CreateConnector {
     row_format: String,
     name: String,
     file: Option<String>,
-    materialized: Option<bool>,
+    is_table: Option<bool>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -207,6 +210,7 @@ impl TestCaseResult {
             stream_error: self.stream_error,
             binder_error: self.binder_error,
             create_source: original_test_case.create_source.clone(),
+            create_table_with_connector: original_test_case.create_table_with_connector.clone(),
             with_config_map: original_test_case.with_config_map.clone(),
             stream_dist_plan: self.stream_dist_plan,
         };
@@ -232,6 +236,7 @@ impl TestCase {
 
         // Since temp file will be deleted when it goes out of scope, so create source in advance.
         self.create_source(session.clone()).await?;
+        self.create_table_with_connector(session.clone()).await?;
 
         let mut result: Option<TestCaseResult> = None;
         for sql in self
@@ -249,23 +254,56 @@ impl TestCase {
         Ok(result.unwrap_or_default())
     }
 
+    #[inline(always)]
+    fn create_connector_sql(
+        is_table: bool,
+        connector_name: String,
+        connector_row_format: String,
+    ) -> String {
+        let object_to_create = if is_table { "TABLE" } else { "SOURCE" };
+        format!(
+            r#"CREATE {} {}
+    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
+            object_to_create, connector_name, connector_row_format
+        )
+    }
+
+    async fn create_table_with_connector(
+        &self,
+        session: Arc<SessionImpl>,
+    ) -> Result<Option<TestCaseResult>> {
+        match self.create_table_with_connector.clone() {
+            Some(connector) => {
+                if let Some(content) = connector.file {
+                    let sql =
+                        Self::create_connector_sql(true, connector.name, connector.row_format);
+                    let temp_file = create_proto_file(content.as_str());
+                    self.run_sql(
+                        &(sql + temp_file.path().to_str().unwrap() + "'"),
+                        session.clone(),
+                        false,
+                        None,
+                    )
+                    .await
+                } else {
+                    panic!(
+                        "{:?} create table with connector must include `file` for the file content",
+                        self.id
+                    );
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
     // If testcase have create source info, run sql to create source.
     // Support create source by file content or file location.
     async fn create_source(&self, session: Arc<SessionImpl>) -> Result<Option<TestCaseResult>> {
         match self.create_source.clone() {
             Some(source) => {
                 if let Some(content) = source.file {
-                    let materialized = if let Some(true) = source.materialized {
-                        "materialized".to_string()
-                    } else {
-                        "".to_string()
-                    };
-                    let sql = format!(
-                        r#"CREATE {} SOURCE {}
-    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-    ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
-                        materialized, source.name, source.row_format
-                    );
+                    let sql = Self::create_connector_sql(false, source.name, source.row_format);
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
                         &(sql + temp_file.path().to_str().unwrap() + "'"),
@@ -336,12 +374,8 @@ impl TestCase {
                     )
                     .await?;
                 }
-                Statement::CreateSource {
-                    is_materialized,
-                    stmt,
-                } => {
-                    create_source::handle_create_source(handler_args, is_materialized, stmt)
-                        .await?;
+                Statement::CreateSource { stmt } => {
+                    create_source::handle_create_source(handler_args, stmt).await?;
                 }
                 Statement::CreateIndex {
                     name,

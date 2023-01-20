@@ -89,6 +89,7 @@ impl ToBatchProst for BatchUpdate {
         NodeBody::Update(UpdateNode {
             exprs,
             table_id: self.logical.table_id().table_id(),
+            returning: self.logical.has_returning(),
         })
     }
 }

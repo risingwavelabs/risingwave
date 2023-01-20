@@ -385,10 +385,26 @@ pub mod top_n_executor {
     use risingwave_storage::memory::MemoryStateStore;
 
     use crate::common::table::state_table::StateTable;
+
     pub async fn create_in_memory_state_table(
         data_types: &[DataType],
         order_types: &[OrderType],
         pk_indices: &[usize],
+    ) -> StateTable<MemoryStateStore> {
+        create_in_memory_state_table_from_state_store(
+            data_types,
+            order_types,
+            pk_indices,
+            MemoryStateStore::new(),
+        )
+        .await
+    }
+
+    pub async fn create_in_memory_state_table_from_state_store(
+        data_types: &[DataType],
+        order_types: &[OrderType],
+        pk_indices: &[usize],
+        state_store: MemoryStateStore,
     ) -> StateTable<MemoryStateStore> {
         let column_descs = data_types
             .iter()
@@ -396,7 +412,7 @@ pub mod top_n_executor {
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
         StateTable::new_without_distribution(
-            MemoryStateStore::new(),
+            state_store,
             TableId::new(0),
             column_descs,
             order_types.to_vec(),

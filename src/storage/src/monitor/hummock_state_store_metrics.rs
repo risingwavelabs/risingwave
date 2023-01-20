@@ -35,6 +35,10 @@ pub struct HummockStateStoreMetrics {
     pub get_shared_buffer_hit_counts: GenericCounterVec<AtomicU64>,
     pub remote_read_time: HistogramVec,
     pub iter_fetch_meta_duration: HistogramVec,
+
+    pub read_req_bloom_filter_positive_counts: GenericCounterVec<AtomicU64>,
+    pub read_req_positive_but_non_exist_counts: GenericCounterVec<AtomicU64>,
+    pub read_req_check_bloom_filter_counts: GenericCounterVec<AtomicU64>,
 }
 
 impl HummockStateStoreMetrics {
@@ -42,7 +46,7 @@ impl HummockStateStoreMetrics {
         let bloom_filter_true_negative_counts = register_int_counter_vec_with_registry!(
             "state_store_bloom_filter_true_negative_counts",
             "Total number of sstables that have been considered true negative by bloom filters",
-            &["table_id"],
+            &["table_id", "type"],
             registry
         )
         .unwrap();
@@ -50,7 +54,7 @@ impl HummockStateStoreMetrics {
         let bloom_filter_check_counts = register_int_counter_vec_with_registry!(
             "state_bloom_filter_check_counts",
             "Total number of read request to check bloom filters",
-            &["table_id"],
+            &["table_id", "type"],
             registry
         )
         .unwrap();
@@ -105,6 +109,30 @@ impl HummockStateStoreMetrics {
         let iter_fetch_meta_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
 
+        let read_req_bloom_filter_positive_counts = register_int_counter_vec_with_registry!(
+            "state_store_read_req_bloom_filter_positive_counts",
+            "Total number of read request with at least one SST bloom filter check returns positive",
+            &["table_id", "type"],
+            registry
+        )
+        .unwrap();
+
+        let read_req_positive_but_non_exist_counts = register_int_counter_vec_with_registry!(
+            "state_store_read_req_positive_but_non_exist_counts",
+            "Total number of read request on non-existent key/prefix with at least one SST bloom filter check returns positive",
+            &["table_id", "type"],
+            registry
+        )
+        .unwrap();
+
+        let read_req_check_bloom_filter_counts = register_int_counter_vec_with_registry!(
+            "state_store_read_req_check_bloom_filter_counts",
+            "Total number of read request that checks bloom filter with a prefix hint",
+            &["table_id", "type"],
+            registry
+        )
+        .unwrap();
+
         Self {
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,
@@ -114,6 +142,9 @@ impl HummockStateStoreMetrics {
             get_shared_buffer_hit_counts,
             remote_read_time,
             iter_fetch_meta_duration,
+            read_req_bloom_filter_positive_counts,
+            read_req_positive_but_non_exist_counts,
+            read_req_check_bloom_filter_counts,
         }
     }
 

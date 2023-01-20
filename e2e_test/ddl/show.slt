@@ -79,10 +79,6 @@ show materialized views;
 mv3
 
 query T
-show materialized sources;
-----
-
-query T
 show sources;
 ----
 
