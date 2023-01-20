@@ -19,11 +19,11 @@ use anyhow::{anyhow, Context};
 use itertools::Itertools;
 use rand::prelude::SliceRandom;
 use risingwave_common::bail;
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
-use super::ParallelUnitMapping;
 use crate::manager::{WorkerId, WorkerLocations};
 use crate::model::ActorId;
 use crate::MetaResult;

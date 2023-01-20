@@ -22,8 +22,8 @@ use itertools::Itertools;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto};
 use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
+use super::vnode::{ParallelUnitId, VirtualNode};
 use crate::buffer::{Bitmap, BitmapBuilder};
-use crate::hash::{ParallelUnitId, VirtualNode};
 use crate::util::compress::compress_data;
 
 pub type ActorId = u32;

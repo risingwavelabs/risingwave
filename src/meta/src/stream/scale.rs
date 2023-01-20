@@ -23,7 +23,7 @@ use num_integer::Integer;
 use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::hash::{ParallelUnitId, VirtualNode};
+use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
 use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -42,7 +42,7 @@ use crate::barrier::{Command, Reschedule};
 use crate::manager::{IdCategory, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{ActorMapping, GlobalStreamManager};
+use crate::stream::GlobalStreamManager;
 use crate::MetaResult;
 
 #[derive(Debug)]

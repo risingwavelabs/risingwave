@@ -19,13 +19,12 @@ mod tests {
     use itertools::Itertools;
     use maplit::btreeset;
     use risingwave_common::buffer::Bitmap;
-    use risingwave_common::hash::{ParallelUnitId, VirtualNode};
+    use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping, VirtualNode};
     use risingwave_pb::common::ParallelUnit;
     use risingwave_pb::stream_plan::StreamActor;
 
     use crate::model::ActorId;
     use crate::stream::scale::rebalance_actor_vnode;
-    use crate::stream::{ActorMapping, ParallelUnitMapping};
 
     fn simulated_parallel_unit_nums(min: Option<usize>, max: Option<usize>) -> Vec<usize> {
         let mut raw = vec![1, 3, 12, 42, VirtualNode::COUNT];

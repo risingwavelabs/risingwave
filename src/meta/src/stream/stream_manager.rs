@@ -19,6 +19,7 @@ use futures::future::BoxFuture;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::{ActorMapping, ParallelUnitMapping};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::{ActorInfo, Buffer, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -31,7 +32,7 @@ use risingwave_pb::stream_service::{
 };
 use uuid::Uuid;
 
-use super::{ActorMapping, ParallelUnitMapping, ScheduledLocations};
+use super::ScheduledLocations;
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{
