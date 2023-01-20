@@ -496,7 +496,7 @@
   sql: |
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);
     select * from t where v1 >= now() or v2 >= now();
-  stream_error: 'internal error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`'
+  stream_error: 'internal error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.'
 - name: now inside HAVING clause
   sql: |
     create table t (v1 timestamp with time zone, v2 int);
