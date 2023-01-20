@@ -113,11 +113,11 @@ impl MetaClient {
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
         let mut resp = self.inner.subscribe(request.clone()).await;
-        for s in retry_strategy {
+        for retry in retry_strategy {
             if resp.is_ok() {
                 return resp;
             }
-            tokio::time::sleep(s).await;
+            tokio::time::sleep(retry).await;
             let request = request.clone();
             resp = self.inner.subscribe(request).await;
         }
@@ -139,11 +139,11 @@ impl MetaClient {
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
         let mut resp = grpc_meta_client.add_worker_node(request.clone()).await;
-        for s in retry_strategy {
+        for retry in retry_strategy {
             if resp.is_ok() {
                 break;
             }
-            tokio::time::sleep(s).await;
+            tokio::time::sleep(retry).await;
             let request = request.clone();
             resp = grpc_meta_client.add_worker_node(request).await;
         }
@@ -164,11 +164,11 @@ impl MetaClient {
         };
         let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
         let mut resp = self.inner.activate_worker_node(request.clone()).await;
-        for s in retry_strategy {
+        for retry in retry_strategy {
             if resp.is_ok() {
                 break;
             }
-            tokio::time::sleep(s).await;
+            tokio::time::sleep(retry).await;
             let request = request.clone();
             resp = self.inner.activate_worker_node(request).await;
         }
