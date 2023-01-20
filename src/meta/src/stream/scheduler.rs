@@ -241,7 +241,6 @@ impl Scheduler {
     /// `set_fragment_vnode_mapping` works by following steps:
     /// 1. Build a vnode mapping according to parallel units where the fragment is scheduled.
     /// 2. Set the vnode mapping into the fragment.
-    /// 3. Record the relationship between state tables and vnode mappings.
     fn set_fragment_vnode_mapping(
         &self,
         fragment: &mut Fragment,

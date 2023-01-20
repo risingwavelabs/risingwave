@@ -57,16 +57,10 @@ impl FragmentManagerCore {
             .filter(|tf| tf.state() != State::Initial)
             .flat_map(|table_fragments| {
                 table_fragments.fragments.values().map(|fragment| {
-                    let parallel_unit_mapping = fragment
-                        .vnode_mapping
-                        .as_ref()
-                        .expect("no data distribution found");
+                    let parallel_unit_mapping = fragment.vnode_mapping.clone().unwrap();
                     FragmentParallelUnitMapping {
                         fragment_id: fragment.fragment_id,
-                        mapping: Some(ParallelUnitMapping {
-                            original_indices: parallel_unit_mapping.original_indices.clone(),
-                            data: parallel_unit_mapping.data.clone(),
-                        }),
+                        mapping: Some(parallel_unit_mapping),
                     }
                 })
             })
@@ -742,8 +736,7 @@ where
                                 if let DispatcherType::Hash = dispatcher.r#type() {
                                     dispatcher.hash_mapping = upstream_dispatcher_mapping
                                         .as_ref()
-                                        .map(|m| m.to_protobuf())
-                                        .clone();
+                                        .map(|m| m.to_protobuf());
                                 }
 
                                 update_actors(

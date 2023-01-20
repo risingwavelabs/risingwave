@@ -35,7 +35,7 @@ pub trait VnodeMappingItem {
     ///
     /// Currently, there are two types of items: [`ParallelUnitId`] and [`ActorId`]. We don't use
     /// them directly as the generic parameter because they're the same type aliases.
-    type Item: Copy + Eq + Ord + Hash + Debug;
+    type Item: Copy + Ord + Hash + Debug;
 }
 
 /// Exapnded mapping from virtual nodes to items, essentially a vector of items and can be indexed

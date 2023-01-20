@@ -434,8 +434,7 @@ where
                 let vnode_mapping = fragment
                     .vnode_mapping
                     .as_ref()
-                    .map(ParallelUnitMapping::from_protobuf)
-                    .clone();
+                    .map(ParallelUnitMapping::from_protobuf);
 
                 for actor in &fragment.actors {
                     mapping

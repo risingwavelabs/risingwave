@@ -991,10 +991,10 @@ where
                     if !in_degree_types.contains(&DispatcherType::Hash) {
                         None
                     } else if parallel_unit_to_actor_after_reschedule.len() == 1 {
-                        let actor_id = *parallel_unit_to_actor_after_reschedule
-                            .first_key_value()
-                            .unwrap()
-                            .1;
+                        let actor_id = parallel_unit_to_actor_after_reschedule
+                            .into_values()
+                            .next()
+                            .unwrap();
                         Some(ActorMapping::new_single(actor_id))
                     } else {
                         // Changes of the bitmap must occur in the case of HashDistribution

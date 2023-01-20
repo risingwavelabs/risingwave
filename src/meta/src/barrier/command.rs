@@ -292,8 +292,7 @@ where
                                         hash_mapping: reschedule
                                             .upstream_dispatcher_mapping
                                             .as_ref()
-                                            .map(|m| m.to_protobuf())
-                                            .clone(),
+                                            .map(|m| m.to_protobuf()),
                                         added_downstream_actor_id: reschedule.added_actors.clone(),
                                         removed_downstream_actor_id: reschedule
                                             .removed_actors
