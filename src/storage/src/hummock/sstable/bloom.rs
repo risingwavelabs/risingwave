@@ -28,7 +28,7 @@ pub trait BitSliceMut {
     fn set_bit(&mut self, idx: usize, val: bool);
 }
 
-pub trait FilterBuildeer {
+pub trait FilterBuilder {
     /// add key which need to be filter for construct filter data.
     fn add_key(&mut self, key: &[u8]);
     /// Builds Bloom filter from key hashes
@@ -143,7 +143,7 @@ impl BloomFilterBuilder {
     }
 }
 
-impl FilterBuildeer for BloomFilterBuilder {
+impl FilterBuilder for BloomFilterBuilder {
     fn add_key(&mut self, key: &[u8]) {
         self.key_hash_entries.push(xxh32::xxh32(key, 0));
     }
