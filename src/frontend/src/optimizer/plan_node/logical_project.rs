@@ -45,7 +45,9 @@ impl LogicalProject {
 
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>) -> Self {
         let core = generic::Project::new(exprs, input.clone());
-        Self::with_core(core)
+        let new_me = Self::with_core(core);
+        crate::optimizer::plan_visitor::InputRefValidator.validate(new_me.clone().into());
+        new_me
     }
 
     pub fn with_core(core: generic::Project<PlanRef>) -> Self {
