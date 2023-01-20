@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::catalog::ColumnId;
@@ -46,8 +46,8 @@ impl Case {
             schema: schema.clone(),
             column_ids: column_ids.clone(),
             rows,
-            needed_ids: needed_ids.unwrap_or(column_ids.clone()),
-            needed_schema: needed_schema.unwrap_or(schema.clone()),
+            needed_ids: needed_ids.unwrap_or(column_ids),
+            needed_schema: needed_schema.unwrap_or(schema),
         }
     }
 }
@@ -93,7 +93,7 @@ fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
     let mut res = vec![];
     if c.column_ids == c.needed_ids {
         for byte in bytes {
-            let row = serde.deserialize(&byte)?.into_inner();
+            let row = serde.deserialize(byte)?.into_inner();
             res.push(row);
         }
     } else {
@@ -102,15 +102,15 @@ fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
             .iter()
             .enumerate()
             .map(|(v, k)| (k, v))
-            .collect::<HashMap<_, _>>();
+            .collect::<BTreeMap<_, _>>();
         let needed_to_row = c
             .needed_ids
             .iter()
             .map(|id| (id, *column_id_to_index.get(id).unwrap_or(&65536)))
-            .collect::<HashMap<_, _>>();
+            .collect::<BTreeMap<_, _>>();
 
         for byte in bytes.iter().enumerate() {
-            let row = serde.deserialize(&byte.1)?.into_inner();
+            let row = serde.deserialize(byte.1)?.into_inner();
             let mut needed = vec![None; c.needed_ids.len()];
             for (i, c) in c.needed_ids.iter().enumerate() {
                 let ri = *needed_to_row.get(c).unwrap();
@@ -141,12 +141,12 @@ fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
             .iter()
             .enumerate()
             .map(|(v, k)| (k, v))
-            .collect::<HashMap<_, _>>();
+            .collect::<BTreeMap<_, _>>();
         let needed_to_row = c
             .needed_ids
             .iter()
             .map(|id| (id, *column_id_to_index.get(id).unwrap_or(&65536)))
-            .collect::<HashMap<_, _>>();
+            .collect::<BTreeMap<_, _>>();
         for byte in bytes {
             let row = deserializer.deserialize(&byte[..])?.into_inner();
             let mut needed = vec![None; c.needed_ids.len()];
@@ -230,17 +230,17 @@ fn bench_row(c: &mut Criterion) {
     }
 
     for case in &cases {
-        let encode_result = memcmp_encode(&case);
+        let encode_result = memcmp_encode(case);
         c.bench_function(
             format!("memcmp decoding on {}", case.name).as_str(),
             |bencher| bencher.iter(|| memcmp_decode(case, &encode_result)),
         );
-        let encode_result = basic_encode(&case);
+        let encode_result = basic_encode(case);
         c.bench_function(
             format!("basic decoding on {}", case.name).as_str(),
             |bencher| bencher.iter(|| basic_decode(case, &encode_result)),
         );
-        let encode_result = column_aware_encode(&case);
+        let encode_result = column_aware_encode(case);
         c.bench_function(
             format!("column aware decoding on {}", case.name).as_str(),
             |bencher| bencher.iter(|| column_aware_decode(case, &encode_result)),

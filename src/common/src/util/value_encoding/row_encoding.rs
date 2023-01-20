@@ -1,9 +1,28 @@
-use std::collections::HashMap;
+// Copyright 2023 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! Value encoding is an encoding format which converts row into a binary form that remains
+//! explanable after schema changes
+
+use std::collections::BTreeMap;
 
 use super::*;
 use crate::catalog::ColumnId;
 use crate::row::Row;
 
+/// deprecated design of have a Width to represent number of datum
+/// may be considered should `ColumnId` representation be optimized
 // #[derive(Clone, Copy)]
 // enum Width {
 //     Mid(u8),
@@ -11,6 +30,7 @@ use crate::row::Row;
 //     Extra(u32),
 // }
 
+/// `RowEncoding` holds row-specific information for Column-Aware Encoding
 struct RowEncoding {
     flag: u8,
     offsets: Vec<u8>,
@@ -26,36 +46,22 @@ impl RowEncoding {
         }
     }
 
-    // fn set_width(&mut self, datum_num: &Width) {
-    //     match datum_num {
-    //         Width::Mid(_) => {
-    //             self.flag |= 0b0100;
-    //         }
-    //         Width::Large(_) => {
-    //             self.flag |= 0b1000;
-    //         }
-    //         Width::Extra(_) => {
-    //             self.flag |= 0b1100;
-    //         }
-    //     }
-    // }
-
     fn set_big(&mut self, maybe_offset: &[usize], max_offset: usize) {
         assert!(self.offsets.is_empty());
         match max_offset {
-            _n @ ..= const {u8::MAX as usize} => {
+            _n @ ..=const { u8::MAX as usize } => {
                 self.flag |= 0b01;
                 maybe_offset
                     .iter()
                     .for_each(|m| self.offsets.put_u8(*m as u8));
             }
-            _n @ ..= const {u16::MAX as usize} => {
+            _n @ ..=const { u16::MAX as usize } => {
                 self.flag |= 0b10;
                 maybe_offset
                     .iter()
                     .for_each(|m| self.offsets.put_u16(*m as u16));
             }
-            _n @ ..= const {u32::MAX as usize} => {
+            _n @ ..=const { u32::MAX as usize } => {
                 self.flag |= 0b11;
                 maybe_offset
                     .iter()
@@ -66,7 +72,6 @@ impl RowEncoding {
     }
 
     fn encode(&mut self, datum_refs: impl Iterator<Item = impl ToDatumRef>) {
-        // self.set_width(width);
         assert!(
             self.buf.is_empty(),
             "should not encode one RowEncoding object multiple times."
@@ -85,6 +90,8 @@ impl RowEncoding {
     }
 }
 
+/// Column-Aware `Serializer` holds schema related information, and shall be
+/// created again once the schema changes
 pub struct Serializer {
     encoded_column_ids: Vec<u8>,
     datum_num: usize,
@@ -93,16 +100,11 @@ pub struct Serializer {
 
 impl Serializer {
     pub fn new(column_ids: &[ColumnId]) -> Self {
+        // currently we hard-code ColumnId as i32
         let mut encoded_column_ids = Vec::with_capacity(column_ids.len() * 4);
         for id in column_ids {
             encoded_column_ids.put_i32_le(id.get_id());
         }
-        // let datum_num = match column_ids.len() {
-        //     n if n <= u8::MAX as usize => Width::Mid(n as u8),
-        //     n if n <= u16::MAX as usize => Width::Large(n as u16),
-        //     n if n <= u32::MAX as usize => Width::Extra(n as u32),
-        //     _ => unreachable!("the number of columns exceeds u32"),
-        // };
         let datum_num = column_ids.len();
         let mut encoded_datum_num = vec![];
         encoded_datum_num.put_u32_le(datum_num as u32);
@@ -132,8 +134,10 @@ impl Serializer {
     }
 }
 
+/// Column-Aware `Deserializer` holds needed `ColumnIds` and their corresponding schema
+/// Should non-null default values be specified, a new field could be added to Deserializer
 pub struct Deserializer<'a> {
-    needed_column_ids: HashMap<i32, usize>,
+    needed_column_ids: BTreeMap<i32, usize>,
     schema: &'a [DataType],
 }
 
@@ -145,19 +149,13 @@ impl<'a> Deserializer<'a> {
                 .iter()
                 .enumerate()
                 .map(|(i, c)| (c.get_id(), i))
-                .collect::<HashMap<_, _>>(),
+                .collect::<BTreeMap<_, _>>(),
             schema,
         }
     }
 
     pub fn decode(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         let flag = encoded_bytes.get_u8();
-        // let nums_bytes = match flag & 0b1100 {
-        //     0b0100 => 1,
-        //     0b1000 => 2,
-        //     0b1100 => 4,
-        //     _ => return Err(ValueEncodingError::InvalidFlag(flag)),
-        // };
         let offset_bytes = match flag & 0b11 {
             0b01 => 1,
             0b10 => 2,
@@ -205,14 +203,6 @@ impl<'a> Deserializer<'a> {
         Ok(datums)
     }
 }
-
-// fn serialize_width(width: Width, buf: &mut impl BufMut) {
-//     match width {
-//         Width::Mid(w) => buf.put_u8(w),
-//         Width::Large(w) => buf.put_u16_le(w),
-//         Width::Extra(w) => buf.put_u32_le(w),
-//     }
-// }
 
 fn deserialize_width(len: usize, data: &mut impl Buf) -> usize {
     match len {
