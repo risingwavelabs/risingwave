@@ -801,10 +801,11 @@ impl<'a, K: LruKey + Clone + 'static, T: LruValue + 'static> Drop for CleanCache
     }
 }
 
-/// `lookup_with_request_dedup` can directly return `Result<CacheableEntry<K, T>, E>`, but if we do
-/// not want to wait when cache hit does not happen, we can call `lookup_with_request_dedup_noawait`
-/// which will return `BoxFuture<'static, Result<CacheableEntry<K, T>, E>>` when cache hit does not
-/// happen.
+/// `lookup_with_request_dedup.await` can directly return `Result<CacheableEntry<K, T>, E>`, but if
+/// we do not want to wait when cache hit does not happen, we can directly call
+/// `lookup_with_request_dedup` which will return a `LookupResponse` which contains
+/// `Receiver<CacheableEntry<K, T>>` or `JoinHandle<Result<CacheableEntry<K, T>, E>>` when cache hit
+/// does not happen.
 pub enum LookupResponse<K: LruKey + Clone + 'static, T: LruValue + 'static, E> {
     Invalid,
     Cached(CacheableEntry<K, T>),
@@ -842,7 +843,7 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static, E: From<RecvError>> Fut
     }
 }
 
-/// Only implement `lookup_with_request_dedup` and `lookup_with_request_dedup_noawait` for static
+/// Only implement `lookup_with_request_dedup` for static
 /// values, as they can be sent across tokio spawned futures.
 impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
     pub fn lookup_with_request_dedup<F, E, VC>(
